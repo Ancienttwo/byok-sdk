@@ -4,7 +4,7 @@ import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTe
   type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/server/execution-core';
 import { botRoutines, endable, owned, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
   type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
-import { admitBotToolsets, applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, planHomeRetry, requireMain, updateBot,
+import { admitBotToolsets, applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, inactive, planHomeRetry, requireMain, updateBot,
   writeSnapshotBot, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
@@ -605,8 +605,8 @@ export class HostedCollaborationStore {
    *
    * The fire can create execution, so the owner Bot's device must have an active H binding (#793 D2e), read from the state of
    * this transaction, as the sync builds the routine offer from it. Otherwise it throws `DeviceBindingError` and writes
-   * nothing, and the slot stays due. The promotion checks the binding again. An archived owner Bot skips the fence: its
-   * routine Turn creates no execution, because the sync ends it before any freeze, as L does. A revoke and an archive are both
+   * nothing, and the slot stays due. The promotion checks the binding again. An archived or suspended (#1319) owner Bot skips
+   * the fence: its routine Turn creates no execution, because the sync ends it before any freeze, as L does. A revoke and an archive are both
    * final, so with the fence that slot could never fire.
    *
    * A Host job routine (#793 S14) records its occurrence and its `host_job` outbox row, as K4 `recordOccurrence` does, with no
@@ -626,7 +626,7 @@ export class HostedCollaborationStore {
       const owner = (routine.definition.hostOccurrence?.input as BotRoutineInput | undefined)?.owner;
       const bot = owner === undefined ? undefined : state.team.bots[owner];
       if (!bot) throw new Error('Routine owner Bot not found');
-      if (!bot.archived) await activeBinding(client, key, bot.execution.deviceId);
+      if (!inactive(bot)) await activeBinding(client, key, bot.execution.deviceId);
       const occurrence = recordDue(slice, scope, routine, now);
       const run = occurrenceRun(routine, occurrence);
       const result = commitCommand(state, { scope, commandId: occurrence.key, command: { kind: 'occurrence', key: occurrence.key } },
@@ -1435,13 +1435,13 @@ export class HostedCollaborationStore {
   /**
    * The earliest time that the K8 rule `collaborationDue` gives for `state`, or null for none. A held Turn (#956) that the
    * next sync would no longer hold is due at once (0): its Bot's device now has an active binding (after `bindDevice`), or
-   * its Bot is archived or gone (for example after a `team_snapshot` without it), so the sync ends it. A held Turn on a
+   * its Bot is archived, suspended or gone (for example after a `team_snapshot` without it), so the sync ends it. A held Turn on a
    * refused device adds no time, so it never makes the scope spin.
    */
   private async dueAt(client: PoolClient, key: string, state: CollaborationState): Promise<number | null> {
     const due = collaborationDue(state, this.timers), bots = state.team.bots;
     const held = Object.values(state.turns).filter(turn => turn.held && !turn.conclusion)
-      .map(turn => Object.hasOwn(bots, turn.botId) && !bots[turn.botId]!.archived ? bots[turn.botId]!.execution.deviceId : undefined);
+      .map(turn => Object.hasOwn(bots, turn.botId) && !inactive(bots[turn.botId]) ? bots[turn.botId]!.execution.deviceId : undefined);
     if (held.length) {
       const devices = [...new Set(held.filter(device => device !== undefined))];
       const refused = await deviceRefusals(client, key, devices);

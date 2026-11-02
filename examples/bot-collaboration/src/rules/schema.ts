@@ -3,6 +3,7 @@ import { botTurnOutcomeFragments as f, composeBotTurnOutcomeSchema, type NonEmpt
 import { checkRoutineSchedule } from '@byok-sdk/core';
 import type { Turn } from './turn';
 import type { RoomsState } from './rooms';
+import { inactive } from './team';
 import { openDelegations, type DelegationView } from './delegation';
 
 /**
@@ -14,7 +15,7 @@ export const NEW_ROOMS = ['new_room_1'] as const;
 /** The Bot fields that the schema and the ContextPack read. */
 export interface ContextBot {
   readonly id: string; readonly name: string; readonly role: string; readonly mainBot: boolean; readonly archived: boolean;
-  readonly readyRevision: string | null;
+  readonly participation?: 'suspended'; readonly readyRevision: string | null;
 }
 /** Team, delegation and reply rows. No Turn rows: the ContextPack takes its history as an argument. */
 export interface ContextState extends DelegationView {
@@ -165,13 +166,13 @@ export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, m
   const compose = (scheduleShape: RoutineScheduleShape) => {
     const fragments: BotTurnOutcomeFragments = turn?.source === 'room_slot' ? (() => {
       const seat = state.team.seats[turn.id]!, room = state.team.rooms[state.team.rounds[seat.roundId]!.roomId]!;
-      const members = room.members.filter(id => !state.team.bots[id]?.archived);
+      const members = room.members.filter(id => !inactive(state.team.bots[id]));
       return { speech: f.speech(), ...(members.length ? { room_call: f.roomCall({ members: members as unknown as NonEmptyIds }) } : {}) };
     })() : allow({
       // A refusal report has no delegate fragment, so it cannot cause another report (§8.2).
       // A target stays offered while a newer profile is pending; its Turn waits for readback (§2.2).
       ...(turn?.refusalReport ? {} : { delegate: f.delegate({ to: [botId, ...Object.values(state.team.bots)
-        .filter(b => b.id !== botId && !b.archived && personaApplied(state, b)).map(b => b.id)] }) }),
+        .filter(b => b.id !== botId && !inactive(b) && personaApplied(state, b)).map(b => b.id)] }) }),
       ask_user: f.askUser(),
       confirmable_action: f.confirmableAction({ actions: (offer?.confirmable ?? DEFAULT_CONFIRMABLE) as [ConfirmableSpec, ...ConfirmableSpec[]] }),
       create_routine: f.createRoutine({ localIds: ['new_routine_1'], timeZones, scheduleShape }),

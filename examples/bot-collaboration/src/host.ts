@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ownReadOnlyToolsets } from './toolset-policy';
-import { admitBotToolsets } from './rules/team';
+import { admitBotToolsets, inactive } from './rules/team';
 import type { UpdateRoutineAction } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOptions, type Intent, type IntentInput, type OutcomeTransaction,
@@ -183,7 +183,7 @@ function bounded<T>(read: Promise<T>, ms: number): Promise<T> {
 /** A Turn that has no offer yet and can freeze one: not concluded, failed or held, and its Bot is active with its profile applied. */
 function awaitsOffer(ledger: LedgerState, state: CollaborationState, turn: Turn): boolean {
   const bot = state.team.bots[turn.botId];
-  return !turn.conclusion && !turn.held && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !bot.archived && bot.readyRevision === bot.revision;
+  return !turn.conclusion && !turn.held && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !inactive(bot) && bot.readyRevision === bot.revision;
 }
 /** The slot row of one K4 intent (#1229). An intent holds a slot once it is submitted or has attempt evidence. */
 function dispatchRow(state: LedgerState, row: Intent): DispatchIntent {

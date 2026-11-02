@@ -5,7 +5,7 @@ import { BOT_REPLY_MAX_BYTES, type IntentFacts, type Publish } from './delegatio
 import { CurrentRequestTooLargeError } from './history';
 import { outcomeSchema, promptActions, type ContextBot, type ContextRoutine, type ContextState, type CheckedOffer } from './schema';
 import { botTurnInstruction, type BotHistoryState, type ContextTurn, type InstructionLimits } from './context';
-import { admitBotToolsets } from './team';
+import { admitBotToolsets, inactive } from './team';
 import type { RoomMessage, Seat } from './rooms';
 
 /**
@@ -105,7 +105,7 @@ export interface SyncOptions<R extends ContextRoutine> {
  * What the store writes for one Turn:
  * - `freeze`: store this intent input.
  * - `routine`: a routine Turn joins the FIFO as its occurrence intent, with this execution. Its wait counts from the occurrence record.
- * - `cancel`: the Bot is archived, so cancel the intent, which has not started.
+ * - `cancel`: the Bot is archived or suspended, so cancel the intent, which has not started.
  * - `ended`: the Turn has no intent and is concluded. A routine Turn concludes its open occurrence.
  */
 export type SyncStep<E> =
@@ -127,7 +127,7 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   options: SyncOptions<R>, publish: Publish): SyncStep<E> | undefined {
   const intent = facts.intent(turn.id), bot = state.team.bots[turn.botId];
   if (intent) {
-    if (!intent.conclusion) return bot?.archived && !facts.executionStarted(turn.id) ? { kind: 'cancel' } : undefined;
+    if (!intent.conclusion) return inactive(bot) && !facts.executionStarted(turn.id) ? { kind: 'cancel' } : undefined;
     // Work that never started did not consume its rejected actions.
     if (intent.conclusion !== 'succeeded' && !facts.executionStarted(turn.id)) {
       for (const rejection of state.rejected) if (rejection.consumedBy === turn.id) delete rejection.consumedBy;
@@ -154,8 +154,8 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     turn.reported = true;
     return undefined;
   }
-  // An archived Bot never starts this Turn. A concluded Turn keeps its conclusion.
-  if (!turn.conclusion && bot?.archived) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
+  // An archived or suspended Bot never starts this Turn. A concluded Turn keeps its conclusion.
+  if (!turn.conclusion && inactive(bot)) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
   if (turn.conclusion) return { kind: 'ended' };
   if (turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked') return undefined;
   // #956: a Turn whose Bot's device is refused waits, before the profile check, since a refused device may never apply a

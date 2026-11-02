@@ -21,7 +21,11 @@ export function admitBotToolsets(execution: { readonly payload: { readonly requi
  * `profileRevision` is the Host's profile revision, a decimal string. It is required when the Host owns the persona
  * projection (#879), and refused otherwise.
  */
-export interface TeamSnapshotBot { id: string; name: string; role: string; persona: string; model: string; mainBot: boolean; profileRevision?: string }
+export interface TeamSnapshotBot {
+  id: string; name: string; role: string; persona: string; model: string; mainBot: boolean; profileRevision?: string;
+  /** #1319: the Bot stays in the team but takes no new K8 work. A later snapshot without it restores the Bot. */
+  participation?: 'suspended';
+}
 /** `revision` is the authority's team revision. It is not the collaboration commit revision. */
 export interface TeamSnapshot { revision: number; bots: TeamSnapshotBot[] }
 /**
@@ -30,9 +34,22 @@ export interface TeamSnapshot { revision: number; bots: TeamSnapshotBot[] }
  */
 export interface ExternalTeam { revision: number; persona?: true }
 export const TEAM_BOT_LIMIT = 24;
-export type TeamModeCode = 'external_team' | 'stale_team' | 'external_persona';
+export type TeamModeCode = 'external_team' | 'stale_team' | 'external_persona' | 'bot_suspended';
 export class TeamModeError extends Error {
   constructor(readonly code: TeamModeCode, message: string) { super(message); this.name = 'TeamModeError'; }
+}
+/**
+ * The one check of whether a Bot can take new work (#1319). Absent or archived: `archived`. A suspended Bot is still a team
+ * member, so membership and return checks read `archived` instead.
+ */
+export function inactive(bot: { readonly archived: boolean; readonly participation?: 'suspended' } | undefined): 'archived' | 'suspended' | undefined {
+  if (!bot || bot.archived) return 'archived';
+  return bot.participation;
+}
+/** A command that would give a suspended Bot new work refuses, and the commit writes nothing. */
+export function refuseSuspended(team: { readonly bots: Readonly<Record<string, { readonly archived: boolean; readonly participation?: 'suspended' }>> },
+  botId: string): void {
+  if (inactive(team.bots[botId]) === 'suspended') throw new TeamModeError('bot_suspended', `bot_suspended: Bot ${botId} is not participating`);
 }
 /** T3: the team authority owns the Bots, so local Bot management refuses. */
 export function refuseExternalTeam(team: { readonly external?: ExternalTeam }, action: string): void {
@@ -57,14 +74,18 @@ export function teamSnapshot(value: unknown): TeamSnapshot {
   }
   const bots = row.bots.map(bot => {
     if (!bot || typeof bot !== 'object' || !text(bot.id) || !bot.id || !text(bot.name) || !text(bot.role) || !text(bot.persona)
-      || !text(bot.model) || typeof bot.mainBot !== 'boolean') throw new Error('Invalid team snapshot Bot');
+      || !text(bot.model) || typeof bot.mainBot !== 'boolean' || bot.participation !== undefined && bot.participation !== 'suspended') {
+      throw new Error('Invalid team snapshot Bot');
+    }
     // The id becomes the projection agentRef and a home directory name. Bot rows are plain object keys, so an id
     // such as `__proto__` or `constructor` is refused too.
     if (bot.id in Object.prototype || !AgentHomeProjectionAgentRefSchema.safeParse({ agentId: bot.id, profileRevision: '1' }).success) {
       throw new Error('Invalid team snapshot Bot id');
     }
     const row: TeamSnapshotBot = { id: bot.id, name: bot.name, role: bot.role, persona: bot.persona, model: bot.model, mainBot: bot.mainBot,
-      ...(bot.profileRevision === undefined ? {} : { profileRevision: profileRevision(bot.profileRevision) }) };
+      ...(bot.profileRevision === undefined ? {} : { profileRevision: profileRevision(bot.profileRevision) }),
+      // Only a suspended row carries the field, so a snapshot without it keeps its evidence.
+      ...(bot.participation ? { participation: bot.participation } : {}) };
     // A projection that the server refuses would leave the Bot never ready, so the snapshot is refused first.
     if (!AgentHomeProjectionValueSchema.safeParse(profileProjection(row)).success) throw new Error('Team snapshot Bot projection is too large');
     return row;

@@ -7,9 +7,9 @@ import { roomFields, roomVisibility } from './rules/rooms';
 
 import { NEW_BOTS, NEW_ROOMS } from './rules/schema';
 import { DEFAULT_AUTONOMY } from './rules/autonomy';
-import { activeBot, admitBotToolsets, archiveBot, profileProjection, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
+import { activeBot, admitBotToolsets, archiveBot, inactive, profileProjection, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
 
-export { activeBot, admitBotToolsets, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
+export { activeBot, admitBotToolsets, inactive, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
 export const TEAM_NOTE_LIMIT = 20;
 export function projectionRequestId(value: unknown): string {
   const digest = hash(value);

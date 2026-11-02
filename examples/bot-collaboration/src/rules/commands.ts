@@ -1,7 +1,7 @@
 import type { RoomFields } from '@byok-sdk/protocol';
 import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addBatchTurns, addTurn, json, type Json, type Turn } from './turn';
-import { activeBot, archiveBot, profileRevision, refuseExternalTeam, requireMain, teamSnapshot, TeamModeError, type ExternalTeam, type TeamSnapshot,
+import { activeBot, archiveBot, inactive, profileRevision, refuseExternalTeam, refuseSuspended, requireMain, teamSnapshot, TeamModeError, type ExternalTeam, type TeamSnapshot,
   type TeamSnapshotBot } from './team';
 import { roomInput, setMemberMentions, updateRoom, type MemberMentions, type Mentions } from './rooms';
 import { sealBatchForCancel, type InputFields } from './coalesce';
@@ -73,8 +73,8 @@ export type Command = KeyedCommand | KeylessCommand;
 interface TeamRows {
   team: {
     external?: ExternalTeam;
-    bots: Readonly<Record<string, { mainBot: boolean; archived: boolean; readonly revision: string; readyRevision: string | null;
-      readonly persona: string; autonomy?: Autonomy }>>;
+    bots: Readonly<Record<string, { mainBot: boolean; archived: boolean; participation?: 'suspended'; readonly revision: string;
+      readyRevision: string | null; readonly persona: string; autonomy?: Autonomy }>>;
     homeOperations: ReadonlyArray<{ readonly botId: string; readonly status: string;
       readonly request: { readonly payload: { readonly agentRef: { readonly profileRevision: string } } } }>;
   };
@@ -87,13 +87,14 @@ export type CommandScopeState = Pick<CommandState, 'turns' | 'questions' | 'card
  * while one of their devices is frozen for an owner switch or owned by the other Host, so both Hosts refuse the same commands.
  * `input` and an owner `receive` name their Bot. A room input can seat any Bot member of the room. An answer adds a Turn for
  * the question's Bot, and a decided card adds an `action_result` Turn for the card's Bot and can start its connector call.
+ * A suspended room member gets no seat (#1319), so its device never refuses a room input.
  * Any other command, and an unknown Bot, room, question or card, names none: the command refuses an unknown id itself.
  */
 export function commandBots(state: CommandScopeState, command: Command): string[] {
   const own = <T>(rows: Readonly<Record<string, T>>, id: string): T | undefined => Object.hasOwn(rows, id) ? rows[id] : undefined;
   const bots = (ids: readonly (string | undefined)[]) => ids.filter((id): id is string => id !== undefined && Object.hasOwn(state.team.bots, id));
   const turnBot = (turnId: string | undefined) => bots([turnId === undefined ? undefined : own(state.turns, turnId)?.botId]);
-  const members = (roomId: string) => bots(own(state.team.rooms, roomId)?.members ?? []);
+  const members = (roomId: string) => bots(own(state.team.rooms, roomId)?.members ?? []).filter(id => !inactive(state.team.bots[id]));
   switch (command.kind) {
     case 'input': return bots([command.botId]);
     case 'receive': return command.inbound === 'owner_input' ? bots([command.botId]) : members(command.roomId);
@@ -232,6 +233,7 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
   switch (command.kind) {
     case 'input': {
       activeBot(state.team, command.botId);
+      refuseSuspended(state.team, command.botId);
       return accepted(need(ports.admitInput, command.kind)({ id: hash(['user', command.botId, command.key]), key: command.key,
         botId: command.botId, request: command.request, sender: command.sender, authority: 'owner' }));
     }
@@ -239,6 +241,7 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
       let root: string;
       if (command.inbound === 'owner_input') {
         activeBot(state.team, command.botId);
+        refuseSuspended(state.team, command.botId);
         root = need(ports.admitInput, command.kind)({ id: hash(['user', command.botId, command.key]), key: command.key,
           botId: command.botId, request: command.request, sender: command.sender, authority: 'owner' });
       } else root = roomInput(state.team, command.key, command.roomId, command.text, command.mentions, command.from);
@@ -255,10 +258,12 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
       }
       const answer = command.answer;
       if (!answer.trim() || question.value.answerKind === 'single_choice' && !question.value.options.some(o => o.id === answer)) throw new Error('Invalid answer');
+      const botId = state.turns[question.turnId]!.botId;
+      refuseSuspended(state.team, botId);
       question.answer = answer;
       const turnId = hash(['answer', command.questionId]);
       addTurn(state, { id: turnId, root: turnId, source: 'answer', request: JSON.stringify({ question: question.value, answer }),
-        botId: state.turns[question.turnId]!.botId, hop: 0, authority: 'owner' });
+        botId, hop: 0, authority: 'owner' });
       return accepted();
     }
     case 'decide': {
@@ -270,6 +275,7 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
       if (card.state !== 'pending') {
         return card.state === command.decision ? accepted() : { outcome: 'refused', reasonCode: 'card_decided', reason: `Card already ${card.state}` };
       }
+      refuseSuspended(state.team, state.turns[card.turnId]!.botId);
       card.state = command.decision;
       return accepted();
     }
@@ -376,8 +382,12 @@ function applyTeamSnapshot(state: CommandState, snapshot: TeamSnapshot, ports: C
   const write = need(ports.teamBot, 'team_snapshot');
   for (const bot of snapshot.bots) {
     write(bot);
-    // The flag is not in the persona projection, so it changes no profile revision.
-    activeBot(team, bot.id).mainBot = bot.mainBot;
+    // The flags are not in the persona projection, so they change no profile revision.
+    const row = activeBot(team, bot.id);
+    row.mainBot = bot.mainBot;
+    // #1319: a suspended Bot keeps its profile, readiness and autonomy, so a later snapshot restores it as it was.
+    if (bot.participation) row.participation = bot.participation;
+    else delete row.participation;
   }
   external.revision = snapshot.revision;
   return accepted();

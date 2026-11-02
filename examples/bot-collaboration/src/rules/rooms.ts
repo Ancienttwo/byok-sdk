@@ -3,6 +3,7 @@ import { canonical, hash } from '@byok-sdk/server/execution-core/canonical';
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS, historyWindow } from './history';
 import { json, type TurnFields, type TurnsState } from './turn';
 import { observes, type AutonomyGate } from './autonomy';
+import { inactive, refuseSuspended } from './team';
 
 /**
  * Room seat arbitration as pure rules (#606 R1). Each function changes only the room slice that the
@@ -38,9 +39,9 @@ export interface Seat {
   status: 'waiting' | 'queued' | 'running' | 'late' | 'post' | 'pass' | 'failed' | 'busy' | 'removed' | 'blocked';
   triggerMessageId?: string; released: boolean; deadline?: number; startedAt?: number; late: boolean; reason?: string;
 }
-/** The team slice that the rules read and change. Of a Bot, they read only `archived`. */
+/** The team slice that the rules read and change. Of a Bot, they read only `archived` and `participation` (#1319). */
 export interface RoomsState {
-  bots: Readonly<Record<string, { readonly archived: boolean }>>;
+  bots: Readonly<Record<string, { readonly archived: boolean; readonly participation?: 'suspended' }>>;
   rooms: Record<string, Room>; rounds: Record<string, Round>; seats: Record<string, Seat>;
   roots: Record<string, { autonomous: number; late: number }>;
 }
@@ -63,6 +64,8 @@ function activeBot(team: Pick<RoomsState, 'bots'>, botId: string): void {
 function reserve(team: RoomsState, round: Round, botId: string, triggerMessageId?: string): void {
   const room = team.rooms[round.roomId]!;
   activeBot(team, botId);
+  // A room_call to a suspended Bot is a refused action.
+  refuseSuspended(team, botId);
   if (!room.members.includes(botId)) throw new Error('Called Bot is not a member');
   if (round.seats.length >= round.limit) throw new Error('Round seat budget reached');
   if ((round.counts[botId] ?? 0) >= (botId === round.admin ? 4 : 2)) throw new Error('Member seat budget reached');
@@ -74,9 +77,12 @@ function reserve(team: RoomsState, round: Round, botId: string, triggerMessageId
 function newRound(team: RoomsState, id: string, root: string, roomId: string, input: string, members: readonly string[], triggerMessageId?: string): Round {
   const room = team.rooms[roomId];
   if (!room) throw new Error('Room not found');
-  const distinct = [...new Set(members)];
-  // Validate all members before changing any budget or round row.
-  distinct.forEach(botId => { if (!room.members.includes(botId)) throw new Error('Mention is not a member'); activeBot(team, botId); });
+  // Validate all members before changing any budget or round row. A suspended member gets no seat, named or not (#1319).
+  const distinct = [...new Set(members)].filter(botId => {
+    if (!room.members.includes(botId)) throw new Error('Mention is not a member');
+    activeBot(team, botId);
+    return !inactive(team.bots[botId]);
+  });
   const round: Round = { id, root, roomId, input, seats: [], counts: {}, limit: distinct.length + 4 + (room.admin ? 4 : 0),
     ...(room.admin ? { admin: room.admin } : {}), closed: distinct.length === 0 };
   distinct.forEach(botId => reserve(team, round, botId, triggerMessageId));
@@ -138,7 +144,7 @@ export function roomInput(team: RoomsState, key: string, roomId: string, text: s
 }
 export function memberPresent(team: RoomsState, seat: Seat): boolean {
   const room = team.rooms[team.rounds[seat.roundId]!.roomId];
-  return !!room?.members.includes(seat.botId) && !team.bots[seat.botId]?.archived;
+  return !!room?.members.includes(seat.botId) && !inactive(team.bots[seat.botId]);
 }
 function observeStart(seat: Seat, now: number): void {
   if (seat.startedAt !== undefined) return;
