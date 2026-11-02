@@ -281,6 +281,8 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/daemon\/control-client\.ts$/,
     /^packages\/client\/src\/(?:daemon\/owned-process-ledger|util\/daemon-owner)\.ts$/,
     /^packages\/client\/src\/(?:diagnostics\/store-compatibility|adapters\/packaging)\.ts$/,
+    // #1366: operational health hardens storeDir through ensureSecureDir.
+    /^packages\/client\/src\/daemon\/operational-health\.ts$/,
   ],
   'linux-systemd-smoke': [
     /^templates\/service\/systemd\//,
@@ -295,6 +297,7 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/bin\/commands\/unpair\.ts$/,
     /^packages\/client\/src\/daemon\/control-client\.ts$/,
     /^packages\/client\/scripts\/control-socket-check\.mjs$/,
+    /^packages\/client\/src\/daemon\/operational-health\.ts$/,
   ],
   'ipc-smoke': [
     /^packages\/client\/src\/daemon\/(?:control-protocol|control-server|device-credential-provider|device-credential-store)\.ts$/,
