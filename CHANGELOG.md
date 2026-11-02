@@ -9,10 +9,12 @@
   K8 does not deliver it. Without a message handler the message still refuses
   with `binding_mismatch`. `enqueueHostIntent` refuses an execution with
   `messageEgress` whose name has no message handler, and a restart refuses an
-  open such intent. The K8 entry now exports `contextTurns`,
-  `historyRowFromTurn`, `ContextTurn`, `HostIntentMessageHandler` and
-  `MessageDisposition`. The `delegation:<id>:<revision>` projection carries the
-  delegation's `root`.
+  open such intent. Each name in `hostIntentMessages` needs a handler of the
+  same name in `hostIntents`, and the pass that removes a compacted Host
+  intent's record also removes its replies. The K8 entry now exports
+  `contextTurns`, `historyRowFromTurn`, `ContextTurn`,
+  `HostIntentMessageHandler` and `MessageDisposition`. The
+  `delegation:<id>:<revision>` projection carries the delegation's `root`.
 
 - **Added (examples)** — K8 `BotCollaboration.setModels(models)` replaces the
   Host's model templates at run time (#1357). Construction and `setModels`
