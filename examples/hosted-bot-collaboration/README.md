@@ -142,8 +142,8 @@ promoted an intent, concluded an untried intent on `cancel`, or concluded an occ
 facts again and runs every Turn again. So one sync ends a Turn whose promotion settled `superseded` at once, or whose
 untried intent it cancelled. Each of those steps happens once per intent or occurrence, so the rounds end.
 
-In history mode, `options.history` maps each Turn id to that Turn's history rows, as L reads them. A Turn without
-an entry does not freeze.
+In history mode, `options.history` maps each Turn id to that Turn's history rows, as L reads them, in the row shape of
+`src/rules/context.ts` (`contextTurns`), with the optional `reply` text (#1318). A Turn without an entry does not freeze.
 
 ### Batch seal
 
