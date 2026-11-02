@@ -1,14 +1,15 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import { createConnection } from 'node:net';
 import path from 'node:path';
 import type { StoreCompatibility, StoreCompatibilityVerdict } from '@byok-sdk/core';
-import { connectControlClient, isControlDaemonGone } from '../daemon/control-client';
-import type { ControlStatusResult } from '../daemon/control-protocol';
+import { connectControlClient } from '../daemon/control-client';
+import { controlEndpointPath, controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
 import { daemonLifecycleHealth, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { assertDaemonStoreQuiescent, DaemonOwnerActiveError } from '../util/daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError, type DaemonOwnerLease } from '../util/daemon-owner';
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
-import { acquirePathMutationGate, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
+import { acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle';
 import type { ManagedServiceLifecycle } from './managed-lifecycle';
 import { serviceStateDir } from './service-unit';
@@ -29,6 +30,12 @@ export interface ServicePayloadManifest {
   id: string;
   /** Every file of the payload except the manifest: `/`-separated relative path → lowercase hex SHA-256. */
   files: Record<string, string>;
+}
+
+/** A daemon store the service process owns (#1328): the `DaemonConfig.storeDir` and `productId` of one daemon it runs. */
+export interface ServiceDaemonStore {
+  readonly storeDir: string;
+  readonly productId: string;
 }
 
 /**
@@ -66,7 +73,16 @@ export interface ServiceInstallationOptions {
   healthCheck?(signal: AbortSignal): Promise<void>;
   /** How long the health check may take. Default 60000. */
   healthTimeoutMs?: number;
-  /** How long a stop may take to leave the store quiescent. Default 30000. */
+  /**
+   * Every daemon store the service process owns, read after the service has
+   * stopped, on every upgrade, rollback and recover (#1328). Each `storeDir`
+   * is absolute and listed once; `productId` is not empty; an empty list is
+   * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
+   * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
+   * since the default one reaches only `productId`'s daemon.
+   */
+  daemonStores?(): Promise<readonly ServiceDaemonStore[]>;
+  /** How long a stop may take to leave every daemon store quiescent, shared by all of them. Default 30000. */
   stopTimeoutMs?: number;
   /** Test seams for the underlying lifecycle. */
   lifecycle?: CreateServiceLifecycleOptions;
@@ -142,7 +158,8 @@ const ERROR_MESSAGES = {
   version_current: 'The payload is the version already running.',
   version_conflict: 'A different payload with the same version id is already staged.',
   upgrade_pending: 'An earlier upgrade or rollback was interrupted. Run recover() (CLI: byok-agent upgrade recover) first.',
-  store_busy: 'The store still has a running owner after the stop. Stop every process that uses this store and retry.',
+  store_busy: 'A daemon store still has a running owner after the stop. Stop every process that uses it and retry.',
+  daemon_stores_invalid: 'daemonStores() threw or listed an invalid store: each storeDir must be absolute and listed once, each productId not empty.',
   owned_process_residue: 'Processes from the previous daemon run survived; resolve them before upgrading.',
   precheck_failed: 'The candidate\'s store precheck did not produce a verdict.',
   store_repair_required: 'The candidate needs a new store path and a new pairing. Nothing was switched; decide before upgrading.',
@@ -282,6 +299,9 @@ export function defaultServiceHealthCheck(options: { storeDir: string; productId
  * another recorded lifecycle owner is refused before anything is written.
  */
 export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecycle: ManagedServiceLifecycle): ServiceInstallation {
+  if (opts.daemonStores !== undefined && opts.healthCheck === undefined) {
+    throw new TypeError('ServiceInstallationOptions.daemonStores requires healthCheck: the default health check reaches only productId\'s daemon');
+  }
   const root = path.resolve(opts.installRoot);
   const storeDir = opts.service.storeDir;
   const versionsDir = path.join(root, 'versions');
@@ -387,43 +407,66 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     });
   }
 
+  /** The daemon stores to quiesce, read now: the service has just stopped. */
+  async function readDaemonStores(): Promise<readonly ServiceDaemonStore[]> {
+    if (opts.daemonStores === undefined) return [{ storeDir, productId: opts.productId }];
+    let listed: readonly ServiceDaemonStore[];
+    try {
+      listed = await opts.daemonStores();
+    } catch {
+      throw new ServiceInstallationError('daemon_stores_invalid');
+    }
+    if (!Array.isArray(listed)) throw new ServiceInstallationError('daemon_stores_invalid');
+    const seen = new Set<string>();
+    return listed.map((store: Partial<ServiceDaemonStore>) => {
+      if (typeof store?.storeDir !== 'string' || !path.isAbsolute(store.storeDir) || typeof store.productId !== 'string' || store.productId === '') {
+        throw new ServiceInstallationError('daemon_stores_invalid');
+      }
+      const resolved = path.resolve(store.storeDir);
+      if (seen.has(resolved)) throw new ServiceInstallationError('daemon_stores_invalid');
+      seen.add(resolved);
+      return { storeDir: resolved, productId: store.productId };
+    });
+  }
+
   /**
-   * Stops the service and waits until no daemon owns the store, then holds
-   * the store gate (taken after the service gate, the documented order) and
-   * ends whatever the stopped run left in the owned-process ledger.
+   * Stops the service and takes an `installer` owner lease on every daemon
+   * store before one shared deadline: a lease proves the store's last owner
+   * is gone and reclaims what a crashed one left, including a `control.token`
+   * whose endpoint no longer answers. Then it holds every store gate (taken
+   * after the service gate, the documented order, and sorted) and ends
+   * whatever the stopped runs left in their owned-process ledgers. The
+   * returned release frees the gates first: a lease's own release takes its
+   * store gate.
    */
-  async function stopQuiescent(): Promise<PathMutationGate> {
+  async function stopQuiescent(): Promise<() => Promise<void>> {
     await lifecycle.stop();
     const deadline = Date.now() + (opts.stopTimeoutMs ?? 30_000);
-    for (;;) {
-      try {
-        if (await isControlDaemonGone(storeDir, opts.productId)) {
-          await assertDaemonStoreQuiescent(storeDir);
-          break;
-        }
-      } catch (error) {
-        if (!(error instanceof DaemonOwnerActiveError)) throw error;
+    const leases: DaemonOwnerLease[] = [];
+    let gates: readonly PathMutationGate[] = [];
+    const release = async (): Promise<void> => {
+      for (const gate of gates) await gate.release();
+      for (const lease of leases) await lease.release();
+    };
+    try {
+      const stores = await readDaemonStores();
+      for (const store of stores) {
+        leases.push(await leaseStore(store.storeDir, deadline));
+        await removeStaleControlToken(store);
       }
-      if (Date.now() >= deadline) throw new ServiceInstallationError('store_busy');
-      await delay(100);
-    }
-    let gate: PathMutationGate;
-    try {
-      gate = await acquirePathMutationGate({ scope: 'store', targetPath: storeDir }, { waitMs: 5_000 });
+      try {
+        gates = await acquirePathMutationGates(stores.map((store) => ({ scope: 'store', targetPath: store.storeDir })), { waitMs: 5_000 });
+      } catch (error) {
+        if (error instanceof PathMutationGateBusyError) throw new ServiceInstallationError('store_busy');
+        throw error;
+      }
+      for (const store of stores) await new OwnedProcessLedger(store.storeDir).reconcile();
     } catch (error) {
-      if (error instanceof PathMutationGateBusyError) throw new ServiceInstallationError('store_busy');
-      throw error;
-    }
-    try {
-      await assertDaemonStoreQuiescent(storeDir);
-      await new OwnedProcessLedger(storeDir).reconcile();
-    } catch (error) {
-      await gate.release();
-      if (error instanceof DaemonOwnerActiveError) throw new ServiceInstallationError('store_busy');
+      await release();
       if (error instanceof OwnedProcessResidueError) throw new ServiceInstallationError('owned_process_residue');
       throw error;
     }
-    return gate;
+    return release;
   }
 
   /** Starts the installed `current` and reports whether it became healthy in time. A start the manager refuses is unhealthy. */
@@ -494,7 +537,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * then `recover()` can run every step again from what is on disk.
    */
   async function restore(from: string, to: string, previous: string | undefined, code?: ServiceInstallationErrorCode): Promise<ServiceUpgradeReceipt> {
-    const gate = await stopQuiescent();
+    const release = await stopQuiescent();
     try {
       // The write-ahead pending receipt may predate the snapshot: nothing was
       // switched or rewritten then, so `from` only needs to run again.
@@ -502,7 +545,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       await setPointer('current', from);
       await setPointer('previous', previous);
     } finally {
-      await gate.release();
+      await release();
     }
     const kept = previous === undefined ? {} : { previous };
     const receipt = (await startHealthy())
@@ -538,8 +581,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       // before it, nothing has changed and a failure restarts `from`.
       await writeReceipt({ state: 'pending', from, to, ...kept });
       let stores: StoreCompatibility[];
+      let release: () => Promise<void>;
       try {
-        const gate = await stopQuiescent();
+        release = await stopQuiescent();
         try {
           stores = await precheck(to);
           const refused = stores.find((store) => store.verdict === 'new-path-repair' || store.verdict === 'rejected');
@@ -547,8 +591,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
             throw new ServiceInstallationError(refused.verdict === 'new-path-repair' ? 'store_repair_required' : 'store_rejected', stores);
           }
           await snapshot(to, stores);
-        } finally {
-          await gate.release();
+        } catch (error) {
+          await release();
+          throw error;
         }
       } catch (error) {
         if (error instanceof ServiceInstallationError) {
@@ -559,12 +604,12 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       }
 
       // From here a crash leaves the pending receipt, which recover() resolves.
-      const gate = await acquirePathMutationGate({ scope: 'store', targetPath: storeDir }, { waitMs: 5_000 });
+      // The leases and gates are held through the switch.
       try {
         await setPointer('previous', from);
         await setPointer('current', to);
       } finally {
-        await gate.release();
+        await release();
       }
       if (!(await startHealthy())) {
         const receipt = await restore(from, to, previous, 'health_check_failed');
@@ -670,6 +715,45 @@ function isStoreCompatibility(value: unknown): value is StoreCompatibility {
   const store = value as Record<string, unknown>;
   return typeof store.store === 'string' && typeof store.path === 'string' && path.isAbsolute(store.path)
     && typeof store.reason === 'string' && VERDICTS.has(store.verdict as StoreCompatibilityVerdict);
+}
+
+/**
+ * Takes an `installer` lease on a stopped daemon's store, retrying while its
+ * last owner is still alive. `acquireDaemonOwner` reclaims the owner files of
+ * a dead one.
+ */
+async function leaseStore(storeDir: string, deadline: number): Promise<DaemonOwnerLease> {
+  for (;;) {
+    try {
+      return await acquireDaemonOwner(storeDir, 'installer');
+    } catch (error) {
+      if (!(error instanceof DaemonOwnerActiveError)) throw error;
+      if (Date.now() >= deadline) throw new ServiceInstallationError('store_busy');
+      await delay(100);
+    }
+  }
+}
+
+/**
+ * Under the store's lease no daemon can serve it, so a `control.token` whose
+ * endpoint refuses connections was left by a crashed run and is removed. An
+ * endpoint that answers, or whose state is unknown, is `store_busy`.
+ */
+async function removeStaleControlToken(store: ServiceDaemonStore): Promise<void> {
+  const token = controlTokenPath(store.storeDir);
+  if (!(await exists(token))) return;
+  const refused = await new Promise<boolean>((resolve) => {
+    const socket = createConnection(controlEndpointPath(store.productId, store.storeDir));
+    const finish = (result: boolean): void => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(result);
+    };
+    socket.once('connect', () => finish(false));
+    socket.once('error', (error: NodeJS.ErrnoException) => finish(error.code === 'ECONNREFUSED' || error.code === 'ENOENT'));
+  });
+  if (!refused) throw new ServiceInstallationError('store_busy');
+  await fs.rm(token, { force: true });
 }
 
 function runProgram(program: ServiceProgram): Promise<{ code: number | null; stdout: string }> {

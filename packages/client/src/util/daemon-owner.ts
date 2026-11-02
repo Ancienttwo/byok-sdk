@@ -22,7 +22,8 @@ interface OwnerRecord {
   version: 2;
   pid: number;
   nonce: string;
-  role: 'daemon' | 'doctor';
+  /** `installer`: a service installation holding a stopped store across an upgrade, rollback or recover (#1328). */
+  role: 'daemon' | 'doctor' | 'installer';
   acquiredAt: string;
   processStartedAt: string;
   livenessPort: number;
@@ -177,7 +178,7 @@ function isOwnerRecord(value: unknown): value is OwnerRecord {
     (candidate.pid ?? 0) > 0 &&
     typeof candidate.nonce === 'string' &&
     candidate.nonce.length === 36 &&
-    (candidate.role === 'daemon' || candidate.role === 'doctor') &&
+    (candidate.role === 'daemon' || candidate.role === 'doctor' || candidate.role === 'installer') &&
     typeof candidate.acquiredAt === 'string' &&
     Number.isFinite(Date.parse(candidate.acquiredAt)) &&
     typeof candidate.processStartedAt === 'string' &&

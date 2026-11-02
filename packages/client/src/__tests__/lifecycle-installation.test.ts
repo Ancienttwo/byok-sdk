@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,9 +10,12 @@ import {
   ServiceInstallationError,
   SERVICE_PAYLOAD_MANIFEST,
   type ServiceInstallation,
+  type ServiceInstallationOptions,
 } from '../lifecycle/service-installation';
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { SERVICE_UNIT_MARKER, withServiceOwnerGate } from '../lifecycle/service-unit';
+import { acquireDaemonOwner } from '../util/daemon-owner';
+import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 useInProcessServiceLifecycleGate();
@@ -130,7 +134,7 @@ async function expectConsistent(dataOf: Record<string, string>): Promise<void> {
 }
 
 /** The installation over `lifecycle`, with this suite's health seam. */
-function installationOver(lifecycle: ManagedServiceLifecycle): ServiceInstallation {
+function installationOver(lifecycle: ManagedServiceLifecycle, extra: Partial<ServiceInstallationOptions> = {}): ServiceInstallation {
   return serviceInstallationOver({
     service: { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app' },
     productId: 'svc',
@@ -145,6 +149,7 @@ function installationOver(lifecycle: ManagedServiceLifecycle): ServiceInstallati
     },
     healthTimeoutMs: 5_000,
     stopTimeoutMs: 2_000,
+    ...extra,
   }, lifecycle);
 }
 
@@ -430,6 +435,82 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         await expectConsistent({ '1.0.0': 'v1 data', '2.0.0': 'v2 data' });
         expect(await pointer('current')).toBe('1.0.0');
       }
+    });
+  });
+
+  describe('daemon stores (#1328): every store is leased and gated across the switch', () => {
+    let research: string;
+    beforeEach(async () => {
+      research = path.join(root, 'research', 'device');
+      await fs.mkdir(research, { recursive: true });
+    });
+    const both = () => installationOver(fakeLifecycle(), {
+      daemonStores: async () => [{ storeDir, productId: 'svc' }, { storeDir: research, productId: 'research' }],
+    });
+
+    it('stops both stores and holds their leases and gates through the pointer switch', async () => {
+      installation = both();
+      await installation.install(await payload('1.0.0'));
+      const seen: unknown[] = [];
+      const original = fs.rename.bind(fs);
+      const spy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+        if (String(to) === path.join(installRoot, 'current')) {
+          for (const dir of [storeDir, research]) {
+            const owner = JSON.parse(await fs.readFile(path.join(dir, 'daemon-owner.json'), 'utf8')) as { role: string };
+            const gate = await acquirePathMutationGate({ scope: 'store', targetPath: dir }).catch((error: unknown) => error);
+            seen.push([owner.role, gate instanceof PathMutationGateBusyError]);
+          }
+        }
+        return original(from, to);
+      });
+      try { await expect(installation.upgrade(await payload('2.0.0'))).resolves.toMatchObject({ state: 'switched' }); }
+      finally { spy.mockRestore(); }
+      expect(seen).toEqual([['installer', true], ['installer', true]]);
+      await expect(fs.access(path.join(research, 'daemon-owner.json'))).rejects.toThrow();
+    });
+
+    it('a store with a live owner is store_busy and nothing is switched', async () => {
+      installation = both();
+      await installation.install(await payload('1.0.0'));
+      const live = await acquireDaemonOwner(research, 'daemon');
+      events = [];
+      try { await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'store_busy' }); }
+      finally { await live.release(); }
+      expect(events).toEqual(['stop', 'start']);
+      expect(await pointer('current')).toBe('1.0.0');
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_busy' });
+    });
+
+    it('reclaims what a crashed daemon left (a dead owner and a control.token) and upgrades', async () => {
+      installation = both();
+      await installation.install(await payload('1.0.0'));
+      const dead = spawnSync(process.execPath, ['-e', '']).pid;
+      const at = new Date().toISOString();
+      await fs.writeFile(path.join(research, 'daemon-owner.json'), JSON.stringify({
+        version: 2, pid: dead, nonce: randomUUID(), role: 'daemon', acquiredAt: at, processStartedAt: at, livenessPort: 1,
+      }));
+      await fs.writeFile(path.join(research, 'control.token'), 'stale');
+      await expect(installation.upgrade(await payload('2.0.0'))).resolves.toMatchObject({ state: 'switched' });
+      await expect(fs.access(path.join(research, 'control.token'))).rejects.toThrow();
+      await expect(fs.access(path.join(research, 'daemon-owner.json'))).rejects.toThrow();
+    });
+
+    it.each([
+      ['a relative storeDir', async () => [{ storeDir: 'store', productId: 'svc' }]],
+      ['a store listed twice', async () => [{ storeDir, productId: 'svc' }, { storeDir: `${storeDir}${path.sep}`, productId: 'other' }]],
+      ['an empty productId', async () => [{ storeDir, productId: '' }]],
+      ['a throw', async () => { throw new Error('no session'); }],
+    ])('%s is daemon_stores_invalid and nothing is switched', async (_label, daemonStores) => {
+      await installation.install(await payload('1.0.0'));
+      events = [];
+      await expect(installationOver(fakeLifecycle(), { daemonStores }).upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'daemon_stores_invalid' });
+      expect(events).toEqual(['stop', 'start']);
+      expect(await pointer('current')).toBe('1.0.0');
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'daemon_stores_invalid' });
+    });
+
+    it('daemonStores without healthCheck is a TypeError', () => {
+      expect(() => installationOver(fakeLifecycle(), { daemonStores: async () => [], healthCheck: undefined })).toThrow(TypeError);
     });
   });
 
