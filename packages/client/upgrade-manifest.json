@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "f42e9687d8f11ef1abf685ba2269a9b1d8be72e4394bf7d997a3209a0174873c"
+    "snapshotSha256": "aafc9a836afff85f0d5b35768f84d04e9667a86f9cc806bcf04980a7e192ee5e"
   },
   "configFields": {
     "status": "tracked",
@@ -22,6 +22,15 @@
       "migration": "CHANGELOG.md#unreleased",
       "items": [
         "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions"
+      ]
+    },
+    {
+      "id": "k8-history-reply",
+      "impact": "additive",
+      "summary": "K8 history rows from an external history authority can carry an optional reply, the reply text that the user saw for that Turn (#1318). K8 puts it in the frozen ContextPack row, counts it in contextMaxBytes with the rest of the row (whole rows go oldest first, a reply is never cut) and covers it in historyDigest; K8 still stores no reply text. A reply that is not a string refuses the whole history and the Turn stays queued. historyRowFromTurn in src/rules/context.ts builds a row from a bot-turn:<id> projection value and the reply. Rows without reply behave as before; a Host that vendored K8 copies the new rules/context.ts.",
+      "migration": "examples/bot-collaboration/README.md#external-history-authority",
+      "items": [
+        "example:bot-collaboration"
       ]
     },
     {
@@ -48,6 +57,13 @@
     }
   ],
   "changes": [
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=e352ad2b8a4000ee",
+      "after": "K8 0.0.1 src-sha256=43ad240e9fb07721",
+      "entry": "k8-history-reply"
+    },
     {
       "item": "export:@byok-sdk/client#ServiceDaemonStore",
       "change": "added",
