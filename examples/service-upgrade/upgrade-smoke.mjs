@@ -155,9 +155,12 @@ async function smoke(owner, server, payloads) {
   try {
     await lifecycle(variant, cmd, server, payloads);
   } catch (error) {
+    // Printed first: a cleanup failure below must not hide it.
+    console.log(`--- ${owner} failure\n${error?.stack ?? error}`);
     await diagnose(variant);
     // Leave no service registered on the machine; the failure stays the result.
-    await run(cmd.uninstall());
+    const cleanup = await run(cmd.uninstall());
+    if (cleanup.code !== 0) console.log(`--- ${owner} cleanup uninstall exit ${cleanup.code}\n${cleanup.stdout}${cleanup.stderr}`);
     throw error;
   }
 }
