@@ -1,6 +1,6 @@
 # ADR-046：SDK 不内置 Bot 产品形态，Agent 是 SDK 的单位
 
-> **来源**：owner 2026-11-03 批准。依据是 owner 与 advisor 对两种 Bot 形态的讨论：多 Bot，以及单 Bot + Channel。PR：<开出 PR 后补上链接>。
+> **来源**：owner 2026-11-03 批准。依据是 owner 与 advisor 对两种 Bot 形态的讨论：多 Bot，以及单 Bot + Channel。PR：[#1354](https://github.com/Ancienttwo/byok-sdk/pull/1354)。
 > **关联**：[ADR-038](../architecture/adr-2026-10-13-bot-platform.md)（Bot 平台与协作）、[ADR-039](ADR-039-bot-mode-product-prd.md)（Bot 模式产品方案）、[ADR-041](ADR-041-k8b-cross-bot.md)（K8b 跨 Bot）。
 
 状态：已决定（owner 2026-11-03）。本文不改变现行的 API、wire、schema、存储和 K8 行为。
