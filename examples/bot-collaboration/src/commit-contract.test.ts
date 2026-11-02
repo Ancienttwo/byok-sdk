@@ -13,8 +13,8 @@ import type { CommandRecord } from './rules/commit';
 import { DatabaseSync } from 'node:sqlite';
 import { commitCommand, expireCards, refuseRetired, reportCardDecisions, RetiredIdentityError, type AdmittedIds, type Command,
   type CommandPorts } from './rules/commands';
-import { cardVectors, coalesceVectors, commitVectors, replyVectors, roomVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors,
-  VECTOR_NOW, type CardSubject, type CoalesceSubject, type CommitSubject, type ReplySubject, type RoomSubject, type SeedTeam, type SettlementSubject,
+import { cardVectors, coalesceVectors, commitVectors, replyVectors, roomVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS,
+  staleTemplateSyncVectors, syncVectors, VECTOR_NOW, type CardSubject, type CoalesceSubject, type CommitSubject, type ReplySubject, type RoomSubject, type SeedTeam, type SettlementSubject,
   type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
 import { advanceRoomsAndTurns } from './rooms';
 import { intentRows, settleDelegations } from './delegation';
@@ -154,6 +154,8 @@ retentionVectors('pure rules in memory', memorySubject);
 retentionVectors('L HostLedger', ledgerSubject);
 syncVectors('pure rules in memory', () => memorySubject());
 syncVectors('L HostLedger', () => ledgerSubject());
+staleTemplateSyncVectors('pure rules in memory', () => memorySubject());
+staleTemplateSyncVectors('L HostLedger', () => ledgerSubject());
 
 it('L: a projection identity conflict in a decision leaves the ledger unchanged', () => {
   const subject = ledgerSubject(), card = hash(['task-1', 'confirmable_action', 0]);

@@ -355,6 +355,15 @@ export function syncVectors(name: string, open: () => SyncSubject | Promise<Sync
       await subject.sync();
       expect(await subject.stored()).toBe(stored);
     });
+  });
+}
+/**
+ * The sync vector of a stored template that differs from the Host's (#1358): only L keeps such a template at freeze time,
+ * since H re-projects the scope config's templates at each sync.
+ */
+export function staleTemplateSyncVectors(name: string, open: () => SyncSubject | Promise<SyncSubject>): void {
+  describe(`sync contract, stored template: ${name}`, () => {
+    const seeded = async () => { const subject = await open(); await subject.change(seedSync); return subject; };
 
     it('writes nothing when a later Turn of the same sync throws', async () => {
       const subject = await seeded();
