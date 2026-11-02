@@ -1,0 +1,47 @@
+name: diag-1342
+on:
+  pull_request:
+    paths:
+      - .github/workflows/diag-1342.yml
+jobs:
+  measure:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun ci
+      - run: bun run --cwd packages/client build
+      - name: Bundle the real helpers for node
+        run: |
+          @'
+          export { atomicWriteFile } from './packages/client/src/util/atomic-write';
+          export { ensureSecureDir } from './packages/client/src/util/secure-dir';
+          '@ | Set-Content -Path diag-entry.ts
+          bun build diag-entry.ts --target=node --format=esm --outfile "$env:RUNNER_TEMP\diag-helpers.mjs"
+      - name: Measure lstat(device.json) around ensureSecureDir(storeDir)
+        run: |
+          @'
+          import { promises as fs } from 'node:fs';
+          import os from 'node:os';
+          import path from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          const { atomicWriteFile, ensureSecureDir } = await import(pathToFileURL(path.join(process.env.RUNNER_TEMP, 'diag-helpers.mjs')).href);
+          const pick = (s) => ({ ino: s.ino.toString(), ctimeNs: s.ctimeNs.toString(), mtimeNs: s.mtimeNs.toString(), size: s.size.toString() });
+          for (let i = 1; i <= 3; i++) {
+            const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'diag1342-'));
+            await ensureSecureDir(storeDir);
+            const file = path.join(storeDir, 'device.json');
+            await atomicWriteFile(file, JSON.stringify({ run: i, at: Date.now() }, null, 2), { mode: 0o600 });
+            const before = pick(await fs.lstat(file, { bigint: true }));
+            await ensureSecureDir(storeDir);
+            const after = pick(await fs.lstat(file, { bigint: true }));
+            console.log(JSON.stringify({ run: i, before, after, inoChanged: before.ino !== after.ino, ctimeChanged: before.ctimeNs !== after.ctimeNs, mtimeChanged: before.mtimeNs !== after.mtimeNs, sizeChanged: before.size !== after.size }));
+          }
+          '@ | Set-Content -Path "$env:RUNNER_TEMP\diag-1342.mjs"
+          node "$env:RUNNER_TEMP\diag-1342.mjs"
