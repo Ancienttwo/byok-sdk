@@ -33,13 +33,13 @@ export function locateBundledPiAssets(input: {
 }): string {
   const named = input.piPackageDir !== undefined && input.piPackageDir !== '';
   if (!named && input.entry !== undefined) {
-    throw new PiBundledAssetsError('pi_bundled_assets_unavailable: an interpreter + bundle product must set PI_PACKAGE_DIR to its Pi asset root');
+    throw new PiBundledAssetsError('pi_bundled_assets_unavailable: an interpreter + bundle product must set runtimes.pi.packageDir (PiAdapterOptions.packageDir) to its Pi asset root');
   }
   const root = path.resolve(named ? input.piPackageDir! : path.dirname(input.executable));
   if (!existsSync(path.join(root, layout.basePath, 'manifest.json'))) {
     throw new PiBundledAssetsError(named
-      ? 'pi_bundled_assets_unavailable: PI_PACKAGE_DIR holds no SDK Pi asset manifest'
-      : 'pi_bundled_assets_unavailable: no SDK Pi asset manifest beside the executable; set PI_PACKAGE_DIR to the product Pi asset root');
+      ? 'pi_bundled_assets_unavailable: runtimes.pi.packageDir holds no SDK Pi asset manifest'
+      : 'pi_bundled_assets_unavailable: no SDK Pi asset manifest beside the executable; set runtimes.pi.packageDir (PiAdapterOptions.packageDir) to the product Pi asset root');
   }
   return root;
 }

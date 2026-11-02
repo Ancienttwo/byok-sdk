@@ -60,8 +60,9 @@ async function listFiles(root: string, relative: string): Promise<string[]> {
 /**
  * Create the Pi asset root of a single-file product from the installed
  * `@byok-sdk/client` and its pinned official Pi package. Run it in the
- * product build, then ship `outDir` with the product and name it in
- * `PI_PACKAGE_DIR` (a Bun-compiled executable may keep it beside itself).
+ * product build, then ship `outDir` with the product and set its absolute
+ * path as `runtimes.pi.packageDir` (`PiAdapterOptions.packageDir`); a
+ * Bun-compiled executable may keep it beside itself.
  *
  * The Pi package must be the exact official pin. The Pi export resources must
  * match their recorded SHA-256 digests, and the SDK todo locale assets must

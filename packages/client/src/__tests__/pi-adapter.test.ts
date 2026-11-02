@@ -387,7 +387,7 @@ const __executionScratch = await testExecutionScratch();
     const prepared = await bundle.prepare({ offer: { instruction: 'Never sent' }, descriptor: bundle.descriptor, requiredToolsetIds: [] });
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
     await expect(prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd: os.tmpdir(), env: {},  }))
-      .rejects.toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start', message: 'pi_bundled_assets_unavailable: an interpreter + bundle product must set PI_PACKAGE_DIR to its Pi asset root' });
+      .rejects.toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start', message: 'pi_bundled_assets_unavailable: an interpreter + bundle product must set runtimes.pi.packageDir (PiAdapterOptions.packageDir) to its Pi asset root' });
   });
 
   // #1315: the asset root of a single-file product is `packageDir` alone, for
@@ -414,7 +414,7 @@ const __executionScratch = await testExecutionScratch();
       const spawned: Array<NodeJS.ProcessEnv | undefined> = [];
       const passed = new PiAdapter({ resolveBin, spawnFn: recordingSpawn(spawned), sdkHelperHost: bundle, runtimeEnvironment: { pass: ['PI_PACKAGE_DIR'] } });
       await expect(passed.detect()).resolves.toEqual({ kind: 'not-found' });
-      await expect(launch(passed)).rejects.toThrow('pi_bundled_assets_unavailable: an interpreter + bundle product must set PI_PACKAGE_DIR to its Pi asset root');
+      await expect(launch(passed)).rejects.toThrow('pi_bundled_assets_unavailable: an interpreter + bundle product must set runtimes.pi.packageDir (PiAdapterOptions.packageDir) to its Pi asset root');
       expect(spawned).toHaveLength(0);
       const configured = new PiAdapter({ resolveBin, spawnFn: recordingSpawn(spawned), sdkHelperHost: bundle, packageDir: PRODUCT_ASSETS });
       await expect(configured.detect()).resolves.toMatchObject({ kind: 'available', version: resolvePiRuntimeIdentity().version });
@@ -433,7 +433,7 @@ const __executionScratch = await testExecutionScratch();
         const spawned: Array<NodeJS.ProcessEnv | undefined> = [];
         const unset = new PiAdapter({ resolveBin, spawnFn: recordingSpawn(spawned), sdkHelperHost: bundle });
         await expect(unset.detect()).resolves.toEqual({ kind: 'not-found' });
-        await expect(launch(unset)).rejects.toThrow('pi_bundled_assets_unavailable: an interpreter + bundle product must set PI_PACKAGE_DIR to its Pi asset root');
+        await expect(launch(unset)).rejects.toThrow('pi_bundled_assets_unavailable: an interpreter + bundle product must set runtimes.pi.packageDir (PiAdapterOptions.packageDir) to its Pi asset root');
         loginShell({ ...withoutAssetRoot(), PI_PACKAGE_DIR: broken });
         vi.stubEnv('PI_PACKAGE_DIR', broken);
         const configured = new PiAdapter({ resolveBin, spawnFn: recordingSpawn(spawned), sdkHelperHost: bundle, packageDir: PRODUCT_ASSETS });
