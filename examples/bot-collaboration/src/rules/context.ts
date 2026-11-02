@@ -17,10 +17,13 @@ export interface ContextHistory {
   readonly turns: readonly (Turn | ContextTurn)[]; readonly cards: readonly Card[]; readonly questions: readonly Question[];
   readonly rejected: readonly Rejection[]; readonly room?: readonly RoomMessage[];
 }
-/** One history row of a ContextPack. An external history authority gives its rows in this shape (#739 Q4a). */
+/**
+ * One history row of a ContextPack. An external history authority gives its rows in this shape (#739 Q4a).
+ * `reply` is the reply text that the user saw for this Turn (#1318). Only an external authority gives it; K8 stores no reply text.
+ */
 export interface ContextTurn {
   id: string; root: string; source: Turn['source']; request: string; hop: number; status: Turn['status'];
-  conclusion?: string; outcomeSummary: string[];
+  conclusion?: string; outcomeSummary: string[]; reply?: string;
 }
 const SOURCES = new Set<string>(['user', 'continuation', 'answer', 'action_result', 'routine', 'room_slot', 'bot_request', 'bot_reply']);
 const STATUSES = new Set<string>(['queued', 'processing', 'succeeded', 'failed', 'blocked', 'delivered']);
@@ -32,17 +35,26 @@ export function contextTurns(value: unknown): ContextTurn[] {
     const r = (row ?? fail()) as Record<string, unknown>;
     const text = (key: string) => typeof r[key] === 'string' ? r[key] as string : fail();
     if (!SOURCES.has(text('source')) || !STATUSES.has(text('status')) || !Number.isSafeInteger(r.hop) || (r.hop as number) < 0
-      || r.conclusion !== undefined && typeof r.conclusion !== 'string'
+      || r.conclusion !== undefined && typeof r.conclusion !== 'string' || r.reply !== undefined && typeof r.reply !== 'string'
       || !Array.isArray(r.outcomeSummary) || r.outcomeSummary.some(key => typeof key !== 'string')) fail();
     return { id: text('id'), root: text('root'), source: r.source as Turn['source'], request: text('request'), hop: r.hop as number,
       status: r.status as Turn['status'], ...(r.conclusion === undefined ? {} : { conclusion: r.conclusion as string }),
-      outcomeSummary: [...r.outcomeSummary as string[]] };
+      outcomeSummary: [...r.outcomeSummary as string[]], ...(r.reply === undefined ? {} : { reply: r.reply as string }) };
   });
+}
+/**
+ * One history row from a `bot-turn:<id>` projection value and the reply text that the user saw, for an external authority.
+ * The row passes `contextTurns`.
+ */
+export function historyRowFromTurn(projection: Turn & { readonly owner: string; readonly reply?: string }): ContextTurn {
+  const { conclusion, ...row } = contextTurn(projection);
+  return { ...row, ...(conclusion === undefined ? {} : { conclusion }) };
 }
 function contextTurn(turn: Turn | ContextTurn): ContextTurn & { conclusion: string | undefined } {
   return { id: turn.id, root: turn.root, source: turn.source, request: turn.request, hop: turn.hop, status: turn.status, conclusion: turn.conclusion,
     outcomeSummary: 'outcomeSummary' in turn ? [...turn.outcomeSummary]
-      : turn.outcome && typeof turn.outcome === 'object' && !Array.isArray(turn.outcome) ? Object.keys(turn.outcome) : [] };
+      : turn.outcome && typeof turn.outcome === 'object' && !Array.isArray(turn.outcome) ? Object.keys(turn.outcome) : [],
+    ...('reply' in turn && turn.reply !== undefined ? { reply: turn.reply } : {}) };
 }
 /** `crossRequest` is the framed Request section of a Cross-Bot Turn; its background is trimmed too (§3.7). */
 export function turnContext<R extends ContextRoutine>(state: ContextState, history: ContextHistory, turn: Turn, turnLimit = HISTORY_MAX_ITEMS,
