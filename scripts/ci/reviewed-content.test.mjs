@@ -685,6 +685,34 @@ test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
   }
 });
 
+test('#1375: the K8 core edge moves to devDependencies, and only that move is admitted', t => {
+  const f = fixture(t);
+  const path = 'examples/bot-collaboration/package.json';
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1' };
+  f.write(path, { ...manifest, dependencies: { '@byok-sdk/core': 'workspace:*', '@byok-sdk/protocol': 'workspace:*' }, devDependencies: {} });
+  rebase(f, 'K8 with core as a dependency');
+  f.write(path, { ...manifest, dependencies: { '@byok-sdk/protocol': 'workspace:*' }, devDependencies: { '@byok-sdk/core': 'workspace:*' } });
+  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
+  f.write(path, { ...manifest, dependencies: { '@byok-sdk/protocol': 'workspace:*' }, devDependencies: { '@byok-sdk/core': '^0.36.0' } });
+  assert.throws(() => selectImpact([path], f), /more than/, 'another spec');
+  f.write(path, { ...manifest, dependencies: { '@byok-sdk/protocol': 'workspace:*' }, devDependencies: {} });
+  assert.throws(() => selectImpact([path], f), /more than/, 'a dropped edge');
+});
+
+test('#1375: the MCP server example drops its core edge, and stays private', t => {
+  const f = fixture(t);
+  const path = 'examples/byok-mcp-server/package.json';
+  const manifest = { name: '@byok-sdk/example-byok-mcp-server', private: true, version: '0.0.1' };
+  f.write(path, { ...manifest, dependencies: { '@byok-sdk/core': 'workspace:*', '@byok-sdk/protocol': 'workspace:*' } });
+  rebase(f, 'MCP server with core');
+  f.write(path, { ...manifest, dependencies: { '@byok-sdk/protocol': 'workspace:*' } });
+  assert.ok(selectImpact([path], f).dirs.includes('examples/byok-mcp-server'));
+  f.write(path, { ...manifest, dependencies: { '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/keys': 'workspace:*' } });
+  assert.throws(() => selectImpact([path], f), /more than/, 'another dependency edit');
+  f.write(path, { ...manifest, private: false, dependencies: { '@byok-sdk/protocol': 'workspace:*' } });
+  assert.throws(() => selectImpact([path], f), /must stay private/);
+});
+
 function rebase(f, message) {
   const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', message);

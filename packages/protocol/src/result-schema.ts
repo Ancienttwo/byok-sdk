@@ -109,8 +109,8 @@ export interface ResultSchema {
  * keyword at fault, or a document-level code: `not-serializable`,
  * `not-plain-json`, `over-cap`, `too-deep` (JSON nesting), `schema` (a
  * subschema that is not an object) or `depth` (subschema nesting). A contract
- * rule issue (reason `contract-mismatch`) uses the rule code:
- * `duplicate-option-id` or `blank-text`.
+ * rule issue (reason `contract-mismatch`) uses its bot-turn-outcome.v1
+ * rule code, for example `blank-text`, `duplicate-target` or `empty-update`.
  */
 export interface ResultIssue {
   readonly pointer: string;

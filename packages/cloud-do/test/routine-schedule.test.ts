@@ -1,8 +1,8 @@
 import { expect, it } from 'vitest';
 import { build } from 'esbuild';
 import { Miniflare, Log, LogLevel } from 'miniflare';
-import { directed, tzCases } from '../../core/src/__tests__/fixtures/routine-cases';
-import { nextRoutineOccurrence } from '../../core/src/routine-schedule';
+import { directed, tzCases } from '../../protocol/src/__tests__/fixtures/routine-cases';
+import { nextRoutineOccurrence } from '../../protocol/src/routine-schedule';
 
 it('matches Node calendar instants and zone checks in real workerd without Node support', async () => {
   const bundle = await build({ entryPoints: ['test/routine-schedule-worker.ts'], bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022' });

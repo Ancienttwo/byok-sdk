@@ -6,6 +6,8 @@ import { applyManagement, roomFields } from './team';
 import { roomInput, advanceRooms, applySpeech } from './rooms';
 import { turnContext } from './schema';
 import { HISTORY_MAX_BYTES } from './history';
+/** These cases do not read the room projections. */
+const noPublish = (): void => {};
 
 function setup(members = ['b0', 'b1', 'b2']) {
   const ledger = { application: {}, intents: {}, executions: {} } as LedgerState;
@@ -15,7 +17,7 @@ function setup(members = ['b0', 'b1', 'b2']) {
   state.team.rooms.r = { id: 'r', ...roomFields(state.team, { name: 'Room', members }), messages: [] };
   const advance = () => advanceRooms(ledger, state, 0, (id, botId, request) => {
     state.turns[id] = { id, root: id, botId, request, source: 'room_slot', hop: 0, status: 'queued' };
-  });
+  }, noPublish);
   const membersAs = (next: string[], taskId: string) => applyManagement(state, 'b0', taskId,
     { update_room: [{ roomId: 'r', members: next }] }, { default: template('device') }, (_kind, work) => work());
   return { ledger, state, advance, membersAs };
@@ -23,7 +25,7 @@ function setup(members = ['b0', 'b1', 'b2']) {
 
 it('uses actual UTF-8 JSON bytes and keeps a suffix of complete messages without changing ledger rows', () => {
   const { state, advance } = setup();
-  const round = roomInput(state, 'bytes', 'r', 'Current request', ['b1']); advance();
+  const round = roomInput(state, 'bytes', 'r', 'Current request', ['b1'], noPublish); advance();
   const turn = state.turns[state.team.rounds[round]!.seats[0]!]!;
   const text = '\0😀"\\'.repeat(1000);
   state.team.rooms.r!.messages = Array.from({ length: 20 }, (_, i) => ({ id: String(i), from: 'user', text, late: false }));
@@ -67,10 +69,10 @@ it('windows only this Bot private history and leaves the current request for the
 
 it('keeps no-mention messages as background without creating an execution', () => {
   const { state, advance } = setup();
-  const background = roomInput(state, 'background', 'r', 'Background evidence', []); advance();
+  const background = roomInput(state, 'background', 'r', 'Background evidence', [], noPublish); advance();
   expect(state.team.rounds[background]!.seats).toEqual([]);
   expect(state.turns).toEqual({});
-  const round = roomInput(state, 'selected', 'r', 'Now answer', ['b1']); advance();
+  const round = roomInput(state, 'selected', 'r', 'Now answer', ['b1'], noPublish); advance();
   const context = turnContext(state, state.turns[state.team.rounds[round]!.seats[0]!]!);
   if (!('room' in context)) throw new Error('Expected room context');
   expect(context.room.messages.map(m => m.text)).toEqual(['Background evidence', 'Now answer']);
@@ -79,12 +81,12 @@ it('keeps no-mention messages as background without creating an execution', () =
 
 it('hides pre-join messages and an older round root request from a called late joiner', () => {
   const { state, advance, membersAs } = setup(['b0', 'b1']);
-  const round = roomInput(state, 'old-root', 'r', 'PRE-JOIN-SECRET', ['b0']); advance();
+  const round = roomInput(state, 'old-root', 'r', 'PRE-JOIN-SECRET', ['b0'], noPublish); advance();
   const first = state.turns[state.team.rounds[round]!.seats[0]!]!;
   membersAs(['b0', 'b1', 'b2'], 'join');
   expect(state.team.rooms.r!.visibleFrom.b2).toBe(1);
   applySpeech(state, first, { speech: { kind: 'post', text: 'POST-JOIN-CALL' }, room_call: { members: ['b2'] } },
-    'call', 0, (_kind, work) => work());
+    'call', 0, noPublish, (_kind, work) => work());
   advance();
   const late = state.turns[state.team.rounds[round]!.seats[1]!]!;
   const context = turnContext(state, late);
@@ -100,12 +102,12 @@ it('hides pre-join messages and an older round root request from a called late j
 
 it('preserves retained member offsets and resets the boundary after leaving and rejoining', () => {
   const { state, advance, membersAs } = setup();
-  roomInput(state, 'before', 'r', 'First membership', []);
+  roomInput(state, 'before', 'r', 'First membership', [], noPublish);
   membersAs(['b0', 'b1'], 'leave');
-  roomInput(state, 'absent', 'r', 'While absent', []);
+  roomInput(state, 'absent', 'r', 'While absent', [], noPublish);
   membersAs(['b0', 'b1', 'b2'], 'rejoin');
   expect(state.team.rooms.r!.visibleFrom).toEqual({ b0: 0, b1: 0, b2: 2 });
-  const round = roomInput(state, 'after', 'r', 'After rejoin', ['b2']); advance();
+  const round = roomInput(state, 'after', 'r', 'After rejoin', ['b2'], noPublish); advance();
   const context = turnContext(state, state.turns[state.team.rounds[round]!.seats[0]!]!);
   if (!('room' in context)) throw new Error('Expected room context');
   expect(context.room.messages.map(m => m.text)).toEqual(['After rejoin']);
@@ -114,7 +116,7 @@ it('preserves retained member offsets and resets the boundary after leaving and 
 
 it('reports required metadata overflow without pruning authority or hard blocking history', () => {
   const { state, advance } = setup();
-  const round = roomInput(state, 'metadata', 'r', 'Current', ['b1']); advance();
+  const round = roomInput(state, 'metadata', 'r', 'Current', ['b1'], noPublish); advance();
   state.team.notes = [{ id: 'oversized-import', text: 'x'.repeat(HISTORY_MAX_BYTES) }];
   const context = turnContext(state, state.turns[state.team.rounds[round]!.seats[0]!]!);
   if (!('room' in context)) throw new Error('Expected room context');
@@ -141,11 +143,11 @@ it('keeps exactly the newest 100 small private turns independently of the byte l
 
 it('does not claim an invisible pre-join request is present when a pass calls a later member', () => {
   const { state, advance, membersAs } = setup(['b0', 'b1']);
-  const round = roomInput(state, 'old-root', 'r', 'PRE-JOIN-REQUEST', ['b0']); advance();
+  const round = roomInput(state, 'old-root', 'r', 'PRE-JOIN-REQUEST', ['b0'], noPublish); advance();
   const first = state.turns[state.team.rounds[round]!.seats[0]!]!;
   membersAs(['b0', 'b1', 'b2'], 'join');
-  applySpeech(state, first, { speech: { kind: 'pass' }, room_call: { members: ['b2'] } }, 'call', 0, (_kind, work) => work());
-  for (let i = 0; i < 101; i++) roomInput(state, `background-${i}`, 'r', `After join ${i}`, []);
+  applySpeech(state, first, { speech: { kind: 'pass' }, room_call: { members: ['b2'] } }, 'call', 0, noPublish, (_kind, work) => work());
+  for (let i = 0; i < 101; i++) roomInput(state, `background-${i}`, 'r', `After join ${i}`, [], noPublish);
   advance();
   const late = state.turns[state.team.rounds[round]!.seats[1]!]!;
   const context = turnContext(state, late);
@@ -157,14 +159,14 @@ it('does not claim an invisible pre-join request is present when a pass calls a 
 
 it('keeps an autonomous caller post in the frozen Request even after it leaves the recent message window', () => {
   const { state, advance, membersAs } = setup(['b0', 'b1']);
-  const round = roomInput(state, 'old-root', 'r', 'PRE-JOIN-REQUEST', ['b0']); advance();
+  const round = roomInput(state, 'old-root', 'r', 'PRE-JOIN-REQUEST', ['b0'], noPublish); advance();
   const seatId = state.team.rounds[round]!.seats[0]!;
   membersAs(['b0', 'b1', 'b2'], 'join');
   Object.assign(state.team.seats[seatId]!, { status: 'late', released: true, late: true });
   state.team.rounds[round]!.closed = true;
   applySpeech(state, state.turns[seatId]!, { speech: { kind: 'post', text: 'CURRENT CALLER REQUEST' }, room_call: { members: ['b2'] } },
-    'autonomous-call', 0, (_kind, work) => work());
-  for (let i = 0; i < 101; i++) roomInput(state, `background-${i}`, 'r', `New background ${i}`, []);
+    'autonomous-call', 0, noPublish, (_kind, work) => work());
+  for (let i = 0; i < 101; i++) roomInput(state, `background-${i}`, 'r', `New background ${i}`, [], noPublish);
   advance();
   const called = Object.values(state.turns).find(t => t.botId === 'b2')!;
   const context = turnContext(state, called);
@@ -180,14 +182,14 @@ it('keeps an autonomous caller post in the frozen Request even after it leaves t
 
 it('inherits the visible caller post when an intermediate member passes and calls another member', () => {
   const { state, advance } = setup();
-  const round = roomInput(state, 'root', 'r', 'Older root request', ['b0']); advance();
+  const round = roomInput(state, 'root', 'r', 'Older root request', ['b0'], noPublish); advance();
   const first = state.turns[state.team.rounds[round]!.seats[0]!]!;
   applySpeech(state, first, { speech: { kind: 'post', text: 'Current caller post' }, room_call: { members: ['b1'] } },
-    'first-call', 0, (_kind, work) => work());
+    'first-call', 0, noPublish, (_kind, work) => work());
   advance();
   const middle = state.turns[state.team.rounds[round]!.seats[1]!]!;
   applySpeech(state, middle, { speech: { kind: 'pass' }, room_call: { members: ['b2'] } },
-    'pass-call', 0, (_kind, work) => work());
+    'pass-call', 0, noPublish, (_kind, work) => work());
   advance();
   const last = state.turns[state.team.rounds[round]!.seats[2]!]!;
   expect(JSON.parse(last.request)).toMatchObject({ request: 'Current caller post', requestFrom: 'b0' });

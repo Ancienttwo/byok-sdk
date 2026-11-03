@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { ROUTINE_HORIZON_MS } from '@byok-sdk/core';
+import { ROUTINE_HORIZON_MS } from '@byok-sdk/protocol';
 import { WAKE_MAX_FUTURE_MS } from '../wakes/types';
 
 it('keeps WAKE_MAX_FUTURE_MS equal to ROUTINE_HORIZON_MS (368 days)', () => {

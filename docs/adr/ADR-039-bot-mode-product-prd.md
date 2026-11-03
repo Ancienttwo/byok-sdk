@@ -127,7 +127,7 @@ Bot 模式的不变量在平台 PRD §5 的 I1–I12。本文补七条：
 | Conversation、Turn、输入来源、群、委派账本、待确认动作账本、routine 账本 | Host | 平台 PRD §9.1 加 v2 新增 |
 | Host 执行核心：per-Agent FIFO、`taskId` 代际 | Host（K4 参考实现） | 不进 SDK API |
 | Execution、offer、terminal、outcome 格式校验 | SDK | `executions.submit`、`tasks.deviceTerminal`、K7 |
-| `bot-turn-outcome.v1` 的动作片段、routine 时点纯函数 | SDK（`@byok-sdk/protocol`、`@byok-sdk/core`） | §5.2 K8-S；Host 填 enum 并冻结最终 schema |
+| `bot-turn-outcome.v1` 的动作片段、routine 时点纯函数 | SDK（`@byok-sdk/protocol`，#1375 前在 `@byok-sdk/core`） | §5.2 K8-S；Host 填 enum 并冻结最终 schema |
 | 设备端时钟 | SDK `server.wakes`（Topology L） | Aiphabee 是 L。周期规则在 Host |
 | Agent home、记忆内容、CAS、intent 的 at-most-once apply | SDK daemon（设备本地） | 单 writer |
 | 记忆写入权威和 intent 屏障在三端的证明 | SDK | §5.3.3 |
@@ -160,11 +160,11 @@ K4 保持每个 routine id 的定义不可变。改定义换新 id。同 id 的�
 
 范围按平台 PRD §9.3–§9.6，加 v2 新增的三类动作和一条默认规则。
 
-**K8-S（Aimpact 已接受）。** `@byok-sdk/protocol` 发布 `bot-turn-outcome.v1` 的动作片段、组合函数和 TS 类型。Host 按角色和执行类型选片段，填花名册、群、模型、routine id 的 `enum`，调用 `composeBotTurnOutcomeSchema`，冻结进 offer。daemon 按冻结 schema 校验，并执行 SDK contract 的规则（`bot-turn-outcome.v1`：`ask_user` 选项 id 不重复，模型写的字符串 `trim()` 后不为空，`confirmable_action` 的 draft 除外），K7 不变（#1374）。`@byok-sdk/core` 发布 Host 调用的纯函数 `nextRoutineOccurrence(schedule, now)` 和 `checkRoutineSchedule`。K8-S 改 protocol、core、server 的 wake 上限、spec 和 api-surface。（依据 R3）
+**K8-S（Aimpact 已接受）。** `@byok-sdk/protocol` 发布 `bot-turn-outcome.v1` 的动作片段、组合函数和 TS 类型。Host 按角色和执行类型选片段，填花名册、群、模型、routine id 的 `enum`，调用 `composeBotTurnOutcomeSchema`，冻结进 offer。daemon 按冻结 schema 校验，并执行 SDK contract 的规则（`bot-turn-outcome.v1`：`ask_user` 选项 id 不重复，模型写的字符串 `trim()` 后不为空，`confirmable_action` 的 draft 除外），K7 不变（#1374）。其余只看 outcome 文档的规则也由 contract 执行：委派目标、localId、取消 id、群成员不重复，create_room 的 admin 在成员里，更新至少改一个字段，schedule 通过 `checkRoutineSchedule`（#1375）。`@byok-sdk/protocol` 发布纯函数 `nextRoutineOccurrence(schedule, now)` 和 `checkRoutineSchedule`（#1375 前在 `@byok-sdk/core`）。K8-S 改 protocol、core、server 的 wake 上限、spec 和 api-surface。（依据 R3）
 
-K7 子集没有 `pattern`、`format`、`uniqueItems`、`$ref`。schedule 用结构化字段（§5.5）。类型、范围和 enum 放在外层 `properties`，三种封闭形状用只列属性名的 `oneOf` 区分。Host 应用时调用 `checkRoutineSchedule`，处理 schema 看不到的日期组合。`maxLength` 数码点。canonical JSON 中每码点按最多 6 字节计；`number`、`integer` 的保守上界分别为 25、24 字节。只有整数范围的两端绝对值都小于 1e21 时，才按端点十进制长度收紧。
+K7 子集没有 `pattern`、`format`、`uniqueItems`、`$ref`。schedule 用结构化字段（§5.5）。schedule 只有一种封闭形状，写类型、范围和 enum；字段组合、重复星期和不存在的日期由 contract 调用 `checkRoutineSchedule` 拒收（#1375）。`maxLength` 数码点。canonical JSON 中每码点按最多 6 字节计；`number`、`integer` 的保守上界分别为 25、24 字节。只有整数范围的两端绝对值都小于 1e21 时，才按端点十进制长度收紧。
 
-组合函数分别报告 `not-subset`、`schema-over-budget`、`over-budget`。只有 schema 超过 16 KiB 才可把 routine 片段改为 `flat` 后重新组合。必须在冻结 offer 前完成。仍超限时显式阻塞，或走 Host 已定义的分批选择流程。不静默截断授权对象的 enum。`flat` 的字段组合仍由 Host 应用时校验。（依据 WO-03 v4 §2.6；R3）
+组合函数分别报告 `not-subset`、`schema-over-budget`、`over-budget`。超限时在冻结 offer 前显式阻塞，或走 Host 已定义的分批选择流程，不静默截断授权对象的 enum（#1375 删除了 `flat` 回退）。（依据 WO-03 v4 §2.6；R3）
 
 **outcome 契约 `bot-turn-outcome.v1`。** 总上限是 `RESULT_OUTCOME_MAX_BYTES = 65 536` 字节（`packages/protocol/src/result-schema.ts`）。根是封闭对象，每种动作一个可选字段。数组动作各有 `maxItems`。下表的码点和个数上限是 WO-03 v4 §2.5 的 **v1 提议值**，不标已定。Host 填 enum 后，组合函数重新检查总上界。
 
@@ -266,7 +266,7 @@ Aimpact 已定：不接受 Linux-only。v1 把 macOS 和 Windows 的证明都列
 
 - Bot 在 outcome 里 `create_routine { localId, schedule, prompt, target }`。`localId` 是 Host 预发的槽位。`target` 默认是自己；Main Bot 可以指向团队 Bot（§12 Q12）。
 - schedule 用结构化字段：`minute`（整数 0–59）、`hour`（整数 0–23）、`tz`（Host enum）。无日字段为每日；`daysOfWeek` 为 1–7 个 `mon`…`sun`；`dayOfMonth` 为 1–31，可再加 `month`（1–12）表示每年。星期和日期不能同时出现；`month` 必须带 `dayOfMonth`。重复星期在存储前去重。月末不存在的日期跳过。每天最多一个时点，不支持“每 N 小时”或“每月最后一天”。
-- Host 应用时先调 `checkRoutineSchedule`。4 月 31 日报 `schedule_unreachable`，2 月 29 日报 `schedule_beyond_horizon`。不合法动作被拒，并写进下一次 ContextPack。通过后落 routine 账本（定义版本 1，owner 是发起的 Bot），用 `nextRoutineOccurrence` 算下一个时点，`wakes.schedule({ dedupKey: "<routineId>:<version>:<t>", availableAt: t })`。version 和 t 是规范十进制安全整数，从右往左解析。之后按平台 PRD §6 Topology L 和 §12 跑。
+- contract 在 `submit_result` 调 `checkRoutineSchedule`（#1375）。4 月 31 日报 `schedule_unreachable`，2 月 29 日报 `schedule_beyond_horizon`，设备拒收，模型在同一个 Turn 里改正。Host 应用时通过后落 routine 账本（定义版本 1，owner 是发起的 Bot），用 `nextRoutineOccurrence` 算下一个时点，`wakes.schedule({ dedupKey: "<routineId>:<version>:<t>", availableAt: t })`。version 和 t 是规范十进制安全整数，从右往左解析。之后按平台 PRD §6 Topology L 和 §12 跑。
 - routine 执行的输入是 `prompt` 加 Host 的 ContextPack。结果回 owner 的对话，来源 `routine`。
 - `update_routine` 由 K8a 实现同 id 的 current/pending、调度 generation 和在途上限。有在途 occurrence 时，旧版本快照结算后才切换；无在途时立刻切换。暂停后恢复也服从这个条件（平台 PRD §12.3 第 6 条）。K4 定义不可变，改定义换新 id。`cancel_routine` 把 lifecycle 改为 `completed` 并 `wakes.cancel`；要停止运行中的执行，Host 另调 `tasks.cancel`。
 - 用户在 UI 看得到 Bot 建的 routine，可以暂停、改、删。

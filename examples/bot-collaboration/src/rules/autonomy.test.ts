@@ -4,6 +4,8 @@ import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcom
 import { outcomeSchema, type ContextState } from './schema';
 import { applySpeech, advanceRooms, roomInput, type RoomsState } from './rooms';
 import { autonomyOf, recordWouldDo, wouldDoRows, type AutonomyGate, type AutonomyState } from './autonomy';
+/** These cases do not read the room projections. */
+const noPublish = (): void => {};
 
 /** A Turn of a Bot whose schema offers every ordinary action, and the ports that record an observed action. */
 function setup(taskId = 'task') {
@@ -58,7 +60,7 @@ it('records a room_call in observe while the accepted speech stays, and creates 
     rooms: { r: { id: 'r', name: 'Room', members: ['a', 'b'], mode: 'mention', announcement: '', visibleFrom: { a: 0, b: 0 }, messages: [] } },
     rounds: {}, seats: {}, roots: {},
   };
-  const round = roomInput(team, 'key', 'r', 'Review', ['a']);
+  const round = roomInput(team, 'key', 'r', 'Review', ['a'], noPublish);
   advanceRooms(team, {}, 0);
   const seat = team.rounds[round]!.seats[0]!;
   const state: AutonomyState = {};
@@ -69,7 +71,7 @@ it('records a room_call in observe while the accepted speech stays, and creates 
   } };
   const accepted: string[] = [];
   const accept = (kind: string, work: () => void) => { work(); accepted.push(kind); };
-  applySpeech(team, seat, { speech: { kind: 'post', text: 'Ready' }, room_call: { members: ['b'] } }, 'task', 1, accept, gate);
+  applySpeech(team, seat, { speech: { kind: 'post', text: 'Ready' }, room_call: { members: ['b'] } }, 'task', 1, noPublish, accept, gate);
   expect(team.rooms.r!.messages.map(message => message.text)).toEqual(['Review', 'Ready']);
   expect(Object.keys(team.rounds)).toHaveLength(1);
   expect(Object.keys(team.seats)).toHaveLength(1);
@@ -78,7 +80,7 @@ it('records a room_call in observe while the accepted speech stays, and creates 
   expect(wouldDoRows(state)).toEqual([expect.objectContaining({ action: 'room_call', detail: { members: ['b'] } })]);
   expect(rows).toHaveLength(1);
   // The same seat cannot speak twice, so a second application records nothing new either.
-  applySpeech(team, seat, { speech: { kind: 'post', text: 'Ready' }, room_call: { members: ['b'] } }, 'task', 1, accept, gate);
+  applySpeech(team, seat, { speech: { kind: 'post', text: 'Ready' }, room_call: { members: ['b'] } }, 'task', 1, noPublish, accept, gate);
   expect(rows).toHaveLength(1);
 });
 

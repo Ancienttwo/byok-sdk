@@ -34,8 +34,8 @@ git diff <recorded-commit>..<new-commit> -- examples/bot-collaboration
 
 ## Published SDK packages
 
-The copy imports `@byok-sdk/protocol`, `@byok-sdk/core`, `@byok-sdk/server` and
-`@byok-sdk/client` from npm. Layers 2 and 3 need all four, because they need
+The copy imports `@byok-sdk/protocol`, `@byok-sdk/server` and
+`@byok-sdk/client` from npm. Layers 2 and 3 need all three, because they need
 the K4 root entry, `@byok-sdk/server/execution-core`. Layer 1 needs only the packages
 its list names. These packages are released
 together under one version. Use exactly the version of the tag you copied. A commit between tags
@@ -73,7 +73,6 @@ src/rules/schema.ts
 src/rules/sync.ts
 src/rules/team.ts
 src/rules/turn.ts
-@byok-sdk/core
 @byok-sdk/protocol
 @byok-sdk/server/execution-core/canonical: canonical hash
 ```
@@ -115,7 +114,6 @@ src/team.ts
 src/toolset-policy.ts
 src/topology.ts
 @byok-sdk/client
-@byok-sdk/core
 @byok-sdk/protocol
 @byok-sdk/server
 @byok-sdk/server/execution-core
@@ -156,7 +154,6 @@ src/l-test-host.test-support.ts
 src/retention-vectors.test-support.ts
 src/routine-vectors.test-support.ts
 @byok-sdk/client: AgentEgressPolicy Daemon DeviceCredentialBackend RuntimeAdapter RuntimeAdapterPrepareInput RuntimeAdapterPrepareResult RuntimeDetectResult RuntimeDisposalFailure RuntimeEnvironment RuntimeOperationStartInput Session buildRuntimeEnvironment createDaemonWithAdapters freezeRuntimeAdapterDescriptor
-@byok-sdk/core
 @byok-sdk/example-host-execution-core/test-support: template
 @byok-sdk/protocol
 @byok-sdk/server: CreateByokServerOptions DueWake createByokServer

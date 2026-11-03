@@ -661,8 +661,11 @@ fragment is a schema inside the result-document subset. The Host composes the
 final schema for one execution, fills every id `enum` (roster, slots, rooms,
 routines, models, time zones) and freezes it in the offer as
 `terminalProjection: { mode: 'result-document', contract: 'bot-turn-outcome.v1', schema }`.
-The daemon validates only the format against that frozen schema, as for every
-result document. Semantic checks and application stay with the Host.
+The daemon validates the outcome against that frozen schema, as for every
+result document, and then runs the stateless rules of the `bot-turn-outcome.v1`
+contract (#1374, #1375): a violation refuses `submit_result`, so the model
+corrects it in the same Turn. Checks that read Host state, and application,
+stay with the Host.
 
 The outcome root is a closed object. Each action kind is one optional property;
 `{}` means no actions. Every array has `maxItems` and every string has
@@ -679,9 +682,17 @@ static budget is a product contract; K7 still rejects any oversized outcome at
 Host-offered `localId` slots, so references to them are enum members. Only a
 Main Bot schema contains management actions and `create_routine.target`; only a
 room-turn schema contains `speech` and `room_call`, and it requires `speech`.
-The subset has no `pattern`, `uniqueItems` or `minProperties`. The Host
-therefore checks duplicates, impossible schedule dates and empty updates when it
-applies an outcome, and reports a refused action in the next ContextPack.
+The subset has no `pattern`, `uniqueItems` or `minProperties`, so the contract
+rules cover what the schema cannot say. They refuse model text that is blank
+after `trim()` (outside a confirmable-action draft); a repeated `ask_user`
+option id, `delegate` target (this Bot included), `create_bot` localId,
+`cancel_routine` or `cancel_delegation` id, or member within `room_call`,
+`create_room` or `update_room`; a `create_room` admin outside its members; an
+update that changes no field; and a schedule that `checkRoutineSchedule`
+refuses. Each issue names the rule and a JSON Pointer to the later repeat or
+the faulty item. The Host checks the rest, for example permissions, budgets,
+archived Bots and occupied slots, when it applies an outcome, and reports a
+refused action in the next ContextPack.
 
 `botTurnOutcomeFragments.cancelDelegation({ delegationIds })` adds the optional
 `cancel_delegation` array. Each item has one required `delegationId` from the
@@ -700,29 +711,27 @@ local time. `daysOfWeek` (1 to 7 of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`,
 `sun`) limits it to those weekdays. `dayOfMonth` (1-31) limits it to that day
 of each month; with `month` (1-12), to that day of that month only. With no
 day field, the schedule runs every day. `daysOfWeek` and `dayOfMonth` never
-appear together, and `month` needs `dayOfMonth`. The fragment states each
-field's type, range and enum once, in a closed outer object. A `oneOf` of three
-closed branches lists only the allowed property names and the branch's own day
-field, so the schema refuses an out-of-range value or an invalid combination
-during the execution.
+appear together, and `month` needs `dayOfMonth`. The fragment is one closed
+object with each field's type, range and enum, so the schema refuses an
+out-of-range value. The field combinations, repeated weekdays and dates a month
+never has are contract rules (`checkRoutineSchedule`, #1375).
 
 Schema budget rule. `composeBotTurnOutcomeSchema` reports `not-subset`,
 `schema-over-budget` (the schema is above `RESULT_SCHEMA_MAX_BYTES`) and
 `over-budget` (the outcome bound is above `RESULT_OUTCOME_MAX_BYTES`) apart.
 The Host first offers only the fragments and objects that the execution needs.
-Only `schema-over-budget` lets the Host rebuild the routine fragments with
-`scheduleShape: 'flat'`, which drops the `oneOf`; the Host then refuses the two
-invalid combinations when it applies the outcome. This happens before the offer
-is frozen. If the schema is still too large, the Host blocks the execution with
-a visible reason or runs a defined batch selection. It never removes authorized
-ids from an enum silently.
+If the schema is still too large, the Host blocks the execution with a visible
+reason or runs a defined batch selection before the offer is frozen. It never
+removes authorized ids from an enum silently.
 
-`@byok-sdk/core` publishes `checkRoutineSchedule` and
+`@byok-sdk/protocol` publishes `checkRoutineSchedule` and
 `nextRoutineOccurrence(schedule, now)`. `checkRoutineSchedule` refuses a
 malformed schedule (`schedule_invalid`), a date that the month never has, such
 as April 31 (`schedule_unreachable`), February 29, whose next occurrence can be
 eight years away (`schedule_beyond_horizon`), and an unknown zone
-(`tz_invalid`). It accepts repeated weekdays and treats them as one. `tz` is an
+(`tz_invalid`). A repeated weekday is `schedule_invalid`. `nextRoutineOccurrence`
+throws `RoutineScheduleError` (code `routine_schedule_invalid`) for a schedule
+that `checkRoutineSchedule` refuses. `tz` is an
 IANA zone name known to the engine's Intl data. Offset spellings are refused
 by the name shape or by Intl. For example, `+08:00` fails the name check;
 `UTC+8` is refused by Intl. `Etc/GMT+8` remains a valid zone name.

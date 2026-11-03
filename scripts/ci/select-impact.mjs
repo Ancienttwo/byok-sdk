@@ -33,7 +33,6 @@ export const workspaceGraph = {
     "name": "@byok-sdk/example-byok-mcp-server",
     "dependencies": [
       "@byok-sdk/client",
-      "@byok-sdk/core",
       "@byok-sdk/example-host-execution-core",
       "@byok-sdk/protocol",
       "@byok-sdk/server",

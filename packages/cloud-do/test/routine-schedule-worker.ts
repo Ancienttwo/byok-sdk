@@ -1,4 +1,4 @@
-import { checkRoutineSchedule, nextRoutineOccurrence, type RoutineSchedule } from '../../core/src/routine-schedule';
+import { checkRoutineSchedule, nextRoutineOccurrence, type RoutineSchedule } from '../../protocol/src/routine-schedule';
 
 export default {
   async fetch(request: Request): Promise<Response> {

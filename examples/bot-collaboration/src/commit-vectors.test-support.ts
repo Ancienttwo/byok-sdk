@@ -14,6 +14,8 @@ import type { CoalescePolicy } from './rules/coalesce';
 import { ROOM_GRACE_MS, roomFields, roomInput, type Seat } from './rules/rooms';
 import { projectionRequestId, type HomeReadback } from './team';
 import type { HomeOperation } from './team-model';
+/** These cases do not read the room projections. */
+const noPublish = (): void => {};
 
 /**
  * #739 D1 commit contract vectors. Each store runs the same cases: the K8 L ledger now, and the H adapter in D2.
@@ -944,7 +946,7 @@ export function seedRoom(state: CollaborationState): void {
   state.cards.c1!.expiresAt = Number.MAX_SAFE_INTEGER;
   state.team.bots.b = { ...state.team.bots.main!, id: 'b', name: 'B', role: 'Reviewer', mainBot: false, execution: template('device', 'b') };
   state.team.rooms.r = { id: 'r', ...roomFields(state.team, { name: 'Room', members: ['main', 'b'] }), messages: [] };
-  roomInput(state.team, 'm1', 'r', 'Hello', ['b', 'main']);
+  roomInput(state.team, 'm1', 'r', 'Hello', ['b', 'main'], noPublish);
 }
 export function roomVectors(name: string, open: () => RoomSubject | Promise<RoomSubject>): void {
   describe(`room contract: ${name}`, () => {
@@ -972,7 +974,7 @@ export function roomVectors(name: string, open: () => RoomSubject | Promise<Room
     });
 
     it('cancels an unclaimed seat at its deadline as busy, and queues the next seat', async () => {
-      const { subject, first, second, seats } = await opened(), deadline = VECTOR_NOW + ROOM_GRACE_MS;
+      const { subject, round, first, second, seats } = await opened(), deadline = VECTOR_NOW + ROOM_GRACE_MS;
       await subject.sync(VECTOR_NOW);
       await subject.sync(deadline - 1);
       expect((await seats())[0]).toMatchObject({ status: 'queued', released: false });
@@ -980,6 +982,10 @@ export function roomVectors(name: string, open: () => RoomSubject | Promise<Room
       await subject.sync(deadline);
       expect(await seats()).toMatchObject([{ status: 'busy', released: true }, { status: 'queued', released: false, deadline: deadline + ROOM_GRACE_MS }]);
       expect(await subject.cancelReason(first)).toBe('cancelled');
+      // #1393: the busy seat is published; the root still has a seat that is not terminal.
+      expect(await subject.projection(`room-seat:r:${first}`)).toEqual([{ roomId: 'r', root: round.id, roundId: round.id, seatId: first, botId: 'b',
+        status: 'busy', late: false }]);
+      expect(await subject.projection(`room-root:r:${round.id}`)).toEqual([]);
       expect((await subject.state()).turns[second]).toMatchObject({ source: 'room_slot', botId: 'main', authority: 'bot' });
       expect(await subject.intent(second)).toMatchObject({ key: second, source: 'bot' });
     });
@@ -1020,6 +1026,11 @@ export function roomVectors(name: string, open: () => RoomSubject | Promise<Room
       await subject.sync(VECTOR_NOW);
       expect(await seats()).toMatchObject([{ status: 'blocked', released: true }, { status: 'blocked', released: true }]);
       expect((await subject.state()).team.rounds[round.id]).toMatchObject({ closed: true });
+      // #1393: each blocked seat is published, and the root once its last seat is blocked.
+      for (const [seatId, botId] of [[round.seats[0]!, 'b'], [round.seats[1]!, 'main']] as const) {
+        expect(await subject.projection(`room-seat:r:${seatId}`)).toEqual([expect.objectContaining({ root: round.id, seatId, botId, status: 'blocked' })]);
+      }
+      expect(await subject.projection(`room-root:r:${round.id}`)).toEqual([{ roomId: 'r', root: round.id, seats: round.seats }]);
     });
 
     it('fails the unadmitted seat Turn of a Bot that left the room with cancelled', async () => {

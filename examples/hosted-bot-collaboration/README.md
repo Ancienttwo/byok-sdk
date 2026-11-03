@@ -205,7 +205,8 @@ expiry and before the Turn steps, as L's sync runs it (#793 S6). Its seat facts 
 `started` from the reconciliation's claim fact, and the row's conclusion. A seat Turn that the step queues freezes in the
 same round. The step cancels a seat's admitted work through `cancelIntent`, as a delegation cancel does: an untried row
 concludes `cancelled` in that sync, and a tried row keeps its cancel reason for the reconciliation. A seat Turn with no
-intent fails with the seat's conclusion. The due scheduler syncs a scope when a seat's deadline is reached.
+intent fails with the seat's conclusion. The step writes the K8 `room-seat:` and `room-root:` projections of the seats that
+became terminal with the sync's other projections (#1393). The due scheduler syncs a scope when a seat's deadline is reached.
 
 ### Reply checks
 

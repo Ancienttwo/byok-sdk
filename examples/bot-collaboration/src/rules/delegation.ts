@@ -230,16 +230,12 @@ export function reserveUnits(n: number): number { return n + Math.max(n, 1); }
 export function applyDelegate(state: DelegationState, turn: Turn, taskId: string, outcome: BotTurnOutcome, seat: boolean,
   now: number, emit: Publish, accept: (action: string, work: () => void) => void, gate?: AutonomyGate): { successor: boolean } {
   let successor = false;
-  let self = false;
-  const targets = new Set<string>();
   const rows: Delegation[] = [];
   const accepted: Delegation[] = [];
   outcome.delegate?.forEach((action, index) => {
     const id = hash([taskId, 'delegate', index]);
     if (action.to === turn.botId) {
       accept('delegate', () => {
-        if (self) throw new Error('Duplicate delegation target');
-        self = true;
         if (state.turns[id]) { successor = true; return; }
         const limits = budget(state, turn.root);
         if (limits.continuation >= 4) throw new Error('Continuation budget is 4');
@@ -257,9 +253,7 @@ export function applyDelegate(state: DelegationState, turn: Turn, taskId: string
     const target = inactive(state.team.bots[action.to]);
     const row: Delegation = { id, root: turn.root, fromBotId: turn.botId, fromTurnId: turn.id, fromTaskId: taskId, index,
       toBotId: action.to, request: action.request, hop: turn.hop + 1, chainTurnIds: [], batch: taskId, status: 'queued', revision: 0 };
-    const reason = seat ? 'room_seat' : targets.has(action.to) ? 'duplicate_target' : target ? `target_${target}`
-      : row.hop > HOP_LIMIT ? 'hop_limit' : undefined;
-    targets.add(action.to);
+    const reason = seat ? 'room_seat' : target ? `target_${target}` : row.hop > HOP_LIMIT ? 'hop_limit' : undefined;
     state.delegations[id] = row;
     rows.push(row);
     if (reason) close(row, 'refused', now, reason);

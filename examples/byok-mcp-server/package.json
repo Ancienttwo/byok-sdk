@@ -10,7 +10,6 @@
   "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": {
     "@byok-sdk/client": "workspace:*",
-    "@byok-sdk/core": "workspace:*",
     "@byok-sdk/example-host-execution-core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
     "@byok-sdk/server": "workspace:*"
