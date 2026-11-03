@@ -56,8 +56,7 @@ const rand = rng(20261018);
 const pick = <T>(xs: readonly T[]) => xs[Math.floor(rand() * xs.length)]!;
 const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1));
 function randomDays(): RoutineDayOfWeek[] {
-  const days = Array.from({ length: int(1, 7) }, () => pick(ROUTINE_DAYS_OF_WEEK));
-  return rand() < 0.1 ? [...days, days[0]!].slice(0, 7) : days; // sometimes a duplicate
+  return [...new Set(Array.from({ length: int(1, 7) }, () => pick(ROUTINE_DAYS_OF_WEEK)))];
 }
 function randomSchedule(tz: string, kinds: readonly ('daily' | 'weekly' | 'monthly' | 'yearly')[]): RoutineSchedule {
   const time = { minute: int(0, 59), hour: int(0, 23), tz };

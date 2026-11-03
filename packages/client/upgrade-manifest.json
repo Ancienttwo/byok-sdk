@@ -7,13 +7,169 @@
   },
   "to": {
     "version": "0.36.0",
-    "snapshotSha256": "f82fc8482c1054149c3e663b82e9f4b794834643da7f67197be8cdd6db721680"
+    "snapshotSha256": "a54b143f25fd91d2fc189a420d858a7ebc91d8e4b58e4ff405f9936f77c61155"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "bot-turn-outcome-stateless-rules",
+      "impact": "breaking",
+      "summary": "bot-turn-outcome.v1 runs every rule that reads only the outcome (#1375), so the device refuses a violating outcome on submit_result and the model corrects it in the same Turn. New contract-mismatch keywords: duplicate-target (a repeated delegate to, this Bot included), duplicate-local-id (create_bot), duplicate-id (cancel_routine, cancel_delegation), duplicate-member (room_call, create_room, update_room), admin-not-member (create_room), empty-update (update_routine with neither schedule nor prompt, update_bot or update_room with no field), and schedule-invalid, schedule-unreachable, schedule-beyond-horizon, tz-invalid for a schedule that checkRoutineSchedule refuses. The routine calendar moved from @byok-sdk/core to @byok-sdk/protocol: import checkRoutineSchedule, nextRoutineOccurrence, the ROUTINE_* constants and their types from @byok-sdk/protocol. Core drops them and its routine_schedule_invalid code; nextRoutineOccurrence throws the protocol RoutineScheduleError (code routine_schedule_invalid) instead of ByokCoreError. A repeated daysOfWeek day is schedule_invalid instead of being merged. A routine already stored with a repeated weekday (for example by the byok-mcp-server example) throws RoutineScheduleError when its next occurrence is computed: update it to distinct days before the upgrade. The schedule fragment has one closed shape without the oneOf: RoutineScheduleShape and the scheduleShape option are removed, and a schema over budget is schema-over-budget with no flat fallback. The room mode enum and RoomFields.mode have only 'mention'. K8 drops its apply-time copies of these rules and the delegation reason duplicate_target; the owner updateRoutine and the sealed create and reseal check an empty update and the calendar at their entry. A Host that vendors K8 copies the changed files and imports the calendar from @byok-sdk/protocol.",
+      "migration": "docs/spec.md#bot-turn-outcome-fragments-and-routine-time-points",
+      "items": [
+        "example:bot-collaboration",
+        "export:@byok-sdk/core#CORE_ERROR_CODES",
+        "export:@byok-sdk/core#ROUTINE_DAYS_OF_WEEK",
+        "export:@byok-sdk/core#ROUTINE_HORIZON_MS",
+        "export:@byok-sdk/core#ROUTINE_MAX_NOW",
+        "export:@byok-sdk/core#ROUTINE_MIN_NOW",
+        "export:@byok-sdk/core#RoutineDayOfWeek",
+        "export:@byok-sdk/core#RoutineSchedule",
+        "export:@byok-sdk/core#RoutineScheduleCheck",
+        "export:@byok-sdk/core#RoutineScheduleIssueCode",
+        "export:@byok-sdk/core#checkRoutineSchedule",
+        "export:@byok-sdk/core#nextRoutineOccurrence",
+        "export:@byok-sdk/protocol#ROUTINE_HORIZON_MS",
+        "export:@byok-sdk/protocol#ROUTINE_MAX_NOW",
+        "export:@byok-sdk/protocol#ROUTINE_MIN_NOW",
+        "export:@byok-sdk/protocol#RoutineSchedule",
+        "export:@byok-sdk/protocol#RoutineScheduleCheck",
+        "export:@byok-sdk/protocol#RoutineScheduleError",
+        "export:@byok-sdk/protocol#RoutineScheduleIssueCode",
+        "export:@byok-sdk/protocol#checkRoutineSchedule",
+        "export:@byok-sdk/protocol#nextRoutineOccurrence",
+        "export:@byok-sdk/protocol#RoomFields",
+        "export:@byok-sdk/protocol#RoutineScheduleShape",
+        "export:@byok-sdk/protocol#botTurnOutcomeFragments"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=627add813b3eea45",
+      "after": "K8 0.0.1 src-sha256=b2f859a3564feff3",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core#CORE_ERROR_CODES",
+      "change": "changed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core#ROUTINE_DAYS_OF_WEEK",
+      "change": "removed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core#ROUTINE_HORIZON_MS",
+      "change": "removed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core#ROUTINE_MAX_NOW",
+      "change": "removed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core#ROUTINE_MIN_NOW",
+      "change": "removed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core#RoutineDayOfWeek",
+      "change": "removed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core#RoutineSchedule",
+      "change": "removed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core#RoutineScheduleCheck",
+      "change": "removed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core#RoutineScheduleIssueCode",
+      "change": "removed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core#checkRoutineSchedule",
+      "change": "removed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/core#nextRoutineOccurrence",
+      "change": "removed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ROUTINE_HORIZON_MS",
+      "change": "added",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ROUTINE_MAX_NOW",
+      "change": "added",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ROUTINE_MIN_NOW",
+      "change": "added",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RoomFields",
+      "change": "changed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RoutineSchedule",
+      "change": "added",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RoutineScheduleCheck",
+      "change": "added",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RoutineScheduleError",
+      "change": "added",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RoutineScheduleIssueCode",
+      "change": "added",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RoutineScheduleShape",
+      "change": "removed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#botTurnOutcomeFragments",
+      "change": "changed",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#checkRoutineSchedule",
+      "change": "added",
+      "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#nextRoutineOccurrence",
+      "change": "added",
+      "entry": "bot-turn-outcome-stateless-rules"
+    }
+  ]
 }

@@ -23,7 +23,6 @@ export const directed: [string, RoutineSchedule, string, string][] = [
   ['weekly sun from a Sunday after the time', { minute: 0, hour: 9, daysOfWeek: ['sun'], tz: 'UTC' }, '2026-10-18T10:00:00Z', '2026-10-25T09:00:00.000Z'],
   ['mon/wed/fri from Tuesday', { minute: 0, hour: 9, daysOfWeek: ['mon', 'wed', 'fri'], tz: 'UTC' }, '2026-10-20T10:00:00Z', '2026-10-21T09:00:00.000Z'],
   ['trading days 09:00 Shanghai from Saturday', { minute: 0, hour: 9, daysOfWeek: ['mon', 'tue', 'wed', 'thu', 'fri'], tz: 'Asia/Shanghai' }, '2026-10-17T10:00:00Z', '2026-10-19T01:00:00.000Z'],
-  ['duplicate days collapse: mon,mon', { minute: 0, hour: 9, daysOfWeek: ['mon', 'mon'], tz: 'UTC' }, '2026-10-19T09:00:00Z', '2026-10-26T09:00:00.000Z'],
 ];
 const base = { minute: 0, hour: 9, tz: 'UTC' };
 export const fieldCases: [string, unknown, string][] = [
@@ -31,7 +30,7 @@ export const fieldCases: [string, unknown, string][] = [
   ['minute 59 hour 23', { ...base, minute: 59, hour: 23 }, 'ok'],
   ['weekly one day', { ...base, daysOfWeek: ['mon'] }, 'ok'],
   ['weekly all 7 days', { ...base, daysOfWeek: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] }, 'ok'],
-  ['weekly duplicate days (Host dedupes)', { ...base, daysOfWeek: ['fri', 'fri'] }, 'ok'],
+  ['weekly duplicate days', { ...base, daysOfWeek: ['fri', 'fri'] }, 'schedule_invalid'],
   ['monthly day 31', { ...base, dayOfMonth: 31 }, 'ok'],
   ['yearly May 31', { ...base, dayOfMonth: 31, month: 5 }, 'ok'],
   ['yearly Feb 28', { ...base, dayOfMonth: 28, month: 2 }, 'ok'],

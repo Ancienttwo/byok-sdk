@@ -90,7 +90,6 @@ export function createBot(state: CollaborationState, taskId: string, action: Cre
   if (!base) throw new Error('Unavailable model');
   admitBotToolsets(base, readOnlyToolsets);
   const id = hash([taskId, action.localId]);
-  if (state.team.bots[id]) throw new Error('Duplicate local Bot slot');
   const execution = structuredClone(base);
   execution.payload.agentRef = { agentId: id, profileRevision: '1' };
   // A new Bot starts in observe (#1229, owner ruling): the owner sees what it would do before it does it.
@@ -102,7 +101,6 @@ export function createBot(state: CollaborationState, taskId: string, action: Cre
 }
 export function updateBot(state: CollaborationState, action: UpdateBotAction, models: Record<string, ExecutionTemplate>, readOnlyToolsets: readonly string[] = []): void {
   const bot = activeBot(state.team, action.botId);
-  if (!['name', 'role', 'persona', 'model'].some(k => k in action)) throw new Error('An update must change a Bot field');
   const model = action.model ?? bot.model, base = models[model];
   if (base) admitBotToolsets(base, readOnlyToolsets);
   const revision = (BigInt(bot.revision) + 1n).toString();
@@ -208,7 +206,6 @@ export function applyManagement(state: CollaborationState, actor: string, taskId
   outcome.update_room?.forEach(action => rooms('update_room', () => {
     const room = team.rooms[action.roomId];
     if (!room) throw new Error('Room not found');
-    if (!['name', 'members', 'admin', 'mode', 'announcement'].some(k => k in action)) throw new Error('An update must change a room field');
     const fields = { ...room, ...resolve(action) };
     if (!action.admin && !fields.members.includes(fields.admin ?? '')) delete fields.admin;
     const next = roomFields(team, fields);
@@ -218,7 +215,6 @@ export function applyManagement(state: CollaborationState, actor: string, taskId
   }));
   if (outcome.team_note) managed('team_note', () => {
     if (team.notes.length >= TEAM_NOTE_LIMIT) throw new Error('Team note limit is 20');
-    if ([...outcome.team_note!.text].length > 300) throw new Error('Team note needs 1 to 300 characters');
     team.notes.push({ id: hash([taskId, 'team_note']), text: outcome.team_note!.text });
   });
 }

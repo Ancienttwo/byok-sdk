@@ -1,13 +1,14 @@
-import { ByokCoreError } from './errors';
+import { ProtocolError } from './errors';
 
+/** ISO 8601 order, Monday first. */
 export const ROUTINE_DAYS_OF_WEEK = Object.freeze(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const);
 export type RoutineDayOfWeek = (typeof ROUTINE_DAYS_OF_WEEK)[number];
 
 /**
  * One local time per matching day. No daysOfWeek and no dayOfMonth: every
- * day. daysOfWeek: those weekdays only. dayOfMonth: that day of every month,
- * or of `month` only. daysOfWeek and dayOfMonth never appear together;
- * `month` needs `dayOfMonth`.
+ * day. daysOfWeek: those weekdays only, each at most once. dayOfMonth: that
+ * day of every month, or of `month` only. daysOfWeek and dayOfMonth never
+ * appear together; `month` needs `dayOfMonth`.
  */
 export interface RoutineSchedule {
   readonly minute: number;
@@ -46,6 +47,11 @@ class ScheduleError extends Error {
   constructor(code: RoutineScheduleIssueCode, message: string) { super(message); this.code = code; }
 }
 const invalid = (message: string) => new ScheduleError('schedule_invalid', message);
+/** {@link nextRoutineOccurrence} was given a schedule that {@link checkRoutineSchedule} refuses. */
+export class RoutineScheduleError extends ProtocolError {
+  readonly code = 'routine_schedule_invalid';
+  constructor(message: string) { super(message); this.name = 'RoutineScheduleError'; }
+}
 
 function integer(value: unknown, name: string, min: number, max: number): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) throw invalid(`${name} must be an integer ${min}-${max}`);
@@ -79,7 +85,8 @@ function parse(schedule: RoutineSchedule): Parsed {
   if (s.daysOfWeek !== undefined) {
     if (!Array.isArray(s.daysOfWeek) || s.daysOfWeek.length < 1 || s.daysOfWeek.length > 7) throw invalid('daysOfWeek must list 1-7 days');
     for (const d of s.daysOfWeek) if (!(ROUTINE_DAYS_OF_WEEK as readonly unknown[]).includes(d)) throw invalid(`unknown day ${JSON.stringify(d)}`);
-    p.days = new Set(s.daysOfWeek as RoutineDayOfWeek[]); // duplicates collapse
+    p.days = new Set(s.daysOfWeek as RoutineDayOfWeek[]);
+    if (p.days.size !== s.daysOfWeek.length) throw invalid('daysOfWeek repeats a day');
   }
   if (s.dayOfMonth !== undefined) {
     p.dayOfMonth = integer(s.dayOfMonth, 'dayOfMonth', 1, 31);
@@ -96,7 +103,7 @@ function parse(schedule: RoutineSchedule): Parsed {
   return p;
 }
 
-/** Validation only. The Host calls it when it applies create_routine / update_routine. */
+/** Validation only. The bot-turn-outcome.v1 contract runs it on every create_routine / update_routine schedule. */
 export function checkRoutineSchedule(schedule: RoutineSchedule): RoutineScheduleCheck {
   try { parse(schedule); return { ok: true }; } catch (e) {
     if (e instanceof ScheduleError) return { ok: false, code: e.code, message: e.message };
@@ -146,7 +153,7 @@ export function nextRoutineOccurrence(schedule: RoutineSchedule, now: number): n
   }
   let p: Parsed;
   try { p = parse(schedule); } catch (error) {
-    if (error instanceof ScheduleError) throw new ByokCoreError('routine_schedule_invalid', error.message);
+    if (error instanceof ScheduleError) throw new RoutineScheduleError(error.message);
     throw error;
   }
   const start = localAsUtc(p.tz, now);

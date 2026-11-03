@@ -272,6 +272,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     if (before.devDependencies?.['@byok-sdk/cloud'] === undefined && after.devDependencies?.['@byok-sdk/cloud'] === 'workspace:*') {
       delete after.devDependencies['@byok-sdk/cloud'];
     }
+    // #1375: only the tests import core, so its edge moves from dependencies to devDependencies.
+    if (before.dependencies?.['@byok-sdk/core'] === 'workspace:*' && before.devDependencies?.['@byok-sdk/core'] === undefined
+      && after.dependencies?.['@byok-sdk/core'] === undefined && after.devDependencies?.['@byok-sdk/core'] === 'workspace:*') {
+      delete after.devDependencies['@byok-sdk/core'];
+      after.dependencies['@byok-sdk/core'] = 'workspace:*';
+    }
     // #793 D2a-0: the K8 entries for the hosted example.
     if (before.exports === undefined && isDeepStrictEqual(after.exports, K8_HOSTED_EXPORTS)) delete after.exports;
     // #793 D2g: the retention entries, only on top of exactly the hosted entries.
@@ -307,6 +313,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     const hosted = { ...switched, ...K8_L_TEST_HOST_EXPORTS };
     if (isDeepStrictEqual(before.exports, hosted) && isDeepStrictEqual(after.exports, { ...hosted, ...K8_MESSAGE_EXPORTS })) {
       after.exports = before.exports;
+    }
+  } else if (path === 'examples/byok-mcp-server/package.json') {
+    if (before.private !== true || after.private !== true) throw new Error('The MCP server example must stay private');
+    // #1375: the routine calendar moved to protocol, so the core edge goes.
+    if (before.dependencies?.['@byok-sdk/core'] === 'workspace:*' && after.dependencies && after.dependencies['@byok-sdk/core'] === undefined) {
+      after.dependencies['@byok-sdk/core'] = 'workspace:*';
     }
   } else if (path === 'examples/packaging/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The packaging example must stay private');

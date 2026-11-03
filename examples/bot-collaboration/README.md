@@ -157,7 +157,7 @@ actions of a Bot Turn outside a room, from `delegate`, `ask_user`,
 extra actions of an owner Main Bot Turn, from the Bot and room management
 actions, `team_note` and `cancel_delegation`. A list only removes actions, and
 an empty list removes all of that kind. `timeZones` holds 1 to 8 IANA zones for
-`create_routine` and `update_routine`, checked by the `@byok-sdk/core` routine
+`create_routine` and `update_routine`, checked by the `@byok-sdk/protocol` routine
 calendar. The default is `UTC` and `America/New_York`. `confirmable` holds 1 to
 16 `confirmable_action` branches, each an action name and its draft schema. The
 default is `send_message`, and the connector receives only the offered names.
@@ -166,7 +166,7 @@ bounds with eight long time zones at the eight-routine limit, with room for
 heavier drafts (`CONFIRMABLE_MAX`).
 The constructor checks the offer and composes one schema with it. Turns that
 froze before keep their schema. A room seat always gets `speech`. A schema
-that is over budget even in the flat shape blocks its Turn, as before. The H
+that is over budget blocks its Turn. The H
 sync takes the same offer as `SyncOptions.offer`, a value from `outcomeOffer`.
 An offer with `actions.turn` also narrows the system
 prompt of a Bot Turn: it keeps only the sentences for every Bot Turn and for the
@@ -179,11 +179,12 @@ gets. An offer without `actions.turn` keeps
 
 Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
-answer does not reset that budget. Empty updates and duplicate
-targets are refused. A duplicate option id and model text that is blank after
-`trim()` break the `bot-turn-outcome.v1` contract rules: the device refuses
-the outcome on `submit_result`, and the Host refuses such an outcome whole.
-Duplicate weekdays are stored as a set.
+answer does not reset that budget. The rules that read only the outcome are
+`bot-turn-outcome.v1` contract rules (#1374, #1375): blank model text after
+`trim()`, a repeated option id, delegate target, `create_bot` localId,
+cancel id, room member or weekday, a `create_room` admin outside its members,
+an update that changes nothing, and an invalid schedule. The device refuses
+such an outcome on `submit_result`, and the Host refuses it whole.
 An expired card can appear in the recent ContextPack window. It creates no model turn.
 A confirmation card starts as `pending`. The owner can choose `confirmed` or
 `rejected`. A card becomes `expired` after 24 hours. Only a committed
@@ -286,8 +287,10 @@ K8 keeps the Bot policy. A Bot creates routines only for itself. Each owner
 has at most eight routines that are not completed. The routine id is
 `hash([taskId, 'create_routine', index])`. The hook input holds `owner`,
 `authority` and `prompt`, and a new version keeps the owner and the authority.
-An update must change the schedule or the prompt. Duplicate weekdays are
-stored once. The routine actions run as K4 routine commands in the outcome
+An update must change the schedule or the prompt, and a schedule repeats no
+weekday. The contract checks an outcome's routine actions; the owner
+`updateRoutine` and the sealed create and reseal check the same at their entry.
+The routine actions run as K4 routine commands in the outcome
 commit. A refused action changes no routine.
 
 The hook writes the routine Turn in the occurrence commit. The Turn id is the
@@ -882,7 +885,7 @@ an ordered Bot id list or the structured value `all`. The default is empty.
 The optional `principal` is the verified sender ([IM channel input](#im-channel-input)).
 The Host never scans text for names or `[PASS]`. Rooms support mention mode.
 An admin identity grants a larger budget. It does not create an implicit seat.
-The optional admin mode is refused. `updateRoom` is an authenticated owner API
+A room has no admin mode, so the outcome fragment offers only `mention`. `updateRoom` is an authenticated owner API
 for membership, admin, name, and announcement changes.
 
 `createRoom(roomId, fields)` is an authenticated owner API that creates a room
@@ -963,8 +966,7 @@ Rejected feedback is private to its Bot. The next frozen input reserves it.
 An execution that fails before it starts releases that reservation.
 A turn that cannot pass Request or schema admission has status `blocked` and
 `blockedReason`. It creates no intent. `cancelTurn` can cancel it before admission.
-Other schema composition errors propagate as Host defects. Only
-`schema-over-budget` permits the flat-schedule fallback.
+Other schema composition errors propagate as Host defects.
 
 Unmentioned messages are stored as background. They do not create a seat, but
 a later selected member can see eligible background messages. Each member has
@@ -1026,7 +1028,7 @@ lists this Bot first, then each active team Bot after its first persona
 readback. It lists Bot ids only. A room seat has no `delegate` fragment.
 
 One outcome can hold two cross-Bot items. The Host refuses an item with
-a delegation verdict and a reason: `room_seat`, `duplicate_target`,
+a delegation verdict and a reason: `room_seat`,
 `target_archived`, `hop_limit`, or `budget_exhausted`.
 A refusal also enters the initiator's `rejectedActions`.
 An accepted item creates a `bot_request` Turn for the target. Its id is

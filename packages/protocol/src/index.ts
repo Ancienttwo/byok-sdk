@@ -620,4 +620,5 @@ export type {
 } from './e2ee-member';
 
 export * from './bot-turn-outcome';
+export * from './routine-schedule';
 export { resultOutcomeMaxBytes } from './result-schema';

@@ -215,7 +215,6 @@ export function applySpeech(team: RoomsState, seatId: string, document: Pick<Bot
   if (accepted && document.room_call) accept('room_call', () => {
     if (observes(gate)) { gate.record('room_call', 0, json(document.room_call!)); return; }
     const members = [...document.room_call!.members];
-    if (new Set(members).size !== members.length) throw new Error('Duplicate room_call member');
     // A batch is atomic. Refusal must not consume any seat or round budget.
     const copy = structuredClone(team);
     const triggerMessageId = document.speech?.kind === 'post' ? seat.id : seat.triggerMessageId;

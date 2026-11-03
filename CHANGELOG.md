@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+- **Breaking (protocol, core, examples; #1375)** — `bot-turn-outcome.v1` runs
+  every rule that reads only the outcome, so the device refuses a violating
+  outcome on `submit_result` and the model corrects it in the same Turn. New
+  `contract-mismatch` keywords, each at the later repeat or the faulty item:
+  `duplicate-target` (a repeated `delegate` `to`, this Bot included),
+  `duplicate-local-id` (`create_bot`), `duplicate-id` (`cancel_routine`,
+  `cancel_delegation`), `duplicate-member` (`room_call`, `create_room`,
+  `update_room`), `admin-not-member` (`create_room`), `empty-update`
+  (`update_routine` with neither schedule nor prompt, `update_bot` or
+  `update_room` with no field), and `schedule-invalid`,
+  `schedule-unreachable`, `schedule-beyond-horizon`, `tz-invalid` for a
+  schedule that `checkRoutineSchedule` refuses.
+  - The routine calendar moved from `@byok-sdk/core` to `@byok-sdk/protocol`:
+    `checkRoutineSchedule`, `nextRoutineOccurrence`, `ROUTINE_DAYS_OF_WEEK`,
+    `ROUTINE_HORIZON_MS`, `ROUTINE_MIN_NOW`, `ROUTINE_MAX_NOW` and their types.
+    Core no longer exports them, and its `routine_schedule_invalid` code is
+    gone. `nextRoutineOccurrence` throws the protocol `RoutineScheduleError`
+    (code `routine_schedule_invalid`) instead of `ByokCoreError`. Import them
+    from `@byok-sdk/protocol`.
+  - A repeated weekday in `daysOfWeek` is `schedule_invalid`; before, it was
+    treated as one. A routine already stored with a repeated weekday, for
+    example by the byok-mcp-server example, throws `RoutineScheduleError` when
+    its next occurrence is computed: update it to distinct days before the
+    upgrade.
+  - The schedule fragment has one shape, a closed object without the `oneOf`.
+    `RoutineScheduleShape` and the `scheduleShape` option of `createRoutine`
+    and `updateRoutine` are removed. A schema over budget is
+    `schema-over-budget` with no flat fallback; K8 blocks such a Turn with
+    `Outcome schema over budget: <message>`. On a K8 team of three Bots,
+    one room and one routine, an ordinary Bot schema shrinks from 4,232 to
+    3,566 bytes and an owner Main Bot schema from 6,451 to 5,769 bytes.
+  - The room `mode` enum and `RoomFields.mode` have only `mention`; no Host
+    accepted `admin`.
+  - K8 drops its apply-time copies of these rules: a refused outcome ends its
+    K4 intent `outcome_failed`, and `rejectedActions` no longer carries
+    `Duplicate delegation target`, `Duplicate room_call member`,
+    `An update must change a Bot field`, `An update must change a room field`,
+    `Duplicate local Bot slot` or the delegation reason `duplicate_target`.
+    The owner `updateRoutine` and the sealed create and reseal still check an
+    empty update and the calendar at their entry, with `checkRoutineSchedule`.
+
 ## 0.36.0 — 2026-11-03 (published)
 
 0.36.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

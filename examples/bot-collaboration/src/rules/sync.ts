@@ -204,7 +204,7 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     frozen = botTurnInstruction(state, turn, options.limits, options.routines, history?.rows, room?.rows, promptActions(schema, options.offer));
   } catch (error) {
     if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {
-      blockTurn(state, turn, `Outcome schema over budget after flat fallback: ${error.message}`, publish);
+      blockTurn(state, turn, `Outcome schema over budget: ${error.message}`, publish);
     } else if (error instanceof CurrentRequestTooLargeError) blockTurn(state, turn, error.message, publish);
     else throw error;
     return undefined;
@@ -257,7 +257,7 @@ function freezeSealed<E extends FreezeExecution, R extends ContextRoutine>(state
   try { schema = outcomeSchema(turn.botId, state, turn, options.models, options.routines, options.offer); }
   catch (error) {
     if (!(error instanceof BotTurnOutcomeSchemaError) || error.code !== 'schema-over-budget') throw error;
-    blockTurn(state, turn, `Outcome schema over budget after flat fallback: ${error.message}`, publish);
+    blockTurn(state, turn, `Outcome schema over budget: ${error.message}`, publish);
     return undefined;
   }
   state.schemas[turn.id] = schema;

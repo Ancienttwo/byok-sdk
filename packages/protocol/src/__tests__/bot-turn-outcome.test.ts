@@ -4,7 +4,7 @@ import { TerminalProjectionSelectionSchema } from '../terminal-projection';
 import {
   botTurnOutcomeFragments as F, composeBotTurnOutcomeSchema, BotTurnOutcomeSchemaError, BOT_TURN_OUTCOME_LIMITS,
   BOT_TURN_OUTCOME_CONTRACT,
-  type NonEmptyIds, type RoutineScheduleShape,
+  type NonEmptyIds,
 } from '../bot-turn-outcome';
 import type { BotTurnOutcome, BotTurnOutcomeKind, CancelDelegationAction } from '../index';
 import { worstCaseInstance } from './bot-outcome-fixtures';
@@ -49,14 +49,14 @@ const conversation = () => composeBotTurnOutcomeSchema({
   create_routine: F.createRoutine({ localIds: routineSlots, timeZones }),
   update_routine: F.updateRoutine({ routineIds: routines, timeZones }), cancel_routine: F.cancelRoutine({ routineIds: routines }),
 });
-const mainBot = (zones: NonEmptyIds = timeZones, routineIds: NonEmptyIds = routines, scheduleShape: RoutineScheduleShape = 'checked') =>
-  composeBotTurnOutcomeSchema(mainBotFragments(zones, routineIds, scheduleShape));
-function mainBotFragments(zones: NonEmptyIds, routineIds: NonEmptyIds, scheduleShape: RoutineScheduleShape = 'checked') {
+const mainBot = (zones: NonEmptyIds = timeZones, routineIds: NonEmptyIds = routines) =>
+  composeBotTurnOutcomeSchema(mainBotFragments(zones, routineIds));
+function mainBotFragments(zones: NonEmptyIds, routineIds: NonEmptyIds) {
   const withSlots = [...roster, ...botSlots] as unknown as NonEmptyIds;
   return {
     delegate: F.delegate({ to: withSlots }), ask_user: F.askUser(), confirmable_action: F.confirmableAction({ actions: confirmables }),
-    create_routine: F.createRoutine({ localIds: routineSlots, timeZones: zones, targets: roster, scheduleShape }),
-    update_routine: F.updateRoutine({ routineIds, timeZones: zones, scheduleShape }), cancel_routine: F.cancelRoutine({ routineIds }),
+    create_routine: F.createRoutine({ localIds: routineSlots, timeZones: zones, targets: roster }),
+    update_routine: F.updateRoutine({ routineIds, timeZones: zones }), cancel_routine: F.cancelRoutine({ routineIds }),
     create_bot: F.createBot({ localIds: botSlots, models }), update_bot: F.updateBot({ botIds: team1, models }),
     delete_bot: F.deleteBot({ botIds: team1 }), create_room: F.createRoom({ localIds: roomSlots, members: withSlots }),
     update_room: F.updateRoom({ roomIds: rooms, members: withSlots }), team_note: F.teamNote(),
@@ -90,12 +90,8 @@ describe('Bot turn outcome fragments', () => {
 
   it('bounds a Main Bot outcome with 24 open delegations and a full cancel array', () => {
     const delegationIds = Array.from({ length: 24 }, (_, i) => id('delegation', i)) as unknown as NonEmptyIds;
-    expect(() => composeBotTurnOutcomeSchema({
-      ...mainBotFragments(timeZones, routines),
-      cancel_delegation: F.cancelDelegation({ delegationIds }),
-    })).toThrow(expect.objectContaining({ code: 'schema-over-budget' }));
     const schema = composeBotTurnOutcomeSchema({
-      ...mainBotFragments(timeZones, routines, 'flat'),
+      ...mainBotFragments(timeZones, routines),
       cancel_delegation: F.cancelDelegation({ delegationIds }),
     });
     expect(checkResultSchema(schema).ok).toBe(true);
@@ -125,11 +121,8 @@ describe('Bot turn outcome fragments', () => {
     ['daily', {}, true],
     ['weekly', { daysOfWeek: ['mon', 'fri'] }, true],
     ['all weekdays', { daysOfWeek: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] }, true],
-    ['duplicate weekdays', { daysOfWeek: ['mon', 'mon'] }, true],
     ['monthly', { dayOfMonth: 31 }, true],
     ['yearly', { dayOfMonth: 31, month: 12 }, true],
-    ['calendar checks stay with Host', { dayOfMonth: 31, month: 4 }, true],
-    ['February 29 stays with Host', { dayOfMonth: 29, month: 2 }, true],
     ['weekday and date', { daysOfWeek: ['mon'], dayOfMonth: 1 }, false],
     ['weekday and month', { daysOfWeek: ['mon'], month: 2 }, false],
     ['all day selectors', { daysOfWeek: ['mon'], dayOfMonth: 1, month: 2 }, false],
@@ -146,8 +139,8 @@ describe('Bot turn outcome fragments', () => {
     ['month above range', { dayOfMonth: 1, month: 13 }, false],
     ['month string', { dayOfMonth: 1, month: '2' }, false],
     ['unknown field', { cron: '0 9 * * *' }, false],
-  ])('matches the v3 three-branch schema: %s', (_name, dayFields, validDayFields) => {
-    const checked = F.createRoutine({ localIds: routineSlots, timeZones }).items!.properties!.schedule!;
+  ])('matches the v3 three-branch schema under the contract: %s', (_name, dayFields, validDayFields) => {
+    const schema = conversation();
     const time: Record<string, ResultSchema> = {
       minute: { type: 'integer', minimum: 0, maximum: 59 },
       hour: { type: 'integer', minimum: 0, maximum: 23 },
@@ -166,9 +159,9 @@ describe('Bot turn outcome fragments', () => {
     const root = (schedule: ResultSchema): ResultSchema => ({
       type: 'object', additionalProperties: false, required: ['schedule'], properties: { schedule },
     });
-    const checkedRoot = root(checked), v3Root = root(v3);
-    expect(checkResultSchema(checkedRoot).ok).toBe(true);
+    const v3Root = root(v3);
     expect(checkResultSchema(v3Root).ok).toBe(true);
+    const create = (schedule: unknown) => ({ create_routine: [{ localId: routineSlots[0], schedule, prompt: 'check' }] });
     for (const minute of [0, 59, -1, 60, 1.5, '0', undefined]) {
       for (const hour of [0, 23, 24, undefined]) {
         for (const tz of ['UTC', 'Asia/Shanghai', 'Mars/Phobos']) {
@@ -176,9 +169,8 @@ describe('Bot turn outcome fragments', () => {
             ...(minute === undefined ? {} : { minute }),
             ...(hour === undefined ? {} : { hour }), tz, ...dayFields,
           };
-          const outcome = { schedule };
-          const actual = validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: checkedRoot }, outcome).ok;
-          const reference = validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: v3Root }, outcome).ok;
+          const actual = validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, create(schedule)).ok;
+          const reference = validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: v3Root }, { schedule }).ok;
           const expected = validDayFields && (minute === 0 || minute === 59)
             && (hour === 0 || hour === 23) && tz !== 'Mars/Phobos';
           const context = JSON.stringify(schedule);
@@ -188,19 +180,15 @@ describe('Bot turn outcome fragments', () => {
       }
     }
     for (const schedule of [null, [], 'daily']) {
-      expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: checkedRoot }, { schedule }).ok).toBe(false);
+      expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, create(schedule)).ok).toBe(false);
       expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: v3Root }, { schedule }).ok).toBe(false);
     }
   });
 
-  it('keeps checked field combinations in the schema and leaves flat combinations to the Host', () => {
-    for (const extra of [{ daysOfWeek: ['mon'], dayOfMonth: 1 }, { month: 3 }]) {
-      for (const shape of ['checked', 'flat'] as const) {
-        const schema = composeBotTurnOutcomeSchema({ create_routine: F.createRoutine({ localIds: routineSlots, timeZones, scheduleShape: shape }) });
-        const outcome = { create_routine: [{ localId: routineSlots[0], schedule: { minute: 0, hour: 9, tz: 'UTC', ...extra }, prompt: 'check' }] };
-        expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, outcome).ok).toBe(shape === 'flat');
-      }
-    }
+  it('leaves schedule field combinations to the contract: the schema alone admits them', () => {
+    const outcome = { create_routine: [{ localId: routineSlots[0], schedule: { minute: 0, hour: 9, tz: 'UTC', month: 3 }, prompt: 'check' }] };
+    expect(validateResultOutcome({ contract: SCHEMA_ONLY, schema: conversation() }, outcome).ok).toBe(true);
+    expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: conversation() }, outcome)).toMatchObject({ ok: false, reason: 'contract-mismatch' });
   });
 
   it.each([
@@ -228,12 +216,10 @@ describe('Bot turn outcome fragments', () => {
     expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: conversation() }, {}).ok).toBe(true);
   });
 
-  it('uses flat only after a schema byte error and still refuses an oversized enum set', () => {
+  it('refuses an oversized enum set as schema-over-budget', () => {
     const ids = (n: number) => Array.from({ length: n }, (_, i) => id('rtn', i)) as unknown as NonEmptyIds;
-    expect(() => mainBot(timeZones, ids(8))).not.toThrow();
-    expect(() => mainBot(timeZones, ids(22))).toThrow(expect.objectContaining({ code: 'schema-over-budget' }));
-    expect(() => mainBot(timeZones, ids(22), 'flat')).not.toThrow();
-    expect(() => mainBot(timeZones, ids(96), 'flat')).toThrow(expect.objectContaining({ code: 'schema-over-budget' }));
+    expect(() => mainBot(timeZones, ids(22))).not.toThrow();
+    expect(() => mainBot(timeZones, ids(96))).toThrow(expect.objectContaining({ code: 'schema-over-budget' }));
   });
 
   it('keeps subset, schema, outcome and draft budget failures distinct', () => {
@@ -265,5 +251,38 @@ describe('Bot turn outcome fragments', () => {
       .map(pointer => ({ pointer, keyword: 'blank-text', message: 'Blank text' }))));
     expect(validateResultOutcome(contract, { confirmable_action: [{ action: 'send_message', summary: 'Send', draft: { channel: 'sms', text: ' ' } }] }).ok).toBe(true);
     expect(validateResultOutcome({ contract: 'other.v1', schema: conversation() }, blank).ok).toBe(true);
+  });
+
+  const schedule = (extra: Record<string, unknown>) => ({ minute: 0, hour: 9, tz: 'UTC', ...extra });
+  const routineAt = (extra: Record<string, unknown>) => ({ create_routine: [{ localId: routineSlots[0], schedule: schedule(extra), prompt: 'check' }] });
+  const bot = (localId: string) => ({ localId, name: 'a', role: 'b', persona: 'c', model: models[0] });
+  const delegationIds = [id('delegation', 0), id('delegation', 1)] as unknown as NonEmptyIds;
+  const withCancel = () => composeBotTurnOutcomeSchema({ ...mainBotFragments(timeZones, routines), cancel_delegation: F.cancelDelegation({ delegationIds }) });
+  it.each<[string, () => ResultSchema, unknown, string, string]>([
+    ['self twice', conversation, { delegate: [{ to: self, request: 'a' }, { to: self, request: 'b' }] }, '/delegate/1/to', 'duplicate-target'],
+    ['another Bot twice', conversation, { delegate: [{ to: team[0], request: 'a' }, { to: team[0], request: 'b' }] }, '/delegate/1/to', 'duplicate-target'],
+    ['create_bot localId', mainBot, { create_bot: [bot(botSlots[0]), bot(botSlots[0])] }, '/create_bot/1/localId', 'duplicate-local-id'],
+    ['cancel_routine id', conversation, { cancel_routine: [{ routineId: routines[0] }, { routineId: routines[0] }] }, '/cancel_routine/1/routineId', 'duplicate-id'],
+    ['cancel_delegation id', withCancel, { cancel_delegation: [{ delegationId: delegationIds[0] }, { delegationId: delegationIds[0] }] },
+      '/cancel_delegation/1/delegationId', 'duplicate-id'],
+    ['room_call member', room, { speech: { kind: 'pass' }, room_call: { members: [self, self] } }, '/room_call/members/1', 'duplicate-member'],
+    ['create_room member', mainBot, { create_room: [{ localId: roomSlots[0], name: 'R', members: [self, self] }] }, '/create_room/0/members/1', 'duplicate-member'],
+    ['update_room member', mainBot, { update_room: [{ roomId: rooms[0], members: [self, self] }] }, '/update_room/0/members/1', 'duplicate-member'],
+    ['create_room admin', mainBot, { create_room: [{ localId: roomSlots[0], name: 'R', members: [self], admin: team[0] }] }, '/create_room/0/admin', 'admin-not-member'],
+    ['update_routine', conversation, { update_routine: [{ routineId: routines[0] }] }, '/update_routine/0', 'empty-update'],
+    ['update_bot', mainBot, { update_bot: [{ botId: team[0] }] }, '/update_bot/0', 'empty-update'],
+    ['update_room', mainBot, { update_room: [{ roomId: rooms[0] }] }, '/update_room/0', 'empty-update'],
+    ['weekday and date', conversation, routineAt({ daysOfWeek: ['mon'], dayOfMonth: 1 }), '/create_routine/0/schedule', 'schedule-invalid'],
+    ['repeated weekday', conversation, routineAt({ daysOfWeek: ['mon', 'mon'] }), '/create_routine/0/schedule', 'schedule-invalid'],
+    ['April 31', conversation, routineAt({ dayOfMonth: 31, month: 4 }), '/create_routine/0/schedule', 'schedule-unreachable'],
+    ['February 29', conversation, { update_routine: [{ routineId: routines[0], schedule: schedule({ dayOfMonth: 29, month: 2 }) }] },
+      '/update_routine/0/schedule', 'schedule-beyond-horizon'],
+  ])('refuses %s under the bot-turn-outcome contract', (_name, build, outcome, pointer, keyword) => {
+    const schema = build();
+    expect(validateResultOutcome({ contract: SCHEMA_ONLY, schema }, outcome).ok).toBe(true);
+    const refused = validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, outcome);
+    expect(refused).toMatchObject({ ok: false, reason: 'contract-mismatch' });
+    if (refused.ok) throw new Error('unreachable');
+    expect(refused.issues.map(issue => [issue.pointer, issue.keyword])).toEqual([[pointer, keyword]]);
   });
 });

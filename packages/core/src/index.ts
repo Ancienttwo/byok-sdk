@@ -400,4 +400,3 @@ export type { LocalStoreId, StoreCompatibility, StoreCompatibilityVerdict } from
 export { InMemoryStorageLedger } from './in-memory/storage-ledger';
 export type { InMemoryObjectBytes } from './in-memory/blob';
 
-export * from './routine-schedule';

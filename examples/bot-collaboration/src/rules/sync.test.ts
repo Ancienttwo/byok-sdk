@@ -226,7 +226,7 @@ describe('a sealed routine Turn (#953)', () => {
       const s = sealedState(), out = published();
       const row = turn(s, { id: 'occurrence:o1', root: 'occurrence:o1', source: 'routine', request: '', status: 'queued', sealedRoutine: ref });
       expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)).toBeUndefined();
-      expect([row.status, row.conclusion, row.blockedReason]).toEqual(['blocked', undefined, 'Outcome schema over budget after flat fallback: still too large']);
+      expect([row.status, row.conclusion, row.blockedReason]).toEqual(['blocked', undefined, 'Outcome schema over budget: still too large']);
       expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1']);
       oversized = false;
       expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)?.kind).toBe('routine');

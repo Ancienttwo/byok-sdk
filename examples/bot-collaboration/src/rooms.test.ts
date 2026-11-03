@@ -157,16 +157,15 @@ it('windows excess room history with a notice and keeps other Bots private turns
   expect(state.team.rooms.r!.messages[0]!.text).toHaveLength(65536);
 });
 
-it('refuses duplicate local slots and invalid room edits without partial room mutation', () => {
+it('refuses invalid room edits without partial room mutation', () => {
   const { state, accept, rejected } = setup();
   const action = { localId: 'new_bot_1', name: 'New', role: 'Worker', persona: 'Persona', model: 'default' };
-  applyManagement(state, 'b0', 'create', { create_bot: [action, action],
+  applyManagement(state, 'b0', 'create', { create_bot: [action],
     create_room: [{ localId: 'new_room_1', name: 'Created', members: ['new_bot_1'] }],
   }, { default: template('device') }, accept);
   expect(Object.values(state.team.bots)).toHaveLength(4);
   const created = Object.values(state.team.rooms).find(r => r.name === 'Created')!;
   expect(created.members).toEqual([Object.values(state.team.bots).find(b => b.name === 'New')!.id]);
-  expect(rejected).toContain('create_bot: Duplicate local Bot slot');
   const prior = structuredClone(state.team.rooms.r);
   applyManagement(state, 'b0', 'bad-room', { update_room: [{ roomId: 'r', admin: created.members[0]!, announcement: 'Must not apply' }] },
     { default: template('device') }, accept);
@@ -179,10 +178,10 @@ it('bounds shared notes at twenty and preserves other valid actions after a refu
   for (let i = 0; i < 21; i++) applyManagement(state, 'b0', `note-${i}`, { team_note: { text: `Note ${i}` } }, { default: template('device') }, accept);
   expect(state.team.notes).toHaveLength(20);
   expect(rejected).toContain('team_note: Team note limit is 20');
-  applyManagement(state, 'b0', 'partial', { update_bot: [{ botId: 'b1' }], update_room: [{ roomId: 'r', announcement: 'Valid' }] }, { default: template('device') }, accept);
-  expect(state.team.bots.b1!.revision).toBe('1');
+  applyManagement(state, 'b0', 'partial', { update_bot: [{ botId: 'absent', name: 'X' }], update_room: [{ roomId: 'r', announcement: 'Valid' }] },
+    { default: template('device') }, accept);
   expect(state.team.rooms.r!.announcement).toBe('Valid');
-  expect(rejected).toContain('update_bot: An update must change a Bot field');
+  expect(rejected).toContain('update_bot: Bot is archived or absent');
 });
 
 it('gives a member a full running grace after waiting 239 seconds and keeps that deadline across scans', () => {

@@ -101,8 +101,6 @@ it('keeps both bounds with eight long time zones at the eight-routine limit', ()
   expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThanOrEqual(protocol.RESULT_SCHEMA_MAX_BYTES);
   expect(protocol.resultOutcomeMaxBytes(schema)).toBeLessThanOrEqual(protocol.RESULT_OUTCOME_MAX_BYTES);
   expect(zones(schema, 'update_routine')).toEqual(offer.timeZones);
-  // The checked schedule shape still fits; the flat fallback is not needed.
-  expect(schedule(schema, 'update_routine').oneOf).toBeDefined();
 });
 
 it('keeps both bounds with the most confirmable actions, eight long time zones and the eight-routine limit', () => {
@@ -111,10 +109,9 @@ it('keeps both bounds with the most confirmable actions, eight long time zones a
   const schema = outcomeSchema('main', stateOf({}), undefined, ['default'], routineViews('main', 8, 'report'), outcomeOffer({ timeZones: LONG_ZONES, confirmable }));
   expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThanOrEqual(protocol.RESULT_SCHEMA_MAX_BYTES);
   // The figure of the CONFIRMABLE_MAX comment.
-  expect(Buffer.byteLength(JSON.stringify(schema))).toBe(11_564);
+  expect(Buffer.byteLength(JSON.stringify(schema))).toBe(10_898);
   expect(protocol.resultOutcomeMaxBytes(schema)).toBeLessThanOrEqual(protocol.RESULT_OUTCOME_MAX_BYTES);
   expect(schema.properties!.confirmable_action!.items!.oneOf).toHaveLength(CONFIRMABLE_MAX);
-  expect(schedule(schema, 'update_routine').oneOf).toBeDefined();
 });
 
 const server = {
