@@ -132,7 +132,7 @@ function newRound(team: RoomsState, id: string, root: string, roomId: string, in
   team.rounds[id] = round;
   return round;
 }
-/** Append offsets stay valid because the ledger retains its complete audit history. */
+/** Offsets index `room.messages`. Retention moves messages of archived roots out of it and lowers each offset to match (#1394). */
 export function roomVisibility(room: Room, members: readonly string[]): Record<string, number> {
   return Object.fromEntries(members.map(id => [id,
     room.members.includes(id) ? room.visibleFrom?.[id] ?? room.messages.length : room.messages.length,

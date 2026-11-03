@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { hash, MIN_TOMBSTONE_RETENTION_MS, taskId } from '@byok-sdk/server/execution-core';
+import { hash, MIN_TOMBSTONE_RETENTION_MS, taskId, type Json } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { retainRoots } from '@byok-sdk/example-bot-collaboration/retention';
@@ -28,6 +28,9 @@ async function hosted(): Promise<RetentionSubject> {
     retain: (input, limits) => store().retain(scope, input, limits),
     change: edit => store().seed(scope, edit),
     stored: () => store().dump(scope),
+    archived: async (namespace, id) => (await opened!.pool.query<{ body: Json }>(
+      `SELECT body FROM ${table('archived_row')} WHERE scope = $1 AND namespace = $2 AND id = $3`,
+      [storedKey(scope), namespace, storedKey(id)])).rows[0]?.body,
     state: () => store().read(scope),
   };
 }
