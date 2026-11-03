@@ -3,6 +3,7 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir } from '../util/secure-dir';
+import { sameContent } from '../util/file-state';
 
 export type OperationalHealthState = 'healthy' | 'degraded' | 'recovering';
 export type OperationalFailureSource = 'reconnect' | 'upload' | 'maintenance' | 'lifecycle';
@@ -39,16 +40,6 @@ export interface OpenOperationalHealthFile {
   stat: import('node:fs').BigIntStats;
 }
 
-function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
-  return (
-    left.dev === right.dev &&
-    left.ino === right.ino &&
-    left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
-  );
-}
-
 /**
  * Bind the pathname to a regular-file handle before any bytes are read.
  * POSIX additionally gets O_NOFOLLOW/O_NONBLOCK. On Windows those flags are
@@ -83,8 +74,8 @@ export async function openOperationalHealthFile(
       !opened.isFile() ||
       !namedAfter.isFile() ||
       namedAfter.isSymbolicLink() ||
-      !sameFileState(namedBefore, opened) ||
-      !sameFileState(opened, namedAfter)
+      !sameContent(namedBefore, opened) ||
+      !sameContent(opened, namedAfter)
     ) {
       throw new Error('operational health pathname changed before safe open');
     }
@@ -145,6 +136,7 @@ export class OperationalHealthTracker {
   #unavailableReason: string | undefined;
   #writeTail: Promise<void> = Promise.resolve();
   #started = false;
+  #dirHardened = false;
 
   constructor(storeDir: string, options: OperationalHealthOptions = {}) {
     this.#filePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
@@ -291,7 +283,14 @@ export class OperationalHealthTracker {
     if (!this.#state) return;
     const body = JSON.stringify(this.#state, null, 2);
     this.#writeTail = this.#writeTail.then(async () => {
-      await ensureSecureDir(path.dirname(this.#filePath));
+      // Harden storeDir once per tracker: on win32 each `icacls` re-push of
+      // inheritable ACEs rewrites the ctime of every sibling (`device.json`,
+      // `control.token`). A failed hardening is not marked; the write fails
+      // closed and the tracker becomes unavailable.
+      if (!this.#dirHardened) {
+        await ensureSecureDir(path.dirname(this.#filePath));
+        this.#dirHardened = true;
+      }
       await atomicWriteFile(this.#filePath, body, { mode: 0o600, fsync: true });
     });
     try {
@@ -352,7 +351,7 @@ async function readOperationalHealthHandle(
     return { status: 'unavailable', reason: 'operational health state could not be inspected' };
   }
   const sizeBytes = Number(before.size);
-  if (expected && !sameFileState(before, expected)) {
+  if (expected && !sameContent(before, expected)) {
     return { status: 'unavailable', sizeBytes, reason: 'operational health handle identity changed before inspection' };
   }
   if (!before.isFile()) {
@@ -371,9 +370,7 @@ async function readOperationalHealthHandle(
     const after = await handle.stat({ bigint: true });
     if (
       bytesRead !== sizeBytes ||
-      after.size !== before.size ||
-      after.mtimeNs !== before.mtimeNs ||
-      after.ctimeNs !== before.ctimeNs
+      !sameContent(after, before)
     ) {
       return { status: 'unavailable', sizeBytes: Number(after.size), reason: 'operational health state changed during inspection' };
     }

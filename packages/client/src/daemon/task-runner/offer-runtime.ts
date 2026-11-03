@@ -31,7 +31,6 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
         || (preparation === undefined && (messageRequirement !== undefined || terminalProjection?.mode === 'result-document'))
         || requiresAgentMemoryMcp || preparedMemorySelected,
       blobAbort.signal,
-      mcpToolApprovals !== undefined,
     );
   } catch (error) {
     if (!admissionWithdrawn()) decline(`runtime detection failed: ${outboundErrorMessage(error)}`, true);
@@ -215,7 +214,13 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     decline(prepared.reason, prepared.retryable);
     return undefined;
   }
-  return { scratch, offered, pick, env, mcpEnv, taskMcpServers, mcpToolsetTools, mcpToolApprovals, prepared };
+  // `approveTools` is a grant, projected only to a runtime that declares
+  // `mcpToolApprovals`; it never takes part in admission or runtime selection.
+  return {
+    scratch, offered, pick, env, mcpEnv, taskMcpServers, mcpToolsetTools,
+    mcpToolApprovals: pick.descriptor.mcpToolApprovals === true ? mcpToolApprovals : undefined,
+    prepared,
+  };
 }
 
 export async function pickAdapter(
@@ -223,7 +228,6 @@ export async function pickAdapter(
   requestedRuntime: string | undefined,
   requiresMcpToolsets: boolean,
   signal: AbortSignal,
-  requiresMcpToolApprovals = false,
 ): Promise<PickResult> {
   const allowlist = this['deps'].runtimeAllowlist;
 
@@ -252,9 +256,6 @@ export async function pickAdapter(
         reason: `runtime "${requestedRuntime}" cannot project required MCP toolsets`,
         retryable: false,
       };
-    }
-    if (requiresMcpToolApprovals && descriptor.mcpToolApprovals !== true) {
-      return { ok: false, reason: `runtime "${requestedRuntime}" cannot enforce Host MCP tool approvals`, retryable: false };
     }
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
     // A Host-configured block is the one diagnostic verdict that changes
@@ -288,7 +289,7 @@ export async function pickAdapter(
   const eligible = allowlist ? this['deps'].adapters.filter((a) => allowlist.includes(a.descriptor.id)) : this['deps'].adapters;
   // M5 batch-3: product decision — pi is the FALLBACK runtime, not the
   // default. Ordered independently of `deps.adapters`'s own construction
-  // order (which stays whatever `buildDefaultAdapters`/the embedder built
+  // order (which stays whatever `buildRuntimeAdapters`/the embedder built
   // it as — see `ALL_RUNTIME_IDS`'s doc comment, `create-daemon.ts`).
   const candidates = orderByPreference(eligible, this['deps'].runtimePreference ?? DEFAULT_RUNTIME_PREFERENCE);
   // Count candidates that pass the capability filters. A requirement no
@@ -298,18 +299,15 @@ export async function pickAdapter(
   for (const adapter of candidates) {
     const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
     if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
-    if (requiresMcpToolApprovals && descriptor.mcpToolApprovals !== true) continue;
     capabilityEligible += 1;
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
     // Auto selection skips a blocked candidate and keeps the candidate order.
     if (detected.kind === 'available' && detected.versionVerdict?.state !== 'block') return { ok: true, adapter, descriptor };
   }
-  const capabilityMismatch = (requiresMcpToolsets || requiresMcpToolApprovals) && eligible.length > 0 && capabilityEligible === 0;
+  const capabilityMismatch = requiresMcpToolsets && eligible.length > 0 && capabilityEligible === 0;
   return {
     ok: false,
-    reason: requiresMcpToolApprovals
-      ? 'no available runtime on this device can enforce Host MCP tool approvals'
-      : requiresMcpToolsets
+    reason: requiresMcpToolsets
       ? 'no available runtime on this device can project required MCP toolsets'
       : 'no available runtime on this device',
     retryable: runtimeUnavailableRetryable('none_available'),

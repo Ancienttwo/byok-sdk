@@ -186,7 +186,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // closing reply is the last assistant message. A run that repeats its
       // answer in a later model call with no tool between (#501) then
       // publishes it once.
-      progressEventsAreMessages: true,
+      progressMessageBoundary: 'session',
       platforms: ['darwin', 'linux', 'win32'],
       capabilities: {
         ...CLAUDE_RUNTIME_CAPABILITIES,

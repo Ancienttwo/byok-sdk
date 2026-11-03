@@ -6,6 +6,9 @@ import { verifyReviewedContent, changedApiOwners } from './reviewed-content.mjs'
 import { documentationChecks } from './documentation-checks.mjs';
 import { resolveScriptChecks, scriptTestInputs } from './script-test-inputs.mjs';
 
+// #1316: the archived upgrade manifests, one exact path each.
+const UPGRADE_HISTORY_FILES = new Set(['0.31.0-0.32.0', '0.32.0-0.33.0', '0.33.0-0.34.0', '0.34.0-0.35.0'].map(name => `packages/client/upgrade-history/${name}.json`));
+
 // Reviewed workspace graph; the contract test detects manifest drift.
 export const workspaceGraph = {
   "examples/basic": {
@@ -193,8 +196,9 @@ export const knownFamilies = Object.freeze([
 // family owns: its tests, smoke scripts and the source they qualify. Package
 // membership alone never selects a platform family; the Linux targeted job
 // runs the complete owning and dependent workspace suites, and explicit
-// release validation runs every family. The contract test checks that each
-// test file and script a family job runs is owned by that family.
+// release validation runs every family. The contract test reads each family
+// job in ci.yml and checks that a change to each test file and script it runs
+// selects that family.
 export const familyOwners = Object.freeze({
   'agent-memory-export-linux': [
     /^examples\/host-execution-core\/src\/fixtures\/memory-restore-crash\.ts$/,
@@ -278,6 +282,8 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/daemon\/control-client\.ts$/,
     /^packages\/client\/src\/(?:daemon\/owned-process-ledger|util\/daemon-owner)\.ts$/,
     /^packages\/client\/src\/(?:diagnostics\/store-compatibility|adapters\/packaging)\.ts$/,
+    // #1366: operational health hardens storeDir through ensureSecureDir.
+    /^packages\/client\/src\/daemon\/operational-health\.ts$/,
   ],
   'linux-systemd-smoke': [
     /^templates\/service\/systemd\//,
@@ -292,6 +298,7 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/bin\/commands\/unpair\.ts$/,
     /^packages\/client\/src\/daemon\/control-client\.ts$/,
     /^packages\/client\/scripts\/control-socket-check\.mjs$/,
+    /^packages\/client\/src\/daemon\/operational-health\.ts$/,
   ],
   'ipc-smoke': [
     /^packages\/client\/src\/daemon\/(?:control-protocol|control-server|device-credential-provider|device-credential-store)\.ts$/,
@@ -314,6 +321,14 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
     /^packages\/client\/scripts\/(?:credential-audit-core|credential-audit-positive-control|linux-credential-audit|adapter-task-smoke)\.mjs$/,
     /^packages\/keys\/src\//,
+  ],
+  // #1364: the Windows leg runs these suites under a freshly created
+  // standard-user account.
+  'npm-release-pack': [
+    // The real Pi projection ACL query, its evidence budget and native suite.
+    /^packages\/keys\/src\/(?:pi-provider-launcher-core\.ts|pi-projection-windows\.test\.ts|fixtures\/acl-evidence-budget\.ts)$/,
+    // #385: the keys launch sequence against the built pi-rpc host.
+    /^packages\/client\/src\/__tests__\/pi-rpc-key-custody\.test\.ts$/,
   ],
 });
 // #649 and #702: release script paths that the owner reviewed for 0.28.2.
@@ -344,6 +359,12 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/cloud-do-consumer-smoke.mjs': {
     tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
+  // #1378: the shared Secret Service wrapper that these family jobs run their
+  // suites under. build-test also runs it, but plan-ci never lets a routine
+  // path select build-test (the same rule as .node-version).
+  'scripts/ci/with-secret-service.sh': {
+    tests: [], families: ['dataplane', 'execution-recovery-native', 'npm-release-pack', 'release-pack-migrate'],
+  },
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and
   // runs it in every family job; #925 selects npm-release-pack alone.
   'scripts/release/execution-submit-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
@@ -352,6 +373,8 @@ export const reviewedScripts = Object.freeze({
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and runs
   // it against the packed client's Pi launcher and todo assets.
   'scripts/release/pi-launcher-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
+  // #1378: release-pack-migrate runs this migration smoke on the packed tarballs.
+  'scripts/release/pg-migrate-smoke.mjs': { tests: [], families: ['release-pack-migrate'] },
   'scripts/release/pack-and-smoke.test.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true },
   // pack-and-smoke.mjs imports this tarball guard and runs it in each of its family jobs.
   'scripts/release/published-store-paths.mjs': {
@@ -372,6 +395,7 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/check-upgrade-manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/check-upgrade-manifest.test.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/dts-surface.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
+  'scripts/release/upgrade-manifest/history.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/snapshot.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
 });
@@ -575,6 +599,8 @@ export function selectImpact(paths, context = {}) {
     // tarball ships. The targeted job's gate step reads both.
     if (path === 'scripts/release/upgrade-manifest/baseline.json') { scripts = true; continue; }
     if (path === 'packages/client/upgrade-manifest.json') { scripts = true; families.add('npm-release-pack'); continue; }
+    // #1316: the released manifests the client tarball ships beside it.
+    if (UPGRADE_HISTORY_FILES.has(path)) { scripts = true; families.add('npm-release-pack'); continue; }
     // #1102: the store precheck fixtures, their index and generator. The server,
     // keys and client suites check every fixture against its `expected` verdicts.
     if (/^scripts\/release\/fixtures\/stores\/(?:generate\.mjs|index\.json|(?:\d+\.\d+\.\d+|main)\/[a-z0-9/-]+\.(?:db|sqlite))$/.test(path)) {

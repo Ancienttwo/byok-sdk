@@ -1,5 +1,6 @@
-import type { RuntimeOperationStartInput, Session } from '../types';
+import type { RuntimeAdapterDescriptor, RuntimeOperationStartInput, Session } from '../types';
 import { isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
+import { bindDeclaredSessionMembers, type DeclaredSessionMembers } from './session-contract';
 
 /**
  * After an abort, the adapter's start() still owns what it spawned. Codex and
@@ -24,8 +25,40 @@ export function abortedStartOf(failure: unknown): AbortedStart | undefined {
   return typeof failure === 'object' && failure !== null ? abortedStarts.get(failure) : undefined;
 }
 
-/** A deadline withdraws admission; it never invents a quiescence receipt. */
+/** A started session and the members its descriptor declares, bound once. */
+export interface OwnedRuntime {
+  readonly session: Session;
+  readonly members: DeclaredSessionMembers;
+}
+
+/**
+ * A deadline withdraws admission; it never invents a quiescence receipt. A
+ * started session that lacks a member its descriptor requires is closed, then
+ * refused with `runtime_session_incomplete`.
+ */
 export async function startOwnedRuntime(
+  start: (input: RuntimeOperationStartInput) => Promise<Session>,
+  input: RuntimeOperationStartInput,
+  descriptor: RuntimeAdapterDescriptor,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<OwnedRuntime> {
+  const session = await startSession(start, input, signal, timeoutMs);
+  let members: DeclaredSessionMembers;
+  try {
+    members = bindDeclaredSessionMembers(descriptor, session);
+  } catch (incomplete) {
+    try {
+      await session.close();
+    } catch (cause) {
+      throw new RuntimeStartupDisposalFailure(() => session.close(), { cause });
+    }
+    throw incomplete;
+  }
+  return { session, members };
+}
+
+async function startSession(
   start: (input: RuntimeOperationStartInput) => Promise<Session>,
   input: RuntimeOperationStartInput,
   signal: AbortSignal,

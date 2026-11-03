@@ -28,7 +28,7 @@ import { connectControlClient } from '../daemon/control-client';
 import { formatLifecycle, formatLifecycleRemedy } from '../diagnostics/format';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { probeRuntimes } from './runtime-probe';
-import { buildConfiguredRuntimeAdapters } from '../daemon/create-daemon/support';
+import { buildRuntimeAdapters, resolvePiByokLauncher } from '../adapters/runtime-adapters';
 import { isRecord, RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, type ControlRuntimesEnvironmentResult, type ControlStatusResult } from '../daemon/control-protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 import type { RuntimeEnvironmentRemovalRule, RuntimeEnvironmentSource } from '../runtime/environment';
@@ -44,6 +44,7 @@ import {
 } from '../daemon/operational-health';
 import { acquireDaemonOwner } from '../util/daemon-owner';
 import { ensureSecureDir } from '../util/secure-dir';
+import { sameContent, sameFile } from '../util/file-state';
 
 /**
  * The server rejects a device proof whose `issuedAt` is further than its skew
@@ -95,16 +96,27 @@ async function fileSize(filePath: string): Promise<number | undefined> {
   }
 }
 
-async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['device']> {
+interface DeviceInspection {
+  device: DiagnosticsSnapshot['device'];
+  /** Why the device is `unavailable`; feeds the check summary only, never the snapshot. */
+  reason?: string;
+}
+
+function deviceUnavailable(reason: string, err?: unknown): DeviceInspection {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  return { device: { status: 'unavailable' }, reason: typeof code === 'string' ? `${reason} (${code})` : reason };
+}
+
+async function inspectDevice(storeDir: string): Promise<DeviceInspection> {
   const filePath = path.join(storeDir, 'device.json');
-  let pathStat: import('node:fs').Stats;
+  let pathStat: import('node:fs').BigIntStats;
   try {
-    pathStat = await fs.lstat(filePath);
-    if (!pathStat.isFile()) return { status: 'unavailable' };
+    pathStat = await fs.lstat(filePath, { bigint: true });
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'unpaired' };
-    return { status: 'unavailable' };
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { device: { status: 'unpaired' } };
+    return deviceUnavailable('device identity could not be inspected safely', err);
   }
+  if (!pathStat.isFile()) return deviceUnavailable('device identity is not a real regular file');
   let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
     handle = await fs.open(
@@ -112,54 +124,45 @@ async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['dev
       fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
     );
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'unpaired' };
-    return { status: 'unavailable' };
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { device: { status: 'unpaired' } };
+    return deviceUnavailable('device identity could not be opened safely', err);
   }
   try {
-    const stat = await handle.stat();
-    const namedAfterOpen = await fs.lstat(filePath);
+    const stat = await handle.stat({ bigint: true });
+    const namedAfterOpen = await fs.lstat(filePath, { bigint: true });
     if (
       !stat.isFile() ||
       !namedAfterOpen.isFile() ||
       namedAfterOpen.isSymbolicLink() ||
-      stat.dev !== pathStat.dev ||
-      stat.ino !== pathStat.ino ||
-      stat.size !== pathStat.size ||
-      stat.mtimeMs !== pathStat.mtimeMs ||
-      stat.ctimeMs !== pathStat.ctimeMs ||
-      stat.dev !== namedAfterOpen.dev ||
-      stat.ino !== namedAfterOpen.ino ||
-      stat.size !== namedAfterOpen.size ||
-      stat.mtimeMs !== namedAfterOpen.mtimeMs ||
-      stat.ctimeMs !== namedAfterOpen.ctimeMs ||
-      stat.size <= 0 ||
-      stat.size > MAX_DEVICE_RECORD_BYTES
-    ) return { status: 'unavailable' };
-    const bytes = Buffer.alloc(stat.size);
+      !sameContent(stat, pathStat) ||
+      !sameContent(stat, namedAfterOpen)
+    ) return deviceUnavailable('device identity pathname changed before safe open');
+    if (stat.size <= 0n || stat.size > BigInt(MAX_DEVICE_RECORD_BYTES)) {
+      return deviceUnavailable('device identity exceeds the bounded read limit');
+    }
+    const bytes = Buffer.alloc(Number(stat.size));
     const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
-    const after = await handle.stat();
-    const namedAfterRead = await fs.lstat(filePath);
+    const after = await handle.stat({ bigint: true });
+    const namedAfterRead = await fs.lstat(filePath, { bigint: true });
     if (
       bytesRead !== bytes.length ||
-      after.dev !== stat.dev ||
-      after.ino !== stat.ino ||
-      after.size !== stat.size ||
-      after.mtimeMs !== stat.mtimeMs ||
-      after.ctimeMs !== stat.ctimeMs ||
-      namedAfterRead.dev !== stat.dev ||
-      namedAfterRead.ino !== stat.ino ||
-      namedAfterRead.size !== stat.size ||
-      namedAfterRead.mtimeMs !== stat.mtimeMs ||
-      namedAfterRead.ctimeMs !== stat.ctimeMs
+      !sameContent(after, stat) ||
+      !sameContent(namedAfterRead, stat)
     ) {
-      return { status: 'unavailable' };
+      return deviceUnavailable('device identity changed during bounded read');
     }
-    const parsed = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>;
-    return typeof parsed.deviceId === 'string' && parsed.deviceId.length > 0
-      ? { status: 'paired', deviceIdHash: stableIdentifierHash(parsed.deviceId) }
-      : { status: 'unavailable' };
-  } catch {
-    return { status: 'unavailable' };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(bytes.toString('utf8'));
+    } catch {
+      return deviceUnavailable('device identity is not valid JSON');
+    }
+    const deviceId = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>).deviceId : undefined;
+    return typeof deviceId === 'string' && deviceId.length > 0
+      ? { device: { status: 'paired', deviceIdHash: stableIdentifierHash(deviceId) } }
+      : deviceUnavailable('device identity has no valid deviceId');
+  } catch (err) {
+    return deviceUnavailable('device identity could not be inspected safely', err);
   } finally {
     await handle.close();
   }
@@ -170,14 +173,13 @@ interface FileIdentity {
   ino: bigint;
   size: bigint;
   mtimeNs: bigint;
-  ctimeNs: bigint;
 }
 
 async function regularFileIdentity(filePath: string): Promise<FileIdentity | undefined> {
   try {
     const stat = await fs.lstat(filePath, { bigint: true });
     if (!stat.isFile()) throw new Error('journal component is not a regular file');
-    return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs };
+    return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeNs: stat.mtimeNs };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw err;
@@ -186,13 +188,7 @@ async function regularFileIdentity(filePath: string): Promise<FileIdentity | und
 
 function sameIdentity(left: FileIdentity | undefined, right: FileIdentity | undefined): boolean {
   if (!left || !right) return left === right;
-  return (
-    left.dev === right.dev &&
-    left.ino === right.ino &&
-    left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
-  );
+  return sameContent(left, right);
 }
 
 function identityFromBigIntStat(stat: {
@@ -200,9 +196,8 @@ function identityFromBigIntStat(stat: {
   ino: bigint;
   size: bigint;
   mtimeNs: bigint;
-  ctimeNs: bigint;
 }): FileIdentity {
-  return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs };
+  return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeNs: stat.mtimeNs };
 }
 
 async function copyOpenFileBounded(
@@ -370,7 +365,7 @@ function readPinnedQuarantineFile(
   const fd = openSync(name, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0));
   try {
     const opened = fstatSync(fd, { bigint: true });
-    if (!opened.isFile() || !sameInode(opened, namedBefore) || opened.size < 0 || opened.size > BigInt(maxBytes)) {
+    if (!opened.isFile() || !sameFile(opened, namedBefore) || opened.size < 0 || opened.size > BigInt(maxBytes)) {
       throw new Error('quarantine entry could not be opened as a bounded regular file');
     }
     let bytes: Buffer | undefined;
@@ -390,7 +385,7 @@ function readPinnedQuarantineFile(
     }
     const openedAfter = fstatSync(fd, { bigint: true });
     const namedAfter = lstatSync(name, { bigint: true });
-    if (!sameFileState(openedAfter, opened) || !sameFileState(namedAfter, opened)) {
+    if (!sameContent(openedAfter, opened) || !sameContent(namedAfter, opened)) {
       throw new Error('quarantine entry changed during inspection');
     }
     return {
@@ -457,7 +452,7 @@ function inspectQuarantinePinned(
   try {
     process.chdir(dir);
     const pinned = lstatSync('.', { bigint: true });
-    if (!pinned.isDirectory() || !sameInode(pinned, expectedDirectory)) {
+    if (!pinned.isDirectory() || !sameFile(pinned, expectedDirectory)) {
       throw new Error('quarantine directory changed during inspection');
     }
     const selected: import('node:fs').Dirent[] = [];
@@ -587,7 +582,7 @@ async function inspectQuarantine(storeDir: string): Promise<DiagnosticsSnapshot[
   }
 }
 
-function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticCheck[] {
+function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>, deviceReason: string | undefined): DiagnosticCheck[] {
   return [
     {
       id: 'config',
@@ -597,7 +592,7 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
     {
       id: 'device',
       status: snapshot.device.status === 'unavailable' ? 'fail' : snapshot.device.status === 'unpaired' ? 'warn' : 'pass',
-      summary: snapshot.device.status,
+      summary: deviceReason === undefined ? snapshot.device.status : `${snapshot.device.status}: ${deviceReason}`,
     },
     {
       id: 'runtimes',
@@ -767,7 +762,7 @@ export async function collectDoctorDiagnostics(
 ): Promise<DoctorDiagnostics> {
   const resolvedStoreDir = path.resolve(storeDir);
   const connectControl = options.connectControl ?? connectControlClient;
-  const [device, health, journal, quarantine, controlConnection, lastAudited, lastEnvironment, serviceLogs] = await Promise.all([
+  const [deviceInspection, health, journal, quarantine, controlConnection, lastAudited, lastEnvironment, serviceLogs] = await Promise.all([
     inspectDevice(resolvedStoreDir),
     inspectOperationalHealthFile(resolvedStoreDir),
     inspectJournal(resolvedStoreDir),
@@ -828,7 +823,7 @@ export async function collectDoctorDiagnostics(
   if (control.status === 'offline') {
     liveRuntimeEnvironment = undefined;
     runtimeEnvironmentUnknown = 'daemon-offline';
-    observations = await probeRuntimes(options.adapters ?? buildConfiguredRuntimeAdapters(config), { timeoutMs: options.runtimeProbeTimeoutMs });
+    observations = await probeRuntimes(options.adapters ?? buildRuntimeAdapters(config, resolvePiByokLauncher(config)), { timeoutMs: options.runtimeProbeTimeoutMs });
     runtimeSource = 'local-shell';
     environment = lastEnvironment ?? { status: 'unknown' };
   }
@@ -863,7 +858,7 @@ export async function collectDoctorDiagnostics(
       customStoreDir: config.storeDir !== undefined,
       ...(config.runtimeAllowlist ? { runtimeAllowlistCount: config.runtimeAllowlist.length } : {}),
     },
-    device,
+    device: deviceInspection.device,
     runtimes,
     runtimeSource,
     environment,
@@ -894,7 +889,7 @@ export async function collectDoctorDiagnostics(
     },
   };
   return {
-    snapshot: { ...withoutChecks, checks: checksFor(withoutChecks) },
+    snapshot: { ...withoutChecks, checks: checksFor(withoutChecks, deviceInspection.reason) },
     runtimeEnvironment: liveRuntimeEnvironment === undefined
       ? { status: 'unknown', reason: runtimeEnvironmentUnknown }
       : { status: 'known', runtimes: liveRuntimeEnvironment.runtimes },
@@ -903,19 +898,6 @@ export async function collectDoctorDiagnostics(
 
 export function stableIdentifierHash(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
-}
-
-function sameInode(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
-function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
-  return (
-    sameInode(left, right) &&
-    left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
-  );
 }
 
 /**
@@ -947,12 +929,12 @@ function publishQuarantineEvidencePinned(
     process.chdir(quarantineDir);
     entered = true;
     const pinned = lstatSync('.', { bigint: true });
-    if (!pinned.isDirectory() || !sameInode(pinned, expectedDirectory)) {
+    if (!pinned.isDirectory() || !sameFile(pinned, expectedDirectory)) {
       throw new Error('quarantine path changed before publication; refusing quarantine');
     }
     const openSource = fstatSync(sourceFd, { bigint: true });
     const namedSource = lstatSync(sourcePath, { bigint: true });
-    if (!sameFileState(openSource, sourceStat) || !sameFileState(namedSource, sourceStat)) {
+    if (!sameContent(openSource, sourceStat) || !sameContent(namedSource, sourceStat)) {
       throw new Error('operational health source identity changed before quarantine');
     }
     const sizeBytes = Number(sourceStat.size);
@@ -967,7 +949,7 @@ function publishQuarantineEvidencePinned(
       position += bytesRead;
     }
     const afterRead = fstatSync(sourceFd, { bigint: true });
-    if (!sameFileState(afterRead, sourceStat)) {
+    if (!sameContent(afterRead, sourceStat)) {
       throw new Error('operational health state changed during bounded copy');
     }
     const sha256 = createHash('sha256').update(bytes).digest('hex');
@@ -984,14 +966,14 @@ function publishQuarantineEvidencePinned(
     evidenceCreated = true;
     const evidence = lstatSync(evidenceName, { bigint: true });
     const tempEvidence = lstatSync(evidenceTemp, { bigint: true });
-    if (!evidence.isFile() || !sameInode(evidence, tempEvidence) || evidence.size !== sourceStat.size) {
+    if (!evidence.isFile() || !sameFile(evidence, tempEvidence) || evidence.size !== sourceStat.size) {
       throw new Error('quarantined operational health evidence does not match the bounded copy');
     }
     unlinkSync(evidenceTemp);
     evidenceTemp = undefined;
     const finalOpenSource = fstatSync(sourceFd, { bigint: true });
     const finalNamedSource = lstatSync(sourcePath, { bigint: true });
-    if (!sameFileState(finalOpenSource, sourceStat) || !sameFileState(finalNamedSource, sourceStat)) {
+    if (!sameContent(finalOpenSource, sourceStat) || !sameContent(finalNamedSource, sourceStat)) {
       throw new Error('operational health source changed before removal');
     }
     const manifestBody = `${JSON.stringify(
@@ -1035,7 +1017,7 @@ function publishQuarantineEvidencePinned(
     }
     const removalOpenSource = fstatSync(sourceFd, { bigint: true });
     const removalNamedSource = lstatSync(sourcePath, { bigint: true });
-    if (!sameFileState(removalOpenSource, sourceStat) || !sameFileState(removalNamedSource, sourceStat)) {
+    if (!sameContent(removalOpenSource, sourceStat) || !sameContent(removalNamedSource, sourceStat)) {
       throw new Error('operational health source changed before removal');
     }
     unlinkSync(sourcePath);

@@ -27,6 +27,9 @@ export type {
   RuntimeRetryDisposition,
 } from '../runtime-failure';
 
+export { createRuntimeAdapters } from './runtime-adapters';
+export type { PiRuntimeConfig, RuntimeAdaptersConfig, RuntimeAdaptersRuntimes } from './runtime-adapters';
+
 export { PiAdapter } from './pi/pi-adapter';
 export type { PiAdapterOptions, PiByokLauncherConfig } from './pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './pi/resolve-bin';

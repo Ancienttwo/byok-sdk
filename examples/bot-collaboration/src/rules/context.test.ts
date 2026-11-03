@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import { contextPack, contextTurns, turnInstruction, type ContextHistory } from './context';
+import { hash, canonical } from '@byok-sdk/server/execution-core/canonical';
+import { contextPack, contextTurns, historyRowFromTurn, turnInstruction, type ContextHistory } from './context';
 import type { ContextState } from './schema';
 import type { Turn } from './turn';
 
@@ -53,12 +54,22 @@ it('selects the current Turn by id and keeps it out of the history rows', () => 
 });
 
 it('takes injected rows in the ContextPack row shape, and refuses any other shape', () => {
-  const injected = contextTurns([{ id: 'c1', root: 'c1', source: 'user', request: 'Cloud', hop: 0, status: 'succeeded', outcomeSummary: ['ask_user'] }]);
+  const injected = contextTurns([{ id: 'c1', root: 'c1', source: 'user', request: 'Cloud', hop: 0, status: 'succeeded', outcomeSummary: ['ask_user'], reply: 'Seen' }]);
   const current = turn('t1', 'Now', 'queued');
   const history: ContextHistory = { turns: [...injected, current], cards: [], questions: [], rejected: [] };
   const { context } = turnInstruction(authority(), history, current, limits);
   if (!('turns' in context)) throw new Error('Expected a Bot Turn context');
   expect(context.turns).toEqual(injected);
   for (const bad of [null, {}, [null], [{ ...injected[0], source: 'other' }], [{ ...injected[0], hop: -1 }], [{ ...injected[0], outcomeSummary: [1] }],
-    [{ ...injected[0], conclusion: 3 }]]) expect(() => contextTurns(bad)).toThrow('Invalid injected history');
+    [{ ...injected[0], conclusion: 3 }], [{ ...injected[0], reply: 3 }]]) expect(() => contextTurns(bad)).toThrow('Invalid injected history');
+});
+
+it('#1318: builds a history row from a bot-turn projection and its reply, which contextTurns takes as it is', () => {
+  const projection = JSON.parse(JSON.stringify({ owner: 'main', ...turn('t1', 'Compare A and B'), outcome: { ask_user: {} }, reported: true, reply: 'A wins' }));
+  const row = historyRowFromTurn(projection);
+  expect(row).toEqual({ id: 't1', root: 't1', source: 'user', request: 'Compare A and B', hop: 0, status: 'succeeded', conclusion: 'succeeded',
+    outcomeSummary: ['ask_user'], reply: 'A wins' });
+  expect(hash(canonical(contextTurns([row])))).toBe(hash(canonical([row])));
+  const { reply: _reply, ...plain } = projection;
+  expect(historyRowFromTurn(plain)).not.toHaveProperty('reply');
 });

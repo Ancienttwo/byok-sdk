@@ -122,11 +122,11 @@ export interface CopySdkPackagingAssetsOptions {
   readonly platform: 'darwin' | 'linux' | 'win32';
   readonly arch: 'x64' | 'arm64';
 }
-/** Directories relative to `outDir`, for the product's daemon configuration and environment. */
+/** Directories relative to `outDir`, for the product's daemon configuration. */
 export interface SdkPackagingAssets {
   /** Every written file, relative to `outDir`, sorted. */
   readonly files: readonly string[];
-  /** `PI_PACKAGE_DIR` for the Pi host. */
+  /** `DaemonConfig.runtimes.pi.packageDir`, made absolute; the SDK gives it to Pi and the Pi host as `PI_PACKAGE_DIR`. */
   readonly piPackageDir: string;
   /** `DaemonConfig.nativeAssetRoot`; Windows x64 only. */
   readonly nativeAssetRoot?: string;

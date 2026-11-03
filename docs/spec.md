@@ -311,9 +311,9 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-A version bump does not authorize publish. The current aligned release is `0.34.0`; publication requires separate
+A version bump does not authorize publish. The current aligned release is `0.35.1`; publication requires separate
 release authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.34.0`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.35.1`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -323,6 +323,18 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.35.1 is a PATCH under the general policy above: corrections only. It keeps
+wire v5. The upgrade manifest from 0.35.0 holds 1 additive entry, for a K8
+example test Host, and no breaking entry. The release adds no Postgres
+migration and no SQLite schema change. See the
+[0.35.1 candidate notes](releases/v0.35.1.md).
+
+0.35.0 is a MINOR under the general policy above, with no exception. It keeps
+wire v5. The upgrade manifest from 0.34.0 holds 3 breaking entries, and
+#1324 is a behavior-only breaking change recorded in the CHANGELOG. The
+release adds no Postgres migration and no SQLite schema change. See the
+[0.35.0 release notes](releases/v0.35.0.md).
 
 0.34.0 is a MINOR under the general policy above, with no exception. It moves
 the wire to v5. The upgrade manifest from 0.33.0 holds 2 breaking entries,
@@ -384,27 +396,29 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-The registry readback of 2026-11-02 (UTC) reports `latest` 0.34.0 for all nine
-packages. The earlier published versions are 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
+The registry read of 2026-11-03 (UTC) reports `latest` 0.35.0 for all nine
+packages. The earlier published versions are 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
 0.30.0, 0.29.0, 0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for
 0.28.0 / keys 0.13.0, 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22
 (UTC) for 0.28.2 and 0.28.3, 2026-10-23 (UTC) for 0.29.0, 2026-10-24 (UTC)
 for 0.30.0 and 0.30.1, 2026-10-26 (UTC) for 0.30.2, 2026-10-29 (UTC) for
 0.31.0, 2026-11-01 (UTC) for 0.32.0 and 0.33.0, and 2026-11-02 (UTC) for
-0.34.0. The tag `v0.34.0` and its GitHub Release point to `58658abd5`, the
-squash merge of #1309 on main. The tag `v0.33.0` and
+0.34.0 and 0.35.0. The tag `v0.35.0` and its GitHub Release point to
+`312d5f6b6`, the squash merge of #1344 on main. The tag `v0.34.0` and its
+GitHub Release point to `58658abd5`, the squash merge of #1309 on main. The tag `v0.33.0` and
 its GitHub Release point to `fdf39b10a`, the squash merge of #1287 on main.
 The tag `v0.32.0` and its GitHub Release point to `5f975955`, the squash
 merge of #1250 on main. The tag
 `v0.31.0` points to `982aa2d7`, the release commit on the branch
 `release/0.31`, which is not on main. The tag
 `v0.30.2` points to `b1469e5a`, the merge of #1006. The tag `v0.30.1` points
-to `142acbe2`, the merge of #916. The 0.28.0 to 0.34.0
+to `142acbe2`, the merge of #916. The 0.28.0 to 0.35.0
 source-candidate notes are preparation history. They are not publication
 records, except that the [0.31.0 notes](releases/v0.31.0.md), the
-[0.32.0 notes](releases/v0.32.0.md), the [0.33.0 notes](releases/v0.33.0.md)
-and the [0.34.0 notes](releases/v0.34.0.md) also hold the 0.31.0, 0.32.0,
-0.33.0 and 0.34.0 publication records. This read confirms registry
+[0.32.0 notes](releases/v0.32.0.md), the [0.33.0 notes](releases/v0.33.0.md),
+the [0.34.0 notes](releases/v0.34.0.md) and the
+[0.35.0 notes](releases/v0.35.0.md) also hold the 0.31.0, 0.32.0, 0.33.0,
+0.34.0 and 0.35.0 publication records. This read confirms registry
 availability. It does not establish isolated-install qualification. A later
 release needs the accepted final-commit CI artifact and separate owner
 authorization.
@@ -1462,13 +1476,18 @@ Fresh Pi execution keeps Pi's default native tools, the SDK web and todo
 extensions, the installed pi-subagents extension (see "Pi subagents") and the
 user's own extensions and skills. For Agent tasks on the
 ordinary RPC lane, local `PiAdapterOptions.agentUserContext: 'excluded'`
-removes user extensions, skills, templates, themes, instruction files and
-session resource settings; it isolates context and never removes a tool. The
+removes user extensions, skills, templates, themes and session resource
+settings; it isolates context and never removes a tool. `agentUserContext: 'excluded'` excludes user-level resources and the instruction files of every directory above the Agent home. Instruction files in the Agent home (`lease.canonicalHome`) itself and its subdirectories load as usual. Pi
+keeps only context files whose real path is in the Agent home, the same rule
+as Claude. The
 excluded loader uses a fresh SDK resources directory while Pi's original
 model/auth stores remain the authentication authority; credentials are not
 copied or added to tool environments. Prepared/durable lanes reject `excluded`
-before spawning. The ordinary launch config is digest-bound v8 (`agentUserContext`,
-explicit resource paths and the `auto` gate address); earlier versions are not accepted.
+before spawning. The ordinary launch config is digest-bound v10 (`agentUserContext`,
+`agentHome`, explicit resource paths and the `auto` gate address); `agentHome` is the
+lease's canonical home under `excluded` and null otherwise, and an excluded Agent
+task without a sealed canonical-home lease is refused before spawning. Earlier
+versions are not accepted.
 `agentSkillPaths` and `agentExtensionPaths` explicitly load absolute local skill
 and trusted executable extension paths (default empty), including under excluded
 user context. They are copied and frozen at adapter construction and apply only
@@ -2346,11 +2365,12 @@ reloads change identity and invalidate the old definition's observation.
 Servers and approvals are copied together from one registry snapshot before
 runtime detection and claim. The deeply frozen per-attempt `mcpToolApprovals`
 start resource cannot be enlarged by a later `toolsets.reload`; later attempts
-read the new definition. Runtime selection requires the local descriptor's
-`mcpToolApprovals: true` for a nonempty declaration. Codex declares it; other
-bundled runtimes do not. Explicit unsupported runtime selection declines
-non-retryably before claim; automatic selection excludes unsupported adapters.
-No approval declaration or capability is added to wire.
+read the new definition. `approveTools` is a grant: the daemon projects it
+only to a runtime whose descriptor declares `mcpToolApprovals: true`. It takes
+no part in admission or runtime selection. On any other runtime it has no
+effect, and that runtime handles the server exactly as it handles a server
+without `approveTools`. Codex declares the capability; other bundled runtimes
+do not. No approval declaration or capability is added to wire.
 
 Codex projects only `tools.<exact-name>.approval_mode = "approve"` in the
 thread config for both start and resume, alongside the separate fixed SDK
@@ -2433,10 +2453,9 @@ behind an explicit helper dispatch.
 A single-file product sets `sdkHelperHost: { mode: 'self-executable' }`. Every
 Pi launch then re-enters the product executable as
 `<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`, and
-the product names its Pi asset root in `PI_PACKAGE_DIR` and passes that name
-explicitly through `DaemonConfig.runtimeEnvironment.pass` or
-`PiAdapterOptions.runtimeEnvironment` (a Bun-compiled executable may keep the
-assets beside itself).
+the product names its Pi asset root in `DaemonConfig.runtimes.pi.packageDir` or
+`PiAdapterOptions.packageDir`, the only source; the SDK gives it to Pi as
+`PI_PACKAGE_DIR` (a Bun-compiled executable may keep the assets beside itself).
 
 This is the one supported way to ship official pi in a host download. The
 product bundles the SDK root, so official pi from the build machine install is
@@ -2472,7 +2491,7 @@ holds the SDK asset manifest; otherwise it reports `not-found`, and a launch is
 refused with `pi_bundled_assets_unavailable`. The client packaging test builds
 interpreter + bundle hosts, run by Bun and by Node, with no `node_modules`, and
 runs one pi task against a loopback provider. It also builds a Bun-compiled
-host whose asset root is its own directory, with no `PI_PACKAGE_DIR`, and runs
+host whose asset root is its own directory, with no `packageDir`, and runs
 the same task. Each task loads a user Pi package whose TypeScript extension
 imports the pi coding-agent package and `typebox`.
 
@@ -3638,7 +3657,7 @@ Pi custody consumes the client-decided runtime launch: `--pi-bin`, optional `--p
 
 The bundled launcher executable reads the platform OS store with its default storage options. `@byok-sdk/keys` also exports `runPiProviderLauncher(options, { createSecretStore })`, the same launcher with a host-built `SecretStore`, so a host with its own storage options supplies one launcher executable without a second store definition. Both apply the same exact profile, binding, runtime-entry and custody checks. The provider projection keeps the profile URL convention of the direct clients: for the `anthropic` adapter it projects the keys endpoint `modelApiUrl(base_url, 'messages')` without its `/v1/messages` suffix, because Pi appends that suffix, and it refuses an endpoint without that suffix with `PROVIDER_URL_INVALID`. For `auth_mode: 'none'` the `pi-rpc` projection sets the fixed non-secret `apiKey` `byok-sdk-auth-none`, because Pi refuses a request without a key; the `pi-prepared` and `pi-durable` entries require a launcher-delivered key and refuse a keyless profile with `PROVIDER_PROFILE_INVALID` at admission.
 
-The ordinary `byok-pi-rpc` host launched under `credentialSource: keys-profile` receives its key the same way as the durable worker below (#385): over the launcher's private one-shot JSON IPC channel bound to the config digest, never in its environment, argv or stdio RPC. Its digest-bound launch config (`byok.pi.rpc-launch` version 9) states `credentialSource` and the optional resolved file scope; under `keys-profile` the host refuses a launch environment that carries a provider key, disconnects IPC before any extension, tool or session exists, and registers the key only in Pi's in-memory runtime credential overlay (`ModelRuntime.setRuntimeApiKey`). Its projection carries the non-secret `apiKey` marker `byok:rpc-ipc`; under `pi-auth-store` the host refuses an IPC channel it was not configured for. Conformance tests require no key in the output of Pi's real built-in bash tool running `env` and none in the host's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). Pi subagents are unavailable in this lane: a pi-subagents child session opens its own model runtime from the projection, whose `apiKey` is the `byok:rpc-ipc` marker, and never sees the key held in the parent's memory, so the host does not load pi-subagents under `keys-profile`. No `subagent` tool is offered and the marker is never sent as a key. Only `byok-pi-prepared`, which registers MCP tools only, receives the key as `PI_PROVIDER_API_KEY` in its environment.
+The ordinary `byok-pi-rpc` host launched under `credentialSource: keys-profile` receives its key the same way as the durable worker below (#385): over the launcher's private one-shot JSON IPC channel bound to the config digest, never in its environment, argv or stdio RPC. Its digest-bound launch config (`byok.pi.rpc-launch` version 10) states `credentialSource` and the optional resolved file scope; under `keys-profile` the host refuses a launch environment that carries a provider key, disconnects IPC before any extension, tool or session exists, and registers the key only in Pi's in-memory runtime credential overlay (`ModelRuntime.setRuntimeApiKey`). Its projection carries the non-secret `apiKey` marker `byok:rpc-ipc`; under `pi-auth-store` the host refuses an IPC channel it was not configured for. Conformance tests require no key in the output of Pi's real built-in bash tool running `env` and none in the host's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). Pi subagents are unavailable in this lane: a pi-subagents child session opens its own model runtime from the projection, whose `apiKey` is the `byok:rpc-ipc` marker, and never sees the key held in the parent's memory, so the host does not load pi-subagents under `keys-profile`. No `subagent` tool is offered and the marker is never sent as a key. Only `byok-pi-prepared`, which registers MCP tools only, receives the key as `PI_PROVIDER_API_KEY` in its environment.
 
 The durable Pi lane runs in a separate `byok-pi-durable` executable launched through the same credential launcher contract as `byok-pi-prepared`. The credential launcher transfers the provider key over a private, one-shot JSON IPC channel bound to the launch config digest; it MUST NEVER place the key in the durable child's environment, argv, stdio RPC or replica files. The worker consumes it into model/provider memory and disconnects IPC before constructing tools or MCP children. Deleting process.env is not an isolation mechanism. Tool exec MUST force `inheritEnv: false` and an explicit allowlist. Conformance tests require no key in both inherited tool env and the worker's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). The daemon communicates with it over stdio RPC, does not depend on `@byok-sdk/keys`, and never reads, proxies or forwards credentials. Its environment is rebuilt by the same EnvironmentBuilder allowlist with the `BYOK_*` deny. One child exclusively owns one durable storage; because upstream pi-durable provides no cross-process lock, the child MUST acquire an OS exclusive lock (flock or sidecar lockfile) bound to the current leaseId before opening storage, and MUST fail closed if it cannot. The child exists only while its daemon holds the home's single-writer lease; lease release requires the child's disposal receipt or confirmed process-tree death (wait after KILL).
 

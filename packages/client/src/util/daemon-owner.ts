@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
+import { sameContent } from './file-state';
 import { ensureSecureDir } from './secure-dir';
 import {
   acquirePathMutationGate,
@@ -22,7 +23,8 @@ interface OwnerRecord {
   version: 2;
   pid: number;
   nonce: string;
-  role: 'daemon' | 'doctor';
+  /** `installer`: a service installation holding a stopped store across an upgrade, rollback or recover (#1328). */
+  role: 'daemon' | 'doctor' | 'installer';
   acquiredAt: string;
   processStartedAt: string;
   livenessPort: number;
@@ -168,6 +170,14 @@ export class DaemonOwnerActiveError extends Error {
   }
 }
 
+/** Another process is reclaiming this store's stale lease; retry once it is done. */
+export class DaemonOwnerReclaimingError extends Error {
+  constructor() {
+    super('store mutation lease is being reclaimed; retry after the current operation finishes');
+    this.name = 'DaemonOwnerReclaimingError';
+  }
+}
+
 function isOwnerRecord(value: unknown): value is OwnerRecord {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<OwnerRecord>;
@@ -177,7 +187,7 @@ function isOwnerRecord(value: unknown): value is OwnerRecord {
     (candidate.pid ?? 0) > 0 &&
     typeof candidate.nonce === 'string' &&
     candidate.nonce.length === 36 &&
-    (candidate.role === 'daemon' || candidate.role === 'doctor') &&
+    (candidate.role === 'daemon' || candidate.role === 'doctor' || candidate.role === 'installer') &&
     typeof candidate.acquiredAt === 'string' &&
     Number.isFinite(Date.parse(candidate.acquiredAt)) &&
     typeof candidate.processStartedAt === 'string' &&
@@ -216,16 +226,8 @@ async function readOwner(filePath: string): Promise<OwnerRecord | undefined> {
       !stat.isFile() ||
       !namedAfterOpen.isFile() ||
       namedAfterOpen.isSymbolicLink() ||
-      stat.dev !== namedBefore.dev ||
-      stat.ino !== namedBefore.ino ||
-      stat.size !== namedBefore.size ||
-      stat.mtimeNs !== namedBefore.mtimeNs ||
-      stat.ctimeNs !== namedBefore.ctimeNs ||
-      stat.dev !== namedAfterOpen.dev ||
-      stat.ino !== namedAfterOpen.ino ||
-      stat.size !== namedAfterOpen.size ||
-      stat.mtimeNs !== namedAfterOpen.mtimeNs ||
-      stat.ctimeNs !== namedAfterOpen.ctimeNs
+      !sameContent(stat, namedBefore) ||
+      !sameContent(stat, namedAfterOpen)
     ) {
       throw new Error('store mutation owner path changed before safe open');
     }
@@ -237,16 +239,8 @@ async function readOwner(filePath: string): Promise<OwnerRecord | undefined> {
     const namedAfterRead = await fs.lstat(filePath, { bigint: true });
     if (
       bytesRead !== size ||
-      after.dev !== stat.dev ||
-      after.ino !== stat.ino ||
-      after.size !== stat.size ||
-      after.mtimeNs !== stat.mtimeNs ||
-      after.ctimeNs !== stat.ctimeNs ||
-      namedAfterRead.dev !== stat.dev ||
-      namedAfterRead.ino !== stat.ino ||
-      namedAfterRead.size !== stat.size ||
-      namedAfterRead.mtimeNs !== stat.mtimeNs ||
-      namedAfterRead.ctimeNs !== stat.ctimeNs
+      !sameContent(after, stat) ||
+      !sameContent(namedAfterRead, stat)
     ) {
       throw new Error('store mutation owner path changed during inspection');
     }
@@ -586,7 +580,7 @@ export async function acquireDaemonOwner(
 
     for (;;) {
       if (await reclaimExistsAndIsActive(reclaimPath)) {
-        throw new Error('store mutation lease is being reclaimed; retry after the current operation finishes');
+        throw new DaemonOwnerReclaimingError();
       }
       await fs.rm(reclaimPath, { force: true });
 
@@ -628,7 +622,7 @@ export async function acquireDaemonOwner(
       if (existing && (await processOwnsRecord(existing))) throw new DaemonOwnerActiveError(existing.role);
 
       if (!(await createOwner(reclaimPath, record))) {
-        throw new Error('store mutation lease is being reclaimed; retry after the current operation finishes');
+        throw new DaemonOwnerReclaimingError();
       }
       try {
         const rechecked = await readOwner(ownerPath);

@@ -124,11 +124,11 @@ describe('single-file re-entry (sdkHelperHost)', () => {
   it.each([['instruction', 'pi-rpc'], ['prepared', 'pi-prepared']] as const)('adapter %s launch re-enters the product executable as %s', async (kind, entry) => {
     const f = await fixture();
     const resolveBin = vi.fn(() => ({ command: process.execPath, source: 'env' as const }));
-    const adapter = new PiAdapter({ resolveBin, sdkHelperHost: { mode: 'self-executable' } });
+    const assets = fileURLToPath(new URL('../../dist/assets/', import.meta.url));
+    const adapter = new PiAdapter({ resolveBin, sdkHelperHost: { mode: 'self-executable' }, packageDir: assets });
     const prepared = await adapter.prepare({offer:{instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
-    const assets = fileURLToPath(new URL('../../dist/assets/', import.meta.url));
-    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{PI_PACKAGE_DIR:assets},scratch:f.options.scratch}) as PiRuntimeLaunchResources;
+    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{},scratch:f.options.scratch}) as PiRuntimeLaunchResources;
     try {
       expect(resolveBin).not.toHaveBeenCalled();
       expect(resources).toMatchObject({ kind: entry, command: process.execPath, fixedArgs: ['__byok_sdk_helper', entry] });

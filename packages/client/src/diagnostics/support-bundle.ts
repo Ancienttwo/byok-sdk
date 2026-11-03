@@ -13,6 +13,7 @@ import {
   type CollectDiagnosticsOptions,
   type DiagnosticsSnapshot,
 } from './diagnostics';
+import { sameContent } from '../util/file-state';
 
 export const MAX_SUPPORT_AUDIT_TAIL_BYTES = 256 * 1024;
 export const MAX_SUPPORT_AUDIT_FACTS = 200;
@@ -90,16 +91,6 @@ export interface SupportBundle {
   };
 }
 
-function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
-  return (
-    left.dev === right.dev &&
-    left.ino === right.ino &&
-    left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
-  );
-}
-
 async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recentEvents']> {
   const filePath = auditLogPath(storeDir);
   let pathStat: import('node:fs').BigIntStats;
@@ -133,8 +124,8 @@ async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recent
       !stat.isFile() ||
       !namedAfterOpen.isFile() ||
       namedAfterOpen.isSymbolicLink() ||
-      !sameFileState(pathStat, stat) ||
-      !sameFileState(stat, namedAfterOpen)
+      !sameContent(pathStat, stat) ||
+      !sameContent(stat, namedAfterOpen)
     ) {
       return { status: 'unavailable', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
     }
@@ -148,8 +139,8 @@ async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recent
     if (
       bytesRead !== length ||
       namedAfterRead.isSymbolicLink() ||
-      !sameFileState(stat, afterRead) ||
-      !sameFileState(afterRead, namedAfterRead)
+      !sameContent(stat, afterRead) ||
+      !sameContent(afterRead, namedAfterRead)
     ) {
       return { status: 'unavailable', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
     }

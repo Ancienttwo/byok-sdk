@@ -33,6 +33,8 @@ test('artifact readers select generically, deduplicate, and carry their install 
 test('reader inventory includes copied fixtures, native identity and built cross-package inputs', () => {
   for (const [input, reader] of [
     ['packages/client/upgrade-manifest.json', upgrade],
+    ['packages/client/upgrade-history/0.33.0-0.34.0.json', upgrade],
+    ['scripts/release/upgrade-manifest/history.mjs', upgrade],
     ['api-surface/core.d.ts', upgrade],
     ['packages/client/native/agent-memory-fs/main.go', 'scripts/release/agent-memory-helper-source.test.mjs'],
     ['packages/client/src/util/agent-memory-helper-release-pin.ts', 'scripts/release/agent-memory-helper-source.test.mjs'],

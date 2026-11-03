@@ -1,8 +1,22 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_OPERATIONAL_HEALTH_FILE_BYTES, OperationalHealthTracker } from '../daemon/operational-health';
+import type { Runner } from '../util/exec-runner';
+import { SecureDirHardeningError } from '../util/secure-dir';
+
+// Route the tracker's ensureSecureDir through the win32 icacls branch with a
+// fake runner so the hardening count is observable on any host OS.
+const icacls = vi.hoisted(() => ({ run: undefined as Runner | undefined }));
+vi.mock('../util/secure-dir', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../util/secure-dir')>();
+  return {
+    ...actual,
+    ensureSecureDir: (dir: string) =>
+      icacls.run ? actual.ensureSecureDir(dir, { platform: 'win32', run: icacls.run }) : actual.ensureSecureDir(dir),
+  };
+});
 
 const dirs: string[] = [];
 
@@ -13,6 +27,7 @@ async function tempDir(): Promise<string> {
 }
 
 afterEach(async () => {
+  icacls.run = undefined;
   await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -133,5 +148,29 @@ describe('operational health', () => {
     await tracker.recordFailure('lifecycle');
     await tracker.markCleanStop();
     expect(await fs.readFile(file, 'utf8')).toBe('{not-json');
+  });
+
+  it('hardens storeDir with icacls once per tracker, not on every state write', async () => {
+    const dir = await tempDir();
+    const run = vi.fn<Runner>().mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    icacls.run = run;
+    const tracker = new OperationalHealthTracker(dir);
+    await tracker.startRun();
+    await tracker.recordFailure('reconnect');
+    await tracker.recordFailure('upload');
+    await tracker.recordFailure('maintenance');
+    await tracker.recordSuccess('reconnect');
+    await tracker.markCleanStop();
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith('icacls', expect.arrayContaining([dir, '/inheritance:r']));
+  });
+
+  it('fails the write closed when the first hardening fails and never writes unhardened state', async () => {
+    const dir = await tempDir();
+    icacls.run = vi.fn<Runner>().mockResolvedValue({ code: 5, stdout: '', stderr: 'Access is denied.' });
+    const tracker = new OperationalHealthTracker(dir);
+    await expect(tracker.startRun()).rejects.toBeInstanceOf(SecureDirHardeningError);
+    await expect(fs.stat(path.join(dir, 'operational-health.json'))).rejects.toThrow();
+    expect(tracker.snapshot()).toEqual({ availability: 'unavailable', reason: 'operational health state could not be persisted' });
   });
 });

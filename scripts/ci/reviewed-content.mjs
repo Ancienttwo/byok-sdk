@@ -97,6 +97,10 @@ const K8_MIGRATION_EXPORTS = Object.freeze({ './migration': './src/migration.ts'
 // with it node:sqlite (ledger.ts) and node:async_hooks (core.ts); it does not
 // load the K8 host. Only H tests import it; H's src does not.
 const K8_SWITCH_EXPORTS = Object.freeze({ './switch': './src/switch.ts' });
+// #1325: the L test Host that the routine and delivery vectors run on, added on
+// top of the switch entry. It is test support that a Host vendors; it imports
+// only published packages.
+const K8_L_TEST_HOST_EXPORTS = Object.freeze({ './l-test-host': './src/l-test-host.test-support.ts' });
 /** The other workspace manifests, each with its dir. */
 function otherWorkspaceManifests(cwd, self) {
   const manifests = [];
@@ -291,6 +295,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     if (isDeepStrictEqual(before.exports, migrated) && isDeepStrictEqual(after.exports, { ...migrated, ...K8_SWITCH_EXPORTS })) {
       after.exports = before.exports;
     }
+    // #1325: the L test Host entry, only on top of exactly the entries up to and including the switch entry.
+    const switched = { ...migrated, ...K8_SWITCH_EXPORTS };
+    if (isDeepStrictEqual(before.exports, switched) && isDeepStrictEqual(after.exports, { ...switched, ...K8_L_TEST_HOST_EXPORTS })) {
+      after.exports = before.exports;
+    }
   } else if (path === 'examples/packaging/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The packaging example must stay private');
     // #1104: the bundle test command.
@@ -368,6 +377,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       // #1094 ships the generated DaemonConfig schema beside the upgrade manifest: exactly one appended files entry.
       if (isDeepStrictEqual(before.files, [...CLIENT_FILES, 'upgrade-manifest.json'])
         && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json', 'daemon-config.schema.json'])) {
+        after.files = before.files;
+      }
+      // #1316 ships the released upgrade manifests beside the current one: exactly one appended files entry.
+      if (isDeepStrictEqual(before.files, [...CLIENT_FILES, 'upgrade-manifest.json', 'daemon-config.schema.json'])
+        && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json', 'daemon-config.schema.json', 'upgrade-history'])) {
         after.files = before.files;
       }
       // #635 adds the public transport-free test-double entry; its bundle is checked by check-adapters-entry.mjs.

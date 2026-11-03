@@ -101,7 +101,7 @@ describe('GrokAdapter sessions', () => {
       versionPolicy: { qualifiedVersion: '1.0.52', unqualified: 'warn' },
       capabilities: {
         steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true, preparedLane: false,
-        isolation: { userContext: true, userMcpServers: true, sessionPersistence: false },
+        isolation: { userContext: false, userMcpServers: true, sessionPersistence: false },
       },
     });
     const prepared = await a.prepare({

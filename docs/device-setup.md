@@ -128,6 +128,39 @@ instead (see [Configuration](#configuration)).
 Custom adapters belong in `createDaemonWithAdapters`; the effective report
 marks them `injected`, without claiming SDK-built isolation settings for them.
 
+A Host that wraps each SDK adapter before injecting it builds the set with
+`createRuntimeAdapters` from `@byok-sdk/client/adapters`, instead of
+constructing `PiAdapter`, `ClaudeAdapter`, `CodexAdapter` and `GrokAdapter`
+itself. It takes the `DaemonConfig` keys that configure adapters
+(`runtimeAllowlist`, `runtimes`, `codexSandbox`, `runtimeEnvironment`,
+`nativeAssetRoot`, `sdkHelperHost`, `piByokLauncher`) and returns the adapters
+`createDaemon` builds from them. Pass those keys to the factory only; the
+`createDaemonWithAdapters` config still rejects `runtimes`, `codexSandbox` and
+`runtimeEnvironment`. The durable Pi lane (`runtimes.pi.durableLane`) needs the
+daemon journal, so the factory refuses it.
+
+```ts
+import { createDaemonWithAdapters } from '@byok-sdk/client';
+import { createRuntimeAdapters } from '@byok-sdk/client/adapters';
+
+const adapters = createRuntimeAdapters({
+  runtimeAllowlist: ['pi', 'claude', 'codex'],
+  runtimes: { pi: { packageDir: '/opt/acme/pi' } },
+}).map(guard); // guard: the Host's own adapter wrapper
+const daemon = createDaemonWithAdapters(config, adapters);
+```
+
+A product that bundles Pi sets its Pi asset root (the absolute form of
+`SdkPackagingAssets.piPackageDir`) as `runtimes.pi.packageDir`. It is the only
+source: the SDK gives it to Pi and the pi-host helper process as
+`PI_PACKAGE_DIR`, no other runtime gets it, and a `PI_PACKAGE_DIR` in the
+login shell or the Host environment never reaches Pi. Naming
+`PI_PACKAGE_DIR` in `runtimeEnvironment.pass` is an error.
+
+A Host that keeps one store per tenant places each store outside
+`<hostStorageRoot>/agents/`, which the SDK owns for Agent homes, and leaves the
+scratch root to the SDK default (no `storage.scratchRoot`).
+
 ## Runtime environment
 
 Runtimes get the user's login-shell environment, not the Host's `process.env`
@@ -211,7 +244,8 @@ and a static tool-authorization policy in `toolAuthorization`:
 }
 ```
 
-- `runtimes.pi.agentUserContext`, `runtimes.claude.agentUserContext`,
+- `runtimes.pi.agentUserContext`, `runtimes.pi.packageDir`,
+  `runtimes.claude.agentUserContext`,
   `runtimes.claude.agentSessionPersistence`,
   `runtimes.codex.agentUserMcpServers`, `runtimes.grok.compatInstructions` and
   `runtimes.grok.agentUserMcpServers` go to the adapter constructors. An unset
@@ -684,6 +718,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimeAllowlist` | common | array |
 | `runtimes` | advanced | object |
 | `runtimes.pi` | advanced | object |
+| `runtimes.pi.durableLane` | advanced | boolean |
 | `runtimes.pi.agentUserContext` | advanced | "excluded" / "inherit" |
 | `runtimes.pi.versionPolicy` | advanced | object |
 | `runtimes.pi.versionPolicy.qualifiedVersion` | required when parent is set | string |
@@ -691,7 +726,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.pi.versionPolicy.allow` | advanced | array |
 | `runtimes.pi.versionPolicy.warn` | advanced | array |
 | `runtimes.pi.versionPolicy.block` | advanced | array |
-| `runtimes.pi.durableLane` | advanced | boolean |
+| `runtimes.pi.packageDir` | advanced | string |
 | `runtimes.claude` | advanced | object |
 | `runtimes.claude.agentUserContext` | advanced | "excluded" / "inherit" |
 | `runtimes.claude.agentSessionPersistence` | advanced | "disabled" / "enabled" |
@@ -802,6 +837,20 @@ still need correction. Codes do not replace the reported field/path or cause.
 
 Use the manifest shipped with the target distribution; its `from`/`to` versions
 identify that transition. The current relevant entries are generated below.
+
+A Host that skips releases checks the whole range after it installs the
+target train, from the directory that resolves its `@byok-sdk/*` packages:
+
+```sh
+npx byok-agent upgrade check --from 0.32.0 --json
+```
+
+It lists every breaking manifest entry released after `--from`, with its
+release and migration link, and checks that every installed `@byok-sdk/*`
+package has the client's version. Exit 2 means a migration or a mixed train
+needs action; see [the upgrade manifest](upgrade-manifest.md#upgrading-across-releases).
+A `--from` before 0.31.0 has no manifest: follow the release's
+`docs/releases/host-upgrade-<version>.md` instead.
 Historical changes not represented by a current manifest entry remain linked to
 their source contract rather than being assigned invented release versions:
 
@@ -821,7 +870,7 @@ their source contract rather than being assigned invented release versions:
   [the shared approval path](security.md#3-shared-approval-path).
 
 <!-- generated:migrations:start -->
-Manifest transition: **0.34.0 → 0.34.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
+Manifest transition: **0.35.0 → 0.35.1**. Versions and entries below come from the current package manifest; they are not a release announcement.
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|

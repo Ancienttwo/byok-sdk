@@ -48,7 +48,7 @@ if (process.argv[2] !== 'capture') {
   const input=JSON.parse(await fs.readFile(process.argv[3],'utf8'));
   let capture; let runtime; let stage='prepare';
   try {
-    const adapter=new sdk.PiAdapter({sdkHelperHost:{mode:'self-executable',executable:process.execPath,entry:process.argv[1]},spawnFn:(command,args,options)=>{
+    const adapter=new sdk.PiAdapter({sdkHelperHost:{mode:'self-executable',executable:process.execPath,entry:process.argv[1]},packageDir:input.piPackageDir,spawnFn:(command,args,options)=>{
       const configPath=args[args.indexOf('--config')+1];
       const configBytes=readFileSync(configPath,'utf8');
       capture={command,args,options,configPath,configBytes,config:JSON.parse(configBytes)};
@@ -222,9 +222,9 @@ describe('Pi launch path — single-file product re-entry (sdkHelperHost)', () =
         // captured child environment instead isolates HOME, and we audit the
         // default cache too.
         const assetRoot = path.join(release, 'assets');
-        // The product names its Pi asset root in its own environment.
+        // The product names its Pi asset root as packageDir; the SDK gives it to the Pi child (#1315).
         const env = { PATH: process.env.PATH ?? '', HOME: home, TMPDIR: runDir, npm_config_registry: registryUrl,
-          PI_CODING_AGENT_DIR: path.join(runDir, 'agent'), PI_PACKAGE_DIR: assetRoot };
+          PI_CODING_AGENT_DIR: path.join(runDir, 'agent') };
         const bootstrapEnv = { ...env, BUN_INSTALL_CACHE_DIR: cacheDir, BUN_CONFIG_DEFAULT_REGISTRY: registryUrl };
         const fixture = await preparedFixture(runDir, runDir, { PATH: env.PATH }, providerUrl);
         await fs.mkdir(env.PI_CODING_AGENT_DIR);
@@ -263,7 +263,7 @@ describe('Pi launch path — single-file product re-entry (sdkHelperHost)', () =
           const entryKind = kind === 'instruction' ? 'pi-rpc' : 'pi-prepared';
           const reportPath = path.join(runDir, `${kind}-report.json`);
           const inputPath = path.join(runDir, `${kind}-input.json`);
-          await fs.writeFile(inputPath, JSON.stringify({ ...fixture, release, kind, env, mcpEnv: { PATH: env.PATH },
+          await fs.writeFile(inputPath, JSON.stringify({ ...fixture, release, kind, env, piPackageDir: assetRoot, mcpEnv: { PATH: env.PATH },
             scratchRoot: testScratchRoot(), report: reportPath }));
           try { await execFileAsync(interpreter, ['--no-install', bundle, 'capture', inputPath], { cwd: runDir, env: bootstrapEnv, timeout: 20_000 }); }
           catch (error) {
@@ -532,8 +532,8 @@ describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
       await fs.writeFile(slotPreload, SLOT_OWNER_PRELOAD);
       const cwd = path.join(release, 'workspace');
       await fs.mkdir(cwd);
-      const launch = serializePiHostConfig({ format: 'byok.pi.rpc-launch', version: 9, credentialSource: 'pi-auth-store', cwd,
-        agentUserContext: 'inherit', agentSkillPaths: [], agentExtensionPaths: [], toolAuthorization: null,
+      const launch = serializePiHostConfig({ format: 'byok.pi.rpc-launch', version: 10, credentialSource: 'pi-auth-store', cwd,
+        agentUserContext: 'inherit', agentHome: null, agentSkillPaths: [], agentExtensionPaths: [], toolAuthorization: null,
         fileScope: null, mcp: { mcpEnv: {}, mcpServers: {}, observation: {} } });
       const configPath = path.join(release, 'launch.json');
       await fs.writeFile(configPath, launch.bytes);

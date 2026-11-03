@@ -2,6 +2,216 @@
 
 ## Unreleased
 
+## 0.35.1 — source candidate
+
+0.35.1 is a PATCH release under the pre-1.0 policy: corrections only, with no
+new public API, persistence or security authority. The upgrade manifest that
+`@byok-sdk/client` ships (`packages/client/upgrade-manifest.json`, 0.35.0 to
+0.35.1) holds 1 additive entry, for the K8 example test Host, and no breaking
+entry. The wire stays v5 (`PROTOCOL_VERSION = 5`) with an unchanged corpus.
+There is no new Postgres migration and no SQLite schema change. See the
+[0.35.1 candidate notes](docs/releases/v0.35.1.md) and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.35.1.md).
+
+- **Added (examples)** — K8 exports `./l-test-host`
+  (`src/l-test-host.test-support.ts`), an L test Host built only from the
+  published packages: an embedded SQLite server, a paired daemon with a stub
+  runtime that submits the result document, and the `HostLedger`. The K8
+  routine and delivery vectors now run on it instead of the K4 `openHost`, so a
+  Host that vendors K8 can run them too. `src/VENDOR.md` Layer 3 lists the file
+  and no longer tells a Host to skip these vectors (#1325).
+
+- **Fix (client; #1335)** — Grok no longer declares
+  `isolation.userContext`. `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
+  `[paths] extra_rule_dirs` still reach an Agent task, and `compatInstructions`
+  turns off only the Claude and Cursor sources. A Host that gates on
+  `isolation.userContext` now reads `false` for Grok, as it already did for
+  Codex.
+
+- **Fix (client; #1350)** — a failed or interrupted service upgrade now rolls
+  back a Host directory store whose accepted path ends in `/`, `/.` or `/./`.
+  Before, restore failed with `EINVAL` on Linux and `recover()` stayed
+  pending, leaving candidate data in the directory and the current pointer on
+  the candidate. A pending upgrade recorded with that spelling now recovers,
+  and recovery still refuses a directory root that is a symlink before it
+  restores any store.
+
+- **Fix (client; #1342)** — `byok-agent status`, doctor and the support bundle
+  no longer report a store file as replaced or as changed during the read when
+  only its metadata changed (its ctime, for example after icacls pushes
+  inherited permissions down on Windows). A replaced file or changed bytes
+  still fail as before.
+
+- **Fix (client; #1365)** — the summary of the `device` diagnostics check
+  names the reason when the device identity cannot be read: the failing
+  safe-open step, with the fs error code when there is one, instead of
+  a bare `unavailable`. Only the summary text changes; the
+  `DiagnosticsSnapshot.device` type is unchanged.
+
+- **Fix (client; #1366)** — operational health hardens its `storeDir` once per
+  tracker instead of on every write. On Windows each write ran icacls, which
+  pushed inherited permissions down onto every `storeDir` file and changed the
+  ctime of `device.json` and `control.token` (the likely source of the #1342
+  reports). A hardening that fails is not recorded, so the next write still
+  fails closed.
+
+- **Fix (keys; #1364)** — the Windows Pi projection ACL query no longer loads
+  `System.Web.Extensions` or uses `JavaScriptSerializer`. The path arrives
+  alone on stdin as strict UTF-8 and the script writes its JSON itself. A cold
+  query took a median of about 0.45s in CI, down from 2.65s. The exit-code
+  mapping and the TypeScript validation of the result are unchanged; an empty
+  path, which the SDK never sends, now exits `invalid_request` instead of
+  `unexpected`. The remaining PowerShell start and exit time is #1373.
+
+## 0.35.0 — 2026-11-02 (published)
+
+0.35.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+The upgrade manifest that `@byok-sdk/client` ships
+(`packages/client/upgrade-manifest.json`, 0.34.0 to 0.35.0) lists the
+Host-visible changes since 0.34.0 that change an API, config or example item:
+3 breaking entries and 6 additive entries, each with a migration link. The
+`approveTools` change (#1324) changes behavior only, so it has no manifest
+entry; it is the third Breaking (client) item below. The wire stays v5
+(`PROTOCOL_VERSION = 5`) with an unchanged corpus. There is no new Postgres
+migration and no SQLite schema change. See the
+[0.35.0 release notes](docs/releases/v0.35.0.md) and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.35.0.md). The breaking
+changes, all in client: `runtimes.pi.packageDir` is the only Pi asset root,
+and `PI_PACKAGE_DIR` no longer reaches Pi from the environment (#1315);
+`progressMessageBoundary` replaces `progressEventsAreMessages`, and a Session
+without a member its descriptor declares fails at start (#1323);
+`approveTools` is a grant and no longer an admission requirement, which
+changes runtime selection (#1324); the service precheck, receipt and error
+hold `ServiceStoreVerdict` (#1328). The npm registry lists all nine public
+packages at 0.35.0 as `latest`, published on 2026-11-02 (UTC). The release
+commit is `312d5f6b6` on `main`, and the annotated tag `v0.35.0` and its
+GitHub Release point to it. This release does not say that 0.35.0, or a Host
+on it, is ready for production.
+
+- **Breaking (client)** — `DaemonConfig.runtimes.pi.packageDir` (and
+  `PiAdapterOptions.packageDir`) is the only source of the Pi asset root of a
+  product that bundles Pi. It must be absolute; the SDK sets `PI_PACKAGE_DIR`
+  from it for Pi and the pi-host helper process only, and a `PI_PACKAGE_DIR`
+  in the login-shell snapshot or the Host environment no longer reaches Pi.
+  `runtimeEnvironment.pass` naming `PI_PACKAGE_DIR` and a relative
+  `packageDir` throw `DaemonConfigInvalidError` (`invalid_value`). Migration:
+  move the value you put in `PI_PACKAGE_DIR` (for example the absolute form of
+  `SdkPackagingAssets.piPackageDir`) into `runtimes.pi.packageDir`, and drop
+  `PI_PACKAGE_DIR` from `runtimeEnvironment.pass` and the process environment
+  (#1315).
+- **Added (client)** — `createRuntimeAdapters(config)` from
+  `@byok-sdk/client/adapters` builds the adapters `createDaemon` builds for the
+  same `runtimeAllowlist`, `runtimes`, `codexSandbox`, `runtimeEnvironment`,
+  `nativeAssetRoot`, `sdkHelperHost` and `piByokLauncher`, so a Host that
+  decorates adapters for `createDaemonWithAdapters` no longer constructs them
+  itself. Invalid `codexSandbox` or `runtimeEnvironment` throws `TypeError`;
+  any other invalid value, including `runtimes.pi.durableLane`, throws
+  `DaemonConfigInvalidError` (#1315).
+- **Added (client)** — `byok-agent upgrade check --from <version> [--json]` and
+  `checkUpgradeFrom(fromVersion, { resolveFrom })`: every breaking
+  upgrade-manifest entry released after `--from`, with its release and
+  migration link, plus a check that every installed `@byok-sdk/*` package has
+  the client's version; exit 2 when either needs action. The client tarball
+  ships every released manifest since 0.31.0 in `upgrade-history/`, and a
+  rebaseline archives the released manifest instead of dropping it. See
+  [the upgrade manifest](docs/upgrade-manifest.md#upgrading-across-releases)
+  (#1316).
+- **Breaking (client)** — `RuntimeAdapterDescriptor.progressEventsAreMessages`
+  is removed, with no alias. Declare `progressMessageBoundary` instead:
+  `'event'` (each non-blank `progress` event is one message; Codex and dsh) or
+  `'session'` (`Session.progressStartsMessage` decides; Claude). Absent, as
+  before, consecutive `progress` events form one reply until a tool
+  interaction. `freezeRuntimeAdapterDescriptor` throws `TypeError` for any
+  other value. The daemon binds the members a descriptor declares once, when
+  `start()` returns, and no longer reads `session.<member>?.()`: a `'session'`
+  adapter whose Session has no `progressStartsMessage()` is closed and its task
+  fails at start with `runtime_session_incomplete` (`task.fail`,
+  non-retryable, failure class `unknown`). A Host that wraps an adapter or its
+  Session forwards every declared member; see
+  [Wrapping a Session](docs/adapter-capabilities.md#wrapping-a-session)
+  (#1323, aiphabee#427).
+- **Added (client)** — `ExecutionRecordUnknown` gains `evidence_missing`. A
+  `trajectoryEvidence: 'event-stream'` adapter whose started Session has no
+  `evidence()` keeps running, and its execution record is `unknown`
+  (`evidence_missing`) instead of silently omitting the adapter counts. A
+  declaring Session must implement `evidence()` and return zero counts when
+  nothing was dropped (#1323).
+- **Breaking (client)** — `approveTools` on a toolset server is a grant, not an
+  admission requirement. The daemon projects it only to a runtime whose
+  descriptor declares `mcpToolApprovals: true` (Codex today). It takes no part
+  in admission or runtime selection; any other runtime handles the server
+  exactly as it handles a server without `approveTools`. The declines
+  `runtime "<id>" cannot enforce Host MCP tool approvals` and `no available
+  runtime on this device can enforce Host MCP tool approvals` are removed. Two
+  behaviors change: an explicitly selected runtime without the capability (for
+  example Claude, Pi or Grok) now runs a task whose server carries
+  `approveTools`, where it was declined before claim; and automatic selection
+  on a device with both Claude and Codex now follows
+  `DEFAULT_RUNTIME_PREFERENCE` and picks Claude, where it picked Codex. No
+  field, default or wire shape changes. Migration: a Host that used
+  `approveTools` to keep a server on Codex pins the runtime with an explicit
+  runtime selection or `runtimeAllowlist`; a Host that wants Claude or Pi to
+  ask on every call sets `toolAuthorization` `auto` with an
+  `alwaysAsk { mcpServer }` rule; a Host that copied a toolset per runtime can
+  merge the copies into one id (#1324).
+- **Changed (client, behavior)** — Pi `agentUserContext: 'excluded'` now loads the
+  Agent home's own `AGENTS.md`, as Claude does with its `CLAUDE.md`: it excludes
+  user-level resources and the instruction files of every directory above the
+  Agent home, and keeps instruction files whose real path is in the Agent home
+  (`lease.canonicalHome`) or below it. Before, Pi loaded no context file at all.
+  The ordinary Pi launch config is now v10 with `agentHome`; v9 is refused, and
+  an excluded Agent task without a sealed canonical-home lease is refused before
+  spawning (#1338).
+- **Breaking (client)** — the service installation precheck prints
+  `{ "stores": ServiceStoreVerdict[] }`, and `ServiceUpgradeReceipt.stores` and
+  `ServiceInstallationError.stores` hold `ServiceStoreVerdict`, a new exported
+  type: `store` is an SDK `LocalStoreId` or a Host store id (1-64 of
+  `a-z 0-9 -`), and an optional `kind` is `file` (the default) or `directory`.
+  A directory store is snapshotted and restored as a whole tree, symlinks kept
+  as links. The precheck output is checked more strictly: a store id outside
+  the pattern, an unknown `kind`, a repeated path or a store inside a directory
+  store is `precheck_failed` ("did not produce a valid verdict"), and so is a
+  store whose path is not what its `kind` says, or is a symlink, at the
+  snapshot; a symlinked store file was followed and copied before. A copy that
+  fails is the new code `snapshot_failed`, with the copy error as its `cause`:
+  the receipt is `failed` and the old version is started again. A snapshot that 0.34 wrote is still restored.
+  Migration: a Host that reads `stores` as `StoreCompatibility` reads
+  `ServiceStoreVerdict`; a precheck that printed `StoreCompatibility[]` needs
+  no change; a reader with an exhaustive switch over the codes gets one more
+  case (#1328).
+
+- **Added (client)** — `ServiceInstallationOptions.daemonStores()` and the
+  `ServiceDaemonStore` type: a service process that owns several daemon stores
+  lists them, and every upgrade, rollback and recover stops all of them, holds
+  an owner lease and the store gate of each through the pointer switch, and
+  ends each store's owned processes. It requires `healthCheck`
+  (`createServiceInstallation` throws `TypeError` without it). A list with a
+  relative or repeated `storeDir` or an empty `productId`, or a throw, is the
+  new `ServiceInstallationErrorCode` `daemon_stores_invalid`: the receipt is
+  `failed`, nothing is switched and the old version is started again. A reader
+  with an exhaustive switch over the codes gets one more case (#1328).
+- **Changed (client)** — the stop before an upgrade, rollback or recover now
+  takes an owner lease on each daemon store, the default single store
+  included, instead of polling for a missing `daemon-owner.json` and
+  `control.token`. A store a crashed daemon left behind (a dead owner, a
+  `control.token` whose endpoint refuses connections) is reclaimed and the
+  upgrade goes on; before, it was `store_busy` until that daemon started again
+  (#1328).
+
+- **Added (examples)** — K8 history rows from an external history authority
+  can carry an optional `reply`, the reply text the user saw for that Turn;
+  K8 freezes it in the ContextPack row, counts it in `contextMaxBytes` and
+  covers it in `historyDigest` (#1318). K8 gains the owner call
+  `cancelHostIntent(key)` (#1320). A Host that vendored K8 copies the new
+  `rules/context.ts`; see
+  [external history authority](examples/bot-collaboration/README.md#external-history-authority).
+
+- **Added (keys)** — `WindowsCredentialManagerSecretStoreOptions.systemRoot`: the
+  absolute Windows system directory PowerShell is started from. Omitted, the
+  store reads `process.env.SystemRoot` once at construction; an injected value
+  that is not absolute makes the store unavailable and never falls back to the
+  process environment (#1310).
+
 ## 0.34.0 — 2026-11-02 (published)
 
 0.34.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

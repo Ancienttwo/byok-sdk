@@ -177,7 +177,7 @@ export interface McpStdioServerConfig {
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
   mcpServers: Readonly<Record<string, McpStdioServerConfig & {
-    /** Exact Host-approved tool names; omitted or empty adds no approval. Local configuration only. */
+    /** Exact Host-approved tool names, granted only to a runtime that declares `mcpToolApprovals`; never an admission requirement. Omitted or empty grants nothing. Local configuration only. */
     readonly approveTools?: readonly string[];
   }>>;
 }
@@ -264,11 +264,12 @@ export interface Session {
   /** Normalized events for this session; the daemon batches these into `task.progress`. A `MessageDraftDelta` only feeds the display-only draft. */
   events: AsyncIterable<AgentEvent | MessageDraftDelta>;
   /**
-   * For an adapter whose descriptor sets `progressEventsAreMessages` but
-   * emits one assistant message as several `progress` events. Return false
-   * when `event`, an object this session's `events` yielded, continues the
-   * message of an earlier event: the daemon then keeps both in the same
-   * closing reply. Absent: every non-blank `progress` event starts a message.
+   * Required when the descriptor declares `progressMessageBoundary:
+   * 'session'`; the daemon closes and refuses a started session without it
+   * (`runtime_session_incomplete`). Return false when `event`, an object this
+   * session's `events` yielded, continues the message of an earlier event:
+   * the daemon then keeps both in the same closing reply. Never read for any
+   * other boundary.
    */
   progressStartsMessage?(event: Extract<AgentEvent, { type: 'progress' }>): boolean;
   /** Inject steering text into a running turn (mid-stream). */
@@ -286,10 +287,10 @@ export interface Session {
   close(): Promise<void>;
   /**
    * Runtime output this session could not turn into `events`, as counts for
-   * the whole session up to `close()`. The daemon reads it once, after
-   * `close()` resolved, and only when the descriptor declares
-   * `trajectoryEvidence`. A declaring adapter that omits it states that
-   * nothing below its event stream can drop or invent a frame.
+   * the whole session up to `close()`. Required when the descriptor declares
+   * `trajectoryEvidence`; return zero counts when nothing was dropped. The
+   * daemon reads it once, after `close()` resolved. A declaring session
+   * without it makes the execution record `unknown` (`evidence_missing`).
    */
   evidence?(): SessionEvidence;
 }
@@ -335,25 +336,27 @@ export interface RuntimeAdapterDescriptor {
    * never makes an offer wait on one it has no use for.
    */
   readonly requiresMcpToolsetToolObservation?: boolean;
-  /** Can enforce the local Host's exact per-tool MCP approvals. Nonempty grants require this capability. */
+  /** Receives the local Host's exact per-tool MCP approvals; projects grants; absent = the runtime receives none; never an admission requirement. */
   readonly mcpToolApprovals?: boolean;
   /**
-   * Whether each `progress` event carries one complete assistant message
-   * rather than a streaming delta. Codex emits one event per completed
-   * `agentMessage`, and Claude one per complete text block, so commentary and
-   * the final answer arrive as separate events with no tool interaction
-   * between them. When this is true, the
-   * daemon starts a new closing reply at every `progress` event, so the
-   * closing reply (`task.complete.finalMessage`) is the last message only.
-   * Absent or false: consecutive `progress` events form one reply until a
-   * tool interaction.
+   * Where one assistant message ends among `progress` events. The closing
+   * reply (`task.complete.finalMessage`) is the last message.
+   *
+   * - Absent: `progress` events are streaming deltas; consecutive ones form
+   *   one reply until a tool interaction.
+   * - `'event'`: each non-blank `progress` event is one complete message and
+   *   starts a new reply. Codex (one event per `agentMessage`) and dsh.
+   * - `'session'`: `Session.progressStartsMessage` decides for each non-blank
+   *   `progress` event, and the Session must implement it. Claude, whose
+   *   events are text blocks and one message can span several.
    */
-  readonly progressEventsAreMessages?: boolean;
+  readonly progressMessageBoundary?: 'event' | 'session';
   /**
    * Declares `Session.events` as the evidence source of the daemon's local
    * execution record (`daemon/execution-record.ts`): every tool call and
    * result carries its `toolCallId`, and `turn_end` means the runtime
-   * completed. Absent: every record of this adapter is `unknown`.
+   * completed. The Session must implement `evidence()`. Absent: every record
+   * of this adapter is `unknown`.
    */
   readonly trajectoryEvidence?: 'event-stream';
   /**
@@ -571,7 +574,7 @@ interface RuntimeOperationStartBase {
   readonly env: NodeJS.ProcessEnv;
   /** Local MCP authority resolved from logical wire ids. */
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
-  /** Local registry approvals copied and frozen with this attempt's servers; never sourced from wire or transcript. */
+  /** Local registry approvals copied and frozen with this attempt's servers, present only when the descriptor declares `mcpToolApprovals`; never sourced from wire or transcript. */
   readonly mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
   /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
   readonly mcpToolsetTools?: McpToolsetToolObservation;
@@ -671,6 +674,11 @@ export interface RuntimeAdapter {
   projectMcpEnvironment?(env: Readonly<Record<string, string>>): Readonly<Record<string, string>>;
 }
 
+function progressMessageBoundaryOf(value: unknown): 'event' | 'session' {
+  if (value === 'event' || value === 'session') return value;
+  throw new TypeError(`invalid RuntimeAdapterDescriptor.progressMessageBoundary: ${String(value)}`);
+}
+
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */
 export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescriptor): RuntimeAdapterDescriptor {
   return Object.freeze({
@@ -678,7 +686,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     ...(descriptor.mcpToolApprovals === true ? { mcpToolApprovals: true } : {}),
-    ...(descriptor.progressEventsAreMessages === true ? { progressEventsAreMessages: true } : {}),
+    ...(descriptor.progressMessageBoundary === undefined ? {} : { progressMessageBoundary: progressMessageBoundaryOf(descriptor.progressMessageBoundary) }),
     ...(descriptor.trajectoryEvidence === 'event-stream' ? { trajectoryEvidence: 'event-stream' as const } : {}),
     ...(descriptor.platforms === undefined ? {} : { platforms: Object.freeze([...descriptor.platforms]) }),
     ...(descriptor.fileScope === undefined ? {} : { fileScope: Object.freeze({ lanes: Object.freeze([...descriptor.fileScope.lanes]) }) }),

@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { StoreCompatibility } from '@byok-sdk/core';
 import { readServiceInstallationState, type ServiceInstallation, type ServiceUpgradeReceipt } from '../../lifecycle/service-installation';
 import { inspectDaemonStores } from '../../diagnostics/store-compatibility';
+import { checkUpgradeFrom } from '../../lifecycle/upgrade-from';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../official-release';
 
 /** Exit code when the check ran and at least one store would not be opened as it is. */
@@ -34,6 +35,29 @@ export async function runUpgradeStoreCheckCommand(options: UpgradeStoreCheckOpti
   return stores.every((store) => store.verdict === 'accepted' || store.verdict === 'absent')
     ? 0
     : UPGRADE_CHECK_REFUSED_EXIT_CODE;
+}
+
+/**
+ * `byok-agent upgrade check --from <version>` (#1316): the breaking manifest
+ * entries since `fromVersion` and the train of `@byok-sdk/*` packages that
+ * resolve from the working directory. Returns 0 on `pass`,
+ * {@link UPGRADE_CHECK_REFUSED_EXIT_CODE} otherwise.
+ */
+export function runUpgradeFromCheckCommand(options: {
+  readonly fromVersion: string; readonly json: boolean; readonly resolveFrom?: string; readonly log?: (line: string) => void;
+}): number {
+  const log = options.log ?? ((line: string) => console.log(line));
+  const report = checkUpgradeFrom(options.fromVersion, options.resolveFrom === undefined ? {} : { resolveFrom: options.resolveFrom });
+  if (options.json) {
+    log(JSON.stringify(report, null, 2));
+  } else {
+    log(`byok-agent upgrade check ${report.from} -> ${report.to ?? '(unresolved)'}: ${report.verdict}`);
+    if (report.refusal !== undefined) log(`${report.refusal.code} — ${report.refusal.message}`);
+    for (const entry of report.breaking) log(`breaking ${entry.release} ${entry.id} — ${entry.migration}`);
+    log(`additive entries: ${report.additiveCount}`);
+    for (const pkg of report.train.packages) log(`${pkg.version === 'absent' || pkg.version === report.train.version ? 'train' : 'train-mismatch'} ${pkg.name} ${pkg.version}`);
+  }
+  return report.verdict === 'pass' ? 0 : UPGRADE_CHECK_REFUSED_EXIT_CODE;
 }
 
 function formatStore(store: StoreCompatibility): string {

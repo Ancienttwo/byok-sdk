@@ -27,7 +27,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * M3-1 white-label config coverage:
  *  - `DaemonConfig.branding` is carried through to `status().branding` verbatim.
  *  - `createDaemon` builds its bundled adapter set FROM `runtimeAllowlist`
- *    (see `create-daemon.ts`'s `buildDefaultAdapters`/`createDaemon` doc
+ *    (see `adapters/runtime-adapters.ts`'s `buildRuntimeAdapters`/`createDaemon` doc
  *    comments for the exact unset-vs-set contract this locks in) instead of
  *    the old hard-wired pi-only default.
  *  - `runtimeAllowlist`'s separate, pre-existing enforcement in

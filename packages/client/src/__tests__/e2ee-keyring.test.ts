@@ -1449,6 +1449,8 @@ describe('device member KEM rotation after a shred (E5b-2)', () => {
     await web.append('shred', { scopeId: 'scope-b' });
     await keyring.catchUp();
     await rotated(custody, 2);
+    // The custody holds epoch 2 before the session keys swap and the rotation logs it.
+    await keyring.kemRotationSettled();
     expect(server.e2ee.deviceAppends).toHaveLength(1);
     expect(logs).toContain('rotated the member KEM key to epoch 2');
     await keyring.catchUp();

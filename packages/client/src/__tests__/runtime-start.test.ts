@@ -1,15 +1,18 @@
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { expect, it, vi } from 'vitest';
 import { startOwnedRuntime } from '../daemon/runtime-start';
-import { RuntimeStartupDisposalFailure } from '../runtime-failure';
-import type { RuntimeOperationStartInput, Session } from '../types';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
+import { freezeRuntimeAdapterDescriptor, type RuntimeAdapterDescriptor, type RuntimeOperationStartInput, type Session } from '../types';
+
+const descriptor = (progressMessageBoundary?: RuntimeAdapterDescriptor['progressMessageBoundary']): RuntimeAdapterDescriptor =>
+  freezeRuntimeAdapterDescriptor({ id: 'wrapped', supportsDispatchSelection: false, capabilities: { steer: false, resume: false, approvalInteractive: false }, progressMessageBoundary });
 
 it('a startup deadline retains a late session until its close receipt', async () => {
 const __executionScratch = await testExecutionScratch();
 
   let resolve!: (session: Session) => void;
   const pending = new Promise<Session>(r => { resolve = r; });
-  const error = await startOwnedRuntime(() => pending, { scratch: __executionScratch, } as RuntimeOperationStartInput, new AbortController().signal, 10).catch(e => e);
+  const error = await startOwnedRuntime(() => pending, { scratch: __executionScratch, } as RuntimeOperationStartInput, descriptor(), new AbortController().signal, 10).catch(e => e);
   expect(error).toBeInstanceOf(RuntimeStartupDisposalFailure);
   await expect(error.retryDisposal()).rejects.toThrow('receipt');
   const close = vi.fn().mockRejectedValueOnce(new Error('not quiescent')).mockResolvedValue(undefined);
@@ -19,4 +22,35 @@ const __executionScratch = await testExecutionScratch();
   await expect(error.retryDisposal()).rejects.toThrow('not quiescent');
   await expect(error.retryDisposal()).resolves.toBeUndefined();
   expect(close).toHaveBeenCalledTimes(2);
+});
+
+it('closes, then refuses a session that lacks the progressStartsMessage its descriptor declares', async () => {
+  const close = vi.fn().mockResolvedValue(undefined);
+  const error = await startOwnedRuntime(async () => ({ close } as unknown as Session), {} as RuntimeOperationStartInput,
+    descriptor('session'), new AbortController().signal, 1_000).catch(e => e);
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+  expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+  expect(error.message).toMatch(/^runtime_session_incomplete: /);
+});
+
+it('quarantines an incomplete session whose close() fails', async () => {
+  const close = vi.fn().mockRejectedValueOnce(new Error('not quiescent')).mockResolvedValue(undefined);
+  const error = await startOwnedRuntime(async () => ({ close } as unknown as Session), {} as RuntimeOperationStartInput,
+    descriptor('session'), new AbortController().signal, 1_000).catch(e => e);
+  expect(error).toBeInstanceOf(RuntimeStartupDisposalFailure);
+  await expect(error.retryDisposal()).resolves.toBeUndefined();
+  expect(close).toHaveBeenCalledTimes(2);
+});
+
+it.each([['event'], [undefined]] as const)('starts a session without progressStartsMessage for boundary %s', async boundary => {
+  const session = { close: vi.fn() } as unknown as Session;
+  const started = await startOwnedRuntime(async () => session, {} as RuntimeOperationStartInput,
+    descriptor(boundary), new AbortController().signal, 1_000);
+  expect(started).toEqual({ session, members: {} });
+  expect(session.close).not.toHaveBeenCalled();
+});
+
+it('refuses a progressMessageBoundary outside its closed set', () => {
+  expect(() => descriptor('message' as never)).toThrow(TypeError);
 });

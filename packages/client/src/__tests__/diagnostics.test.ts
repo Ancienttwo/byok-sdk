@@ -505,6 +505,53 @@ describe('diagnostics collector', () => {
     expect(snapshot.runtimes).toMatchObject([{ present: false }]);
     expect(JSON.stringify(snapshot)).not.toContain('hanging');
   });
+
+  async function deviceCheckSummary(dir: string): Promise<string | undefined> {
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(snapshot.device).toEqual({ status: 'unavailable' });
+    return snapshot.checks.find((check) => check.id === 'device')?.summary;
+  }
+
+  it('names the fs error code when device.json cannot be opened', async () => {
+    const dir = await tempDir();
+    const devicePath = path.join(dir, 'device.json');
+    await fs.writeFile(devicePath, JSON.stringify({ deviceId: 'device-1' }));
+    const realOpen = fs.open.bind(fs);
+    const open = vi.spyOn(fs, 'open').mockImplementation((target, ...rest) => {
+      if (target === devicePath) return Promise.reject(Object.assign(new Error('denied'), { code: 'EPERM' }));
+      return realOpen(target, ...rest);
+    });
+    try {
+      expect(await deviceCheckSummary(dir)).toBe('unavailable: device identity could not be opened safely (EPERM)');
+    } finally {
+      open.mockRestore();
+    }
+  });
+
+  it('names the identity change when device.json is replaced before safe open', async () => {
+    const dir = await tempDir();
+    const devicePath = path.join(dir, 'device.json');
+    await fs.writeFile(devicePath, JSON.stringify({ deviceId: 'device-1' }));
+    const realOpen = fs.open.bind(fs);
+    const open = vi.spyOn(fs, 'open').mockImplementation((target, ...rest) => {
+      if (target === devicePath) {
+        renameSync(devicePath, `${devicePath}.original`);
+        writeFileSync(devicePath, JSON.stringify({ deviceId: 'device-2' }));
+      }
+      return realOpen(target, ...rest);
+    });
+    try {
+      expect(await deviceCheckSummary(dir)).toBe('unavailable: device identity pathname changed before safe open');
+    } finally {
+      open.mockRestore();
+    }
+  });
+
+  it('names the parse failure when device.json is not valid JSON', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(path.join(dir, 'device.json'), '{not json');
+    expect(await deviceCheckSummary(dir)).toBe('unavailable: device identity is not valid JSON');
+  });
 });
 
 describe('doctor explicit fix', () => {

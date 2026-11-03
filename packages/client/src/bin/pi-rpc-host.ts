@@ -1,7 +1,7 @@
 import { parsePiAgentResources } from '../adapters/pi/agent-resources';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
-import { readFileSync, mkdirSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { readFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAgentDir, type CreateAgentSessionOptions, type InlineExtension } from '@earendil-works/pi-coding-agent';
 import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
@@ -26,7 +26,7 @@ const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
-  readonly version: 9;
+  readonly version: 10;
   /**
    * `keys-profile`: the keys launcher parents this host, and the provider key
    * arrives over its private IPC channel. `pi-auth-store`: the device's own
@@ -37,6 +37,8 @@ export interface PiRpcHostConfig {
   readonly cwd: string;
   /** `excluded` isolates user resources; it never removes a tool. */
   readonly agentUserContext: 'inherit' | 'excluded';
+  /** The lease's canonical home under `excluded`, else null: only its instruction files load. */
+  readonly agentHome: string | null;
   readonly agentSkillPaths: readonly string[];
   readonly agentExtensionPaths: readonly string[];
   /** The `auto` gate for this session and its native Pi subagents; null in `all`. */
@@ -65,6 +67,12 @@ function fail(message: string): never {
   throw new Error(`byok-pi-rpc: ${message}`);
 }
 
+/** The same at-or-below test as Claude's Agent user-context exclusion. */
+function within(home: string, path: string): boolean {
+  const rel = relative(home, path);
+  return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
 /** A callable host owns CLI usage errors; thin bins must not reformat them. */
 function failUsage(message: string): never {
   process.stderr.write(`byok-pi-rpc: ${message}\n`);
@@ -74,11 +82,11 @@ function failUsage(message: string): never {
 export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('config must be an object');
   const raw = value as Record<string, unknown>;
-  const keys = ['format', 'version', 'credentialSource', 'cwd', 'mcp', 'agentUserContext', 'agentSkillPaths', 'agentExtensionPaths', 'toolAuthorization', 'fileScope'];
+  const keys = ['format', 'version', 'credentialSource', 'cwd', 'mcp', 'agentUserContext', 'agentHome', 'agentSkillPaths', 'agentExtensionPaths', 'toolAuthorization', 'fileScope'];
   if (Object.keys(raw).some((key) => !keys.includes(key)) || keys.some((key) => !(key in raw))) {
     fail(`config must contain exactly ${keys.join(', ')}`);
   }
-  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 9) fail('unsupported config format/version');
+  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 10) fail('unsupported config format/version');
   const resources = parsePiAgentResources({ userContext: raw.agentUserContext, skillPaths: raw.agentSkillPaths, extensionPaths: raw.agentExtensionPaths });
   const credentialSource = raw.credentialSource;
   if (typeof credentialSource !== 'string' || !(CREDENTIAL_SOURCES as readonly string[]).includes(credentialSource)) {
@@ -87,11 +95,18 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (typeof raw.cwd !== 'string' || !isAbsolute(raw.cwd) || resolve(raw.cwd) !== raw.cwd) {
     fail('config.cwd must be a normalized absolute path');
   }
+  const agentHome = raw.agentHome;
+  if (resources.userContext === 'excluded'
+    ? typeof agentHome !== 'string' || !isAbsolute(agentHome) || resolve(agentHome) !== agentHome
+    : agentHome !== null) {
+    fail('config.agentHome must be a normalized absolute path under excluded user context and null otherwise');
+  }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   return {
-    format: 'byok.pi.rpc-launch', version: 9,
+    format: 'byok.pi.rpc-launch', version: 10,
     credentialSource: credentialSource as PiRpcHostConfig['credentialSource'], cwd: raw.cwd, mcp,
     agentUserContext: resources.userContext,
+    agentHome: agentHome as string | null,
     agentSkillPaths: resources.skillPaths,
     agentExtensionPaths: resources.extensionPaths,
     toolAuthorization: raw.toolAuthorization === null ? null : parseToolAuthorizationIpcConfig(raw.toolAuthorization),
@@ -246,6 +261,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   };
   setToolAuthorizationGateEnv(childGate, join(dirname(args.configPath), 'tool-authorization.json'));
   if (config.toolAuthorization !== null) extensionFactories.push(createPiToolAuthorizationHook(config.toolAuthorization));
+  const agentHome = config.agentHome === null ? null : realpathSync(config.agentHome);
   let resourceAgentDir: string | undefined;
   if (config.agentUserContext === 'excluded') {
     resourceAgentDir = join(dirname(args.configPath), 'pi-agent-resources');
@@ -260,9 +276,12 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
       extensionFactories,
       additionalSkillPaths: [...config.agentSkillPaths],
       additionalExtensionPaths: [...config.agentExtensionPaths],
-      ...(config.agentUserContext === 'excluded' ? {
-        noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-      } : {}),
+      ...(agentHome === null ? {} : {
+        noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
+        // Only instruction files whose real path is at or below the Agent home
+        // load, as for Claude; the user's and every ancestor directory's do not.
+        agentsFilesOverride: ({ agentsFiles }) => ({ agentsFiles: agentsFiles.filter(file => within(agentHome, realpathSync(file.path))) }),
+      }),
     },
     ...(providerApiKey === undefined ? {} : { providerApiKey }),
     ...(fileScope === undefined ? {} : {

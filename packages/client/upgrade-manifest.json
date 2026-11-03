@@ -2,18 +2,36 @@
   "schemaVersion": 1,
   "package": "@byok-sdk/client",
   "from": {
-    "version": "0.34.0",
-    "snapshotSha256": "fee22954a2a80cb73c9e2d790d31e6e3b3618d535f0027c6942622bb80df981c"
+    "version": "0.35.0",
+    "snapshotSha256": "9d71ff20dc74f88a519fc46d47f14f6e39ab08472ba8ec179accc00b4ad45d76"
   },
   "to": {
-    "version": "0.34.0",
-    "snapshotSha256": "fee22954a2a80cb73c9e2d790d31e6e3b3618d535f0027c6942622bb80df981c"
+    "version": "0.35.1",
+    "snapshotSha256": "9d110107a982e603805ce02a5141351bb41bc3ed5b574813f418e0f89fe9eb71"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "k8-l-test-host",
+      "impact": "additive",
+      "summary": "K8 exports ./l-test-host (src/l-test-host.test-support.ts), an L test Host built only from the published packages: an embedded SQLite server, a paired daemon with a stub runtime that submits the result document, and the HostLedger. The K8 routine and delivery vectors run on it instead of the K4 openHost, so a Host that vendors K8 can run them too (#1325). The K8 rules and their runtime behavior do not change; a Host that vendored K8 copies the new file with the two contract tests, as src/VENDOR.md Layer 3 lists.",
+      "migration": "examples/bot-collaboration/src/VENDOR.md#layer-3-shared-vectors",
+      "items": [
+        "example:bot-collaboration"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=13268de4f68b46f5",
+      "after": "K8 0.0.1 src-sha256=203a3a753c7dee77",
+      "entry": "k8-l-test-host"
+    }
+  ]
 }

@@ -8,13 +8,9 @@ import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../
 import { runtimeVersionPolicyProjection } from '../../runtime-version-policy';
 import { toRuntimeInfoCapabilities } from '../runtime-capabilities';
 import { type AgentContentReadSurface, type AgentContentReadPolicySelection, AGENT_CONTENT_READ_CAPABILITIES, createAgentContentReadPolicy, type AgentContentReadPolicy } from '../agent-content-read';
-import { PiAdapter } from '../../adapters/pi/pi-adapter';
-import { ClaudeAdapter } from '../../adapters/claude/claude-adapter';
-import { CodexAdapter } from '../../adapters/codex/codex-adapter';
-import { GrokAdapter } from '../../adapters/grok/grok-adapter';
 import { DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_MAX_TTL_MS } from '@byok-sdk/core';
 import type { AgentContentReadConfig, DaemonConfig, DeviceAssertionConfig } from '../create-daemon';
-import { resolvePiByokLauncher } from './config';
+import { ALL_RUNTIME_IDS } from '../../adapters/runtime-adapters';
 
 /**
  * Module-scope helpers of the daemon composition (#926): constants, adapter
@@ -303,88 +299,6 @@ export function policyRevisionMismatchPolicies(
 }
 
 /**
- * Canonical construction/identity order for `createDaemon`'s bundled adapter
- * set (`buildDefaultAdapters` below) and for `conn.hello.runtimes`
- * reporting order (`detectRuntimes`) — this is NOT the auto-select priority
- * order.
- *
- * M5 batch-3 (workstream 1): auto-select priority now lives entirely in
- * `task-runner.ts`, as its own explicit order independent of this one — see
- * `DEFAULT_RUNTIME_PREFERENCE`/`TaskRunner.pickAdapter`, overridable
- * per-daemon via `DaemonConfig.runtimePreference` above. Before this change,
- * `pickAdapter`'s no-runtime branch walked `deps.adapters` directly (this
- * array's own construction order), so listing pi first here silently made
- * it the de-facto DEFAULT auto-selected runtime whenever present — the
- * opposite of the product decision that pi is the FALLBACK runtime (tried
- * only once nothing better is available/capable), not the default. That
- * conflation is why this constant's order and the auto-select order are now
- * two independent things: this one stays `['pi', 'claude', 'codex']`
- * (unchanged — still a perfectly fine construction/reporting order, and
- * changing it would needlessly reshuffle `conn.hello.runtimes` for no
- * reason), while `DEFAULT_RUNTIME_PREFERENCE` states the actual selection
- * priority explicitly (`['claude', 'codex', 'pi']`, pi last) instead of
- * leaving it as an implicit side effect of this list's order.
- */
-export const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
-
-/**
- * Every runtime `createDaemon` can build, in construction order. `grok` is a
- * custom harness, not a wire runtime id, so it is built only when
- * `runtimeAllowlist` lists it; an unset allowlist keeps `ALL_RUNTIME_IDS`.
- */
-const SDK_BUILT_RUNTIME_IDS: readonly SdkBuiltRuntimeId[] = [...ALL_RUNTIME_IDS, 'grok'];
-type SdkBuiltRuntimeId = RuntimeId | 'grok';
-
-export function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonConfig, piByokLauncher: DaemonConfig['piByokLauncher']): RuntimeAdapter {
-  const environment = config.runtimeEnvironment === undefined ? {} : { runtimeEnvironment: config.runtimeEnvironment };
-  // `DaemonConfig.runtimes`, already validated; an unset option keeps the adapter default.
-  const pi = config.runtimes?.pi;
-  const claude = config.runtimes?.claude;
-  const codex = config.runtimes?.codex;
-  const grok = config.runtimes?.grok;
-  switch (id) {
-    case 'pi':
-      return new PiAdapter({
-        nativeAssetRoot: config.nativeAssetRoot, byokLauncher: piByokLauncher, ...environment,
-        ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }),
-        ...(pi?.durableLane === true ? { durableLane: true } : {}),
-        ...(pi?.agentUserContext === undefined ? {} : { agentUserContext: pi.agentUserContext }),
-        ...(pi?.versionPolicy === undefined ? {} : { versionPolicy: pi.versionPolicy, versionPolicySource: 'daemon-config' as const }),
-      });
-    case 'claude':
-      return new ClaudeAdapter({
-        nativeAssetRoot: config.nativeAssetRoot, ...environment,
-        ...(claude?.agentUserContext === undefined ? {} : { agentUserContext: claude.agentUserContext }),
-        ...(claude?.agentSessionPersistence === undefined ? {} : { agentSessionPersistence: claude.agentSessionPersistence }),
-        ...(claude?.versionPolicy === undefined ? {} : { versionPolicy: claude.versionPolicy, versionPolicySource: 'daemon-config' as const }),
-      });
-    case 'codex':
-      return new CodexAdapter({
-        nativeAssetRoot: config.nativeAssetRoot, ...environment,
-        ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }),
-        ...(codex?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: codex.agentUserMcpServers }),
-        ...(codex?.versionPolicy === undefined ? {} : { versionPolicy: codex.versionPolicy, versionPolicySource: 'daemon-config' as const }),
-      });
-    case 'grok':
-      return new GrokAdapter({
-        nativeAssetRoot: config.nativeAssetRoot, ...environment,
-        ...(grok?.compatInstructions === undefined ? {} : { compatInstructions: grok.compatInstructions }),
-        ...(grok?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: grok.agentUserMcpServers }),
-        ...(grok?.versionPolicy === undefined ? {} : { versionPolicy: grok.versionPolicy, versionPolicySource: 'daemon-config' as const }),
-      });
-  }
-}
-
-/**
- * Builds `createDaemon`'s bundled adapter set from `DaemonConfig.runtimeAllowlist`
- * — see that field's own doc comment for the unset-vs-set contract. Filters
- * `SDK_BUILT_RUNTIME_IDS` (rather than mapping the allowlist directly) so an
- * allowlist entry that isn't a real runtime id is silently ignored — the same
- * "unknown id never gets an adapter" fail-closed shape `TaskRunner.pickAdapter`
- * already applies to an unknown *requested* runtime — and it de-duplicates
- * repeated entries for free.
- */
-/**
  * `DaemonConfig` keys that configure the adapters `createDaemon` builds.
  * `createDaemonWithAdapters` rejects each one, even when undefined, and
  * `checkDaemonConfig` reports the same keys for injected adapters.
@@ -400,18 +314,6 @@ export function injectedAdapterConfigConflicts(config: object): { readonly key: 
   return CREATE_DAEMON_ONLY_KEYS
     .filter(([key]) => Object.hasOwn(config, key))
     .map(([key, remedy]) => ({ key, message: `DaemonConfig.${key} is only supported by createDaemon; ${remedy}` }));
-}
-
-export function buildDefaultAdapters(config: DaemonConfig, piByokLauncher: DaemonConfig['piByokLauncher']): RuntimeAdapter[] {
-  const ids = config.runtimeAllowlist
-    ? SDK_BUILT_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))
-    : ALL_RUNTIME_IDS;
-  return ids.map((id) => buildAdapter(id, config, piByokLauncher));
-}
-
-/** The bundled adapter set `createDaemon` builds, for callers holding only the config: `byok-agent runtimes` and offline doctor. */
-export function buildConfiguredRuntimeAdapters(config: DaemonConfig): RuntimeAdapter[] {
-  return buildDefaultAdapters(config, resolvePiByokLauncher(config));
 }
 
 /**

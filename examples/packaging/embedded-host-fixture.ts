@@ -95,8 +95,8 @@ async function host(): Promise<void> {
     storeDir: path.join(root, 'store'), storage: { scratchRoot: path.join(root, 'scratch') },
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: EGRESS_POLICY },
     runtimeAllowlist: ['pi'], sdkHelperHost: helperHost,
-    // main() sets PI_PACKAGE_DIR in this process; a Pi launch reads it from the runtime environment.
-    runtimeEnvironment: { pass: ['PI_PACKAGE_DIR'] },
+    // The SDK gives this asset root to every Pi and Pi host child as PI_PACKAGE_DIR.
+    runtimes: { pi: { packageDir: path.join(assets, sdkPackagingAssetLayout.pi) } },
     // Windows Pi launches own their process tree with a Job Object, through koffi from this root.
     ...(process.platform === 'win32' ? { nativeAssetRoot: path.join(assets, sdkPackagingAssetLayout.native) } : {}),
     ...(native ? { agentMemoryHelperAssetRoot: path.join(assets, sdkPackagingAssetLayout.agentMemoryHelper) } : {}),
@@ -135,8 +135,6 @@ async function host(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  // The Pi host, in this process and in every re-entered child, reads its assets here.
-  process.env.PI_PACKAGE_DIR = path.join(assetRoot(), sdkPackagingAssetLayout.pi);
   if (await runSdkReservedHelperCommand()) return;
   // A SEA repeats its executable as argv[1], so product arguments start at 2 in every format.
   const args = process.argv.slice(2);

@@ -404,39 +404,35 @@ export function buildPiProviderChildEnvironment(options: {
 // PowerShell 5.1 never auto-loads a module. An inherited PSModulePath (a
 // PowerShell 7 session puts its own Microsoft.PowerShell.Security first)
 // therefore cannot break the query, and no per-user module analysis runs. The
-// request is decoded from stdin as UTF-8 explicitly, independent of the console
-// code page, so a non-ASCII path reaches the API unchanged. The serializer
-// assembly loads in its own try: a missing assembly throws FileNotFoundException,
-// which the outer mapping would misreport as path_not_found, so it exits 5 and
-// takes the generic 'unexpected' cause.
+// path arrives alone on stdin and is decoded as strict UTF-8, independent of
+// the console code page, so a non-ASCII path reaches the API unchanged. No
+// serializer assembly is loaded (#1364: loading System.Web.Extensions and
+// running JavaScriptSerializer for the first time on a machine was most of a
+// cold query, up to 30s on a hosted runner). The output is written by hand:
+// every value is a boolean or a SID checked against S-1-[0-9-]+ first, so
+// nothing needs escaping; a SID of any other shape exits non-zero.
 const WINDOWS_PROJECTION_ACL_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
-try { [void][System.Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35') } catch { exit 5 }
 try {
-  $serializer = [System.Web.Script.Serialization.JavaScriptSerializer]::new()
-  $requestText = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()
-  try { $request = $serializer.DeserializeObject($requestText) } catch { exit 2 }
-  if ($request -isnot [System.Collections.Generic.IDictionary[string, object]] -or $request.Count -ne 1 -or $request['path'] -isnot [string]) { exit 2 }
-  $path = [string]$request['path']
+  $path = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()
+  if ($path.Length -eq 0) { exit 2 }
   $sidType = [System.Security.Principal.SecurityIdentifier]
+  $sidPattern = '^S-1-[0-9-]+\z'
   $reparsePoint = ([System.IO.File]::GetAttributes($path) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
   $acl = [System.IO.Directory]::GetAccessControl($path)
-  $rules = [System.Collections.Generic.List[object]]::new()
+  $rules = [System.Collections.Generic.List[string]]::new()
   foreach ($rule in $acl.GetAccessRules($true, $true, $sidType)) {
-    $entry = [System.Collections.Generic.Dictionary[string, object]]::new()
-    $entry['sid'] = [string]$rule.IdentityReference.Value
-    $entry['allow'] = [bool]($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow)
-    $entry['fullControl'] = [bool](($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl)
-    $entry['inherits'] = [bool](($rule.InheritanceFlags -band 3) -eq 3 -and $rule.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None)
-    $rules.Add($entry)
+    $sid = [string]$rule.IdentityReference.Value
+    if ($sid -cnotmatch $sidPattern) { exit 1 }
+    $allow = [bool]($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow)
+    $fullControl = [bool](($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl)
+    $inherits = [bool](($rule.InheritanceFlags -band 3) -eq 3 -and $rule.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None)
+    $rules.Add('{"sid":"' + $sid + '","allow":' + ([string]$allow).ToLowerInvariant() + ',"fullControl":' + ([string]$fullControl).ToLowerInvariant() + ',"inherits":' + ([string]$inherits).ToLowerInvariant() + '}')
   }
-  $result = [System.Collections.Generic.Dictionary[string, object]]::new()
-  $result['reparsePoint'] = [bool]$reparsePoint
-  $result['owner'] = [string]$acl.GetOwner($sidType).Value
-  $result['currentUser'] = [string][System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-  $result['protected'] = [bool]$acl.AreAccessRulesProtected
-  $result['rules'] = $rules.ToArray()
-  [Console]::Out.Write($serializer.Serialize($result))
+  $owner = [string]$acl.GetOwner($sidType).Value
+  $currentUser = [string][System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  if ($owner -cnotmatch $sidPattern -or $currentUser -cnotmatch $sidPattern) { exit 1 }
+  [Console]::Out.Write('{"reparsePoint":' + ([string][bool]$reparsePoint).ToLowerInvariant() + ',"owner":"' + $owner + '","currentUser":"' + $currentUser + '","protected":' + ([string][bool]$acl.AreAccessRulesProtected).ToLowerInvariant() + ',"rules":[' + [string]::Join(',', $rules) + ']}')
   exit 0
 } catch {
   $failure = $_.Exception
@@ -468,7 +464,7 @@ export async function assertWindowsPiProjectionAcl(
   const result = await (options.run ?? runCommand)(
     powershell,
     ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PROJECTION_ACL_SCRIPT, 'utf16le').toString('base64')],
-    JSON.stringify({ path: directory }),
+    directory,
   );
   if (result.exitCode !== 0) {
     const cause = WINDOWS_PROJECTION_ACL_QUERY_CAUSES[result.exitCode] ?? 'unexpected';

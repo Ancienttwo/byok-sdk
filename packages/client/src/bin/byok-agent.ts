@@ -32,7 +32,7 @@ import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
 import { runToolsetsReloadCommand } from './commands/toolsets';
 import { runTeamCreateCommand, runTeamJoinCommand, runTeamListCommand, runTeamOpenCommand, runTeamWatchCommand } from './commands/team';
 import { runUnpairCommand } from './commands/unpair';
-import { runUpgradeInstallationCommand, runUpgradeStatusCommand, runUpgradeStoreCheckCommand, UPGRADE_INSTALLATION_ACTIONS, type UpgradeInstallationAction } from './commands/upgrade';
+import { runUpgradeFromCheckCommand, runUpgradeInstallationCommand, runUpgradeStatusCommand, runUpgradeStoreCheckCommand, UPGRADE_INSTALLATION_ACTIONS, type UpgradeInstallationAction } from './commands/upgrade';
 import { runVersionCommand } from './version';
 
 /**
@@ -91,7 +91,7 @@ import { runVersionCommand } from './version';
 const E2EE_PAIR_FLAG = '--e2ee';
 const REPLACE_OTHER_STORE_FLAG = '--replace-other-store';
 
-function usage(): never {
+function usage(exitCode = 1): never {
   console.error(
     [
       'Usage:',
@@ -117,6 +117,7 @@ function usage(): never {
       '  byok-agent team open <workspace> --tmux-bin <absolute> [--session <name>] --config <path>',
       '  byok-agent unpair [--yes] [--force] [--config <path>]',
       '  byok-agent upgrade check --store [--json] [--config <path>]   (read-only; exit 2 when a store would be refused)',
+      '  byok-agent upgrade check --from <version> [--json]   (breaking manifest entries since <version> and the @byok-sdk/* train; exit 2 when either needs action)',
       '  byok-agent upgrade apply <payload-dir> | rollback | recover | status [--json] --config <path>   (an install --payload installation)',
       '  byok-agent approvals [--config <path>]                    (list pending approvalIds — see approve/reject below)',
       '  byok-agent approve <approvalId> [--config <path>]',
@@ -131,7 +132,7 @@ function usage(): never {
       '  byok-agent service-status [--config <path>] [--name <svc>]',
     ].join('\n'),
   );
-  process.exit(1);
+  process.exit(exitCode);
 }
 
 /**
@@ -345,7 +346,14 @@ async function main(): Promise<void> {
   }
 
   if (command === 'upgrade') {
-    const [action, ...operands] = positionalArgs(rest, ['--config', '--name', '--node-bin', '--winsw-bin', '--winsw-install-dir']);
+    const [action, ...operands] = positionalArgs(rest, ['--config', '--name', '--node-bin', '--winsw-bin', '--winsw-install-dir', '--from']);
+    if (action === 'check' && rest.includes('--from')) {
+      if (operands.includes('--store')) usage(2);
+      const fromVersion = argValue(rest, '--from');
+      if (fromVersion === undefined || operands.some((flag) => flag !== '--json')) usage();
+      process.exitCode = runUpgradeFromCheckCommand({ fromVersion, json: hasFlag(rest, '--json') });
+      return;
+    }
     if (action === 'check') {
       if (!operands.includes('--store') || operands.some((flag) => flag !== '--store' && flag !== '--json')) usage();
       const config = loadConfig(configPathFrom(rest));

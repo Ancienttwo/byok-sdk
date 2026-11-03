@@ -285,9 +285,10 @@ task-scoped `--mcp-config` 加入这些 stdio server，用户自己的 MCP 配�
 
 Host 的工具预批准只由本机 toolset server 的 `approveTools` 精确名单声明；
 registry 定义期一次校验、排序并深冻结，名单进入 canonical digest。
-`resolveMcpServers` 在同一次快照解析中复制 server 与授权，准入时要求本地
-`RuntimeAdapterDescriptor.mcpToolApprovals` 能力；Codex 声明，其他 bundled
-runtime 不声明。显式选择不支持者在 claim 前拒绝，自动选择会排除它们。
+`resolveMcpServers` 在同一次快照解析中复制 server 与授权。`approveTools` 是授权，
+daemon 只把它投影给声明了本地 `RuntimeAdapterDescriptor.mcpToolApprovals` 的
+runtime；它不参与准入，也不参与 runtime 选择。Codex 声明，其他 bundled runtime
+不声明，它们处理该 server 的方式与没有 `approveTools` 的 server 完全相同。
 `toolsets.reload` 不能放宽正在准入或运行的 attempt。
 Codex 的同一 beforeOpen 投影处理 start/resume：固定 SDK helper 表与 Host
 声明按 server 隔离，仅写精确工具的 `approval_mode: approve`，不写 wildcard、
@@ -334,7 +335,7 @@ stateDiagram-v2
 ### 2.4 Freeze 与兼容边界
 
 - 当前 wire 是 `v5`：#1290 把 `PROTOCOL_VERSION` 由 4 升到 5，runtime capability `durablePi` 改名 `durableLane`，其余 v4 形状不变。v5 端点拒绝 v4 对端，部署先排空，再让 server 侧与 daemon 一起升级；保留的 store 照常打开，只有未处理的 v4 行会挡住启动，v4 build 存下的 hosted terminal receipt 不再能解码（[wire v5 迁移](../migrations/wire-v5-durable-lane.md)）。0.33.0 是最后一个 v4 版本。历史：#925 把 3 升到 4（删除 `conn.ack`、runtime-only offer 及其 sealed 类型、`strict-agent-only` 与三个审批 capability flag，`approvalId` 成为必填，v3 写过的 store 不受支持，见[升级说明](../releases/925-wire-v4.md)）；K7（#468）把 2 升到 3（result-document 的 `schema` 成为必填）；ADR-037 把 1 升到 2（删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`）。v2、v3、v4 corpus 与 registry 只读。
-- 规则只写在 [protocol.md "Freeze rule"](../protocol.md#freeze-rule)：每个 v5 变更走 version bump、gated addition、strip-safe addition 三条路之一。后两条在 `packages/protocol/src/wire-additions.ts` 的 `WIRE_ADDITIONS` 里声明，cloud admission 读同一张表。首个 v5 版本 0.34.0 已发布：`compat.test.ts` 用最后一个 v4 版本 0.33.0（`byok-protocol-previous`）作 rejection oracle，它拒绝每个 v5 envelope；v5 registry 登记了 0.34.0 的 corpus，跨版本的 addition 声明在有已发布的 v5 decoder 被 pin 为 oracle 之前没有证明。
+- 规则只写在 [protocol.md "Freeze rule"](../protocol.md#freeze-rule)：每个 v5 变更走 version bump、gated addition、strip-safe addition 三条路之一。后两条在 `packages/protocol/src/wire-additions.ts` 的 `WIRE_ADDITIONS` 里声明，cloud admission 读同一张表。首个 v5 版本 0.34.0 已发布：`compat.test.ts` 用最后一个 v4 版本 0.33.0（`byok-protocol-previous`）作 rejection oracle，它拒绝每个 v5 envelope；v5 registry 登记了 0.34.0 的 corpus，已发布的 0.35.0 与 0.35.1 source candidate 登记同一份 corpus，跨版本的 addition 声明在有已发布的 v5 decoder 被 pin 为 oracle 之前没有证明。
 - observability unknown 可忽略；control/security unknown 必须 fail-closed。
 - server 只接受当前 major（v5，`PROTOCOL_VERSION = 5`，`packages/protocol/src/version.ts`）。v4 envelope 被拒绝；没有 N-1 reader，所以 server 与 client 必须一起升级。
 

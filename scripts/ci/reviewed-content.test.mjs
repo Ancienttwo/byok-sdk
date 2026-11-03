@@ -117,6 +117,18 @@ test('the client manifest admits only the exact runtime contract script', t => {
 });
 
 // #1094: the generated DaemonConfig schema is appended after the upgrade manifest, exactly.
+test('the client files list admits exactly the appended upgrade history (#1316)', t => {
+  const f = fixture(t);
+  const files = ['dist', 'README.md', 'LICENSE', 'upgrade-manifest.json', 'daemon-config.schema.json'];
+  f.write('packages/client/package.json', { ...f.manifest, files });
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'files'], { cwd: f.cwd });
+  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
+  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-history'] });
+  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
+  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-history', 'src'] });
+  assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
+});
+
 test('the client files list admits exactly the appended DaemonConfig schema', t => {
   const f = fixture(t);
   const files = ['dist', 'README.md', 'LICENSE', 'upgrade-manifest.json'];
@@ -637,6 +649,15 @@ test('#975 slice 5: the K8 manifest admits the switch entry only on top of the e
     f.write(path, candidate);
     assert.throws(() => selectImpact([path], f), /more than/, reason);
   }
+  // #1325: the L test Host entry, only on top of exactly the entries up to the switch entry.
+  const lTestHost = { './l-test-host': './src/l-test-host.test-support.ts' };
+  f.write(path, { ...manifest, exports: { ...migrated, ...lTestHost } });
+  assert.throws(() => selectImpact([path], f), /more than/, 'the L test Host entry without the switch entry');
+  f.write(path, { ...manifest, exports: { ...migrated, ...sw } });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the switch entry');
+  f.base = git('rev-parse', 'HEAD').trim();
+  f.write(path, { ...manifest, exports: { ...migrated, ...sw, ...lTestHost } });
+  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
 });
 
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {

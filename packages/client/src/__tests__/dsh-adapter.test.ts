@@ -90,7 +90,7 @@ describe('DshAdapter construction and descriptor', () => {
 
   it('declares the dsh descriptor', () => {
     const descriptor = new DshAdapter({ home: '/tmp/byok-dsh-x', model: MODEL }).descriptor;
-    expect(descriptor).toMatchObject({ id: 'dsh', supportsDispatchSelection: false, platforms: ['darwin', 'linux'], progressEventsAreMessages: true });
+    expect(descriptor).toMatchObject({ id: 'dsh', supportsDispatchSelection: false, platforms: ['darwin', 'linux'], progressMessageBoundary: 'event' });
     expect(descriptor.capabilities).toEqual(DSH_RUNTIME_CAPABILITIES);
     expect(descriptor.versionPolicy).toEqual({ qualifiedVersion: QUALIFIED_DSH_VERSION, unqualified: 'warn' });
   });

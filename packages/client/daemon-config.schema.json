@@ -765,7 +765,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = the three wire runtimes —\npi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildDefaultAdapters`; the `grok` custom harness is\nbuilt only when listed), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
+      "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = the three wire runtimes —\npi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildRuntimeAdapters`; the `grok` custom harness is\nbuilt only when listed), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
     },
     "runtimes": {
       "type": "object",
@@ -773,6 +773,10 @@
         "pi": {
           "type": "object",
           "properties": {
+            "durableLane": {
+              "type": "boolean",
+              "description": "`PiAdapterOptions.durableLane`: the opt-in durable worker. Disabled by default. Requires `agentHome` and `piByokLauncher`; unavailable on Windows."
+            },
             "agentUserContext": {
               "enum": [
                 "excluded",
@@ -916,9 +920,9 @@
               ],
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             },
-            "durableLane": {
-              "type": "boolean",
-              "description": "`PiAdapterOptions.durableLane`: the opt-in durable worker. Disabled by default. Requires `agentHome` and `piByokLauncher`; unavailable on Windows."
+            "packageDir": {
+              "type": "string",
+              "description": "`PiAdapterOptions.packageDir`: the absolute Pi asset root of a product\nthat bundles Pi. It is the only source: the SDK sets it as\n`PI_PACKAGE_DIR` for Pi and the pi-host helper process alone, and\nremoves any `PI_PACKAGE_DIR` the login shell or Host environment holds."
             }
           }
         },
@@ -1468,7 +1472,7 @@
           "pi"
         ]
       },
-      "description": "M5 batch-3 (workstream 1): explicit auto-select priority order for\n`TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)\n— tried in listed order; the first candidate that is both PRESENT\n(`adapter.detect()`) and CAPABLE (declares MCP toolset projection when\nthe offer requires it) wins. Unset defaults to\n`DEFAULT_RUNTIME_PREFERENCE` (`task-runner.ts`): `['claude', 'codex',\n'pi']` — pi LAST, deliberately.\n\nProduct decision: pi is this SDK's FALLBACK runtime, not its default.\nBefore this field existed, the auto-select path had no notion of\npriority at all — it simply walked `deps.adapters` in whatever order\n`buildDefaultAdapters`/the embedder constructed them, which for\n`createDaemon`'s bundled set meant `ALL_RUNTIME_IDS`'s construction\norder (`['pi', 'claude', 'codex']`) doubled as the de-facto selection\npriority — silently making pi the default winner whenever it was\npresent, for no better reason than being listed first in an array never\nmeant to encode a priority. This field makes the real priority an\nexplicit, independently-configurable decision instead of an accident of\nconstruction order — see `ALL_RUNTIME_IDS`'s own doc comment below for\nthe construction-vs-selection-order split this introduces.\n\nOnly affects the auto-select (no `task.offer.runtime`) path — an offer\nnaming an explicit runtime is unaffected (unchanged semantics: that\nexact adapter is used, or the offer is declined; never a fallback\nsubstitution). Independent of `runtimeAllowlist` above (which restricts\nWHICH runtimes are eligible at all): this only orders the attempt\nsequence among whatever that allowlist, if set, already let through."
+      "description": "M5 batch-3 (workstream 1): explicit auto-select priority order for\n`TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)\n— tried in listed order; the first candidate that is both PRESENT\n(`adapter.detect()`) and CAPABLE (declares MCP toolset projection when\nthe offer requires it) wins. Unset defaults to\n`DEFAULT_RUNTIME_PREFERENCE` (`task-runner.ts`): `['claude', 'codex',\n'pi']` — pi LAST, deliberately.\n\nProduct decision: pi is this SDK's FALLBACK runtime, not its default.\nBefore this field existed, the auto-select path had no notion of\npriority at all — it simply walked `deps.adapters` in whatever order\n`buildRuntimeAdapters`/the embedder constructed them, which for\n`createDaemon`'s bundled set meant `ALL_RUNTIME_IDS`'s construction\norder (`['pi', 'claude', 'codex']`) doubled as the de-facto selection\npriority — silently making pi the default winner whenever it was\npresent, for no better reason than being listed first in an array never\nmeant to encode a priority. This field makes the real priority an\nexplicit, independently-configurable decision instead of an accident of\nconstruction order — see `ALL_RUNTIME_IDS`'s own doc comment below for\nthe construction-vs-selection-order split this introduces.\n\nOnly affects the auto-select (no `task.offer.runtime`) path — an offer\nnaming an explicit runtime is unaffected (unchanged semantics: that\nexact adapter is used, or the offer is declined; never a fallback\nsubstitution). Independent of `runtimeAllowlist` above (which restricts\nWHICH runtimes are eligible at all): this only orders the attempt\nsequence among whatever that allowlist, if set, already let through."
     },
     "storeDir": {
       "type": "string"
@@ -1543,7 +1547,7 @@
                   "items": {
                     "type": "string"
                   },
-                  "description": "Exact Host-approved tool names; omitted or empty adds no approval. Local configuration only."
+                  "description": "Exact Host-approved tool names, granted only to a runtime that declares `mcpToolApprovals`; never an admission requirement. Omitted or empty grants nothing. Local configuration only."
                 }
               },
               "required": [
