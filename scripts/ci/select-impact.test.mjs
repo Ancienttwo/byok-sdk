@@ -239,13 +239,10 @@ test('owned helper build scripts keep release packaging qualification', () => {
 // families run complete workspace suites chosen by package membership, not by
 // owned paths.
 const suiteFamilies = new Set(['build-test', 'macos-client', 'dataplane', 'release-pack-migrate']);
-// Job inputs that name no single checkable path (a matrix expression or a
-// downloaded script), and job inputs the selector refuses until a reviewed
-// mapping exists. Each entry must still occur in its job.
+// Job inputs that name no single checkable path: a matrix expression or a
+// downloaded script. Each entry must still occur in its job.
 const registeredJobInputs = {
-  'execution-recovery-native': { 'scripts/ci/with-secret-service.sh': 'shared Secret Service wrapper; the selector refuses it' },
   'hermes-real-windows': { $installer: 'the pinned upstream Hermes installer, downloaded at run time' },
-  'npm-release-pack': { 'scripts/ci/with-secret-service.sh': 'shared Secret Service wrapper; the selector refuses it' },
   'packageability-smoke': { 'templates/packaging/${{ matrix.recipe }}/smoke-test.sh': 'one smoke per recipe under templates/packaging/' },
   'runtime-contract': { 'packages/client/src/__tests__/runtime-contract/${{ matrix.runtime }}.contract.ts': 'one contract per runtime under src/__tests__/runtime-contract/' },
 };
@@ -285,10 +282,7 @@ test('family owners cover every test file and script their CI job runs', () => {
     assert.ok(inputs.length > 0, `${family}: no job input checked`);
     const registered = registeredJobInputs[family] ?? {};
     for (const input of new Set(inputs)) {
-      if (input in registered) {
-        if (!/[$*]|\/$/.test(input)) assert.throws(() => selectImpact([input]), /reviewed CI mapping required/i, `${family}: ${input} is mapped now; drop its registration`);
-        continue;
-      }
+      if (input in registered) continue;
       assert.ok(!/[$*]|\/$/.test(input), `${family} runs ${input}, which names no single path; register it`);
       assert.ok(selectImpact([input]).families.includes(family), `${family} runs ${input} but a change to it does not select ${family}`);
       checked++;
@@ -358,6 +352,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   assert.deepEqual(Object.keys(reviewedScripts).sort(), [
     'scripts/api-surface/check-version-authority.mjs', 'scripts/api-surface/check-version-authority.test.mjs',
     'scripts/architecture/dependency-baseline.json', 'scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs',
+    'scripts/ci/with-secret-service.sh',
     'scripts/docs/device-setup.mjs', 'scripts/docs/device-setup.test.mjs',
     'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs',
     'scripts/release/check-upgrade-manifest.mjs', 'scripts/release/check-upgrade-manifest.test.mjs',

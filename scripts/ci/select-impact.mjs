@@ -359,6 +359,12 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/cloud-do-consumer-smoke.mjs': {
     tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
+  // #1378: the shared Secret Service wrapper that these family jobs run their
+  // suites under. build-test also runs it, but plan-ci never lets a routine
+  // path select build-test (the same rule as .node-version).
+  'scripts/ci/with-secret-service.sh': {
+    tests: [], families: ['dataplane', 'execution-recovery-native', 'npm-release-pack', 'release-pack-migrate'],
+  },
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and
   // runs it in every family job; #925 selects npm-release-pack alone.
   'scripts/release/execution-submit-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
