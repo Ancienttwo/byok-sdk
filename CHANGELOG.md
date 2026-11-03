@@ -17,7 +17,8 @@
   current user, SYSTEM and Administrators, give the current user inheritable
   full control, and hold exactly one OWNER RIGHTS (`S-1-3-4`) ACE with
   READ_CONTROL only. The client now adds that OWNER RIGHTS ACE when it creates
-  the projection directory. Run `@byok-sdk/client` and `@byok-sdk/keys` at the
+  the projection directory. The built-in local Administrator account (RID 500),
+  whose ACE icacls writes as the alias `LA`, is supported. Run `@byok-sdk/client` and `@byok-sdk/keys` at the
   same version. When they differ, the launch fails closed. A 0.37.0 launcher
   refuses a directory made by an older client with
   `pi_projection_acl_owner_rights_missing`. An older launcher refuses a

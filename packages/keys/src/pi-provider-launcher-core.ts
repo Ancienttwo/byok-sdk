@@ -453,9 +453,10 @@ interface ProjectionAce { allow: boolean; flags: ReadonlySet<string>; mask: numb
 /**
  * The DACL of an `icacls /save` SDDL line. Anything outside the known grammar
  * (another component, an unknown control flag, ACE type, ACE flag, right or
- * SID alias, an object or conditional ACE) is refused, never skipped.
+ * SID alias, an object or conditional ACE) is refused, never skipped. The
+ * current user's SID is matched by the exact form icacls renders it in.
  */
-function parseProjectionDacl(sddl: string): { protected: boolean; aces: ProjectionAce[] } {
+function parseProjectionDacl(sddl: string, user: { sid: string; token: string }): { protected: boolean; aces: ProjectionAce[] } {
   const dacl = /^D:((?:P|AI|AR)*)((?:\([^()]*\))*)$/u.exec(sddl);
   if (!dacl) throw new Error('pi_projection_acl_invalid_sddl');
   const aces: ProjectionAce[] = [];
@@ -475,11 +476,19 @@ function parseProjectionDacl(sddl: string): { protected: boolean; aces: Projecti
       }
       for (const right of rights) mask = (mask | SDDL_RIGHTS[right]!) >>> 0;
     }
-    const sid = SDDL_SIDS[sidText] ?? (/^S-1-[0-9]+(?:-[0-9]+)+$/u.test(sidText) ? sidText : undefined);
+    const sid = sidText === user.token ? user.sid : SDDL_SIDS[sidText] ?? (/^S-1-[0-9]+(?:-[0-9]+)+$/u.test(sidText) ? sidText : undefined);
     if (sid === undefined) throw new Error('pi_projection_acl_invalid_ace');
     aces.push({ allow: type === 'A', flags: new Set(flags), mask, sid });
   }
   return { protected: dacl[1]!.includes('P'), aces };
+}
+
+/** The SDDL of one `icacls /save` record, whose first line must be the target's leaf name. */
+async function saveSddl(run: CommandRunner, icacls: string, target: string, file: string): Promise<string> {
+  await runWindowsTool(run, icacls, 'icacls', [target, '/save', file]);
+  const lines = (await fs.readFile(file)).toString('utf16le').replace(/^\uFEFF/u, '').replace(/\r\n$/u, '').split('\r\n');
+  if (lines.length !== 2 || lines[0] !== path.basename(target)) throw new Error('pi_projection_acl_invalid_output');
+  return lines[1]!;
 }
 
 /**
@@ -521,18 +530,25 @@ export async function assertWindowsPiProjectionAcl(
   const currentUser = user[1]!;
 
   const saveDir = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'byok-acl-'));
-  let saved: string;
+  let userToken: string;
+  let sddl: string;
   try {
-    const file = path.join(saveDir, 'acl');
-    await runWindowsTool(run, icacls, 'icacls', [directory, '/save', file]);
-    saved = (await fs.readFile(file)).toString('utf16le');
+    // icacls writes some SIDs as aliases: the built-in local Administrator
+    // (RID 500) is `LA`. Render the current user's SID once, alone in the DACL
+    // of an empty file, and match exactly that form (#1373).
+    const reference = path.join(saveDir, 'user');
+    await fs.writeFile(reference, '');
+    await runWindowsTool(run, icacls, 'icacls', [reference, '/inheritance:r', '/grant:r', `*${currentUser}:(R)`]);
+    const rendered = /^D:[A-Z]*\(A;;[^;()]*;;;([^;()]+)\)$/u.exec(await saveSddl(run, icacls, reference, path.join(saveDir, 'user.acl')));
+    if (!rendered) throw new Error('pi_projection_acl_invalid_output');
+    userToken = rendered[1]!;
+    const known = SDDL_SIDS[userToken] ?? (/^S-1-/u.test(userToken) ? userToken : undefined);
+    if (known !== undefined && known !== currentUser) throw new Error('pi_projection_acl_invalid_output');
+    sddl = await saveSddl(run, icacls, directory, path.join(saveDir, 'acl'));
   } finally {
     await fs.rm(saveDir, { recursive: true, force: true });
   }
-  // One record: the leaf name, then its SDDL.
-  const lines = saved.replace(/^﻿/u, '').replace(/\r\n$/u, '').split('\r\n');
-  if (lines.length !== 2 || lines[0] !== path.basename(directory)) throw new Error('pi_projection_acl_invalid_output');
-  const acl = parseProjectionDacl(lines[1]!);
+  const acl = parseProjectionDacl(sddl, { sid: currentUser, token: userToken });
 
   if (!acl.protected) throw new Error('pi_projection_acl_unprotected');
   const ownerRights = acl.aces.filter(ace => ace.sid === 'S-1-3-4');

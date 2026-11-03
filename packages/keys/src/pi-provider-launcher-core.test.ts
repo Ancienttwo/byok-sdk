@@ -474,16 +474,19 @@ describe('Windows projection ACL verification', () => {
   const queryFailure = (cause: string, step: string, exit?: number) =>
     `pi_projection_acl_query_failed: Pi projection ACL query failed (cause=${cause}, step=${step}${exit === undefined ? '' : `, exit=${exit}`})`;
   // icacls /save writes UTF-16LE: the leaf name, then its SDDL (#1381 E1).
-  function fakeTools(sddl: string, over: { icacls?: number; whoami?: number; whoamiOut?: string; saved?: (leaf: string) => string } = {}) {
+  // The reference file renders the current user as `userRendering` (the built-in Administrator renders as LA).
+  function fakeTools(sddl: string, over: { icacls?: number; whoami?: number; whoamiOut?: string; saved?: (leaf: string) => string; userRendering?: string } = {}) {
     const saves: string[] = [];
     const run = vi.fn(async (executable: string, args: string[]) => {
       if (executable.endsWith('whoami.exe')) {
         return { exitCode: over.whoami ?? 0, stdout: over.whoamiOut ?? `"host\\user","${user}"\r\n`, stderr: 'C:\\Users\\someone' };
       }
-      saves.push(args[2]!);
+      saves.push(args[0]!);
       if (over.icacls !== undefined) return { exitCode: over.icacls, stdout: '', stderr: 'C:\\Users\\someone\\secret: Access is denied.' };
+      if (args[1] !== '/save') return { exitCode: 0, stdout: 'Successfully processed 1 files', stderr: '' };
       const leaf = path.basename(args[0]!);
-      await fs.writeFile(args[2]!, Buffer.from(over.saved?.(leaf) ?? `${leaf}\r\n${sddl}\r\n`, 'utf16le'));
+      const record = leaf === 'user' ? `user\r\nD:PAI(A;;FR;;;${over.userRendering ?? user})\r\n` : over.saved?.(leaf) ?? `${leaf}\r\n${sddl}\r\n`;
+      await fs.writeFile(args[2]!, Buffer.from(record, 'utf16le'));
       return { exitCode: 0, stdout: 'Successfully processed 1 files', stderr: '' };
     });
     return { run, saves };
@@ -501,11 +504,15 @@ describe('Windows projection ACL verification', () => {
   it('runs the fixed system whoami and icacls, saving into a private file it removes', async () => withDirectory(async directory => {
     const { run, saves } = fakeTools(good);
     await assertAcl(directory, run);
+    const reference = saves[0]!;
     expect(run.mock.calls.map(([executable, args]) => [executable, args.slice(0, 2)])).toEqual([
       ['C:\\Windows\\System32\\whoami.exe', ['/user', '/fo']],
+      ['C:\\Windows\\System32\\icacls.exe', [reference, '/inheritance:r']],
+      ['C:\\Windows\\System32\\icacls.exe', [reference, '/save']],
       ['C:\\Windows\\System32\\icacls.exe', [directory, '/save']],
     ]);
-    await expect(fs.access(path.dirname(saves[0]!))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(run.mock.calls[1]![1]).toEqual([reference, '/inheritance:r', '/grant:r', `*${user}:(R)`]);
+    await expect(fs.access(path.dirname(reference))).rejects.toMatchObject({ code: 'ENOENT' });
   }));
   it('accepts OWNER RIGHTS with READ_CONTROL plus SYNCHRONIZE and well-known SIDs in literal form', async () => withDirectory(async directory => {
     await assertAcl(directory, fakeTools(`D:PAI(A;OICI;FA;;;${user})(A;OICI;0x1f01ff;;;S-1-5-18)(A;;0x120000;;;S-1-3-4)`).run);
@@ -531,8 +538,16 @@ describe('Windows projection ACL verification', () => {
   ])('refuses %s without repair', async (_label, sddl, code) => withDirectory(async directory => {
     await expect(assertAcl(directory, fakeTools(sddl).run)).rejects.toThrow(code);
   }));
+  // #1373: the built-in local Administrator (RID 500) is rendered as LA; only the user's own rendering matches.
+  it('matches the current user by the form icacls renders it in', async () => withDirectory(async directory => {
+    const asAlias = good.replace(`;;;${user})`, ';;;LA)');
+    await assertAcl(directory, fakeTools(asAlias, { userRendering: 'LA' }).run);
+    await expect(assertAcl(directory, fakeTools(asAlias).run)).rejects.toThrow('pi_projection_acl_invalid_ace');
+  }));
   it.each([
     ['another leaf name', { saved: () => `other\r\n${good}\r\n` }],
+    ['a reference rendering of another SID', { userRendering: 'S-1-5-21-2000' }],
+    ['a reference rendering with two ACEs', { userRendering: `${user})(A;;FR;;;SY` }],
     ['a second record', { saved: (leaf: string) => `${leaf}\r\n${good}\r\n${leaf}\r\n${good}\r\n` }],
     ['a whoami line without a SID', { whoamiOut: '"host\\user","user"\r\n' }],
   ])('refuses %s', async (_label, over) => withDirectory(async directory => {
