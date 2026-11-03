@@ -351,6 +351,11 @@ export const reviewedScripts = Object.freeze({
     tests: ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/beta-release.test.mjs'],
     install: true, families: ['npm-release-pack'],
   },
+  // #1383: every targeted run also runs this scan itself, without an install.
+  // check-package-graph.mjs calls it, so a change also builds for the targeted
+  // check:release-graph and selects npm-release-pack; scriptTestInputs adds the
+  // release script tests.
+  'scripts/release/check-retired-identities.mjs': { tests: [], install: true, families: ['npm-release-pack'] },
   'scripts/release/pack-and-smoke.mjs': {
     tests: ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs'],
     install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
@@ -675,10 +680,9 @@ export function selectImpact(paths, context = {}) {
     // The cloud-dataplane invariant suites run this file after migrating.
     if (path === 'tests/sql/control_plane_invariants.sql') { dirs.add('packages/cloud-dataplane'); continue; }
     // #1322: the ArchContext model, its review policy and projection config, and
-    // the projected archimap. They select no family. check:release-graph scans
-    // .projection-manifest.json for retired @byok/ ids; like docs/architecture/*.md,
-    // README.md and CHANGELOG.md it stays no-impact for now and is covered by build
-    // PRs, nightly and release validation. #1383 tracks running that on every PR.
+    // the projected archimap. They select no family. Every targeted run scans
+    // .projection-manifest.json, docs/architecture/*.md, README.md and CHANGELOG.md
+    // for retired @byok/ ids (check-retired-identities.mjs), so they need no build.
     // Exact files and the model's stable-id kinds only, so a new model kind or
     // generated file still fails here.
     if (archContextFiles.has(path)
