@@ -675,9 +675,12 @@ export function selectImpact(paths, context = {}) {
     // The cloud-dataplane invariant suites run this file after migrating.
     if (path === 'tests/sql/control_plane_invariants.sql') { dirs.add('packages/cloud-dataplane'); continue; }
     // #1322: the ArchContext model, its review policy and projection config, and
-    // the projected archimap. No build, test or CI job reads them; repo-harness
-    // architecture tooling validates them locally. Exact files and the model's
-    // stable-id kinds only, so a new model kind or generated file still fails here.
+    // the projected archimap. They select no family. check:release-graph scans
+    // .projection-manifest.json for retired @byok/ ids; like docs/architecture/*.md,
+    // README.md and CHANGELOG.md it stays no-impact for now and is covered by build
+    // PRs, nightly and release validation. #1383 tracks running that on every PR.
+    // Exact files and the model's stable-id kinds only, so a new model kind or
+    // generated file still fails here.
     if (archContextFiles.has(path)
       || /^\.archcontext\/model\/(?:nodes\/(?:capability|component|module)|relations\/relation|flows\/flow)\.sdk\.[a-z0-9-]+\.yaml$/.test(path)) continue;
     if (path === '.gitignore' || rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
