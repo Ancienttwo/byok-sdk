@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createModels, createProvider } from '@earendil-works/pi-ai/models';
 import { createAssistantMessageEventStream, type AssistantMessage, type Model } from '@earendil-works/pi-ai';
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
-import { DURABLE_HARNESS_IDENTITY, DURABLE_HARNESS_SETTINGS, openDurableEngine } from '../adapters/pi-durable/engine';
+import { DURABLE_HARNESS_IDENTITY, DURABLE_HARNESS_SETTINGS, DurableRunInterrupted, openDurableEngine } from '../adapters/pi-durable/engine';
 import { admitReplica } from '../adapters/pi-durable/replica';
 import { projectDurableEvent } from '../adapters/pi-durable/events';
 const roots: string[] = [];
@@ -60,6 +60,18 @@ describe('real Pi 1.0 durable engine', () => {
       try { await engine.run(); } finally { await engine.close(); }
       expect(input.calls()).toBe(1); expect(await readFile(receipt, 'utf8')).toBe('old-model-call\n');
       await expect(readFile(path.join(path.dirname(input.file), 'old-effect'))).rejects.toThrow();
+    } finally { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await once(child,'close'); } }
+  });
+  it('ends a resumed execution whose model request a crash cut off as interrupted, without sending it again', async () => {
+    const input = await fixture(); const receipt = path.join(path.dirname(input.file), 'old-calls');
+    const child = spawn(process.execPath, [path.resolve(import.meta.dirname, 'fixtures/pi-durable-pending.mjs'), input.file, receipt, 'request', input.binding.taskId], { stdio: ['ignore','pipe','pipe'] });
+    try {
+      await new Promise<void>((resolve,reject) => { child.stdout.once('data', () => resolve()); child.once('error',reject); child.once('exit', () => reject(new Error('pending fixture exited'))); });
+      child.kill('SIGKILL'); await once(child, 'close');
+      const engine = await openDurableEngine({ ...input, resume: true, beforeTool: async () => {}, events: async () => {}, completed: async () => { throw new Error('an interrupted run never completes'); } });
+      try { await expect(engine.run()).rejects.toEqual(new DurableRunInterrupted('interrupted')); } finally { await engine.close(); }
+      // Pi 1.5 charges the cut-off request as a failed attempt; with retries off nothing is sent again.
+      expect(input.calls()).toBe(0); expect(await readFile(receipt, 'utf8')).toBe('old-model-call\n');
     } finally { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await once(child,'close'); } }
   });
   it('sends no provider attribution headers, as with Pi 1.3', async () => {

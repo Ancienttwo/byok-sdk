@@ -7,13 +7,44 @@
   },
   "to": {
     "version": "0.36.0",
-    "snapshotSha256": "f82fc8482c1054149c3e663b82e9f4b794834643da7f67197be8cdd6db721680"
+    "snapshotSha256": "7676fb907c8603cbdc64038f3b9921065bcf5eac31734a1b31b7e98d86314ee3"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "pi-150-closure",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "The official Pi closure is pinned to exactly 1.5.0 and adds @earendil-works/pi-schema as its tenth package (upstream commit f9a26365); the closureDigest changes, so a preparation compiled for 1.4.0 declines with preparation_runtime_identity_mismatch until it is prepared again. pi-durable migrates a replica forward on open (pi.live v3, pi.tool v3, pi.generation v2) and a 0.36.0 build cannot open it afterwards, so a device or Durable Object cannot roll back past this release. A crash, eviction or reset while a model request is in flight no longer sends that request again: the run ends unanswered with reason interrupted, which the client durable lane reports as runtime_exited ('durable runtime was interrupted during a model request') and cloud-do as CLOUD_EXECUTION_INTERRUPTED, as before. Streamed progress reaches durable storage within about one second instead of on every update. cloud-do: CloudToolDefinition.parameters is pi-schema-typed, so build tool schemas with Type from typebox or with pi-schema builders, not with Type from @earendil-works/pi-ai, which no longer exports it; arguments are coerced before validation (\"42\" to 42, one value to an array, null to an omitted optional property) and the validation messages the model sees changed. A DurableObjectSqliteDatabase implementation must provide runCounted. keys: PI_MODEL_CATALOG_PI_AI_VERSION is 1.5.0, and 30 entries Pi 1.5.0 dropped return not_in_catalog. A lane that does not pass the Host system prompt gets Pi 1.5.0's tightened default prompt.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/cloud-do#DurableObjectSqliteDatabase",
+        "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+        "store:pi-durable"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "export:@byok-sdk/cloud-do#DurableObjectSqliteDatabase",
+      "change": "changed",
+      "entry": "pi-150-closure"
+    },
+    {
+      "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+      "change": "changed",
+      "entry": "pi-150-closure"
+    },
+    {
+      "item": "store:pi-durable",
+      "change": "changed",
+      "before": "@earendil-works/pi-durable@1.4.0",
+      "after": "@earendil-works/pi-durable@1.5.0",
+      "entry": "pi-150-closure"
+    }
+  ]
 }

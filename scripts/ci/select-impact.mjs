@@ -388,6 +388,13 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/pi-launcher-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
   // #1378: release-pack-migrate runs this migration smoke on the packed tarballs.
   'scripts/release/pg-migrate-smoke.mjs': { tests: [], families: ['release-pack-migrate'] },
+  // The Pi closure definition: the family jobs that run pack-and-smoke.mjs check
+  // the installed closure against it, and client input preparation imports it.
+  'scripts/release/pi-runtime-identity.mjs': {
+    tests: ['scripts/release/pack-and-smoke.test.mjs'],
+    install: true,
+    families: ['adapter-lifecycle-smoke', 'agent-memory-helper', 'credential-isolation-audit', 'dataplane', 'npm-release-pack', 'release-pack-migrate', 'runtime-contract'],
+  },
   'scripts/release/pack-and-smoke.test.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true },
   // pack-and-smoke.mjs imports this tarball guard and runs it in each of its family jobs.
   'scripts/release/published-store-paths.mjs': {
@@ -607,6 +614,9 @@ export function selectImpact(paths, context = {}) {
     // #1105: the retention soak is a dev-only artifact producer run by its own
     // workflow, not by a package test suite.
     if (path === 'scripts/soak/client-retention-soak.mjs') { scripts = true; continue; }
+    // The operator collector writes official-pi-closure.json, which is mapped
+    // on its own; nothing runs or imports the collector.
+    if (path === 'scripts/release/collect-official-pi-closure.mjs') { scripts = true; continue; }
     if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'
       || path === 'scripts/release/agent-memory-helper-source.test.mjs') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;

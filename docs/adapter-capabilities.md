@@ -26,7 +26,7 @@ the runtime does instead.
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `2.1.312` | `0.160.0` | `0.2.1-rc.5` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.4.0` | `1.4.0` |
+| Qualified version (PR CI) | — | `2.1.312` | `0.160.0` | `0.2.1-rc.5` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.5.0` | `1.5.0` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | no | yes | no |
 | Redirect the active turn | `steer` | no | yes | no | no | no | yes | no |
 | Display-only message draft | `messageDraft` | yes | yes | no | yes | yes | yes | yes |
@@ -433,7 +433,7 @@ file does not disable the normal resource loader or all ambient context sources.
 Credential custody and environment filtering also do not establish prompt
 isolation: the allowlisted environment retains home/config discovery paths.
 
-Pi 1.4.0 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
+Pi 1.5.0 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
 `~/.pi/agent`. From it, Pi loads a context file (`AGENTS.override.md`,
 `AGENTS.md` or `CLAUDE.md`), `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions,
 prompts, themes and skills. It also loads skills from `~/.agents/skills`. The
@@ -538,7 +538,7 @@ What the upstream runtimes offer that the SDK does not use:
 - Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
   keys of its agent-mode guide have none. From the 1.0.62 guide and local
   folders; not probed with an SDK session or on 1.0.52.
-- Pi: Pi 1.4.0 has `SessionManager.inMemory` and the CLI flag `--no-session`
+- Pi: Pi 1.5.0 has `SessionManager.inMemory` and the CLI flag `--no-session`
   ("Don't save session (ephemeral)"). The SDK
   [host](../packages/client/src/bin/pi-session-runtime.ts) opens a saved session
   and accepts no such flag.

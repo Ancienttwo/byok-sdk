@@ -3,7 +3,8 @@ import { promises as fs, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runAgentLoop, type AgentEvent as PiEvent, type AgentTool, type StreamFn, type ToolExecutionMode } from '@earendil-works/pi-agent-core';
-import { createAssistantMessageEventStream, Type, type AssistantMessage, type Message, type Model } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, type AssistantMessage, type Message, type Model } from '@earendil-works/pi-ai';
+import { Type } from 'typebox';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { mapPiMessageToAgentEvent } from '../adapters/pi/events';
 import { OFFICIAL_PI_PROVENANCE } from '../adapters/pi/official-pi-installation.mjs';
@@ -77,13 +78,13 @@ async function coreRecord(scenario: 'normal' | 'tool-error' | 'abort-tool' | 'ab
   return { events, execute, providerFrames };
 }
 
-describe('Octop T0: fixed Pi 1.4.0 emitter with synthetic model responses', () => {
+describe('Octop T0: fixed Pi 1.5.0 emitter with synthetic model responses', () => {
   it('binds the research to the reviewed closure and installed emitter bytes', () => {
-    expect(OFFICIAL_PI_PROVENANCE).toMatchObject({ packageVersion: '1.4.0',
-      upstreamCommit: '4a080252f06caf63a525d7873c5d94d3c23887e0',
-      closureDigest: '79c414be071768df15f0a107595564b11c67d904c601e7b2ccf1495fc3053fcc' });
+    expect(OFFICIAL_PI_PROVENANCE).toMatchObject({ packageVersion: '1.5.0',
+      upstreamCommit: 'f9a26365568127461c47a07a37dcb42c140a3ac5',
+      closureDigest: '9c94eaec01a9b7054843c0780a553d0c670a03f38d2b7d91fb6702835cbcf4b8' });
     const root = new URL('../../node_modules/@earendil-works/pi-agent-core/', import.meta.url);
-    expect(JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).version).toBe('1.4.0');
+    expect(JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).version).toBe('1.5.0');
     expect(createHash('sha256').update(readFileSync(new URL('dist/agent-loop.js', root))).digest('hex'))
       .toBe('22ee81f9977e211044c1ad41a763876c793ca7fc1c5b39b9fa7f76f3cb281129');
   });

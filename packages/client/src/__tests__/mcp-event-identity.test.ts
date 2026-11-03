@@ -47,7 +47,7 @@ it('annotates both Pi native events from the exact registered tool identity', ()
 
 it('annotates both durable Pi tool events from the exact observed toolset name only', () => {
   const use = withMcpIdentity({ type: 'tool_use', tool: name, toolCallId: 'task-call', input: {} }, identities);
-  const result = withMcpIdentity(projectDurableEvent({ type: 'tool_execution_end', toolName: name, toolCallId: 'pi-call' })[0]!, identities);
+  const result = withMcpIdentity(projectDurableEvent({ type: 'tool_end', tool: name, callId: 'pi-call' })[0]!, identities);
   expect(use).toEqual({ type: 'tool_use', tool: name, mcp, toolCallId: 'task-call', input: {} });
   expect(result).toMatchObject({ type: 'tool_result', tool: name, mcp });
   expect(AgentEventSchema.parse(result)).toHaveProperty('mcp', mcp);

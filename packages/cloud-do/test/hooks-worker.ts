@@ -1,6 +1,7 @@
 import type { JsonValue } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import { LiveDoc, type TaskId, type ConversationId } from '@earendil-works/pi-durable';
+import { commitWrites } from '@earendil-works/pi-durable/testing';
 import { SessionAuditDO } from './session-runtime-worker';
 import { cloudErrorResponse, CloudDoError } from '../src/errors';
 import { sessionObjectName } from '../src/identity';
@@ -92,7 +93,7 @@ export class HooksDO extends SessionAuditDO {
       const native = await harness.getTask(seeded.taskId as TaskId<JsonValue>, context);
       if (!native) throw new CloudDoError('CLOUD_TOOL_FAILED');
       const storage = await openDurableObjectStorage(this.ctx.storage);
-      await storage.commit([{ type: 'task', value: { ...native, state: { status: 'pending', checkpoint: { phase: 'call' } } } }], context);
+      await commitWrites(storage, [{ type: 'task', value: { ...native, state: { status: 'pending', checkpoint: { phase: 'call' } } } }], context);
       await storage.close(context);
       harness.resume();
       const conversation = await harness.conversation(seeded.conversationId as ConversationId, context);

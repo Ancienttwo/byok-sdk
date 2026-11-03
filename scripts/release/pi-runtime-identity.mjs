@@ -6,7 +6,7 @@ import { OFFICIAL_PI_PROVENANCE } from '../../packages/client/src/adapters/pi/of
 // closure package the SDK imports directly to that same exact version.
 // `pi-tui` ships prebuilt `.node` addons and may not be a direct dependency
 // (release-graph purity gate); pi-durable and chord are direct exact pins under
-// the R4 durable ruling. The remaining siblings (`pi-telemetry`,
+// the R4 durable ruling. The remaining siblings (`pi-telemetry`, `pi-schema`,
 // `pi-codemode`, `pi-mcp`) and `pi-tui` reach an install only through the
 // coding agent's caret ranges, so npm installs the newest compatible release.
 // The release gates read and report their installed version; they do not gate
@@ -45,6 +45,7 @@ export const PI_RUNTIME_CLOSURE = Object.freeze([
   '@earendil-works/pi-durable',
   '@earendil-works/chord',
   '@earendil-works/pi-telemetry',
+  '@earendil-works/pi-schema',
   '@earendil-works/pi-tui',
   '@earendil-works/pi-codemode',
   '@earendil-works/pi-mcp',
@@ -59,6 +60,7 @@ export const PI_RUNTIME_CLOSURE = Object.freeze([
 const PI_INDIRECT_CLOSURE = Object.freeze([
   '@earendil-works/pi-tui',
   '@earendil-works/pi-telemetry',
+  '@earendil-works/pi-schema',
   '@earendil-works/pi-codemode',
   '@earendil-works/pi-mcp',
 ]);

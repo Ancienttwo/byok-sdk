@@ -132,8 +132,8 @@ describe('credential failure before and inside real native Harness in workerd', 
       const task = JSON.parse(result.tables.pi_tasks![0]!.record as string);
       expect(task.state.outcome).toMatchObject({ status: 'failed', error: { message: CODE } });
       expect(result.settled[0]!.detail).toBe(CODE);
-      // Native pi emits message_end for outcome.failed. task_failed is for faults and orphans.
-      const errors = result.events.filter(event => event.type === 'message_end')
+      // Native pi appends the failed answer for outcome.failed; a fault or orphan would end the run instead.
+      const errors = result.events.filter(event => event.type === 'entry')
         .flatMap(event => event.entry?.model ?? []).filter(message => message.stopReason === 'error');
       expect(errors).toMatchObject([{ stopReason: 'error', errorMessage: CODE }]);
       assertSafe(result, logs);

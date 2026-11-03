@@ -34,7 +34,7 @@ async function grantFixture(): Promise<{ home: string; grant: FileScopeGrant }> 
   };
 }
 
-describe('scoped tools in a real Pi 1.4.0 session (#1061 slice 3)', () => {
+describe('scoped tools in a real Pi 1.5.0 session (#1061 slice 3)', () => {
   it('shadows all six native file tools and guards execution', async () => {
     const { home, grant } = await grantFixture();
     const agentDir = await tmpDir('byok-real-agent-');

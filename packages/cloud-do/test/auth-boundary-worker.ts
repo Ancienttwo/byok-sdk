@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
-import { Harness, createRegistry, watchEvents, type AgentEvent } from '@earendil-works/pi-durable';
+import { Harness, createRegistry, type EntryRecord, type LiveState } from '@earendil-works/pi-durable';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { estimateMessageTokens } from '@earendil-works/pi-ai/utils/estimate';
 import { AgentDO, CLOUD_HARNESS_SETTINGS } from '../src/agent-do';
@@ -91,7 +91,8 @@ export class AuthHarnessDO extends DurableObject<Record<string, unknown>> {
       models, registry: createRegistry(),
       settings: CLOUD_HARNESS_SETTINGS,
     }, ctx);
-    const events: AgentEvent[] = [];
+    // Appended entries and compaction activity, from the conversation view.
+    const events: { type: 'entry' | 'compaction'; entry?: EntryRecord }[] = [];
     const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' },
       agent: { model: { provider: 'zai_openai', modelId: PLATFORM_PROFILES.zai_openai.model }, tools: [] } }, ctx);
     let estimatedTokens = 0;
@@ -107,17 +108,15 @@ export class AuthHarnessDO extends DurableObject<Record<string, unknown>> {
       }, ctx);
       estimatedTokens = (await conversation.context(ctx)).messages.reduce((total, message) => total + estimateMessageTokens(message), 0);
     }
-    const watcher = await watchEvents(harness, conversation.id, ctx);
-    const terminalCount = flow === 'multi-turn' ? 2 : 1;
-    const delivered = new Set<number>();
-    let finishDelivery!: () => void;
-    const finalDelivery = new Promise<void>(resolve => { finishDelivery = resolve; });
-    watcher.start(async batch => {
-      events.push(...batch);
-      for (const event of batch) if (event.type === 'submission' && ['done', 'unanswered'].includes(event.record.status)) {
-        delivered.add(event.record.id);
-        if (delivered.size === terminalCount) finishDelivery();
-      }
+    const watcher = await conversation.watch(ctx);
+    let last: number = watcher.value.entries.at(-1)?.id ?? 0;
+    const record = (entries: readonly EntryRecord[]) => {
+      for (const entry of entries) if (entry.id > last) { last = entry.id; events.push({ type: 'entry', entry }); }
+    };
+    watcher.start(async call => {
+      if (call.kind !== 'value') return;
+      record(call.value.entries);
+      if (((call.value.docs['pi.live'] as LiveState | undefined)?.compactions?.length ?? 0) > 0) events.push({ type: 'compaction' });
     });
     const first = await conversation.submit({ type: 'input', content: 'Write a safe paragraph.', whenBusy: 'reject' }, ctx);
     const settled = [await first.wait(ctx)];
@@ -127,8 +126,9 @@ export class AuthHarnessDO extends DurableObject<Record<string, unknown>> {
       settled.push(await second.wait(ctx));
       await conversation.waitForIdle(ctx);
     }
-    await finalDelivery;
     await watcher.stop();
+    // A stopped watch drops a folded value it had not delivered; committed entries fill it.
+    record((await conversation.entries({ minEntryId: (last + 1) as EntryRecord['id'], order: 'ascending' }, 1000, undefined, ctx)).items);
     const result = { settled, events, estimatedTokens, resolverFailures, settings: CLOUD_HARNESS_SETTINGS,
       coercions: broken.coercions(), tables: dump(this.ctx.storage) };
     await harness.close(ctx);

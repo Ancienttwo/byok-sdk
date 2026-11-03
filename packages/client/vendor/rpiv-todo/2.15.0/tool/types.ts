@@ -1,5 +1,14 @@
-import { StringEnum } from "@earendil-works/pi-ai/utils/typebox-helpers";
-import { type Static, Type } from "typebox";
+import { type Static, type TUnsafe, Type } from "typebox";
+
+// pi-ai 1.5 no longer ships StringEnum; this is pi-ai 1.4's implementation, the same schema.
+function StringEnum<T extends readonly string[]>(values: T, options?: { description?: string; default?: T[number] }): TUnsafe<T[number]> {
+	return Type.Unsafe<T[number]>({
+		type: "string",
+		enum: values,
+		...(options?.description && { description: options.description }),
+		...(options?.default && { default: options.default }),
+	});
+}
 
 // ---------------------------------------------------------------------------
 // Tool / command identity — verbatim string boundaries.
