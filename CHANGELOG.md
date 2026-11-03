@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.36.0 — source candidate
+## 0.36.0 — 2026-11-03 (published)
 
 0.36.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 0.35.1 was prepared (#1376) but never published; its fixes ship in 0.36.0, and
@@ -12,14 +12,18 @@ Host-visible changes since 0.35.0 that change an API, config or example item:
 3 breaking entries, each with a migration link. The wire stays v5
 (`PROTOCOL_VERSION = 5`) with an unchanged corpus. There is no new Postgres
 migration and no SQLite schema change. See the
-[0.36.0 candidate notes](docs/releases/v0.36.0.md) and the
+[0.36.0 release notes](docs/releases/v0.36.0.md) and the
 [Host upgrade checklist](docs/releases/host-upgrade-0.36.0.md). The breaking
 changes: a Windows service definition's `windows` is the union
 `ServiceWindowsOptions`, with a new `user` scope (client, #1337);
 `validateResultOutcome` takes `({ contract, schema }, outcome)` and runs the
 `bot-turn-outcome.v1` contract rules (protocol, client and K8, #1374); and the
 K8 example refuses an outcome that breaks those rules whole (#1374), with the
-other K8 changes of this release in the same manifest entry.
+other K8 changes of this release in the same manifest entry. The npm registry
+lists all nine public packages at 0.36.0 as `latest`, published on 2026-11-03
+(UTC). The release commit is `644cf95a2` on `main`, and the annotated tag
+`v0.36.0` and its GitHub Release point to it. This release does not say that
+0.36.0, or a Host on it, is ready for production.
 
 - **Breaking (client)** — `ServiceDefinition.windows` is the union
   `ServiceWindowsOptions`. `{ scope?: 'machine'; winswBin; installDir? }` is

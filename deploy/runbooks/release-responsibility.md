@@ -77,14 +77,11 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The next source candidate is 0.36.0 for all nine packages, a MINOR. It is
-not published. 0.35.1 was prepared but never published; its fixes ship in
-0.36.0.
-See the [candidate notes](../../docs/releases/v0.36.0.md).
-The current release is 0.35.0 for all nine packages, keys included. The
-registry lists it as `latest`.
-See the [release notes](../../docs/releases/v0.35.0.md).
-The registry read of 2026-11-03 (UTC) reports `latest` 0.35.0 for all nine packages.
+The current release is 0.36.0 for all nine packages, keys included. The
+registry lists it as `latest`. 0.35.1 was prepared but never published; its
+fixes ship in 0.36.0.
+See the [release notes](../../docs/releases/v0.36.0.md).
+The registry read of 2026-11-03 (UTC) reports `latest` 0.36.0 for all nine packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -99,11 +96,12 @@ dependencies consistent.
 A release set contains eight aligned packages plus keys: nine packages. From
 0.28.2 all nine carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.35.0 for all nine packages on 2026-11-03 (UTC).
+the dist-tag `latest`, observed at 0.36.0 for all nine packages on 2026-11-03 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records that prior `latest` for all nine packages: 0.35.0. A registry read at
-release confirms it.
+records the prior `latest` for all nine packages. It still records 0.35.0,
+the baseline of the 0.36.0 publication. It does not describe the current
+registry. Review it in the next release preparation.
 This train has no first publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
@@ -112,17 +110,17 @@ failed registry reads do not establish package absence.
 
 Source preparation and npm execution need separate authorization. The owner
 provided both for 0.27.0. The registry lists 0.28.0, 0.28.1, 0.28.2, 0.28.3,
-0.29.0, 0.30.0, 0.30.1, 0.30.2, 0.31.0, 0.32.0, 0.33.0, 0.34.0 and 0.35.0
-as published (2026-10-20, 2026-10-21, 2026-10-22, 2026-10-23, 2026-10-24,
-2026-10-26, 2026-10-29, 2026-11-01 and 2026-11-02, UTC). This repository has
-no publication record for most of these versions; the
-[0.31.0 notes](../../docs/releases/v0.31.0.md), the
+0.29.0, 0.30.0, 0.30.1, 0.30.2, 0.31.0, 0.32.0, 0.33.0, 0.34.0, 0.35.0 and
+0.36.0 as published (2026-10-20, 2026-10-21, 2026-10-22, 2026-10-23,
+2026-10-24, 2026-10-26, 2026-10-29, 2026-11-01, 2026-11-02 and 2026-11-03,
+UTC). This repository has no publication record for most of these versions;
+the [0.31.0 notes](../../docs/releases/v0.31.0.md), the
 [0.32.0 notes](../../docs/releases/v0.32.0.md), the
 [0.33.0 notes](../../docs/releases/v0.33.0.md), the
-[0.34.0 notes](../../docs/releases/v0.34.0.md) and the
-[0.35.0 notes](../../docs/releases/v0.35.0.md) hold the ones for 0.31.0,
-0.32.0, 0.33.0, 0.34.0 and 0.35.0.
-The 0.36.0 candidate has source-preparation authorization only.
+[0.34.0 notes](../../docs/releases/v0.34.0.md), the
+[0.35.0 notes](../../docs/releases/v0.35.0.md) and the
+[0.36.0 notes](../../docs/releases/v0.36.0.md) hold the ones for 0.31.0,
+0.32.0, 0.33.0, 0.34.0, 0.35.0 and 0.36.0.
 Live qualification and production rollout remain separate operations.
 The [publication record](../../docs/releases/v0.27.0-publication.md) confirms
 the exact source, package order and completed registry readback.
@@ -164,9 +162,9 @@ separate evidence and authorization; see the
    Ordinary pull requests and main pushes use impact-scoped checks. Full validation is a release acceptance action only: after the routing policy is adopted, dispatch `gh workflow run ci.yml --ref main -f release_sha=<full-approved-main-sha>`. The workflow rejects a mismatched SHA and any ref other than `main` or a `release/*` candidate branch; its `CI required` gate must succeed before consuming the release artifact. A feature, fix or diagnosis branch never runs the complete matrix: if its plan fails on an unmapped path, add a reviewed mapping in `scripts/ci/select-impact.mjs`. Do not substitute ordinary main-push success or an earlier candidate's checks for this exact-SHA release evidence. While policy PR #653 is unmerged, this is the proposed acceptance path, not a claim that main already implements it.
 
    1. Confirm the CI run for the exact release commit is green, including its `npm-release-pack` job. Explicitly dispatch `ci.yml` on the approved main commit with `release_sha` equal to that full SHA, then use its successful `workflow_dispatch` run (`gh run list --branch main --workflow CI --event workflow_dispatch --commit <sha> --limit 1`), not a routine push or `pull_request` run: on pull-request events `github.sha` is the merge ref, so that run's artifact is named after a commit that is not `HEAD` and the dry run refuses it.
-   2. Download that run's accepted tarballs: `gh run download <run-id> -n release-pack-<sha> -D <dir>`, where `<sha>` is the full 40-character commit id (`git rev-parse HEAD`).
-   3. After approving the exact package/version/channel plan, dry run `node scripts/release/publish.mjs --artifacts <dir>` for stable; append `--tag rc` for an approved RC. It refuses unless the frozen schema-3 `release-manifest.json` names the release version, exact complete package set and reviewed registry baseline, and was packed from the current `HEAD`. Every tarball the publish set needs must be present and match its recorded SHA-256, SHA-512, package identity and runtime dependency maps. Older manifests are not defaulted or upgraded in place. It queries registry version availability and, for an RC, the explicit prior-publication baseline, then prints the ordered plan. It does not publish, perform post-publication readback or tag. Only the appropriate clean not-found response can establish version/package absence; authentication, transport, malformed-output and other read errors block. `--artifacts` avoids rebuilding/repacking; a bare dry run builds and packs.
-   4. Obtain separate publication authorization for that exact destination, public package/version set, channel and provenance method. For stable, release with `node scripts/release/publish.mjs --artifacts <dir> --execute`; append `--tag rc` only for an approved RC. Run interactively in Terminal.app for npm write 2FA. It refuses if the tag already exists, if `npm whoami` reports no account, or if `npm profile get --json` does not report `tfa.mode` `auth-and-writes` — there is no override. Immediately before the first RC write, it rechecks exact-version absence and the entire baseline; this narrows the race window but npm publication remains nontransactional. It then publishes each tarball in dependency order (`--provenance` only under GitHub Actions OIDC; a local release logs that no attestation is attached), reads the registry back, and only then creates the annotated `v<version>` tag carrying the source commit.
+   2. Read that run's accepted artifact: `gh api repos/Ancienttwo/byok-sdk/actions/runs/<run-id>/artifacts` lists `release-pack-<sha>`, where `<sha>` is the full 40-character commit id (`git rev-parse HEAD`); note its `id` and its `digest` (`sha256:<hex>`). Run the publisher from a checkout of exactly that commit. It downloads the artifact itself; do not download it by hand.
+   3. After approving the exact package/version/channel plan, dry run `node scripts/release/publish.mjs --ci-run-id <run-id> --ci-artifact-id <artifact-id> --ci-artifact-digest <digest>` for stable; append `--tag rc` for an approved RC. Through `gh api` it verifies that the run is a successful `ci.yml` `workflow_dispatch` for `HEAD` on `main` or `release/*` and that the artifact belongs to that run with that digest, then downloads the ZIP and checks its digest. It refuses unless the frozen schema-3 `release-manifest.json` names the release version, exact complete package set and reviewed registry baseline, and was packed from the current `HEAD`. Every tarball the publish set needs must be present and match its recorded SHA-256, SHA-512, package identity and runtime dependency maps. Older manifests are not defaulted or upgraded in place. It queries registry version availability and, for an RC, the explicit prior-publication baseline, then prints the ordered plan. It does not publish, perform post-publication readback or tag. Only the appropriate clean not-found response can establish version/package absence; authentication, transport, malformed-output and other read errors block. `--artifacts <dir>` (already packed tarballs) and a bare dry run (builds and packs) are local dry-run inputs only: they cannot be combined with the CI evidence flags and cannot authorize publication.
+   4. Obtain separate publication authorization for that exact destination, public package/version set, channel and provenance method. For stable, release with `node scripts/release/publish.mjs --ci-run-id <run-id> --ci-artifact-id <artifact-id> --ci-artifact-digest <digest> --execute`, the same evidence flags as the dry run; append `--tag rc` only for an approved RC. `--execute` without all three flags fails with `RELEASE_CI_EVIDENCE_REQUIRED`. Run interactively in Terminal.app for npm write 2FA. It refuses if the tag already exists, if `npm whoami` reports no account, or if `npm profile get --json` does not report `tfa.mode` `auth-and-writes` — there is no override. Immediately before the first RC write, it rechecks exact-version absence and the entire baseline; this narrows the race window but npm publication remains nontransactional. It then publishes each tarball in dependency order (`--provenance` only under GitHub Actions OIDC; a local release logs that no attestation is attached), reads the registry back, and only then creates the annotated `v<version>` tag carrying the source commit.
 
       On a slow uplink, raise npm's request timeout for this run (for example `npm_config_fetch_timeout=3600000`): the client tarball is about 10.8 MB, and its publish request can outlast npm's default `fetch-timeout` of 300000 ms.
    5. Push the tag: `git push origin v<version>`. A tag exists only for a train the registry has already confirmed.
