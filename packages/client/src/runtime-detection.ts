@@ -21,7 +21,7 @@ export interface RuntimeObservation {
   present: boolean;
   outcome: RuntimeDetectResult['kind'];
   reason?: RuntimeDetectionRefusalReason;
-  /** With `reason: 'runtime_environment_unavailable'`: why the login-shell capture failed. */
+  /** With `reason: 'runtime_environment_unavailable'`: why the login-shell capture or, on win32, the logon registry read failed. */
   code?: ServiceEnvironmentUnavailableCode;
   version?: string;
   qualifiedVersion?: string;
