@@ -150,6 +150,8 @@ jobs:
         run: node scripts/api-surface/check-version-authority.mjs
       - name: Upgrade manifest
         run: node scripts/release/check-upgrade-manifest.mjs
+      - name: Retired package identities
+        run: node scripts/release/check-retired-identities.mjs
       - name: Install dependencies
         if: needs.select.outputs.build == 'true'
         run: bun ci
