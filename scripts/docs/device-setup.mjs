@@ -68,7 +68,7 @@ export function generateGuide(current, manifest = JSON.parse(read('packages/clie
   return result;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   const file = path.join(root, 'docs/device-setup.md');
   const current = readFileSync(file, 'utf8');
   const generated = generateGuide(current);

@@ -116,7 +116,7 @@ export async function install(runtime, mode, { dir, githubEnv = process.env.GITH
   return lines;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.main) {
   const [runtime, mode] = process.argv.slice(2);
   install(runtime, mode).catch(error => {
     console.error(error instanceof Error ? error.message : String(error));

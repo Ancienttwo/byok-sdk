@@ -55,6 +55,10 @@ export const scriptTestInputs = Object.freeze({
   'scripts/api-surface/check-provisioning-code-alignment.test.mjs': { install: true, inputs: [
     /^packages\/(?:keys|protocol)\/(?:src\/|package\.json$|tsup\.config\.ts$)/,
   ] },
+  'scripts/ci/permanent-skips.test.mjs': { inputs: [
+    /^(?:scripts|examples)\/.*\.[cm]?[jt]s$/,
+    /^packages\/[^/]+\/(?:scripts|src)\/.*\.[cm]?[jt]s$/,
+  ] },
   'scripts/architecture/dependency-graph.test.mjs': { inputs: [
     /^scripts\/architecture\/dependency-(?:graph\.mjs|baseline\.json)$/,
     /^packages\/[^/]+\/(?:package\.json$|src\/(?!.*(?:\/__tests__\/|\.test\.|\.spec\.|\.d\.ts$)))/,

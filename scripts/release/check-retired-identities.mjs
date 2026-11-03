@@ -52,7 +52,7 @@ export function checkRetiredIdentities(repoRoot) {
     .map(relativePath => `${relativePath}: contains retired @byok/ package identity`);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   const errors = checkRetiredIdentities(fileURLToPath(new URL('../..', import.meta.url)));
   if (errors.length > 0) {
     for (const error of errors) console.error(`[retired-identities] ${error}`);

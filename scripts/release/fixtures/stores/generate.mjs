@@ -170,6 +170,6 @@ async function main() {
   console.log(`[store-fixtures] wrote ${[...releases, ...(includeMain ? ['main'] : [])].join(', ')}`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   await main();
 }

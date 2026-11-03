@@ -1,5 +1,4 @@
 import { isReleaseRef, verifyPrPlan } from './plan-ci.mjs';
-import { pathToFileURL } from 'node:url';
 import { knownFamilies, selectImpact } from './select-impact.mjs';
 import { requireCiSuccess } from './require-ci-success.mjs';
 
@@ -19,7 +18,7 @@ export function requireCiPlan(needs, plan, event, sha, base, cwd) {
   }
   requireCiSuccess(Object.fromEntries(required.map(id => [id, needs[id]])), required);
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.main) {
   const plan = JSON.parse(process.env.CI_PLAN ?? '');
   if (process.env.CI_EVENT === 'workflow_dispatch' && !isReleaseRef(process.env.CI_REF)) throw new Error('Release validation runs only on main or release/* refs');
   if (process.env.CI_EVENT === 'schedule' && process.env.CI_REF !== 'refs/heads/main') throw new Error('Nightly validation runs only on main');

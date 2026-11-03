@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
 import { knownFamilies, scriptChecksForPaths, selectImpact } from './select-impact.mjs';
 import { LOCKFILE_VERSION_REASON } from './dependency-impact.mjs';
 
@@ -66,7 +65,7 @@ export function verifyPrPlan(plan, env = process.env, cwd = process.cwd()) {
   return base;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.main) {
   const event = process.env.CI_EVENT;
   const base = resolveCiBase();
   let paths;
