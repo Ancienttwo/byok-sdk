@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.35.1 — source candidate
+
+0.35.1 is a PATCH release under the pre-1.0 policy: corrections only, with no
+new public API, persistence or security authority. The upgrade manifest that
+`@byok-sdk/client` ships (`packages/client/upgrade-manifest.json`, 0.35.0 to
+0.35.1) holds 1 additive entry, for the K8 example test Host, and no breaking
+entry. The wire stays v5 (`PROTOCOL_VERSION = 5`) with an unchanged corpus.
+There is no new Postgres migration and no SQLite schema change. See the
+[0.35.1 candidate notes](docs/releases/v0.35.1.md) and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.35.1.md).
+
 - **Added (examples)** — K8 exports `./l-test-host`
   (`src/l-test-host.test-support.ts`), an L test Host built only from the
   published packages: an embedded SQLite server, a paired daemon with a stub
@@ -30,6 +41,27 @@
   only its metadata changed (its ctime, for example after icacls pushes
   inherited permissions down on Windows). A replaced file or changed bytes
   still fail as before.
+
+- **Fix (client; #1365)** — the summary of the `device` diagnostics check
+  names the reason when the device identity cannot be read: the failing
+  safe-open step, with the fs error code when there is one, instead of
+  a bare `unavailable`. Only the summary text changes; the
+  `DiagnosticsSnapshot.device` type is unchanged.
+
+- **Fix (client; #1366)** — operational health hardens its `storeDir` once per
+  tracker instead of on every write. On Windows each write ran icacls, which
+  pushed inherited permissions down onto every `storeDir` file and changed the
+  ctime of `device.json` and `control.token` (the likely source of the #1342
+  reports). A hardening that fails is not recorded, so the next write still
+  fails closed.
+
+- **Fix (keys; #1364)** — the Windows Pi projection ACL query no longer loads
+  `System.Web.Extensions` or uses `JavaScriptSerializer`. The path arrives
+  alone on stdin as strict UTF-8 and the script writes its JSON itself. A cold
+  query took a median of about 0.45s in CI, down from 2.65s. The exit-code
+  mapping and the TypeScript validation of the result are unchanged; an empty
+  path, which the SDK never sends, now exits `invalid_request` instead of
+  `unexpected`. The remaining PowerShell start and exit time is #1373.
 
 ## 0.35.0 — 2026-11-02 (published)
 
