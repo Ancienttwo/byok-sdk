@@ -440,11 +440,16 @@ await runtime.dispose();
       await assert.rejects(readFile(configPath),{code:'ENOENT'});
       await ensureSecureDir(path.dirname(configPath));
       await ensureSecureDir(keysRuntime.projectionDir);
+      // The client's projection DACL also grants OWNER RIGHTS READ_CONTROL (#1373).
+      if (process.platform === 'win32') {
+        const grant=spawnSync('icacls',[keysRuntime.projectionDir,'/grant','*S-1-3-4:(RC)'],{encoding:'utf8'});
+        assert.equal(grant.status,0,grant.stderr);
+      }
       await writeFile(configPath,keysConfigBytes);
       await rm(reservedServerCwdMarker,{force:true});
       try {
         // Windows lowpriv CI rounds 8-9 (35206575959, 35208560163): this
-        // keys chain (launcher + SQLite + ACL powershell + pi host) exceeds
+        // keys chain (launcher + SQLite + ACL query + pi host) exceeded
         // the default 30s cap on its first cold execution; scoped here only.
         const state=await rpcState(keysInvocation.command,keysInvocation.args,{...keysInvocation.options,env:{
           ...keysInvocation.options.env,
