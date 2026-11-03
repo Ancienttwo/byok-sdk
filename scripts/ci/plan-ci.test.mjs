@@ -187,7 +187,7 @@ test('a routine plan never contains the complete test suite', () => {
 // #649: the targeted job installs for a reviewed script whose tests need
 // installed packages; the other reviewed scripts run their tests without one.
 test('reviewed release scripts install only when their tests need packages', () => {
-  const install = ['scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs', 'scripts/architecture/dependency-baseline.json', 'scripts/release/check-package-graph.mjs', 'scripts/release/check-retired-identities.mjs', 'scripts/release/pack-and-smoke.mjs', 'scripts/release/pack-and-smoke.test.mjs',
+  const install = ['scripts/api-surface/check-api-surface.mjs', 'scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs', 'scripts/architecture/dependency-baseline.json', 'scripts/release/check-package-graph.mjs', 'scripts/release/check-retired-identities.mjs', 'scripts/release/pack-and-smoke.mjs', 'scripts/release/pack-and-smoke.test.mjs',
     'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs',
     'scripts/release/beta-release.test.mjs', 'scripts/release/registry-readback.mjs',
     'scripts/release/execution-submit-smoke.mjs', 'scripts/release/packaging-plugin-smoke.mjs', 'scripts/release/cloud-do-consumer-smoke.mjs', 'scripts/release/cloud-do-consumer-worker.mjs',

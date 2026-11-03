@@ -340,6 +340,9 @@ export const reviewedScripts = Object.freeze({
   'scripts/architecture/dependency-baseline.json': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
   'scripts/docs/device-setup.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
   'scripts/docs/device-setup.test.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
+  // #1387: the test imports acorn (module-scan.mjs), and install also selects the
+  // build job that runs check:api-surface.
+  'scripts/api-surface/check-api-surface.mjs': { tests: ['scripts/api-surface/check-api-surface.test.mjs'], install: true },
   'scripts/api-surface/check-version-authority.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/api-surface/check-version-authority.test.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/release/beta-release.test.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },

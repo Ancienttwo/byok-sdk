@@ -397,6 +397,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   const tracked = new Set(spawnSync('git', ['ls-files'], { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean));
   const scripts = JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).scripts;
   assert.deepEqual(Object.keys(reviewedScripts).sort(), [
+    'scripts/api-surface/check-api-surface.mjs',
     'scripts/api-surface/check-version-authority.mjs', 'scripts/api-surface/check-version-authority.test.mjs',
     'scripts/architecture/dependency-baseline.json', 'scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs',
     'scripts/ci/with-secret-service.sh',
@@ -474,7 +475,7 @@ test('store precheck fixtures select the server, keys and client suites', () => 
 
 test('release script siblings outside the reviewed list still fail closed', () => {
   for (const path of ['scripts/release/publish-unreviewed.test.mjs', 'scripts/release/pg-unreviewed-smoke.mjs', 'scripts/release/registry-contract.mjs',
-    'scripts/release/nested/publish.mjs', 'scripts/api-surface/check-api-surface.mjs', 'scripts/api-surface/check-version-authority.js']) {
+    'scripts/release/nested/publish.mjs', 'scripts/api-surface/check-api-surface.js', 'scripts/api-surface/check-version-authority.js']) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
   }
 });
