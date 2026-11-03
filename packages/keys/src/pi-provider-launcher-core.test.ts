@@ -468,136 +468,121 @@ describe('committed Pi spawn boundary', () => {
   });
 });
 
-/**
- * Positions in a PowerShell script where a command could be invoked, so could
- * resolve through PSModulePath. The ACL script is .NET-only, and this guard
- * enforces that structurally, without a denylist that the next alias would
- * slip past:
- * - every statement (split on newline, ';', '{', '}' and '|') starts with a
- *   variable, a type expression, a try/catch/exit keyword or an if/while/foreach
- *   condition; an `exit` takes only a literal, a variable or a parenthesis;
- * - an assignment's right-hand side starts with a variable, type expression,
- *   parenthesis, string, number or '@';
- * - a foreach header's input after 'in' starts with the same value tokens;
- * - after every '(' (so also '$(' and '@('), and after every ',' (call
- *   arguments, outside type brackets), the next token is a variable, type
- *   expression, parenthesis, string, number or '@' (after '(' also ')'), never
- *   a bare word, '&' or '.'.
- * Single-quoted strings are inert, so their contents are blanked first;
- * double-quoted strings stay in view because '$(...)' runs inside them.
- * Rejects Verb-Noun cmdlets in any case and aliases (gi, gci, %, ?, iex,
- * select, where, ...).
- */
-function powershellCommandFindings(script: string): string[] {
-  const code = script.replaceAll(/'[^']*'/gu, "''");
-  const statementStart = /^(?:\$|\[|(?:try|catch)\b|exit\b\s*(?:$|[\d$(]\S*)|(?:if|while|foreach)\s*\()/iu;
-  const valueStart = /^(?:\$|\[|\(|'|"|\d|@)/u;
-  const findings: string[] = [];
-  for (const statement of code.split(/[\n;{}|]/u).map((part) => part.trim()).filter((part) => part !== '')) {
-    if (!statementStart.test(statement)) findings.push(statement);
-    const rhs = /^\$\w+(?:\['[^']*'\])?\s*=\s*(.*)$/u.exec(statement)?.[1];
-    if (rhs !== undefined && !valueStart.test(rhs)) findings.push(statement);
-  }
-  for (const [, next] of code.matchAll(/\((?=\s*(\S?))/gu)) {
-    if (!/^[$[('"@)\d]$/u.test(next ?? '')) findings.push(`( followed by ${JSON.stringify(next)}`);
-  }
-  for (const [, next] of code.matchAll(/\bforeach\s*\(\s*\$\w+\s+in\b\s*(\S?)/giu)) {
-    if (!valueStart.test(next ?? '')) findings.push(`foreach in followed by ${JSON.stringify(next)}`);
-  }
-  // Generic type arguments ([Dictionary[string, object]]) are not call arguments.
-  let untyped = code;
-  for (let previous = ''; previous !== untyped;) {
-    previous = untyped;
-    untyped = untyped.replaceAll(/\[[A-Za-z][^[\]]*\]/gu, '[T]');
-  }
-  for (const [, next] of untyped.matchAll(/,(?=\s*(\S?))/gu)) {
-    if (!/^[$[('"@\d]$/u.test(next ?? '')) findings.push(`, followed by ${JSON.stringify(next)}`);
-  }
-  if (/\b[a-z]+-[a-z]+\b/iu.test(code.replaceAll(/\s-[a-z]+\b/giu, ' '))) findings.push('Verb-Noun');
-  return findings;
-}
-
 describe('Windows projection ACL verification', () => {
-  const owner = 'S-1-5-21-1000';
-  const good = { owner, currentUser:owner, protected:true, reparsePoint:false, rules:[
-    {sid:owner,allow:true,fullControl:true,inherits:true},
-    {sid:'S-1-5-18',allow:true,fullControl:true,inherits:true},
-    {sid:'S-1-5-32-544',allow:true,fullControl:true,inherits:true},
-  ]};
-  it('uses fixed system PowerShell and transports the literal path on stdin', async () => {
-    const run = vi.fn(async () => ({exitCode:0,stdout:JSON.stringify(good),stderr:''}));
-    const directory = 'C:\\Task $x; path\\projection';
-    await assertWindowsPiProjectionAcl(directory,{systemRoot:'C:\\Windows',run});
-    const [command,args,input] = run.mock.calls[0] as unknown as [string,string[],string];
-    expect(command).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-    expect(args.slice(0,3)).toEqual(['-NoProfile','-NonInteractive','-EncodedCommand']);
-    expect(args.join(' ')).not.toContain(directory);
-    expect(input).toBe(directory);
-  });
+  const user = 'S-1-5-21-1000';
+  const good = `D:PAI(A;OICI;FA;;;${user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;RC;;;OW)`;
+  const queryFailure = (cause: string, step: string, exit?: number) =>
+    `pi_projection_acl_query_failed: Pi projection ACL query failed (cause=${cause}, step=${step}${exit === undefined ? '' : `, exit=${exit}`})`;
+  // icacls /save writes UTF-16LE: the leaf name, then its SDDL (#1381 E1).
+  // The reference file renders the current user as `userRendering` (the built-in Administrator renders as LA).
+  function fakeTools(sddl: string, over: { icacls?: number; whoami?: number; whoamiOut?: string; saved?: (leaf: string) => string; userRendering?: string } = {}) {
+    const saves: string[] = [];
+    const run = vi.fn(async (executable: string, args: string[]) => {
+      if (executable.endsWith('whoami.exe')) {
+        return { exitCode: over.whoami ?? 0, stdout: over.whoamiOut ?? `"host\\user","${user}"\r\n`, stderr: 'C:\\Users\\someone' };
+      }
+      saves.push(args[0]!);
+      if (over.icacls !== undefined) return { exitCode: over.icacls, stdout: '', stderr: 'C:\\Users\\someone\\secret: Access is denied.' };
+      if (args[1] !== '/save') return { exitCode: 0, stdout: 'Successfully processed 1 files', stderr: '' };
+      const leaf = path.basename(args[0]!);
+      const record = leaf === 'user' ? `user\r\nD:PAI(A;;FA;;;${over.userRendering ?? user})\r\n` : over.saved?.(leaf) ?? `${leaf}\r\n${sddl}\r\n`;
+      await fs.writeFile(args[2]!, Buffer.from(record, 'utf16le'));
+      return { exitCode: 0, stdout: 'Successfully processed 1 files', stderr: '' };
+    });
+    return { run, saves };
+  }
+  async function withDirectory(check: (directory: string) => Promise<void>): Promise<void> {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-acl-unit-')));
+    try {
+      await fs.mkdir(path.join(root, 'projection'));
+      await check(path.join(root, 'projection'));
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  }
+  const assertAcl = (directory: string, run: ReturnType<typeof fakeTools>['run']) =>
+    assertWindowsPiProjectionAcl(directory, { systemRoot: 'C:\\Windows', run });
+
+  it('runs the fixed system whoami and icacls, saving into a private file it removes', async () => withDirectory(async directory => {
+    const { run, saves } = fakeTools(good);
+    await assertAcl(directory, run);
+    const reference = saves[0]!;
+    expect(run.mock.calls.map(([executable, args]) => [executable, args.slice(0, 2)])).toEqual([
+      ['C:\\Windows\\System32\\whoami.exe', ['/user', '/fo']],
+      ['C:\\Windows\\System32\\icacls.exe', [reference, '/inheritance:r']],
+      ['C:\\Windows\\System32\\icacls.exe', [reference, '/save']],
+      ['C:\\Windows\\System32\\icacls.exe', [directory, '/save']],
+    ]);
+    expect(run.mock.calls[1]![1]).toEqual([reference, '/inheritance:r', '/grant:r', `*${user}:(F)`]);
+    await expect(fs.access(path.dirname(reference))).rejects.toMatchObject({ code: 'ENOENT' });
+  }));
+  it('accepts OWNER RIGHTS with READ_CONTROL plus SYNCHRONIZE and well-known SIDs in literal form', async () => withDirectory(async directory => {
+    await assertAcl(directory, fakeTools(`D:PAI(A;OICI;FA;;;${user})(A;OICI;0x1f01ff;;;S-1-5-18)(A;;0x120000;;;S-1-3-4)`).run);
+  }));
   it.each([
-    {...good,owner:'S-1-5-21-2000'}, {...good,protected:false},
-    {...good,reparsePoint:true}, {...good,extra:true},
-    {...good,rules:[{...good.rules[0],extra:true}]},
-    {...good,rules:[...good.rules,{sid:'S-1-1-0',allow:true,fullControl:false,inherits:true}]},
-    {...good,rules:[{sid:owner,allow:true,fullControl:false,inherits:true}]},
-    {...good,rules:[{sid:owner,allow:true,fullControl:true,inherits:false}]},
-  ])('refuses unsafe ACL without repair', async (acl) => {
-    const run = vi.fn(async () => ({exitCode:0,stdout:JSON.stringify(acl),stderr:''}));
-    await expect(assertWindowsPiProjectionAcl('C:\\projection',{systemRoot:'C:\\Windows',run})).rejects.toThrow();
-    expect(run).toHaveBeenCalledOnce();
-  });
-  it('runs a query that invokes no PowerShell command, so no module is ever auto-loaded', async () => {
-    const run = vi.fn(async () => ({exitCode:0,stdout:JSON.stringify(good),stderr:''}));
-    await assertWindowsPiProjectionAcl('C:\\projection',{systemRoot:'C:\\Windows',run});
-    const [,args] = run.mock.calls[0] as unknown as [string,string[]];
-    const script = Buffer.from(args[3]!, 'base64').toString('utf16le');
-    expect(script).toContain('GetAccessControl');
-    // A Verb-Noun command (or an alias for one) resolves through PSModulePath;
-    // an inherited PowerShell 7 module path then shadows
-    // Microsoft.PowerShell.Security.
-    expect(powershellCommandFindings(script)).toEqual([]);
-  });
-  it('rejects every command form the cmdlet guard exists to keep out', () => {
-    for (const script of [
-      '$acl = Get-Acl $path', '$acl = get-acl $path', '$acl = GET-ACL $path',
-      'gi $path', 'gci $path', '$x | select Name', '$x | where Name', '$x | % { $_ }',
-      '$x | ? { $_ }', 'iex $text', '$x | foreach Name', '$acl = gi $path',
-      // Commands reached through a parenthesis, subexpression or argument.
-      '$acl = (gi $path).GetAccessControl()', '$acl = $(gi $path)', '$acl = @(gci $path)',
-      '[void](iex $text)', '$x = (& $cmd)', '$x = (. $script)', 'exit (gi $p)',
-      'if ((gi $p)) { exit 0 }', '$x = "$(gi $p)"', '$x.Add((gci $p))',
-      'exit gi $p', '$x.Add($a, gi $p)', '$x = ( gi $p)',
-      // A foreach input is a pipeline even without a wrapping parenthesis.
-      'foreach ($i in gi $p) {', 'foreach ($i in gci $p) { $i }',
-      'foreach($i in gi){$i}', 'FOREACH ($i IN gi $p) {',
-    ]) expect(powershellCommandFindings(script), script).not.toEqual([]);
-  });
-  it('accepts foreach headers whose inputs start with value tokens', () => {
-    for (const input of ['$items', '[int]1', '($items)', "'literal'", '"literal"', '@($items)', '1']) {
-      const script = `foreach ($i in ${input}) { $i }`;
-      expect(powershellCommandFindings(script), script).toEqual([]);
-    }
-  });
-  it('loads no serializer assembly, whose first use on a machine dominated a cold query (#1364)', async () => {
-    const run = vi.fn(async () => ({exitCode:0,stdout:JSON.stringify(good),stderr:''}));
-    await assertWindowsPiProjectionAcl('C:\\projection',{systemRoot:'C:\\Windows',run});
-    const [,args] = run.mock.calls[0] as unknown as [string,string[]];
-    const script = Buffer.from(args[3]!, 'base64').toString('utf16le');
-    expect(script).not.toContain('Assembly]::Load');
-    expect(script).not.toContain('System.Web');
-  });
+    ['an unprotected DACL', `D:AI(A;OICI;FA;;;${user})(A;;RC;;;OW)`, 'pi_projection_acl_unprotected'],
+    ['a deny ACE', `D:P(D;;DC;;;${user})(A;OICI;FA;;;${user})(A;;RC;;;OW)`, 'pi_projection_acl_unauthorized_ace'],
+    ['no OWNER RIGHTS ACE', `D:P(A;OICI;FA;;;${user})(A;OICI;FA;;;SY)`, 'pi_projection_acl_owner_rights_missing'],
+    ['two OWNER RIGHTS ACEs', `D:P(A;OICI;FA;;;${user})(A;;RC;;;OW)(A;;RC;;;S-1-3-4)`, 'pi_projection_acl_owner_rights_missing'],
+    ['OWNER RIGHTS with WRITE_DAC', `D:P(A;OICI;FA;;;${user})(A;;RCWD;;;OW)`, 'pi_projection_acl_owner_rights_missing'],
+    ['an inheritable OWNER RIGHTS ACE', `D:P(A;OICI;FA;;;${user})(A;OICI;RC;;;OW)`, 'pi_projection_acl_owner_rights_missing'],
+    ['another SID', `D:P(A;OICI;FA;;;${user})(A;;RC;;;OW)(A;;FR;;;S-1-1-0)`, 'pi_projection_acl_unauthorized_ace'],
+    ['the user without full control', `D:P(A;OICI;0x1301bf;;;${user})(A;;RC;;;OW)`, 'pi_projection_acl_owner_access_missing'],
+    ['the user full control that is inherit-only', `D:P(A;OICIIO;FA;;;${user})(A;;RC;;;OW)`, 'pi_projection_acl_owner_access_missing'],
+    ['an unknown ACE type', `D:P(XA;;FA;;;${user})(A;;RC;;;OW)`, 'pi_projection_acl_invalid_ace'],
+    ['an object ACE', `D:P(A;;FA;bf967a86-0de6-11d0-a285-00aa003049e2;;${user})(A;;RC;;;OW)`, 'pi_projection_acl_invalid_ace'],
+    ['an unknown ACE flag', `D:P(A;OICISA;FA;;;${user})(A;;RC;;;OW)`, 'pi_projection_acl_invalid_ace'],
+    ['an unknown right', `D:P(A;OICI;ZZ;;;${user})(A;;RC;;;OW)`, 'pi_projection_acl_invalid_ace'],
+    ['an unknown SID alias', `D:P(A;OICI;FA;;;${user})(A;;RC;;;OW)(A;;FR;;;AU)`, 'pi_projection_acl_invalid_ace'],
+    ['a seventh ACE field', `D:P(A;OICI;FA;;;${user};x)(A;;RC;;;OW)`, 'pi_projection_acl_invalid_ace'],
+    ['a conditional ACE', `D:P(XA;OICI;FA;;;${user};(x))(A;;RC;;;OW)`, 'pi_projection_acl_invalid_sddl'],
+    ['an owner component', `O:BAD:P(A;OICI;FA;;;${user})(A;;RC;;;OW)`, 'pi_projection_acl_invalid_sddl'],
+  ])('refuses %s without repair', async (_label, sddl, code) => withDirectory(async directory => {
+    await expect(assertAcl(directory, fakeTools(sddl).run)).rejects.toThrow(code);
+  }));
+  // #1373: the built-in local Administrator (RID 500) is rendered as LA; only the user's own rendering matches.
+  it('matches the current user by the form icacls renders it in', async () => withDirectory(async directory => {
+    const asAlias = good.replace(`;;;${user})`, ';;;LA)');
+    await assertAcl(directory, fakeTools(asAlias, { userRendering: 'LA' }).run);
+    await expect(assertAcl(directory, fakeTools(asAlias).run)).rejects.toThrow('pi_projection_acl_invalid_ace');
+  }));
   it.each([
-    [2, 'invalid_request'], [3, 'path_not_found'], [4, 'access_denied'],
-    [127, 'powershell_unavailable'], [1, 'unexpected'], [5, 'unexpected'], [-196608, 'unexpected'],
-  ])('fails closed on query exit %i with the closed cause %s and no host detail', async (exitCode, cause) => {
-    const stderr = 'C:\\Users\\someone\\secret-dir: System.UnauthorizedAccessException';
-    const run = vi.fn(async () => ({exitCode,stdout:JSON.stringify(good),stderr}));
-    const failure = await assertWindowsPiProjectionAcl('C:\\Users\\someone\\projection',{systemRoot:'C:\\Windows',run})
-      .then(() => undefined, (error: unknown) => error);
-    expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message)
-      .toBe(`pi_projection_acl_query_failed: Pi projection ACL query failed (cause=${cause}, exit=${exitCode})`);
-  });
+    ['another leaf name', { saved: () => `other\r\n${good}\r\n` }],
+    ['a reference rendering of another SID', { userRendering: 'S-1-5-21-2000' }],
+    ['a reference rendering with two ACEs', { userRendering: `${user})(A;;FA;;;SY` }],
+    ['a second record', { saved: (leaf: string) => `${leaf}\r\n${good}\r\n${leaf}\r\n${good}\r\n` }],
+    ['a whoami line without a SID', { whoamiOut: '"host\\user","user"\r\n' }],
+  ])('refuses %s', async (_label, over) => withDirectory(async directory => {
+    await expect(assertAcl(directory, fakeTools(good, over).run)).rejects.toThrow('pi_projection_acl_invalid_output');
+  }));
+  it.each([
+    ['icacls', 2, 'path_not_found'], ['icacls', 3, 'path_not_found'], ['icacls', 5, 'access_denied'],
+    ['icacls', 127, 'icacls_unavailable'], ['icacls', 1, 'unexpected'], ['whoami', 127, 'whoami_unavailable'], ['whoami', 1, 'unexpected'],
+  ] as const)('fails closed on %s exit %i with the closed cause %s and no host detail', async (step, exit, cause) => withDirectory(async directory => {
+    const { run, saves } = fakeTools(good, step === 'icacls' ? { icacls: exit } : { whoami: exit });
+    await expect(assertAcl(directory, run)).rejects.toThrow(new Error(queryFailure(cause, step, exit)));
+    for (const file of saves) await expect(fs.access(path.dirname(file))).rejects.toMatchObject({ code: 'ENOENT' });
+  }));
+  it('classifies a missing leaf and a missing parent from the parent listing, before any tool runs', async () => withDirectory(async directory => {
+    const { run } = fakeTools(good);
+    await expect(assertAcl(path.join(directory, 'absent'), run)).rejects.toThrow(new Error(queryFailure('path_not_found', 'readdir')));
+    await expect(assertAcl(path.join(directory, 'nope', 'absent'), run)).rejects.toThrow(new Error(queryFailure('path_not_found', 'readdir')));
+    expect(run).not.toHaveBeenCalled();
+  }));
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('classifies an unlistable parent as access_denied', async () => withDirectory(async directory => {
+    await fs.chmod(path.dirname(directory), 0o000);
+    try {
+      await expect(assertAcl(directory, fakeTools(good).run)).rejects.toThrow(new Error(queryFailure('access_denied', 'readdir')));
+    } finally { await fs.chmod(path.dirname(directory), 0o700); }
+  }));
+  it('refuses a link or a non-directory entry before any tool runs', async () => withDirectory(async directory => {
+    const { run } = fakeTools(good);
+    const link = path.join(path.dirname(directory), 'link');
+    const file = path.join(path.dirname(directory), 'file');
+    await fs.symlink(directory, link, 'junction');
+    await fs.writeFile(file, '');
+    await expect(assertAcl(link, run)).rejects.toThrow('pi_projection_reparse_point');
+    await expect(assertAcl(file, run)).rejects.toThrow('pi_projection_not_directory_or_symlink');
+    expect(run).not.toHaveBeenCalled();
+  }));
 });
 
 describe('the required runtime entry', () => {

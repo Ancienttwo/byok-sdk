@@ -33,6 +33,8 @@ import { defaultRunner, type Runner } from './exec-runner';
 const SYSTEM_SID = '*S-1-5-18';
 /** Finding R4: the well-known SID for the built-in `Administrators` group (`BUILTIN\Administrators`) — same locale-independence rationale as {@link SYSTEM_SID}. */
 const ADMINISTRATORS_SID = '*S-1-5-32-544';
+/** OWNER RIGHTS: an ACE for it replaces the rights an owner gets implicitly (READ_CONTROL and WRITE_DAC). */
+const OWNER_RIGHTS_SID = '*S-1-3-4';
 
 /**
  * Pure command-construction seam (finding F7) — kept separate from the
@@ -185,6 +187,26 @@ export class SecureFileHardeningError extends Error {
  * own — see the inline comment on it).
  */
 export async function ensureSecureDir(dir: string, opts: EnsureSecureDirOptions = {}): Promise<void> {
+  await secureDir(dir, buildIcaclsArgs, opts);
+}
+
+/**
+ * The keys Pi projection DACL: {@link buildIcaclsArgs} plus OWNER RIGHTS
+ * (S-1-3-4) with READ_CONTROL only and no inheritance flags. That ACE takes
+ * away the owner's implicit WRITE_DAC, so the keys launcher can accept the
+ * directory without reading its owner (#1373). Only the projection directory
+ * gets it.
+ */
+export function buildProjectionIcaclsArgs(dir: string, username: string): string[] {
+  return [...buildIcaclsArgs(dir, username), '/grant', `${OWNER_RIGHTS_SID}:(RC)`];
+}
+
+/** {@link ensureSecureDir} for the keys Pi projection directory, with {@link buildProjectionIcaclsArgs}. */
+export async function ensurePiProjectionDir(dir: string, opts: EnsureSecureDirOptions = {}): Promise<void> {
+  await secureDir(dir, buildProjectionIcaclsArgs, opts);
+}
+
+async function secureDir(dir: string, buildArgs: (dir: string, username: string) => string[], opts: EnsureSecureDirOptions): Promise<void> {
   const platform = opts.platform ?? process.platform;
   const run = opts.run ?? defaultRunner;
 
@@ -196,7 +218,7 @@ export async function ensureSecureDir(dir: string, opts: EnsureSecureDirOptions 
   const { username } = os.userInfo();
   let result: Awaited<ReturnType<Runner>>;
   try {
-    result = await run('icacls', buildIcaclsArgs(dir, username));
+    result = await run('icacls', buildArgs(dir, username));
   } catch (err) {
     throw new SecureDirHardeningError(dir, `could not run icacls: ${err instanceof Error ? err.message : String(err)}`);
   }

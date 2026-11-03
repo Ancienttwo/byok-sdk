@@ -14599,6 +14599,16 @@ export declare class SecureFileHardeningError extends Error {
  * own — see the inline comment on it).
  */
 export declare function ensureSecureDir(dir: string, opts?: EnsureSecureDirOptions): Promise<void>;
+/**
+ * The keys Pi projection DACL: {@link buildIcaclsArgs} plus OWNER RIGHTS
+ * (S-1-3-4) with READ_CONTROL only and no inheritance flags. That ACE takes
+ * away the owner's implicit WRITE_DAC, so the keys launcher can accept the
+ * directory without reading its owner (#1373). Only the projection directory
+ * gets it.
+ */
+export declare function buildProjectionIcaclsArgs(dir: string, username: string): string[];
+/** {@link ensureSecureDir} for the keys Pi projection directory, with {@link buildProjectionIcaclsArgs}. */
+export declare function ensurePiProjectionDir(dir: string, opts?: EnsureSecureDirOptions): Promise<void>;
 /** Re-asserts 0600 on POSIX and a non-inherited owner/SYSTEM/Admin DACL on Windows. */
 export declare function ensureSecureFile(filePath: string, opts?: EnsureSecureDirOptions): Promise<void>;
 /**

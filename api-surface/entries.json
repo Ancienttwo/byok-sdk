@@ -2683,6 +2683,7 @@
         "child_process",
         "crypto",
         "fs",
+        "os",
         "path",
         "zod"
       ],
@@ -2697,6 +2698,7 @@
           "child_process",
           "crypto",
           "fs",
+          "os",
           "path"
         ],
         "thirdParty": []

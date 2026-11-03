@@ -1290,7 +1290,19 @@ export declare function buildPiProviderChildEnvironment(options: {
     secret: string | undefined;
     platform?: NodeJS.Platform;
 }): Record<string, string>;
-/** Read-only Windows equivalent of uid + 0700; never repairs host ACLs. */
+/**
+ * Read-only Windows equivalent of uid + 0700; never repairs host ACLs.
+ *
+ * It does not read the owner. The client creates the projection leaf with one
+ * exclusive mkdir (`createProjectionDir` -> `createPrivateTempDir`, no reuse of
+ * an existing name) and then grants OWNER RIGHTS (S-1-3-4) only READ_CONTROL,
+ * which takes away the owner's implicit WRITE_DAC. OWNER RIGHTS limits only
+ * handles opened after it is in place, and nobody else can hold an older
+ * handle to a leaf this launch's client created exclusively. So whoever owns
+ * the directory can change its DACL only through an explicit ACE, and the
+ * rules below admit explicit ACEs only for the current user, SYSTEM and
+ * Administrators (#1373).
+ */
 export declare function assertWindowsPiProjectionAcl(directory: string, options?: {
     systemRoot?: string;
     run?: CommandRunner;
