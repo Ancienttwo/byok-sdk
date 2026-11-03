@@ -110,7 +110,12 @@ try {
       @{ id = 'B8'; value = ';C:\e1-b8;'; kind = $stringKind },
       @{ id = 'B9'; value = 'C:\e1-b9a;%PATH%%PATH%;C:\e1-b9b'; kind = $expandKind },
       @{ id = 'B10'; value = 'C:\e1-b10a%PATH%C:\e1-b10b'; kind = $expandKind },
-      @{ id = 'B11'; value = '%PATH%'; kind = $expandKind })) {
+      @{ id = 'B11'; value = '%PATH%'; kind = $expandKind },
+      @{ id = 'B12'; value = ('C:\e1-b12;' + ($machineExpanded -split ';')[0] + ';C:\e1-b12z'); kind = $stringKind },
+      @{ id = 'B13'; value = ('C:\e1-b13;' + ($machineExpanded -split ';')[0].ToUpperInvariant() + ';C:\e1-b13z'); kind = $stringKind },
+      @{ id = 'B14'; value = ('C:\e1-b14;' + ($machineExpanded -split ';')[0] + '\;C:\e1-b14z'); kind = $stringKind },
+      @{ id = 'B15'; value = 'C:\e1-b15;C:\e1-b15;c:\E1-B15'; kind = $stringKind },
+      @{ id = 'B16'; value = '%SystemRoot%\system32;C:\e1-b16'; kind = $expandKind })) {
     Clear-Case
     $user.SetValue('Path', $case.value, $case.kind)
     $built = [E1Env]::Build()['Path']
@@ -198,9 +203,11 @@ try {
     $machine.SetValue('E1EMXA', '%E1EMXB%', $expandKind); $machine.SetValue('E1EMXB', 'mxb-%SystemRoot%', $expandKind); $machine.SetValue('E1EMXC', '%E1EMXB%', $expandKind)
     $user.SetValue('E1EUXA', '%E1EUXB%', $expandKind); $user.SetValue('E1EUXB', 'uxb-%USERPROFILE%', $expandKind); $user.SetValue('E1EUXC', '%E1EUXB%', $expandKind)
     $user.SetValue('E1EUP', '%PATH%', $expandKind)
+    $user.SetValue('E1EUN', '%USERNAME%|%USERPROFILE%', $expandKind)
     $user.SetValue('E1EUPE', '%PATHEXT%', $expandKind)
     $user.SetValue('Path', 'C:\e1e', $expandKind)
-    $e1eMachine += 'E1EMXA', 'E1EMXB', 'E1EMXC'; $e1eUser += 'E1EUXA', 'E1EUXB', 'E1EUXC', 'E1EUP', 'E1EUPE'
+    $user.SetValue('E1EUQ', '%PATH%', $expandKind)
+    $e1eMachine += 'E1EMXA', 'E1EMXB', 'E1EMXC'; $e1eUser += 'E1EUXA', 'E1EUXB', 'E1EUXC', 'E1EUP', 'E1EUPE', 'E1EUN', 'E1EUQ'
     try {
       $e = [E1Env]::Build()
       $i = 0
@@ -213,6 +220,10 @@ try {
       Show 'E1e user EXPAND naming EXPAND (A before B, C after)' @($e['E1EUXA'], $e['E1EUXB'], $e['E1EUXC'])
       Show 'E1e user %PATH% outside Path, machine replaced by <M>' ($e['E1EUP'].Replace($machineExpanded, '<M>'))
       Show 'E1e user %PATHEXT% outside PATHEXT' $e['E1EUPE']
+      Show 'E1f user USERNAME|USERPROFILE (session USERNAME, logon USERNAME)' @($e['E1EUN'], $env:USERNAME, $e['USERNAME'])
+      Show 'E1f user %PATH% created after the user Path, machine replaced by <M>' ($e['E1EUQ'].Replace($machineExpanded, '<M>'))
+      Show 'E1f machine Path first entry' (($machineExpanded -split ';')[0])
+      Show 'E1f machine Path has system32' (@($machineExpanded -split ';' | Where-Object { $_ -like '*system32' }))
     } finally {
       foreach ($n in $e1eMachine) { $machine.DeleteValue($n, $false) }
       foreach ($n in $e1eUser) { $user.DeleteValue($n, $false) }
