@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+## 0.36.0 — source candidate
+
+0.36.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+0.35.1 was prepared (#1376) but never published; its fixes ship in 0.36.0, and
+this section holds them. The upgrade manifest that `@byok-sdk/client` ships
+(`packages/client/upgrade-manifest.json`, 0.35.0 to 0.36.0) lists the
+Host-visible changes since 0.35.0 that change an API, config or example item:
+3 breaking entries, each with a migration link. The wire stays v5
+(`PROTOCOL_VERSION = 5`) with an unchanged corpus. There is no new Postgres
+migration and no SQLite schema change. See the
+[0.36.0 candidate notes](docs/releases/v0.36.0.md) and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.36.0.md). The breaking
+changes: a Windows service definition's `windows` is the union
+`ServiceWindowsOptions`, with a new `user` scope (client, #1337);
+`validateResultOutcome` takes `({ contract, schema }, outcome)` and runs the
+`bot-turn-outcome.v1` contract rules (protocol, client and K8, #1374); and the
+K8 example refuses an outcome that breaks those rules whole (#1374), with the
+other K8 changes of this release in the same manifest entry.
+
+- **Breaking (client)** — `ServiceDefinition.windows` is the union
+  `ServiceWindowsOptions`. `{ scope?: 'machine'; winswBin; installDir? }` is
+  today's WinSW Windows Service, and `{ winswBin }` still compiles. The new
+  `{ scope: 'user'; stop: ServiceProgram }` autostarts the service at the
+  user's logon with no SCM registration and no administrator (#1337): the unit
+  is `<name>.cmd` in the user's Startup folder, which starts the batch launcher
+  `<storeDir>\service\<name>.launcher.cmd`; the launcher reruns the program
+  about 10s after a non-zero exit and ends when `<name>.stopped` exists.
+  `stop()` writes that marker, runs the Host's `stop` program, then waits for
+  the launcher to exit. A `stop` program that exits non-zero is the new
+  `ServiceUnitError` code `service_stop_failed`, and the marker stays. A
+  program value with `"`, `%` or a control character throws at construction.
+  Code that reads `def.windows.winswBin` must first narrow on `scope`.
+  `byok-agent install` on Windows still installs only the WinSW service.
+
 - **Breaking (protocol, client, examples; #1374)** —
   `validateResultOutcome` now takes `({ contract, schema }, outcome)`; the
   `(schema, outcome)` form is gone. When `contract` is `bot-turn-outcome.v1`,
@@ -70,32 +104,6 @@
   until the template returns. In H, a Bot whose model is not in the scope
   config is now held instead of running its stored template. A new Bot still
   needs a template.
-
-- **Breaking (client)** — `ServiceDefinition.windows` is the union
-  `ServiceWindowsOptions`. `{ scope?: 'machine'; winswBin; installDir? }` is
-  today's WinSW Windows Service, and `{ winswBin }` still compiles. The new
-  `{ scope: 'user'; stop: ServiceProgram }` autostarts the service at the
-  user's logon with no SCM registration and no administrator (#1337): the unit
-  is `<name>.cmd` in the user's Startup folder, which starts the batch launcher
-  `<storeDir>\service\<name>.launcher.cmd`; the launcher reruns the program
-  about 10s after a non-zero exit and ends when `<name>.stopped` exists.
-  `stop()` writes that marker, runs the Host's `stop` program, then waits for
-  the launcher to exit. A `stop` program that exits non-zero is the new
-  `ServiceUnitError` code `service_stop_failed`, and the marker stays. A
-  program value with `"`, `%` or a control character throws at construction.
-  Code that reads `def.windows.winswBin` must first narrow on `scope`.
-  `byok-agent install` on Windows still installs only the WinSW service.
-
-## 0.35.1 — source candidate
-
-0.35.1 is a PATCH release under the pre-1.0 policy: corrections only, with no
-new public API, persistence or security authority. The upgrade manifest that
-`@byok-sdk/client` ships (`packages/client/upgrade-manifest.json`, 0.35.0 to
-0.35.1) holds 1 additive entry, for the K8 example test Host, and no breaking
-entry. The wire stays v5 (`PROTOCOL_VERSION = 5`) with an unchanged corpus.
-There is no new Postgres migration and no SQLite schema change. See the
-[0.35.1 candidate notes](docs/releases/v0.35.1.md) and the
-[Host upgrade checklist](docs/releases/host-upgrade-0.35.1.md).
 
 - **Added (examples)** — K8 exports `./l-test-host`
   (`src/l-test-host.test-support.ts`), an L test Host built only from the

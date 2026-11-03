@@ -6,8 +6,8 @@
     "snapshotSha256": "9d71ff20dc74f88a519fc46d47f14f6e39ab08472ba8ec179accc00b4ad45d76"
   },
   "to": {
-    "version": "0.35.1",
-    "snapshotSha256": "9d110107a982e603805ce02a5141351bb41bc3ed5b574813f418e0f89fe9eb71"
+    "version": "0.36.0",
+    "snapshotSha256": "f82fc8482c1054149c3e663b82e9f4b794834643da7f67197be8cdd6db721680"
   },
   "configFields": {
     "status": "tracked",
@@ -28,7 +28,7 @@
       "id": "service-windows-user-scope",
       "impact": "breaking",
       "summary": "Needs the next MINOR. ServiceDefinition.windows is the union ServiceWindowsOptions: { scope?: 'machine'; winswBin; installDir? } is the WinSW Windows Service as before, and { winswBin } still compiles; { scope: 'user'; stop: ServiceProgram } autostarts at the user's logon from a Startup .cmd and a batch launcher under <storeDir>\\service, with no SCM registration and no administrator (#1337). stop() writes <name>.stopped, runs the Host's stop program and waits for the launcher to exit (service_unload_timeout); a stop program that exits non-zero is the new ServiceUnitError code service_stop_failed. A program value with \", % or a control character throws at construction. Code that reads def.windows.winswBin narrows on scope first. CreateServiceLifecycleOptions.deps also takes the user-scope test seams.",
-      "migration": "CHANGELOG.md#unreleased",
+      "migration": "docs/releases/host-upgrade-0.36.0.md#from-0350-to-0360",
       "items": [
         "export:@byok-sdk/client#CreateServiceLifecycleOptions",
         "export:@byok-sdk/client#ServiceDefinition",
@@ -52,8 +52,38 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=13268de4f68b46f5",
-      "after": "K8 0.0.1 src-sha256=604f4c2942dce1df",
+      "after": "K8 0.0.1 src-sha256=627add813b3eea45",
       "entry": "k8-l-test-host"
+    },
+    {
+      "item": "export:@byok-sdk/client#CreateServiceLifecycleOptions",
+      "change": "changed",
+      "entry": "service-windows-user-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceDefinition",
+      "change": "changed",
+      "entry": "service-windows-user-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitErrorCode",
+      "change": "changed",
+      "entry": "service-windows-user-scope"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceWindowsOptions",
+      "change": "added",
+      "entry": "service-windows-user-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ResultOutcomeCheck",
+      "change": "changed",
+      "entry": "result-outcome-contract-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#validateResultOutcome",
+      "change": "changed",
+      "entry": "result-outcome-contract-rules"
     }
   ]
 }

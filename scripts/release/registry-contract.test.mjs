@@ -93,7 +93,7 @@ function mutateResponse(fixture, selector, change) {
   fixture.responses.set(selector, good(value));
 }
 
-// Independently pin the public registry baseline reviewed for the 0.35.1 release.
+// Independently pin the public registry baseline reviewed for the 0.36.0 release.
 // Do not derive expected versions from the file under test.
 test('the reviewed plan enumerates all nine packages with their prior stable latest', () => {
   assert.equal(names.length, 9);
