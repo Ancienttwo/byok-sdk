@@ -1,7 +1,7 @@
 // Trial evidence and classification for docs/submit-result-measurement.md
 // "Classify every trial". Pure functions: no I/O, no clock.
 import { validateResultOutcome } from '@byok-sdk/protocol';
-import type { CorpusCase } from './corpus';
+import { corpusContract, type CorpusCase } from './corpus';
 import { resultDigest } from './digest';
 
 export const CATEGORIES = ['infrastructure_abort', 'timeout', 'unobservable', 'valid', 'invalid', 'missing', 'terminal_failure'] as const;
@@ -224,7 +224,7 @@ export function classifyTrial(observation: TrialObservation, options: ClassifyOp
   if (terminal.status === 'task.complete') {
     if (document === undefined) return done('unobservable', 'complete_without_document');
     if (staged && staged.contentHash !== outcomeDigest) return done('unobservable', 'staged_record_differs_from_terminal');
-    if (!validateResultOutcome(options.corpusCase.schema, document).ok) return done('unobservable', 'terminal_document_fails_schema');
+    if (!validateResultOutcome({ contract: corpusContract(options.corpusCase.id), schema: options.corpusCase.schema }, document).ok) return done('unobservable', 'terminal_document_fails_schema');
     return done('valid');
   }
   if (submissions.some(submission => submission.validation === 'rejected') && staged === null) return done('invalid');

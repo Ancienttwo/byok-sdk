@@ -6,7 +6,7 @@ import { advanceRooms, applySpeech, roomInput, ROOM_GRACE_MS } from './rooms';
 import { applyManagement, roomFields } from './team';
 import { outcomeSchema, turnContext } from './schema';
 import { HISTORY_MAX_BYTES } from './history';
-import { validateResultOutcome } from '@byok-sdk/protocol';
+import { BOT_TURN_OUTCOME_CONTRACT, validateResultOutcome } from '@byok-sdk/protocol';
 
 function setup(count = 3, admin?: string) {
   const ledger = { application: {}, intents: {}, executions: {} } as LedgerState;
@@ -80,10 +80,10 @@ it('requires explicit speech, offers management only to Main Bots, and checks cu
   roomInput(state, 'schema', 'r', 'Speak', ['b1']); advance();
   const turn = Object.values(state.turns)[0]!;
   const group = outcomeSchema('b1', state, turn);
-  expect(validateResultOutcome(group, {}).ok).toBe(false);
-  expect(validateResultOutcome(group, { speech: { kind: 'post', text: '' } }).ok).toBe(false);
-  expect(validateResultOutcome(group, { speech: { kind: 'pass' } }).ok).toBe(true);
-  expect(validateResultOutcome(group, { room_call: { members: ['b0'] }, speech: { kind: 'pass' } }).ok).toBe(true);
+  expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: group }, {}).ok).toBe(false);
+  expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: group }, { speech: { kind: 'post', text: '' } }).ok).toBe(false);
+  expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: group }, { speech: { kind: 'pass' } }).ok).toBe(true);
+  expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: group }, { room_call: { members: ['b0'] }, speech: { kind: 'pass' } }).ok).toBe(true);
   expect(group.properties).not.toHaveProperty('create_bot');
   const ordinary = { ...turn, source: 'user', authority: 'owner' } as Turn;
   expect(outcomeSchema('b1', state, ordinary).properties).not.toHaveProperty('speech');

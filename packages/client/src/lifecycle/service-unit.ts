@@ -26,9 +26,9 @@ export type ServiceUnitState = 'absent' | 'exact' | 'repairable' | 'foreign';
 
 export interface ServiceUnitInspection {
   state: ServiceUnitState;
-  /** The plist, systemd unit or WinSW descriptor. */
+  /** The plist, systemd unit, WinSW descriptor or Startup `.cmd`. */
   unitPath: string;
-  /** The stable launcher the unit runs (macOS and Linux); on Windows the SCM runs the installed WinSW executable. */
+  /** The stable launcher the unit runs (macOS, Linux and a Windows `user` scope service); for WinSW the SCM runs the installed WinSW executable. */
   launcherPath: string;
   /** The lifecycle owner recorded in the store, when one is. */
   owner?: string;
@@ -45,6 +45,7 @@ const ERROR_MESSAGES = {
   lifecycle_owner_busy: 'Another service lifecycle operation or local-state relocation is in progress. Run it again when that one has finished.',
   invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.',
   service_unload_timeout: 'The service manager did not finish unloading the stopped service in time. Check the service manager, then run the operation again.',
+  service_stop_failed: 'The service stop program exited with a failure. The stop marker stays, so the service is not restarted; check the stop program, then run the operation again.',
 } as const;
 
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
@@ -68,9 +69,10 @@ export function serviceStateDir(storeDir: string, platform: NodeJS.Platform = pr
   return (platform === 'win32' ? path.win32 : path.posix).join(storeDir, 'service');
 }
 
-/** The stable launcher path a macOS or Linux unit runs. */
+/** The stable launcher path a unit runs: a shell script on macOS and Linux, a batch file for a Windows `user` scope service. */
 export function serviceLauncherPath(storeDir: string, serviceName: string, platform: NodeJS.Platform = process.platform): string {
-  return (platform === 'win32' ? path.win32 : path.posix).join(serviceStateDir(storeDir, platform), `${serviceName}.launcher.sh`);
+  if (platform === 'win32') return path.win32.join(serviceStateDir(storeDir, platform), `${serviceName}.launcher.cmd`);
+  return path.posix.join(serviceStateDir(storeDir, platform), `${serviceName}.launcher.sh`);
 }
 
 function hasControlChar(value: string): boolean {
@@ -100,6 +102,41 @@ export function generateServiceLauncher(program: ServiceProgram): string {
   if (program.cwd !== undefined) lines.push(`cd ${shellQuote(program.cwd)} || exit 1`);
   lines.push(`exec ${[program.command, ...program.args].map(shellQuote).join(' ')}`);
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * One double-quoted `cmd.exe` word. `"` cannot be escaped inside a quoted
+ * word and `%` expands even there, so either one, like a control character,
+ * is refused rather than rewritten (#1337).
+ *
+ * @internal
+ */
+export function cmdQuote(value: string): string {
+  if (hasControlChar(value) || /["%]/u.test(value)) {
+    throw new Error(`Windows launcher values must not contain ", % or control characters (got ${JSON.stringify(value)})`);
+  }
+  return `"${value}"`;
+}
+
+/**
+ * The batch launcher a Windows `user` scope unit starts (#1337). Each round
+ * first ends with 0 when `stopMarker` exists, then `call`s the program: exit
+ * 0 ends the launcher, any other exit reruns it about 10s later (the
+ * exit-code contract in `exit-codes.ts`). The wait is `ping`, since
+ * `timeout.exe` fails without console input. It sets no environment.
+ */
+export function generateWindowsUserLauncher(program: ServiceProgram, stopMarker: string): string {
+  const lines = ['@echo off', `REM ${SERVICE_UNIT_MARKER}`];
+  if (program.cwd !== undefined) lines.push(`cd /d ${cmdQuote(program.cwd)} || exit /b 1`);
+  lines.push(
+    ':run',
+    `if exist ${cmdQuote(stopMarker)} exit /b 0`,
+    `call ${[program.command, ...program.args].map(cmdQuote).join(' ')}`,
+    'if %ERRORLEVEL% EQU 0 exit /b 0',
+    'ping -n 11 127.0.0.1 >nul',
+    'goto run',
+  );
+  return `${lines.join('\r\n')}\r\n`;
 }
 
 export interface ServiceUnitFile {

@@ -278,16 +278,13 @@ it('drains immediate real SDK terminals to a fixed point without stranding a con
   expect(bot.snapshot().rejected).toContainEqual(expect.objectContaining({ action: 'delegate', reason: 'Continuation budget is 4' }));
 });
 
-it('rejects duplicate targets and option ids without consuming a second continuation', async () => {
+it('rejects duplicate targets without consuming a second continuation', async () => {
   await setup();
   const root = await bot.input('duplicate-actions', 'Choose');
-  await finish(root, { delegate: [{ to: 'main', request: 'one' }, { to: 'main', request: 'two' }],
-    ask_user: { question: 'Choose', answerKind: 'single_choice', options: [{ id: 'same', label: 'A' }, { id: 'same', label: 'B' }] } });
+  await finish(root, { delegate: [{ to: 'main', request: 'one' }, { to: 'main', request: 'two' }] });
   expect(bot.snapshot().budgets[root]).toEqual({ continuation: 1, delegation: 0 });
-  expect(Object.values(bot.snapshot().questions)).toEqual([]);
   expect(bot.snapshot().rejected).toEqual(expect.arrayContaining([
     expect.objectContaining({ action: 'delegate', reason: 'Duplicate delegation target' }),
-    expect.objectContaining({ action: 'ask_user', reason: 'Duplicate option id' }),
   ]));
   const child = Object.values(bot.snapshot().turns).find(t => t.source === 'continuation')!;
   await finish(child.id);

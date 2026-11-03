@@ -160,7 +160,7 @@ K4 保持每个 routine id 的定义不可变。改定义换新 id。同 id 的�
 
 范围按平台 PRD §9.3–§9.6，加 v2 新增的三类动作和一条默认规则。
 
-**K8-S（Aimpact 已接受）。** `@byok-sdk/protocol` 发布 `bot-turn-outcome.v1` 的动作片段、组合函数和 TS 类型。Host 按角色和执行类型选片段，填花名册、群、模型、routine id 的 `enum`，调用 `composeBotTurnOutcomeSchema`，冻结进 offer。daemon 仍只按冻结 schema 校验格式，K7 不变。`@byok-sdk/core` 发布 Host 调用的纯函数 `nextRoutineOccurrence(schedule, now)` 和 `checkRoutineSchedule`。K8-S 改 protocol、core、server 的 wake 上限、spec 和 api-surface。（依据 R3）
+**K8-S（Aimpact 已接受）。** `@byok-sdk/protocol` 发布 `bot-turn-outcome.v1` 的动作片段、组合函数和 TS 类型。Host 按角色和执行类型选片段，填花名册、群、模型、routine id 的 `enum`，调用 `composeBotTurnOutcomeSchema`，冻结进 offer。daemon 按冻结 schema 校验，并执行 SDK contract 的规则（`bot-turn-outcome.v1`：`ask_user` 选项 id 不重复，模型写的字符串 `trim()` 后不为空，`confirmable_action` 的 draft 除外），K7 不变（#1374）。`@byok-sdk/core` 发布 Host 调用的纯函数 `nextRoutineOccurrence(schedule, now)` 和 `checkRoutineSchedule`。K8-S 改 protocol、core、server 的 wake 上限、spec 和 api-surface。（依据 R3）
 
 K7 子集没有 `pattern`、`format`、`uniqueItems`、`$ref`。schedule 用结构化字段（§5.5）。类型、范围和 enum 放在外层 `properties`，三种封闭形状用只列属性名的 `oneOf` 区分。Host 应用时调用 `checkRoutineSchedule`，处理 schema 看不到的日期组合。`maxLength` 数码点。canonical JSON 中每码点按最多 6 字节计；`number`、`integer` 的保守上界分别为 25、24 字节。只有整数范围的两端绝对值都小于 1e21 时，才按端点十进制长度收紧。
 

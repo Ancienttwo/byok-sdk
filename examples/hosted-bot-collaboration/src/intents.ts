@@ -70,12 +70,16 @@ export async function freezeIntent<E extends IntentExecution>(client: PoolClient
   return input;
 }
 
-/** The frozen input of a task and the Turn that froze it. The input never changes after the freeze. */
-export async function frozenIntent(client: PoolClient, scope: string, task: string): Promise<{ turnId: string; input: FrozenExecutionInput } | undefined> {
-  const found = await client.query<{ key: string; input: FrozenExecutionInput }>('SELECT key, input FROM intent WHERE scope = $1 AND task_id = $2',
-    [storedKey(scope), task]);
+/**
+ * The frozen input of a task, the Turn that froze it, and the Host intent handler name (#1362), null for a Bot Turn.
+ * The input never changes after the freeze.
+ */
+export async function frozenIntent(client: PoolClient, scope: string, task: string): Promise<{ turnId: string; input: FrozenExecutionInput;
+  handler: string | null } | undefined> {
+  const found = await client.query<{ key: string; input: FrozenExecutionInput; handler: string | null }>(
+    'SELECT key, input, handler FROM intent WHERE scope = $1 AND task_id = $2', [storedKey(scope), task]);
   const row = found.rows[0];
-  return row && { turnId: JSON.parse(row.key) as string, input: row.input };
+  return row && { turnId: JSON.parse(row.key) as string, input: row.input, handler: row.handler };
 }
 
 /** The frozen input of the current task of intent `key`: the K4 `intent(key)` that L reads. */

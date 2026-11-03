@@ -67,6 +67,36 @@ export function nodeAgentProgram(opts: NodeAgentProgramOptions): ServiceProgram 
   return program;
 }
 
+/**
+ * How a service runs on Windows:
+ *
+ * - `machine` (the default): a WinSW-wrapped Windows Service registered with
+ *   the Service Control Manager (`winsw.ts`). Installing it needs an
+ *   administrator.
+ * - `user`: autostart at the user's logon, without the SCM and without an
+ *   administrator (`windows-user.ts`, #1337). The unit is a `.cmd` in the
+ *   user's Startup folder that starts the batch launcher
+ *   `<storeDir>\service\<name>.launcher.cmd`, which reruns the program
+ *   after a non-zero exit. `stop` is the Host's own program that makes the
+ *   running service exit (for the byok-agent daemon, a control `shutdown`);
+ *   it must exit 0 once the service is stopping or already gone.
+ */
+export type ServiceWindowsOptions =
+  | {
+      scope?: 'machine';
+      /**
+       * Absolute path to the product-bundled WinSW executable. Decision-6
+       * boundary: this SDK never bundles or downloads this binary itself —
+       * see `templates/service/winsw/README.md`. The lifecycle copies it
+       * into `installDir` under this service's own name (WinSW's own
+       * convention: the exe and its XML config must share a basename).
+       */
+      winswBin: string;
+      /** Directory the renamed WinSW exe + generated XML are installed into. Defaults to `logDir`. */
+      installDir?: string;
+    }
+  | { scope: 'user'; stop: ServiceProgram };
+
 export interface ServiceDefinition {
   /** Stable service identifier — becomes the launchd `Label`, the systemd unit's basename, and the WinSW `<id>` (sanitized per-platform via {@link sanitizeServiceName}). Typically `DaemonConfig.productId`. */
   name: string;
@@ -90,22 +120,11 @@ export interface ServiceDefinition {
    */
   owner: string;
   /**
-   * Windows/WinSW-only inputs. Required when actually constructing a
-   * lifecycle on `win32` (`create-service-lifecycle.ts` throws a clear
-   * error otherwise); ignored on macOS/Linux.
+   * Windows-only inputs, required when constructing a lifecycle on `win32`
+   * (`create-service-lifecycle.ts` throws a clear error otherwise); ignored
+   * on macOS/Linux. See {@link ServiceWindowsOptions}.
    */
-  windows?: {
-    /**
-     * Absolute path to the product-bundled WinSW executable. Decision-6
-     * boundary: this SDK never bundles or downloads this binary itself —
-     * see `templates/service/winsw/README.md`. The lifecycle copies it
-     * into `installDir` under this service's own name (WinSW's own
-     * convention: the exe and its XML config must share a basename).
-     */
-    winswBin: string;
-    /** Directory the renamed WinSW exe + generated XML are installed into. Defaults to `logDir`. */
-    installDir?: string;
-  };
+  windows?: ServiceWindowsOptions;
 }
 
 /** Options for {@link ServiceLifecycle.install}. */

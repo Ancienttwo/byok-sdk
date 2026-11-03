@@ -5,7 +5,7 @@ import { BOT_REPLY_MAX_BYTES, type IntentFacts, type Publish } from './delegatio
 import { CurrentRequestTooLargeError } from './history';
 import { outcomeSchema, promptActions, type ContextBot, type ContextRoutine, type ContextState, type CheckedOffer } from './schema';
 import { botTurnInstruction, type BotHistoryState, type ContextTurn, type InstructionLimits } from './context';
-import { admitBotToolsets } from './team';
+import { admitBotToolsets, inactive } from './team';
 import type { RoomMessage, Seat } from './rooms';
 
 /**
@@ -38,7 +38,7 @@ export interface SealedRoutineTemplate {
 /** A sealed routine Turn that cannot freeze ends `failed` with one of these reasons (#953). */
 export const SEALED_ROUTINE_TEMPLATE_MISSING = 'sealed_routine_template_missing';
 export const SEALED_ROUTINE_AGENT_CHANGED = 'sealed_routine_agent_changed';
-export interface SyncBot<E extends FreezeExecution> extends ContextBot { readonly revision: string; readonly execution: E }
+export interface SyncBot<E extends FreezeExecution> extends ContextBot { readonly revision: string; readonly model: string; readonly execution: E }
 /** The rows that the sync step reads and changes. */
 export interface SyncState<E extends FreezeExecution> extends ContextState, BotHistoryState {
   readonly turns: Readonly<Record<string, Turn>>;
@@ -105,7 +105,7 @@ export interface SyncOptions<R extends ContextRoutine> {
  * What the store writes for one Turn:
  * - `freeze`: store this intent input.
  * - `routine`: a routine Turn joins the FIFO as its occurrence intent, with this execution. Its wait counts from the occurrence record.
- * - `cancel`: the Bot is archived, so cancel the intent, which has not started.
+ * - `cancel`: the Bot is archived or suspended, so cancel the intent, which has not started.
  * - `ended`: the Turn has no intent and is concluded. A routine Turn concludes its open occurrence.
  */
 export type SyncStep<E> =
@@ -126,8 +126,10 @@ function blockTurn(state: Pick<SyncState<FreezeExecution>, 'team'>, turn: Turn, 
 export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(state: SyncState<E>, turn: Turn, facts: SyncFacts,
   options: SyncOptions<R>, publish: Publish): SyncStep<E> | undefined {
   const intent = facts.intent(turn.id), bot = state.team.bots[turn.botId];
+  // A missing Bot is not archived here: its Turn stays unadmitted, as before #1319.
+  const stopped = bot && inactive(bot);
   if (intent) {
-    if (!intent.conclusion) return bot?.archived && !facts.executionStarted(turn.id) ? { kind: 'cancel' } : undefined;
+    if (!intent.conclusion) return stopped && !facts.executionStarted(turn.id) ? { kind: 'cancel' } : undefined;
     // Work that never started did not consume its rejected actions.
     if (intent.conclusion !== 'succeeded' && !facts.executionStarted(turn.id)) {
       for (const rejection of state.rejected) if (rejection.consumedBy === turn.id) delete rejection.consumedBy;
@@ -154,8 +156,8 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     turn.reported = true;
     return undefined;
   }
-  // An archived Bot never starts this Turn. A concluded Turn keeps its conclusion.
-  if (!turn.conclusion && bot?.archived) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
+  // An archived or suspended Bot never starts this Turn. A concluded Turn keeps its conclusion.
+  if (!turn.conclusion && stopped) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
   if (turn.conclusion) return { kind: 'ended' };
   if (turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked') return undefined;
   // #956: a Turn whose Bot's device is refused waits, before the profile check, since a refused device may never apply a
@@ -184,6 +186,12 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     return undefined;
   }
   delete turn.profileFailure;
+  // #1357: the Host has no template of the Bot's model, for example after a device key was removed. Every Turn of the Bot,
+  // a sealed routine Turn too, waits here and freezes once the Host provides the template.
+  if (!options.models.includes(bot.model)) {
+    blockTurn(state, turn, `Unavailable model: ${bot.model}`, publish);
+    return undefined;
+  }
   if (turn.sealedRoutine) return freezeSealed(state, turn, turn.sealedRoutine, bot, options, publish);
   // Phase 2 of a history-mode sync: a Bot Turn freezes only with the history read before this transaction.
   const history = options.historyMode && turn.source !== 'room_slot' ? options.history : undefined;
@@ -230,6 +238,8 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
  * template or a Bot Agent that the template is not sealed for, so those end the Turn `failed`: a blocked routine Turn keeps
  * its occurrence open, and an open occurrence stops the version switch that the reseal needs. An outcome schema over
  * budget depends on the state, not on the version, so it blocks the Turn as for a plain one until the state shrinks.
+ * A missing execution template of the Bot's model (#1357) is a device state that a reseal cannot fix, so `syncTurn` blocks
+ * the Turn before this, until the Host provides the template.
  */
 function freezeSealed<E extends FreezeExecution, R extends ContextRoutine>(state: SyncState<E>, turn: Turn, routine: SealedRoutineRef,
   bot: SyncBot<E>, options: SyncOptions<R>, publish: Publish): SyncStep<E> | undefined {

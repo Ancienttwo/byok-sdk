@@ -11,7 +11,8 @@
  *   sees a schema the guard did not admit.
  * - {@link validateResultOutcome}: re-runs the guard, bounds the outcome,
  *   then validates the outcome against the admitted schema with
- *   `@cfworker/json-schema` (draft 2020-12, interpreted; no code generation).
+ *   `@cfworker/json-schema` (draft 2020-12, interpreted; no code generation),
+ *   then the rules of an SDK-defined contract.
  *
  * The subset (PRD §8.3): `type`, `properties`, `required`,
  * `additionalProperties` (only `false`), `items`, `enum`, `const`, `oneOf`,
@@ -24,6 +25,7 @@
  */
 import { Validator, type OutputUnit } from '@cfworker/json-schema';
 import { canonicalizePlainJson, type BoundedPlainJsonCheck } from './plain-json';
+import { BOT_TURN_OUTCOME_CONTRACT, botTurnOutcomeRuleIssues } from './bot-turn-outcome-contract';
 
 /** Maximum canonical JSON UTF-8 size of a result-document schema. */
 export const RESULT_SCHEMA_MAX_BYTES = 16_384;
@@ -106,7 +108,9 @@ export interface ResultSchema {
  * validation issues (`''` is the document root). `keyword` is the JSON Schema
  * keyword at fault, or a document-level code: `not-serializable`,
  * `not-plain-json`, `over-cap`, `too-deep` (JSON nesting), `schema` (a
- * subschema that is not an object) or `depth` (subschema nesting).
+ * subschema that is not an object) or `depth` (subschema nesting). A contract
+ * rule issue (reason `contract-mismatch`) uses the rule code:
+ * `duplicate-option-id` or `blank-text`.
  */
 export interface ResultIssue {
   readonly pointer: string;
@@ -134,7 +138,7 @@ export type ResultSchemaCheck =
 
 export type ResultOutcomeCheck =
   | { readonly ok: true; readonly bytes: number; readonly canonical: unknown }
-  | ResultFailure<'schema-not-admitted' | ResultDocumentFailureReason | 'schema-mismatch'>;
+  | ResultFailure<'schema-not-admitted' | ResultDocumentFailureReason | 'schema-mismatch' | 'contract-mismatch'>;
 
 const KEYWORDS = new Set<string>(RESULT_SCHEMA_KEYWORDS);
 const INSTANCE_TYPES = new Set<string>(RESULT_SCHEMA_INSTANCE_TYPES);
@@ -342,11 +346,14 @@ function fragmentToPointer(location: string): string {
  * ({@link checkResultSchema}) always runs first; a schema it refuses is
  * `schema-not-admitted` and never reaches the library. The outcome must be
  * plain JSON data of at most {@link RESULT_OUTCOME_MAX_BYTES} canonical UTF-8
- * bytes, checked before validation. On success, `canonical` is the snapshot
- * a sender stages and puts on the wire.
+ * bytes, checked before validation. When `projection.contract` is an
+ * SDK-defined contract (only BOT_TURN_OUTCOME_CONTRACT today), its rules run
+ * after the schema passes; a rule failure is `contract-mismatch`. Any other
+ * contract id gets the schema check only. On success, `canonical` is the
+ * snapshot a sender stages and puts on the wire.
  */
-export function validateResultOutcome(schema: unknown, outcome: unknown): ResultOutcomeCheck {
-  const admitted = checkResultSchema(schema);
+export function validateResultOutcome(projection: { readonly contract: string; readonly schema: unknown }, outcome: unknown): ResultOutcomeCheck {
+  const admitted = checkResultSchema(projection.schema);
   if (!admitted.ok) {
     return { ok: false, reason: 'schema-not-admitted', bytes: admitted.bytes, issues: admitted.issues, truncated: admitted.truncated };
   }
@@ -357,7 +364,13 @@ export function validateResultOutcome(schema: unknown, outcome: unknown): Result
   // follows one failing path instead of growing with every failing pair.
   const validator = new Validator(withoutPrototypes(admitted.canonical) as Record<string, unknown>, '2020-12', true);
   const result = validator.validate(withoutPrototypes(document.canonical));
-  if (result.valid) return { ok: true, bytes: document.bytes, canonical: document.canonical };
+  if (result.valid) {
+    const rules = projection.contract === BOT_TURN_OUTCOME_CONTRACT ? botTurnOutcomeRuleIssues(document.canonical) : [];
+    if (rules.length === 0) return { ok: true, bytes: document.bytes, canonical: document.canonical };
+    const ruleSink = new IssueSink();
+    for (const issue of rules) ruleSink.add(issue.pointer, issue.keyword, issue.message);
+    return { ok: false, reason: 'contract-mismatch', bytes: document.bytes, issues: ruleSink.issues, truncated: ruleSink.truncated };
+  }
 
   const sink = new IssueSink();
   for (const unit of result.errors as readonly OutputUnit[]) sink.add(fragmentToPointer(unit.instanceLocation), unit.keyword, unit.error);

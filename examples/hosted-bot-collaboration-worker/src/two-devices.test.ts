@@ -47,8 +47,11 @@ describe.skipIf(!RUN)('two device processes against one Worker H Host (#794 D3)'
     await substrate.store.seed(scope, state => {
       seedCollaboration(state);
       Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
-      state.team.bots.main = { ...state.team.bots.main!, model: 'local', execution: a };
-      state.team.bots.b = { ...state.team.bots.main, id: 'b', name: 'B', role: 'Reviewer', mainBot: false, model: 'remote', execution: b };
+      // Each Bot's id is its Agent id, as the H sync re-projects the agentRef from it (#1358).
+      const { main, ...bots } = state.team.bots;
+      state.team.bots = { ...bots, 'agent-a': { ...main!, id: 'agent-a', model: 'local', execution: a },
+        'agent-b': { ...main!, id: 'agent-b', name: 'B', role: 'Reviewer', mainBot: false, model: 'remote', execution: b } };
+      state.turns.t1!.botId = 'agent-a';
     });
     for (const device of devices) await substrate.store.bindDevice(scope, device.deviceId);
   });
@@ -70,12 +73,12 @@ describe.skipIf(!RUN)('two device processes against one Worker H Host (#794 D3)'
     expect(one.pid).not.toBe(two.pid);
     expect(one.deviceId).not.toBe(two.deviceId);
 
-    const response = await worker!.input(token, 'main', `k-${randomUUID()}`, 'Ask B to check the totals');
+    const response = await worker!.input(token, 'agent-a', `k-${randomUUID()}`, 'Ask B to check the totals');
     expect(response.status).toBe(200);
     const { turnId: root } = await response.json() as { turnId: string };
     const rootTask = taskId(root, 0);
     await one.waitForStart(rootTask);
-    await one.finish(rootTask, { delegate: [{ to: 'b', request: 'Check the totals' }] });
+    await one.finish(rootTask, { delegate: [{ to: 'agent-b', request: 'Check the totals' }] });
 
     const delegationId = hash([rootTask, 'delegate', 0]), request = taskId(delegationId, 0);
     await until(async () => (await pass(), two.started.some(entry => entry.taskId === request) || undefined));
@@ -112,7 +115,7 @@ describe.skipIf(!RUN)('two device processes against one Worker H Host (#794 D3)'
   it('an instance destroyed after the consumer committed a reply: the device sends it again, and the decision stays', async () => {
     const [one] = devices as [DeviceProcess, DeviceProcess];
     worker = await restart({ fault: 'hang-after-consume' });
-    const response = await worker.input(token, 'main', `k-${randomUUID()}`, 'Answer directly');
+    const response = await worker.input(token, 'agent-a', `k-${randomUUID()}`, 'Answer directly');
     const { turnId } = await response.json() as { turnId: string };
     const task = taskId(turnId, 0);
     await until(async () => (await pass(), one.started.some(entry => entry.taskId === task) || undefined));

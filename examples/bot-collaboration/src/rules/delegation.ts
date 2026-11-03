@@ -3,6 +3,7 @@ import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addTurn, json, type Json, type Rejection, type ReplyEntry, type Turn, type TurnsState, type Verdict } from './turn';
 import { frame, REPLY_META_MAX_BYTES } from './frame';
 import { observes, type AutonomyGate } from './autonomy';
+import { inactive } from './team';
 
 /**
  * Cross-Bot delegation as pure rules (#739 D1): budget units, the batch join, verdicts, cancel arbitration and
@@ -11,9 +12,11 @@ import { observes, type AutonomyGate } from './autonomy';
  */
 /**
  * Frozen in the arbitration transaction (§8.8). `delivered` turns true after core.cancel. No `reason` means a user cancel.
- * `target_archived` is the Host cancel when the target Bot is archived (§8.4). Its verdict is `refused`.
+ * `target_archived` and `target_suspended` (#1319) are the Host cancel when the target Bot is archived or suspended (§8.4).
+ * Their verdict is `refused`.
  */
-export interface DelegationCancel { requestedAt: number; targetTurnId: string; delivered: boolean; reason?: 'main_bot_cancelled' | 'target_archived' }
+export interface DelegationCancel { requestedAt: number; targetTurnId: string; delivered: boolean;
+  reason?: 'main_bot_cancelled' | 'target_archived' | 'target_suspended' }
 export interface Delegation {
   id: string; root: string; fromBotId: string; fromTurnId: string; fromTaskId: string; index: number;
   toBotId: string; toAgentRef?: { agentId: string; profileRevision: string }; toDeviceId?: string;
@@ -27,8 +30,8 @@ export interface Delegation {
   claimed?: { turnId: string; at: number };
   /** A chain Turn still open at the verdict. Its later terminal goes to audit only. */
   lateTurnId?: string;
-  /** The verdict has no reply Turn because the initiator is archived (§8.5). */
-  undelivered?: 'initiator_archived';
+  /** The verdict has no reply Turn because the initiator is archived (§8.5) or suspended (#1319). */
+  undelivered?: 'initiator_archived' | 'initiator_suspended';
 }
 /**
  * One A outcome. `slots` are the prepaid A reply units of this batch.
@@ -38,13 +41,14 @@ export interface Batch { id: string; delegationIds: string[]; slots: string[]; r
 /** `turnId` is the Turn that holds the unit. A free A slot has none. */
 export interface Unit { id: string; root: string; state: 'reserved' | 'spent' | 'released'; turnId?: string }
 export interface AcceptedReply {
+  /** The intent key. For a Bot Turn, it is the Turn id. */
   turnId: string; messageId: string; contentHash: string; contentType: string; acceptedAt: number;
   /** Stored only for delegation chain Turns. */
   body?: string;
 }
 /** The Bot fields that delegation reads. */
 export interface DelegationBot {
-  readonly id: string; readonly name: string; readonly archived: boolean;
+  readonly id: string; readonly name: string; readonly archived: boolean; readonly participation?: 'suspended';
   readonly execution: { readonly deviceId: string; readonly payload: { readonly agentRef: { readonly agentId: string; readonly profileRevision: string } } };
 }
 /** The collaboration rows that delegation reads and changes. */
@@ -144,7 +148,7 @@ export function releaseUnit(state: DelegationState, id: string | undefined): voi
 
 function publish(d: Delegation, emit: Publish): void {
   d.revision++;
-  emit(`delegation:${d.id}:${d.revision}`, json({ id: d.id, revision: d.revision, fromBotId: d.fromBotId, toBotId: d.toBotId,
+  emit(`delegation:${d.id}:${d.revision}`, json({ id: d.id, revision: d.revision, root: d.root, fromBotId: d.fromBotId, toBotId: d.toBotId,
     request: d.request, status: d.status, verdict: d.verdict, reason: d.reason, replyTurnId: d.replyTurnId, undelivered: d.undelivered }));
 }
 function close(d: Delegation, verdict: Verdict, now: number, reason?: string, reply?: string): void {
@@ -161,11 +165,11 @@ function entry(d: Delegation): ReplyEntry {
 /** Delivery (§8.2): one reply Turn per report. It runs only when a prepaid A slot is free. */
 function report(state: DelegationState, batch: Batch, rows: Delegation[], id: string, refusalReport: boolean): void {
   const origin = state.turns[rows[0]!.fromTurnId]!;
-  const initiator = state.team.bots[origin.botId];
-  if (!initiator || initiator.archived) {
+  const initiator = inactive(state.team.bots[origin.botId]);
+  if (initiator) {
     // §8.5: the verdict stays in the ledger, with no reply Turn. The projection shows why.
     for (const slot of batch.slots) if (!state.units[slot]!.turnId) releaseUnit(state, slot);
-    for (const row of rows) row.undelivered = 'initiator_archived';
+    for (const row of rows) row.undelivered = `initiator_${initiator}`;
     return;
   }
   const slot = batch.slots.find(unit => state.units[unit]!.state === 'reserved' && !state.units[unit]!.turnId);
@@ -250,10 +254,10 @@ export function applyDelegate(state: DelegationState, turn: Turn, taskId: string
     }
     if (state.delegations[id]) return;
     if (observes(gate)) { gate.record('delegate', index, json(action)); return; }
-    const target = state.team.bots[action.to];
+    const target = inactive(state.team.bots[action.to]);
     const row: Delegation = { id, root: turn.root, fromBotId: turn.botId, fromTurnId: turn.id, fromTaskId: taskId, index,
       toBotId: action.to, request: action.request, hop: turn.hop + 1, chainTurnIds: [], batch: taskId, status: 'queued', revision: 0 };
-    const reason = seat ? 'room_seat' : targets.has(action.to) ? 'duplicate_target' : !target || target.archived ? 'target_archived'
+    const reason = seat ? 'room_seat' : targets.has(action.to) ? 'duplicate_target' : target ? `target_${target}`
       : row.hop > HOP_LIMIT ? 'hop_limit' : undefined;
     targets.add(action.to);
     state.delegations[id] = row;
@@ -319,13 +323,14 @@ function uncertain(state: DelegationState, d: Delegation, now: number, emit: Pub
 }
 /**
  * Cancel verdict. A reply accepted before the cancel rides along as partial (§8.8).
- * An archived target gives `refused`, and its accepted reply is audit only (§8.4).
+ * An archived or suspended target gives `refused`, and its accepted reply is audit only (§8.4).
  */
 function resolveCancel(state: DelegationState, d: Delegation, taskId: string | undefined, now: number, emit: Publish): void {
   const reply = taskId !== undefined && state.replies[taskId]?.body !== undefined ? taskId : undefined;
-  if (d.cancel!.reason === 'target_archived') {
-    if (reply) state.audit.push(`Delegation reply after archive: ${d.id} ${reply}`);
-    resolveDelegation(state, d, 'refused', now, emit, 'target_archived');
+  const reason = d.cancel!.reason;
+  if (reason === 'target_archived' || reason === 'target_suspended') {
+    if (reply) state.audit.push(`Delegation reply after ${reason === 'target_archived' ? 'archive' : 'suspension'}: ${d.id} ${reply}`);
+    resolveDelegation(state, d, 'refused', now, emit, reason);
     return;
   }
   if (reply) d.partial = true;
@@ -350,14 +355,14 @@ export function openDelegationsContext(state: Pick<DelegationView, 'delegations'
  * Arbitration transaction (§8.8). Freeze the cancel fact on the current chain
  * Turn. That closes its first acceptance and blocks new successors. Without a
  * K4 intent, close queue eligibility and set the verdict now. Returns true when
- * core.cancel must still deliver the cancel. An archived target is cancelled in
- * every open state (§8.4).
+ * core.cancel must still deliver the cancel. An archived or suspended target is
+ * cancelled in every open state (§8.4).
  */
 export function arbitrateCancel(state: DelegationState, facts: Pick<IntentFacts, 'intent'>, d: Delegation, now: number, emit: Publish,
   reason?: DelegationCancel['reason']): boolean {
   if (d.verdict) throw new Error('Delegation already resolved');
   if (d.cancel) return !d.cancel.delivered;
-  if (reason !== 'target_archived' && !CANCELLABLE.has(d.status)) throw new Error('Delegation cannot be cancelled in this state; use abandonDelegation');
+  if (reason !== 'target_archived' && reason !== 'target_suspended' && !CANCELLABLE.has(d.status)) throw new Error('Delegation cannot be cancelled in this state; use abandonDelegation');
   const target = state.turns[d.chainTurnIds.at(-1)!]!, intent = facts.intent(target.id);
   d.cancel = { requestedAt: now, targetTurnId: target.id, delivered: !intent || !!intent.conclusion, ...(reason ? { reason } : {}) };
   if (!intent) {
@@ -411,8 +416,9 @@ export function settleDelegations(state: DelegationState, facts: IntentFacts, no
     if (d.verdict || !d.chainTurnIds.length) continue;
     const last = state.turns[d.chainTurnIds.at(-1)!]!, intent = facts.intent(last.id);
     if (facts.started(last.id)) observeStart(state, last, now, emit);
-    // §8.4: archiving the target is a Host cancel of its current chain Turn. deliverCancels sends it.
-    if (!d.cancel && state.team.bots[d.toBotId]?.archived) arbitrateCancel(state, facts, d, now, emit, 'target_archived');
+    // §8.4: archiving or suspending the target is a Host cancel of its current chain Turn. deliverCancels sends it.
+    const target = inactive(state.team.bots[d.toBotId]);
+    if (!d.cancel && target) arbitrateCancel(state, facts, d, now, emit, `target_${target}`);
     if (d.verdict) continue;
     if (d.cancel) {
       const target = state.turns[d.cancel.targetTurnId]!, cancelled = facts.intent(target.id);

@@ -90,7 +90,7 @@ export async function submitAgentResult(this: TaskRunner, input: AgentResultSubm
   if (store === undefined || agentRef === undefined || tenantId === undefined) {
     throw new Error('the Agent result store is not bound for this task');
   }
-  const check = validateResultOutcome(context.schema, input.outcome);
+  const check = validateResultOutcome({ contract: context.contract, schema: context.schema }, input.outcome);
   if (!check.ok) {
     return {
       state: 'rejected',

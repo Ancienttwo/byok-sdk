@@ -14,7 +14,7 @@ it('retries only schema-over-budget with flat schedules and preserves valid outc
   expect(compose).toHaveBeenCalledTimes(2);
   expect(compose.mock.calls[0]![0].create_routine!.items!.properties!.schedule!.oneOf).toBeDefined();
   expect(compose.mock.calls[1]![0].create_routine!.items!.properties!.schedule!.oneOf).toBeUndefined();
-  expect(protocol.validateResultOutcome(schema, { create_routine: [{ localId: 'new_routine_1',
+  expect(protocol.validateResultOutcome({ contract: protocol.BOT_TURN_OUTCOME_CONTRACT, schema }, { create_routine: [{ localId: 'new_routine_1',
     schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: 'report' }] }).ok).toBe(true);
 });
 

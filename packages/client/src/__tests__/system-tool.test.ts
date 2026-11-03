@@ -21,7 +21,7 @@ function failure(tool: string, host: SystemToolHost): unknown {
 const HOST_TOOLS: Partial<Record<NodeJS.Platform, readonly string[]>> = {
   darwin: ['launchctl', 'ioreg'],
   linux: ['systemctl'],
-  win32: ['taskkill', 'sc.exe', 'reg', 'icacls'],
+  win32: ['taskkill', 'sc.exe', 'reg', 'icacls', 'cmd', 'powershell'],
 };
 
 describe('system tools start from a trusted location, never PATH (#1304)', () => {

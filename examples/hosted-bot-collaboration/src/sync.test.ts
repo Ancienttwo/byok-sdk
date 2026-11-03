@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_RETRY, enqueue, hash, HostLedger, project, taskId, type FrozenInput } from '@byok-sdk/server/execution-core';
+import { DEFAULT_RETRY, enqueue, hash, HostLedger, project, taskId, type ExecutionTemplate, type FrozenInput } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { syncTurn, type Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
@@ -12,7 +12,7 @@ import { freezeIntent, type IntentFreeze } from './intents';
 import { storedKey } from './layout';
 import { VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { inSchema, lockScope, type OutcomeRoutinePorts } from './store';
+import { HostedCollaborationStore, inSchema, lockScope, type OutcomeRoutinePorts } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -61,6 +61,15 @@ function queueTurns(state: CollaborationState): void {
 const intentRow = async (scope: string, turnId: string) => (await opened!.pool.query<{ source: string; input: string; wait_until: string;
   cancel_reason: string | null; conclusion: string | null }>(
   `SELECT source, input::text, wait_until::text, cancel_reason, conclusion FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId)])).rows[0];
+
+/** #1358: Host templates on `device`, the old one with no toolset and the new one with the read-only `docs`. */
+const OLD = template('device', 'main'), NEW = { ...template('other-device', 'main'), payload: { ...template('other-device', 'main').payload, requiredToolsets: ['docs'] } };
+/** #1358: a store over the test schema whose Host config the test replaces between calls. */
+function configured(models: Record<string, ExecutionTemplate>) {
+  const config = { models, readOnlyToolsets: ['docs'] };
+  return { config, store: new HostedCollaborationStore(opened!.pool, store().schema, { host: async () => structuredClone(config) }) };
+}
+const frozenExecution = async (scope: string, turnId: string) => JSON.parse((await intentRow(scope, turnId))!.input) as ExecutionTemplate;
 
 describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 D2b-2)', () => {
   beforeAll(async () => { opened = await openStore(); });
@@ -273,6 +282,44 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
       expect(state.turns.q1).toMatchObject({ status: 'processing' });
       expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: null, conclusion: null });
     });
+  });
+
+  it('#1358: holds a Bot that a snapshot moved to a model the config lacks, then freezes it with that model\'s template', async () => {
+    const h = await hosted(), { config, store: hosts } = configured({ default: OLD });
+    await h.change(state => { seedCollaboration(state, 'external'); queueTurns(state); delete state.turns.q2; });
+    const snapshot = { revision: 2, bots: [{ id: 'main', name: 'Main', role: 'Team owner', persona: '', model: 'b', mainBot: true }] };
+    await hosts.commit(h.scope, { scope: h.scope, commandId: 'team', command: { kind: 'team_snapshot', snapshot } }, vectorClock);
+    // The profile change waits for its persona projection, as in homes.test.ts.
+    await h.change(state => { state.team.bots.main!.readyRevision = state.team.bots.main!.revision; });
+    await hosts.sync(h.scope, { ...SYNC_OPTIONS, history: undefined });
+    expect((await h.state()).turns.q1).toMatchObject({ status: 'blocked', blockedReason: 'Unavailable model: b' });
+    expect(await intentRow(h.scope, 'q1')).toBeUndefined();
+    config.models = { default: OLD, b: NEW };
+    await hosts.sync(h.scope, { ...SYNC_OPTIONS, history: undefined });
+    const bot = (await h.state()).team.bots.main!;
+    expect(await frozenExecution(h.scope, 'q1')).toMatchObject({ deviceId: 'device',
+      payload: { requiredToolsets: ['docs'], agentRef: { agentId: 'main', profileRevision: bot.revision } } });
+  });
+
+  it('#1358: freezes a later Turn of an existing Bot with the config\'s new template, and a frozen Turn keeps its own', async () => {
+    const h = await hosted(), { config, store: hosts } = configured({ default: OLD });
+    await h.change(state => { queueTurns(state); delete state.turns.q2; });
+    await hosts.sync(h.scope, { ...SYNC_OPTIONS, history: undefined });
+    config.models = { default: NEW };
+    await h.change(state => { state.turns.q3 = { ...state.turns.q1!, id: 'q3', root: 'q3', request: 'Later', status: 'queued' }; });
+    await hosts.sync(h.scope, { ...SYNC_OPTIONS, history: undefined });
+    const agentRef = { agentId: 'main', profileRevision: '1' };
+    expect((await frozenExecution(h.scope, 'q1')).payload).not.toHaveProperty('requiredToolsets');
+    expect(await frozenExecution(h.scope, 'q3')).toMatchObject({ deviceId: 'device', payload: { requiredToolsets: ['docs'], agentRef } });
+    expect((await h.state()).team.bots.main!.execution).toMatchObject({ deviceId: 'device', payload: { agentRef } });
+  });
+
+  it('#1358: a config template outside the read-only toolsets fails the sync, which writes nothing', async () => {
+    const h = await hosted(), { store: hosts } = configured({ default: OLD, other: { ...OLD, payload: { ...OLD.payload, requiredToolsets: ['write'] } } });
+    await h.change(queueTurns);
+    const before = await h.stored();
+    await expect(hosts.sync(h.scope, { ...SYNC_OPTIONS, history: undefined })).rejects.toThrow('not declared read-only by the Host: write');
+    expect(await h.stored()).toBe(before);
   });
 
   it('refuses a routine Turn that has no occurrence row, and writes nothing (#793 D2f)', async () => {

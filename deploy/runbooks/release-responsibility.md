@@ -77,9 +77,10 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The next source candidate is 0.35.1 for all nine packages, a PATCH. It is
-not published.
-See the [candidate notes](../../docs/releases/v0.35.1.md).
+The next source candidate is 0.36.0 for all nine packages, a MINOR. It is
+not published. 0.35.1 was prepared but never published; its fixes ship in
+0.36.0.
+See the [candidate notes](../../docs/releases/v0.36.0.md).
 The current release is 0.35.0 for all nine packages, keys included. The
 registry lists it as `latest`.
 See the [release notes](../../docs/releases/v0.35.0.md).
@@ -121,7 +122,7 @@ no publication record for most of these versions; the
 [0.34.0 notes](../../docs/releases/v0.34.0.md) and the
 [0.35.0 notes](../../docs/releases/v0.35.0.md) hold the ones for 0.31.0,
 0.32.0, 0.33.0, 0.34.0 and 0.35.0.
-The 0.35.1 candidate has source-preparation authorization only.
+The 0.36.0 candidate has source-preparation authorization only.
 Live qualification and production rollout remain separate operations.
 The [publication record](../../docs/releases/v0.27.0-publication.md) confirms
 the exact source, package order and completed registry readback.

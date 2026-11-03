@@ -13,7 +13,7 @@ describe('canonical outcome byte bounds', () => {
     expect(resultOutcomeMaxBytes(object({ type: 'number', minimum: -1, maximum: 1 }))).toBe(31);
     expect(resultOutcomeMaxBytes(object({ type: 'integer', minimum: 0, maximum: 1e21 }))).toBe(30);
     const value = { n: 999999999999999900000 };
-    expect(validateResultOutcome(object({ type: 'integer', minimum: 0, maximum: 1e21 }), value).ok).toBe(true);
+    expect(validateResultOutcome({ contract: 'example.v1', schema: object({ type: 'integer', minimum: 0, maximum: 1e21 }) }, value).ok).toBe(true);
     expect(bytes(value)).toBeLessThanOrEqual(30);
   });
   it.each([[0, 100, 3], [-100, 100, 4], [0, 999999999999999900000, 21], [-Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, 17]])
@@ -68,7 +68,7 @@ describe('canonical outcome byte bounds', () => {
       const outcome = { n: Array(maxItems).fill(value) };
       expect(bytes(outcome)).toBeGreaterThan(65536);
       expect(resultOutcomeMaxBytes(schema)).toBeGreaterThanOrEqual(bytes(outcome));
-      expect(validateResultOutcome(schema, outcome)).toMatchObject({ ok: false, reason: 'over-cap' });
+      expect(validateResultOutcome({ contract: 'example.v1', schema }, outcome)).toMatchObject({ ok: false, reason: 'over-cap' });
     }
   });
 });

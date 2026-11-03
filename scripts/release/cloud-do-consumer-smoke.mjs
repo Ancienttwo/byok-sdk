@@ -139,8 +139,8 @@ export async function cloudDoConsumerSmoke(installRoot, workerImports) {
     const protocolEntry = JSON.parse(readFileSync(protocolManifestPath, 'utf8')).exports['.'].import;
     const { validateResultOutcome } = await import(pathToFileURL(path.join(path.dirname(protocolManifestPath), protocolEntry)).href);
     const schema = { type: 'object', required: ['answer'], additionalProperties: false, properties: { answer: { type: 'string' } } };
-    assert.deepEqual(result.valid, validateResultOutcome(schema, { answer: result.hook }));
-    assert.deepEqual(result.invalid, validateResultOutcome(schema, { answer: 1 }));
+    assert.deepEqual(result.valid, validateResultOutcome({ contract: 'consumer.probe.v1', schema }, { answer: result.hook }));
+    assert.deepEqual(result.invalid, validateResultOutcome({ contract: 'consumer.probe.v1', schema }, { answer: 1 }));
     console.log(`[cloud-do-consumer] ${process.platform}: installed Worker bundle, DO RPC, hook, identity, SQLite and shared outcome validation passed`);
   } finally {
     await deadline(mf.dispose(), 10_000, 'workerd disposal');

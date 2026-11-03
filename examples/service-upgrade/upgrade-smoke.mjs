@@ -1,10 +1,12 @@
 // #1097 upgrade smoke: a real service under this OS's manager (launchd,
 // systemd --user, WinSW), installed and upgraded from payloads through
 // createServiceInstallation, once by `byok-agent install --payload` (owner
-// `cli`) and once by app-installer.ts (owner `app`). Each run:
+// `cli`) and once by app-installer.ts (owner `app`). On Windows the app run
+// is a `user` scope service (#1337): a Startup `.cmd` and its batch
+// launcher, with no SCM registration. Each run:
 //
 //   install v1 → pair through the service (serviceEnrollment) → running
-//   [Windows: taskkill /F the daemon → the SCM restarts it → running]
+//   [Windows: taskkill /F the daemon → the SCM (cli) or the launcher (app) restarts it → running]
 //   upgrade v2 → switched
 //   upgrade v3, which passes the precheck, corrupts the journal and exits 1
 //     → health check fails → v2 and its store snapshot restored → running
@@ -14,7 +16,7 @@
 // On Windows the cli run keeps its store on an 8.3 short-name path and the app
 // run on a path longer than 260 characters (#1030).
 //
-//   node examples/service-upgrade/upgrade-smoke.mjs        (WINSW_BIN=<WinSW-x64.exe> on Windows)
+//   node examples/service-upgrade/upgrade-smoke.mjs        (WINSW_BIN=<WinSW-x64.exe> on Windows, for the cli run)
 //
 // Requires `bun run build`. On Linux the user manager must be running
 // (`loginctl enable-linger`); a missing one fails the run.
@@ -117,8 +119,8 @@ async function storeFor(owner) {
 /** The commands of one run: the CLI drives the `cli` installation, app-installer.ts the `app` one. */
 function commands(variant) {
   const service = ['--config', variant.config, '--name', variant.name];
-  const windows = isWindows ? ['--winsw-bin', winswBin, '--winsw-install-dir', variant.winswDir] : [];
   if (variant.owner === 'cli') {
+    const windows = isWindows ? ['--winsw-bin', winswBin, '--winsw-install-dir', variant.winswDir] : [];
     return {
       install: (payload) => [agentCli, 'install', '--payload', payload, '--install-root', variant.installRoot, ...service, ...windows],
       upgrade: (payload) => [agentCli, 'upgrade', 'apply', payload, '--json', ...service, ...windows],
@@ -126,6 +128,7 @@ function commands(variant) {
       uninstall: () => [agentCli, 'uninstall', ...service, ...windows],
     };
   }
+  const windows = isWindows ? ['--windows-user'] : [];
   const app = (action, payload) => [installer, action, '--install-root', variant.installRoot, ...service, ...windows, ...(payload ? ['--payload', payload] : [])];
   return { install: (p) => app('install', p), upgrade: (p) => app('upgrade', p), rollback: () => app('rollback'), uninstall: () => app('uninstall') };
 }
@@ -152,9 +155,12 @@ async function smoke(owner, server, payloads) {
   try {
     await lifecycle(variant, cmd, server, payloads);
   } catch (error) {
+    // Printed first: a cleanup failure below must not hide it.
+    console.log(`--- ${owner} failure\n${error?.stack ?? error}`);
     await diagnose(variant);
     // Leave no service registered on the machine; the failure stays the result.
-    await run(cmd.uninstall());
+    const cleanup = await run(cmd.uninstall());
+    if (cleanup.code !== 0) console.log(`--- ${owner} cleanup uninstall exit ${cleanup.code}\n${cleanup.stdout}${cleanup.stderr}`);
     throw error;
   }
 }
@@ -163,6 +169,11 @@ async function smoke(owner, server, payloads) {
 async function diagnose(variant) {
   const { stdout, stderr } = await run([agentCli, 'status', '--config', variant.config]);
   console.log(`--- ${variant.owner} status\n${stdout}${stderr}`);
+  if (isWindows && variant.owner === 'app') {
+    // The `user` scope service's stop program: the SDK reports only its exit status.
+    const stop = await run([installer, 'stop-daemon', '--config', variant.config, '--install-root', variant.installRoot]);
+    console.log(`--- app stop-daemon exit ${stop.code}\n${stop.stdout}${stop.stderr}`);
+  }
   const logDir = path.join(variant.storeDir, 'service-logs');
   for (const name of await fs.readdir(logDir).catch(() => [])) {
     const text = await fs.readFile(path.join(logDir, name), 'utf8').catch(() => '');
@@ -216,6 +227,11 @@ async function lifecycle(variant, cmd, server, payloads) {
   const { owner, storeDir } = variant;
 
   await ok(cmd.install(payloads.v1));
+  if (isWindows && owner === 'app') {
+    // A `user` scope service never reaches the SCM: ERROR_SERVICE_DOES_NOT_EXIST.
+    const query = await new Promise((resolve) => execFile('sc.exe', ['query', variant.name], (error) => resolve(error?.code ?? 0)));
+    assert.equal(query, 1060, `sc.exe query ${variant.name} must not find a service`);
+  }
   // Pair through the service: a pair that finds no live service enrolls in this process instead.
   await livePid(variant).catch(async (error) => {
     await captureStartError(variant, cmd);
@@ -233,7 +249,7 @@ async function lifecycle(variant, cmd, server, payloads) {
       const next = await runningPid(variant);
       return next !== killed ? next : undefined;
     }, `${owner} restart after taskkill /F`);
-    log(`${owner}: taskkill /F ${killed} → SCM restarted pid=${pid}`);
+    log(`${owner}: taskkill /F ${killed} → ${owner === 'app' ? 'launcher' : 'SCM'} restarted pid=${pid}`);
   }
 
   await ok(cmd.upgrade(payloads.v2));
@@ -257,7 +273,7 @@ async function lifecycle(variant, cmd, server, payloads) {
 
   await ok(cmd.uninstall());
   // macOS and Linux keep the enrollment in the user's keychain or Secret Service; leave none behind.
-  // On Windows it is in the service account's Credential Manager, which this user cannot reach.
+  // On Windows `byok-agent unpair` checks only a WinSW service, so neither run unpairs there.
   if (!isWindows) {
     // The manager unloads the service before its daemon has released the store.
     await until(async () => (/^live status: daemon not reachable/mu.test((await run([agentCli, 'status', '--config', variant.config])).stdout) ? true : undefined),

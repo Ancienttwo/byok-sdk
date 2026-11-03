@@ -18,8 +18,8 @@ export class ConsumerDO extends AgentDO {
       const row = await database.get<{ value: string }>('SELECT value FROM consumer_probe LIMIT 1');
       const objectName = await sessionObjectName({ tenantId: 'consumer', workspaceId: 'workspace', agentId: 'agent', sessionId: 'session' });
       const schema = { type: 'object', required: ['answer'], additionalProperties: false, properties: { answer: { type: 'string' } } };
-      const valid = validateResultOutcome(schema, { answer: hook });
-      const invalid = validateResultOutcome(schema, { answer: 1 });
+      const valid = validateResultOutcome({ contract: 'consumer.probe.v1', schema }, { answer: hook });
+      const invalid = validateResultOutcome({ contract: 'consumer.probe.v1', schema }, { answer: 1 });
       return { hook, stored: row?.value, objectName, valid, invalid };
     } finally { await database.close(); }
   }

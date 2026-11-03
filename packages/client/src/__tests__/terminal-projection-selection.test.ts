@@ -3,7 +3,9 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, RESULT_ISSUES_MAX_COUNT, type Envelope } from '@byok-sdk/protocol';
+import {
+  BOT_TURN_OUTCOME_CONTRACT, botTurnOutcomeFragments, composeBotTurnOutcomeSchema, createEnvelope, RESULT_ISSUES_MAX_COUNT, type Envelope,
+} from '@byok-sdk/protocol';
 import { AgentHomeManager } from '../agent-home';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AGENT_RESULT_DIRECTORY, AgentResultStore } from '../daemon/agent-result-store';
@@ -228,6 +230,18 @@ describe('submit_result: stage, ack and turn_end', () => {
     expect(await runner.submitAgentResult({ contextToken, outcome: { verdict: 'fail', score: 0 } })).toMatchObject({ state: 'staged' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     expect((await waitForTerminal(sent, 'invalid-task')).payload).toMatchObject({ document: { verdict: 'fail', score: 0 } });
+  });
+
+  it('rejects a bot-turn-outcome.v1 duplicate option id with contract-mismatch and stages the corrected resubmit', async () => {
+    const { adapter, runner, hostStorageRoot } = await harness();
+    const schema = composeBotTurnOutcomeSchema({ ask_user: botTurnOutcomeFragments.askUser() });
+    await offerResult(runner, 'contract-task', { mode: 'result-document', contract: BOT_TURN_OUTCOME_CONTRACT, schema });
+    const contextToken = resultToken(adapter);
+    const ask = (second: string) => ({ ask_user: { question: 'which', answerKind: 'single_choice', options: [{ id: 'a', label: 'A' }, { id: second, label: 'B' }] } });
+    expect(await runner.submitAgentResult({ contextToken, outcome: ask('a') })).toMatchObject({ state: 'rejected', reason: 'contract-mismatch',
+      issues: [{ pointer: '/ask_user/options/1/id', keyword: 'duplicate-option-id', message: 'Duplicate option id' }] });
+    expect(await stagedOnDisk(hostStorageRoot, 'contract-task')).toBeUndefined();
+    expect(await runner.submitAgentResult({ contextToken, outcome: ask('b') })).toMatchObject({ state: 'staged' });
   });
 
   it('fails non-retryably when the turn ends with nothing staged and never derives a document from text', async () => {

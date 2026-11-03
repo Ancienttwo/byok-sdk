@@ -39,8 +39,8 @@ it('offers only the allowed actions of each Turn kind, and the frozen schema ref
   expect(keys(owner)).toEqual(['delegate', 'team_note']);
   // A Bot Turn without owner authority gets only the `turn` list.
   expect(keys(outcomeSchema('main', state, { ...turn, authority: 'bot' }, ['default'], [], offer))).toEqual(['delegate']);
-  expect(protocol.validateResultOutcome(owner, { delegate: [{ to: 'main', request: 'Look' }] }).ok).toBe(true);
-  expect(protocol.validateResultOutcome(owner, { ask_user: [{ question: 'Why?', answerKind: 'text' }] }).ok).toBe(false);
+  expect(protocol.validateResultOutcome({ contract: protocol.BOT_TURN_OUTCOME_CONTRACT, schema: owner }, { delegate: [{ to: 'main', request: 'Look' }] }).ok).toBe(true);
+  expect(protocol.validateResultOutcome({ contract: protocol.BOT_TURN_OUTCOME_CONTRACT, schema: owner }, { ask_user: [{ question: 'Why?', answerKind: 'text' }] }).ok).toBe(false);
   // An empty list removes every action of that kind.
   expect(keys(outcomeSchema('main', state, turn, ['default'], [], outcomeOffer({ actions: { turn: [], main: [] } })))).toEqual([]);
 });
@@ -54,7 +54,7 @@ it('offers new_bot_* room members only when the Main Bot list offers create_bot'
   const rooms = outcomeSchema('main', state, turn, ['default'], [], outcomeOffer({ actions: { main: ['create_room', 'update_room'] } }));
   expect(members(rooms, 'create_room')).toEqual(['main']);
   expect(members(rooms, 'update_room')).toEqual(['main']);
-  expect(protocol.validateResultOutcome(rooms, { create_room: [{ localId: 'new_room_1', name: 'Room', members: ['new_bot_1'] }] }).ok).toBe(false);
+  expect(protocol.validateResultOutcome({ contract: protocol.BOT_TURN_OUTCOME_CONTRACT, schema: rooms }, { create_room: [{ localId: 'new_room_1', name: 'Room', members: ['new_bot_1'] }] }).ok).toBe(false);
 });
 
 it('offers the Host time zones in create_routine and update_routine', () => {
@@ -62,15 +62,15 @@ it('offers the Host time zones in create_routine and update_routine', () => {
   const schema = outcomeSchema('main', stateOf({}), undefined, ['default'], routineViews('main', 1, 'report'), offer);
   for (const action of ['create_routine', 'update_routine']) expect(zones(schema, action), action).toEqual(['Asia/Shanghai', 'Asia/Hong_Kong']);
   const routine = (tz: string) => ({ create_routine: [{ localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz }, prompt: 'Brief' }] });
-  expect(protocol.validateResultOutcome(schema, routine('Asia/Shanghai')).ok).toBe(true);
-  expect(protocol.validateResultOutcome(schema, routine('UTC')).ok).toBe(false);
+  expect(protocol.validateResultOutcome({ contract: protocol.BOT_TURN_OUTCOME_CONTRACT, schema }, routine('Asia/Shanghai')).ok).toBe(true);
+  expect(protocol.validateResultOutcome({ contract: protocol.BOT_TURN_OUTCOME_CONTRACT, schema }, routine('UTC')).ok).toBe(false);
 });
 
 it('offers the Host confirmable actions, so the connector gets only those', () => {
   const schema = outcomeSchema('main', stateOf({}), undefined, ['default'], [], outcomeOffer({ confirmable: [{ action: 'place_order', draft: DRAFT }] }));
   const action = (name: string) => ({ confirmable_action: [{ action: name, summary: 'Buy', draft: { symbol: 'ACME' } }] });
-  expect(protocol.validateResultOutcome(schema, action('place_order')).ok).toBe(true);
-  expect(protocol.validateResultOutcome(schema, action('send_message')).ok).toBe(false);
+  expect(protocol.validateResultOutcome({ contract: protocol.BOT_TURN_OUTCOME_CONTRACT, schema }, action('place_order')).ok).toBe(true);
+  expect(protocol.validateResultOutcome({ contract: protocol.BOT_TURN_OUTCOME_CONTRACT, schema }, action('send_message')).ok).toBe(false);
 });
 
 it.each<[string, OutcomeOffer, string]>([

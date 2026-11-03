@@ -3,6 +3,7 @@ import { botTurnOutcomeFragments as f, composeBotTurnOutcomeSchema, type NonEmpt
 import { checkRoutineSchedule } from '@byok-sdk/core';
 import type { Turn } from './turn';
 import type { RoomsState } from './rooms';
+import { inactive } from './team';
 import { openDelegations, type DelegationView } from './delegation';
 
 /**
@@ -14,7 +15,7 @@ export const NEW_ROOMS = ['new_room_1'] as const;
 /** The Bot fields that the schema and the ContextPack read. */
 export interface ContextBot {
   readonly id: string; readonly name: string; readonly role: string; readonly mainBot: boolean; readonly archived: boolean;
-  readonly readyRevision: string | null;
+  readonly participation?: 'suspended'; readonly readyRevision: string | null;
 }
 /** Team, delegation and reply rows. No Turn rows: the ContextPack takes its history as an argument. */
 export interface ContextState extends DelegationView {
@@ -22,7 +23,7 @@ export interface ContextState extends DelegationView {
     bots: Readonly<Record<string, ContextBot>>; notes: Array<{ id: string; text: string }>;
     homeOperations: ReadonlyArray<{ readonly botId: string; readonly status: string }>;
     /** External team mode: the team authority owns the Bots (#739 Q4c). */
-    readonly external?: { readonly revision: number };
+    readonly external?: { readonly revision: number; readonly rooms?: true };
   };
 }
 /** The actions of an ordinary Bot Turn, and the extra actions of an owner Main Bot Turn. A room seat always has speech. */
@@ -165,13 +166,13 @@ export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, m
   const compose = (scheduleShape: RoutineScheduleShape) => {
     const fragments: BotTurnOutcomeFragments = turn?.source === 'room_slot' ? (() => {
       const seat = state.team.seats[turn.id]!, room = state.team.rooms[state.team.rounds[seat.roundId]!.roomId]!;
-      const members = room.members.filter(id => !state.team.bots[id]?.archived);
+      const members = room.members.filter(id => !inactive(state.team.bots[id]));
       return { speech: f.speech(), ...(members.length ? { room_call: f.roomCall({ members: members as unknown as NonEmptyIds }) } : {}) };
     })() : allow({
       // A refusal report has no delegate fragment, so it cannot cause another report (§8.2).
       // A target stays offered while a newer profile is pending; its Turn waits for readback (§2.2).
       ...(turn?.refusalReport ? {} : { delegate: f.delegate({ to: [botId, ...Object.values(state.team.bots)
-        .filter(b => b.id !== botId && !b.archived && personaApplied(state, b)).map(b => b.id)] }) }),
+        .filter(b => b.id !== botId && !inactive(b) && personaApplied(state, b)).map(b => b.id)] }) }),
       ask_user: f.askUser(),
       confirmable_action: f.confirmableAction({ actions: (offer?.confirmable ?? DEFAULT_CONFIRMABLE) as [ConfirmableSpec, ...ConfirmableSpec[]] }),
       create_routine: f.createRoutine({ localIds: ['new_routine_1'], timeZones, scheduleShape }),
@@ -190,8 +191,12 @@ export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, m
           create_bot: f.createBot({ localIds: NEW_BOTS, models: models as unknown as NonEmptyIds }),
           update_bot: f.updateBot({ botIds, models: models as unknown as NonEmptyIds }), delete_bot: f.deleteBot({ botIds }),
         }),
-        create_room: f.createRoom({ localIds: NEW_ROOMS, members: memberIds }), team_note: f.teamNote(),
-        ...(Object.keys(state.team.rooms).length ? { update_room: f.updateRoom({ roomIds: Object.keys(state.team.rooms) as unknown as NonEmptyIds, members: memberIds }) } : {}),
+        // #1321: in the external rooms mode, the authority owns the rooms, so these two actions are not offered.
+        ...(state.team.external?.rooms ? {} : {
+          create_room: f.createRoom({ localIds: NEW_ROOMS, members: memberIds }),
+          ...(Object.keys(state.team.rooms).length ? { update_room: f.updateRoom({ roomIds: Object.keys(state.team.rooms) as unknown as NonEmptyIds, members: memberIds }) } : {}),
+        }),
+        team_note: f.teamNote(),
         ...(open.length ? { cancel_delegation: f.cancelDelegation({ delegationIds: open as unknown as NonEmptyIds }) } : {}),
       }, offer?.actions?.main));
     }

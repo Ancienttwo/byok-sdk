@@ -204,7 +204,7 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
   const fs = deps.fs ?? fsp;
 
   const windows = def.windows;
-  if (!windows) {
+  if (!windows || windows.scope === 'user') {
     throw new Error('WinSW service lifecycle requires `ServiceDefinition.windows.winswBin` (the product-bundled WinSW executable path)');
   }
   const winswBin = windows.winswBin;

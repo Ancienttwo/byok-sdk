@@ -13,6 +13,8 @@ export interface BotProfile {
    * delegate and room_call is recorded as would-do until the owner switches this Bot to `auto`. Host state, never wire.
    */
   autonomy?: Autonomy;
+  /** #1319: the team authority suspended this Bot. It stays a member and takes no new work. Absent: participating. */
+  participation?: 'suspended';
   execution: ExecutionTemplate;
 }
 export interface HomeOperation {

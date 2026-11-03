@@ -186,7 +186,7 @@ evidence list below).
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
   and an `approvalId` on every approval request and decision. `golden/v5.releases.json` registers the published 0.34.0 corpus,
-  the first v5 release, and the same corpus for the published 0.35.0 and the 0.35.1 source candidate; 0.33.0 is the last v4 release. It has no `floor`. Each registered v5 entry pins both corpus
+  the first v5 release, and the same corpus for the published 0.35.0 and the 0.36.0 source candidate; 0.33.0 is the last v4 release. It has no `floor`. Each registered v5 entry pins both corpus
   prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.33.0 registry tarball, the last v4 release. It rejects every v5
@@ -2768,7 +2768,8 @@ decided per offer, by the offer's frozen schema.
 **Result-document offers freeze a schema (wire v3).** Strict Agent offers may
 carry an offer-scoped `terminalProjection`. `{mode:'none'}` selects no
 structured result. `{mode:'result-document', contract, schema}` requires one:
-`contract` is an opaque lowercase id, and `schema` (required since v3) is the
+`contract` is a lowercase id: an SDK-defined contract carries extra rules
+(below), any other id is opaque. `schema` (required since v3) is the
 JSON Schema the outcome must satisfy. The daemon exposes that schema to the
 runtime as the `inputSchema` of the SDK-reserved `submit_result` tool, stages
 the validated outcome, and delivers it only as `task.complete.document`
@@ -2804,7 +2805,7 @@ and `RESULT_ISSUES_MAX_BYTES` = 4 KiB as JSON. Each issue is
 `{ pointer, keyword, message }` with an RFC 6901 pointer into the checked
 document; `truncated` says issues were dropped.
 
-`validateResultOutcome(schema, outcome)` is the outcome check. It re-runs the
+`validateResultOutcome({ contract, schema }, outcome)` is the outcome check. It re-runs the
 guard first (a refused schema is `schema-not-admitted` and never reaches the
 validator). The outcome must then be plain JSON data in well-formed Unicode of
 at most `RESULT_OUTCOME_MAX_BYTES` = 64 KiB (65 536) canonical JSON UTF-8 and
@@ -2815,6 +2816,24 @@ own-property only. Validation stops at the first failing path at each level,
 so the issue list stays short. Input size and depth are bounded; the CPU cost
 of nested `oneOf` over a 64 KiB outcome is bounded by schema nodes times
 outcome nodes, not by a measured timing.
+
+<a id="sdk-defined-contract-rules"></a>
+**SDK-defined contracts add rules.** Once the schema passes,
+`validateResultOutcome` runs the rules of the projection's contract when it is
+one the SDK defines (today only `bot-turn-outcome.v1`); any other contract id
+gets the schema check only. A rule failure is reason `contract-mismatch`, with
+the same `bytes`, `issues` and `truncated` fields. The device calls it on
+`submit_result`, so the model corrects the outcome in the same Turn; a Host
+that checks the same outcome refuses it whole. The `bot-turn-outcome.v1` rules
+cover what the K7 subset cannot express:
+
+- `duplicate-option-id`: an `ask_user` option id repeats an earlier one in the
+  same `options`; the pointer is the later id.
+- `blank-text`: any string in the outcome is empty after `trim()`, except
+  inside a `confirmable_action[*].draft`, whose schema the Host defines.
+
+Messages never echo the value. The K7 subset, the composed schema bytes and the
+wire are unchanged ([#1374](https://github.com/Ancienttwo/byok-sdk/issues/1374)).
 
 Sending `terminalProjection` is gated by the device capability
 `terminal-projection-selection` (`WIRE_ADDITIONS`). A
