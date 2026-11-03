@@ -98,6 +98,26 @@ try {
   $user.SetValue('Path', '%PATH%;C:\e1-b', $expandKind)
   Show 'B logon Path' ([E1Env]::Build()['Path'])
 
+  # Case B2-B5: where %PATH% sits, its spelling, REG_SZ, and a second reference.
+  $machineExpanded = [Environment]::ExpandEnvironmentVariables($machinePath)
+  foreach ($case in @(
+      @{ id = 'B2'; value = 'C:\e1-b2;%PATH%'; kind = $expandKind },
+      @{ id = 'B3'; value = 'C:\e1-b3;%path%;C:\e1-b3z'; kind = $expandKind },
+      @{ id = 'B4'; value = '%PATH%;C:\e1-b4'; kind = $stringKind },
+      @{ id = 'B5'; value = '%PATH%;C:\e1-b5;%PATH%'; kind = $expandKind },
+      @{ id = 'B6'; value = 'C:\e1-b6;%PATHEXT%'; kind = $expandKind })) {
+    Clear-Case
+    $user.SetValue('Path', $case.value, $case.kind)
+    $built = [E1Env]::Build()['Path']
+    Show "$($case.id) logon Path with machine replaced by <M>" ($built.Replace($machineExpanded, '<M>'))
+  }
+
+  # Case H: a user REG_EXPAND_SZ naming a variable only this session has.
+  Clear-Case
+  $env:E1SESSIONONLY1317 = 'from-session'
+  $user.SetValue('E1PROBEU1317', '%E1SESSIONONLY1317%|%USERPROFILE%|%SystemRoot%', $expandKind)
+  Show 'H logon E1PROBEU1317' ([E1Env]::Build()['E1PROBEU1317'])
+
   # Case C: user Path REG_SZ (not REG_EXPAND_SZ) holding a %NAME%.
   Clear-Case
   $user.SetValue('Path', 'C:\e1-c;%USERPROFILE%\e1-c', $stringKind)
