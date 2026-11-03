@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 // Official release asset digest: https://github.com/google/osv-scanner/releases/tag/v2.7.0
 export const scanner = Object.freeze({
@@ -183,4 +182,4 @@ async function main() {
     process.exitCode = 1;
   }
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+if (import.meta.main) await main();

@@ -147,7 +147,7 @@ export async function cloudDoConsumerSmoke(installRoot, workerImports) {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   if (!process.argv[2]) throw new Error('provide the installed tarball consumer root');
   await cloudDoConsumerSmoke(path.resolve(process.argv[2]), runtimeSmokeImports(repoRoot).worker);
 }

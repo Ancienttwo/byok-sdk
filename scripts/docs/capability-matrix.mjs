@@ -62,7 +62,7 @@ export function generateDoc(current) {
   return current.slice(0, current.indexOf(start) + start.length) + '\n' + matrixTable() + '\n' + current.slice(current.indexOf(end));
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   const file = path.join(root, DOC);
   const current = readFileSync(file, 'utf8');
   const generated = generateDoc(current);

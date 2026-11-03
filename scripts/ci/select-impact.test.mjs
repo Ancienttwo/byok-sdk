@@ -397,6 +397,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   const tracked = new Set(spawnSync('git', ['ls-files'], { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean));
   const scripts = JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).scripts;
   assert.deepEqual(Object.keys(reviewedScripts).sort(), [
+    'scripts/api-surface/check-api-surface.mjs',
     'scripts/api-surface/check-version-authority.mjs', 'scripts/api-surface/check-version-authority.test.mjs',
     'scripts/architecture/dependency-baseline.json', 'scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs',
     'scripts/ci/with-secret-service.sh',
@@ -456,7 +457,7 @@ test('upgrade-manifest data files select the script checks', () => {
   assert.deepEqual(selectImpact(['packages/client/upgrade-history/0.31.0-0.32.0.json']), {
     dirs: [], files: ['packages/client/upgrade-history/0.31.0-0.32.0.json'], families: ['npm-release-pack'], reason: 'impacted',
   });
-  assert.throws(() => selectImpact(['packages/client/upgrade-history/0.35.0-0.36.0.json']), /reviewed CI mapping required/i);
+  assert.throws(() => selectImpact(['packages/client/upgrade-history/0.36.0-0.37.0.json']), /reviewed CI mapping required/i);
 });
 
 // #1102: the store precheck fixtures run the suites of the three inspectors (and their dependents).
@@ -474,7 +475,7 @@ test('store precheck fixtures select the server, keys and client suites', () => 
 
 test('release script siblings outside the reviewed list still fail closed', () => {
   for (const path of ['scripts/release/publish-unreviewed.test.mjs', 'scripts/release/pg-unreviewed-smoke.mjs', 'scripts/release/registry-contract.mjs',
-    'scripts/release/nested/publish.mjs', 'scripts/api-surface/check-api-surface.mjs', 'scripts/api-surface/check-version-authority.js']) {
+    'scripts/release/nested/publish.mjs', 'scripts/api-surface/check-api-surface.js', 'scripts/api-surface/check-version-authority.js']) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
   }
 });
@@ -681,6 +682,11 @@ test('reviewed M package build configs keep owner consumers and packed artifacts
     assert.throws(() => selectImpact([`packages/${owner}/tsup.unreviewed.config.ts`]), /reviewed CI mapping required/i);
     assert.throws(() => selectImpact([`packages/${owner}/tsup.config.mjs`]), /reviewed CI mapping required/i);
   }
+  // #1387: cloud-do's build runs scripts/check-dist.mjs; a sibling script stays unreviewed.
+  const checkDist = selectImpact(['packages/cloud-do/scripts/check-dist.mjs']);
+  const cloudDo = selectImpact(['packages/cloud-do/tsconfig.json']);
+  assert.deepEqual([checkDist.dirs, checkDist.families], [cloudDo.dirs, sorted(new Set([...cloudDo.families, 'npm-release-pack']))]);
+  assert.throws(() => selectImpact(['packages/cloud-do/scripts/unreviewed.mjs']), /reviewed CI mapping required/i);
   assert.throws(() => selectImpact(['packages/client/tsup.other.config.ts']), /reviewed CI mapping required/i);
   assert.throws(() => selectImpact(['packages/unreviewed/tsup.config.ts']), /reviewed CI mapping required/i);
 });

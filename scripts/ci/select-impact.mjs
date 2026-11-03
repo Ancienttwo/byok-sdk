@@ -1,13 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { verifyReviewedContent, changedApiOwners } from './reviewed-content.mjs';
 import { documentationChecks } from './documentation-checks.mjs';
 import { resolveScriptChecks, scriptTestInputs } from './script-test-inputs.mjs';
 
 // #1316: the archived upgrade manifests, one exact path each.
-const UPGRADE_HISTORY_FILES = new Set(['0.31.0-0.32.0', '0.32.0-0.33.0', '0.33.0-0.34.0', '0.34.0-0.35.0'].map(name => `packages/client/upgrade-history/${name}.json`));
+const UPGRADE_HISTORY_FILES = new Set(['0.31.0-0.32.0', '0.32.0-0.33.0', '0.33.0-0.34.0', '0.34.0-0.35.0', '0.35.0-0.36.0'].map(name => `packages/client/upgrade-history/${name}.json`));
 
 // Reviewed workspace graph; the contract test detects manifest drift.
 export const workspaceGraph = {
@@ -341,6 +340,9 @@ export const reviewedScripts = Object.freeze({
   'scripts/architecture/dependency-baseline.json': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
   'scripts/docs/device-setup.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
   'scripts/docs/device-setup.test.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
+  // #1387: the test imports acorn (module-scan.mjs), and install also selects the
+  // build job that runs check:api-surface.
+  'scripts/api-surface/check-api-surface.mjs': { tests: ['scripts/api-surface/check-api-surface.test.mjs'], install: true },
   'scripts/api-surface/check-version-authority.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/api-surface/check-version-authority.test.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/release/beta-release.test.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
@@ -449,6 +451,7 @@ const reviewedBuildConfigOwners = Object.freeze({
   'packages/client/tsup.sealed.config.ts': 'packages/client',
   'packages/cloud-dataplane/tsup.config.ts': 'packages/cloud-dataplane',
   'packages/cloud-do/tsup.config.ts': 'packages/cloud-do',
+  'packages/cloud-do/scripts/check-dist.mjs': 'packages/cloud-do',
   'packages/cloud/tsup.config.ts': 'packages/cloud',
   'packages/protocol/tsup.config.ts': 'packages/protocol',
   'packages/server/tsup.config.ts': 'packages/server',
@@ -793,7 +796,7 @@ export function selectImpact(paths, context = {}) {
     reason: fullMatrixReason ?? (dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only') };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.main) {
   try {
     if (process.argv.length > 3) throw new Error('Usage: select-impact.mjs [changed-paths.json] (otherwise JSON stdin)');
     console.log(JSON.stringify(selectImpact(JSON.parse(readFileSync(process.argv[2] ?? 0, 'utf8')), { base: process.env.CI_BASE })));

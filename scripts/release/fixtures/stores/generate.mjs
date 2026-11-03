@@ -29,8 +29,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..', '..');
 const indexFile = path.join(here, 'index.json');
 
-/** Released builds kept as fixtures: every release the latest Host upgrade checklist starts from (0.30.2 while AiphaBee upgrades from it, 0.31.0, 0.32.0, 0.33.0, 0.34.0) and the latest release. */
-export const RELEASES = ['0.30.2', '0.31.0', '0.32.0', '0.33.0', '0.34.0', '0.35.0'];
+/** Released builds kept as fixtures: every release the latest Host upgrade checklist starts from (0.30.2 while AiphaBee upgrades from it, 0.31.0, 0.32.0, 0.33.0, 0.34.0, 0.35.0) and the latest release. */
+export const RELEASES = ['0.30.2', '0.31.0', '0.32.0', '0.33.0', '0.34.0', '0.35.0', '0.36.0'];
 
 /** Where each store lives inside a fixture directory. */
 export const FIXTURE_LAYOUT = {
@@ -170,6 +170,6 @@ async function main() {
   console.log(`[store-fixtures] wrote ${[...releases, ...(includeMain ? ['main'] : [])].join(', ')}`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   await main();
 }

@@ -135,7 +135,7 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 }
 
-if (process.argv[1] !== undefined && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
+if (import.meta.main) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (error: unknown) => {
     console.error(error);
     process.exit(2);

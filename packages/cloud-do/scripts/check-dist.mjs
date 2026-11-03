@@ -45,7 +45,7 @@ export function checkDist(directory) {
   return files;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   try {
     const directory = process.argv[2] ?? fileURLToPath(new URL('../dist', import.meta.url));
     console.log(`[cloud-do-dist] checked ${checkDist(directory)} files`);

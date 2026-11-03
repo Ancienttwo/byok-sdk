@@ -68,6 +68,8 @@ test('dependent-only changes run every selected workspace check without the pack
       'scripts/docs/capability-matrix.test.mjs',
       'scripts/docs/device-setup.test.mjs',
       'scripts/architecture/dependency-graph.test.mjs',
+      // #1387: the CLI entry-guard scan reads every packages/*/src script.
+      'scripts/ci/permanent-skips.test.mjs',
       ...(changed.startsWith('packages/client/')
         ? ['scripts/api-surface/check-oar-bridge.test.mjs']
         : ['scripts/release/check-upgrade-manifest.test.mjs', 'scripts/api-surface/check-provisioning-code-alignment.test.mjs']),
@@ -100,7 +102,7 @@ test('another selected workspace without a test check still fails closed', posix
       const scripts = dir === 'examples/packaging' ? { typecheck: 'tsc' } : { typecheck: 'tsc', test: 'vitest' };
       writeFileSync(path.join(cwd, dir, 'package.json'), JSON.stringify({ scripts }));
     }
-    const { status, stderr, calls } = runTargeted(plan, cwd);
+    const { status, stderr, calls } = runTargeted(plan, cwd, 0);
     assert.notEqual(status, 0);
     assert.match(stderr, /Selected workspace examples\/packaging has no test check/);
     assert.ok(calls.includes('run --cwd examples/packaging typecheck'));
