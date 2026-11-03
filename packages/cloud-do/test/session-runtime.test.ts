@@ -384,12 +384,14 @@ describe('full workerd restart and genuine native task checkpoints', () => {
       await vi.waitFor(async () => {
         const status = await json<{ resumed: number; beforeRequestSignals: boolean[]; toolSignals: boolean[] }>(name, 'race-status');
         expect(status.resumed).toBeGreaterThan(0);
-        if (seed.phase === 'request') expect(status.beforeRequestSignals).toEqual([false]);
+        // Pi 1.5 charges a request the restart cut off as a failed attempt and does not send it again.
+        if (seed.phase === 'request') expect(status.beforeRequestSignals).toEqual([]);
         if (seed.phase === 'call') expect(status.toolSignals).toEqual([false]);
         const row = nativeTasks(await dump(name)).find(task => task.id === seeded.taskId)!;
         expect(row.state.status).toBe('terminal');
         expect(row.abortRequested).toBe(false);
-        if (seed.phase === 'request') expect(row.state.outcome).toMatchObject({ status: 'failed', error: { message: 'CLOUD_EXECUTION_INTERRUPTED' } });
+        // The native generation fails with Pi's own interrupted attempt; the execution row below keeps the SDK code.
+        if (seed.phase === 'request') expect(row.state.outcome).toMatchObject({ status: 'failed', error: { message: 'The host stopped while the model was answering, on attempt 1' } });
       });
       expect(calls).toHaveLength(0);
       expect((await dump(name)).fixture_dispatches).toHaveLength(0);

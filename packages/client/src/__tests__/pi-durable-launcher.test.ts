@@ -180,23 +180,14 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     await vi.waitFor(()=>expect(liveGroup(group)).toEqual([]),{timeout:4_000,interval:20});
     expect(await readFile(path.join(f.home, 'marker'), 'utf8')).toBe('once');
   });
-  it('checkpoint recovery resends the model even with maxRetries zero and preserves M9', async () => {
+  it('a crash during a model request ends the execution as interrupted without resending it', async () => {
     let kill: (() => void) | undefined;
-    const f = await fixture((res,n) => { if (n === 1) { setTimeout(() => kill?.(), 20); return; } finish(res, 'resumed'); });
+    const f = await fixture((res,n) => { if (n === 1) { setTimeout(() => kill?.(), 20); return; } finish(res, 'should never happen'); });
     kill = () => { f.children[0]!.kill('SIGKILL'); };
-    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
-    expect(f.calls()).toBe(2); expect(f.journal).toEqual(['respawn-intent:1']);
-    expect(events.some(event => event.type === 'error')).toBe(false); expect(events.at(-1)).toEqual({ type: 'turn_end' });
-    expect(f.session).not.toHaveProperty('resultDocument');
-    expect(events.filter(event => event.type === 'usage')).toHaveLength(1); // interrupted attempt supplied no usage
-  });
-  it('third respawn is refused after two checkpoint recoveries without more model activity', async () => {
-    let f: Awaited<ReturnType<typeof fixture>>;
-    f=await fixture((_res,n)=>{setTimeout(()=>f.children[n-1]?.kill('SIGKILL'),50);});
-    const events:Array<AgentEvent | MessageDraftDelta>=[];await expect((async()=>{for await(const event of f.session.events)events.push(event);})()).rejects.toMatchObject({phase:'run',retry:'non-retryable'});
-    expect(f.children).toHaveLength(3);expect(f.calls()).toBe(3);expect(f.journal).toEqual(['respawn-intent:1','respawn-intent:2']);
-    expect(events.at(-1)?.type).toBe('error');expect(events.some(event=>event.type==='turn_end')).toBe(false);
-    await new Promise(resolve=>setTimeout(resolve,150));expect(f.calls()).toBe(3);
+    const events:Array<AgentEvent | MessageDraftDelta> = []; await expect((async()=>{for await (const event of f.session.events) events.push(event);})())
+      .rejects.toMatchObject({phase:'run',retry:'non-retryable',message:'durable runtime was interrupted during a model request',failure:{class:'runtime_exited'}});
+    expect(f.children).toHaveLength(2); expect(f.calls()).toBe(1); expect(f.journal).toEqual(['respawn-intent:1']);
+    expect(events.at(-1)?.type).toBe('error'); expect(events.some(event => event.type === 'usage' || event.type === 'turn_end')).toBe(false);
   },30_000);
   it('lease loss while respawn intent is being committed refuses a replacement worker', async () => {
     let owned=true;let f:Awaited<ReturnType<typeof fixture>>;

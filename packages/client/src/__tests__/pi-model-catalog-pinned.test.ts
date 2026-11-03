@@ -43,12 +43,14 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
       expect([api, PI_COMPAT_KEYS_BY_API[api].filter((key) => !Object.hasOwn(declared, key))]).toEqual([api, []]);
     }
     // The two keys added for the OpenRouter, Vercel AI Gateway and Baseten entries.
+    // pi-ai 1.5 builds the compat schemas with pi-schema, whose type does not name the properties.
+    const properties = (api: PiModelApi) => CompatSchemasByApi[api].properties as Record<string, { type?: string }>;
     for (const api of ['openai-completions', 'anthropic-messages'] as const) {
-      expect(CompatSchemasByApi[api].properties.sendSessionAffinityHeaders.type).toBe('boolean');
+      expect(properties(api).sendSessionAffinityHeaders!.type).toBe('boolean');
     }
-    expect(CompatSchemasByApi['anthropic-messages'].properties.allowEmptySignature.type).toBe('boolean');
-    expect(Object.hasOwn(CompatSchemasByApi['openai-responses'].properties, 'sendSessionAffinityHeaders')).toBe(false);
-    expect(Object.hasOwn(CompatSchemasByApi['openai-completions'].properties, 'allowEmptySignature')).toBe(false);
+    expect(properties('anthropic-messages').allowEmptySignature!.type).toBe('boolean');
+    expect(Object.hasOwn(properties('openai-responses'), 'sendSessionAffinityHeaders')).toBe(false);
+    expect(Object.hasOwn(properties('openai-completions'), 'allowEmptySignature')).toBe(false);
   });
 
   it("mirrors Pi's thinking levels", () => {
@@ -95,7 +97,7 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
       const fields = ['id', 'name', 'input', 'reasoning', 'contextWindow', 'maxTokens', 'thinkingLevelMap', 'compat', 'inputLimits'];
       const pick = (source: Record<string, unknown>) => Object.fromEntries(fields.map((field) => [field, source[field] ?? null]));
       // The projected name is the profile display_name, which the profile schema trims
-      // (pi-ai 1.4.0 openrouter google/gemma-4-26b-a4b-it carries a trailing space).
+      // (pi-ai 1.5.0 openrouter google/gemma-4-26b-a4b-it and vercel-ai-gateway openai/gpt-5.2-pro carry a trailing space).
       expect({ provider, ...pick(entry) }).toEqual({ provider, ...pick({ compat: {}, ...model, name: String(model.name).trim() }) });
     }
     // Cerebras, Z.AI GLM, MiniMax and the other entries; a pi-ai upgrade that empties this set is a regression.
@@ -148,7 +150,7 @@ type PiProviderBranch = readonly [file: string, line: string, kind: 'url' | 'unr
 const COPILOT = 'github-copilot is not a catalog vendor';
 const OPENCODE_GO = 'opencode-go is not a catalog vendor';
 
-/** Every pinned pi-ai line that branches on a provider id, reviewed against pi-ai 1.4.0. */
+/** Every pinned pi-ai line that branches on a provider id, reviewed against pi-ai 1.5.0. */
 const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['api/anthropic-messages.js', 'const isOpenRouter = model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai");', 'url', 'openrouter base_url contains openrouter.ai'],
   ['api/anthropic-messages.js', 'if (model.provider !== "anthropic" || hasRequestAuth(apiKey, headers))', 'unreachable', 'federation runs only without a key; a byok launch always supplies one'],
@@ -190,6 +192,8 @@ const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
     + 'AWS Bedrock says none disables grok-4.3 reasoning; xAI does not document a store:false replay without '
     + 'encrypted_content; not checked against the xAI API'],
   ['api/typesafe-system-one.js', 'detectCompat: (model) => model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai")', 'url', 'not a projected api; matches by URL regardless'],
+  ['utils/openrouter-cost.js', 'return model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai");', 'url',
+    'openrouter base_url contains openrouter.ai; it replaces the usage cost with the billed one and changes no request'],
   ['compat.js', 'if (model.provider.startsWith("cloudflare-") && !hasResolvedCloudflareAuth(options)) {', 'unreachable', 'no cloudflare-* catalog vendor'],
   ['compat.js', 'if (model.provider.startsWith("cloudflare-") && !hasResolvedCloudflareAuth(options)) {', 'unreachable', 'no cloudflare-* catalog vendor'],
   ['env-api-keys.js', 'if (provider === "github-copilot") {', 'unreachable', 'environment key lookup; byok passes the key explicitly'],

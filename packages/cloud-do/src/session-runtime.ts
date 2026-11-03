@@ -280,7 +280,7 @@ export class SessionRuntime {
         // A failed Session closes itself, Storage included, before `closed` settles. Until a caller reopens,
         // every call on it rejects with SessionFailed and no model request is admitted.
         void harness.closed.then(end => {
-          if (end.reason !== 'failed' || this.#opened !== opened) return;
+          if (end.kind !== 'failed' || this.#opened !== opened) return;
           this.#recovered = false;
           this.#sessionFailed = true;
         });

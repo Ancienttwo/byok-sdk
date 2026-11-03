@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
 import type { ConversationId, EntryId, Storage } from '@earendil-works/pi-durable';
-import { createStorageConformance, type StorageConformanceAssertions, type StorageConformanceCase } from '@earendil-works/pi-durable/testing';
+import { commitWrites, createStorageConformance, type StorageConformanceAssertions, type StorageConformanceCase } from '@earendil-works/pi-durable/testing';
 
 export type StorageFixture = (use: (storage: Storage, reopen: () => Promise<Storage>) => Promise<void>) => Promise<void>;
 
@@ -13,7 +13,7 @@ export function createByokStorageContract(withStorage: StorageFixture, assertion
       run: () => withStorage(async (storage, reopen) => {
         const a = await storage.mintId<ConversationId>(), b = await storage.mintId<ConversationId>();
         const entry = await storage.mintId<EntryId>();
-        await storage.commit([
+        await commitWrites(storage, [
           { type: 'conversation', value: { id: a } },
           { type: 'conversation', value: { id: b } },
           { type: 'entry', value: { id: entry, conversationId: a, kind: 'byok.execution', data: { text: 'a only' } } },
@@ -34,7 +34,7 @@ export function createByokStorageContract(withStorage: StorageFixture, assertion
         const conversationId = await storage.mintId<ConversationId>();
         const id = await storage.mintId<EntryId>();
         const text = 'x'.repeat(1024 * 1024);
-        await storage.commit([
+        await commitWrites(storage, [
           { type: 'conversation', value: { id: conversationId } },
           { type: 'entry', value: { id, conversationId, kind: 'byok.execution', data: { text } } },
           ...await Promise.all(Array.from({ length: 64 }, async (_, i) => ({

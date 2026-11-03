@@ -93,6 +93,44 @@
   `pi_projection_acl_query_failed: … (cause=<cause>, step=readdir|whoami|icacls[, exit=<code>])`.
   The cause `powershell_unavailable` is replaced by `whoami_unavailable` and
   `icacls_unavailable`.
+- **Breaking (client, cloud-do, keys; Pi 1.5.0)** — the official Pi closure is
+  pinned to exactly 1.5.0 (upstream commit `f9a26365`) and adds
+  `@earendil-works/pi-schema` as its tenth package. The closureDigest changes,
+  so a preparation compiled for 1.4.0 declines with
+  `preparation_runtime_identity_mismatch`; prepare it again.
+  - Durable state is one-way. pi-durable migrates a replica forward on open
+    (`pi.live` v3, `pi.tool` v3, `pi.generation` v2), and a 0.36.0 build
+    cannot open it afterwards. Do not roll a device or Durable Object back
+    past this release.
+  - A crash, eviction or reset while a model request is in flight no longer
+    sends that request again. Retry is off in both durable lanes, so the run
+    ends unanswered with reason `interrupted`. The client durable lane fails
+    the execution as `runtime_exited` with
+    `durable runtime was interrupted during a model request`; before, it sent
+    the request again. cloud-do still ends it with
+    `CLOUD_EXECUTION_INTERRUPTED`.
+  - Streamed progress (partial answers, tool status) reaches durable storage
+    within about one second instead of on every update. Watches still see it
+    at once; a crash can lose up to a second of streamed text, which an
+    interrupted run discards anyway.
+  - cloud-do tool schemas: `CloudToolDefinition.parameters` is typed by
+    pi-schema. `@earendil-works/pi-ai` no longer exports `Type`, `Static` or
+    `TSchema`; build schemas with `Type` from `typebox` or with pi-schema's
+    builders. pi-ai's `StringEnum` now returns a pi-schema `Schema`, which a
+    TypeBox `Type.Object` does not accept. Arguments are coerced before validation
+    (`"42"` becomes `42`, one value becomes an array, `null` becomes an
+    omitted optional property), and TypeBox-only features (`Type.Refine`,
+    codecs, `Format.Set` formats) no longer apply. The validation messages
+    the model sees changed, for example `- path: missing` instead of
+    `must have required properties path`.
+  - cloud-do storage: a `DurableObjectSqliteDatabase` implementation must
+    provide `runCounted(sql, ...params)`, which returns the number of changed
+    rows. The built-in adapter does.
+  - keys: `PI_MODEL_CATALOG_PI_AI_VERSION` is `1.5.0`. The 30 representable
+    entries Pi 1.5.0 dropped return `not_in_catalog`; check stored profiles
+    against `piModelConfigFromPinnedCatalog` before upgrading.
+  - A lane that does not pass the Host system prompt gets Pi 1.5.0's
+    tightened default prompt.
 
 ## 0.36.0 — 2026-11-03 (published)
 

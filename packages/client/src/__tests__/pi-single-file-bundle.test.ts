@@ -451,8 +451,8 @@ function emptyImportMetaModules(bundle: string): string[] {
  * through it. The host loads Node's built-in undici first so that Node's copy
  * keeps them, as it does in ESM. The preload runs before the bundle and notes the
  * frame that wrote each slot. A frame inside `node:internal/deps/undici` is Node's
- * copy. Any other frame is an npm copy. It reads no version string, because Node
- * v26.10.0 and Pi's pin are both undici 8.10.2.
+ * copy. Any other frame is an npm copy. It reads no version string: Node's own
+ * undici and Pi's pin can be the same version.
  */
 const SLOT_OWNER_PRELOAD = `
 const fs = require('node:fs');

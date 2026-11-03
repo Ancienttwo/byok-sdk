@@ -655,6 +655,7 @@
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable",
         "@earendil-works/pi-mcp",
+        "@earendil-works/pi-schema",
         "@earendil-works/pi-telemetry",
         "@earendil-works/pi-tui",
         "@isaacs/nonrecursive-glob-match",
@@ -928,6 +929,7 @@
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable",
         "@earendil-works/pi-mcp",
+        "@earendil-works/pi-schema",
         "@earendil-works/pi-telemetry",
         "@earendil-works/pi-tui",
         "@isaacs/nonrecursive-glob-match",
@@ -1125,7 +1127,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private pure todo runtime",
-      "budgetBytes": 372345,
+      "budgetBytes": 372332,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1448,7 +1450,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Durable Object session runtime",
-      "budgetBytes": 140140,
+      "budgetBytes": 140460,
       "zod": false,
       "codegen": true,
       "nodeBuiltins": {
@@ -1480,8 +1482,9 @@
         "@earendil-works/chord",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-durable",
+        "@earendil-works/pi-schema",
         "@earendil-works/pi-telemetry",
-        "typebox"
+        "partial-json"
       ],
       "unavailableOptional": [],
       "opaqueImports": [],
@@ -1494,16 +1497,6 @@
           "file": "@earendil-works/pi-ai/dist/auth/context.js",
           "line": 10,
           "rule": "opaque import()"
-        },
-        {
-          "file": "typebox/build/type/types/function.mjs",
-          "line": 11,
-          "rule": "Function reference"
-        },
-        {
-          "file": "typebox/build/typebox.mjs",
-          "line": 59,
-          "rule": "Function reference"
         }
       ]
     }
@@ -1765,7 +1758,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Headless Pi model route: choices, linkage, field errors and submission",
-      "budgetBytes": 309769,
+      "budgetBytes": 307348,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1845,7 +1838,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Pinned pi-ai catalog lookup for pi_model",
-      "budgetBytes": 282849,
+      "budgetBytes": 280428,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

@@ -301,7 +301,7 @@ if (submission.ok) {
   representable entry equals the pinned pi-ai built-in model's configuration
   field by field. Pi's run-time branches on its own provider id are not part
   of that promise, because the projected provider is `byok-sdk-<profile_ref>`.
-  In pi-ai 1.4.0 they are:
+  In pi-ai 1.5.0 they are:
   - openrouter `anthropic/*` `cacheControlFormat`. No representable entry is
     affected.
   - the xai `reasoning.encrypted_content` include. Only grok-4.3 at `off`
@@ -323,6 +323,8 @@ if (submission.ok) {
     for every provider except `openai`, `openai-codex` and `opencode`. Turns
     with the same model match the built-in openai requests.
   - the error message prefix.
+  - openrouter billed cost (`usage.cost.totalFromProvider`), read from the
+    response only. byok usage events carry no cost.
 
   The client's pinned catalog drift test keeps a review list of these
   branches.

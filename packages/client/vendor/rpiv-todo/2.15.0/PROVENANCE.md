@@ -9,6 +9,6 @@ SDK-owned integration of the frozen public npm tarball; MIT LICENSE retained ver
 - state/state-reducer.ts: Type-only proven-index non-null assertions.
 - todo-overlay.ts: Local UI port and vendored utils import; type-only non-null assertion on nonempty lines tail.
 - view/format.ts: Use the licensed local Text implementation, same upstream bytes; type-only non-null assertion on the first split segment.
-- tool/types.ts: Use fork1005 public pure StringEnum subpath instead of root export; same function.
+- tool/types.ts: Define StringEnum locally with pi-ai 1.4's TypeBox implementation, which pi-ai 1.5 removed; same schema.
 
 Every other file equals its upstream hash. Upstream imports sibling sources with `.ts` specifiers; the vendor typecheck enables `allowImportingTsExtensions` instead of rewriting them. Type-only annotations are checked by erased-JS equivalence after reversing only documented import rewiring. i18n is a real exact dependency; UI sources retain original bytes and lazy initialization.

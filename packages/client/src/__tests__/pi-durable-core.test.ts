@@ -7,7 +7,7 @@ import os from 'node:os';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { admitReplica, acquireReplicaLock, resetReplica } from '../adapters/pi-durable/replica';
 import { durableToolEnvironment } from '../adapters/pi-durable/environment';
-import { projectDurableEvent } from '../adapters/pi-durable/events';
+import { DurableViewProjection, projectDurableEvent } from '../adapters/pi-durable/events';
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 async function setup() {
@@ -73,10 +73,40 @@ describe('durable replica and tool boundaries', () => {
       await env.cleanup(BACKGROUND_CONTEXT);
     }
   });
-  it('discards snapshots, partial usage and model turn boundaries; run_end alone completes', () => {
-    expect(projectDurableEvent({ type: 'turn_end' })).toEqual([]);
-    expect(projectDurableEvent({ type: 'message_update', usage: {} as never, changes: [{ type: 'text_delta', contentIndex: 0, delta: 'ok' }] })).toEqual([{ type: 'progress', text: 'ok' }]);
-    expect(projectDurableEvent({ type: 'run_end', inputs: [] })).toEqual([{ type: 'turn_end' }]);
-    expect(projectDurableEvent({ type: 'tool_execution_end', toolCallId: 'id', toolName: 'bash' })).toMatchObject([{ type: 'tool_result', isError: true }]);
+  it('projects view changes: streamed text once, tool ends before their result, assistant usage', () => {
+    const conversation = { id: 1 } as never;
+    const assistant = (id: number, text: string, extra: object = {}) => ({ id, conversationId: 1, kind: 'pi.assistant', model: [{ role: 'assistant', content: [{ type: 'text', text }], ...extra }] });
+    const result = (id: number, callId: string) => ({ id, conversationId: 1, kind: 'pi.toolResult', model: [{ role: 'toolResult', toolCallId: callId, isError: false, content: [] }] });
+    const view = (entries: object[], live: object, before?: number) => ({ conversation, entries, ...(before === undefined ? {} : { before }), docs: { 'pi.live': live } }) as never;
+    const projection = new DurableViewProjection(view([assistant(1, 'earlier')], {}));
+    // Attachment history is silent; a partial reports what each text block gained, the entry only its tail.
+    expect(projection.advance(view([assistant(1, 'earlier')], { generation: { attempt: 1, message: { content: [{ type: 'text', text: 'He' }] } } }))).toEqual([{ type: 'text', delta: 'He' }]);
+    expect(projection.advance(view([assistant(1, 'earlier')], { generation: { attempt: 1, message: { content: [{ type: 'text', text: 'Hello' }] } } }))).toEqual([{ type: 'text', delta: 'llo' }]);
+    const answer = assistant(2, 'Hello world');
+    expect(projection.advance(view([assistant(1, 'earlier'), answer], { run: { taskId: 1, inputs: [], turns: 0 }, tools: [{ callId: 'c1', name: 'bash', status: 'running', taskId: 5 }] })))
+      .toEqual([{ type: 'text', delta: ' world' }, { type: 'assistant', entry: answer }]);
+    // A done slot ends with its result entry, in append order; a faulted one has none.
+    const done = result(3, 'c1');
+    expect(projection.advance(view([answer, done], { tools: [{ callId: 'c1', name: 'bash', status: 'done', taskId: 5, entry: 3 }, { callId: 'c2', name: 'read', status: 'done', taskId: 6 }] })))
+      .toEqual([{ type: 'tool_end', callId: 'c1', tool: 'bash', entry: done }, { type: 'tool_end', callId: 'c2', tool: 'read' }]);
+    // Slots stay listed as done until the run ends: each ended once.
+    expect(projection.advance(view([answer, done], { tools: [{ callId: 'c1', name: 'bash', status: 'done', taskId: 5, entry: 3 }, { callId: 'c2', name: 'read', status: 'done', taskId: 6 }] }))).toEqual([]);
+    // An answer with no partial before it is reported whole, once.
+    const whole = assistant(4, 'All at once');
+    expect(projection.advance(view([answer, done, whole], {}))).toEqual([{ type: 'text', delta: 'All at once' }, { type: 'assistant', entry: whole }]);
+    // A window that dropped entries asks for them by ID; retry is never expected in this lane.
+    const skipped = view([assistant(9, 'later')], { generation: { attempt: 2, retry: { at: 0, error: 'x' } } }, 8);
+    expect(projection.missing(skipped)).toEqual({ minEntryId: 5, maxEntryId: 8 });
+    expect(projection.advance(skipped, [assistant(5, 'missed')] as never).map(event => event.type)).toEqual(['text', 'assistant', 'text', 'assistant', 'unexpected']);
+    expect(projection.last).toBe(9);
+    // A value can fold a round's tool result with the next round's partial: the tool ends before the new text.
+    const next = new DurableViewProjection(view([assistant(1, 'x')], { tools: [{ callId: 'c9', name: 'bash', status: 'running', taskId: 9 }] }));
+    const ran = result(2, 'c9');
+    expect(next.advance(view([ran], { tools: [{ callId: 'c9', name: 'bash', status: 'done', taskId: 9, entry: 2 }], generation: { attempt: 1, message: { content: [{ type: 'text', text: 'Final ' }] } } })))
+      .toEqual([{ type: 'tool_end', callId: 'c9', tool: 'bash', entry: ran }, { type: 'text', delta: 'Final ' }]);
+    expect(projectDurableEvent({ type: 'text', delta: 'ok' })).toEqual([{ type: 'progress', text: 'ok' }]);
+    expect(projectDurableEvent({ type: 'tool_end', callId: 'id', tool: 'bash' })).toMatchObject([{ type: 'tool_result', isError: true }]);
+    expect(projectDurableEvent({ type: 'assistant', entry: assistant(2, 'x', { usage: { input: 1, output: 1, cacheRead: 2, cacheWrite: 0, totalTokens: 4 } }) as never }))
+      .toEqual([{ type: 'usage', inputTokens: 3, cachedInputTokens: 2, outputTokens: 1, totalTokens: 4 }]);
   });
 });

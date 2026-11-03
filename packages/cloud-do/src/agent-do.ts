@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { Harness, watchEvents, type AgentEvent, type ConversationId, type EntryRecord } from '@earendil-works/pi-durable';
+import { Harness, type ConversationId, type ConversationView, type EntryRecord, type LiveState } from '@earendil-works/pi-durable';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { admitCloudSubmission } from './admission';
 import { CloudDoError, cloudErrorResponse, type CloudDoErrorCode } from './errors';
@@ -52,26 +52,39 @@ function transcriptRecord(value: unknown, keys: readonly string[]): Record<strin
   return result;
 }
 
-/** Native watch batches can contain a whole message, a block, or a delta. */
-function projectText(blocks: Map<number, string>, event: AgentEvent): string | undefined {
-  const replace = (message: AssistantMessage) => {
-    blocks.clear();
-    message.content.forEach((block, index) => { if (block.type === 'text') blocks.set(index, block.text); });
-  };
-  if (event.type === 'message_start' && event.message.role === 'assistant') replace(event.message);
-  else if (event.type === 'snapshot' && event.generation?.message) replace(event.generation.message);
-  else if (event.type === 'message_update') {
-    for (const change of event.changes) {
-      if (change.type === 'text_delta') blocks.set(change.contentIndex, (blocks.get(change.contentIndex) ?? '') + change.delta);
-      if (change.type === 'text_start' || change.type === 'block') {
-        if (change.block.type === 'text') blocks.set(change.contentIndex, change.block.text);
-        else blocks.delete(change.contentIndex);
-      }
-      if (change.type === 'message') replace(change.message);
+/**
+ * Text and failures one conversation view change shows, past the entries and
+ * tool calls already seen. pi-durable 1.5 removed its event stream: the
+ * streamed answer is `pi.live.generation.message`, a finished answer an
+ * appended `pi.assistant` entry, and a tool task that faulted a done slot
+ * without a result entry.
+ */
+class ViewText {
+  #last: number;
+  #open = new Set<string>();
+  #seen = new Set<string>();
+  constructor(initial: ConversationView) { this.#last = initial.entries.at(-1)?.id ?? initial.before ?? 0; }
+  advance(view: ConversationView): { texts: { text: string; fresh: boolean }[]; failedAssistant?: string; faultedTool: boolean } {
+    const live = (view.docs['pi.live'] ?? {}) as LiveState;
+    const texts: { text: string; fresh: boolean }[] = [];
+    let failedAssistant: string | undefined;
+    for (const entry of view.entries) {
+      if (entry.id <= this.#last) continue;
+      this.#last = entry.id;
+      const message = entry.model?.[0];
+      if (entry.kind !== 'pi.assistant' || message?.role !== 'assistant') continue;
+      texts.push({ text: assistantText(message), fresh: false });
+      if (message.stopReason === 'error') failedAssistant = message.errorMessage ?? '';
     }
-  } else if (event.type === 'message_end' && event.entry.model?.[0]?.role === 'assistant') return assistantText(event.entry.model[0]);
-  else return undefined;
-  return [...blocks.entries()].sort(([a], [b]) => a - b).map(([, text]) => text).join('');
+    const partial = live.generation?.message as AssistantMessage | undefined;
+    if (partial !== undefined) texts.push({ text: assistantText(partial), fresh: true });
+    const slots = new Map((live.tools ?? []).map(slot => [slot.callId, slot]));
+    // A slot that vanished ended with its run, whose settlement decides the outcome.
+    const faultedTool = [...slots.values()].some(slot => slot.status === 'done' && slot.entry === undefined && (this.#open.has(slot.callId) || !this.#seen.has(slot.callId)));
+    for (const slot of slots.values()) this.#seen.add(slot.callId);
+    this.#open = new Set([...slots.values()].filter(slot => slot.status !== 'done').map(slot => slot.callId));
+    return { texts, ...(failedAssistant === undefined ? {} : { failedAssistant }), faultedTool };
+  }
 }
 
 /** One named DO owns one Harness; 4b adds platform-only text model submissions. */
@@ -354,7 +367,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
         agent: runtime.agentChange(admitted.profile, guard) }, BACKGROUND_CONTEXT);
       const execution = lease;
       runtime.attach(execution, conversation.id);
-      const events = await watchEvents(harness, conversation.id, BACKGROUND_CONTEXT);
+      const events = await conversation.watch(BACKGROUND_CONTEXT);
       const encoder = new TextEncoder();
       // Keep backpressure, with a controller that can interrupt a pending write.
       // Native IdentityTransformStream writer.abort() queues behind that write.
@@ -365,7 +378,8 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
       let aborting: Promise<void> | undefined;
       let failure: string | undefined;
       let released = '';
-      const textBlocks = new Map<number, string>();
+      const viewText = new ViewText(events.value);
+      let streaming = false;
       // Delivery has its own lifetime: durable settlement clears the execution
       // timer, but must not leave a blocked native write or listener alive.
       // Briefly allow a draining consumer to receive a timeout/cancel frame.
@@ -416,19 +430,18 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
           await write({ type: 'text_delta', delta });
         }
       };
-      events.start(async batch => {
-        for (const event of batch) {
-          if (event.type === 'message_start' && event.message.role === 'assistant') released = '';
-          const text = projectText(textBlocks, event);
-          if (text !== undefined) await publish(text);
-          if (event.type === 'message_end') {
-            const message = event.entry.model?.[0];
-            if (message?.role === 'assistant' && message.stopReason === 'error') {
-              failure = modelFailureCode(message.errorMessage);
-            }
-          }
-          if (event.type === 'task_failed') failure ??= runtime.fatal(conversation.id) ?? 'CLOUD_MODEL_REQUEST_FAILED';
+      events.start(async call => {
+        if (call.kind !== 'value') { failure ??= runtime.fatal(conversation.id) ?? 'CLOUD_MODEL_REQUEST_FAILED'; return; }
+        const change = viewText.advance(call.value);
+        // A finished answer completes the text its partials streamed; the next answer starts its own,
+        // so the committed final text published after idle adds nothing already sent.
+        for (const { text, fresh } of change.texts) {
+          if (!streaming) released = '';
+          streaming = fresh;
+          await publish(text);
         }
+        if (change.failedAssistant !== undefined) failure = modelFailureCode(change.failedAssistant);
+        if (change.faultedTool) failure ??= runtime.fatal(conversation.id) ?? 'CLOUD_MODEL_REQUEST_FAILED';
       });
       const run = async () => {
         let outcomeWriting = false;
@@ -450,7 +463,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
           const last = [...context.entries].reverse().find(entry => entry.kind === 'pi.assistant')?.model?.[0];
           if (last?.role === 'assistant' && last.stopReason === 'error') failure = modelFailureCode(last.errorMessage);
           failure = runtime.fatal(conversation.id) ?? failure;
-          if (settled.status !== 'done' || stopped.reason === 'listener_error') failure ??= 'CLOUD_MODEL_REQUEST_FAILED';
+          if (settled.status !== 'done' || stopped.kind === 'listener_error') failure ??= 'CLOUD_MODEL_REQUEST_FAILED';
           const outcome = await committedRunOutcome(conversation, runtime, settled.status, settled.status === 'unanswered' ? settled.detail : undefined);
           if (failure) { outcome.state = 'failed'; outcome.errorCode = modelFailureCode(failure); delete outcome.text; }
           outcomeWriting = true;

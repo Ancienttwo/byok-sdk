@@ -22,12 +22,12 @@ import {
 import {
   InMemoryCredentialStore,
   normalizeContext,
-  Type,
   type AssistantMessage,
   type Message,
   type Model,
   type SimpleStreamOptions,
 } from '@earendil-works/pi-ai';
+import { Type } from 'typebox';
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
 
 export const PROVIDER = 'byok-opaque-test';

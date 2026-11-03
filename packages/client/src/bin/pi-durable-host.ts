@@ -3,13 +3,13 @@ import { readFileSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { createModels, createProvider } from '@earendil-works/pi-ai/models';
-import type { Model, ProviderStreams, ToolCall, TSchema } from '@earendil-works/pi-ai';
+import type { Model, ProviderStreams, ToolCall } from '@earendil-works/pi-ai';
 import { type ToolExecutionResult, type ToolRegistration } from '@earendil-works/pi-durable';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { receiveLauncherCredential } from '../adapters/pi/launcher-credential';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
 import { admitReplica, type DurableReplicaBinding } from '../adapters/pi-durable/replica';
-import { openDurableEngine } from '../adapters/pi-durable/engine';
+import { DurableRunInterrupted, openDurableEngine } from '../adapters/pi-durable/engine';
 import { projectDurableEvent, withMcpIdentity } from '../adapters/pi-durable/events';
 import { parseTaskScopedMcpConfig, McpServerPool } from '../adapters/pi/mcp-server-pool';
 import { createPiMcpTools } from '../adapters/pi/mcp-tools';
@@ -94,13 +94,13 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   for (const [rows, naming] of [[projected, 'qualified'], [reserved, 'bare']] as const) {
     // The annotation makes the object literal an excess-property check: the
     // harness reads the model's text from `output` only (#1303).
-    for (const tool of createPiMcpTools(rows, pool, naming)) tools.push({ name: tool.name, description: tool.description, parameters: tool.parameters as TSchema, replay: 'unsafe', execute: async (parameters, toolApi, ctx): Promise<ToolExecutionResult> => {
+    for (const tool of createPiMcpTools(rows, pool, naming)) tools.push({ name: tool.name, description: tool.description, parameters: tool.parameters as ToolRegistration['parameters'], replay: 'unsafe', execute: async (parameters, toolApi, ctx): Promise<ToolExecutionResult> => {
       const result = await tool.execute(toolApi.callId, parameters, ctx.abortSignal);
       return { output: result.content, details: { ...result.details }, isError: result.details.isError };
     } });
   }
   const fileTools: ToolRegistration[] | undefined = scope?.tools.map(tool => ({
-    name: tool.name, description: tool.description, parameters: tool.parameters as TSchema,
+    name: tool.name, description: tool.description, parameters: tool.parameters,
     execute: async (parameters, toolApi, ctx): Promise<ToolExecutionResult> => {
       const result = await tool.execute(`durable:${authority.taskId}:${toolApi.taskId}`, parameters as never, ctx.abortSignal, undefined, { cwd: authority.canonicalHome } as never);
       return { output: result.content };
@@ -148,18 +148,17 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
           write({ type: 'agent_event', event: withMcpIdentity({ type: 'tool_use', tool: call.name, toolCallId, input: call.arguments }, identities) });
         }),
         events: async events => { for (const event of events) {
-          if (event.type === 'tool_execution_start') continue; // Hook supplies the durable task identity.
-          const toolCallId = event.type === 'tool_execution_end' && event.toolCallId ? toolIds.get(event.toolCallId) : undefined;
-          if (event.type === 'tool_execution_end' && event.entry !== undefined && toolCallId !== undefined && admitted.delete(toolCallId)) write({ type: 'tool_committed', toolCallId });
+          const toolCallId = event.type === 'tool_end' ? toolIds.get(event.callId) : undefined;
+          if (event.type === 'tool_end' && event.entry !== undefined && toolCallId !== undefined && admitted.delete(toolCallId)) write({ type: 'tool_committed', toolCallId });
           for (const projectedEvent of projectDurableEvent(event)) {
             const normalized = projectedEvent.type === 'tool_result' && toolCallId ? { ...projectedEvent, toolCallId } : projectedEvent;
-            write({ type: 'agent_event', event: withMcpIdentity(normalized, identities), ...(event.type === 'message_end' ? { usageId: String(event.entry.id) } : {}) });
+            write({ type: 'agent_event', event: withMcpIdentity(normalized, identities), ...(event.type === 'assistant' ? { usageId: String(event.entry.id) } : {}) });
           }
         } },
         completed: async () => { write({ type: 'durable_complete' }); },
       });
       write({ type: 'response', id, success: true, projectionDigest, workerPid:process.pid });
-      void engine.run().catch(() => { write({ type: 'durable_failed' }); });
+      void engine.run().catch((error: unknown) => { write({ type: 'durable_failed', ...(error instanceof DurableRunInterrupted ? { interrupted: true } : {}) }); });
     })().catch(() => { write({ type: 'durable_failed' }); process.exitCode = 1; lines.close(); void cleanup(); });
   });
   await lines.closed;

@@ -123,6 +123,8 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
       let child = first;
       /** A worker ended on its own, and its recovery is in progress or was refused. */
       let crashed = false;
+      /** The run ended because the worker stopped during a model request, not because the model failed. */
+      let interrupted = false;
       /** An acknowledgement the worker's own exit rejected ends the run as that exit. */
       const ack = (message: Parameters<PiRpcClient['send']>[0]) => child.send(message).catch((error: unknown) => {
         crashed = child.processExited;
@@ -161,7 +163,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
               // The terminal rule is the daemon's: a result-document outcome
               // was staged through submit_result, never carried by this frame.
               completed = true; recovery.stop(); queue.push({ type: 'turn_end' }); queue.end(); return;
-            } else if (frame.type === 'durable_failed') { fatal = true; break; }
+            } else if (frame.type === 'durable_failed') { fatal = true; interrupted = frame.interrupted === true; break; }
             else throw new Error('unknown durable frame');
           }
           // Read before disposal: the SDK's own kill also closes the client.
@@ -177,8 +179,9 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
       } catch (error) {
         if (!closing) {
           recovery.stop();
-          failure = new RuntimeExecutionFailure({ phase: 'run', category: 'authority', retry: 'non-retryable', reason: 'durable runtime failed or recovery was refused',
-            failure: { class: crashed || exitedBeforeReceipt ? 'runtime_exited' : 'unknown' } }, { cause: error });
+          failure = new RuntimeExecutionFailure({ phase: 'run', category: 'authority', retry: 'non-retryable',
+            reason: interrupted ? 'durable runtime was interrupted during a model request' : 'durable runtime failed or recovery was refused',
+            failure: { class: interrupted || crashed || exitedBeforeReceipt ? 'runtime_exited' : 'unknown' } }, { cause: error });
           queue.push({ type: 'error', message: failure.message }); queue.end();
         }
       }
