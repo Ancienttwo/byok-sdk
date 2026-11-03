@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.36.0",
-    "snapshotSha256": "467df82c4674aa2c953332c313eb77ada93640989a350b33df4d629635ec2aa3"
+    "snapshotSha256": "aac89ff724ee1b9c679b5b7d3e9f45c3cb371ae185dd84238a3ff13f478733c9"
   },
   "configFields": {
     "status": "tracked",
@@ -83,6 +83,11 @@
       "entry": "windows-logon-registry-path"
     },
     {
+      "item": "export:@byok-sdk/cloud-do#DurableObjectSqliteDatabase",
+      "change": "changed",
+      "entry": "pi-150-closure"
+    },
+    {
       "item": "export:@byok-sdk/core#CORE_ERROR_CODES",
       "change": "changed",
       "entry": "bot-turn-outcome-stateless-rules"
@@ -136,6 +141,11 @@
       "item": "export:@byok-sdk/core#nextRoutineOccurrence",
       "change": "removed",
       "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+      "change": "changed",
+      "entry": "pi-150-closure"
     },
     {
       "item": "export:@byok-sdk/protocol#ROUTINE_HORIZON_MS",
@@ -196,16 +206,6 @@
       "item": "export:@byok-sdk/protocol#nextRoutineOccurrence",
       "change": "added",
       "entry": "bot-turn-outcome-stateless-rules"
-    },
-    {
-      "item": "export:@byok-sdk/cloud-do#DurableObjectSqliteDatabase",
-      "change": "changed",
-      "entry": "pi-150-closure"
-    },
-    {
-      "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
-      "change": "changed",
-      "entry": "pi-150-closure"
     },
     {
       "item": "store:pi-durable",
