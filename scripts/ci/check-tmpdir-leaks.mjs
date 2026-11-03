@@ -10,7 +10,6 @@
 // residue never fails a run; removing it is a separate, owner-gated decision.
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { pathToFileURL } from 'node:url';
 
 export const LEAK_PREFIX = 'byok-';
 
@@ -64,4 +63,4 @@ function main(argv) {
   return leaks ? 1 : 0;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) process.exitCode = main(process.argv.slice(2));
+if (import.meta.main) process.exitCode = main(process.argv.slice(2));

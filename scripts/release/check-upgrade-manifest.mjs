@@ -94,7 +94,7 @@ export function run(argv, log = console) {
   return 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   try {
     process.exitCode = run(process.argv.slice(2));
   } catch (error) {

@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { verifyReviewedContent, changedApiOwners } from './reviewed-content.mjs';
 import { documentationChecks } from './documentation-checks.mjs';
 import { resolveScriptChecks, scriptTestInputs } from './script-test-inputs.mjs';
@@ -793,7 +792,7 @@ export function selectImpact(paths, context = {}) {
     reason: fullMatrixReason ?? (dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only') };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.main) {
   try {
     if (process.argv.length > 3) throw new Error('Usage: select-impact.mjs [changed-paths.json] (otherwise JSON stdin)');
     console.log(JSON.stringify(selectImpact(JSON.parse(readFileSync(process.argv[2] ?? 0, 'utf8')), { base: process.env.CI_BASE })));

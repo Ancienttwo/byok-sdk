@@ -141,11 +141,7 @@ export function run(argv, out = console) {
   return 0;
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined &&
-  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
-
-if (invokedDirectly) {
+if (import.meta.main) {
   try {
     process.exitCode = run(process.argv.slice(2));
   } catch (error) {

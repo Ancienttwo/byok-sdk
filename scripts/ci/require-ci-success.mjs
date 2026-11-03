@@ -1,4 +1,3 @@
-import { pathToFileURL } from 'node:url';
 
 /** No skipped, missing, cancelled or unexpected family can satisfy the gate. */
 export function requireCiSuccess(needs, expected) {
@@ -20,7 +19,7 @@ export function requireCiSuccess(needs, expected) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.main) {
   try {
     requireCiSuccess(JSON.parse(process.env.CI_NEEDS ?? ''), JSON.parse(process.env.CI_REQUIRED_JOBS ?? ''));
     console.log('All required CI job families succeeded');

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { promises as fs, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
@@ -388,7 +387,7 @@ if (process.argv[2] === '--child') {
   try { const result = await child(process.argv[3], process.argv[4]); process.send?.(result); }
   catch (error) { process.send?.({ kind: 'error', message: String(error.message).replaceAll(process.argv[4], '<test-root>') }); process.exitCode = 1; }
   finally { process.disconnect?.(); }
-} else if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+} else if (import.meta.main) {
   const outAt = process.argv.indexOf('--out'); assert.ok(outAt >= 0 && process.argv[outAt + 1], '--out <new evidence directory> required');
   const outDir = path.resolve(process.argv[outAt + 1]); await fs.mkdir(outDir, { recursive: false, mode: 0o700 });
   const onlyAt = process.argv.indexOf('--scenario'); const chosen = onlyAt < 0 ? scenarios : scenarios.filter(scenario => scenario.name === process.argv[onlyAt + 1]);
