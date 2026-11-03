@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2159195,
+      "budgetBytes": 2159558,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -110,7 +110,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 418190,
+      "budgetBytes": 418553,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -425,7 +425,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 397963,
+      "budgetBytes": 398326,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -588,7 +588,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 501176,
+      "budgetBytes": 501258,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -861,7 +861,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 459546,
+      "budgetBytes": 459628,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1701,7 +1701,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 241782,
+      "budgetBytes": 242645,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2338,7 +2338,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2118793,
+      "budgetBytes": 2119156,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2666,7 +2666,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 181743,
+      "budgetBytes": 182623,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2683,6 +2683,7 @@
         "child_process",
         "crypto",
         "fs",
+        "os",
         "path",
         "zod"
       ],
@@ -2697,6 +2698,7 @@
           "child_process",
           "crypto",
           "fs",
+          "os",
           "path"
         ],
         "thirdParty": []
