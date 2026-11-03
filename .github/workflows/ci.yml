@@ -948,11 +948,6 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: E1 registry probe (#1317, temporary)
-        run: |
-          node scripts/ci/e1-registry-probe.mjs
-          ./scripts/ci/e1-registry-probe.ps1
-
       - name: Verify pinned Bun archive
         shell: node {0}
         run: *verify-bun

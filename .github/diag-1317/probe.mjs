@@ -1,5 +1,6 @@
-// #1317 E1 probe (temporary, removed before freeze): can `reg query` and
-// `reg export` read a non-ASCII REG_EXPAND_SZ / REG_SZ value back verbatim?
+// DIAG #1317 -- do not merge. E1a: can `reg query` (stdout pipe) and
+// `reg export` (UTF-16LE file) read a non-ASCII REG_EXPAND_SZ / REG_SZ value
+// back verbatim? Writes a scratch HKCU\Software key and deletes it.
 import { execFileSync, execFile } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,7 +9,7 @@ import path from 'node:path';
 const reg = path.win32.join(process.env.SystemRoot, 'System32', 'reg.exe');
 const key = `HKCU\\Software\\byok-e1-${process.pid}`;
 const expand = 'C:\\Users\\runner\\byok 空間 é\\bin;%USERPROFILE%\\x;%BYOK_E1_UNDEFINED%';
-const plain = 'C:\\工具\\ü;.JS';
+const plain = 'C:\\工具\\ü\\;.JS';
 const run = (args) => new Promise((resolve) => execFile(reg, args, { encoding: 'buffer', windowsHide: true }, (error, stdout, stderr) => resolve({ code: error?.code ?? 0, stdout, stderr })));
 const show = (label, value) => console.log(`${label}: ${JSON.stringify(value)}`);
 
