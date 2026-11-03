@@ -440,7 +440,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 
 | Import / command | Purpose | Third-party dependencies | Zod | Budget |
 | --- | --- | --- | --- | ---: |
-| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2165727 B |
+| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2167770 B |
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 425961 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 65316 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 122334 B |
@@ -478,11 +478,11 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1760 B |
 | `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 571052 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1215 B |
-| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2125325 B |
-| `bin:byok-agent-memory-mcp` | Agent memory MCP helper | — | forbidden | 43919 B |
-| `bin:byok-agent-message-mcp` | Agent message MCP helper | — | forbidden | 43923 B |
-| `bin:byok-agent-result-mcp` | Task-bound structured outcome MCP helper | — | forbidden | 43919 B |
-| `bin:byok-agent-team-mcp` | Agent team MCP helper | — | forbidden | 43911 B |
+| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2127368 B |
+| `bin:byok-agent-memory-mcp` | Agent memory MCP helper | — | forbidden | 43879 B |
+| `bin:byok-agent-message-mcp` | Agent message MCP helper | — | forbidden | 43883 B |
+| `bin:byok-agent-result-mcp` | Task-bound structured outcome MCP helper | — | forbidden | 43879 B |
+| `bin:byok-agent-team-mcp` | Agent team MCP helper | — | forbidden | 43871 B |
 | `bin:byok-pi-durable` | Pi durable launcher; host loads lazily | — | forbidden | 405 B |
 | `bin:byok-pi-prepared` | Pi prepared launcher; host loads lazily | — | forbidden | 470 B |
 | `bin:byok-pi-provider-launcher` | Provider credential custody launcher | `zod` | allowed | 176678 B |

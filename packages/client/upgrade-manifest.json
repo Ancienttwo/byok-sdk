@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.36.0",
-    "snapshotSha256": "151a33338a068f206b9f1d9edc38a3299d22bbeffca58d7e0c1fc50fe1dfa424"
+    "snapshotSha256": "467df82c4674aa2c953332c313eb77ada93640989a350b33df4d629635ec2aa3"
   },
   "configFields": {
     "status": "tracked",
@@ -64,6 +64,11 @@
       "before": "K8 0.0.1 src-sha256=627add813b3eea45",
       "after": "K8 0.0.1 src-sha256=9b029fe282d96103",
       "entry": "bot-turn-outcome-stateless-rules"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceEnvironmentUnavailableCode",
+      "change": "changed",
+      "entry": "windows-logon-registry-path"
     },
     {
       "item": "export:@byok-sdk/core#CORE_ERROR_CODES",
@@ -179,11 +184,6 @@
       "item": "export:@byok-sdk/protocol#nextRoutineOccurrence",
       "change": "added",
       "entry": "bot-turn-outcome-stateless-rules"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceEnvironmentUnavailableCode",
-      "change": "changed",
-      "entry": "windows-logon-registry-path"
     }
   ]
 }
