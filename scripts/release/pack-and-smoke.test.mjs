@@ -12,6 +12,8 @@ import {
   readLockedPiClosure,
 } from './pi-runtime-identity.mjs';
 import { assertNoStorePaths } from './published-store-paths.mjs';
+import { assertWorkerConsumerImports } from './cloud-do-consumer-smoke.mjs';
+import { workerConsumerImports, workerSource } from './cloud-do-consumer-worker.mjs';
 
 const releasePackSource = readFileSync(
   fileURLToPath(new URL('./pack-and-smoke.mjs', import.meta.url)),
@@ -35,6 +37,14 @@ test('release pack includes keys and verifies its packed core edge', () => {
     'every packed package, keys included, must carry the release train version',
   );
   assert.doesNotMatch(releasePackSource, /keysVersion/, 'keys has no version of its own to pack against');
+});
+
+test('the Worker consumer import list fails when it drifts from the Worker source', () => {
+  assertWorkerConsumerImports();
+  assert.throws(
+    () => assertWorkerConsumerImports(`import { KeyStore } from '@byok-sdk/keys';\n${workerSource}`, workerConsumerImports),
+    /workerConsumerImports must equal the imports of workerSource/,
+  );
 });
 
 test('a published file that names the install store fails the release pack', () => {

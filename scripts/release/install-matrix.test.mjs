@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { workerConsumerImports } from './cloud-do-consumer-smoke.mjs';
+import { workerConsumerImports } from './cloud-do-consumer-worker.mjs';
 import { readPublicManifests } from './publish.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -13,7 +13,7 @@ const runtimeFields = ['dependencies', 'optionalDependencies', 'peerDependencies
 // The direct packages of each README install set. Self-hosted and Hosted are the
 // sets ruled in #535 over the unchanged ADR-035 topology. The Worker set is not
 // ruled: it is exactly what the installed Worker consumer of check:release-pack
-// imports (scripts/release/cloud-do-consumer-smoke.mjs).
+// imports (scripts/release/cloud-do-consumer-worker.mjs).
 const expectedSets = new Map([
   ['Self-hosted', ['@byok-sdk/client', '@byok-sdk/keys', '@byok-sdk/server']],
   ['Hosted / Cloudflare', ['@byok-sdk/cloud', '@byok-sdk/cloud-dataplane', '@byok-sdk/cloud-do', '@byok-sdk/ui-runtime']],
