@@ -489,3 +489,5 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `bin:byok-pi-rpc` | Pi RPC launcher; host loads lazily | — | forbidden | 450 B |
 
 <!-- END generated: api-surface/entries.json -->
+
+<!-- diag #1388: README-only change -->
