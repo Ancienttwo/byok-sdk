@@ -2,7 +2,8 @@
 // checkout of the #1400 head so every read appends one JSON line to <log>:
 // which step threw (system-root, secure-dir, execFile, readFile, parse, rm),
 // the error's name, code, killed and signal, the icacls exit class, and the
-// elapsed ms. No file content, path or variable value is written.
+// elapsed ms. No file content, path or variable value is written. With
+// E1H_ISOLATE=1 each reg.exe gets its own TEMP/TMP (E1h).
 // Usage: node e1g-instrument.mjs <impl checkout> <absolute log path>
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -40,7 +41,9 @@ const body = `export async function readWindowsRegistryKey(key: string): Promise
   try {
     const file = path.join(directory, 'key.reg');
     await step('execFile', () => new Promise<void>((resolve, reject) => {
-      execFile(reg, ['export', key, file, '/y'], { timeout: REG_EXPORT_TIMEOUT_MS, windowsHide: true }, (error) => error ? reject(error) : resolve());
+      // E1h: E1H_ISOLATE=1 points this reg.exe's TEMP and TMP at its own private directory.
+      const env = process.env.E1H_ISOLATE === '1' ? { ...process.env, TEMP: directory, TMP: directory } : undefined;
+      execFile(reg, ['export', key, file, '/y'], { timeout: REG_EXPORT_TIMEOUT_MS, windowsHide: true, ...(env === undefined ? {} : { env }) }, (error) => error ? reject(error) : resolve());
     }));
     const bytes = await step('readFile', () => fs.readFile(file));
     const values = await step('parse', () => parseWindowsRegistryExport(bytes, key));

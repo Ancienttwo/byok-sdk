@@ -2,7 +2,7 @@
 // series, then 200 at concurrency 8 (alternating machine and user key) while
 // e1g-stress.mjs saturates every CPU. The instrumented reader logs each call;
 // this prints the counts per round. Run with bun (it loads the TS source).
-// Usage: bun e1g-reads.mjs <impl checkout> <round: serial|parallel>
+// Usage: bun e1g-reads.mjs <impl checkout> <round>; every round but serial runs at concurrency 8.
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -10,7 +10,7 @@ const [root, round] = process.argv.slice(2);
 const { readWindowsRegistryKey, WINDOWS_MACHINE_ENVIRONMENT_KEY, WINDOWS_USER_ENVIRONMENT_KEY } = await import(pathToFileURL(path.join(root, 'packages', 'client', 'src', 'runtime', 'environment.ts')).href);
 const keys = [WINDOWS_MACHINE_ENVIRONMENT_KEY, WINDOWS_USER_ENVIRONMENT_KEY];
 const total = 200;
-const concurrency = round === 'parallel' ? 8 : 1;
+const concurrency = round === 'serial' ? 1 : 8;
 let next = 0;
 let ok = 0;
 let failed = 0;
