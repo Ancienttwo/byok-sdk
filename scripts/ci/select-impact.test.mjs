@@ -68,6 +68,20 @@ test('packages/AGENTS.md and packages/CLAUDE.md are docs-only like the root agen
   });
 });
 
+test('#1322: the reviewed ArchContext model, policy, projection config and archimap select no workspace', () => {
+  const paths = ['.archcontext/manifest.yaml', '.archcontext/product.yaml', '.archcontext/policies/review.yaml',
+    '.archcontext/projections/targets.json', '.archcontext/model/nodes/capability.sdk.sdk-root.yaml',
+    '.archcontext/model/nodes/component.sdk.client-session.yaml', '.archcontext/model/nodes/module.sdk.client.yaml',
+    '.archcontext/model/relations/relation.sdk.client-to-core.yaml', '.archcontext/model/flows/flow.sdk.offer-home-admission.yaml',
+    'docs/architecture/.projection-manifest.json', 'docs/architecture/archimap.html', 'docs/architecture/requests/.gitkeep'];
+  assert.deepEqual(selectImpact(paths), { dirs: [], files: sorted(paths), families: [], reason: 'docs-only' });
+  for (const path of ['.archcontext/generated/index.md', '.archcontext/policies/other.yaml', '.archcontext/model/nodes/service.sdk.client.yaml',
+    '.archcontext/model/nodes/module.sdk.client.json', '.archcontext/model/relations/module.sdk.client.yaml',
+    'docs/architecture/other.html', 'docs/architecture/other.json']) {
+    assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
+  }
+});
+
 test('.gitignore alone selects nothing', () => {
   assert.deepEqual(selectImpact(['.gitignore']), { dirs: [], files: ['.gitignore'], families: [], reason: 'docs-only' });
 });
