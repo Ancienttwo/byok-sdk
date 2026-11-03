@@ -1,4 +1,4 @@
-# DIAG #1373 -- do not merge. Native ACL query evidence (icacls /save + whoami /user) on fresh non-administrator accounts: E1-E4 x20.
+# DIAG #1373 -- do not merge. Native ACL query evidence (icacls /save + whoami /user) on fresh non-administrator accounts: E1-E4 x20; round e5 (owner source, OWNER RIGHTS, reparse, cscript+WMI, Credential Manager cold).
 name: diag-1373
 on:
   pull_request:
@@ -10,12 +10,13 @@ permissions:
   contents: read
 jobs:
   probe:
-    name: "diag-1373 native-acl #${{ matrix.rep }}"
+    name: "diag-1373 ${{ matrix.round }} #${{ matrix.rep }}"
     runs-on: windows-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
+        round: [e5]
         rep: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -26,4 +27,5 @@ jobs:
         shell: pwsh
         env:
           BYOK_DIAG_REP: ${{ matrix.rep }}
+          BYOK_DIAG_ROUND: ${{ matrix.round }}
         run: ./.github/diag-1373/admin.ps1

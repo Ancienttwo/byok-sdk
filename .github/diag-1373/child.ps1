@@ -10,7 +10,8 @@ foreach ($d in @($userHome, $env:APPDATA, $env:LOCALAPPDATA, $env:TEMP)) { New-I
 Remove-Item Env:GITHUB_STEP_SUMMARY -ErrorAction SilentlyContinue
 $env:PATH = "$NodeDir;$env:PATH"
 Set-Location -LiteralPath $Workspace
-& (Join-Path $NodeDir 'node.exe') .github/diag-1373/probe.mjs $ScratchRoot
+$probe = if ($env:BYOK_DIAG_ROUND -eq 'e5') { '.github/diag-1373/probe-e5.mjs' } else { '.github/diag-1373/probe.mjs' }
+& (Join-Path $NodeDir 'node.exe') $probe $ScratchRoot
 $code = $LASTEXITCODE
 Write-Host "[diag] child end exit=$code"
 exit $code

@@ -78,17 +78,37 @@ public static class DiagReparse {
 '@
 Try-Fixture 'tag-dir' { [DiagReparse]::Set("$e4\tag-dir", 0x00001373) }
 Try-Fixture 'tag-file' { [DiagReparse]::Set("$e4\tag-file.txt", 0x00001373) }
-foreach ($n in @('symlink-dir', 'symlink-file.txt', 'junction', 'tag-dir', 'tag-file.txt')) {
+# E5-3 fixtures: volume mount point and dangling links.
+New-Item -ItemType Directory -Path "$e4\mount", "$e4\gone-target" | Out-Null
+$volume = (Get-Volume -DriveLetter C).Path
+Try-Fixture 'mount' { mountvol "$e4\mount" $volume; if ($LASTEXITCODE) { throw "mountvol exit $LASTEXITCODE" } }
+Try-Fixture 'symlink-dangling' { cmd /d /c mklink /D "$e4\symlink-dangling" "$e4\no-such-target"; if ($LASTEXITCODE) { throw "mklink exit $LASTEXITCODE" } }
+Try-Fixture 'junction-dangling' { cmd /d /c mklink /J "$e4\junction-dangling" "$e4\gone-target"; if ($LASTEXITCODE) { throw "mklink exit $LASTEXITCODE" }; Remove-Item -LiteralPath "$e4\gone-target" }
+foreach ($n in @('symlink-dir', 'symlink-file.txt', 'junction', 'tag-dir', 'tag-file.txt', 'mount', 'symlink-dangling', 'junction-dangling')) {
   $q = (fsutil reparsepoint query "$e4\$n" 2>&1 | Select-Object -First 1) -join ''
   Stamp "[e4] admin-view name=$n fsutilExit=$LASTEXITCODE first=$q"
 }
 
+# E5-2 fixtures: owner = the standard user, DACL without any ACE for it; with and without OWNER RIGHTS (S-1-3-4) RC.
+$e5 = Join-Path $scratch 'e5'
+New-Item -ItemType Directory -Path $e5, "$e5\ow", "$e5\noow", "$e5\ow-userf" | Out-Null
+foreach ($n in @('ow', 'noow', 'ow-userf')) {
+  $d = "$e5\$n"
+  icacls $d /setowner $account /Q | Out-Null; $so = $LASTEXITCODE
+  $grants = @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+  if ($n -ne 'noow') { $grants += '*S-1-3-4:(RC)' }
+  if ($n -eq 'ow-userf') { $grants += "*${userSid}:(OI)(CI)F" }
+  icacls $d /inheritance:r /grant:r @grants /Q | Out-Null; $gr = $LASTEXITCODE
+  $sd = (Get-Acl -LiteralPath $d).Sddl
+  Stamp "[e5-2] fixture=$n setownerExit=$so grantExit=$gr sddl=$sd"
+}
 $q = { param([string]$v) "'" + $v.Replace("'", "''") + "'" }
 $launcher = Join-Path $scratch 'launch.ps1'
 Set-Content -LiteralPath $launcher -Encoding utf8 -Value ([string[]]@(
   ('$env:BYOK_LOWPRIV_SCRATCH = ' + (& $q $scratch)),
   ('$env:BYOK_LOWPRIV_WORKSPACE = ' + (& $q $checkout)),
   ('$env:BYOK_LOWPRIV_NODEDIR = ' + (& $q $nodeHome)),
+  ('$env:BYOK_DIAG_ROUND = ' + (& $q $env:BYOK_DIAG_ROUND)),
   ('& ' + (& $q (Join-Path $checkout '.github\diag-1373\child.ps1'))),
   'exit $LASTEXITCODE'))
 $out = Join-Path $scratch 'logs\out.log'; $err = Join-Path $scratch 'logs\err.log'
@@ -97,5 +117,6 @@ $proc = Start-Process -FilePath $pwshExe -ArgumentList ('-NoProfile -NonInteract
 $code = $proc.ExitCode
 Stamp "child exit=$code"
 foreach ($f in @($out, $err)) { Write-Host "===== $(Split-Path -Leaf $f) ====="; if (Test-Path -LiteralPath $f) { Get-Content -LiteralPath $f -Encoding utf8 | ForEach-Object { Write-Host $_ } } }
+mountvol "$e4\mount" /D | Out-Null
 try { Remove-LocalUser -Name $account } catch { Write-Host "teardown: $($_.Exception.Message)" }
 exit $code
