@@ -3,10 +3,13 @@ import { checkResultSchema, resultOutcomeMaxBytes, validateResultOutcome, type R
 import { TerminalProjectionSelectionSchema } from '../terminal-projection';
 import {
   botTurnOutcomeFragments as F, composeBotTurnOutcomeSchema, BotTurnOutcomeSchemaError, BOT_TURN_OUTCOME_LIMITS,
+  BOT_TURN_OUTCOME_CONTRACT,
   type NonEmptyIds, type RoutineScheduleShape,
 } from '../bot-turn-outcome';
 import type { BotTurnOutcome, BotTurnOutcomeKind, CancelDelegationAction } from '../index';
 import { worstCaseInstance } from './bot-outcome-fixtures';
+// The witnesses repeat option ids, so their cases check the schema bound under a contract with no rules.
+const SCHEMA_ONLY = 'example.schema-only.v1';
 const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length;
 // Host context. Ids are 64 ASCII characters, the idMaxLength worst case.
 const id = (prefix: string, n: number) => `${prefix}_${String(n).padStart(64 - prefix.length - 1, '0')}`;
@@ -74,15 +77,15 @@ describe('Bot turn outcome fragments', () => {
     expect(TerminalProjectionSelectionSchema.safeParse({ mode: 'result-document', contract: 'bot-turn-outcome.v1', schema }).success).toBe(true);
     for (const cancel_delegation of [[first], [first, second]]) {
       const outcome: BotTurnOutcome = { cancel_delegation };
-      expect(validateResultOutcome(schema, outcome).ok).toBe(true);
-      expect(validateResultOutcome(conversation(), outcome).ok).toBe(false);
-      expect(validateResultOutcome(room(), { speech: { kind: 'pass' }, ...outcome }).ok).toBe(false);
+      expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, outcome).ok).toBe(true);
+      expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: conversation() }, outcome).ok).toBe(false);
+      expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: room() }, { speech: { kind: 'pass' }, ...outcome }).ok).toBe(false);
     }
-    expect(validateResultOutcome(schema, {}).ok).toBe(true);
+    expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, {}).ok).toBe(true);
     for (const cancel_delegation of [
       [], [first, second, first], [{ delegationId: 'unknown' }], [{}],
       [{ delegationId: delegationIds[0], reason: 'stop' }], [{ delegationId: 1 }],
-    ]) expect(validateResultOutcome(schema, { cancel_delegation }).ok).toBe(false);
+    ]) expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, { cancel_delegation }).ok).toBe(false);
   });
 
   it('bounds a Main Bot outcome with 24 open delegations and a full cancel array', () => {
@@ -101,7 +104,7 @@ describe('Bot turn outcome fragments', () => {
     expect(bound).toBeLessThanOrEqual(65536);
     const witness = worstCaseInstance(schema) as BotTurnOutcome;
     expect(witness.cancel_delegation).toHaveLength(2);
-    expect(validateResultOutcome(schema, witness).ok).toBe(true);
+    expect(validateResultOutcome({ contract: SCHEMA_ONLY, schema }, witness).ok).toBe(true);
     expect(bytes(witness)).toBeLessThanOrEqual(bound);
   });
 
@@ -114,7 +117,7 @@ describe('Bot turn outcome fragments', () => {
       expect(bound).toBe(expectedBound);
       expect(bound).toBeLessThanOrEqual(65536);
       const witness = worstCaseInstance(schema);
-      expect(validateResultOutcome(schema, witness).ok).toBe(true);
+      expect(validateResultOutcome({ contract: SCHEMA_ONLY, schema }, witness).ok).toBe(true);
       expect(bytes(witness)).toBeLessThanOrEqual(bound);
     });
 
@@ -174,8 +177,8 @@ describe('Bot turn outcome fragments', () => {
             ...(hour === undefined ? {} : { hour }), tz, ...dayFields,
           };
           const outcome = { schedule };
-          const actual = validateResultOutcome(checkedRoot, outcome).ok;
-          const reference = validateResultOutcome(v3Root, outcome).ok;
+          const actual = validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: checkedRoot }, outcome).ok;
+          const reference = validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: v3Root }, outcome).ok;
           const expected = validDayFields && (minute === 0 || minute === 59)
             && (hour === 0 || hour === 23) && tz !== 'Mars/Phobos';
           const context = JSON.stringify(schedule);
@@ -185,8 +188,8 @@ describe('Bot turn outcome fragments', () => {
       }
     }
     for (const schedule of [null, [], 'daily']) {
-      expect(validateResultOutcome(checkedRoot, { schedule }).ok).toBe(false);
-      expect(validateResultOutcome(v3Root, { schedule }).ok).toBe(false);
+      expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: checkedRoot }, { schedule }).ok).toBe(false);
+      expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: v3Root }, { schedule }).ok).toBe(false);
     }
   });
 
@@ -195,7 +198,7 @@ describe('Bot turn outcome fragments', () => {
       for (const shape of ['checked', 'flat'] as const) {
         const schema = composeBotTurnOutcomeSchema({ create_routine: F.createRoutine({ localIds: routineSlots, timeZones, scheduleShape: shape }) });
         const outcome = { create_routine: [{ localId: routineSlots[0], schedule: { minute: 0, hour: 9, tz: 'UTC', ...extra }, prompt: 'check' }] };
-        expect(validateResultOutcome(schema, outcome).ok).toBe(shape === 'flat');
+        expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, outcome).ok).toBe(shape === 'flat');
       }
     }
   });
@@ -206,7 +209,7 @@ describe('Bot turn outcome fragments', () => {
     { tz: 'Mars/Phobos' }, { cron: '0 9 * * *' },
   ])('refuses invalid schedule fields %j', extra => {
     const schema = conversation();
-    expect(validateResultOutcome(schema, { create_routine: [{ localId: routineSlots[0], schedule: { minute: 0, hour: 9, tz: 'UTC', ...extra }, prompt: 'check' }] }).ok).toBe(false);
+    expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, { create_routine: [{ localId: routineSlots[0], schedule: { minute: 0, hour: 9, tz: 'UTC', ...extra }, prompt: 'check' }] }).ok).toBe(false);
   });
 
   it('enforces role, enum, action and speech boundaries', () => {
@@ -217,12 +220,12 @@ describe('Bot turn outcome fragments', () => {
       { ask_user: { question: 'why', answerKind: 'single_choice', options: [{ id: 'a', label: 'A' }] } },
       { confirmable_action: [{ action: 'send_email', summary: 'check', draft: { channel: 'sms', text: 'hi' } }] },
       { actions: [] }, { unknown: true },
-    ]) expect(validateResultOutcome(conversation(), value).ok).toBe(false);
+    ]) expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: conversation() }, value).ok).toBe(false);
     for (const value of [{}, { speech: { kind: 'pass', text: 'x' } }, { speech: { kind: 'post' } }, { speech: { kind: 'pass' }, delegate: [] }]) {
-      expect(validateResultOutcome(room(), value).ok).toBe(false);
+      expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: room() }, value).ok).toBe(false);
     }
-    expect(validateResultOutcome(room(), { speech: { kind: 'pass' } }).ok).toBe(true);
-    expect(validateResultOutcome(conversation(), {}).ok).toBe(true);
+    expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: room() }, { speech: { kind: 'pass' } }).ok).toBe(true);
+    expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: conversation() }, {}).ok).toBe(true);
   });
 
   it('uses flat only after a schema byte error and still refuses an oversized enum set', () => {
@@ -245,5 +248,22 @@ describe('Bot turn outcome fragments', () => {
       check(() => F.confirmableAction({ actions: [{ action: 'send', draft }] }), 'draft-over-budget');
     }
     expect(() => F.confirmableAction({ actions: [{ action: 'send', draft: { const: { message: 'hi' } } }] })).not.toThrow();
+  });
+
+  it('refuses duplicate option ids and blank model text under the bot-turn-outcome contract only', () => {
+    const contract = { contract: BOT_TURN_OUTCOME_CONTRACT, schema: conversation() };
+    const ask = (question: string, options: { id: string; label: string }[]) => ({ ask_user: { question, answerKind: 'single_choice', options } });
+    expect(validateResultOutcome(contract, ask('which', [{ id: 'a', label: 'A' }, { id: 'a', label: 'B' }]))).toMatchObject({
+      ok: false, reason: 'contract-mismatch', truncated: false,
+      issues: [{ pointer: '/ask_user/options/1/id', keyword: 'duplicate-option-id', message: 'Duplicate option id' }] });
+    const blank = { ...ask('\u3000', [{ id: 'a', label: 'A' }, { id: 'b', label: '\u00a0' }]), delegate: [{ to: self, request: ' ' }] };
+    const refused = validateResultOutcome(contract, blank);
+    expect(refused).toMatchObject({ ok: false, reason: 'contract-mismatch' });
+    if (refused.ok) throw new Error('unreachable');
+    expect(refused.issues).toHaveLength(3);
+    expect(refused.issues).toEqual(expect.arrayContaining(['/ask_user/question', '/ask_user/options/1/label', '/delegate/0/request']
+      .map(pointer => ({ pointer, keyword: 'blank-text', message: 'Blank text' }))));
+    expect(validateResultOutcome(contract, { confirmable_action: [{ action: 'send_message', summary: 'Send', draft: { channel: 'sms', text: ' ' } }] }).ok).toBe(true);
+    expect(validateResultOutcome({ contract: 'other.v1', schema: conversation() }, blank).ok).toBe(true);
   });
 });

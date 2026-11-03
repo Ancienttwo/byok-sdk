@@ -100,8 +100,9 @@ it('queues structured room_call seats; distinguishes explicit pass, blank post, 
   const round = await host().roomInput('speak', room.id, 'Discuss', [profiles[0]!.id]);
   await finish(seats(round)[0]!.id, { speech: { kind: 'pass' }, room_call: { members: [profiles[1]!.id, profiles[2]!.id] } });
   expect(seats(round)[0]!.status).toBe('pass');
-  await finish(seats(round)[1]!.id, { speech: { kind: 'post', text: '   ' } });
-  expect(seats(round)[1]!.status).toBe('failed');
+  // The device refuses a blank post on submit_result (#1374), so the seat Turn fails.
+  (await running(seats(round)[1]!.id)).finish({ speech: { kind: 'post', text: '   ' } });
+  await vi.waitFor(async () => { await host().drain(); expect(seats(round)[1]!.status).toBe('failed'); }, { timeout: 5000 });
   (await running(seats(round)[2]!.id)).fail();
   await vi.waitFor(async () => { await host().drain(); expect(seats(round)[2]!.status).toBe('failed'); }, { timeout: 5000 });
   const missing = await host().roomInput('missing', room.id, 'Respond', [profiles[1]!.id]);

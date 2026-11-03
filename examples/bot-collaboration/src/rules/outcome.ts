@@ -1,4 +1,4 @@
-import { validateResultOutcome, type BotTurnOutcome, type ResultSchema } from '@byok-sdk/protocol';
+import { BOT_TURN_OUTCOME_CONTRACT, validateResultOutcome, type BotTurnOutcome, type ResultSchema } from '@byok-sdk/protocol';
 import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { json, type Card, type Question, type Turn } from './turn';
 import { applyDelegate, arbitrateCancel, endChain, observeStart, type DelegationBot, type DelegationState, type IntentFacts, type Publish } from './delegation';
@@ -46,7 +46,7 @@ export function applyTurnOutcome(state: OutcomeState, turnId: string, taskId: st
   const turn = state.turns[turnId];
   if (!turn) throw new Error('Missing Bot turn');
   const schema = state.schemas[turn.id];
-  if (!schema || !validateResultOutcome(schema, document).ok) throw new Error('Outcome differs from the frozen schema');
+  if (!schema || !validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, document).ok) throw new Error('Outcome differs from the frozen schema');
   const delegation = turn.delegationId ? state.delegations[turn.delegationId] : undefined;
   // A cancelled or resolved chain never applies B's staged outcome (§8.3, §8.8).
   if (delegation && (delegation.verdict || delegation.cancel)) { state.audit.push(`Outcome audit only: ${taskId}`); return; }
@@ -106,7 +106,6 @@ export function applyTurnOutcome(state: OutcomeState, turnId: string, taskId: st
   });
   if (outcome.ask_user) accept('ask_user', () => {
     const question = outcome.ask_user!;
-    if (question.answerKind === 'single_choice' && new Set(question.options.map(o => o.id)).size !== question.options.length) throw new Error('Duplicate option id');
     const id = hash([taskId, 'ask_user']);
     state.questions[id] = { id, turnId: turn.id, value: question };
     ports.publish(`question:${id}`, json(state.questions[id]));

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.35.0",
-    "snapshotSha256": "b7828968e2ecfae6fb37586c5ca89398cd9640d86db8648b97bd6e3aaf6a8747"
+    "snapshotSha256": "a07df413f3c71cedacaf4dc5a44002bcb55e2971dd026280a529c9dd8b4edae7"
   },
   "configFields": {
     "status": "tracked",
@@ -17,11 +17,21 @@
   "entries": [
     {
       "id": "k8-l-test-host",
-      "impact": "additive",
-      "summary": "K8 exports ./l-test-host (src/l-test-host.test-support.ts), an L test Host built only from the published packages: an embedded SQLite server, a paired daemon with a stub runtime that submits the result document, and the HostLedger. The K8 routine and delivery vectors run on it instead of the K4 openHost, so a Host that vendors K8 can run them too (#1325). The test Host changes no K8 rule; a Host that vendored K8 copies the new file with the two contract tests, as src/VENDOR.md Layer 3 lists. K8 also lets an external team snapshot mark a Bot participation: 'suspended' (#1319): the Bot stays in the team but takes no new work, its open work ends as for an archived Bot (delegation reason target_suspended, undelivered initiator_suspended), and input, answer and decide for it refuse with TeamModeError code bot_suspended. A later snapshot without the field restores it; a snapshot without the field behaves as before (README.md#external-team-authority). K8 also adds BotCollaboration.setModels(models) (#1357): construction and setModels re-project the Host's model templates onto every unarchived Bot by model name, keeping its device and profile; a frozen Turn keeps its execution. A missing template of an existing Bot no longer refuses a snapshot, update_bot, construction or setModels: each of the Bot's Turns blocks with Unavailable model: <name> before it freezes, in K8 and H, until the template returns (README.md#group-chat-and-main-bot). K8 also adds BotOptions.hostIntentMessages (#1356): an Agent message of a Host intent goes to the Host's message handler of the same name in the K4 message transaction, an accepted one is recorded without its body, and without a handler it still refuses with binding_mismatch; enqueueHostIntent and a restart refuse a messageEgress Host intent without a message handler. The K8 entry exports contextTurns, historyRowFromTurn, ContextTurn, HostIntentMessageHandler and MessageDisposition, and the delegation projection carries root (README.md#cross-bot-delegation). K8 also adds the owner command create_room (#1321): BotCollaboration.createRoom and HostedCommandEntry.createRoom create a room with a Host room id, and the same id with other fields is an identity_conflict. With rooms: 'external' (only with team: 'external'), each team snapshot carries the authority's room list; a room that it no longer lists is archived for good, and createRoom, updateRoom, setMemberMentions and the Main Bot's create_room and update_room refuse with TeamModeError code external_rooms. Without the option, behavior is unchanged (README.md#group-chat-and-main-bot). K8 also exports ./rules/message (src/rules/message.ts) for H's Host intent message handler (#1362); no K8 src change. A Host that vendored K8 copies the changed src/rules files, the changed Layer 2 files src/host.ts and src/index.ts, and the changed Layer 3 vector src/commit-vectors.test-support.ts.",
+      "impact": "breaking",
+      "summary": "K8 exports ./l-test-host (src/l-test-host.test-support.ts), an L test Host built only from the published packages: an embedded SQLite server, a paired daemon with a stub runtime that submits the result document, and the HostLedger. The K8 routine and delivery vectors run on it instead of the K4 openHost, so a Host that vendors K8 can run them too (#1325). The test Host changes no K8 rule; a Host that vendored K8 copies the new file with the two contract tests, as src/VENDOR.md Layer 3 lists. K8 also lets an external team snapshot mark a Bot participation: 'suspended' (#1319): the Bot stays in the team but takes no new work, its open work ends as for an archived Bot (delegation reason target_suspended, undelivered initiator_suspended), and input, answer and decide for it refuse with TeamModeError code bot_suspended. A later snapshot without the field restores it; a snapshot without the field behaves as before (README.md#external-team-authority). K8 also adds BotCollaboration.setModels(models) (#1357): construction and setModels re-project the Host's model templates onto every unarchived Bot by model name, keeping its device and profile; a frozen Turn keeps its execution. A missing template of an existing Bot no longer refuses a snapshot, update_bot, construction or setModels: each of the Bot's Turns blocks with Unavailable model: <name> before it freezes, in K8 and H, until the template returns (README.md#group-chat-and-main-bot). K8 also adds BotOptions.hostIntentMessages (#1356): an Agent message of a Host intent goes to the Host's message handler of the same name in the K4 message transaction, an accepted one is recorded without its body, and without a handler it still refuses with binding_mismatch; enqueueHostIntent and a restart refuse a messageEgress Host intent without a message handler. The K8 entry exports contextTurns, historyRowFromTurn, ContextTurn, HostIntentMessageHandler and MessageDisposition, and the delegation projection carries root (README.md#cross-bot-delegation). K8 also adds the owner command create_room (#1321): BotCollaboration.createRoom and HostedCommandEntry.createRoom create a room with a Host room id, and the same id with other fields is an identity_conflict. With rooms: 'external' (only with team: 'external'), each team snapshot carries the authority's room list; a room that it no longer lists is archived for good, and createRoom, updateRoom, setMemberMentions and the Main Bot's create_room and update_room refuse with TeamModeError code external_rooms. Without the option, behavior is unchanged (README.md#group-chat-and-main-bot). K8 also exports ./rules/message (src/rules/message.ts) for H's Host intent message handler (#1362); no K8 src change. A Host that vendored K8 copies the changed src/rules files, the changed Layer 2 files src/host.ts and src/index.ts, and the changed Layer 3 vector src/commit-vectors.test-support.ts. An outcome that breaks the bot-turn-outcome.v1 contract rules is now refused whole, and ask_user no longer has an action-level duplicate option id refusal (#1374).",
       "migration": "examples/bot-collaboration/src/VENDOR.md#layer-3-shared-vectors",
       "items": [
         "example:bot-collaboration"
+      ]
+    },
+    {
+      "id": "result-outcome-contract-rules",
+      "impact": "breaking",
+      "summary": "validateResultOutcome now takes ({ contract, schema }, outcome) and, for the SDK-defined bot-turn-outcome.v1 contract, runs its rules after the schema check: a repeated ask_user option id (duplicate-option-id) or a model string that is blank after trim() outside confirmable_action[*].draft (blank-text) fails with the new ResultOutcomeCheck reason contract-mismatch. The device refuses such an outcome on submit_result, so the model corrects it in the same Turn (#1374). A Host that calls validateResultOutcome directly passes its offer's contract id.",
+      "migration": "docs/protocol.md#sdk-defined-contract-rules",
+      "items": [
+        "export:@byok-sdk/protocol#validateResultOutcome",
+        "export:@byok-sdk/protocol#ResultOutcomeCheck"
       ]
     }
   ],
@@ -30,8 +40,18 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=13268de4f68b46f5",
-      "after": "K8 0.0.1 src-sha256=604f4c2942dce1df",
+      "after": "K8 0.0.1 src-sha256=627add813b3eea45",
       "entry": "k8-l-test-host"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ResultOutcomeCheck",
+      "change": "changed",
+      "entry": "result-outcome-contract-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#validateResultOutcome",
+      "change": "changed",
+      "entry": "result-outcome-contract-rules"
     }
   ]
 }

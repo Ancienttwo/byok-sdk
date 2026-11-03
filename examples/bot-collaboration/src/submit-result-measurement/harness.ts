@@ -17,7 +17,7 @@ import {
 import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, type AgentEvent, type DispatchSelection, type OfferAdmissionTimings } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { InMemoryDeviceCredentialStore } from '../../../../scripts/testing/device-credentials.mjs';
-import { CORPUS, CORPUS_REVISION, corpusCase, preflightCorpus } from './corpus';
+import { CORPUS, CORPUS_REVISION, corpusCase, corpusContract, preflightCorpus } from './corpus';
 import { resultDigest } from './digest';
 import {
   calibrateLabel, classifyTrial, UNCONFIRMED_PREDICATE,
@@ -362,7 +362,7 @@ async function runTrial(host: Host, options: RunCellOptions, planned: PlannedTri
       payload: {
         session: { mode: 'fresh' }, instruction: entry.instruction, ...(options.runtime === 'grok' ? { harnessId: 'grok' } : { runtime: options.runtime }), agentRef: { agentId, profileRevision: '1' }, agentMemory: 'none',
         ...(options.dispatchSelection ? { dispatchSelection: options.dispatchSelection } : {}),
-        terminalProjection: { mode: 'result-document', contract: `${CORPUS_REVISION}.${planned.caseId.toLowerCase()}`, schema: entry.schema as never },
+        terminalProjection: { mode: 'result-document', contract: corpusContract(planned.caseId), schema: entry.schema as never },
         egressPolicy: EGRESS_POLICY,
       },
     });
