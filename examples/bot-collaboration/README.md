@@ -462,7 +462,13 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
   and settled persona deliveries: applied ones except the newest of each Bot,
   and failures of an older profile revision. These archived rows stay.
 - `historyWindow.omitted*` counts only rows still in the state.
-- `room.messages` stays in the state: room offsets count from its start.
+- Each call moves the room messages of archived roots to application rows in
+  namespace `roomMessages`, by message id, with or without `roomHistory`. The
+  last `contextTurnLimit` messages of each room stay, because a seat
+  ContextPack reads at most that many. A message of a root that is still in
+  the state stays too. The same call recomputes `visibleFrom`: it is an offset
+  in the kept list, so each member sees the same kept messages as before. The
+  state, and so a snapshot, no longer holds the whole room history.
 
 After retention, a late message for an archived Turn gets `binding_mismatch`,
 and an echo can no longer match an archived delivery. Back up the whole SQLite

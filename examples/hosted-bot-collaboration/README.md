@@ -107,7 +107,8 @@ keeps the insertion order of each kind.
 - A commit loads every row of its scope, except the command records: it loads only the one record that
   it can replay. Retention, after #798, bounds the scope rows.
 - When a list gets shorter, the positions of its later elements are renumbered. Retention shortens the
-  `rejected`, `audit` and `homeOperations` lists, so their positions change; their content and order stay.
+  `rejected`, `audit` and `homeOperations` lists and the room message lists, so their positions change; their
+  content and order stay.
 - The `kind` CHECK lists come from the layout at the first `migrate()`. `CREATE TABLE IF NOT EXISTS`
   keeps the old CHECK, so a new kind needs an explicit `ALTER` in a later migration.
 - H has no migrations while it is unreleased. After a DDL change, recreate the H schema. `migrate()` on a schema
@@ -592,6 +593,8 @@ root ids are retired in `retired_identity`, and every moved command record answe
 - An accepted Agent message stays accepted for an exact replay after retention. The consumer checks the task's reply
   in the state or in `archived_row`, where retention keeps it with no expiry, as K4 keeps its receipt. A refused message
   replays from its moved record until the record expires, as in L.
+- The room messages that K8 moves (the messages of archived roots outside each room's last `contextTurnLimit`)
+  go to `archived_row` in namespace `roomMessages`, with no expiry.
 - Retention keeps every intent row, settled or not. Only an operator compaction removes one (see Intent compaction).
 - The namespace and id of each archived row, and of each row read (a moved command record or a tombstone), are checked
   against the K4 limits (128 and 1024 characters), as K4 checks every row read in L.
