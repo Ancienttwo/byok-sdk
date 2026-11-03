@@ -179,8 +179,11 @@ gets. An offer without `actions.turn` keeps
 
 Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
-answer does not reset that budget. Empty updates and duplicate targets or
-option ids are refused. Duplicate weekdays are stored as a set.
+answer does not reset that budget. Empty updates and duplicate
+targets are refused. A duplicate option id and model text that is blank after
+`trim()` break the `bot-turn-outcome.v1` contract rules: the device refuses
+the outcome on `submit_result`, and the Host refuses such an outcome whole.
+Duplicate weekdays are stored as a set.
 An expired card can appear in the recent ContextPack window. It creates no model turn.
 A confirmation card starts as `pending`. The owner can choose `confirmed` or
 `rejected`. A card becomes `expired` after 24 hours. Only a committed
