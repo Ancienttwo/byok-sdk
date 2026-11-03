@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.36.0",
-    "snapshotSha256": "aac89ff724ee1b9c679b5b7d3e9f45c3cb371ae185dd84238a3ff13f478733c9"
+    "snapshotSha256": "f6e3f0f5165c7b03dcea6d065af3170885d6ccfcd95b52b20c604091e88ec6ab"
   },
   "configFields": {
     "status": "tracked",
@@ -217,17 +217,17 @@
       "entry": "bot-turn-outcome-stateless-rules"
     },
     {
+      "item": "interprocess:pi-projection-acl",
+      "change": "added",
+      "after": "protocol=2",
+      "entry": "pi-projection-acl-owner-rights"
+    },
+    {
       "item": "store:pi-durable",
       "change": "changed",
       "before": "@earendil-works/pi-durable@1.4.0",
       "after": "@earendil-works/pi-durable@1.5.0",
       "entry": "pi-150-closure"
-    },
-    {
-      "item": "interprocess:pi-projection-acl",
-      "change": "added",
-      "after": "protocol=2",
-      "entry": "pi-projection-acl-owner-rights"
     }
   ]
 }
