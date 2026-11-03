@@ -456,9 +456,11 @@ interface ProjectionAce { allow: boolean; flags: ReadonlySet<string>; mask: numb
  * SID alias, an object or conditional ACE) is refused, never skipped. The
  * current user's SID is matched by the exact form icacls renders it in.
  */
-function parseProjectionDacl(sddl: string, user: { sid: string; token: string }): { protected: boolean; aces: ProjectionAce[] } {
+function parseProjectionDacl(sddl: string, user: { sid: string; token: string }): ProjectionAce[] {
   const dacl = /^D:((?:P|AI|AR)*)((?:\([^()]*\))*)$/u.exec(sddl);
   if (!dacl) throw new Error('pi_projection_acl_invalid_sddl');
+  // Inherited ACEs carry aliases such as AU or CO, so judge protection first.
+  if (!dacl[1]!.includes('P')) throw new Error('pi_projection_acl_unprotected');
   const aces: ProjectionAce[] = [];
   for (const [, body] of dacl[2]!.matchAll(/\(([^()]*)\)/gu)) {
     const fields = body!.split(';');
@@ -480,7 +482,7 @@ function parseProjectionDacl(sddl: string, user: { sid: string; token: string })
     if (sid === undefined) throw new Error('pi_projection_acl_invalid_ace');
     aces.push({ allow: type === 'A', flags: new Set(flags), mask, sid });
   }
-  return { protected: dacl[1]!.includes('P'), aces };
+  return aces;
 }
 
 /** The SDDL of one `icacls /save` record, whose first line must be the target's leaf name. */
@@ -548,17 +550,16 @@ export async function assertWindowsPiProjectionAcl(
   } finally {
     await fs.rm(saveDir, { recursive: true, force: true });
   }
-  const acl = parseProjectionDacl(sddl, { sid: currentUser, token: userToken });
+  const aces = parseProjectionDacl(sddl, { sid: currentUser, token: userToken });
 
-  if (!acl.protected) throw new Error('pi_projection_acl_unprotected');
-  const ownerRights = acl.aces.filter(ace => ace.sid === 'S-1-3-4');
+  const ownerRights = aces.filter(ace => ace.sid === 'S-1-3-4');
   if (ownerRights.length !== 1 || !ownerRights[0]!.allow || ownerRights[0]!.flags.size !== 0
     || (ownerRights[0]!.mask !== READ_CONTROL && ownerRights[0]!.mask !== (READ_CONTROL | SYNCHRONIZE))) {
     throw new Error('pi_projection_acl_owner_rights_missing: Pi projection directory must grant OWNER RIGHTS only READ_CONTROL');
   }
   const principals = new Set([currentUser, 'S-1-3-4', 'S-1-5-18', 'S-1-5-32-544']);
   let userControl = false;
-  for (const ace of acl.aces) {
+  for (const ace of aces) {
     if (!ace.allow || !principals.has(ace.sid)) throw new Error('pi_projection_acl_unauthorized_ace');
     if (ace.sid === currentUser && (ace.mask & FULL_CONTROL) === FULL_CONTROL
       && ace.flags.has('OI') && ace.flags.has('CI') && !ace.flags.has('IO') && !ace.flags.has('NP')) userControl = true;

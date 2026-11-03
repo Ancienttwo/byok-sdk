@@ -45,11 +45,12 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
     await createProjectionFixture(directory, false);
     await expect(assertPiProjectionDirectory(directory)).rejects.toThrow('pi_projection_acl_owner_rights_missing');
   }));
+  // icacls writes Everyone as the alias WD, which the launcher does not admit.
   it('refuses a real external Allow ACE', async () => withRoot('pi-acl-foreign-', async root => {
     const directory = path.join(root, 'projection');
     await createProjectionFixture(directory);
     await exec('icacls', [directory, '/grant', '*S-1-1-0:(R)', '/Q'], { windowsHide: true });
-    await expect(assertPiProjectionDirectory(directory)).rejects.toThrow('pi_projection_acl_unauthorized_ace');
+    await expect(assertPiProjectionDirectory(directory)).rejects.toThrow('pi_projection_acl_invalid_ace');
   }));
   it('refuses a DACL that inherits from its parent', async () => withRoot('pi-acl-inherit-', async root => {
     const directory = path.join(root, 'projection');
