@@ -9755,7 +9755,7 @@ export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, Execut
 export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle';
 export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle';
 export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types';
-export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram, ServiceStatusResult, } from './lifecycle/service-types';
+export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram, ServiceStatusResult, ServiceWindowsOptions, } from './lifecycle/service-types';
 export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
@@ -10838,6 +10838,7 @@ export declare function agentServiceInstallation(input: AgentServiceInstallation
 // ==== @byok-sdk/client dist/lifecycle/create-service-lifecycle.d.ts ====
 import { type LaunchdDeps } from './launchd';
 import { type SystemdDeps } from './systemd';
+import { type WindowsUserDeps } from './windows-user';
 import { type WinswDeps } from './winsw';
 import type { ManagedServiceLifecycle } from './managed-lifecycle';
 import type { ServiceDefinition, ServiceLifecycle } from './service-types';
@@ -10853,7 +10854,7 @@ export interface CreateServiceLifecycleOptions {
      */
     platform?: NodeJS.Platform;
     /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/getuid) — only the fields matching the resolved platform are ever read. */
-    deps?: LaunchdDeps & SystemdDeps & WinswDeps;
+    deps?: LaunchdDeps & SystemdDeps & WinswDeps & WindowsUserDeps;
 }
 /**
  * Platform-dispatched entry point for M3-4's lifecycle API: manages the
@@ -10865,7 +10866,9 @@ export interface CreateServiceLifecycleOptions {
  *  - **Windows**: a WinSW-wrapped Windows Service (`winsw.ts`) — Node has no
  *    native SCM control-handler support in core, so a wrapper is used
  *    rather than hand-rolling the SCM protocol; see `winsw.ts`'s own doc
- *    comment for why WinSW specifically.
+ *    comment for why WinSW specifically. With `windows.scope: 'user'`, a
+ *    logon autostart from the user's Startup folder instead, with no SCM
+ *    and no administrator (`windows-user.ts`, #1337).
  *
  * Every implementation delegates crash-restart entirely to the OS
  * supervisor (`KeepAlive`/`Restart=on-failure`/`<onfailure>`) — none of them
@@ -11438,6 +11441,36 @@ export interface NodeAgentProgramOptions {
  * convenience only, not a resolution mechanism.
  */
 export declare function nodeAgentProgram(opts: NodeAgentProgramOptions): ServiceProgram;
+/**
+ * How a service runs on Windows:
+ *
+ * - `machine` (the default): a WinSW-wrapped Windows Service registered with
+ *   the Service Control Manager (`winsw.ts`). Installing it needs an
+ *   administrator.
+ * - `user`: autostart at the user's logon, without the SCM and without an
+ *   administrator (`windows-user.ts`, #1337). The unit is a `.cmd` in the
+ *   user's Startup folder that starts the batch launcher
+ *   `<storeDir>\service\<name>.launcher.cmd`, which reruns the program
+ *   after a non-zero exit. `stop` is the Host's own program that makes the
+ *   running service exit (for the byok-agent daemon, a control `shutdown`);
+ *   it must exit 0 once the service is stopping or already gone.
+ */
+export type ServiceWindowsOptions = {
+    scope?: 'machine';
+    /**
+     * Absolute path to the product-bundled WinSW executable. Decision-6
+     * boundary: this SDK never bundles or downloads this binary itself —
+     * see `templates/service/winsw/README.md`. The lifecycle copies it
+     * into `installDir` under this service's own name (WinSW's own
+     * convention: the exe and its XML config must share a basename).
+     */
+    winswBin: string;
+    /** Directory the renamed WinSW exe + generated XML are installed into. Defaults to `logDir`. */
+    installDir?: string;
+} | {
+    scope: 'user';
+    stop: ServiceProgram;
+};
 export interface ServiceDefinition {
     /** Stable service identifier — becomes the launchd `Label`, the systemd unit's basename, and the WinSW `<id>` (sanitized per-platform via {@link sanitizeServiceName}). Typically `DaemonConfig.productId`. */
     name: string;
@@ -11461,22 +11494,11 @@ export interface ServiceDefinition {
      */
     owner: string;
     /**
-     * Windows/WinSW-only inputs. Required when actually constructing a
-     * lifecycle on `win32` (`create-service-lifecycle.ts` throws a clear
-     * error otherwise); ignored on macOS/Linux.
+     * Windows-only inputs, required when constructing a lifecycle on `win32`
+     * (`create-service-lifecycle.ts` throws a clear error otherwise); ignored
+     * on macOS/Linux. See {@link ServiceWindowsOptions}.
      */
-    windows?: {
-        /**
-         * Absolute path to the product-bundled WinSW executable. Decision-6
-         * boundary: this SDK never bundles or downloads this binary itself —
-         * see `templates/service/winsw/README.md`. The lifecycle copies it
-         * into `installDir` under this service's own name (WinSW's own
-         * convention: the exe and its XML config must share a basename).
-         */
-        winswBin: string;
-        /** Directory the renamed WinSW exe + generated XML are installed into. Defaults to `logDir`. */
-        installDir?: string;
-    };
+    windows?: ServiceWindowsOptions;
 }
 /** Options for {@link ServiceLifecycle.install}. */
 export interface ServiceInstallOptions {
@@ -11623,9 +11645,9 @@ export declare const SERVICE_UNIT_MARKER = "byok-sdk-service-unit: generated by 
 export type ServiceUnitState = 'absent' | 'exact' | 'repairable' | 'foreign';
 export interface ServiceUnitInspection {
     state: ServiceUnitState;
-    /** The plist, systemd unit or WinSW descriptor. */
+    /** The plist, systemd unit, WinSW descriptor or Startup `.cmd`. */
     unitPath: string;
-    /** The stable launcher the unit runs (macOS and Linux); on Windows the SCM runs the installed WinSW executable. */
+    /** The stable launcher the unit runs (macOS, Linux and a Windows `user` scope service); for WinSW the SCM runs the installed WinSW executable. */
     launcherPath: string;
     /** The lifecycle owner recorded in the store, when one is. */
     owner?: string;
@@ -11643,6 +11665,7 @@ declare const ERROR_MESSAGES: {
     readonly lifecycle_owner_busy: 'Another service lifecycle operation or local-state relocation is in progress. Run it again when that one has finished.';
     readonly invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.';
     readonly service_unload_timeout: 'The service manager did not finish unloading the stopped service in time. Check the service manager, then run the operation again.';
+    readonly service_stop_failed: 'The service stop program exited with a failure. The stop marker stays, so the service is not restarted; check the stop program, then run the operation again.';
 };
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes only; the message never carries a path or OS text. */
@@ -11653,7 +11676,7 @@ export declare class ServiceUnitError extends Error {
 export declare function assertServiceOwner(owner: unknown): asserts owner is string;
 /** `<storeDir>/service`: the SDK-owned directory for the launcher and the lifecycle owner record. */
 export declare function serviceStateDir(storeDir: string, platform?: NodeJS.Platform): string;
-/** The stable launcher path a macOS or Linux unit runs. */
+/** The stable launcher path a unit runs: a shell script on macOS and Linux, a batch file for a Windows `user` scope service. */
 export declare function serviceLauncherPath(storeDir: string, serviceName: string, platform?: NodeJS.Platform): string;
 /**
  * The POSIX launcher every macOS and Linux unit runs. The unit names only
@@ -11663,6 +11686,22 @@ export declare function serviceLauncherPath(storeDir: string, serviceName: strin
  * start (#392).
  */
 export declare function generateServiceLauncher(program: ServiceProgram): string;
+/**
+ * One double-quoted `cmd.exe` word. `"` cannot be escaped inside a quoted
+ * word and `%` expands even there, so either one, like a control character,
+ * is refused rather than rewritten (#1337).
+ *
+ * @internal
+ */
+export declare function cmdQuote(value: string): string;
+/**
+ * The batch launcher a Windows `user` scope unit starts (#1337). Each round
+ * first ends with 0 when `stopMarker` exists, then `call`s the program: exit
+ * 0 ends the launcher, any other exit reruns it about 10s later (the
+ * exit-code contract in `exit-codes.ts`). The wait is `ping`, since
+ * `timeout.exe` fails without console input. It sets no environment.
+ */
+export declare function generateWindowsUserLauncher(program: ServiceProgram, stopMarker: string): string;
 export interface ServiceUnitFile {
     path: string;
     content: string;
@@ -11824,6 +11863,50 @@ export interface UpgradeFromReport {
 export declare function checkUpgradeFrom(fromVersion: string, options?: {
     readonly resolveFrom?: string;
 }): UpgradeFromReport;
+// ==== @byok-sdk/client dist/lifecycle/windows-user.d.ts ====
+import { type Runner } from '../util/exec-runner';
+import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
+import { type ServiceDefinition, type ServiceProgram } from './service-types';
+/** DI seams for tests; the real ones start Windows processes. */
+export interface WindowsUserDeps {
+    /** Runs the launcher process query (PowerShell). */
+    run?: Runner;
+    fs?: ManagedLifecycleFs;
+    /** `%APPDATA%`, the root of the user's Startup folder. Default: `process.env.APPDATA`. */
+    appData?: () => string | undefined;
+    /** Runs the Host's stop program and resolves its exit code. */
+    runStopProgram?: (program: ServiceProgram) => Promise<number | null>;
+    /** Runs the Startup unit once, detached, as Explorer does at logon. */
+    launchUnit?: (unitPath: string) => Promise<void>;
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+}
+/** How long `stop()` waits for the launcher to exit after the stop program before `service_unload_timeout`. */
+export declare const WINDOWS_USER_STOP_TIMEOUT_MS = 30000;
+/** The user's Startup folder under `%APPDATA%`. `GetFolderPath('Startup')` is empty before the first interactive logon, so the path is built, and created on install. */
+export declare function windowsStartupDir(appData: string): string;
+/**
+ * The Startup `.cmd` (#1337): Explorer runs it at logon. Its first line
+ * carries {@link SERVICE_UNIT_MARKER}. `start "" /min` keeps every inner
+ * quote, so a launcher path with spaces stays one word (`conhost
+ * --headless` drops them).
+ */
+export declare function generateWindowsStartupUnit(launcherPath: string): string;
+/**
+ * Windows logon autostart without the SCM or an administrator (#1337,
+ * probe: `docs/researches/2026-11-02-windows-user-autostart-probe.md`).
+ * The unit is `<name>.cmd` in the user's Startup folder; it starts the batch
+ * launcher, which reruns the program after a non-zero exit until
+ * `<storeDir>\service\<name>.stopped` exists.
+ *
+ * - `start()` removes the stop marker and runs the unit, unless a launcher
+ *   is already running.
+ * - `stop()` writes the stop marker, runs the Host's `stop` program (a
+ *   non-zero exit is `service_stop_failed` and the marker stays), then
+ *   waits for the launcher to exit (`service_unload_timeout`).
+ * - `status()` reports the launcher process, found by its command line.
+ */
+export declare function createWindowsUserLifecycle(def: ServiceDefinition, deps?: WindowsUserDeps): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/winsw.d.ts ====
 import { promises as fsp } from 'node:fs';
 import { type Runner } from '../util/exec-runner';

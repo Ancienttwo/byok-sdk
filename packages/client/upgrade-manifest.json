@@ -23,6 +23,18 @@
       "items": [
         "example:bot-collaboration"
       ]
+    },
+    {
+      "id": "service-windows-user-scope",
+      "impact": "breaking",
+      "summary": "Needs the next MINOR. ServiceDefinition.windows is the union ServiceWindowsOptions: { scope?: 'machine'; winswBin; installDir? } is the WinSW Windows Service as before, and { winswBin } still compiles; { scope: 'user'; stop: ServiceProgram } autostarts at the user's logon from a Startup .cmd and a batch launcher under <storeDir>\\service, with no SCM registration and no administrator (#1337). stop() writes <name>.stopped, runs the Host's stop program and waits for the launcher to exit (service_unload_timeout); a stop program that exits non-zero is the new ServiceUnitError code service_stop_failed. A program value with \", % or a control character throws at construction. Code that reads def.windows.winswBin narrows on scope first. CreateServiceLifecycleOptions.deps also takes the user-scope test seams.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/client#CreateServiceLifecycleOptions",
+        "export:@byok-sdk/client#ServiceDefinition",
+        "export:@byok-sdk/client#ServiceUnitErrorCode",
+        "export:@byok-sdk/client#ServiceWindowsOptions"
+      ]
     }
   ],
   "changes": [

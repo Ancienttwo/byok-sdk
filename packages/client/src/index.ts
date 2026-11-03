@@ -514,6 +514,7 @@ export type {
   ServiceLifecycle,
   ServiceProgram,
   ServiceStatusResult,
+  ServiceWindowsOptions,
 } from './lifecycle/service-types';
 export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';

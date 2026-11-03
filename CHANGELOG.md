@@ -57,6 +57,21 @@
   config is now held instead of running its stored template. A new Bot still
   needs a template.
 
+- **Breaking (client)** — `ServiceDefinition.windows` is the union
+  `ServiceWindowsOptions`. `{ scope?: 'machine'; winswBin; installDir? }` is
+  today's WinSW Windows Service, and `{ winswBin }` still compiles. The new
+  `{ scope: 'user'; stop: ServiceProgram }` autostarts the service at the
+  user's logon with no SCM registration and no administrator (#1337): the unit
+  is `<name>.cmd` in the user's Startup folder, which starts the batch launcher
+  `<storeDir>\service\<name>.launcher.cmd`; the launcher reruns the program
+  about 10s after a non-zero exit and ends when `<name>.stopped` exists.
+  `stop()` writes that marker, runs the Host's `stop` program, then waits for
+  the launcher to exit. A `stop` program that exits non-zero is the new
+  `ServiceUnitError` code `service_stop_failed`, and the marker stays. A
+  program value with `"`, `%` or a control character throws at construction.
+  Code that reads `def.windows.winswBin` must first narrow on `scope`.
+  `byok-agent install` on Windows still installs only the WinSW service.
+
 ## 0.35.1 — source candidate
 
 0.35.1 is a PATCH release under the pre-1.0 policy: corrections only, with no

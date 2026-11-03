@@ -1,12 +1,13 @@
 import { createLaunchdLifecycle, type LaunchdDeps } from './launchd';
 import { createSystemdLifecycle, type SystemdDeps } from './systemd';
+import { createWindowsUserLifecycle, type WindowsUserDeps } from './windows-user';
 import { createWinswLifecycle, type WinswDeps } from './winsw';
 import type { ManagedServiceLifecycle } from './managed-lifecycle';
 import type { ServiceDefinition, ServiceLifecycle } from './service-types';
 
 export class UnsupportedServicePlatformError extends Error {
   constructor(platform: string) {
-    super(`no OS service lifecycle for platform "${platform}" — supported: darwin (launchd), linux (systemd --user), win32 (WinSW)`);
+    super(`no OS service lifecycle for platform "${platform}" — supported: darwin (launchd), linux (systemd --user), win32 (WinSW, or the Startup folder for scope 'user')`);
     this.name = 'UnsupportedServicePlatformError';
   }
 }
@@ -20,7 +21,7 @@ export interface CreateServiceLifecycleOptions {
    */
   platform?: NodeJS.Platform;
   /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/getuid) — only the fields matching the resolved platform are ever read. */
-  deps?: LaunchdDeps & SystemdDeps & WinswDeps;
+  deps?: LaunchdDeps & SystemdDeps & WinswDeps & WindowsUserDeps;
 }
 
 /**
@@ -33,7 +34,9 @@ export interface CreateServiceLifecycleOptions {
  *  - **Windows**: a WinSW-wrapped Windows Service (`winsw.ts`) — Node has no
  *    native SCM control-handler support in core, so a wrapper is used
  *    rather than hand-rolling the SCM protocol; see `winsw.ts`'s own doc
- *    comment for why WinSW specifically.
+ *    comment for why WinSW specifically. With `windows.scope: 'user'`, a
+ *    logon autostart from the user's Startup folder instead, with no SCM
+ *    and no administrator (`windows-user.ts`, #1337).
  *
  * Every implementation delegates crash-restart entirely to the OS
  * supervisor (`KeepAlive`/`Restart=on-failure`/`<onfailure>`) — none of them
@@ -76,7 +79,7 @@ export function createManagedServiceLifecycle(def: ServiceDefinition, opts: Crea
     case 'linux':
       return createSystemdLifecycle(def, opts.deps);
     case 'win32':
-      return createWinswLifecycle(def, opts.deps);
+      return def.windows?.scope === 'user' ? createWindowsUserLifecycle(def, opts.deps) : createWinswLifecycle(def, opts.deps);
     default:
       throw new UnsupportedServicePlatformError(platform);
   }
