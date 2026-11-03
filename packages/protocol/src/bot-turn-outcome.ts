@@ -2,8 +2,9 @@ import {
   RESULT_OUTCOME_MAX_BYTES, RESULT_SCHEMA_MAX_BYTES, checkResultSchema, type ResultSchema,
   resultOutcomeMaxBytes,
 } from './result-schema';
+import { BOT_TURN_OUTCOME_CONTRACT } from './bot-turn-outcome-contract';
 
-export const BOT_TURN_OUTCOME_CONTRACT = 'bot-turn-outcome.v1';
+export { BOT_TURN_OUTCOME_CONTRACT };
 
 /** Code-point and item caps for Bot turn outcomes. */
 export const BOT_TURN_OUTCOME_LIMITS = Object.freeze({

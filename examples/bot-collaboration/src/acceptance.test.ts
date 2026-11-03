@@ -118,9 +118,9 @@ it('applies routine policy before questions and delegation, and publishes cards 
   const root = await bot!.input('ordered-actions', 'Prepare actions');
   fixture!.ledger.transaction(s => { stateOf(s.application).budgets[root]!.continuation = 4; });
   await finish(root, { create_routine: [{ localId: 'new_routine_1', schedule: { minute: 0, hour: 9, dayOfMonth: 31, month: 4, tz: 'UTC' }, prompt: 'invalid' }],
-    confirmable_action: [action], ask_user: { question: 'Choose', answerKind: 'single_choice', options: [{ id: 'a', label: 'A' }, { id: 'a', label: 'B' }] },
+    confirmable_action: [action], ask_user: { question: 'Choose', answerKind: 'single_choice', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
     delegate: [{ to: 'main', request: 'continue' }] });
-  expect(bot!.snapshot().rejected.map(r => r.action)).toEqual(['create_routine', 'ask_user', 'delegate']);
+  expect(bot!.snapshot().rejected.map(r => r.action)).toEqual(['create_routine', 'delegate']);
   const next = await bot!.input('ordered-projections', 'Prepare cards');
   const prior = new Set(Object.keys(fixture!.ledger.snapshot().outbox));
   await finish(next, { confirmable_action: [action], ask_user: { question: 'Choose', answerKind: 'text' } });

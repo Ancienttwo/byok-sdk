@@ -53,5 +53,7 @@ it('records an archived Bot outcome as audit only, and refuses a document outsid
   expect(archived.log).toEqual([]);
   const invalid = setup('owner');
   expect(() => applyTurnOutcome(invalid.state, 't1', 'task', { unknown_action: true }, invalid.ports)).toThrow('Outcome differs from the frozen schema');
+  const duplicate = { ask_user: { question: 'Choose', answerKind: 'single_choice', options: [{ id: 'same', label: 'A' }, { id: 'same', label: 'B' }] } };
+  expect(() => applyTurnOutcome(invalid.state, 't1', 'task', duplicate, invalid.ports)).toThrow('Outcome differs from the frozen schema');
   expect(() => applyTurnOutcome(invalid.state, 'missing', 'task', {}, invalid.ports)).toThrow('Missing Bot turn');
 });

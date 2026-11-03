@@ -262,10 +262,10 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
   });
 
   it('frozen schemas require the exact contract, JSON data and declared fields', () => {
-    expect(validateResultOutcome(GOAL_RESULT_SCHEMA, { contract: 'some-other-contract', outcome: 'complete' }).ok).toBe(false);
-    expect(validateResultOutcome(GOAL_RESULT_SCHEMA, '```json\n{}\n```').ok).toBe(false);
-    expect(validateResultOutcome(BTW_RESULT_SCHEMA, { contract: BTW_RESULT_CONTRACT, answer: 'x', extra: 1 }).ok).toBe(false);
-    const valid = validateResultOutcome(GOAL_RESULT_SCHEMA, result('complete'));
+    expect(validateResultOutcome({ contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA }, { contract: 'some-other-contract', outcome: 'complete' }).ok).toBe(false);
+    expect(validateResultOutcome({ contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA }, '```json\n{}\n```').ok).toBe(false);
+    expect(validateResultOutcome({ contract: BTW_RESULT_CONTRACT, schema: BTW_RESULT_SCHEMA }, { contract: BTW_RESULT_CONTRACT, answer: 'x', extra: 1 }).ok).toBe(false);
+    const valid = validateResultOutcome({ contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA }, result('complete'));
     expect(valid.ok).toBe(true);
     if (!valid.ok) throw new Error('valid goal outcome was refused');
     expect(valid.canonical).toEqual(result('complete'));

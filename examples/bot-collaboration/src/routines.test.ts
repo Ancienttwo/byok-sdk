@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { WAKE_MAX_FUTURE_MS } from '@byok-sdk/server';
 import { ROUTINE_HORIZON_MS } from '@byok-sdk/core';
-import { validateResultOutcome, type RoutineScheduleFields } from '@byok-sdk/protocol';
+import { BOT_TURN_OUTCOME_CONTRACT, validateResultOutcome, type RoutineScheduleFields } from '@byok-sdk/protocol';
 import { join } from 'node:path';
 import { hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, WAKE_HORIZON_MS, type HostJobHandler, type HostJobRoutineDefinition } from '@byok-sdk/server/execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
@@ -64,9 +64,9 @@ it('offers all ordinary Bot actions and rejects a target field', () => {
   const routines = botRoutines([routineRow(createDefinition([], 'main', 'task-1', 0, action('old prompt'), 'bot'))]);
   const schema = outcomeSchema('main', stateOf({}), undefined, ['default'], routines);
   expect(Object.keys(schema.properties!)).toEqual(['delegate', 'ask_user', 'confirmable_action', 'create_routine', 'update_routine', 'cancel_routine']);
-  expect(validateResultOutcome(schema, { create_routine: [{ localId: 'new_routine_1', schedule: DAILY, prompt: 'test', target: 'other' }] }).ok).toBe(false);
-  expect(validateResultOutcome(schema, { delegate: [{ to: 'other', request: 'test' }] }).ok).toBe(false);
-  expect(validateResultOutcome(schema, { update_routine: [{ routineId: routines[0]!.id, prompt: 'new' }] }).ok).toBe(true);
+  expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, { create_routine: [{ localId: 'new_routine_1', schedule: DAILY, prompt: 'test', target: 'other' }] }).ok).toBe(false);
+  expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, { delegate: [{ to: 'other', request: 'test' }] }).ok).toBe(false);
+  expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, { update_routine: [{ routineId: routines[0]!.id, prompt: 'new' }] }).ok).toBe(true);
 });
 
 it('builds a K4 hostOccurrence definition with the Bot policy: self only, checked schedule, at most eight open routines per owner', () => {

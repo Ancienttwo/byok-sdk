@@ -6,6 +6,8 @@ import { checkResultSchema, validateResultOutcome } from '@byok-sdk/protocol';
 import { resultDigest } from './digest';
 
 export const CORPUS_REVISION = 'submit-result-v1';
+/** The offer's contract id for a corpus case. */
+export const corpusContract = (caseId: string): string => `${CORPUS_REVISION}.${caseId.toLowerCase()}`;
 
 type JsonSchema = Record<string, unknown>;
 const object = (properties: Record<string, unknown>): JsonSchema => ({
@@ -81,7 +83,7 @@ export function preflightCorpus(corpus: readonly CorpusCase[] = CORPUS): Preflig
   for (const entry of corpus) {
     const schema = checkResultSchema(entry.schema);
     if (!schema.ok) { failures.push({ caseId: entry.id, step: 'checkResultSchema', reason: schema.reason }); continue; }
-    const outcome = validateResultOutcome(entry.schema, entry.target);
+    const outcome = validateResultOutcome({ contract: corpusContract(entry.id), schema: entry.schema }, entry.target);
     if (!outcome.ok) failures.push({ caseId: entry.id, step: 'validateResultOutcome', reason: outcome.reason });
   }
   return { ok: failures.length === 0, failures };

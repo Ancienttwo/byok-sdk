@@ -42,7 +42,7 @@ function rejected<T extends ResultSchemaCheck | ResultOutcomeCheck>(check: T): E
 const outcomeSchema = root({ properties: { value: {} } });
 
 function outcome(schemaUnderValue: Record<string, unknown>, value: unknown): ResultOutcomeCheck {
-  return validateResultOutcome(root({ properties: { value: schemaUnderValue }, required: ['value'] }), { value });
+  return validateResultOutcome({ contract: 'example.v1', schema: root({ properties: { value: schemaUnderValue }, required: ['value'] }) }, { value });
 }
 
 describe('result schema subset: allowed keywords accept and validate', () => {
@@ -86,34 +86,34 @@ describe('result schema subset: allowed keywords accept and validate', () => {
 
   it('additionalProperties: false at the root is honoured', () => {
     const schema = root({ properties: { a: { type: 'string' } }, required: ['a'], additionalProperties: false });
-    expect(validateResultOutcome(schema, { a: 'x' }).ok).toBe(true);
-    const refused = rejected(validateResultOutcome(schema, { a: 'x', extra: 1 }));
+    expect(validateResultOutcome({ contract: 'example.v1', schema }, { a: 'x' }).ok).toBe(true);
+    const refused = rejected(validateResultOutcome({ contract: 'example.v1', schema }, { a: 'x', extra: 1 }));
     expect(refused.issues.map((issue) => issue.keyword)).toContain('additionalProperties');
   });
 
   it('root oneOf beside type: object is admitted (R2)', () => {
     const schema = root({ oneOf: [{ type: 'object', required: ['a'] }, { type: 'object', required: ['b'] }] });
     expect(checkResultSchema(schema).ok).toBe(true);
-    expect(validateResultOutcome(schema, { a: 1 }).ok).toBe(true);
-    expect(rejected(validateResultOutcome(schema, { a: 1, b: 2 })).reason).toBe('schema-mismatch');
+    expect(validateResultOutcome({ contract: 'example.v1', schema }, { a: 1 }).ok).toBe(true);
+    expect(rejected(validateResultOutcome({ contract: 'example.v1', schema }, { a: 1, b: 2 })).reason).toBe('schema-mismatch');
   });
 
   it('presence is own-property only: inherited names never satisfy required or crash properties', () => {
-    expect(rejected(validateResultOutcome(root({ required: ['constructor'] }), {})).reason).toBe('schema-mismatch');
-    expect(validateResultOutcome(root({ properties: { toString: { type: 'string' } } }), {}).ok).toBe(true);
-    expect(validateResultOutcome(JSON.parse('{"type":"object","properties":{"__proto__":{"type":"string"}}}'), JSON.parse('{"__proto__":"x"}')).ok).toBe(true);
-    expect(rejected(validateResultOutcome(JSON.parse('{"type":"object","properties":{"__proto__":{"type":"string"}}}'), JSON.parse('{"__proto__":1}'))).reason).toBe('schema-mismatch');
+    expect(rejected(validateResultOutcome({ contract: 'example.v1', schema: root({ required: ['constructor'] }) }, {})).reason).toBe('schema-mismatch');
+    expect(validateResultOutcome({ contract: 'example.v1', schema: root({ properties: { toString: { type: 'string' } } }) }, {}).ok).toBe(true);
+    expect(validateResultOutcome({ contract: 'example.v1', schema: JSON.parse('{"type":"object","properties":{"__proto__":{"type":"string"}}}') }, JSON.parse('{"__proto__":"x"}')).ok).toBe(true);
+    expect(rejected(validateResultOutcome({ contract: 'example.v1', schema: JSON.parse('{"type":"object","properties":{"__proto__":{"type":"string"}}}') }, JSON.parse('{"__proto__":1}'))).reason).toBe('schema-mismatch');
   });
 
   it('reports the instance pointer in RFC 6901 form', () => {
     const schema = root({ properties: { 'a/b~c': { type: 'array', items: { type: 'string' } } } });
-    const refused = rejected(validateResultOutcome(schema, { 'a/b~c': ['ok', 2] }));
+    const refused = rejected(validateResultOutcome({ contract: 'example.v1', schema }, { 'a/b~c': ['ok', 2] }));
     expect(refused.issues.map((issue) => issue.pointer)).toContain('/a~1b~0c/1');
   });
 
   it('returns the canonical snapshot and its byte count', () => {
     const value = { value: { nested: [1, 'é'] } };
-    const accepted = validateResultOutcome(outcomeSchema, value);
+    const accepted = validateResultOutcome({ contract: 'example.v1', schema: outcomeSchema }, value);
     expect(accepted).toEqual({ ok: true, bytes: byteLength(value), canonical: value });
     if (accepted.ok) expect(accepted.canonical).not.toBe(value);
   });
@@ -154,7 +154,7 @@ describe('result schema subset: the guard refuses everything else before the lib
       const refused = rejected(checkResultSchema(schema));
       expect(refused.reason).toBe('not-subset');
       expect(refused.issues.map((issue) => issue.keyword)).toContain(keyword);
-      const outcomeCheck = rejected(validateResultOutcome(schema, {}));
+      const outcomeCheck = rejected(validateResultOutcome({ contract: 'example.v1', schema }, {}));
       expect(outcomeCheck.reason).toBe('schema-not-admitted');
     }
     expect(validator).not.toHaveBeenCalled();
@@ -278,11 +278,11 @@ describe('result schema subset: plain JSON and size', () => {
     const framing = byteLength({ value: '' });
     const atCap = { value: 'x'.repeat(RESULT_OUTCOME_MAX_BYTES - framing) };
     expect(byteLength(atCap)).toBe(65_536);
-    expect(validateResultOutcome(outcomeSchema, atCap)).toMatchObject({ ok: true, bytes: 65_536 });
+    expect(validateResultOutcome({ contract: 'example.v1', schema: outcomeSchema }, atCap)).toMatchObject({ ok: true, bytes: 65_536 });
     const overCap = { value: 'x'.repeat(RESULT_OUTCOME_MAX_BYTES - framing + 1) };
     const validator = vi.mocked(cfworker.Validator);
     validator.mockClear();
-    expect(rejected(validateResultOutcome(outcomeSchema, overCap))).toMatchObject({ reason: 'over-cap', bytes: 65_537 });
+    expect(rejected(validateResultOutcome({ contract: 'example.v1', schema: outcomeSchema }, overCap))).toMatchObject({ reason: 'over-cap', bytes: 65_537 });
     expect(validator).not.toHaveBeenCalled();
   });
 
@@ -292,7 +292,7 @@ describe('result schema subset: plain JSON and size', () => {
     ['a lone surrogate', { value: '\uDC00' }, 'not-plain-json'],
     ['a lone-surrogate key', { ['\uD800']: 1 }, 'not-plain-json'],
   ] as const)('refuses an outcome that is %s', (_label, value, reason) => {
-    expect(rejected(validateResultOutcome(outcomeSchema, value)).reason).toBe(reason);
+    expect(rejected(validateResultOutcome({ contract: 'example.v1', schema: outcomeSchema }, value)).reason).toBe(reason);
   });
 });
 
@@ -316,12 +316,12 @@ describe('result schema subset: bounded depth and bounded issues', () => {
     let deep: unknown = 1;
     for (let index = 0; index < RESULT_JSON_MAX_DEPTH; index += 1) deep = [deep];
     expect(checkResultSchema(root({ properties: { a: { const: deep } } }))).toMatchObject({ ok: false, reason: 'too-deep' });
-    expect(validateResultOutcome(outcomeSchema, { value: deep })).toMatchObject({ ok: false, reason: 'too-deep' });
+    expect(validateResultOutcome({ contract: 'example.v1', schema: outcomeSchema }, { value: deep })).toMatchObject({ ok: false, reason: 'too-deep' });
     // Far deeper than JSON.stringify itself supports: refused (the engine's
     // serializer gives up first, so the reason is not-serializable), never thrown.
     const veryDeep = JSON.parse(`${'['.repeat(30_000)}${']'.repeat(30_000)}`) as unknown;
-    expect(validateResultOutcome(outcomeSchema, { value: veryDeep }).ok).toBe(false);
-    expect(validateResultOutcome(outcomeSchema, { value: [[[1]]] }).ok).toBe(true);
+    expect(validateResultOutcome({ contract: 'example.v1', schema: outcomeSchema }, { value: veryDeep }).ok).toBe(false);
+    expect(validateResultOutcome({ contract: 'example.v1', schema: outcomeSchema }, { value: [[[1]]] }).ok).toBe(true);
   });
 
   it('validates a broad outcome through nested oneOf at the admitted depth limit', () => {
@@ -338,8 +338,8 @@ describe('result schema subset: bounded depth and bounded issues', () => {
     const schema = root({ properties: { value: node }, required: ['value'] });
     expect(checkResultSchema(schema).ok).toBe(true);
     expect(byteLength({ value: valid })).toBeLessThan(RESULT_OUTCOME_MAX_BYTES);
-    expect(validateResultOutcome(schema, { value: valid }).ok).toBe(true);
-    expect(rejected(validateResultOutcome(schema, { value: invalid })).reason).toBe('schema-mismatch');
+    expect(validateResultOutcome({ contract: 'example.v1', schema }, { value: valid }).ok).toBe(true);
+    expect(rejected(validateResultOutcome({ contract: 'example.v1', schema }, { value: invalid })).reason).toBe('schema-mismatch');
   });
 
   it(`caps the issue list at ${RESULT_ISSUES_MAX_COUNT} entries and marks the cut`, () => {

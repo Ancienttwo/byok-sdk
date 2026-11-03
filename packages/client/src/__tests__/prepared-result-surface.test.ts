@@ -58,9 +58,9 @@ describe('a prepared SummaryJob is a one-tool submit_result record', () => {
     });
     const schema = { type: 'object', oneOf: [branch('question', 'question'), branch('done', 'summary')] };
     expect(checkResultSchema(schema).ok).toBe(true);
-    expect(validateResultOutcome(schema, { kind: 'question', question: 'Continue?' }).ok).toBe(true);
-    expect(validateResultOutcome(schema, { kind: 'done', summary: 'Done.' }).ok).toBe(true);
-    expect(validateResultOutcome(schema, { kind: 'question', summary: 'wrong branch' }).ok).toBe(false);
+    expect(validateResultOutcome({ contract: 'test.union.v1', schema }, { kind: 'question', question: 'Continue?' }).ok).toBe(true);
+    expect(validateResultOutcome({ contract: 'test.union.v1', schema }, { kind: 'done', summary: 'Done.' }).ok).toBe(true);
+    expect(validateResultOutcome({ contract: 'test.union.v1', schema }, { kind: 'question', summary: 'wrong branch' }).ok).toBe(false);
     const selected = { mode: 'result-document', contract: 'test.union.v1', schema } as TerminalProjectionSelection;
     const { surface, compiled } = await surfaceFor(selected);
     expect(surface.tools[0]!.parameters).toEqual(schema);

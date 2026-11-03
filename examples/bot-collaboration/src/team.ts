@@ -218,7 +218,7 @@ export function applyManagement(state: CollaborationState, actor: string, taskId
   }));
   if (outcome.team_note) managed('team_note', () => {
     if (team.notes.length >= TEAM_NOTE_LIMIT) throw new Error('Team note limit is 20');
-    if (!outcome.team_note!.text.trim() || [...outcome.team_note!.text].length > 300) throw new Error('Team note needs 1 to 300 characters');
+    if ([...outcome.team_note!.text].length > 300) throw new Error('Team note needs 1 to 300 characters');
     team.notes.push({ id: hash([taskId, 'team_note']), text: outcome.team_note!.text });
   });
 }

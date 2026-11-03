@@ -197,7 +197,8 @@ export function applySpeech(team: RoomsState, seatId: string, document: Pick<Bot
   accept('speech', () => {
     if (!memberPresent(team, seat) || seat.status === 'busy' || seat.status === 'removed' || seat.status === 'blocked') throw new Error('Seat no longer has speech authority');
     const speech = document.speech;
-    if (!speech || speech.kind === 'post' && !speech.text.trim()) {
+    // A blank post breaks the bot-turn-outcome.v1 contract rules, so it never reaches here (#1374).
+    if (!speech) {
       seat.status = 'failed'; seat.released = true; throw new Error('A seat needs a post or explicit pass');
     }
     observeStart(seat, now);

@@ -1656,9 +1656,26 @@ export declare const BlobRefSchema: z.ZodObject<{
     url: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 export type BlobRef = z.infer<typeof BlobRefSchema>;
+// ==== @byok-sdk/protocol dist/bot-turn-outcome-contract.d.ts ====
+/**
+ * Rules of the bot-turn-outcome.v1 contract that the K7 schema subset cannot
+ * express. `validateResultOutcome` runs them after the schema check when the
+ * projection names this contract. Only type imports from result-schema, so
+ * result-schema can dispatch here without an import cycle.
+ */
+import type { ResultIssue } from './result-schema';
+export declare const BOT_TURN_OUTCOME_CONTRACT = "bot-turn-outcome.v1";
+/**
+ * Any JSON value; a part of the wrong shape is skipped. A string that is empty
+ * after trim() (outside confirmable_action[*].draft) is `blank-text`; a
+ * repeated option id within ask_user is `duplicate-option-id` at the later id.
+ * Messages never echo the value. The caller caps the list.
+ */
+export declare function botTurnOutcomeRuleIssues(outcome: unknown): ResultIssue[];
 // ==== @byok-sdk/protocol dist/bot-turn-outcome.d.ts ====
 import { type ResultSchema } from './result-schema';
-export declare const BOT_TURN_OUTCOME_CONTRACT = "bot-turn-outcome.v1";
+import { BOT_TURN_OUTCOME_CONTRACT } from './bot-turn-outcome-contract';
+export { BOT_TURN_OUTCOME_CONTRACT };
 /** Code-point and item caps for Bot turn outcomes. */
 export declare const BOT_TURN_OUTCOME_LIMITS: Readonly<{
     delegateMaxItems: 2;
@@ -7920,7 +7937,9 @@ export interface ResultSchema {
  * validation issues (`''` is the document root). `keyword` is the JSON Schema
  * keyword at fault, or a document-level code: `not-serializable`,
  * `not-plain-json`, `over-cap`, `too-deep` (JSON nesting), `schema` (a
- * subschema that is not an object) or `depth` (subschema nesting).
+ * subschema that is not an object) or `depth` (subschema nesting). A contract
+ * rule issue (reason `contract-mismatch`) uses the rule code:
+ * `duplicate-option-id` or `blank-text`.
  */
 export interface ResultIssue {
     readonly pointer: string;
@@ -7948,7 +7967,7 @@ export type ResultOutcomeCheck = {
     readonly ok: true;
     readonly bytes: number;
     readonly canonical: unknown;
-} | ResultFailure<'schema-not-admitted' | ResultDocumentFailureReason | 'schema-mismatch'>;
+} | ResultFailure<'schema-not-admitted' | ResultDocumentFailureReason | 'schema-mismatch' | 'contract-mismatch'>;
 /**
  * The admission guard for a result-document schema. Accepts only plain JSON
  * data of at most {@link RESULT_SCHEMA_MAX_BYTES} canonical UTF-8 bytes that
@@ -7961,10 +7980,16 @@ export declare function checkResultSchema(schema: unknown): ResultSchemaCheck;
  * ({@link checkResultSchema}) always runs first; a schema it refuses is
  * `schema-not-admitted` and never reaches the library. The outcome must be
  * plain JSON data of at most {@link RESULT_OUTCOME_MAX_BYTES} canonical UTF-8
- * bytes, checked before validation. On success, `canonical` is the snapshot
- * a sender stages and puts on the wire.
+ * bytes, checked before validation. When `projection.contract` is an
+ * SDK-defined contract (only BOT_TURN_OUTCOME_CONTRACT today), its rules run
+ * after the schema passes; a rule failure is `contract-mismatch`. Any other
+ * contract id gets the schema check only. On success, `canonical` is the
+ * snapshot a sender stages and puts on the wire.
  */
-export declare function validateResultOutcome(schema: unknown, outcome: unknown): ResultOutcomeCheck;
+export declare function validateResultOutcome(projection: {
+    readonly contract: string;
+    readonly schema: unknown;
+}, outcome: unknown): ResultOutcomeCheck;
 /**
  * Conservative canonical UTF-8 bound, or null for an invalid or unbounded schema.
  * Strings cost at most 6 bytes per code point. Number costs 25; integer costs

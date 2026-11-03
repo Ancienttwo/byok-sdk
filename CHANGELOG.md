@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Breaking (protocol, client, examples; #1374)** —
+  `validateResultOutcome` now takes `({ contract, schema }, outcome)`; the
+  `(schema, outcome)` form is gone. When `contract` is `bot-turn-outcome.v1`,
+  the contract rules run after the schema passes, and a failure is the new
+  `ResultOutcomeCheck` reason `contract-mismatch`: keyword
+  `duplicate-option-id` for a repeated `ask_user` option id, `blank-text` for a
+  string that is empty after `trim()` (outside `confirmable_action[*].draft`).
+  The device applies it on `submit_result`, so the model corrects the outcome
+  in the same Turn; before, such an outcome passed and the question never
+  reached the user. K8 checks outcomes with the same call and refuses a
+  violating outcome whole (the K4 intent ends `outcome_failed`); its
+  action-level `Duplicate option id` refusal is removed. A Host that calls
+  `validateResultOutcome` passes its offer's contract id.
+
 - **Added (examples)** — H store option `hostIntentMessages` (#1362), as L's
   (#1356): an Agent message of a Host intent goes to the Host's message handler
   of the same name, synchronously in the consume transaction, and its
