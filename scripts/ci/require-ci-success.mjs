@@ -1,4 +1,3 @@
-
 /** No skipped, missing, cancelled or unexpected family can satisfy the gate. */
 export function requireCiSuccess(needs, expected) {
   if (!Array.isArray(expected) || expected.length === 0
