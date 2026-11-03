@@ -1,5 +1,11 @@
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, composeRuntimeEnvironment, RuntimeEnvironmentUnavailableError, type RuntimeEnvironmentPolicy } from '../runtime/environment';
+import {
+  assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, buildRuntimeEnvironment, composeRuntimeEnvironment, parseWindowsRegistryExport, readWindowsLogonRegistry,
+  readWindowsRegistryKey, RuntimeEnvironmentUnavailableError, setWindowsLogonRegistrySource, WINDOWS_MACHINE_ENVIRONMENT_KEY, WINDOWS_USER_ENVIRONMENT_KEY,
+  type RuntimeEnvironmentPolicy, type WindowsLogonRegistry, type WindowsRegistryString,
+} from '../runtime/environment';
 import type { LoginShellSnapshot } from '../login-shell-environment';
 
 /** A minimal ambient env with no incidental host cruft — every test builds exactly the vars it cares about, rather than depending on whatever happens to be set on the machine running the suite. */
@@ -252,9 +258,10 @@ describe('composeRuntimeEnvironment (#1095)', () => {
       .toEqual({ PATH: '/usr/bin', ACME_HOME: '/a', ...LOOPBACK });
   });
 
-  it('win32: the base is the session baseline from the live environment, matched and denied case-insensitively', () => {
-    const live = { Path: 'C:\\Windows', USERNAME: 'u', ProgramData: 'C:\\ProgramData', HOST_ONLY_SENTINEL: 'x', ClaudeCode: '1', byok_secret: 'must-not-leak', no_proxy: 'corp.example' };
-    expect(composeRuntimeEnvironment({ policy: {}, live, platform: 'win32' }).env).toEqual({ Path: 'C:\\Windows', USERNAME: 'u', ProgramData: 'C:\\ProgramData', NO_PROXY: 'corp.example,127.0.0.1,localhost' });
+  it('win32: PATH is the logon registry value, not a profile-edited session PATH; the other session baseline names match and deny case-insensitively', () => {
+    const live = { Path: 'C:\\Windows;C:\\Users\\u\\fnm', USERNAME: 'u', ProgramData: 'C:\\ProgramData', HOST_ONLY_SENTINEL: 'x', ClaudeCode: '1', byok_secret: 'must-not-leak', no_proxy: 'corp.example' };
+    expect(composeRuntimeEnvironment({ policy: {}, live, windowsLogon: logonRegistry({ Path: sz('C:\\Windows') }), platform: 'win32' }).env)
+      .toEqual({ Path: 'C:\\Windows', USERNAME: 'u', ProgramData: 'C:\\ProgramData', NO_PROXY: 'corp.example,127.0.0.1,localhost' });
   });
 
   it('an adapter conflict rule removes base names only when pass supplied the trigger', () => {
@@ -316,7 +323,7 @@ describe('composeRuntimeEnvironment (#1095)', () => {
   it('reports the base it used: allowlist and windows-session', () => {
     expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['ACME_HOME'] }, live: { PATH: '/usr/bin', ACME_HOME: '/a', OTHER: 'x' }, platform: 'darwin' }).report.names)
       .toEqual([{ name: 'ACME_HOME', source: 'allowlist' }, { name: 'NO_PROXY', source: 'sdk' }, { name: 'PATH', source: 'allowlist' }, { name: 'no_proxy', source: 'sdk' }]);
-    expect(composeRuntimeEnvironment({ policy: {}, live: { Path: 'C:\\Windows', no_proxy: 'corp.example', HOST_ONLY_SENTINEL: 'x' }, platform: 'win32' }).report)
+    expect(composeRuntimeEnvironment({ policy: {}, live: { Path: 'C:\\Windows', no_proxy: 'corp.example', HOST_ONLY_SENTINEL: 'x' }, windowsLogon: logonRegistry({ Path: sz('C:\\Windows') }), platform: 'win32' }).report)
       .toEqual({ names: [{ name: 'NO_PROXY', source: 'sdk' }, { name: 'Path', source: 'windows-session' }], removed: [] });
   });
 
@@ -328,5 +335,115 @@ describe('composeRuntimeEnvironment (#1095)', () => {
     expect(() => assertRuntimeEnvironmentPolicy({ pass: ['BYOK_KEY'] }, 'p')).toThrow('p.pass must not name CLAUDECODE or BYOK_*');
     expect(() => assertRuntimeEnvironmentPolicy({ pass: ['A*B'] }, 'p')).toThrow('p.pass entries must be variable names or *-suffixed prefixes');
     expect(() => assertRuntimeEnvironmentPolicy({ pass: 'A' }, 'p')).toThrow('p.pass must be an array of variable names');
+  });
+});
+
+const sz = (value: string): WindowsRegistryString => ({ expand: false, value });
+const ex = (value: string): WindowsRegistryString => ({ expand: true, value });
+const keyValues = (values: Record<string, WindowsRegistryString>) => new Map(Object.entries(values).map(([name, value]) => [name.toUpperCase(), value]));
+
+function logonRegistry(machine: Record<string, WindowsRegistryString>, user: Record<string, WindowsRegistryString> = {}): WindowsLogonRegistry {
+  return { source: 'registry', machine: keyValues(machine), user: keyValues(user) };
+}
+
+/** A `reg export` file of `key`: BOM, header, section, then `lines`. */
+function regExport(key: string, lines: readonly string[]): Uint8Array {
+  return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(['Windows Registry Editor Version 5.00', '', `[${key}]`, ...lines, '', ''].join('\r\n'), 'utf16le')]);
+}
+
+/** `"<name>"=hex(2):..` for `text`, wrapped after 10 bytes as reg export wraps. */
+function hex2Line(name: string, text: string): string {
+  const octets = [...Buffer.from(`${text}\0`, 'utf16le')].map((octet) => octet.toString(16).padStart(2, '0'));
+  return `"${name}"=hex(2):${octets.slice(0, 10).join(',')},\\\r\n  ${octets.slice(10).join(',')}`;
+}
+
+describe('win32 logon registry base (#1317)', () => {
+  const session = { SystemRoot: 'C:\\Windows', USERPROFILE: 'C:\\Users\\u', APPDATA: 'C:\\Users\\u\\AppData\\Roaming', USERNAME: 'u', HOMEDRIVE: 'C:', TMPDIR: 'C:\\t', HOST_ONLY: 'C:\\h' };
+  // One row per rule measured in #1395 (issuecomment-6599686570, -6599840085).
+  const rows: readonly { rule: string; machine: Record<string, WindowsRegistryString>; user: Record<string, WindowsRegistryString>; Path?: string; PATHEXT?: string }[] = [
+    { rule: 'Path is machine then user, joined by ;, empty entries skipped', machine: { Path: sz('C:\\M1;C:\\M2') }, user: { Path: sz(';C:\\U1;;C:\\U2;') }, Path: 'C:\\M1;C:\\M2;C:\\U1;C:\\U2' },
+    { rule: 'an empty user Path adds nothing', machine: { Path: sz('C:\\M1') }, user: { Path: ex('') }, Path: 'C:\\M1' },
+    { rule: 'a user %PATH% is the machine value; user entries byte-equal to a machine entry are dropped', machine: { Path: sz('C:\\M1;C:\\M2') }, user: { Path: ex('%PATH%;C:\\U;c:\\m1;C:\\U') }, Path: 'C:\\M1;C:\\M2;C:\\U;c:\\m1;C:\\U' },
+    { rule: 'two %PATH% written together join the last and first machine entries into one kept entry (B9)', machine: { Path: sz('C:\\M1;C:\\M2') }, user: { Path: ex('C:\\U9a;%PATH%%PATH%;C:\\U9b') }, Path: 'C:\\M1;C:\\M2;C:\\U9a;C:\\M2C:\\M1;C:\\U9b' },
+    { rule: 'a %PATH% glued to other text keeps the glued entries (B10)', machine: { Path: sz('C:\\M1;C:\\M2') }, user: { Path: ex('C:\\U10a%PATH%C:\\U10b') }, Path: 'C:\\M1;C:\\M2;C:\\U10aC:\\M1;C:\\M2C:\\U10b' },
+    { rule: 'a machine entry with a trailing backslash is a different entry (B14)', machine: { Path: sz('C:\\M1;C:\\M2') }, user: { Path: sz('C:\\U14;C:\\M1\\;C:\\U14z') }, Path: 'C:\\M1;C:\\M2;C:\\U14;C:\\M1\\;C:\\U14z' },
+    { rule: 'a user entry that expands to a machine entry is dropped (B16)', machine: { Path: sz('C:\\Windows\\system32;C:\\M2') }, user: { Path: ex('%SystemRoot%\\system32;C:\\U16') }, Path: 'C:\\Windows\\system32;C:\\M2;C:\\U16' },
+    { rule: 'a user Path left empty by that adds no trailing ;', machine: { Path: sz('C:\\M1') }, user: { Path: ex('%PATH%') }, Path: 'C:\\M1' },
+    { rule: 'the user PATHEXT replaces the machine one', machine: { PATHEXT: sz('.COM;.EXE') }, user: { PATHEXT: sz('.EXE;.PS1') }, PATHEXT: '.EXE;.PS1' },
+    { rule: 'a user %PATHEXT% is the machine value', machine: { PATHEXT: sz('.COM;.EXE') }, user: { PATHEXT: ex('%PATHEXT%;.PS1') }, PATHEXT: '.COM;.EXE;.PS1' },
+    { rule: 'REG_SZ is never expanded', machine: {}, user: { Path: sz('%USERPROFILE%\\bin') }, Path: '%USERPROFILE%\\bin' },
+    { rule: 'profile names expand only at the user stage', machine: { Path: ex('%SystemRoot%\\system32;%USERPROFILE%\\m') }, user: { Path: ex('%USERPROFILE%\\u;%APPDATA%\\u') }, Path: 'C:\\Windows\\system32;%USERPROFILE%\\m;C:\\Users\\u\\u;C:\\Users\\u\\AppData\\Roaming\\u' },
+    { rule: 'machine variables feed the expansion', machine: { JAVA_HOME: sz('C:\\jdk'), Path: ex('%JAVA_HOME%\\bin') }, user: {}, Path: 'C:\\jdk\\bin' },
+    { rule: 'an expandable value sees every plain value, but only the expandable values before it', machine: {}, user: { Path: ex('%NVM_HOME%;%NVM_SYMLINK%'), NVM_HOME: sz('C:\\nvm'), NVM_SYMLINK: ex('%NVM_HOME%\\link') }, Path: 'C:\\nvm;%NVM_SYMLINK%' },
+    { rule: 'volatile, Host-set and session-only names never expand; USERNAME is the machine key value', machine: { USERNAME: sz('SYSTEM') }, user: { Path: ex('%HOMEDRIVE%\\a;%TMPDIR%\\b;%HOST_ONLY%\\c;C:\\%USERNAME%;%UNDEFINED%') }, Path: '%HOMEDRIVE%\\a;%TMPDIR%\\b;%HOST_ONLY%\\c;C:\\SYSTEM;%UNDEFINED%' },
+  ];
+  it.each(rows)('$rule', async ({ machine, user, Path, PATHEXT }) => {
+    const asked: string[] = [];
+    const windowsLogon = await readWindowsLogonRegistry(async (key) => { asked.push(key); return keyValues(key === WINDOWS_MACHINE_ENVIRONMENT_KEY ? machine : user); });
+    expect(asked).toEqual([WINDOWS_MACHINE_ENVIRONMENT_KEY, WINDOWS_USER_ENVIRONMENT_KEY]);
+    const { env } = composeRuntimeEnvironment({ policy: {}, live: { ...session, Path: 'C:\\session-only' }, windowsLogon, platform: 'win32' });
+    expect({ Path: env.Path, PATHEXT: env.PATHEXT }).toEqual({ Path, PATHEXT });
+    expect(env).not.toHaveProperty('JAVA_HOME');
+  });
+
+  it('a passed PATH replaces the logon Path whatever its spelling', () => {
+    const { env, report } = composeRuntimeEnvironment({ policy: { pass: ['PATH'] }, live: { PATH: 'C:\\shims;C:\\Windows' }, windowsLogon: logonRegistry({ Path: sz('C:\\Windows') }), platform: 'win32' });
+    expect(env).toEqual({ PATH: 'C:\\shims;C:\\Windows', NO_PROXY: '127.0.0.1,localhost' });
+    expect(report.names).toEqual([{ name: 'NO_PROXY', source: 'sdk' }, { name: 'PATH', source: 'pass' }]);
+  });
+
+  it('exports one key at a time, machine first', async () => {
+    let running = 0;
+    let most = 0;
+    await readWindowsLogonRegistry(async () => {
+      running += 1;
+      most = Math.max(most, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running -= 1;
+      return new Map();
+    });
+    expect(most).toBe(1);
+  });
+
+  it('a failed registry read fails closed with logon-registry-unavailable', async () => {
+    const windowsLogon = await readWindowsLogonRegistry(async () => { throw new Error('reg export exited 1'); });
+    expect(windowsLogon).toEqual({ source: 'unavailable' });
+    expect(() => composeRuntimeEnvironment({ policy: {}, live: session, windowsLogon, platform: 'win32' }))
+      .toThrow(expect.objectContaining({ code: 'runtime_environment_unavailable', reason: 'logon-registry-unavailable' }));
+  });
+
+  const key = 'HKCU\\Environment';
+  const section = 'HKEY_CURRENT_USER\\Environment';
+  const parses: readonly { case: string; bytes: Uint8Array; values?: [string, WindowsRegistryString][] }[] = [
+    {
+      case: 'REG_SZ escapes, REG_EXPAND_SZ over a continued line, other types and a subkey skipped',
+      bytes: regExport(section, ['"PathExt"="C:\\\\工具\\\\\\"q\\";.JS"', hex2Line('Path', 'C:\\byok 空間 é\\bin;%USERPROFILE%'), '"Count"=dword:00000005', '"Bin"=hex:01,02', '"Multi"=hex(7):41,00,00,00,00,00', '@="default"', '', `[${section}\\Sub]`, '"Inner"="x"']),
+      values: [['PATHEXT', sz('C:\\工具\\"q";.JS')], ['PATH', ex('C:\\byok 空間 é\\bin;%USERPROFILE%')]],
+    },
+    { case: 'no byte order mark', bytes: regExport(section, []).slice(2) },
+    { case: 'an export of another key than the one requested (#1395 E1g)', bytes: regExport('HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', []) },
+    { case: 'a line that is no value', bytes: regExport(section, ['"Path"="C:\\\\a', 'b"']) },
+    { case: 'an odd-length expandable string', bytes: regExport(section, ['"Path"=hex(2):41']) },
+  ];
+  it.each(parses)('parses reg export: $case', ({ bytes, values }) => {
+    if (values === undefined) expect(() => parseWindowsRegistryExport(bytes, key)).toThrow();
+    else expect([...parseWindowsRegistryExport(bytes, key)]).toEqual(values);
+  });
+
+  it.runIf(process.platform === 'win32')('reads a non-ASCII value and the real logon keys through reg export', async () => {
+    const reg = path.win32.join(process.env.SystemRoot!, 'System32', 'reg.exe');
+    const scratch = `HKCU\\Software\\byok-sdk-test-1317-${process.pid}`;
+    const value = 'C:\\byok 空間 é\\bin;%USERPROFILE%\\x';
+    execFileSync(reg, ['add', scratch, '/v', 'Path', '/t', 'REG_EXPAND_SZ', '/d', value, '/f']);
+    execFileSync(reg, ['add', scratch, '/v', 'Count', '/t', 'REG_DWORD', '/d', '5', '/f']);
+    try {
+      expect([...await readWindowsRegistryKey(scratch)]).toEqual([['PATH', ex(value)]]);
+    } finally {
+      execFileSync(reg, ['delete', scratch, '/f']);
+    }
+    setWindowsLogonRegistrySource(undefined);
+    const { env, report } = await buildRuntimeEnvironment({});
+    expect(env.Path).toMatch(/system32/iu);
+    expect(report.names).toContainEqual({ name: 'Path', source: 'windows-session' });
   });
 });

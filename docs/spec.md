@@ -1034,7 +1034,10 @@ passes `DaemonConfig.runtimeEnvironment` to the adapters it builds, and
   with `RuntimeEnvironmentUnavailableError`, detection reports `refused` with
   `runtime_environment_unavailable` and the capture `code`, and an offer is
   declined before claim. win32 has no login shell; its base is the platform
-  baseline names of the live session (`windows-session`).
+  baseline names (`windows-session`): `PATH` and `PATHEXT` as logon builds
+  them from the machine and user `Environment` registry keys (read once per
+  process; a failed read is `logon-registry-unavailable`), the other names
+  from the live session.
 - `allowlist`: the platform baseline plus `allow`, from the live environment.
 - `pass`: names read from the live `process.env` at every build.
 

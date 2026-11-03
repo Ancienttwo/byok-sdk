@@ -12,7 +12,7 @@ import type { RuntimeDetectResult } from './types';
 /** One typed pre-claim admission cause, plus the optional environment capture code. */
 export interface RuntimeUnavailableAdmission {
   readonly cause: RuntimeUnavailableCause;
-  /** Only with `environment_unavailable`: why the login-shell capture failed (#1095). */
+  /** Only with `environment_unavailable`: why the login-shell capture or, on win32, the logon registry read failed (#1095, #1317). */
   readonly code?: ServiceEnvironmentUnavailableCode;
 }
 

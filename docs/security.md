@@ -262,9 +262,16 @@ from the live `process.env` at every build. The strict `allowlist` base takes
 only the platform baseline plus `allow` from the live environment. A failed
 capture fails closed: the runtimes report `refused:runtime_environment_unavailable:<code>`
 and offers are declined; no other environment is substituted. On Windows,
-which has no login shell, the base is the platform baseline names of the live
-session (`windows-session`); reading the user environment from the registry
-is a follow-up.
+which has no login shell, the base is the platform baseline names
+(`windows-session`): `PATH` and `PATHEXT` as logon builds them from the
+machine and user `Environment` registry keys, read once per process with
+`%SystemRoot%\System32\reg.exe export` into a private temp directory that is
+removed after the read; the other names come from the live session. A
+directory that only a PowerShell profile adds to the session `PATH` is
+therefore not in the base. A failed read fails closed as
+`refused:runtime_environment_unavailable:logon-registry-unavailable`. The
+exported file can hold secrets a user keeps in environment variables; its
+content is never logged or put into an error.
 
 Then `CLAUDECODE` (so a child agent starts as its own top-level session) and
 this SDK's own control-plane variables (`BYOK_*`) are removed, whatever listed
@@ -637,7 +644,8 @@ or any other `BYOK_*` value that reaches a build is reported only as a removed
 name under the `deny` rule — never as a value or a path. The support
 bundle and the diagnostics snapshot carry per-runtime counts only. No value is
 reported anywhere. Windows spawns no login
-shell (`windows-session`).
+shell (`windows-session`); it reads the logon registry values of `PATH` and
+`PATHEXT` instead.
 The daemon emits this closed projection as `environment-resolved`; the ordinary
 audit subscriber records it. Live status and diagnostics read the daemon's
 cached environment and runtime observations without executing CLI-side probes.

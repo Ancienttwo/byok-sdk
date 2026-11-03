@@ -43,7 +43,9 @@ import path from 'node:path';
  * `byok-agent start --service` additionally replaces `process.env` with the
  * snapshot (`lifecycle/service-environment.ts`). win32 has no login shell:
  * the snapshot source is `windows-session`, and the runtime environment takes
- * its baseline names from the live session environment.
+ * `PATH` and `PATHEXT` from the logon registry values and its other baseline
+ * names from the live session environment (`runtime/environment.ts`). A failed
+ * registry read fails closed as `logon-registry-unavailable`.
  *
  * Every report of the result — `start` stdout, `audit.jsonl`, `status` —
  * carries only {@link ServiceEnvironmentStatus}: a source, a closed code,
@@ -83,6 +85,7 @@ export const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES = [
   'output-too-large',
   'bad-frame',
   'shell-exit-nonzero',
+  'logon-registry-unavailable',
 ] as const;
 
 export type ServiceEnvironmentUnavailableCode = (typeof SERVICE_ENVIRONMENT_UNAVAILABLE_CODES)[number];

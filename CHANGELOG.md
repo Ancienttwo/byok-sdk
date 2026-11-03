@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Breaking (client)** — On Windows, the `login-shell` runtime environment
+  base takes `PATH` and `PATHEXT` from the logon registry values instead of
+  the live session (#1317). They are built as Windows builds them at logon
+  from `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment`
+  and `HKCU\Environment`, read once per process with `reg.exe export`: the
+  machine `Path`, then the user `Path` entries that are not empty and not
+  already a machine entry; the user `PATHEXT` over the machine one;
+  REG_EXPAND_SZ expanded with the names logon defines, never with
+  Host-settable or session-only names. A directory that only a PowerShell
+  profile adds to the session `PATH` no longer reaches the runtimes; add it to
+  the user `Path` instead. A failed read fails closed:
+  `RuntimeEnvironmentUnavailableError` with the new
+  `ServiceEnvironmentUnavailableCode` `logon-registry-unavailable`, and
+  runtimes report `refused:runtime_environment_unavailable:logon-registry-unavailable`
+  ([device setup](docs/device-setup.md)). The other `windows-session` names
+  still come from the live session, and report sources are unchanged.
 - **Internal (client)** — the SDK-owned OAR source moves from 0.83.0 to
   0.86.0 (`vendor/oar/47c2c3f/`, upstream commit `47c2c3f0`). The vendored
   Codex session takes upstream's manual compaction, which the SDK bridge does

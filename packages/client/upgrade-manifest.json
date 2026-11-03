@@ -7,13 +7,29 @@
   },
   "to": {
     "version": "0.36.0",
-    "snapshotSha256": "f82fc8482c1054149c3e663b82e9f4b794834643da7f67197be8cdd6db721680"
+    "snapshotSha256": "1d78ceed4d4b4e936d7f581b8fc86b1f20b713bd66e976850e2e337f0b0c224b"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "windows-logon-registry-path",
+      "impact": "breaking",
+      "summary": "On Windows the login-shell runtime environment base takes PATH and PATHEXT as Windows builds them at logon from the machine and user Environment registry keys (read once per process with reg.exe export), no longer from the daemon's live session (#1317). A directory only a PowerShell profile adds to the session PATH no longer reaches the runtimes; add it to the user Path in Environment Variables. A failed registry read fails closed with the new ServiceEnvironmentUnavailableCode logon-registry-unavailable (RuntimeEnvironmentUnavailableError; runtimes report refused:runtime_environment_unavailable:logon-registry-unavailable). A Host that switches on ServiceEnvironmentUnavailableCode handles the new member.",
+      "migration": "docs/device-setup.md#runtime-environment",
+      "items": [
+        "export:@byok-sdk/client#ServiceEnvironmentUnavailableCode"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "export:@byok-sdk/client#ServiceEnvironmentUnavailableCode",
+      "change": "changed",
+      "entry": "windows-logon-registry-path"
+    }
+  ]
 }

@@ -110,7 +110,7 @@ export interface RuntimeDetectionAdvisory {
 /**
  * `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode.
  * `platform_unsupported`: the host platform is not in {@link RuntimeAdapterDescriptor.platforms}; no probe ran.
- * `runtime_environment_unavailable`: the login-shell capture failed (`code`), so the runtime has no environment to start in (#1095).
+ * `runtime_environment_unavailable`: the login-shell capture or, on win32, the logon registry read failed (`code`), so the runtime has no environment to start in (#1095, #1317).
  */
 export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported' | 'runtime_environment_unavailable';
 
