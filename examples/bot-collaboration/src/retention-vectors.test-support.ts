@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hash, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/server/execution-core';
+import { hash, MIN_TOMBSTONE_RETENTION_MS, type Json } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from './model';
 import type { CommitRequest } from './rules/commit';
 import { RetiredIdentityError, type Command } from './rules/commands';
@@ -15,6 +15,8 @@ export interface RetentionSubject extends CommitSubject {
   retain(input: RetentionInput, limits: RetentionLimits): RetentionResult | Promise<RetentionResult>;
   /** Writes the stored collaboration state directly, as the Host's passes do. */
   change(edit: (state: CollaborationState) => void): void | Promise<void>;
+  /** The archived row of `namespace` and `id`, as the store's application row port reads it. */
+  archived(namespace: string, id: string): Json | undefined | Promise<Json | undefined>;
 }
 export const RETENTION_NOW = 10_000;
 const LIMITS: RetentionLimits = { contextTurnLimit: 1 };
@@ -183,6 +185,8 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       expect(state.team.rooms.room!.messages.map(row => row.id)).toEqual(['live', 'old2', 'old3']);
       expect(state.team.rooms.room!.visibleFrom).toEqual({ main: 0, b: 1 });
       expect(seen(state)).toEqual(before);
+      for (const id of ['old', 'round', 'seat']) expect(await subject.archived('roomMessages', id), id).toEqual(message(id));
+      expect(await subject.archived('roomMessages', 'live')).toBeUndefined();
     });
 
     it('replays a moved command record, and refuses a retired Turn id at admission until the end', async () => {

@@ -469,6 +469,9 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
   the state stays too. The same call recomputes `visibleFrom`: it is an offset
   in the kept list, so each member sees the same kept messages as before. The
   state, and so a snapshot, no longer holds the whole room history.
+  `historyWindow.omittedMessages` and `notice` of a seat ContextPack count only
+  messages still in the state, as `omittedTurns` does; a count over moved
+  messages would need a stored count for each Bot.
 
 After retention, a late message for an archived Turn gets `binding_mismatch`,
 and an echo can no longer match an archived delivery. Back up the whole SQLite
@@ -710,8 +713,12 @@ transaction, in the same phase as `history`.
   message) is not projected. The Host writes it to its authority first, then
   calls K8, so the next seat reads it.
 - The ledger does not store the mode. Each time a Host turns the option on, it
-  first writes the posts made while it was off from `snapshot().team.rooms` to
-  its authority, deduplicated by id.
+  first writes the posts made while it was off to its authority, deduplicated
+  by id. Turn the option on before the first retention: retention moves the
+  room messages of archived roots out of `snapshot().team.rooms` (see
+  Retention). After a retention, the backfill also reads the archived rows of
+  namespace `roomMessages`, which the owner switch export carries in its
+  `archived` section.
 
 The team comes from this ledger, unless the `team: 'external'` option is set.
 
@@ -974,8 +981,10 @@ Other schema composition errors propagate as Host defects. Only
 
 Unmentioned messages are stored as background. They do not create a seat, but
 a later selected member can see eligible background messages. Each member has
-a persisted append offset in `visibleFrom`. New members see only messages
-appended after joining. Retained members keep their offset. Leaving and
+a persisted offset into `room.messages` in `visibleFrom`. New members see only
+messages appended after joining. Retained members keep their offset; retention
+lowers it by the messages that it moves from before it, so the member sees the
+same kept messages. Leaving and
 rejoining resets it. Both owner edits and Main Bot room edits use this rule.
 A pre-join root request is also excluded from a new member's Request section.
 A delayed post appended after joining is visible. Already frozen offers keep
@@ -987,7 +996,8 @@ SQLite reopen, persona writes, and submit_result helper. `src/rooms.test.ts`
 checks budgets, authority, atomic refusal, and context limits as state rules.
 `roomInput` and all other mutations use the same serial Host consumer. Do not
 call K4 mutation APIs directly. Upload projections with `core.flushProjections`
-or read `snapshot().team` for room history, seats, and profile delivery state.
+or read `snapshot().team` for seats, profile delivery state and the room
+messages that retention has not moved.
 
 ## Persona delivery failures
 

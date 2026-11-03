@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.36.0",
-    "snapshotSha256": "cbf1825694d3299ffea5360fe5fd35219cf2a19f08d207882105879ee0d171f9"
+    "snapshotSha256": "bba576aae24325da6b481937780ead20908bdc685dbd07a02eb573f1f8654110"
   },
   "configFields": {
     "status": "tracked",
@@ -18,7 +18,7 @@
     {
       "id": "k8-room-message-retention",
       "impact": "breaking",
-      "summary": "K8 retainRoots now also moves room messages out of the collaboration state (#1394), with or without roomHistory: each message whose round root or seat is no longer in the state, except the last contextTurnLimit messages of its room, becomes an application row in namespace roomMessages, keyed by message id. The same call recomputes visibleFrom as an offset in the kept list, so every member's seat ContextPack keeps the same messages; historyWindow.omittedMessages counts only messages still in the state. The Room shape and the state version do not change. A Host that read room.messages positions or visibleFrom from a snapshot as absolute offsets must read room history from the archived roomMessages rows or its roomHistory authority instead. A Host that vendored K8 copies the new src/retention.ts and src/retention-vectors.test-support.ts.",
+      "summary": "K8 retainRoots now also moves room messages out of the collaboration state (#1394), with or without roomHistory: each message whose round root or seat is no longer in the state, except the last contextTurnLimit messages of its room, becomes an archived row in namespace roomMessages, keyed by message id. The same call lowers each visibleFrom offset by the messages it moves from before it, so every member's seat ContextPack keeps the same messages; historyWindow.omittedMessages and notice count only messages still in the state, as omittedTurns does. The Room shape and the state version do not change. snapshot().team.rooms no longer holds the whole room history: a Host that turns roomHistory on should do so before the first retention; after a retention, its backfill also reads the roomMessages archived rows, which the owner switch export carries in its archived section. A Host that vendored K8 copies the new src/retention.ts, src/rules/rooms.ts and src/retention-vectors.test-support.ts, and adds archived(namespace, id) to its RetentionSubject.",
       "migration": "examples/bot-collaboration/README.md#retention",
       "items": [
         "example:bot-collaboration"
@@ -30,7 +30,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=627add813b3eea45",
-      "after": "K8 0.0.1 src-sha256=06b2383853c3c344",
+      "after": "K8 0.0.1 src-sha256=9f60bc72cd4397fd",
       "entry": "k8-room-message-retention"
     }
   ]
