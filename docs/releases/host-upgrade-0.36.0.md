@@ -45,7 +45,7 @@ All nine public packages move together. Pin each one to exactly 0.36.0.
 | --- | --- |
 | Git tag | `v0.36.0` |
 | Release commit SHA | the merge of the release PR on `main`, recorded at tagging |
-| Release PR base | main `a43ebba2c` |
+| Release PR base | main `de9c7960e` |
 
 Verify a source checkout with `git rev-parse 'v0.36.0^{commit}'`; the result
 must equal the release commit. The annotated tag object is not the source
