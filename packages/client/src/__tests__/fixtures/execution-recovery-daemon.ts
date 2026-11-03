@@ -1,7 +1,7 @@
 import { testRuntimeEnvironment } from './runtime-env';
 import type { RuntimeEnvironment } from '../../runtime/environment';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { appendFileSync, existsSync, promises as fs, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, promises as fs, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
@@ -47,6 +47,19 @@ if (await runSdkReservedHelperCommand()) process.exit(0);
 
 const config = JSON.parse(readFileSync(process.argv[2]!, 'utf8')) as Config;
 await fs.mkdir(config.controlDir, { recursive: true });
+
+// Tests read these files as soon as they exist, so each one appears whole:
+// write a sibling temp file, then rename it over the target.
+function writeFileAtomic(file: string, content: string): void {
+  const temp = `${file}.${process.pid}.tmp`;
+  writeFileSync(temp, content);
+  renameSync(temp, file);
+}
+
+function appendLineAtomic(file: string, line: string): void {
+  const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  writeFileAtomic(file, `${existing}${line}\n`);
+}
 
 function checkpoint(name: string): void {
   writeFileSync(path.join(config.controlDir, `${name}.reached`), `${process.pid}\n`);
@@ -110,7 +123,7 @@ class ControlledSession implements Session {
             if (!connected.ok) throw new Error(connected.reason);
             try {
               const receipt = await connected.client.request('agent_results.submit', { contextToken: resultServer.env!.BYOK_AGENT_RESULT_CONTEXT, outcome });
-              writeFileSync(path.join(config.controlDir, `${self.taskId}.receipt.json`), JSON.stringify(receipt));
+              writeFileAtomic(path.join(config.controlDir, `${self.taskId}.receipt.json`), JSON.stringify(receipt));
               checkpoint('result-staged');
             } finally { connected.client.close(); }
           }
@@ -179,9 +192,9 @@ class ControlledAdapter implements RuntimeAdapter {
             throw new Error('execution-recovery fixture adapter has no prepared-input lane');
           }
           const taskId = startInput.manifest.taskId;
-          appendFileSync(
+          appendLineAtomic(
             path.join(config.controlDir, 'runtime-starts.jsonl'),
-            `${JSON.stringify({ taskId, pid: process.pid, instruction: startInput.instruction })}\n`,
+            JSON.stringify({ taskId, pid: process.pid, instruction: startInput.instruction }),
           );
           return new ControlledSession(taskId, startInput, config.ownedRuntimeTree === true ? await spawnOwnedRuntimeTree(taskId) : undefined);
         },
