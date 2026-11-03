@@ -485,7 +485,7 @@ describe('Windows projection ACL verification', () => {
       if (over.icacls !== undefined) return { exitCode: over.icacls, stdout: '', stderr: 'C:\\Users\\someone\\secret: Access is denied.' };
       if (args[1] !== '/save') return { exitCode: 0, stdout: 'Successfully processed 1 files', stderr: '' };
       const leaf = path.basename(args[0]!);
-      const record = leaf === 'user' ? `user\r\nD:PAI(A;;FR;;;${over.userRendering ?? user})\r\n` : over.saved?.(leaf) ?? `${leaf}\r\n${sddl}\r\n`;
+      const record = leaf === 'user' ? `user\r\nD:PAI(A;;FA;;;${over.userRendering ?? user})\r\n` : over.saved?.(leaf) ?? `${leaf}\r\n${sddl}\r\n`;
       await fs.writeFile(args[2]!, Buffer.from(record, 'utf16le'));
       return { exitCode: 0, stdout: 'Successfully processed 1 files', stderr: '' };
     });
@@ -511,7 +511,7 @@ describe('Windows projection ACL verification', () => {
       ['C:\\Windows\\System32\\icacls.exe', [reference, '/save']],
       ['C:\\Windows\\System32\\icacls.exe', [directory, '/save']],
     ]);
-    expect(run.mock.calls[1]![1]).toEqual([reference, '/inheritance:r', '/grant:r', `*${user}:(R)`]);
+    expect(run.mock.calls[1]![1]).toEqual([reference, '/inheritance:r', '/grant:r', `*${user}:(F)`]);
     await expect(fs.access(path.dirname(reference))).rejects.toMatchObject({ code: 'ENOENT' });
   }));
   it('accepts OWNER RIGHTS with READ_CONTROL plus SYNCHRONIZE and well-known SIDs in literal form', async () => withDirectory(async directory => {
@@ -547,7 +547,7 @@ describe('Windows projection ACL verification', () => {
   it.each([
     ['another leaf name', { saved: () => `other\r\n${good}\r\n` }],
     ['a reference rendering of another SID', { userRendering: 'S-1-5-21-2000' }],
-    ['a reference rendering with two ACEs', { userRendering: `${user})(A;;FR;;;SY` }],
+    ['a reference rendering with two ACEs', { userRendering: `${user})(A;;FA;;;SY` }],
     ['a second record', { saved: (leaf: string) => `${leaf}\r\n${good}\r\n${leaf}\r\n${good}\r\n` }],
     ['a whoami line without a SID', { whoamiOut: '"host\\user","user"\r\n' }],
   ])('refuses %s', async (_label, over) => withDirectory(async directory => {

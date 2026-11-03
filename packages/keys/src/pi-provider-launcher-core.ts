@@ -537,10 +537,11 @@ export async function assertWindowsPiProjectionAcl(
   try {
     // icacls writes some SIDs as aliases: the built-in local Administrator
     // (RID 500) is `LA`. Render the current user's SID once, alone in the DACL
-    // of an empty file, and match exactly that form (#1373).
+    // of an empty file, and match exactly that form (#1373). The ACE is full
+    // control so the file can be deleted under a parent that grants Modify only.
     const reference = path.join(saveDir, 'user');
     await fs.writeFile(reference, '');
-    await runWindowsTool(run, icacls, 'icacls', [reference, '/inheritance:r', '/grant:r', `*${currentUser}:(R)`]);
+    await runWindowsTool(run, icacls, 'icacls', [reference, '/inheritance:r', '/grant:r', `*${currentUser}:(F)`]);
     const rendered = /^D:[A-Z]*\(A;;[^;()]*;;;([^;()]+)\)$/u.exec(await saveSddl(run, icacls, reference, path.join(saveDir, 'user.acl')));
     if (!rendered) throw new Error('pi_projection_acl_invalid_output');
     userToken = rendered[1]!;
