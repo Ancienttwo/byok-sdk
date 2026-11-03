@@ -3,8 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createPrivateTempDir, ensurePiProjectionDir, ensureSecureDir } from './packages/client/src/util/secure-dir';
-import { assertPiProjectionDirectory } from './packages/keys/src/pi-provider-launcher-core';
+import { createPrivateTempDir, ensurePiProjectionDir, ensureSecureDir } from '../../src/packages/client/src/util/secure-dir';
+import { assertPiProjectionDirectory } from '../../src/packages/keys/src/pi-provider-launcher-core';
 
 const user = execFileSync('whoami', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' }).trim();
 const sid = /"(S-1-[0-9-]+)"$/u.exec(user)?.[1] ?? '?';
