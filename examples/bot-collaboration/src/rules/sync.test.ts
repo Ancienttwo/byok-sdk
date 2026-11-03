@@ -67,16 +67,19 @@ describe('syncTurn', () => {
   });
 
   it('fails a retired Turn with the reason, an audit line and one report', () => {
-    for (const [reason, line] of [['result_retired', 'Turn result retired before sync: t1'], ['turn_retired', 'Turn identity retired: t1']] as const) {
+    const reasons = [['result_retired', 'Turn result retired before sync: t1'], ['turn_retired', 'Turn identity retired: t1']] as const;
+    // #1393: a late seat is released but not terminal, so a retired Turn ends it as well.
+    const seats = [{ status: 'queued', released: false, late: false }, { status: 'late', released: true, late: true }] as const;
+    for (const [[reason, line], seat] of reasons.flatMap(r => seats.map(seat => [r, seat] as const))) {
       const s = state(), row = turn(s, { status: 'queued', source: 'room_slot' }), out = published();
-      s.team.seats.t1 = { id: 't1', roundId: 'round', botId: 'main', status: 'queued', released: false, late: false };
+      s.team.seats.t1 = { id: 't1', roundId: 'round', botId: 'main', ...seat };
       s.team.rounds.round = { id: 'round', root: 'root', roomId: 'r', input: '{}', seats: ['t1'], limit: 5, counts: { main: 1 }, closed: false };
       expect(syncTurn(s, row, facts(undefined, false, reason), OPTIONS, out.publish)).toBeUndefined();
       expect(s.team.seats.t1).toMatchObject({ status: 'failed', released: true, reason });
       expect([row.status, row.conclusion, row.reported, s.audit]).toEqual(['failed', 'failed', true, [line]]);
       // #1393: the retired seat is terminal, and it was the root's last seat.
       expect(out.rows).toEqual([
-        ['room-seat:r:t1', { roomId: 'r', root: 'root', roundId: 'round', seatId: 't1', botId: 'main', status: 'failed', late: false, reason }],
+        ['room-seat:r:t1', { roomId: 'r', root: 'root', roundId: 'round', seatId: 't1', botId: 'main', status: 'failed', late: seat.late, reason }],
         ['room-root:r:root', { roomId: 'r', root: 'root', seats: ['t1'] }],
         ['bot-turn:t1', expect.objectContaining({ reason })]]);
     }

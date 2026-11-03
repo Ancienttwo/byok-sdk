@@ -152,9 +152,10 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   const retired = turn.conclusion ? undefined : facts.retired(turn.id);
   if (retired) {
     turn.status = 'failed'; turn.conclusion = 'failed';
-    // The seat facts no longer see the intent, so release the seat here, as for a failed conclusion. Its round moves on.
+    // The seat facts no longer see the intent, so end the seat here, as for a failed conclusion. Its round moves on.
+    // A late seat is released but not terminal, so it ends here too.
     const seat = state.team.seats[turn.id];
-    if (seat && !seat.released) {
+    if (seat && !seatSettled(seat)) {
       seat.status = 'failed'; seat.released = true; seat.reason = retired;
       publishSettled(state.team, [seat.id], publish);
     }
