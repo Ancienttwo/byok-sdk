@@ -3,7 +3,7 @@ import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { json, type Card, type Question, type Turn } from './turn';
 import { applyDelegate, arbitrateCancel, endChain, observeStart, type DelegationBot, type DelegationState, type IntentFacts, type Publish } from './delegation';
 import { applySpeech, memberPresent, roomMessageProjection, type RoomsState } from './rooms';
-import { requireMain } from './team';
+import { inactive, requireMain } from './team';
 import { observes, type AutonomyGate, type AutonomyState } from './autonomy';
 
 /**
@@ -59,7 +59,7 @@ export function applyTurnOutcome(state: OutcomeState, turnId: string, taskId: st
   };
   const bot = state.team.bots[turn.botId];
   const seat = state.team.seats[turn.id];
-  if (!bot || bot.archived || seat && (!memberPresent(state.team, seat) || ['removed', 'busy', 'blocked'].includes(seat.status))) {
+  if (inactive(bot) || seat && (!memberPresent(state.team, seat) || ['removed', 'busy', 'blocked'].includes(seat.status))) {
     state.audit.push(`Outcome audit only: ${taskId}`); return;
   }
   if (seat) {

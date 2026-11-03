@@ -71,6 +71,24 @@ restart admits every open intent. A Host intent shares the FIFO of its Agent: on
 a Bot's agentRef, that Bot's later Turns wait until it settles. An exact replay
 returns the same intent while K4 keeps it.
 
+An Agent message of a Host intent goes to the message handler of the same name
+in `hostIntentMessages` (#1356). The handler runs synchronously in the K4
+message transaction and returns the `MessageDisposition` that K4 records:
+`{ outcome: 'accepted' }` or `{ outcome: 'refused', reasonCode }`. K8 does not
+deliver the body; the handler delivers it with `tx.publish` or the Host's own
+channel. A handler that throws rolls the transaction back, so neither K8 nor K4
+writes anything, and a handler that returns a promise or another shape throws
+too. An accepted message is recorded in `replies` under its task id, with the
+intent key as `turnId` and no body, so a replay is accepted without the
+handler. A refused message keeps its command record, so a replay gets the same
+refusal without the handler and other content for the same message id gets
+`message_conflict`. A Host intent whose name has no message handler refuses its
+messages with `binding_mismatch`. A name in `hostIntentMessages` needs a
+`hostIntents` handler. `enqueueHostIntent` refuses an execution with
+`messageEgress` whose name has no message handler, and a restart refuses an
+open such intent whose message handler is not registered. The pass that removes
+a compacted Host intent's record also removes its replies.
+
 Cancel a Host intent with the owner call `cancelHostIntent(key)` (#1320), not
 with `bot.core.cancel`. K4 records the cancel on the intent row, so a restart
 reads the same fact. An intent that was not submitted settles as `cancelled`
@@ -626,9 +644,11 @@ transaction freezes only a Turn that still has no offer.
   `outcomeSummary`, and optional `reply`, the reply text that the user saw for
   that Turn (#1318). Rows in another shape are refused, as is a `reply` that
   is not a string.
-- `historyRowFromTurn` in `src/rules/context.ts` builds one row from a
-  `bot-turn:<id>` projection value and the caller's `reply`, so the authority
-  does not derive `outcomeSummary` itself.
+- `historyRowFromTurn` builds one row from a `bot-turn:<id>` projection value
+  and the caller's `reply`, so the authority does not derive `outcomeSummary`
+  itself. `contextTurns` checks rows in this shape and returns them as
+  `ContextTurn[]`. The K8 entry exports both and the `ContextTurn` type
+  (#1356).
 - A row's `reply` counts in `contextMaxBytes` with the rest of the row. When
   the rows do not fit, whole rows go oldest first and `historyWindow` counts
   them; a reply is never cut.
@@ -712,10 +732,34 @@ template.
   revision.
 - The snapshot covers the Bots only. `setMainBot`, `create_bot`, `update_bot`
   and `delete_bot` refuse with `external_team`, and the Main Bot schema does
-  not offer those three actions. Rooms, team notes and persona retries stay
-  local.
+  not offer those three actions. Team notes and persona retries stay local.
+  Rooms stay local too, unless the external rooms mode below is on.
 - The ledger stores the mode. A ledger with a local team cannot open in
   external mode, and an external ledger cannot open without the option.
+
+A snapshot Bot can carry `participation: 'suspended'` (#1319). The Bot stays in
+the team, its rooms and its routines, but takes no new K8 work. `participation`
+is `'suspended'` or absent; any other value refuses the whole snapshot as
+`Invalid team snapshot Bot`, and nothing changes. A suspended Bot:
+
+- leaves the `delegate.to` and `room_call` member lists of every schema frozen
+  after the snapshot, and gets no room seat, even when a message names it;
+- ends its open work as an archived Bot's does: a Turn that has not frozen
+  concludes `cancelled`, a frozen intent that has not started is cancelled, and
+  work that started runs on with its outcome kept as audit only. An open
+  delegation to it resolves `refused` with reason `target_suspended`; a verdict
+  for a delegation that it started gets no reply Turn
+  (`undelivered: 'initiator_suspended'`);
+- refuses `input`, an owner `receive`, `answer` of its question and `decide` of
+  its card with `TeamModeError` code `bot_suspended`
+  (`bot_suspended: Bot <id> is not participating`), and the commit writes
+  nothing. `setAutonomy`, `persona_ready` and push routes stay available.
+
+A later snapshot without the field restores the Bot as it was: its profile
+revision, `readyRevision`, autonomy, room memberships and routines are kept.
+Work cancelled or refused while it was suspended, and routine slots that it
+missed, do not come back. Archive stays for a deleted Bot: a suspended Bot that
+a snapshot no longer lists is archived.
 
 With `persona: 'external'` as well, the Host owns the persona projection of
 each Bot (#879). The Host projects the Agent home with its own daemon hook, so
@@ -735,6 +779,41 @@ there is one projection writer and one revision for each agentRef.
   `personaReady` only after the snapshot that introduces that revision
   resolves: an earlier report is refused, not stored.
 - `retryPersona` refuses with `external_persona`.
+- The ledger stores this mode too, so a restart cannot change it. The mode is
+  fixed once stored, with no migration. The option needs `team: 'external'`.
+
+With `rooms: 'external'` as well, the team snapshot also owns the rooms
+(#1321). Each snapshot carries `rooms`, the authority's whole room list, and
+`applyTeam({ revision, bots, rooms })` writes it after the Bots. Without the
+mode, a snapshot with `rooms` is refused; with it, a snapshot without `rooms`
+is refused, and nothing changes.
+
+- A room has `id`, `name`, `members`, and optionally `admin`, `mode`,
+  `announcement` and `memberMentions`. The id matches
+  `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` and is not an `Object.prototype` key.
+  The rules are those of `create_room`, with one difference: a room can have
+  no member. Its members are Bots of the same snapshot, 0 to 12 and distinct,
+  and its admin is a member. `mode` is `mention` or omitted, `memberMentions`
+  is `execute`, `ignore` or omitted. A snapshot holds at most
+  `TEAM_ROOM_LIMIT` (64) rooms, and room order is not content.
+- A new room starts with no visible history for its members. A listed room
+  takes the snapshot's fields as a whole: an omitted admin, announcement or
+  `memberMentions` is cleared, and `memberMentions` returns to `execute`. A
+  member that stays keeps its visibility, a new member sees messages from now
+  on, and a member that left and came back starts again from now.
+- A room that the snapshot no longer lists is archived for good: it shows
+  `archived: true`, with no member, no visibility and no admin. At the next
+  pass its seats are removed as for a member that left: a seat that has not
+  started is cancelled, a seat that started runs on and its speech is kept as
+  audit only, and the round closes once every seat is released. `roomInput`,
+  a room `receive` and a `room_call` round in it throw `Room is archived`, so
+  the Host stops giving K8 its inbound messages first. A snapshot that lists
+  an archived room is refused, and nothing changes.
+- `createRoom`, `updateRoom` and `setMemberMentions` refuse with
+  `external_rooms`. The Main Bot schema offers neither `create_room` nor
+  `update_room`, and an outcome that has one is refused with `external_rooms`.
+- A suspended Bot (#1319) can be a room member, under the suspension rules
+  above.
 - The ledger stores this mode too, so a restart cannot change it. The mode is
   fixed once stored, with no migration. The option needs `team: 'external'`.
 
@@ -765,6 +844,21 @@ again when applying each action. Creation offers three local Bot slots and one
 local room slot. A room can use those Bot slots in the same outcome. Model ids
 come from `BotOptions.models`. The default model id is `default`. Each model
 has a Host-owned execution template. A Bot update cannot move its device.
+The Host can replace the templates at run time with `setModels(models)`, for
+example after a device key changed (#1357). Construction and `setModels` apply
+each template by model name to every unarchived Bot, a suspended one too. The
+Bot keeps its device and its profile; its agentRef follows its profile
+revision. No profile revision, readiness or persona projection changes. A Turn
+that froze before keeps the execution it froze with, also while it waits in
+the K4 FIFO. A template outside `readOnlyToolsets` refuses the call, which then
+changes nothing. A Bot whose model has no template keeps its stored template,
+and each of its Turns, a sealed routine Turn too, blocks with
+`Unavailable model: <name>` before it freezes (`blocked:<turnId>`). It freezes
+once a later `setModels` or restart provides the template. No write entry
+refuses a missing template of an existing Bot: a snapshot or `update_bot` that
+names such a model stores the profile and keeps the stored template. A new Bot
+still needs a template, since its device comes from it. A sealed routine's
+template is the sealed copy and is not re-projected.
 Profiles cap the active team at 24 Bots. Team notes cap at 20 entries of 300
 characters. Every team Bot receives these notes. Other Bots' private turns and
 persona text do not enter its ContextPack. No cross-home memory read occurs.
@@ -787,6 +881,19 @@ The Host never scans text for names or `[PASS]`. Rooms support mention mode.
 An admin identity grants a larger budget. It does not create an implicit seat.
 The optional admin mode is refused. `updateRoom` is an authenticated owner API
 for membership, admin, name, and announcement changes.
+
+`createRoom(roomId, fields)` is an authenticated owner API that creates a room
+with a Host room id and no model run (#1321). The id follows the snapshot room
+id rule ([External team authority](#external-team-authority)), and the fields
+follow `create_room`: 1 to 12 distinct active members, an admin that is a
+member, and mention mode only. The command id comes from the room id. The same
+id with the same name, members, admin and announcement replays the first
+result, and other fields are an `identity_conflict` (`Room identity conflict`).
+An id that already has a room, also one that a Main Bot outcome created, throws
+`Room already exists`. A new room starts with no visible history for its
+members. Later membership changes follow `updateRoom`. A local room cannot be
+deleted. In the external rooms mode, `createRoom` refuses with
+`external_rooms`.
 
 `setMemberMentions(roomId, value, principal)` is an owner API for the
 `memberMentions` setting of a room (#1230). The value is `execute` or `ignore`;
@@ -1008,7 +1115,11 @@ after that state, reports in its own Turn `H('bot_reply', delegationId)`.
 When an outcome has no accepted item, one refusal report Turn
 `H('bot_reply', taskId)` holds all its refusals. That
 report has no `delegate` fragment. Status changes publish
-`delegation:<id>:<revision>` projections.
+`delegation:<id>:<revision>` projections with `id`, `revision`, `root`,
+`fromBotId`, `toBotId`, `request`, `status`, and `verdict`, `reason`,
+`replyTurnId` and `undelivered` once set. `root` is the delegation's root, so a
+Host can place a cross-Bot delegation under the conversation of its root
+(#1356).
 
 The root Bot budget is 12 units. An outcome with `n` accepted items reserves
 `n + max(n, 1)` units: one B unit and one A reply slot for each item.
@@ -1323,7 +1434,8 @@ source's idempotency key. Whether a platform honors that key is its adapter's
 concern (`docs/host-im-adapter.md`); the switch does not change it.
 
 This entry has no I/O. L's export, import and commit are in "Owner switch on L";
-H's come in a later #975 slice.
+H's are in the hosted example README, "Owner switch export (#975)" and "Owner switch
+import (#975)".
 
 ### Second-device placement and device wait
 
@@ -1339,7 +1451,9 @@ const models = {
 
 A `create_bot` action selects `model: 'remote'`. The Host copies that
 execution template's device into the Bot profile. A model update keeps the
-Bot's device. This is creation placement, not home migration.
+Bot's device. This is creation placement, not home migration. A changed
+`remote` template, passed to `setModels` or at a restart, is re-projected onto
+each Bot of that model on its own device; it does not move a Bot either.
 Install `createBotPersonaProjection()` on both daemons. Wait for exact persona
 readback before dispatch. Device B needs SDK daemon and runtime code, with
 its own credential store and Agent homes. It needs no collaboration Host.

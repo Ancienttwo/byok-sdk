@@ -133,6 +133,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H sealed Bot routines on real Postg
     }
   });
 
+  it('#1358: seals against the template re-projected from the Host config, not the stored one', async () => {
+    const scope = await scoped(false);
+    // A stored template from before the Bot's profile revision 1: only the re-projection gives it the agentRef that v1 is sealed for.
+    await store().seed(scope, state => { state.team.bots.main!.execution.payload.agentRef.profileRevision = '0'; });
+    await store().createSealedRoutine(scope, 'main', action(1, v1), NOW);
+    expect(await routineRow(scope)).toMatchObject({ definition: { id: ID, version: 1 } });
+    expect((await store().read(scope)).team.bots.main!.execution.payload.agentRef).toEqual(agentRef);
+  });
+
   it('takes both as owner commands of the entry: a non-owner is refused with nothing written, and an owner write syncs', async () => {
     const scope = await scoped(false), synced: string[] = [];
     const entry = new HostedCommandEntry<EntryCaller>(store(), { authenticate: async credential => credential, owner: async () => 'owner',

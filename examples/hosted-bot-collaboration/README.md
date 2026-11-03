@@ -26,6 +26,12 @@ transaction. The transaction holds the state change, the command record and the 
   `updatePersona`, `teamBot`, the outcome's `manage`, and the push route ports with `{ channel: true }`. A model template
   carries the device that a new Bot runs on, so each scope has its own config. `commit`, `receive`, `consume` and `finish`
   take the Host clock, not ports. The sync reads its model names and read-only toolsets from the same config.
+- Each `sync` and each Bot routine command first re-projects the config's templates onto the scope's Bots with K8
+  `applyModels`, as L's construction and `setModels` do (#1358). A Bot keeps its device, and its agentRef follows its
+  profile revision. A Bot whose model is not in the config keeps its stored template, and its Turns block with
+  `Unavailable model: <name>` until the config has the model; then it freezes with that model's template. A sealed
+  routine seals the re-projected template. A template that fails the toolset check refuses the whole call, which then
+  writes nothing. A frozen Turn and an already sealed routine copy keep their template.
 - A command reads the intent facts (K8 `CommandPorts.intents`) from the intent rows, under the scope lock, as L reads its
   K4 intents in the commit transaction. The committed intents of an outcome
   (`outcome.committed`, which a Main Bot cancel reads) come from the same rows.
@@ -125,7 +131,7 @@ SDK call.
 insertion order, in one transaction under the scope lock. It writes each step as L writes it to K4:
 
 - `freeze`: `freezeIntent` stores the rule's intent input as it is.
-- `cancel`: the open intent of an archived Bot gets `cancel_reason = 'cancelled'`. A row that no submit tried also gets
+- `cancel`: the open intent of an archived or suspended (#1319) Bot gets `cancel_reason = 'cancelled'`. A row that no submit tried also gets
   the conclusion `cancelled`, as K4 `queuedExpiry` concludes a cancelled queued intent: the submit claim runs under the
   same lock, so no SDK attempt can exist. A tried row waits for the reconciliation.
 - `routine`: K4 `promoteOccurrence` runs on the routine slice. The intent row takes the step's execution and the K4
@@ -171,7 +177,7 @@ facts from the intent rows again after the steps wrote: `intent`, `started` (any
 claim or a terminal that is not a decline, as K8 `intentFacts`: the intent row, and the earlier generations that an import
 moved to `intent_execution`) and `declineCode`. `offeredTo` throws: settlement never reads it.
 Settlement spends or releases units, moves a claimed delegation to `running`, writes the `lateTurnId` audit line,
-freezes the `target_archived` cancel, resolves a cancel once its target concluded, shows `uncertain` after the delegation
+freezes the `target_archived` or `target_suspended` cancel, resolves a cancel once its target concluded, shows `uncertain` after the delegation
 timers, and gives a chain end that did not succeed its verdict. A verdict can add the `bot_reply` Turn of a batch join.
 
 The same round then delivers each new delegation cancel fact (`deliverCancels`), as the L pass does after its sync. A
@@ -357,6 +363,18 @@ L lets the Host run its own work on the K4 core (`enqueueHostIntent`, #882). H d
   instead; H has no startup scan over every scope), and `outcome_failed` for a Bot Turn whose outcome commit throws. The
   reconciler then writes `<code>: <message>` to the row's `last_error` and one audit line
   (`Intent outcome refused <code>: <key> <message>`) when that value changed, so several processes add one line.
+- An Agent message of a Host intent goes to the store's `hostIntentMessages` handler of the same name (#1362), as L's
+  (#1356). The consume transaction runs it synchronously, after the binding check and the accepted-reply check, with
+  `{ intent: { key, taskId }, publish }`, and returns its `MessageDisposition`. An accepted message is recorded without its
+  body, and K8 does not deliver it. A handler that throws, returns a thenable or another shape throws, and nothing is
+  written. A refusal keeps its command record, so a replay returns it and other content for the id is `message_conflict`.
+  Without a message handler the message is refused with `binding_mismatch`, unless the frozen execution has
+  `messageEgress`: then the consume throws `An open Host intent needs the message handler <name>` and writes nothing,
+  since H has no startup scan over every scope. Each `hostIntentMessages` name needs a `hostIntents` handler, and
+  `enqueueHostIntent` refuses an execution with `messageEgress` whose name has no message handler, with nothing written.
+- Retention moves the reply of a concluded Host intent from the state into `archived_row` (namespace `replies`, no
+  expiry), as it moves a Turn's reply, also when compaction removed the intent row first. The replay check and the switch
+  export's receipt check read it there.
 - `HostedReconciler.failStuckIntent(scope, key)` is L's owner `failStuckIntent`. It reconciles that one row again, and
   only when that throws `IntentOutcomeError` for the key, one transaction under the scope lock concludes the row `failed`
   with no terminal, writes `Intent failed by owner <code>: <key> <message>` and runs the version switch. It refuses an
@@ -392,10 +410,11 @@ mode revision in one write, and keeps the row as the tombstone.
   projection with a fixed body, and an audit line with the reason. The rest of the scope syncs, an Agent's delegation to
   such a Bot included. A Turn that already has an intent is not checked: its work lands under its own identity.
 - A held Turn is released by the next sync that does not hold it. The scope's due time (`scope.due_at`, written in each
-  transaction) is 0 while a held Turn's Bot device has an active binding or its Bot is archived or gone, so the due
+  transaction) is 0 while a held Turn's Bot device has an active binding or its Bot is archived, suspended or gone, so the due
   scheduler syncs it at once:
   - after `bindDevice` of that device, which writes the due time in the same transaction, the Turn freezes;
-  - after a `team_snapshot` without the Bot (or `delete_bot`), which archives it, the Turn ends `cancelled`.
+  - after a `team_snapshot` without the Bot (or `delete_bot`), which archives it, or one that suspends it, the Turn ends
+    `cancelled`.
 
   A snapshot cannot move a Bot to another device: K8 keeps the device when the model changes. A held Turn on a
   refused device adds no due time, so a revoked device does not make the scope spin. The owner can also end the Turn
@@ -936,9 +955,10 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
 - **Host jobs.** The store takes the Host job handlers (`{ host, hostJobs: { watchlist } }`), and the sender takes their
   deadline (`hostJobTimeoutMs`). Host code adds each routine once with `addHostJobRoutine`. Every store over one schema
   that a sender or the scheduler uses must have the same handlers.
-- **Host intents.** The store takes the Host intent handlers (`{ host, hostIntents: { research } }`). Every store that a
-  reconciler uses must have them; a missing one keeps the row open as `handler_failed`. The command entry takes
-  `failStuckIntent: (scope, key) => reconciler.failStuckIntent(scope, key)`.
+- **Host intents.** The store takes the Host intent handlers (`{ host, hostIntents: { research } }`), and the message
+  handlers of those that message (`hostIntentMessages`). Every store that a consumer uses must have the same message
+  handlers. Every store that a reconciler uses must have the same Host intent handlers; a missing one keeps the row open
+  as `handler_failed`. The command entry takes `failStuckIntent: (scope, key) => reconciler.failStuckIntent(scope, key)`.
 
 ## Tests
 
@@ -1045,6 +1065,10 @@ three and runs these suites.
   written; an `unknown_intent` row refused and audited once; a failed, an unconfigured and an async handler; the Main Bot
   FIFO held until the Host intent settles; `failStuckIntent` through the entry for a stuck row, a failed handler (run once,
   in the probe), and a Bot Turn whose outcome throws, with its refusals and a probe error; and compaction of a Host intent.
+  For a Host intent message (#1362): an accepted and a refused disposition with their replays and a conflict, a handler that
+  throws, returns a thenable or another shape, the construction, enqueue and consume refusals of a missing message
+  handler, and `binding_mismatch` with no handler. `retention.test.ts` archives a concluded Host intent's reply, replays it
+  with no handler call and passes a switch export.
 - The Host job tests (`host-jobs.test.ts`) port the cases of K4 `host-jobs.test.ts` through the scheduler and the sender:
   a summary stored once with a settled row and no intent; the Bot policy kept apart from Host code, and the definition
   checks; a handler throw with its backoff and a retry with the same occurrence key; a missing and a non-JSON summary;

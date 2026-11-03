@@ -8,7 +8,7 @@ import { hash, HostLedger } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
-import { contextPack, contextTurns } from './schema';
+import { contextPack, contextTurns } from './index';
 import { contextPack as historyPack } from './rules/context';
 import { roomFields } from './team';
 import { botRoutines, createDefinition, updateDefinition } from './routines';

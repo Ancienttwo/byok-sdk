@@ -7,9 +7,9 @@ import { roomFields, roomVisibility } from './rules/rooms';
 
 import { NEW_BOTS, NEW_ROOMS } from './rules/schema';
 import { DEFAULT_AUTONOMY } from './rules/autonomy';
-import { activeBot, admitBotToolsets, archiveBot, profileProjection, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
+import { activeBot, admitBotToolsets, archiveBot, inactive, profileProjection, refuseExternalRooms, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
 
-export { activeBot, admitBotToolsets, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
+export { activeBot, admitBotToolsets, inactive, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
 export const TEAM_NOTE_LIMIT = 20;
 export function projectionRequestId(value: unknown): string {
   const digest = hash(value);
@@ -104,11 +104,11 @@ export function updateBot(state: CollaborationState, action: UpdateBotAction, mo
   const bot = activeBot(state.team, action.botId);
   if (!['name', 'role', 'persona', 'model'].some(k => k in action)) throw new Error('An update must change a Bot field');
   const model = action.model ?? bot.model, base = models[model];
-  if (!base) throw new Error('Unavailable model');
-  admitBotToolsets(base, readOnlyToolsets);
+  if (base) admitBotToolsets(base, readOnlyToolsets);
   const revision = (BigInt(bot.revision) + 1n).toString();
   if (BigInt(revision) > 9223372036854775807n) throw new Error('Profile revision limit');
-  const execution = structuredClone(base);
+  // #1357: without a template the Bot keeps its stored one, and the freeze holds its Turns until the Host provides one.
+  const execution = structuredClone(base ?? bot.execution);
   // Model selection cannot move the Bot home to another device.
   execution.deviceId = bot.execution.deviceId;
   execution.payload.agentRef = { agentId: bot.id, profileRevision: revision };
@@ -141,6 +141,23 @@ export function writeSnapshotBot(state: CollaborationState, row: TeamSnapshotBot
   projection(state, created);
 }
 /**
+ * Re-projects the Host's execution templates onto each unarchived Bot, a suspended one too (#1357). A Bot keeps its device,
+ * and its agentRef follows its profile. A Bot whose model has no template keeps its stored one, and the freeze holds its Turns
+ * with `Unavailable model` until the Host provides it. No profile field changes and no persona projection is queued.
+ * A template that fails the toolset check refuses the whole call before any write.
+ */
+export function applyModels(state: CollaborationState, models: Readonly<Record<string, ExecutionTemplate>>, readOnlyToolsets: readonly string[]): void {
+  for (const model of Object.values(models)) admitBotToolsets(model, readOnlyToolsets);
+  for (const bot of Object.values(state.team.bots)) {
+    const base = models[bot.model];
+    if (bot.archived || !base) continue;
+    const execution = structuredClone(base);
+    execution.deviceId = bot.execution.deviceId;
+    execution.payload.agentRef = { agentId: bot.id, profileRevision: bot.revision };
+    bot.execution = execution;
+  }
+}
+/**
  * Host persona mode (#879). The revision never goes back, and a profile change needs a newer revision. A newer revision
  * keeps `readyRevision` at the last revision that the Host reported ready: the Bot stays a delegate target, and its
  * Turns wait for `persona_ready` of the new revision.
@@ -156,10 +173,11 @@ function writeHostProfile(state: CollaborationState, bot: BotProfile | undefined
       return;
     }
   }
+  // A new Bot needs a template: its device comes from it. An existing Bot keeps its stored one, as in `updateBot` (#1357).
   const base = models[row.model];
-  if (!base) throw new Error('Unavailable model');
-  admitBotToolsets(base, readOnlyToolsets);
-  const execution = structuredClone(base);
+  if (base) admitBotToolsets(base, readOnlyToolsets);
+  else if (!bot) throw new Error('Unavailable model');
+  const execution = structuredClone(base ?? bot!.execution);
   // Model selection cannot move the Bot home to another device.
   if (bot) execution.deviceId = bot.execution.deviceId;
   execution.payload.agentRef = { agentId: row.id, profileRevision: revision };
@@ -171,8 +189,9 @@ export function applyManagement(state: CollaborationState, actor: string, taskId
   models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void, readOnlyToolsets: readonly string[] = []): void {
   const team = state.team, local: Record<string, string> = {};
   const managed = (kind: string, work: () => void) => accept(kind, () => { requireMain(team, actor); work(); });
-  // T3: the team authority owns the Bots. Rooms and team notes stay local.
+  // T3: the team authority owns the Bots. Team notes stay local, and rooms too unless it owns them (#1321).
   const bots = (kind: string, work: () => void) => managed(kind, () => { refuseExternalTeam(team, kind); work(); });
+  const rooms = (kind: string, work: () => void) => managed(kind, () => { refuseExternalRooms(team, kind); work(); });
   outcome.create_bot?.forEach(action => bots('create_bot', () => { local[action.localId] = createBot(state, taskId, action, models, readOnlyToolsets).id; }));
   outcome.update_bot?.forEach(action => bots('update_bot', () => updateBot(state, action, models, readOnlyToolsets)));
   outcome.delete_bot?.forEach(action => bots('delete_bot', () => archiveBot(team, action.botId)));
@@ -180,13 +199,13 @@ export function applyManagement(state: CollaborationState, actor: string, taskId
     ...(fields.members ? { members: fields.members.map(id => local[id] ?? id) } : {}),
     ...(fields.admin ? { admin: local[fields.admin] ?? fields.admin } : {}),
   });
-  outcome.create_room?.forEach(action => managed('create_room', () => {
+  outcome.create_room?.forEach(action => rooms('create_room', () => {
     if (!NEW_ROOMS.includes(action.localId as typeof NEW_ROOMS[number])) throw new Error('Unknown local room slot');
     const id = hash([taskId, action.localId]);
     if (team.rooms[id]) throw new Error('Duplicate local room slot');
     team.rooms[id] = { id, ...roomFields(team, resolve(action) as RoomFields), messages: [] };
   }));
-  outcome.update_room?.forEach(action => managed('update_room', () => {
+  outcome.update_room?.forEach(action => rooms('update_room', () => {
     const room = team.rooms[action.roomId];
     if (!room) throw new Error('Room not found');
     if (!['name', 'members', 'admin', 'mode', 'announcement'].some(k => k in action)) throw new Error('An update must change a room field');

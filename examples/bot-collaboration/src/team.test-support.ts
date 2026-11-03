@@ -31,7 +31,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   holdMessage?: (input: AgentMessageInput, stage: 'before' | 'after') => Promise<void>;
   /** `observe` keeps the product default of the Main Bot. Default: the fixture switches it to `auto`. */
   mainAutonomy?: Autonomy;
-  bot?: Pick<BotOptions, 'team' | 'history' | 'coalesce' | 'deviceConcurrency'> } = {}) {
+  bot?: Pick<BotOptions, 'team' | 'rooms' | 'history' | 'coalesce' | 'deviceConcurrency'> } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'k8b-'));
   const productId = 'k8b-test';
   let ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`, { compactVeto: botCompactVeto });

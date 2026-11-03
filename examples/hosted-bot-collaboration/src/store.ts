@@ -4,7 +4,7 @@ import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTe
   type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/server/execution-core';
 import { botRoutines, endable, owned, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
   type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
-import { admitBotToolsets, applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, planHomeRetry, requireMain, updateBot,
+import { admitBotToolsets, applyHomeTerminal, applyManagement, applyModels, failHomeFlush, homeEnqueued, homeHead, inactive, planHomeRetry, requireMain, updateBot,
   writeSnapshotBot, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
@@ -17,7 +17,7 @@ import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefu
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
-import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
+import { decideMessage, messageCommandId, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDecision } from './messages';
 import { decideFinish, type HostedIntentHandler, type IntentOutcomeError, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
 import { dueRoutine, hostedRoutineCommands, hostJobCommands, hostJobRowKey, loadSlice, planSlice, recordDue, switchDueVersions,
@@ -115,6 +115,12 @@ export interface HostedStoreOptions {
    * intent row, and the terminal transaction of a `task.complete` result runs that handler.
    */
   hostIntents?: Readonly<Record<string, HostedIntentHandler>>;
+  /**
+   * The Agent message handlers of Host intents (#1362), by the `hostIntents` name, as L's `hostIntentMessages`. The consume
+   * transaction runs the handler synchronously and returns its disposition. An accepted message is recorded without its
+   * body and not delivered. A Host intent whose execution has `messageEgress` needs one.
+   */
+  hostIntentMessages?: Readonly<Record<string, HostedIntentMessageHandler>>;
 }
 /** A Host intent (#955): its key, its stable task id, and its conclusion once it has one. */
 export interface HostIntent { key: string; taskId: string; conclusion?: Conclusion }
@@ -233,11 +239,17 @@ export class HostedCollaborationStore {
   readonly hostJobs: ReadonlyMap<string, HostJobHandler>;
   /** The Host intent handlers by name (#955). */
   private readonly hostIntents: ReadonlyMap<string, HostedIntentHandler>;
+  /** The Host intent message handlers by name (#1362). */
+  private readonly hostIntentMessages: ReadonlyMap<string, HostedIntentMessageHandler>;
   constructor(private readonly pool: Pool, readonly schema: string, options: HostedStoreOptions) {
     if (typeof options?.host !== 'function') throw new Error('The Host config of each scope is required');
     this.host = options.host;
     this.hostJobs = new Map(Object.entries(options.hostJobs ?? {}));
     this.hostIntents = new Map(Object.entries(options.hostIntents ?? {}));
+    this.hostIntentMessages = new Map(Object.entries(options.hostIntentMessages ?? {}));
+    for (const name of this.hostIntentMessages.keys()) {
+      if (!this.hostIntents.has(name)) throw new Error(`A Host intent message handler needs the Host intent handler ${name}`);
+    }
     this.channel = options.channel === true;
     // The ContextPack budget comes with each sync, so the construction checks every bound except that one.
     if (options.coalesce) this.coalesce = coalescePolicy(options.coalesce, Number.MAX_SAFE_INTEGER);
@@ -486,6 +498,8 @@ export class HostedCollaborationStore {
     if (this.coalesce) coalescePolicy(this.coalesce, options.limits.contextMaxBytes);
     const key = storedKey(scope), config = await this.host(scope), models = Object.keys(config.models), readOnlyToolsets = config.readOnlyToolsets ?? [];
     return this.change(scope, undefined, async (state, publish, client) => {
+      // As L re-projects the Host's templates (#1357), so a freeze in this sync uses the scope config's current templates (#1358).
+      applyModels(state, config.models, readOnlyToolsets);
       const published = new Set<string>();
       const slice = await loadSlice(client, key), routines = botRoutines(Object.values(slice.state.routines));
       const emit: Publish = (id, body) => { publish(id, body); published.add(id); };
@@ -556,12 +570,14 @@ export class HostedCollaborationStore {
   setRoutineLifecycle(scope: string, botId: string, id: string, lifecycle: Routine['lifecycle'], now: number): Promise<void> {
     return this.routineCommand(scope, botId, now, commands => commands.lifecycle(owned(commands.list(), botId, id).definition.id, lifecycle));
   }
-  private routineCommand(scope: string, botId: string, now: number,
+  private async routineCommand(scope: string, botId: string, now: number,
     run: (commands: ReturnType<typeof hostedRoutineCommands>, execution: ExecutionTemplate) => void): Promise<void> {
-    const key = storedKey(scope);
+    const key = storedKey(scope), config = await this.host(scope);
     return this.change(scope, undefined, async (state, _publish, client) => {
       // H has no Host-wide Bot id, so the caller names the acting Bot. Only the Main Bot owns this API.
       requireMain(state.team, botId);
+      // A sealed routine seals the re-projected template of the scope config (#1358).
+      applyModels(state, config.models, config.readOnlyToolsets ?? []);
       const slice = await loadSlice(client, key);
       run(hostedRoutineCommands(slice, now), state.team.bots[botId]!.execution);
       await writeSlice(client, key, slice);
@@ -605,8 +621,8 @@ export class HostedCollaborationStore {
    *
    * The fire can create execution, so the owner Bot's device must have an active H binding (#793 D2e), read from the state of
    * this transaction, as the sync builds the routine offer from it. Otherwise it throws `DeviceBindingError` and writes
-   * nothing, and the slot stays due. The promotion checks the binding again. An archived owner Bot skips the fence: its
-   * routine Turn creates no execution, because the sync ends it before any freeze, as L does. A revoke and an archive are both
+   * nothing, and the slot stays due. The promotion checks the binding again. An archived or suspended (#1319) owner Bot skips
+   * the fence: its routine Turn creates no execution, because the sync ends it before any freeze, as L does. A revoke and an archive are both
    * final, so with the fence that slot could never fire.
    *
    * A Host job routine (#793 S14) records its occurrence and its `host_job` outbox row, as K4 `recordOccurrence` does, with no
@@ -626,7 +642,7 @@ export class HostedCollaborationStore {
       const owner = (routine.definition.hostOccurrence?.input as BotRoutineInput | undefined)?.owner;
       const bot = owner === undefined ? undefined : state.team.bots[owner];
       if (!bot) throw new Error('Routine owner Bot not found');
-      if (!bot.archived) await activeBinding(client, key, bot.execution.deviceId);
+      if (!inactive(bot)) await activeBinding(client, key, bot.execution.deviceId);
       const occurrence = recordDue(slice, scope, routine, now);
       const run = occurrenceRun(routine, occurrence);
       const result = commitCommand(state, { scope, commandId: occurrence.key, command: { kind: 'occurrence', key: occurrence.key } },
@@ -669,7 +685,7 @@ export class HostedCollaborationStore {
     return this.transaction(async client => {
       if (!await exists(client)) return refused;
       return this.decideIn(client, key, messageCommandId(input), (state, publish) => decideMessage(client, scope, state, input,
-        this.ports(config, state, publish, clock), this.channel));
+        this.ports(config, state, publish, clock), this.channel, this.hostIntentMessages));
     }, false);
   }
 
@@ -695,6 +711,9 @@ export class HostedCollaborationStore {
    */
   async enqueueHostIntent(scope: string, input: IntentInput, handler: string, clock: () => number): Promise<HostIntent> {
     if (!this.hostIntents.has(handler)) throw new Error(`Unknown Host intent handler: ${handler}`);
+    if (input.execution.payload.messageEgress && !this.hostIntentMessages.has(handler)) {
+      throw new Error(`Host intent handler ${handler} has no message handler`);
+    }
     admitBotToolsets(input.execution, (await this.host(scope)).readOnlyToolsets ?? []);
     const scopeKey = storedKey(scope), key = storedKey(input.key);
     return this.change(scope, undefined, async (state, _publish, client) => {
@@ -1435,13 +1454,13 @@ export class HostedCollaborationStore {
   /**
    * The earliest time that the K8 rule `collaborationDue` gives for `state`, or null for none. A held Turn (#956) that the
    * next sync would no longer hold is due at once (0): its Bot's device now has an active binding (after `bindDevice`), or
-   * its Bot is archived or gone (for example after a `team_snapshot` without it), so the sync ends it. A held Turn on a
+   * its Bot is archived, suspended or gone (for example after a `team_snapshot` without it), so the sync ends it. A held Turn on a
    * refused device adds no time, so it never makes the scope spin.
    */
   private async dueAt(client: PoolClient, key: string, state: CollaborationState): Promise<number | null> {
     const due = collaborationDue(state, this.timers), bots = state.team.bots;
     const held = Object.values(state.turns).filter(turn => turn.held && !turn.conclusion)
-      .map(turn => Object.hasOwn(bots, turn.botId) && !bots[turn.botId]!.archived ? bots[turn.botId]!.execution.deviceId : undefined);
+      .map(turn => Object.hasOwn(bots, turn.botId) && !inactive(bots[turn.botId]) ? bots[turn.botId]!.execution.deviceId : undefined);
     if (held.length) {
       const devices = [...new Set(held.filter(device => device !== undefined))];
       const refused = await deviceRefusals(client, key, devices);

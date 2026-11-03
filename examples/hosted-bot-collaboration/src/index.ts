@@ -2,7 +2,9 @@ export { CallbackCommandError, HOST_JOB_EXECUTION_UNSUPPORTED, HostedCollaborati
   type DeviceWork, type HostIntent, type HostedStoreOptions, type HostedSyncOptions, type InboundIdentity, type Publish, type ReplyFence, type StorePorts, type SyncResult } from './store';
 export { DDL, STORE_VERSION } from './ddl';
 export type { IntentCompaction, IntentCompactionInput } from './compaction';
-export { hostedMessageConsumer, type AgentMessageConsumer, type AgentMessageInput, type MessageConsumerOptions, type MessageDecision } from './messages';
+export { hostedMessageConsumer, type AgentMessageConsumer, type AgentMessageInput, type HostedIntentMessageHandler, type HostedIntentMessageTransaction,
+  type MessageConsumerOptions, type MessageDecision } from './messages';
+export type { MessageDisposition } from '@byok-sdk/example-bot-collaboration/rules/message';
 export { freezeIntent, HostedSubmitter, type IntentFreeze, type SubmitFailure, type SubmitPass, type SubmitterOptions } from './intents';
 export { HostedReconciler, IntentOutcomeError, type HostedIntentHandler, type HostedIntentTransaction, type HostedTaskPort, type ReconcileFailure, type ReconcilePass, type ReconcilerOptions, type TaskEvidence } from './reconcile';
 export { DeviceBindingError, DeviceSwitchingError, DeviceSwitchRefusedError, type DeviceBinding } from './binding';

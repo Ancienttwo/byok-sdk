@@ -13,7 +13,7 @@ const execution: FreezeExecution = { payload: {} };
 const consumed = (): Rejection => ({ botId: 'main', taskId: 'a', action: 'delegate', reason: 'hop_limit', consumedBy: 't1' });
 function state(archived = false, rejected: Rejection[] = []): SyncState<FreezeExecution> {
   return {
-    team: { bots: { main: { id: 'main', name: 'Main', role: 'Owner', mainBot: true, archived, revision: '1', readyRevision: '1', execution } },
+    team: { bots: { main: { id: 'main', name: 'Main', role: 'Owner', mainBot: true, archived, model: 'default', revision: '1', readyRevision: '1', execution } },
       rooms: {}, rounds: {}, seats: {}, notes: [], homeOperations: [] },
     delegations: {}, replies: {}, turns: {}, cards: {}, questions: {}, rejected, schemas: {}, audit: [],
   };
@@ -202,6 +202,16 @@ describe('a sealed routine Turn (#953)', () => {
       expect(syncTurn(s, row, facts(), options, out.publish)).toEqual({ kind: 'ended' });
       expect(out.rows).toHaveLength(1);
     }
+  });
+
+  it('blocks a Turn whose model has no Host template, with no sealed failure, and freezes it once the template returns (#1357)', () => {
+    const s = sealedState(), out = published();
+    const row = turn(s, { id: 'occurrence:o1', root: 'occurrence:o1', source: 'routine', request: '', status: 'queued', sealedRoutine: ref });
+    expect(syncTurn(s, row, facts(), { ...sealedOptions(), models: [] }, out.publish)).toBeUndefined();
+    expect([row.status, row.conclusion, row.blockedReason]).toEqual(['blocked', undefined, 'Unavailable model: default']);
+    expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1']);
+    expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)?.kind).toBe('routine');
+    expect([row.status, row.blockedReason]).toEqual(['processing', undefined]);
   });
 
   it('blocks a Turn whose outcome schema stays over budget, with no sealed failure, and freezes it once the state shrinks', () => {

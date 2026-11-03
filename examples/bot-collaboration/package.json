@@ -7,6 +7,7 @@
   "exports": {
     "./rules/commands": "./src/rules/commands.ts",
     "./rules/commit": "./src/rules/commit.ts",
+    "./rules/message": "./src/rules/message.ts",
     "./model": "./src/model.ts",
     "./coalesce": "./src/coalesce.ts",
     "./team": "./src/team.ts",

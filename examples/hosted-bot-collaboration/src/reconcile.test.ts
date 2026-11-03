@@ -41,14 +41,15 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H reconciliation on a real SDK server and da
   /**
    * A user Turn of the Main Bot, frozen by the sync rule with the real clock and delivered to the daemon. The suite shares
    * one SDK tenant, so each test has its own Turn id and task id, and its own Agent, so no Agent home of an earlier test is busy.
+   * The sync re-projects the agentRef from the Bot id (#1358), so the Main Bot's id is that Agent id.
    */
   async function delivered(agentId = randomUUID()) {
     const scope = `tenant:${randomUUID()}`, turnId = `u-${randomUUID()}`;
     await store().seed(scope, state => {
       seedCollaboration(state);
-      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
-      state.team.bots.main!.execution = template(host!.deviceId, agentId);
-      state.turns[turnId] = { id: turnId, root: turnId, botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
+      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true, botId: agentId });
+      state.team.bots = { [agentId]: { ...state.team.bots.main!, id: agentId, execution: template(host!.deviceId, agentId) } };
+      state.turns[turnId] = { id: turnId, root: turnId, botId: agentId, source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
     });
     await store().bindDevice(scope, host!.deviceId);
     await store().sync(scope, { ...SYNC_OPTIONS, history: undefined, now: Date.now() });

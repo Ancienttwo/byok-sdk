@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ownReadOnlyToolsets } from './toolset-policy';
-import { admitBotToolsets } from './rules/team';
+import { admitBotToolsets, inactive } from './rules/team';
 import type { UpdateRoutineAction } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOptions, type Intent, type IntentInput, type OutcomeTransaction,
@@ -15,6 +15,7 @@ import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
 import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, expireCards, replyCheckDue, reportCardDecisions,
   commandBots, type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
+import { hostMessageDisposition, type MessageDisposition } from './rules/message';
 import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, writeLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
@@ -22,7 +23,7 @@ import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCale
 import { DEFAULT_AUTONOMY, autonomyOf, recordWouldDo, wouldDoRows, type Autonomy, type AutonomyGate, type WouldDo } from './rules/autonomy';
 import { DEVICE_CONCURRENCY, admitDeviceSlot, type DispatchIntent } from './rules/priority';
 
-import { applyManagement, updateBot, writeSnapshotBot } from './team';
+import { applyManagement, applyModels, updateBot, writeSnapshotBot } from './team';
 import { botCompactVeto } from './compaction';
 import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
 import { advanceRoomsAndTurns, memberMentions, roomMessageProjection, roomMessages, type MemberMentions, type Mentions, type RoomMessage } from './rooms';
@@ -48,7 +49,10 @@ export interface BotOptions {
   owner?: string;
   /** Optional Host IM outbox. Push stays off until an owner enables a route. */
   channel?: ChannelOptions;
-  /** Host-owned model templates. New Bots stay on the selected template's device. */
+  /**
+   * Host-owned model templates. New Bots stay on the selected template's device. Construction and `setModels` apply each
+   * template by model name to every unarchived Bot. A Bot whose model has none keeps its Turns blocked (`Unavailable model`).
+   */
   models?: Record<string, ExecutionTemplate>;
   /** Host-owned read-only toolset IDs. Default empty. The Host's local tool server must enforce read-only behavior. */
   readOnlyToolsets?: readonly string[];
@@ -78,8 +82,15 @@ export interface BotOptions {
   /**
    * Handlers of the Host's own K4 intents (#882), by name. `enqueueHostIntent` stores the name with the intent.
    * At a `task.complete` terminal, the handler runs synchronously in the terminal transaction with the result document.
+   * An intent whose execution has `messageEgress` also needs a handler of the same name in `hostIntentMessages`.
    */
   hostIntents?: Readonly<Record<string, HostIntentHandler>>;
+  /**
+   * Agent message handlers of Host intents (#1356), by the `hostIntents` name. The handler runs synchronously in the K4
+   * message transaction and decides the message. K8 records an accepted message without its body and does not deliver it.
+   * A Host intent whose name has no message handler refuses its messages with `binding_mismatch`.
+   */
+  hostIntentMessages?: Readonly<Record<string, HostIntentMessageHandler>>;
   /** Passed to the K4 core. Default 100. */
   reconcileMs?: number;
   /** Passed to the K4 core: a coalesced hint after a commit that wrote the outbox. */
@@ -122,6 +133,12 @@ export interface BotOptions {
    */
   persona?: 'external';
   /**
+   * External rooms mode (#1321), only with `team: 'external'`. Each team snapshot carries the authority's whole room list,
+   * and a room that it no longer lists is archived for good. `createRoom`, `updateRoom`, `setMemberMentions` and the Main Bot's
+   * `create_room` and `update_room` refuse with `external_rooms`. The ledger stores the mode, so a restart cannot change it.
+   */
+  rooms?: 'external';
+  /**
    * Outcome offer (#881): allowlists of actions by Turn kind, the IANA time zones of routine actions, and the
    * `confirmable_action` branches. Each field only narrows the default. It applies to Turns frozen after construction.
    */
@@ -134,6 +151,8 @@ export interface BotOptions {
 }
 /** Synchronous. A throw or a thenable leaves the intent open, and `drain()` rejects. */
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
+/** Synchronous. A throw rolls the message transaction back, and a thenable or another result throws. */
+export type HostIntentMessageHandler = (input: AgentMessageInput, transaction: MessageTransaction) => MessageDisposition;
 /**
  * A K4 terminal that K8 cannot apply (#882 Q6f): its key is neither a Bot Turn nor a Host intent, its Host handler
  * failed, or the outcome commit of its Bot Turn threw. The intent stays open at the head of its FIFO, and each pass rejects
@@ -183,7 +202,7 @@ function bounded<T>(read: Promise<T>, ms: number): Promise<T> {
 /** A Turn that has no offer yet and can freeze one: not concluded, failed or held, and its Bot is active with its profile applied. */
 function awaitsOffer(ledger: LedgerState, state: CollaborationState, turn: Turn): boolean {
   const bot = state.team.bots[turn.botId];
-  return !turn.conclusion && !turn.held && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !bot.archived && bot.readyRevision === bot.revision;
+  return !turn.conclusion && !turn.held && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !inactive(bot) && bot.readyRevision === bot.revision;
 }
 /** The slot row of one K4 intent (#1229). An intent holds a slot once it is submitted or has attempt evidence. */
 function dispatchRow(state: LedgerState, row: Intent): DispatchIntent {
@@ -228,6 +247,7 @@ export class BotCollaboration {
   /** History mode: Turns whose history read failed in this pass. The timer reads them again. */
   private unread = new Set<string>();
   private readonly hostIntentHandlers: ReadonlyMap<string, HostIntentHandler>;
+  private readonly hostIntentMessageHandlers: ReadonlyMap<string, HostIntentMessageHandler>;
   /** Terminals that could not apply in the current K4 drain, by intent key. K4 also drains from its own timer. */
   private readonly intentFailures = new Map<string, IntentOutcomeError>();
   /** The last audited reason of each refused key, so a stuck intent adds one audit row and not one per pass. */
@@ -256,8 +276,12 @@ export class BotCollaboration {
     if (team.external && !!team.external.persona !== (options.persona === 'external')) {
       throw new Error(`This ledger has ${team.external.persona ? 'Host' : 'K8'} persona projections`);
     }
-    // An archived Bot never runs a new Turn, so its stored template is not "current".
-    for (const bot of Object.values(team.bots)) if (!bot.archived) admitBotToolsets(bot.execution, options.readOnlyToolsets);
+    if (options.rooms !== undefined && (options.rooms !== 'external' || options.team !== 'external')) {
+      throw new Error("The external rooms mode needs team: 'external'");
+    }
+    if (team.external && !!team.external.rooms !== (options.rooms === 'external')) {
+      throw new Error(`This ledger has ${team.external.rooms ? 'external' : 'local'} rooms`);
+    }
     // Recovery can resubmit a frozen older generation after the Bot changes models.
     // Historical settled executions remain readable; only outstanding work must be admitted.
     for (const intent of Object.values(persisted.intents)) {
@@ -267,11 +291,18 @@ export class BotCollaboration {
       if (execution) admitBotToolsets(execution.input, options.readOnlyToolsets);
     }
     this.hostIntentHandlers = new Map(Object.entries(options.hostIntents ?? {}));
+    this.hostIntentMessageHandlers = new Map(Object.entries(options.hostIntentMessages ?? {}));
+    for (const name of this.hostIntentMessageHandlers.keys()) {
+      if (!this.hostIntentHandlers.has(name)) throw new Error(`A Host intent message handler needs the Host intent handler ${name}`);
+    }
     for (const [key, { handler }] of Object.entries(stateOf(persisted.application).hostIntents ?? {})) {
       // A record whose intent K4 compacted is stale until the next pass. It needs no handler.
       const intent = persisted.intents[hash(key)];
       if (intent && intent.conclusion === undefined && !this.hostIntentHandlers.has(handler)) {
         throw new Error(`An open Host intent needs the handler ${handler}`);
+      }
+      if (intent && intent.conclusion === undefined && intent.execution.payload.messageEgress && !this.hostIntentMessageHandlers.has(handler)) {
+        throw new Error(`An open Host intent needs the message handler ${handler}`);
       }
     }
     this.owner = { id: options.owner ?? 'owner', kind: 'human' };
@@ -323,16 +354,35 @@ export class BotCollaboration {
     if (!stateOf(persisted.application).switchExport) ledger.transaction(s => {
       const state = stateOf(s.application);
       if (options.team === 'external') {
-        state.team.external ??= { revision: 0, ...(options.persona === 'external' ? { persona: true as const } : {}) };
-        return;
+        state.team.external ??= { revision: 0, ...(options.persona === 'external' ? { persona: true as const } : {}),
+          ...(options.rooms === 'external' ? { rooms: true as const } : {}) };
+      } else {
+        state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
+          model: Object.keys(this.models())[0]!, mainBot: true, archived: false, autonomy: DEFAULT_AUTONOMY,
+          revision: options.execution.payload.agentRef.profileRevision, readyRevision: options.execution.payload.agentRef.profileRevision,
+          execution: structuredClone(options.execution) };
       }
-      state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
-        model: Object.keys(this.models())[0]!, mainBot: true, archived: false, autonomy: DEFAULT_AUTONOMY,
-        revision: options.execution.payload.agentRef.profileRevision, readyRevision: options.execution.payload.agentRef.profileRevision,
-        execution: structuredClone(options.execution) };
+      // #1357: the stored templates become the Host's current ones. Frozen intents keep the execution they froze with.
+      applyModels(state, this.models(), options.readOnlyToolsets ?? []);
     });
   }
   private models(): Record<string, ExecutionTemplate> { return this.options.models ?? { default: this.options.execution }; }
+  /**
+   * Replaces the Host's model templates at run time (#1357), for example after a device key changed. Each unarchived Bot takes
+   * the template of its model; a Turn frozen before keeps its execution. No profile revision, readiness or persona projection
+   * changes. A Bot whose model is missing keeps its Turns blocked until a later call provides it. A template that fails the
+   * toolset check, or model names that the outcome schema cannot take, refuse the call and change nothing.
+   */
+  setModels(models: Readonly<Record<string, ExecutionTemplate>>): Promise<void> {
+    return this.exclusive(async () => {
+      const next = structuredClone(models) as Record<string, ExecutionTemplate>;
+      // The model names enter the Main Bot's create_bot and update_bot schemas, as at construction.
+      outcomeSchema(this.options.botId, stateOf({}), undefined, Object.keys(next), [], this.offer);
+      this.write(s => applyModels(stateOf(s.application), next, this.options.readOnlyToolsets ?? []));
+      this.options.models = next;
+      await this.process();
+    });
+  }
   snapshot(): CollaborationState { return stateOf(this.ledger.snapshot().application); }
   /**
    * Every K8 write of this Host, except the switch steps (#975). It refuses while the domain is exported, after the work,
@@ -518,6 +568,9 @@ export class BotCollaboration {
   enqueueHostIntent(input: IntentInput, handler: string): Promise<Intent> {
     return this.exclusive(async () => {
       if (!this.hostIntentHandlers.has(handler)) throw new Error(`Unknown Host intent handler: ${handler}`);
+      if (input.execution.payload.messageEgress && !this.hostIntentMessageHandlers.has(handler)) {
+        throw new Error(`Host intent handler ${handler} has no message handler`);
+      }
       // A restart admits every open intent, so a Host intent passes the same toolset admission as a Bot execution.
       admitBotToolsets(input.execution, this.options.readOnlyToolsets);
       this.write(s => {
@@ -623,11 +676,13 @@ export class BotCollaboration {
   private applyMessage(input: AgentMessageInput, tx: MessageTransaction): { outcome: 'accepted' | 'refused'; reasonCode?: string } {
     const state = stateOf(tx.application);
     refuseExported(state);
+    const name = hostIntent(state, tx.intent.key)?.handler, handler = name === undefined ? undefined : this.hostIntentMessageHandlers.get(name);
     let disposition;
     try {
       ({ disposition } = this.commitCallback(state, `${input.taskId}:${input.payload.messageId}`,
         { kind: 'message', turnId: tx.intent.key, message: { taskId: input.taskId, payload: input.payload } },
-        { publish: tx.publish, ...this.deliverPort(state, input.taskId) },
+        { publish: tx.publish, ...this.deliverPort(state, input.taskId),
+          ...(handler ? { hostMessage: () => hostMessageDisposition(handler(input, tx)) } : {}) },
         // A refused message keeps a command record, and retention can move it into K4 rows (#798).
         id => tx.rows.get('commands', id) as CommandRecord | undefined));
     } catch (cause) {
@@ -768,6 +823,16 @@ export class BotCollaboration {
     await this.exclusive(async () => {
       this.ownerOnly(by, 'setMemberMentions', roomId);
       this.commitKeyless({ kind: 'set_room_member_mentions', roomId, memberMentions: value });
+      await this.process();
+    });
+  }
+  /**
+   * Owner API (#1321): create room `roomId` with no model run. The command id comes from the room id, so the same id with
+   * the same fields replays, and other fields are an identity conflict.
+   */
+  async createRoom(roomId: string, fields: RoomFields): Promise<void> {
+    await this.exclusive(async () => {
+      this.commitOwner(hash(['create_room', roomId]), { kind: 'create_room', roomId, fields });
       await this.process();
     });
   }
@@ -971,7 +1036,12 @@ export class BotCollaboration {
   private sync(s: LedgerState, rows: ApplicationRows, injected?: InjectedHistory): boolean {
     const state = stateOf(s.application);
     // A Host intent record lives as long as K4 keeps the intent, so a replay stays exact until K4 compacts it.
-    for (const key of Object.keys(state.hostIntents ?? {})) if (!s.intents[hash(key)]) delete state.hostIntents![key];
+    // Its accepted message records (#1356) go with it.
+    for (const key of Object.keys(state.hostIntents ?? {})) {
+      if (s.intents[hash(key)]) continue;
+      delete state.hostIntents![key];
+      for (const [taskId, reply] of Object.entries(state.replies)) if (reply.turnId === key) delete state.replies[taskId];
+    }
     // A batch sealed here is enqueued in this pass, before later Turns of its Bot.
     sealDueBatches(state, this.coalesce, this.now());
     // Refresh passive state before any new offer freezes its ContextPack.

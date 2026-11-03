@@ -10,6 +10,7 @@ import { storedKey } from './layout';
 import { TEST_HOST } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedReconciler, IntentOutcomeError, type HostedIntentHandler, type HostedTaskPort } from './reconcile';
+import type { AgentMessageInput, HostedIntentMessageHandler, MessageDisposition } from './index';
 import { HostedCollaborationStore, inSchema, lockScope } from './store';
 
 /**
@@ -40,6 +41,12 @@ const port = {
 const KEY = 'host-research-1', TASK = taskId(KEY, 0), RESULT = { summary: 'host research done' };
 const WAIT_UNTIL = Date.now() + 600_000;
 const input = (extra: Partial<IntentInput> = {}): IntentInput => ({ key: KEY, source: 'user', execution: template('device', 'research'), waitUntil: WAIT_UNTIL, ...extra });
+// #1362: a Host intent with message egress, and an Agent message of its task, as L's host-intents.test.ts (#1356).
+const base = template('device', 'research');
+const chat = { ...base, agentMessageContext: { destinationBinding: 'conversation' }, payload: { ...base.payload,
+  messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 } } };
+const message = (scope: string, messageId = 'm1', contentHash = 'h1'): AgentMessageInput => ({ tenant: scope, taskId: TASK, deviceId: 'device',
+  context: chat.agentMessageContext, payload: { agentRef: chat.payload.agentRef, messageId, contentHash, contentType: 'text/markdown', body: 'Here is the answer.' } }) as unknown as AgentMessageInput;
 
 describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#955)', () => {
   // One schema for each test, because the submit and reconcile scans cover the whole schema.
@@ -49,8 +56,11 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
     submitted.clear(); documents.clear(); paused = false;
   });
 
-  const hostStore = (hostIntents: Record<string, HostedIntentHandler>) =>
-    new HostedCollaborationStore(opened!.pool, opened!.store.schema, { host: TEST_HOST, hostIntents });
+  const hostStore = (hostIntents: Record<string, HostedIntentHandler>, hostIntentMessages?: Record<string, HostedIntentMessageHandler>) =>
+    new HostedCollaborationStore(opened!.pool, opened!.store.schema, { host: TEST_HOST, hostIntents, ...(hostIntentMessages ? { hostIntentMessages } : {}) });
+  /** A store whose `chat` intents have a message handler that records each call's message id and returns `decide()`. */
+  const chatStore = (decide: () => unknown, calls: string[] = []) =>
+    hostStore({ chat: () => {} }, { chat: input => { calls.push(input.payload.messageId); return decide() as MessageDisposition; } });
   const reconciler = (store: HostedCollaborationStore) => new HostedReconciler(opened!.pool, store.schema, store, { port: () => port, pollMs: 0 });
   const submit = () => new HostedSubmitter(opened!.pool, opened!.store.schema, { port: () => port }).run();
   const sync = (store: HostedCollaborationStore, scope: string) => store.sync(scope, { ...SYNC_OPTIONS, history: undefined, now: Date.now() });
@@ -347,5 +357,63 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
     expect(await store.compactIntents(scope, { acknowledgedTurnIds: [KEY] })).toEqual({ compactedIntents: 1, alreadyCompactedIntents: 0 });
     expect(await rows(scope)).toEqual([]);
     await expect(store.enqueueHostIntent(scope, input(), 'research', Date.now)).rejects.toBeInstanceOf(RetiredIntentIdentityError);
+  });
+
+  it('#1362: gives a Host intent message to its handler, records the reply without a body, and a replay runs no handler', async () => {
+    const calls: string[] = [], store = chatStore(() => ({ outcome: 'accepted' }), calls), scope = await scoped(store);
+    await store.enqueueHostIntent(scope, input({ execution: chat }), 'chat', Date.now);
+    expect(await store.consume(scope, message(scope), Date.now)).toEqual({ outcome: 'accepted' });
+    expect((await store.read(scope)).replies[TASK]).toEqual({ turnId: KEY, messageId: 'm1', contentHash: 'h1', contentType: 'text/markdown', acceptedAt: expect.any(Number) });
+    expect(await store.consume(scope, message(scope), Date.now)).toEqual({ outcome: 'accepted' });
+    expect(calls).toEqual(['m1']);
+  });
+
+  it('#1362: returns the handler\'s refusal, replays it with no call, and other content for the id is a conflict', async () => {
+    const calls: string[] = [], store = chatStore(() => ({ outcome: 'refused', reasonCode: 'conversation_closed' }), calls), scope = await scoped(store);
+    await store.enqueueHostIntent(scope, input({ execution: chat }), 'chat', Date.now);
+    const refused = { outcome: 'refused', reasonCode: 'conversation_closed' };
+    expect(await store.consume(scope, message(scope), Date.now)).toEqual(refused);
+    expect(await store.consume(scope, message(scope), Date.now)).toEqual(refused);
+    expect(await store.consume(scope, message(scope, 'm1', 'h2'), Date.now)).toEqual({ outcome: 'refused', reasonCode: 'message_conflict' });
+    expect({ calls, replies: (await store.read(scope)).replies }).toEqual({ calls: ['m1'], replies: {} });
+  });
+
+  it('#1362: writes nothing for a message handler that throws, returns a thenable or returns another shape', async () => {
+    let decide: () => unknown = () => { throw new Error('conversation store offline'); };
+    const store = chatStore(() => decide()), scope = await scoped(store);
+    await store.enqueueHostIntent(scope, input({ execution: chat }), 'chat', Date.now);
+    const before = await store.dump(scope);
+    await expect(store.consume(scope, message(scope), Date.now)).rejects.toThrow('conversation store offline');
+    decide = async () => { throw new Error('async conversation failed'); };
+    await expect(store.consume(scope, message(scope), Date.now)).rejects.toThrow('Host intent message handler must be synchronous');
+    decide = () => ({ outcome: 'refused' });
+    await expect(store.consume(scope, message(scope), Date.now)).rejects.toThrow('Invalid Host intent message disposition');
+    expect(await store.dump(scope)).toBe(before);
+  });
+
+  it('#1362: needs a message handler for a messageEgress Host intent at construction, enqueue and consume', async () => {
+    expect(() => hostStore({}, { chat: () => ({ outcome: 'accepted' }) })).toThrow('A Host intent message handler needs the Host intent handler chat');
+    const bare = hostStore({ chat: () => {} }), scope = await scoped(bare);
+    await expect(bare.enqueueHostIntent(scope, input({ execution: chat }), 'chat', Date.now)).rejects.toThrow('Host intent handler chat has no message handler');
+    expect(await row(scope, KEY)).toBeUndefined();
+    await chatStore(() => ({ outcome: 'accepted' })).enqueueHostIntent(scope, input({ execution: chat }), 'chat', Date.now);
+    const before = await bare.dump(scope);
+    await expect(bare.consume(scope, message(scope), Date.now)).rejects.toThrow('An open Host intent needs the message handler chat');
+    expect(await bare.dump(scope)).toBe(before);
+  });
+
+  it('#1362: refuses with binding_mismatch the message of a Host intent with no message handler and no egress, and of a Bot Turn', async () => {
+    const calls: string[] = [], store = hostStore({ research: () => {}, chat: () => {} }, { chat: input => { calls.push(input.payload.messageId); return { outcome: 'accepted' }; } });
+    const scope = await scoped(store);
+    await store.enqueueHostIntent(scope, input(), 'research', Date.now);
+    const plain = { ...message(scope), context: undefined, payload: { ...message(scope).payload, agentRef: base.payload.agentRef } } as unknown as AgentMessageInput;
+    expect(await store.consume(scope, plain, Date.now)).toEqual({ outcome: 'refused', reasonCode: 'binding_mismatch' });
+    await turn(store, scope, 'q1');
+    const frozen = (await opened!.pool.query<{ input: FrozenInput }>(`SELECT input FROM ${table('intent')} WHERE scope = $1 AND key = $2`,
+      [storedKey(scope), storedKey('q1')])).rows[0]!.input;
+    const bot = { tenant: scope, taskId: taskId('q1', 0), deviceId: 'device', context: frozen.agentMessageContext,
+      payload: { agentRef: frozen.payload.agentRef, messageId: 'm2', contentHash: 'h2', contentType: 'text/markdown', body: 'Bot reply' } } as unknown as AgentMessageInput;
+    expect(await store.consume(scope, bot, Date.now)).toEqual({ outcome: 'accepted' });
+    expect(calls).toEqual([]);
   });
 });

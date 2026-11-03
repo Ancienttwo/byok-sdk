@@ -3,6 +3,7 @@ import { canonical, hash } from '@byok-sdk/server/execution-core/canonical';
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS, historyWindow } from './history';
 import { json, type TurnFields, type TurnsState } from './turn';
 import { observes, type AutonomyGate } from './autonomy';
+import { inactive, refuseSuspended, type TeamSnapshotRoom } from './team';
 
 /**
  * Room seat arbitration as pure rules (#606 R1). Each function changes only the room slice that the
@@ -28,6 +29,8 @@ export interface Room {
   messages: RoomMessage[];
   /** Host setting (#1230). Absent: `execute`, so a ledger written before the setting reads the ruling's default. */
   memberMentions?: MemberMentions;
+  /** #1321: a team snapshot in the external rooms mode no longer lists the room. Permanent, as a Bot archive. */
+  archived?: true;
 }
 export interface Round {
   id: string; root: string; roomId: string; input: string; seats: string[];
@@ -38,9 +41,9 @@ export interface Seat {
   status: 'waiting' | 'queued' | 'running' | 'late' | 'post' | 'pass' | 'failed' | 'busy' | 'removed' | 'blocked';
   triggerMessageId?: string; released: boolean; deadline?: number; startedAt?: number; late: boolean; reason?: string;
 }
-/** The team slice that the rules read and change. Of a Bot, they read only `archived`. */
+/** The team slice that the rules read and change. Of a Bot, they read only `archived` and `participation` (#1319). */
 export interface RoomsState {
-  bots: Readonly<Record<string, { readonly archived: boolean }>>;
+  bots: Readonly<Record<string, { readonly archived: boolean; readonly participation?: 'suspended' }>>;
   rooms: Record<string, Room>; rounds: Record<string, Round>; seats: Record<string, Seat>;
   roots: Record<string, { autonomous: number; late: number }>;
 }
@@ -63,6 +66,8 @@ function activeBot(team: Pick<RoomsState, 'bots'>, botId: string): void {
 function reserve(team: RoomsState, round: Round, botId: string, triggerMessageId?: string): void {
   const room = team.rooms[round.roomId]!;
   activeBot(team, botId);
+  // A room_call to a suspended Bot is a refused action.
+  refuseSuspended(team, botId);
   if (!room.members.includes(botId)) throw new Error('Called Bot is not a member');
   if (round.seats.length >= round.limit) throw new Error('Round seat budget reached');
   if ((round.counts[botId] ?? 0) >= (botId === round.admin ? 4 : 2)) throw new Error('Member seat budget reached');
@@ -71,12 +76,21 @@ function reserve(team: RoomsState, round: Round, botId: string, triggerMessageId
   round.seats.push(id);
   team.seats[id] = { id, roundId: round.id, botId, status: 'waiting', released: false, late: false, ...(triggerMessageId ? { triggerMessageId } : {}) };
 }
-function newRound(team: RoomsState, id: string, root: string, roomId: string, input: string, members: readonly string[], triggerMessageId?: string): Round {
+/** A room that takes a new message or round (#1321): the Host stops giving K8 the messages of an archived room. */
+function openRoom(team: Pick<RoomsState, 'rooms'>, roomId: string): Room {
   const room = team.rooms[roomId];
   if (!room) throw new Error('Room not found');
-  const distinct = [...new Set(members)];
-  // Validate all members before changing any budget or round row.
-  distinct.forEach(botId => { if (!room.members.includes(botId)) throw new Error('Mention is not a member'); activeBot(team, botId); });
+  if (room.archived) throw new Error('Room is archived');
+  return room;
+}
+function newRound(team: RoomsState, id: string, root: string, roomId: string, input: string, members: readonly string[], triggerMessageId?: string): Round {
+  const room = openRoom(team, roomId);
+  // Validate all members before changing any budget or round row. A suspended member gets no seat, named or not (#1319).
+  const distinct = [...new Set(members)].filter(botId => {
+    if (!room.members.includes(botId)) throw new Error('Mention is not a member');
+    activeBot(team, botId);
+    return !inactive(team.bots[botId]);
+  });
   const round: Round = { id, root, roomId, input, seats: [], counts: {}, limit: distinct.length + 4 + (room.admin ? 4 : 0),
     ...(room.admin ? { admin: room.admin } : {}), closed: distinct.length === 0 };
   distinct.forEach(botId => reserve(team, round, botId, triggerMessageId));
@@ -89,13 +103,39 @@ export function roomVisibility(room: Room, members: readonly string[]): Record<s
     room.members.includes(id) ? room.visibleFrom?.[id] ?? room.messages.length : room.messages.length,
   ]));
 }
-export function roomFields(team: Pick<RoomsState, 'bots'>, fields: RoomFields): Omit<Room, 'id' | 'messages'> {
+/** `empty`: a room of a team snapshot (#1321) may have no member. Every other rule is the same. */
+export function roomFields(team: Pick<RoomsState, 'bots'>, fields: RoomFields, empty = false): Omit<Room, 'id' | 'messages'> {
   if (fields.mode && fields.mode !== 'mention') throw new Error('Only mention mode is supported');
-  const members = [...fields.members];
-  if (!members.length || members.length > 12 || new Set(members).size !== members.length) throw new Error('Room needs 1 to 12 distinct members');
+  const members = [...fields.members], least = empty ? 0 : 1;
+  if (members.length < least || members.length > 12 || new Set(members).size !== members.length) throw new Error(`Room needs ${least} to 12 distinct members`);
   members.forEach(id => activeBot(team, id));
   if (fields.admin && !members.includes(fields.admin)) throw new Error('Admin must be a room member');
   return { name: fields.name, members, visibleFrom: Object.fromEntries(members.map(id => [id, 0])), ...(fields.admin ? { admin: fields.admin } : {}), mode: 'mention', announcement: fields.announcement ?? '' };
+}
+/** Owner `create_room` (#1321): the Host gives the room id. A room that a Main Bot outcome created has its id too. */
+export function createRoom(team: Pick<RoomsState, 'bots' | 'rooms'>, roomId: string, fields: RoomFields): void {
+  if (Object.hasOwn(team.rooms, roomId)) throw new Error('Room already exists');
+  team.rooms[roomId] = { id: roomId, ...roomFields(team, fields), messages: [] };
+}
+/**
+ * The rooms of a team snapshot in the external rooms mode (#1321), after its Bots. Each listed room takes the snapshot's
+ * fields as a whole: an omitted admin, announcement or memberMentions is cleared. A room that the list lacks is archived for
+ * good: no member, no visibility, no admin. Its seats and rounds settle at the next `advanceRooms`, as for a member that left.
+ */
+export function applyRoomSnapshot(team: Pick<RoomsState, 'bots' | 'rooms'>, rooms: readonly TeamSnapshotRoom[]): void {
+  const listed = new Set(rooms.map(room => room.id));
+  for (const room of Object.values(team.rooms)) {
+    if (room.archived || listed.has(room.id)) continue;
+    room.archived = true; room.members = []; room.visibleFrom = {};
+    delete room.admin;
+  }
+  for (const { id, memberMentions, ...fields } of rooms) {
+    const next = roomFields(team, fields, true), room = team.rooms[id], setting = memberMentions ? { memberMentions } : {};
+    if (!room) { team.rooms[id] = { id, ...next, messages: [], ...setting }; continue; }
+    next.visibleFrom = roomVisibility(room, next.members);
+    delete room.admin; delete room.memberMentions;
+    Object.assign(room, next, setting);
+  }
 }
 /** Owner room edit. An admin that leaves the members is dropped unless the update names one. */
 export function updateRoom(team: Pick<RoomsState, 'bots' | 'rooms'>, roomId: string, update: Partial<RoomFields>): void {
@@ -124,8 +164,7 @@ export function setMemberMentions(team: Pick<RoomsState, 'rooms'>, roomId: strin
 }
 /** `from` is the sender's principal id (#552). Without it, the message is from `user` and the input identity is the K8b one. */
 export function roomInput(team: RoomsState, key: string, roomId: string, text: string, mentions: Mentions, from?: string): string {
-  const room = team.rooms[roomId];
-  if (!room) throw new Error('Room not found');
+  const room = openRoom(team, roomId);
   if (!text.trim()) throw new Error('Room input is empty');
   const id = hash(['room-input', roomId, key]), input = JSON.stringify({ text, mentions, from });
   const prior = team.rounds[id];
@@ -138,7 +177,7 @@ export function roomInput(team: RoomsState, key: string, roomId: string, text: s
 }
 export function memberPresent(team: RoomsState, seat: Seat): boolean {
   const room = team.rooms[team.rounds[seat.roundId]!.roomId];
-  return !!room?.members.includes(seat.botId) && !team.bots[seat.botId]?.archived;
+  return !!room?.members.includes(seat.botId) && !inactive(team.bots[seat.botId]);
 }
 function observeStart(seat: Seat, now: number): void {
   if (seat.startedAt !== undefined) return;
@@ -181,6 +220,8 @@ export function applySpeech(team: RoomsState, seatId: string, document: Pick<Bot
     const triggerMessageId = document.speech?.kind === 'post' ? seat.id : seat.triggerMessageId;
     if (round.closed) {
       if (copy.roots[round.root]!.autonomous >= 3) throw new Error('Autonomous round budget is 3');
+      // newRound skips a suspended member, so a room_call that names one is refused here, as `reserve` refuses it.
+      for (const botId of members) refuseSuspended(copy, botId);
       const id = hash([taskId, 'room_call']);
       newRound(copy, id, round.root, round.roomId, JSON.stringify({ calledBy: seat.botId }), members, triggerMessageId);
       copy.roots[round.root]!.autonomous++;

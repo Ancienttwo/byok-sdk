@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+- **Added (examples)** — H store option `hostIntentMessages` (#1362), as L's
+  (#1356): an Agent message of a Host intent goes to the Host's message handler
+  of the same name, synchronously in the consume transaction, and its
+  `MessageDisposition` is the decision. An accepted message is recorded without
+  its body; K8 does not deliver it. Without a message handler the message still
+  refuses with `binding_mismatch`, and one whose frozen execution has
+  `messageEgress` makes the consume throw with nothing written.
+  `enqueueHostIntent` refuses an execution with `messageEgress` whose name has
+  no message handler, and each `hostIntentMessages` name needs a `hostIntents`
+  handler. Retention archives the reply of a concluded Host intent. H exports
+  `HostedIntentMessageHandler`, `HostedIntentMessageTransaction` and
+  `MessageDisposition`; K8 exports `./rules/message`.
+
+- **Added (examples)** — H re-projects the scope config's model templates
+  onto the scope's Bots at each `sync` and each Bot routine command, with K8
+  `applyModels` (#1358). A Bot that a team snapshot moved to a model the config
+  lacked is held with `Unavailable model: <name>`; once the config has the
+  model, it freezes with that model's template instead of the old one. A
+  changed template reaches existing Bots at their next freeze, with the device
+  and agentRef unchanged, and a sealed routine seals the re-projected
+  template. A template outside `readOnlyToolsets` now fails the `sync` or the
+  routine command, which writes nothing. `HostConfig` is unchanged.
+
+- **Added (examples)** — K8 `BotOptions.hostIntentMessages` (#1356): an Agent
+  message of a Host intent goes to the Host's message handler of the same name,
+  synchronously in the K4 message transaction, and its `MessageDisposition`
+  goes back to K4 as it is. An accepted message is recorded without its body;
+  K8 does not deliver it. Without a message handler the message still refuses
+  with `binding_mismatch`. `enqueueHostIntent` refuses an execution with
+  `messageEgress` whose name has no message handler, and a restart refuses an
+  open such intent. Each name in `hostIntentMessages` needs a handler of the
+  same name in `hostIntents`, and the pass that removes a compacted Host
+  intent's record also removes its replies. The K8 entry now exports
+  `contextTurns`, `historyRowFromTurn`, `ContextTurn`,
+  `HostIntentMessageHandler` and `MessageDisposition`. The
+  `delegation:<id>:<revision>` projection carries the delegation's `root`.
+
+- **Added (examples)** — K8 `BotCollaboration.setModels(models)` replaces the
+  Host's model templates at run time (#1357). Construction and `setModels`
+  apply each template by model name to every unarchived Bot, keeping its
+  device, and change no profile revision, readiness or persona projection.
+  A Turn that froze before keeps its execution. A restart now re-projects the
+  Host's templates onto existing Bots; before, a Bot kept its stored template.
+  In local team mode the Main Bot therefore runs `models[<first model>]` from
+  the first construction on, as `update_bot` already did at its first profile
+  change; without `models` nothing changes. Construction no longer checks the
+  stored templates against `readOnlyToolsets`, since they are replaced by the
+  checked current ones. A missing template of an existing Bot no longer
+  refuses a team snapshot, `update_bot`, construction or `setModels`: the Bot
+  keeps its stored template, and in K8 and H each of its Turns, a sealed
+  routine Turn too, blocks with `Unavailable model: <name>` before it freezes,
+  until the template returns. In H, a Bot whose model is not in the scope
+  config is now held instead of running its stored template. A new Bot still
+  needs a template.
+
 ## 0.35.1 — source candidate
 
 0.35.1 is a PATCH release under the pre-1.0 policy: corrections only, with no
@@ -20,6 +75,33 @@ There is no new Postgres migration and no SQLite schema change. See the
   routine and delivery vectors now run on it instead of the K4 `openHost`, so a
   Host that vendors K8 can run them too. `src/VENDOR.md` Layer 3 lists the file
   and no longer tells a Host to skip these vectors (#1325).
+
+- **Added (examples)** — An external team snapshot Bot in K8 and H can carry
+  `participation: 'suspended'` (#1319). The Bot stays in the team but takes no
+  new work: it leaves `delegate.to` and the `room_call` members and gets no
+  room seat. Its open work ends as for an archived Bot. Delegations to it
+  resolve `refused` with reason `target_suspended`, and a verdict for one that
+  it started is `undelivered: 'initiator_suspended'`. `input`, owner `receive`,
+  `answer` and `decide` for it refuse with `TeamModeError` code
+  `bot_suspended`. A later snapshot without the field restores it, with its
+  profile revision, readiness and autonomy unchanged. Any other
+  `participation` value refuses the snapshot. A snapshot without the field
+  behaves as before.
+
+- **Added (examples)** — K8 and H have an owner `create_room` command (#1321):
+  `BotCollaboration.createRoom(roomId, fields)` and
+  `HostedCommandEntry.createRoom(credential, roomId, fields)` create a room
+  with a Host room id and no model run. The same id with the same fields
+  replays the first result, other fields are an `identity_conflict`, and an id
+  that already has a room throws `Room already exists`. With the new
+  `rooms: 'external'` option (only with `team: 'external'`), each team
+  snapshot carries `rooms`, the authority's whole room list, and the authority
+  owns the rooms and their `memberMentions`. A room that a snapshot no longer
+  lists is archived for good: its seats are removed at the next pass, and
+  `roomInput` throws `Room is archived`. In that mode `createRoom`,
+  `updateRoom`, `setMemberMentions` and the Main Bot's `create_room` and
+  `update_room` refuse with `TeamModeError` code `external_rooms`. Without the
+  option, behavior is unchanged.
 
 - **Fix (client; #1335)** — Grok no longer declares
   `isolation.userContext`. `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and

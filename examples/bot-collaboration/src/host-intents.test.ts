@@ -2,10 +2,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, type ExecutionServer, type IntentInput } from '@byok-sdk/server/execution-core';
+import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, type AgentMessageInput, type ExecutionServer, type IntentInput } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, IntentOutcomeError, type BotOptions, type HostIntentHandler } from './host';
 import { botCompactVeto } from './compaction';
+import type { HostIntentMessageHandler, MessageDisposition } from './index';
+import { sealLedger } from './switch';
 
 /**
  * #882: the Host's own K4 work on the Bot tenant's core. A fake server: a submitted task with the K4 test contract
@@ -57,10 +59,10 @@ function openBot(hostIntents: Record<string, HostIntentHandler>, extra: Partial<
   ledger ??= new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto });
   return new BotCollaboration(server as never, ledger, { botId: 'main', execution: template('device'), connector: async () => null, hostIntents, ...extra });
 }
-async function restart(hostIntents: Record<string, HostIntentHandler>): Promise<BotCollaboration> {
+async function restart(hostIntents: Record<string, HostIntentHandler>, extra: Partial<BotOptions> = {}): Promise<BotCollaboration> {
   await bot!.close(); ledger!.close();
   bot = ledger = undefined;
-  return openBot(hostIntents);
+  return openBot(hostIntents, extra);
 }
 const KEY = 'host-research-1', WAIT_UNTIL = Date.now() + 600_000;
 const input = (extra: Partial<IntentInput> = {}): IntentInput => ({ key: KEY, source: 'user', execution: template('device', 'research'), waitUntil: WAIT_UNTIL, ...extra });
@@ -332,4 +334,103 @@ it('refuses to cancel an unknown key, a direct K4 intent, a Bot Turn and a non-o
   await bot.enqueueHostIntent(input(), 'research');
   await expect(bot.cancelHostIntent(KEY, { id: 'guest', kind: 'human' })).rejects.toThrow('not_owner: cancelHostIntent needs the owner principal');
   expect({ cancels, conclusion: bot.core.intent(KEY)?.conclusion }).toEqual({ cancels: [], conclusion: undefined });
+});
+
+// #1356: the Agent message of a Host intent goes to the Host's message handler in the K4 message transaction.
+const base = template('device', 'research');
+const chat = { ...base, agentMessageContext: { destinationBinding: 'conversation' }, payload: { ...base.payload,
+  messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 } } };
+const chatInput = () => input({ execution: chat });
+function message(messageId = 'm1', contentHash = 'h1'): AgentMessageInput {
+  return { tenant: 'tenant', taskId: bot!.core.intent(KEY)!.taskId, deviceId: 'device', context: chat.agentMessageContext,
+    payload: { agentRef: chat.payload.agentRef, messageId, contentHash, contentType: 'text/markdown', body: 'Here is the answer.' } } as unknown as AgentMessageInput;
+}
+/** A message handler that records each call's message id and returns `decide()`. */
+function chatBot(decide: () => unknown, calls: string[] = []): { calls: string[]; handler: HostIntentMessageHandler } {
+  return { calls, handler: input => { calls.push(input.payload.messageId); return decide() as MessageDisposition; } };
+}
+
+it('gives a Host intent message to its handler, records the accepted reply without a body, and a replay runs no handler', async () => {
+  paused = true;
+  const { calls, handler } = chatBot(() => ({ outcome: 'accepted' }));
+  bot = openBot({ chat: () => {} }, { hostIntentMessages: { chat: handler } });
+  const { taskId } = await bot.enqueueHostIntent(chatInput(), 'chat');
+  expect(await bot.consumeMessage(message())).toEqual({ outcome: 'accepted' });
+  expect(bot.snapshot().replies[taskId]).toEqual({ turnId: KEY, messageId: 'm1', contentHash: 'h1', contentType: 'text/markdown', acceptedAt: expect.any(Number) });
+  expect(await bot.consumeMessage(message())).toEqual({ outcome: 'accepted' });
+  expect(calls).toEqual(['m1']);
+});
+
+it('returns a refusal of the handler as it is, and its replay without the handler, and other content is a conflict', async () => {
+  paused = true;
+  const { calls, handler } = chatBot(() => ({ outcome: 'refused', reasonCode: 'conversation_closed' }));
+  bot = openBot({ chat: () => {} }, { hostIntentMessages: { chat: handler } });
+  await bot.enqueueHostIntent(chatInput(), 'chat');
+  const refused = { outcome: 'refused', reasonCode: 'conversation_closed' };
+  expect(await bot.consumeMessage(message())).toEqual(refused);
+  expect(await bot.consumeMessage(message())).toEqual(refused);
+  expect(await bot.consumeMessage(message('m1', 'h2'))).toEqual({ outcome: 'refused', reasonCode: 'message_conflict' });
+  expect({ calls, replies: bot.snapshot().replies }).toEqual({ calls: ['m1'], replies: {} });
+});
+
+it('writes nothing for a handler that throws, returns a thenable or returns another shape', async () => {
+  paused = true;
+  const unhandled: unknown[] = [], record = (reason: unknown) => { unhandled.push(reason); };
+  process.on('unhandledRejection', record);
+  onTestFinished(() => { process.off('unhandledRejection', record); });
+  let decide: () => unknown = () => { throw new Error('conversation store offline'); };
+  bot = openBot({ chat: () => {} }, { hostIntentMessages: { chat: () => decide() as MessageDisposition } });
+  await bot.enqueueHostIntent(chatInput(), 'chat');
+  const before = ledger!.snapshot();
+  await expect(bot.consumeMessage(message())).rejects.toThrow('conversation store offline');
+  decide = async () => { throw new Error('async conversation failed'); };
+  await expect(bot.consumeMessage(message())).rejects.toThrow('Host intent message handler must be synchronous');
+  decide = () => ({ outcome: 'refused' });
+  await expect(bot.consumeMessage(message())).rejects.toThrow('Invalid Host intent message disposition');
+  expect(ledger!.snapshot()).toEqual(before);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(unhandled).toEqual([]);
+});
+
+it('refuses the message of a Host intent whose name has no message handler with binding_mismatch', async () => {
+  paused = true;
+  const { calls, handler } = chatBot(() => ({ outcome: 'accepted' }));
+  bot = openBot({ research: () => {}, chat: () => {} }, { hostIntentMessages: { chat: handler } });
+  const { taskId } = await bot.enqueueHostIntent(input(), 'research');
+  const plain = { ...message(), context: undefined, payload: { ...message().payload, agentRef: base.payload.agentRef } } as unknown as AgentMessageInput;
+  expect(await bot.consumeMessage({ ...plain, taskId })).toEqual({ outcome: 'refused', reasonCode: 'binding_mismatch' });
+  expect(calls).toEqual([]);
+});
+
+it('needs a message handler for a messageEgress Host intent at enqueue and at a restart', async () => {
+  paused = true;
+  expect(() => openBot({}, { hostIntentMessages: { chat: () => ({ outcome: 'accepted' }) } }))
+    .toThrow('A Host intent message handler needs the Host intent handler chat');
+  bot = openBot({ chat: () => {} });
+  await expect(bot.enqueueHostIntent(chatInput(), 'chat')).rejects.toThrow('Host intent handler chat has no message handler');
+  expect(bot.core.intent(KEY)).toBeUndefined();
+  const { handler } = chatBot(() => ({ outcome: 'accepted' }));
+  bot = await restart({ chat: () => {} }, { hostIntentMessages: { chat: handler } });
+  await bot.enqueueHostIntent(chatInput(), 'chat');
+  await expect(restart({ chat: () => {} })).rejects.toThrow('An open Host intent needs the message handler chat');
+  bot = openBot({ chat: () => {} }, { hostIntentMessages: { chat: handler } });
+  expect(await bot.consumeMessage(message())).toEqual({ outcome: 'accepted' });
+});
+
+it('exports a ledger with a Host intent reply, and the pass after K4 compacts the intent removes the reply', async () => {
+  paused = true;
+  const { handler } = chatBot(() => ({ outcome: 'accepted' }));
+  bot = openBot({ chat: () => {} }, { hostIntentMessages: { chat: handler } });
+  const { taskId } = await bot.enqueueHostIntent(chatInput(), 'chat');
+  expect(await bot.consumeMessage(message())).toEqual({ outcome: 'accepted' });
+  paused = false;
+  await bot.drain();
+  expect(bot.core.intent(KEY)?.conclusion).toBe('succeeded');
+  await bot.core.flushProjections(async () => {});
+  expect(() => sealLedger(ledger!, { source: 'L', domain: 'tenant', exportedAt: Date.now(), devices: [{ deviceId: 'device', frozenRevision: 1 }] }))
+    .not.toThrow();
+  expect(ledger!.compact({ acknowledgedIntentKeys: [KEY], now: Date.now(), tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS })).toMatchObject({ compactedIntents: 1 });
+  expect(bot.snapshot().replies[taskId]).toBeDefined();
+  await bot.drain();
+  expect({ hostIntents: bot.snapshot().hostIntents, replies: bot.snapshot().replies }).toEqual({ hostIntents: {}, replies: {} });
 });

@@ -3,10 +3,11 @@ import type { AgentMessageConsumers, TenantId } from '@byok-sdk/cloud';
 import { canonical } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { CommitConflict, revisionOf, type CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
+import { hostMessageDisposition, type MessageDisposition } from '@byok-sdk/example-bot-collaboration/rules/message';
 import { earlierIntent, frozenIntent } from './intents';
 import { storedKey } from './layout';
 import { acceptedReply, commitStored } from './retention';
-import type { Decision, HostedCollaborationStore, StorePorts } from './store';
+import type { Decision, HostedCollaborationStore, Publish, StorePorts } from './store';
 
 /** The SDK admission hook that H installs (#793 D2c). */
 /** This Host dispatches no sealed task, so it consumes plaintext messages only. */
@@ -15,6 +16,17 @@ export type AgentMessageInput = Parameters<AgentMessageConsumer['consume']>[0];
 /** H never holds a message: each decision is final. */
 export type MessageDecision = { outcome: 'accepted' } | { outcome: 'refused'; reasonCode: string };
 
+/** The consume transaction of a Host intent message (#1362), as `HostedIntentTransaction` with no terminal. */
+export interface HostedIntentMessageTransaction {
+  readonly intent: { readonly key: string; readonly taskId: string };
+  publish: Publish;
+}
+/**
+ * Decides an Agent message of a Host intent (#1362), as L's `HostIntentMessageHandler`. Synchronous: a throw, a thenable or
+ * another result than a disposition throws, and the consume transaction writes nothing.
+ */
+export type HostedIntentMessageHandler = (input: AgentMessageInput, transaction: HostedIntentMessageTransaction) => MessageDisposition;
+
 /** The command id of an Agent message, as L keys it. */
 export const messageCommandId = (input: AgentMessageInput): string => `${input.taskId}:${input.payload.messageId}`;
 
@@ -22,8 +34,8 @@ export const messageCommandId = (input: AgentMessageInput): string => `${input.t
  * Decides one Agent message in the consume transaction, in the order of K4 `consumeMessage`. The checks before the commit
  * write nothing. They stay stable for a replay, because the frozen input never changes and an accepted reply stays.
  */
-export async function decideMessage(client: PoolClient, scope: string, state: CollaborationState,
-  input: AgentMessageInput, ports: StorePorts, channel: boolean): Promise<Decision<MessageDecision>> {
+export async function decideMessage(client: PoolClient, scope: string, state: CollaborationState, input: AgentMessageInput,
+  ports: StorePorts, channel: boolean, messageHandlers: ReadonlyMap<string, HostedIntentMessageHandler>): Promise<Decision<MessageDecision>> {
   const refuse = (reasonCode: string): Decision<MessageDecision> => ({ value: { outcome: 'refused', reasonCode }, outbox: [] });
   const frozen = await frozenIntent(client, scope, input.taskId);
   if (!frozen) return decideEarlier(client, scope, state, input);
@@ -35,11 +47,19 @@ export async function decideMessage(client: PoolClient, scope: string, state: Co
   if (reply && (reply.messageId !== input.payload.messageId || reply.contentHash !== input.payload.contentHash)) return refuse('message_conflict');
   if (reply) return { value: { outcome: 'accepted' }, outbox: [] };
   const head = revisionOf(state), { manage: _manage, ...base } = ports;
+  // A Host intent's message goes to the Host's message handler of the same name (#1362). Without one, K8 refuses it with
+  // `binding_mismatch`, unless its execution has message egress: L refuses to open with such an open intent, and H has no
+  // startup check over every scope, so the consume fails closed here and writes nothing.
+  const handler = frozen.handler === null ? undefined : messageHandlers.get(frozen.handler);
+  if (frozen.handler !== null && !handler && frozen.input.payload.messageEgress) {
+    throw new Error(`An open Host intent needs the message handler ${frozen.handler}`);
+  }
+  const transaction: HostedIntentMessageTransaction = { intent: { key: frozen.turnId, taskId: input.taskId }, publish: base.publish };
   let result: CommitResult;
   try {
     result = await commitStored(client, scope, state, { scope, commandId: messageCommandId(input),
       command: { kind: 'message', turnId: frozen.turnId, message: { taskId: input.taskId, payload: input.payload } } },
-    base, channel);
+    { ...base, ...(handler ? { hostMessage: () => hostMessageDisposition(handler(input, transaction)) } : {}) }, channel);
   } catch (cause) {
     // Other content for the id of a refused message: the refusal that K4 gives for an accepted one.
     if (cause instanceof CommitConflict && cause.code === 'identity_conflict') return refuse('message_conflict');
