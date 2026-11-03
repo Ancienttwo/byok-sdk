@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.execution-to-agent-home",
+  "kind": "writes",
+  "source": "component.sdk.client-execution",
+  "target": "component.sdk.client-agent-home",
+  "synchrony": "synchronous",
+  "intent": "Reserve the Agent home and execution scratch before claim and release them after the terminal result."
+}

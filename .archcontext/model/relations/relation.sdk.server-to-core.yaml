@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.server-to-core",
+  "kind": "depends-on",
+  "source": "module.sdk.server",
+  "target": "module.sdk.core",
+  "synchrony": "synchronous",
+  "intent": "Provide memory or SQLite implementations of the store ports."
+}

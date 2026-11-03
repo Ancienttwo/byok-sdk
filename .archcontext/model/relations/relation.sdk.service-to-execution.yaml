@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.service-to-execution",
+  "kind": "depends-on",
+  "source": "component.sdk.client-service",
+  "target": "component.sdk.client-execution",
+  "synchrony": "synchronous",
+  "intent": "Detect, probe and launch runtime adapters from the CLI and the runtime host bins."
+}

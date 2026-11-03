@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.client-to-session",
+  "kind": "calls",
+  "source": "module.sdk.client",
+  "target": "component.sdk.client-session",
+  "synchrony": "synchronous",
+  "intent": "Start the authenticated connection and route received messages to their handlers."
+}

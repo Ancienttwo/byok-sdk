@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.execution-to-approvals",
+  "kind": "calls",
+  "source": "component.sdk.client-execution",
+  "target": "component.sdk.client-approvals",
+  "synchrony": "synchronous",
+  "intent": "Register every runtime approval and auto-mode tool authorization through TaskRunner.requestApproval."
+}

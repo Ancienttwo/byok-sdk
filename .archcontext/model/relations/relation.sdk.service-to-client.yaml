@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.service-to-client",
+  "kind": "calls",
+  "source": "component.sdk.client-service",
+  "target": "module.sdk.client",
+  "synchrony": "synchronous",
+  "intent": "Start the daemon from the byok-agent start command and the service definitions."
+}

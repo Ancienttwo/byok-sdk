@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.cloud-to-protocol",
+  "kind": "depends-on",
+  "source": "module.sdk.cloud",
+  "target": "module.sdk.protocol",
+  "synchrony": "synchronous",
+  "intent": "Decode and encode wire messages and serve the HTTP paths."
+}

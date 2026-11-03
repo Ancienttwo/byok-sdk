@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.core",
+  "kind": "module",
+  "name": "Platform contracts",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "contract",
+  "summary": "Branded tenant identity, tenant-first store ports, device proof canonicalization, sealed payloads and the in-memory reference stores.",
+  "source": {
+    "include": [
+      "packages/core/**"
+    ]
+  },
+  "notes": [
+    "Leaf package: no workspace dependency. Store ports live in src/stores.ts; createInMemoryCoreStores in src/in-memory/."
+  ]
+}

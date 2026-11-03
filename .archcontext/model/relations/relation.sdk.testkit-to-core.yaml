@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.testkit-to-core",
+  "kind": "depends-on",
+  "source": "module.sdk.testkit",
+  "target": "module.sdk.core",
+  "synchrony": "synchronous",
+  "intent": "Sign device proofs as a simulated device."
+}

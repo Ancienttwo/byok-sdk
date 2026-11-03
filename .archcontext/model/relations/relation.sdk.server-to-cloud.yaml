@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.server-to-cloud",
+  "kind": "depends-on",
+  "source": "module.sdk.server",
+  "target": "module.sdk.cloud",
+  "synchrony": "synchronous",
+  "intent": "Compose the kernel behind the embedded Node HTTP surface."
+}

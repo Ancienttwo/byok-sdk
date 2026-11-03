@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.cloud",
+  "kind": "module",
+  "name": "Coordination kernel",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "kernel",
+  "summary": "Environment-neutral coordination kernel: authentication, route registry, device inbound gate, mailbox, attempts and first-terminal-wins terminal authority over injected stores.",
+  "source": {
+    "include": [
+      "packages/cloud/**"
+    ]
+  },
+  "notes": [
+    "Holds no process state; all facts live in the injected stores. Entry point: createByokCloud (src/cloud.ts)."
+  ]
+}

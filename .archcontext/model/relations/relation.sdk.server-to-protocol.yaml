@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.server-to-protocol",
+  "kind": "depends-on",
+  "source": "module.sdk.server",
+  "target": "module.sdk.protocol",
+  "synchrony": "synchronous",
+  "intent": "Use wire types and path constants at the HTTP boundary."
+}

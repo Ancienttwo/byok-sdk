@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "component.sdk.client-service",
+  "kind": "component",
+  "name": "Install, service and diagnostics",
+  "status": "active",
+  "parent": "module.sdk.client",
+  "layer": "device",
+  "summary": "The byok-agent CLI and the other package bins, service definitions for launchd, systemd user and WinSW, login shell environment capture, doctor and support-bundle.",
+  "source": {
+    "include": [
+      "packages/client/src/bin/**",
+      "packages/client/src/lifecycle/**",
+      "packages/client/src/diagnostics/**",
+      "packages/client/src/login-shell-environment.ts"
+    ]
+  }
+}

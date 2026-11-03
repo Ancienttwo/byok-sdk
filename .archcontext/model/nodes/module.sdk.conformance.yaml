@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.conformance",
+  "kind": "module",
+  "name": "Composition conformance",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "verification",
+  "summary": "Private conformance suites: one assertion source that every kernel composition and the device simulator must pass.",
+  "source": {
+    "include": [
+      "packages/conformance/**"
+    ]
+  },
+  "notes": [
+    "Private; never published (scripts/release/check-package-graph.mjs)."
+  ]
+}

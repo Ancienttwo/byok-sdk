@@ -1,0 +1,87 @@
+{
+  "schemaVersion": "archcontext.flow/v1",
+  "id": "flow.sdk.offer-home-admission",
+  "capabilityId": "capability.sdk.sdk-root",
+  "name": "Offer admission into the Agent home",
+  "applicability": "required",
+  "participants": [
+    {
+      "id": "runner",
+      "nodeId": "component.sdk.client-execution"
+    },
+    {
+      "id": "home",
+      "nodeId": "component.sdk.client-agent-home"
+    }
+  ],
+  "steps": [
+    {
+      "id": "identity",
+      "from": "runner",
+      "to": "home",
+      "label": "Validate the AgentRef that the offer names",
+      "evidence": {
+        "entrypointId": "execution.offer-identity",
+        "sourceSymbol": "offeredAgentRef",
+        "sinkId": "home.validate-agent-ref"
+      }
+    },
+    {
+      "id": "canonical-home",
+      "from": "runner",
+      "to": "home",
+      "label": "Derive the canonical Agent home without creating it",
+      "evidence": {
+        "entrypointId": "execution.offer-home-admission",
+        "sourceSymbol": "reserveOfferHome",
+        "sinkId": "home.canonical-path"
+      }
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "admitted",
+      "kind": "success",
+      "label": "The home has a free writer or reader slot",
+      "steps": [
+        {
+          "id": "acquire",
+          "from": "runner",
+          "to": "home",
+          "label": "Acquire the execution lease and bind the offer workspace to the home",
+          "evidence": {
+            "entrypointId": "execution.offer-workspace",
+            "sourceSymbol": "bindOfferWorkspace",
+            "sinkId": "home.acquire-execution"
+          }
+        }
+      ],
+      "terminal": {
+        "participant": "runner",
+        "label": "Continue to manifest sealing, claim and runtime start"
+      }
+    },
+    {
+      "id": "busy",
+      "kind": "error",
+      "label": "The home is at its writer or reader limit",
+      "steps": [
+        {
+          "id": "count",
+          "from": "runner",
+          "to": "home",
+          "label": "Count the active Attempts of the home; at the limit decline the offer",
+          "evidence": {
+            "entrypointId": "execution.offer-home-admission",
+            "sourceSymbol": "countHome",
+            "sinkId": "home.active-attempts"
+          }
+        }
+      ],
+      "terminal": {
+        "participant": "runner",
+        "label": "Send task.decline with agent_home_writer_busy or agent_home_reader_busy before claim"
+      }
+    }
+  ]
+}

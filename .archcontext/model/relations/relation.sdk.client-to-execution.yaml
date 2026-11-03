@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.client-to-execution",
+  "kind": "calls",
+  "source": "module.sdk.client",
+  "target": "component.sdk.client-execution",
+  "synchrony": "synchronous",
+  "intent": "Hand accepted offers, cancels and steers to the TaskRunner."
+}

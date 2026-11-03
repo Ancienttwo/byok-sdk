@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.cloud-do",
+  "kind": "module",
+  "name": "Durable Object agent host",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "side",
+  "summary": "Cloudflare Durable Object session host for native pi-durable storage and execution with platform provider credentials.",
+  "source": {
+    "include": [
+      "packages/cloud-do/**"
+    ]
+  },
+  "notes": [
+    "No workspace runtime dependency. Entry point: AgentDO (src/agent-do.ts)."
+  ]
+}

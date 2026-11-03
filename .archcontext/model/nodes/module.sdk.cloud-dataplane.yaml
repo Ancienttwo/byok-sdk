@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.cloud-dataplane",
+  "kind": "module",
+  "name": "Hosted data plane",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "composition",
+  "summary": "Hosted composition stores: canonical Postgres and R2 stores, migrations, truth transactions, mailbox wake over LISTEN and maintenance.",
+  "source": {
+    "include": [
+      "packages/cloud-dataplane/**"
+    ]
+  },
+  "notes": [
+    "Topology H. The ./runtime subpath is the Worker-safe store surface; the root entry adds Node-only migrate and Postgres wake."
+  ]
+}

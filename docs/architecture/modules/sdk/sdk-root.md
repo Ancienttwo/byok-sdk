@@ -1,13 +1,13 @@
 # sdk/sdk-root 架構文檔
 
-<!-- BEGIN ARCHCONTEXT:generated target="projection_target.entity.capability-sdk-sdk-root" sourceDigest="sha256:8a356f1f8cde7afe326b5033ae8d6ea5bba3db826b1db3e1223405ed3e6361e2" rendererVersion="archcontext.docs-renderer/v4" outputDigest="sha256:2bf05588105f46b1329f21cb42bdb87f212de8fd4a636783b09e7a9de9f2bea3" -->
+<!-- BEGIN ARCHCONTEXT:generated target="projection_target.entity.capability-sdk-sdk-root" rendererVersion="archcontext.docs-renderer/v6" outputDigest="sha256:0dba605b7e8f28d02b4dd49e281971555437e3df14541484209a89e17907430c" -->
 > **狀態**:`active`
 > **Capability ID**:`capability.sdk.sdk-root`(kind `capability`)
 > **Matched Prefixes**:`packages/**`
 > **Local Contracts**:`packages/AGENTS.md`、`packages/CLAUDE.md`
 > **事實優先級**:倉庫當前狀態 > 本文檔機器區 > 本文檔人工區。機器區(引言、§1、§2)由 ArchContext 從架構模型與源碼度量投影生成,手改會在下次投影被覆蓋。本文檔不記錄出處;本次投影所驗證的 commit 見 `docs/architecture/.projection-manifest.json`。
 
-Owns the existing SDK packages and their public namespace documentation and tests.
+Owns the BYOK SDK workspace packages: the wire and store contracts, the coordination kernel, the Host compositions, the device daemon, key custody, the Durable Object host and the private conformance suites.
 
 ## 1. P1:能力架構地圖
 
@@ -16,19 +16,56 @@ Owns the existing SDK packages and their public namespace documentation and test
 ```mermaid
 flowchart LR
   p1_capability_sdk_sdk_root_17412274["SDK Root"]:::component
-  p1_component_sdk_offer_validation_be71eed1["Offer identity and decline helpers"]:::component
-  p1_module_sdk_runtime_start_b3d0d660["Owned runtime startup"]:::component
-  p1_module_sdk_task_runner_ca53132d["Task offer orchestration"]:::component
-  p1_module_sdk_task_runner_ca53132d -->|"Validate the offered AgentRef and build an explicit decline for invalid identity or unavailable required local capabilities."| p1_component_sdk_offer_validation_be71eed1
-  p1_module_sdk_task_runner_ca53132d -->|"Await prepared operation startup with the remaining admission deadline and preserve cleanup ownership on cancellation or failure."| p1_module_sdk_runtime_start_b3d0d660
+  p1_component_sdk_client_agent_home_a701862e["Agent home and local storage"]:::component
+  p1_component_sdk_client_approvals_3bfdbfa7["Approvals and tool authorization"]:::component
+  p1_component_sdk_client_execution_1c4de85e["Execution and runtime adapters"]:::component
+  p1_component_sdk_client_service_615e61a6["Install#44; service and diagnostics"]:::component
+  p1_component_sdk_client_session_a9c619b2["Device access and session"]:::component
+  p1_module_sdk_client_0b7c484e["Device daemon"]:::component
+  p1_module_sdk_cloud_b266d415["Coordination kernel"]:::component
+  p1_module_sdk_cloud_dataplane_fe815f0d["Hosted data plane"]:::component
+  p1_module_sdk_cloud_do_9a5ce26e["Durable Object agent host"]:::component
+  p1_module_sdk_conformance_72ebd5f0["Composition conformance"]:::component
+  p1_module_sdk_core_f2477339["Platform contracts"]:::component
+  p1_module_sdk_keys_49b8a62f["Provider key custody"]:::component
+  p1_module_sdk_protocol_2f521c76["Wire protocol"]:::component
+  p1_module_sdk_server_37cdf8e2["Embedded server composition"]:::component
+  p1_module_sdk_testkit_7339d0cf["Device simulator"]:::component
+  p1_module_sdk_ui_runtime_630140bc["Timeline projection"]:::component
+  p1_component_sdk_client_session_a9c619b2 -->|"Pair#44; renew tokens#44; long-poll the device mailbox and post device messages#59; this is the only channel between the device and the Host side."| p1_module_sdk_cloud_b266d415
+  p1_module_sdk_client_0b7c484e -->|"Use device proof canonicalization and sealed payloads."| p1_module_sdk_core_f2477339
+  p1_module_sdk_client_0b7c484e -->|"Hand accepted offers#44; cancels and steers to the TaskRunner."| p1_component_sdk_client_execution_1c4de85e
+  p1_module_sdk_client_0b7c484e -->|"Decode offers and encode device messages."| p1_module_sdk_protocol_2f521c76
+  p1_module_sdk_client_0b7c484e -->|"Start the authenticated connection and route received messages to their handlers."| p1_component_sdk_client_session_a9c619b2
+  p1_module_sdk_cloud_dataplane_fe815f0d -->|"Drive kernel mailbox wake and truth transactions for the hosted composition."| p1_module_sdk_cloud_b266d415
+  p1_module_sdk_cloud_dataplane_fe815f0d -->|"Implement the store ports on Postgres and R2."| p1_module_sdk_core_f2477339
+  p1_module_sdk_cloud_dataplane_fe815f0d -->|"Encode and decode mailbox envelopes and apply wire limits in the stores."| p1_module_sdk_protocol_2f521c76
+  p1_module_sdk_cloud_b266d415 -->|"Read and write coordination facts through the tenant-first store ports."| p1_module_sdk_core_f2477339
+  p1_module_sdk_cloud_b266d415 -->|"Decode and encode wire messages and serve the HTTP paths."| p1_module_sdk_protocol_2f521c76
+  p1_module_sdk_conformance_72ebd5f0 -->|"Run the kernel conformance suites against each composition."| p1_module_sdk_cloud_b266d415
+  p1_module_sdk_conformance_72ebd5f0 -->|"Run the store port conformance suites."| p1_module_sdk_core_f2477339
+  p1_module_sdk_conformance_72ebd5f0 -->|"Assert wire-level behavior."| p1_module_sdk_protocol_2f521c76
+  p1_module_sdk_conformance_72ebd5f0 -->|"Drive the device simulator in the simulator suites."| p1_module_sdk_testkit_7339d0cf
+  p1_component_sdk_client_execution_1c4de85e -->|"Reserve the Agent home and execution scratch before claim and release them after the terminal result."| p1_component_sdk_client_agent_home_a701862e
+  p1_component_sdk_client_execution_1c4de85e -->|"Register every runtime approval and auto-mode tool authorization through TaskRunner.requestApproval."| p1_component_sdk_client_approvals_3bfdbfa7
+  p1_module_sdk_keys_49b8a62f -->|"Use the provider provisioning operations and request digests of core."| p1_module_sdk_core_f2477339
+  p1_module_sdk_server_37cdf8e2 -->|"Compose the kernel behind the embedded Node HTTP surface."| p1_module_sdk_cloud_b266d415
+  p1_module_sdk_server_37cdf8e2 -->|"Provide memory or SQLite implementations of the store ports."| p1_module_sdk_core_f2477339
+  p1_module_sdk_server_37cdf8e2 -->|"Use wire types and path constants at the HTTP boundary."| p1_module_sdk_protocol_2f521c76
+  p1_component_sdk_client_service_615e61a6 -->|"Start the daemon from the byok-agent start command and the service definitions."| p1_module_sdk_client_0b7c484e
+  p1_component_sdk_client_service_615e61a6 -->|"Detect#44; probe and launch runtime adapters from the CLI and the runtime host bins."| p1_component_sdk_client_execution_1c4de85e
+  p1_module_sdk_testkit_7339d0cf -->|"Sign device proofs as a simulated device."| p1_module_sdk_core_f2477339
+  p1_module_sdk_testkit_7339d0cf -->|"Speak the wire protocol as a simulated device."| p1_module_sdk_protocol_2f521c76
+  p1_module_sdk_ui_runtime_630140bc -->|"Read the timeline event and approval observation schemas of the kernel."| p1_module_sdk_cloud_b266d415
+  p1_module_sdk_ui_runtime_630140bc -->|"Use wire activity types in the projection."| p1_module_sdk_protocol_2f521c76
   classDef actor fill:#111827,color:#ffffff,stroke:#f9fafb,stroke-width:2px
   classDef component fill:#075985,color:#ffffff,stroke:#bae6fd,stroke-width:2px
   classDef datastore fill:#3f6212,color:#ffffff,stroke:#d9f99d,stroke-width:2px
   classDef external fill:#7c2d12,color:#ffffff,stroke:#fed7aa,stroke-width:2px
 ```
 
-- Proof: `proven` (`sha256:30b54e202b5c6fed844ccf2cb53375674947246b514d7db9886000e60fb1d069`).
-- Semantic nodes: `4`; declared relations: `2`.
+- Proof: `proven` (`sha256:802940b72d927499e32c950fcf8242cd2796ddf52ca2e7e55af285d2c29d8edd`).
+- Semantic nodes: `17`; declared relations: `26`.
 
 ### 1.2 模組職責表
 
@@ -36,7 +73,7 @@ flowchart LR
 
 ### 1.3 規模信號
 
-- 規模量級:`2000–5000` 個文件 / `500k–1000k` 行
+- 規模量級:`2000–5000` 個文件 / `200k–500k` 行
 - 匹配前綴:`packages/**`
 - 推導:掃描 `source.include` 減 `source.exclude`,跳過 `.git/` 與 `node_modules/`,再按 1–2–5 階梯分桶。精確計數不入本文檔:量級足以回答「這個能力有多大」,而逐行計數會讓覆蓋範圍內任何一次源碼改動都改寫本文檔。
 
@@ -52,22 +89,22 @@ flowchart LR
 
 ## 2. P2:端到端數據流
 
-> **Proof**: `proven` (`sha256:30b54e202b5c6fed844ccf2cb53375674947246b514d7db9886000e60fb1d069`); selectors `3/3`.
+> **Proof**: `proven` (`sha256:802940b72d927499e32c950fcf8242cd2796ddf52ca2e7e55af285d2c29d8edd`); selectors `4/4`.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#0d1117","actorBkg":"#312e81","actorBorder":"#c4b5fd","actorTextColor":"#ffffff","signalColor":"#e5e7eb","signalTextColor":"#e5e7eb","labelBoxBkgColor":"#4c1d95","labelBoxBorderColor":"#c4b5fd","labelTextColor":"#ffffff","noteBkgColor":"#78350f","noteBorderColor":"#fcd34d","noteTextColor":"#ffffff","sequenceNumberColor":"#ffffff"}}}%%
 sequenceDiagram
   autonumber
-  participant p2_runner_4c5ce8b1 as Task offer orchestration
-  participant p2_validation_56a509f1 as Offer identity and decline helpers
-  participant p2_startup_a2789b63 as Owned runtime startup
-  p2_runner_4c5ce8b1->>p2_validation_56a509f1: Read and validate the strict offer AgentRef
-  alt Offer passes local admission， input resolution and preparation
-  p2_runner_4c5ce8b1->>p2_startup_a2789b63: Await the owned startup wrapper with the prepared operation and resolved input
-    Note over p2_runner_4c5ce8b1: Receive Session from the wrapper； later binding， pumping and terminal settlement remain separate steps
-  else Invalid AgentRef or required local Agent-home capability unavailable
-  p2_runner_4c5ce8b1->>p2_validation_56a509f1: Emit explicit task.decline and return before runtime startup
-    Note over p2_runner_4c5ce8b1: Return from the offer handler without starting a runtime
+  participant p2_runner_4c5ce8b1 as Execution and runtime adapters
+  participant p2_home_58695d27 as Agent home and local storage
+  p2_runner_4c5ce8b1->>p2_home_58695d27: Validate the AgentRef that the offer names
+  p2_runner_4c5ce8b1->>p2_home_58695d27: Derive the canonical Agent home without creating it
+  alt The home has a free writer or reader slot
+  p2_runner_4c5ce8b1->>p2_home_58695d27: Acquire the execution lease and bind the offer workspace to the home
+    Note over p2_runner_4c5ce8b1: Continue to manifest sealing#44; claim and runtime start
+  else The home is at its writer or reader limit
+  p2_runner_4c5ce8b1->>p2_home_58695d27: Count the active Attempts of the home#59; at the limit decline the offer
+    Note over p2_runner_4c5ce8b1: Send task.decline with agent_home_writer_busy or agent_home_reader_busy before claim
   end
 ```
 <!-- END ARCHCONTEXT:generated target="projection_target.entity.capability-sdk-sdk-root" -->

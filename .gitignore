@@ -62,8 +62,6 @@ _ops/
 .claude/*.bak
 .claude/*.bak.*
 .claude/*.backup-*
-tasks/.current.md.tmp.*
-tasks/current.md
 .ai/harness/checks/
 .ai/harness/checks/*.latest.json
 .ai/harness/checks/*.latest.md
@@ -71,8 +69,6 @@ tasks/current.md
 .ai/harness/archive/
 .ai/harness/backups/
 .ai/harness/failures/latest.jsonl
-.ai/harness/handoff/current.md
-.ai/harness/handoff/resume.md
 .ai/harness/standing-orders.md
 .ai/harness/capability-context/
 .ai/harness/journal/
@@ -83,9 +79,7 @@ tasks/current.md
 !.ai/harness/planning/.gitkeep
 .ai/harness/delegation/*
 .ai/harness/architecture/events.jsonl
-.ai/harness/active-plan
 .ai/harness/active-worktree
-.ai/harness/sprint/
 .ai/harness/worktrees/
 .ai/harness/evidence/
 .ai/harness/runs/
@@ -97,9 +91,7 @@ tasks/current.md
 !.ai/harness/triage/.gitkeep
 .repo-harness/
 .codex/*
-.claude/.active-plan
 .claude/worktrees/
-.claude/.plan-state/
 # END: repo-harness generated-runtime
 
 # wrangler local-dev scratch (worker-smoke E2E); state itself goes to --persist-to tmp
@@ -138,7 +130,6 @@ Thumbs.db
 
 # BEGIN: internal agent/process state (never product source)
 /.ai/
-/.archcontext/
 /.claude/
 /.codex/
 /agents/

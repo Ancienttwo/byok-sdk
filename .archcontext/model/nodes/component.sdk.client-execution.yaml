@@ -1,0 +1,81 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "component.sdk.client-execution",
+  "kind": "component",
+  "name": "Execution and runtime adapters",
+  "status": "active",
+  "parent": "module.sdk.client",
+  "layer": "device",
+  "summary": "Offer admission, Agent home reservation, claim and started, runtime startup ownership, the event pump and terminal settlement, one adapter per agent runtime and process-group ownership.",
+  "source": {
+    "include": [
+      "packages/client/src/daemon/task-runner.ts",
+      "packages/client/src/daemon/task-runner/**",
+      "packages/client/src/daemon/runtime-start.ts",
+      "packages/client/src/daemon/startup-ownership.ts",
+      "packages/client/src/daemon/owned-process-ledger.ts",
+      "packages/client/src/adapters/**",
+      "packages/client/src/runtime/**"
+    ],
+    "entrypoints": [
+      {
+        "id": "execution.offer-identity",
+        "path": "packages/client/src/daemon/task-runner/support.ts",
+        "symbols": [
+          {
+            "name": "offeredAgentRef",
+            "sinks": [
+              {
+                "id": "home.validate-agent-ref",
+                "path": "packages/client/src/agent-home.ts",
+                "symbol": "validateAgentRef"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "execution.offer-home-admission",
+        "path": "packages/client/src/daemon/task-runner/offer-admission.ts",
+        "symbols": [
+          {
+            "name": "reserveOfferHome",
+            "sinks": [
+              {
+                "id": "home.canonical-path",
+                "path": "packages/client/src/agent-home.ts",
+                "symbol": "canonicalHomePath"
+              }
+            ]
+          },
+          {
+            "name": "countHome",
+            "sinks": [
+              {
+                "id": "home.active-attempts",
+                "path": "packages/client/src/agent-home.ts",
+                "symbol": "activeAttemptCount"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "execution.offer-workspace",
+        "path": "packages/client/src/daemon/task-runner/offer-workspace.ts",
+        "symbols": [
+          {
+            "name": "bindOfferWorkspace",
+            "sinks": [
+              {
+                "id": "home.acquire-execution",
+                "path": "packages/client/src/agent-home.ts",
+                "symbol": "acquireExecution"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

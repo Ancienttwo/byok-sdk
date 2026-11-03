@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "component.sdk.client-approvals",
+  "kind": "component",
+  "name": "Approvals and tool authorization",
+  "status": "active",
+  "parent": "module.sdk.client",
+  "layer": "device",
+  "summary": "The single pending-approval registry and the local auto-mode tool authorization gate and its IPC bridge.",
+  "source": {
+    "include": [
+      "packages/client/src/daemon/approvals.ts",
+      "packages/client/src/tool-authorization.ts",
+      "packages/client/src/tool-authorization-ipc.ts"
+    ]
+  }
+}

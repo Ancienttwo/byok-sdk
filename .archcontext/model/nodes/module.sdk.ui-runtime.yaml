@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.ui-runtime",
+  "kind": "module",
+  "name": "Timeline projection",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "composition",
+  "summary": "React-free deterministic Live Activity Timeline projection of task activity for Host UIs.",
+  "source": {
+    "include": [
+      "packages/ui-runtime/**"
+    ]
+  }
+}

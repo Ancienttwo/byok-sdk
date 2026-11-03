@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BYOK SDK Architecture Map</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&family=Noto+Sans+SC:wght@400;600&display=swap">
+<!--
+  repo-harness-archimap map. Projection of .archcontext/model plus measure.ts
+  code facts. Inline styles carry position and size only.
+-->
+<style>
+:root {
+  --canvas: #F7F7F4; --page: #F5F4EF; --ink: #16181D; --ink-2: #4A4F57; --ink-3: #5A5F68; --ink-4: #9AA0A8;
+  --panel: #FFFFFF; --rule: #E2E2DC;
+  --sans: 'IBM Plex Sans', 'Noto Sans SC', -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font-family: var(--sans); }
+main { display: flex; flex-direction: column; align-items: center; gap: 48px; padding: 48px 0; }
+h2.caption { margin: 0 0 12px; font: 600 15px/20px var(--sans); color: var(--ink-3); }
+a { color: #1E40AF; } a:hover { color: #1E3A8A; }
+
+.board { position: relative; width: 1680px; background: var(--canvas); overflow: hidden; }
+.board > * { position: absolute; }
+.kicker { left: 64px; top: 64px; font: 13px/16px var(--mono); letter-spacing: .08em; color: var(--ink-3); }
+.title { left: 64px; top: 88px; font-size: 36px; line-height: 44px; font-weight: 600; }
+.legend { right: 64px; top: 72px; width: 552px; font-size: 13px; line-height: 22px; color: var(--ink-2); text-align: right; }
+.foot { font-size: 11px; line-height: 16px; color: var(--ink-3); }
+.mono { font-family: var(--mono); }
+
+/* Overview */
+.band { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; }
+.layer { font-size: 15px; line-height: 22px; color: var(--ink-2); width: 184px; }
+.layer b { color: var(--ink); }
+.layer small { display: block; font-size: 12px; }
+.node { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  padding: 8px 12px; border: 1.5px solid; border-radius: 10px; font-size: 15px; line-height: 20px;
+  text-decoration: none; color: inherit; }
+.node:hover, .node:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+.node:focus-visible { outline: 2px solid #1E40AF; outline-offset: 2px; }
+.node b { font-weight: 600; }
+.node .loc { font: 12px var(--mono); }
+.node small { display: block; font-size: 13px; line-height: 18px; opacity: .85; }
+.node .id { font: 11px var(--mono); color: var(--ink-4); }
+.k-app { background: #EEF0F3; border-color: #4B5563; color: #1F2937; }
+.k-compose { background: #E8EEFB; border-color: #1E40AF; color: #1E2A4A; }
+.k-kernel { background: #EFEAFB; border-color: #5B21B6; color: #2E1F4F; }
+.k-contract { background: #E3F3F0; border-color: #0F766E; color: #16332F; }
+.k-remote { background: #FBEDE6; border-color: #9A3412; color: #4A2414; }
+.k-external { background: #FFFFFF; border-style: dashed; border-color: #8A8F98; color: var(--ink); }
+.zone { border: 1.5px dashed #C2703F; background: #FFF8F4; border-radius: 14px; }
+.zone-label { font-size: 15px; line-height: 22px; color: #7C2D12; }
+.note { background: #FFF4D6; border: 1px solid #B7791F; border-radius: 8px; padding: 6px 10px; font-size: 12px; line-height: 17px; color: #5C3D0A; }
+
+/* Edges */
+svg.edges { left: 0; top: 0; overflow: visible; pointer-events: none; }
+/* Direct children only: marker paths inside <defs> keep their own fill. */
+.edges > path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.e-call { stroke: #6B7079; stroke-width: 2; }
+.e-import { stroke: #2B2F36; stroke-width: 3; }
+.e-remote { stroke: #9A3412; stroke-width: 2; }
+.e-host { stroke: #5B21B6; stroke-width: 2; }
+.e-dash { stroke-dasharray: 6 6; }
+.lifeline { stroke: #C4C6BF; stroke-width: 1.5; stroke-dasharray: 4 6; }
+.badge { font: 600 12px/16px var(--mono); background: #FFFFFF; border: 1px solid var(--rule); border-radius: 6px; padding: 1px 6px; }
+.elabel { font-size: 13px; line-height: 16px; color: var(--ink-2); white-space: nowrap; }
+
+/* Matrix */
+.panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 24px; }
+table.matrix { border-collapse: separate; border-spacing: 4px; font-size: 13px; }
+.matrix th { font: 600 12px var(--mono); color: var(--ink-2); padding: 6px 8px; text-align: center; }
+.matrix th.row { text-align: right; }
+.matrix td { width: 120px; height: 44px; white-space: nowrap; text-align: center; border-radius: 6px; font: 600 13px var(--mono); background: #F2F2EE; color: var(--ink-4); }
+.matrix td small { display: block; font: 400 11px var(--sans); }
+.h1 { background: #E6F2EF !important; color: #16332F !important; }
+.h2 { background: #BFE0D9 !important; color: #16332F !important; }
+.h3 { background: #7FC1B4 !important; color: #10302B !important; }
+.h4 { background: #2F8F7E !important; color: #FFFFFF !important; }
+.forbid { background: #FBEDEA !important; color: #9A3412 !important; font-size: 11px !important; }
+.attn { background: #FFF4D6 !important; color: #5C3D0A !important; outline: 2px solid #B7791F; }
+.viol { background: #FBEDEA !important; color: #B42318 !important; outline: 2px solid #B42318; }
+.swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin: 0 4px 0 12px; }
+
+/* Sequence */
+.lifehead { display: flex; align-items: center; justify-content: center; text-align: center; width: 192px; height: 64px;
+  border: 1.5px solid #4B5563; border-radius: 10px; background: var(--panel); font-size: 14px; line-height: 18px; }
+.phase { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; }
+.phase.dashed { border-style: dashed; }
+.phase-label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+
+/* Dark strip and file tree */
+.dark { background: #16181D; color: #E6E7EA; border-radius: 12px; padding: 24px; }
+.dark h3 { margin: 0 0 16px; font-size: 15px; }
+.chip { display: inline-block; background: #262A31; border-radius: 8px; padding: 8px 12px; font: 12px/16px var(--mono); }
+.chip b { color: #FFFFFF; margin-right: 6px; }
+.sep { color: #6B7079; margin: 0 8px; }
+.tree { font: 12.5px/20px var(--mono); white-space: pre; }
+.tree i { color: #8A8F98; font-style: normal; }
+
+/* Remarks */
+.remarks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+.remark { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--ink-4); border-radius: 12px; padding: 20px; }
+.remark.high { border-left-color: #B42318; }
+.remark.medium { border-left-color: #B7791F; }
+.remark .meta { font: 12px var(--mono); color: var(--ink-3); }
+.remark h3 { margin: 8px 0; font-size: 17px; line-height: 24px; }
+.remark p { margin: 0 0 8px; font-size: 13px; line-height: 20px; color: var(--ink-2); }
+.remark .ref { font: 12px var(--mono); color: var(--ink-3); }
+.tag { display: inline-block; font: 600 11px var(--sans); background: #FFF4D6; color: #5C3D0A; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- Board 1: layered overview -->
+<section>
+<h2 class="caption">1 · Layered overview</h2>
+<div class="board" style="height:1456px">
+  <div class="kicker">BYOK SDK · ARCHITECTURE · 346fdc4</div>
+  <div class="title">Layered overview</div>
+  <div class="legend">Thick line: value import, number = measured edge count<br>Orange dashed line: network boundary (model relation) · Dashed box: not provided by the SDK<br>Orange zone: the separately deployed device side</div>
+
+  <a class="node k-app" data-module="sdk-root" href="modules/sdk/sdk-root.md" style="left:64px;top:184px;width:1552px;height:80px">
+    <span><b>SDK Root</b> <span class="loc">0.1k</span></span><small>capability.sdk.sdk-root · owns packages/** · contract packages/AGENTS.md, packages/CLAUDE.md</small><span class="id">sdk-root</span></a>
+
+  <div class="band" style="left:64px;top:296px;width:1104px;height:120px"></div>
+  <div class="band" style="left:64px;top:448px;width:1104px;height:160px"></div>
+  <div class="band" style="left:64px;top:640px;width:1104px;height:160px"></div>
+  <div class="band" style="left:64px;top:832px;width:1104px;height:160px"></div>
+  <div class="band" style="left:64px;top:1024px;width:1104px;height:160px"></div>
+  <div class="band" style="left:64px;top:1216px;width:1104px;height:160px"></div>
+  <div class="layer" style="left:88px;top:328px"><b>L4</b> Host apps<small class="mono">examples/ · not modeled</small></div>
+  <div class="layer" style="left:88px;top:504px"><b>L3</b> Composition<small>embedded and hosted</small></div>
+  <div class="layer" style="left:88px;top:696px"><b>L2</b> Kernel<small>the single authority</small></div>
+  <div class="layer" style="left:88px;top:888px"><b>L1</b> Contracts<small>shared by every side</small></div>
+  <div class="layer" style="left:88px;top:1080px"><b>Side</b><small>off the dispatch path</small></div>
+  <div class="layer" style="left:88px;top:1272px"><b>Verification</b><small>private, never published</small></div>
+
+  <div class="node k-external" style="left:296px;top:320px;width:272px;height:72px">
+    <span><b>Topology L Host</b></span><small>device-local Host product</small></div>
+  <div class="node k-external" style="left:584px;top:320px;width:272px;height:72px">
+    <span><b>Topology H Host</b></span><small>hosted Host service</small></div>
+  <div class="node k-external" style="left:872px;top:320px;width:272px;height:72px">
+    <span><b>Host UI</b></span><small>browser</small></div>
+
+  <a class="node k-compose" data-module="server" href="modules/sdk/sdk-root.md" style="left:296px;top:476px;width:272px;height:104px">
+    <span><b>Embedded server</b> <span class="loc">9.7k</span></span><small>Node composition · memory or SQLite</small><span class="id">server</span></a>
+  <a class="node k-compose" data-module="cloud-dataplane" href="modules/sdk/sdk-root.md" style="left:584px;top:476px;width:272px;height:104px">
+    <span><b>Hosted data plane</b> <span class="loc">11.8k</span></span><small>Postgres + R2 stores · LISTEN wake</small><span class="id">cloud-dataplane</span></a>
+  <a class="node k-compose" data-module="ui-runtime" href="modules/sdk/sdk-root.md" style="left:872px;top:476px;width:272px;height:104px">
+    <span><b>Timeline projection</b> <span class="loc">1.0k</span></span><small>Live Activity Timeline</small><span class="id">ui-runtime</span></a>
+
+  <a class="node k-kernel" data-module="cloud" href="modules/sdk/sdk-root.md" style="left:296px;top:668px;width:720px;height:104px">
+    <span><b>Coordination kernel</b> <span class="loc">16.1k</span></span><small>auth · route registry · inbound gate · mailbox · attempts · terminal authority</small><span class="id">cloud</span></a>
+
+  <a class="node k-contract" data-module="protocol" href="modules/sdk/sdk-root.md" style="left:296px;top:860px;width:416px;height:104px">
+    <span><b>Wire protocol</b> <span class="loc">7.5k</span></span><small>wire v5 envelopes · codec · HTTP paths</small><span class="id">protocol</span></a>
+  <a class="node k-contract" data-module="core" href="modules/sdk/sdk-root.md" style="left:728px;top:860px;width:416px;height:104px">
+    <span><b>Platform contracts</b> <span class="loc">9.2k</span></span><small>tenant identity · store ports · device proof</small><span class="id">core</span></a>
+
+  <a class="node k-app" data-module="cloud-do" href="modules/sdk/sdk-root.md" style="left:296px;top:1052px;width:416px;height:104px">
+    <span><b>Durable Object agent host</b> <span class="loc">5.7k</span></span><small>pi-durable session host · platform keys</small><span class="id">cloud-do</span></a>
+  <a class="node k-app" data-module="keys" href="modules/sdk/sdk-root.md" style="left:728px;top:1052px;width:416px;height:104px">
+    <span><b>Provider key custody</b> <span class="loc">9.4k</span></span><small>provider profiles · key custody · Pi launcher</small><span class="id">keys</span></a>
+
+  <a class="node k-app" data-module="conformance" href="modules/sdk/sdk-root.md" style="left:296px;top:1244px;width:416px;height:104px">
+    <span><b>Composition conformance</b> <span class="loc">6.5k</span></span><small>one assertion source per composition</small><span class="id">conformance</span></a>
+  <a class="node k-app" data-module="testkit" href="modules/sdk/sdk-root.md" style="left:728px;top:1244px;width:416px;height:104px">
+    <span><b>Device simulator</b> <span class="loc">0.8k</span></span><small>headless pairing, renewal and presence</small><span class="id">testkit</span></a>
+
+  <div class="zone" style="left:1224px;top:448px;width:392px;height:928px"></div>
+  <div class="zone-label" style="left:1248px;top:464px"><b>Device side · @byok-sdk/client</b></div>
+  <a class="node k-remote" data-module="client-service" href="modules/sdk/sdk-root.md" style="left:1248px;top:504px;width:344px;height:96px">
+    <span><b>Install, service, diagnostics</b> <span class="loc">10.3k</span></span><small>byok-agent CLI · services · doctor</small><span class="id">client-service</span></a>
+  <a class="node k-remote" data-module="client-daemon" href="modules/sdk/sdk-root.md" style="left:1248px;top:640px;width:344px;height:96px">
+    <span><b>Device daemon</b> <span class="loc">68.0k</span></span><small>createDaemon · stores · Agent memory · MCP</small><span class="id">client-daemon</span></a>
+  <a class="node k-remote" data-module="client-session" href="modules/sdk/sdk-root.md" style="left:1248px;top:776px;width:344px;height:96px">
+    <span><b>Device access and session</b> <span class="loc">5.1k</span></span><small>pairing · long-poll · cursor · journal</small><span class="id">client-session</span></a>
+  <a class="node k-remote" data-module="client-execution" href="modules/sdk/sdk-root.md" style="left:1248px;top:912px;width:344px;height:96px">
+    <span><b>Execution and adapters</b> <span class="loc">27.2k</span></span><small>offer admission · adapters · process groups</small><span class="id">client-execution</span></a>
+  <a class="node k-remote" data-module="client-approvals" href="modules/sdk/sdk-root.md" style="left:1248px;top:1048px;width:344px;height:96px">
+    <span><b>Approvals, tool authorization</b> <span class="loc">1.1k</span></span><small>approval registry · auto tool gate</small><span class="id">client-approvals</span></a>
+  <a class="node k-remote" data-module="client-agent-home" href="modules/sdk/sdk-root.md" style="left:1248px;top:1184px;width:344px;height:96px">
+    <span><b>Agent home, local storage</b> <span class="loc">3.5k</span></span><small>storeDir · Agent home · scratch · retention</small><span class="id">client-agent-home</span></a>
+
+  <svg class="edges" width="1680" height="1456">
+    <defs>
+      <marker id="a-import" viewBox="0 0 4 4" refX="2" refY="2" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L4 2 L0 4 Z" fill="#2B2F36"/></marker>
+      <marker id="a-remote" viewBox="0 0 4 4" refX="2" refY="2" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L4 2 L0 4 Z" fill="#9A3412"/></marker>
+    </defs>
+    <path class="e-import" d="M432 580 V664" marker-end="url(#a-import)"/>
+    <path class="e-import" d="M720 580 V664" marker-end="url(#a-import)"/>
+    <path class="e-import" d="M984 580 V664" marker-end="url(#a-import)"/>
+    <path class="e-import" d="M504 772 V856" marker-end="url(#a-import)"/>
+    <path class="e-import" d="M936 772 V856" marker-end="url(#a-import)"/>
+    <path class="e-import" d="M936 1052 V968" marker-end="url(#a-import)"/>
+    <path class="e-remote e-dash" d="M1248 824 H1120 V720 H1020" marker-end="url(#a-remote)"/>
+  </svg>
+  <div class="badge" style="left:444px;top:612px">11</div>
+  <div class="badge" style="left:732px;top:612px">13</div>
+  <div class="badge" style="left:996px;top:612px">2</div>
+  <div class="badge" style="left:516px;top:804px">35</div>
+  <div class="badge" style="left:948px;top:804px">41</div>
+  <div class="badge" style="left:948px;top:996px">4</div>
+  <div class="elabel" style="left:1028px;top:696px">HTTPS long-poll</div>
+  <div class="foot" style="left:64px;top:1400px;width:1552px">Size: non-test LOC from measure.ts at 346fdc4. Drawn: value imports between Host-side packages with their counts, and relation.sdk.client-session-to-cloud, the only channel between the device and the Host side. Left out: imports of server and cloud-dataplane into protocol and core, conformance and testkit imports, device imports of protocol and core, and every edge inside the device zone. Board 2 has all of them. Every node links to its capability page.</div>
+</div>
+</section>
+
+<!-- Board 2: dependency direction (measured) -->
+<section>
+<h2 class="caption">2 · Dependency direction (measured)</h2>
+<div class="board" style="height:1112px">
+  <div class="kicker">BYOK SDK · DEPENDENCIES · 346fdc4</div>
+  <div class="title">Dependency direction (measured)</div>
+  <div class="legend"><span class="swatch h1"></span>1–5<span class="swatch h2"></span>6–20<span class="swatch h3"></span>21–50<span class="swatch h4"></span>51+ value imports<br><span class="swatch attn"></span>two-way import between two map modules</div>
+  <div class="panel" style="left:64px;top:184px;width:1104px">
+    <table class="matrix">
+      <tr><th></th><th>cloud</th><th>protocol</th><th>core</th><th>testkit</th><th>client-<br>daemon</th><th>client-<br>session</th><th>client-<br>execution</th><th>client-<br>approvals</th><th>client-<br>agent-home</th><th>client-<br>service</th></tr>
+      <tr><th class="row">server</th><td class="h2" style="width:80px">11</td><td class="h2" style="width:80px">8</td><td class="h2" style="width:80px">7</td><td style="width:80px">—</td><td style="width:80px">—</td><td style="width:80px">—</td><td style="width:80px">—</td><td style="width:80px">—</td><td style="width:80px">—</td><td style="width:80px">—</td></tr>
+      <tr><th class="row">cloud-dataplane</th><td class="h2">13</td><td class="h1">4</td><td class="h3">21</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><th class="row">ui-runtime</th><td class="h1">2</td><td class="h1">1</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><th class="row">cloud</th><td>·</td><td class="h3">35</td><td class="h3">41</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><th class="row">keys</th><td>—</td><td>—</td><td class="h1">4</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><th class="row">cloud-do</th><td>—</td><td>—</td><td class="h1">1<small>R-A3</small></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><th class="row">conformance</th><td class="h2">8</td><td class="h1">2</td><td class="h2">20</td><td class="h1">1</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><th class="row">testkit</th><td>—</td><td class="h1">2</td><td class="h1">1</td><td>·</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><th class="row">client-service</th><td>—</td><td class="h1">3</td><td class="h1">2</td><td>—</td><td class="attn">96<small>R-A1</small></td><td class="h2">7</td><td class="attn">46<small>R-A1</small></td><td class="h2">7</td><td class="h2">13</td><td>·</td></tr>
+      <tr><th class="row">client-daemon</th><td>—</td><td class="h3">37</td><td class="h2">9</td><td>—</td><td>·</td><td class="attn">34<small>R-A1</small></td><td class="attn">42<small>R-A1</small></td><td class="attn">7<small>R-A1</small></td><td class="attn">34<small>R-A1</small></td><td class="attn">20<small>R-A1</small></td></tr>
+      <tr><th class="row">client-session</th><td>—</td><td class="h1">5</td><td class="h1">4</td><td>—</td><td class="attn">12<small>R-A1</small></td><td>·</td><td>—</td><td>—</td><td class="attn">2<small>R-A1</small></td><td>—</td></tr>
+      <tr><th class="row">client-execution</th><td>—</td><td class="h2">13</td><td>—</td><td>—</td><td class="attn">164<small>R-A1</small></td><td>—</td><td>·</td><td class="h2">9</td><td class="attn">8<small>R-A1</small></td><td class="attn">1<small>R-A1</small></td></tr>
+      <tr><th class="row">client-approvals</th><td>—</td><td>—</td><td>—</td><td>—</td><td class="attn">3<small>R-A1</small></td><td>—</td><td>—</td><td>·</td><td>—</td><td>—</td></tr>
+      <tr><th class="row">client-agent-home</th><td>—</td><td class="h1">2</td><td class="h1">1</td><td>—</td><td class="attn">18<small>R-A1</small></td><td class="attn">1<small>R-A1</small></td><td class="attn">1<small>R-A1</small></td><td>—</td><td>·</td><td>—</td></tr>
+    </table>
+    <p class="foot">Rows import, columns are imported. Value imports only, tests excluded, tracked files only (measure.ts at 346fdc4). Rows sdk-root and columns server, cloud-dataplane, ui-runtime, keys, cloud-do and conformance are left out: no module imports them and sdk-root imports nothing. 23 workspace subpath imports (for example @byok-sdk/protocol/constants and @byok-sdk/core/sealed-payload) do not resolve because their exports point at untracked dist/ files, so their edges are missing. 1 file did not parse: packages/client/src/adapters/pi/official-pi-installation.d.mts. Every model relation except the HTTPS long-poll has a value-import count here.</p>
+  </div>
+  <div class="panel" style="left:1200px;top:184px;width:416px">
+    <div class="mono" style="font-size:12px;color:#5A5F68">R-A1 · Medium</div>
+    <h3 style="margin:8px 0;font-size:17px">Two-way imports in the device side</h3>
+    <p class="mono" style="margin:0;font-size:12px;line-height:22px;color:#4A4F57">execution ↔ daemon 164 / 42<br>service ↔ daemon 96 / 20<br>agent-home ↔ daemon 18 / 34<br>session ↔ daemon 12 / 34<br>approvals ↔ daemon 3 / 7<br>service ↔ execution 46 / 1<br>execution ↔ agent-home 8 / 1<br>session ↔ agent-home 2 / 1</p>
+    <p class="foot" style="margin:12px 0 0">No two-way import between packages. Every Host-side edge points down the layers.</p>
+  </div>
+  <div class="panel" style="left:1200px;top:640px;width:416px">
+    <h3 style="margin:0 0 8px;font-size:15px">Who guards these directions</h3>
+    <p style="margin:0;font-size:13px;line-height:22px;color:#4A4F57">Package edges: checked by <span class="mono">scripts/architecture/dependency-graph.mjs</span> against <span class="mono">dependency-baseline.json</span> (bun run test:scripts)<br>Private packages stay unpublished: checked by <span class="mono">bun run check:release-graph</span><br>Edges inside the client package: not checked</p>
+  </div>
+</div>
+</section>
+
+<!-- Board 4: key sequence -->
+<section>
+<h2 class="caption">4 · Key sequence</h2>
+<div class="board" style="height:800px">
+  <div class="kicker">BYOK SDK · SEQUENCE · 346fdc4</div>
+  <div class="title">Offer admission into the Agent home</div>
+  <div class="legend">flow.sdk.offer-home-admission · 4 of 4 selectors proven<br>Orange: device side call · Amber note: side effect or decision</div>
+  <div class="lifehead" style="left:224px;top:184px">Execution and<br>runtime adapters</div>
+  <div class="lifehead" style="left:464px;top:184px">Agent home and<br>local storage</div>
+
+  <div class="phase" style="left:64px;top:272px;width:1552px;height:176px"></div>
+  <div class="phase-label" style="left:80px;top:280px">① Identity and home key</div>
+  <div class="phase" style="left:64px;top:472px;width:1552px;height:120px"></div>
+  <div class="phase-label" style="left:80px;top:480px">② The home has a free slot</div>
+  <div class="phase dashed" style="left:64px;top:616px;width:1552px;height:120px"></div>
+  <div class="phase-label" style="left:80px;top:624px">③ The home is at its limit</div>
+
+  <svg class="edges" width="1680" height="800">
+    <defs><marker id="s-remote" viewBox="0 0 4 4" refX="2" refY="2" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L4 2 L0 4 Z" fill="#9A3412"/></marker></defs>
+    <path class="lifeline" d="M320 248 V744"/><path class="lifeline" d="M560 248 V744"/>
+    <path class="e-remote" d="M320 344 H556" marker-end="url(#s-remote)"/>
+    <path class="e-remote" d="M320 416 H556" marker-end="url(#s-remote)"/>
+    <path class="e-remote" d="M320 560 H556" marker-end="url(#s-remote)"/>
+    <path class="e-remote" d="M320 704 H556" marker-end="url(#s-remote)"/>
+  </svg>
+  <div class="elabel" style="left:336px;top:308px">Validate the AgentRef<br>that the offer names</div>
+  <div class="elabel" style="left:336px;top:380px">Derive the canonical Agent<br>home without creating it</div>
+  <div class="elabel" style="left:336px;top:524px">Acquire the execution lease,<br>bind the offer workspace</div>
+  <div class="elabel" style="left:336px;top:668px">Count the active Attempts;<br>at the limit, decline</div>
+
+  <div class="note" style="left:704px;top:328px;width:480px">offeredAgentRef → validateAgentRef · <span class="mono">support.ts:404</span></div>
+  <div class="note" style="left:704px;top:400px;width:480px">reserveOfferHome → canonicalHomePath · <span class="mono">offer-admission.ts:88</span></div>
+  <div class="note" style="left:704px;top:544px;width:480px">bindOfferWorkspace → acquireExecution · <span class="mono">offer-workspace.ts:44</span></div>
+  <div class="note" style="left:704px;top:688px;width:480px">countHome → activeAttemptCount · <span class="mono">offer-admission.ts:101</span></div>
+  <div class="foot" style="left:1208px;top:552px;width:392px">Then manifest sealing, claim and runtime start.</div>
+  <div class="foot" style="left:1208px;top:696px;width:392px">task.decline with agent_home_writer_busy or agent_home_reader_busy, before claim.</div>
+  <div class="foot" style="left:64px;top:760px;width:1552px">Step labels are the model flow labels, shortened. Each step is a direct CodeGraph call from the source symbol to the sink symbol. Paths are under packages/client/src/daemon/task-runner/.</div>
+</div>
+</section>
+
+<!-- Board 5: interfaces -->
+<section>
+<h2 class="caption">5 · Interfaces</h2>
+<div class="board" style="height:856px">
+  <div class="kicker">BYOK SDK · PUBLIC SURFACE · 346fdc4</div>
+  <div class="title">Public surface by package</div>
+  <div class="legend">Package export subpaths and bins, from each package.json<br>API reports: api-surface/*.d.ts, checked by bun run check:api-surface</div>
+  <div class="panel" style="left:64px;top:184px;width:496px;height:136px"><b>@byok-sdk/protocol</b> <span class="mono foot">protocol</span><p class="mono" style="margin:8px 0 0;font-size:12px;line-height:20px">. · ./constants · ./agent-memory</p></div>
+  <div class="panel" style="left:592px;top:184px;width:496px;height:136px"><b>@byok-sdk/core</b> <span class="mono foot">core</span><p class="mono" style="margin:8px 0 0;font-size:12px;line-height:20px">. · ./sealed-payload</p></div>
+  <div class="panel" style="left:1120px;top:184px;width:496px;height:136px"><b>@byok-sdk/cloud</b> <span class="mono foot">cloud</span><p class="mono" style="margin:8px 0 0;font-size:12px;line-height:20px">.</p></div>
+  <div class="panel" style="left:64px;top:344px;width:496px;height:136px"><b>@byok-sdk/server</b> <span class="mono foot">server</span><p class="mono" style="margin:8px 0 0;font-size:12px;line-height:20px">. · ./execution-core · ./execution-core/canonical</p></div>
+  <div class="panel" style="left:592px;top:344px;width:496px;height:136px"><b>@byok-sdk/cloud-dataplane</b> <span class="mono foot">cloud-dataplane</span><p class="mono" style="margin:8px 0 0;font-size:12px;line-height:20px">. (Node: migrate, Postgres wake) · ./runtime (Worker-safe stores)</p></div>
+  <div class="panel" style="left:1120px;top:344px;width:496px;height:136px"><b>@byok-sdk/ui-runtime</b> <span class="mono foot">ui-runtime</span><p class="mono" style="margin:8px 0 0;font-size:12px;line-height:20px">.</p></div>
+  <div class="panel" style="left:64px;top:504px;width:496px;height:136px"><b>@byok-sdk/keys</b> <span class="mono foot">keys</span><p class="mono" style="margin:8px 0 0;font-size:12px;line-height:20px">. · ./pi-catalog · ./model-route<br>bin: byok-pi-provider-launcher</p></div>
+  <div class="panel" style="left:592px;top:504px;width:496px;height:136px"><b>@byok-sdk/cloud-do</b> <span class="mono foot">cloud-do</span><p class="mono" style="margin:8px 0 0;font-size:12px;line-height:20px">.</p></div>
+  <div class="panel" style="left:1120px;top:504px;width:496px;height:136px"><b>Private, never published</b><p class="mono" style="margin:8px 0 0;font-size:12px;line-height:20px">@byok-sdk/conformance · @byok-sdk/testkit</p></div>
+  <div class="panel" style="left:64px;top:664px;width:1552px;height:136px"><b>@byok-sdk/client</b> <span class="mono foot">client-daemon (exports) · client-service (bins)</span><p class="mono" style="margin:8px 0 0;font-size:12px;line-height:20px">. · ./adapters · ./agent-memory · ./assertion-client · ./mcp-server · ./mcp-server/http · ./packaging · ./testing<br>bins: byok-agent · byok-agent-message-mcp · byok-agent-result-mcp · byok-agent-memory-mcp · byok-agent-team-mcp · byok-pi-durable · byok-pi-prepared · byok-pi-rpc</p></div>
+</div>
+</section>
+
+<!-- Board 6: remarks -->
+<section>
+<h2 class="caption">6 · Remarks</h2>
+<div class="board" style="height:792px">
+  <div class="kicker">BYOK SDK · REMARKS · 346fdc4 · observations only; not scheduled work</div>
+  <div class="title">Remarks · 5</div>
+  <div class="legend"><span class="swatch" style="background:#B42318"></span>High · correctness or security boundary<span class="swatch" style="background:#B7791F"></span>Medium · structural burden<span class="swatch" style="background:#9AA0A8"></span>Low · naming and cleanup</div>
+  <div class="remarks" style="left:64px;top:184px;width:1552px">
+    <div class="remark medium">
+      <div class="meta">R-A1 · Medium · structure <span class="tag">#1099</span></div>
+      <h3>The device daemon remainder is a two-way import hub</h3>
+      <p>client-daemon holds 68.0k LOC in 375 files. It imports and is imported by every client component: execution 164 / 42, service 96 / 20, Agent home 18 / 34, session 12 / 34. No component builds or tests without it. Direction: continue the client layering and the TaskRunner reducer split in <a href="https://github.com/Ancienttwo/byok-sdk/issues/1099">#1099</a>.</p>
+      <div class="ref">packages/client/src/daemon/create-daemon.ts:850</div>
+    </div>
+    <div class="remark medium">
+      <div class="meta">R-A2 · Medium · coverage <span class="tag">needs owner decision</span></div>
+      <h3>74.0k LOC outside packages/** has no model owner</h3>
+      <p>212 tracked code files are unassigned: the api-surface/*.d.ts API reports (client.d.ts alone is 14.4k), the examples/ reference Hosts, and the scripts/ release, CI and API-surface checks. Direction: decide whether examples and release tooling become capabilities with their own contract files, or stay outside the model.</p>
+      <div class="ref">api-surface/client.d.ts:1</div>
+    </div>
+    <div class="remark">
+      <div class="meta">R-A3 · Low · dependency</div>
+      <h3>cloud-do test support imports core by a relative path</h3>
+      <p>The 1 value import from cloud-do to core on board 2 is a test worker under packages/cloud-do/test/. cloud-do declares no core dependency, and the model has no cloud-do → core relation. Direction: import through @byok-sdk/core as a dev dependency, or move the worker out of the package source.</p>
+      <div class="ref">packages/cloud-do/test/routine-schedule-worker.ts:1</div>
+    </div>
+    <div class="remark">
+      <div class="meta">R-A4 · Low · projection <span class="tag">needs owner decision</span></div>
+      <h3>Former generated targets keep the old one-capability output</h3>
+      <p>The v3 repo-harness/v1 manifest targets only the capability page. index.md, decisions/index.md, changelog.md and diagrams/architecture.* keep renderer v4 regions of the earlier 4-node model, and nothing refreshes them. Direction: delete them or turn them into human prose.</p>
+      <div class="ref">docs/architecture/index.md:29</div>
+    </div>
+    <div class="remark">
+      <div class="meta">R-A5 · Low · model gap</div>
+      <h3>The model has no process or deployment nodes</h3>
+      <p>The runtime topology board is left out. The only cross-side channel in the model is the HTTPS long-poll relation. The process view stays in process-namespace-topology.md. Direction: add process and deployment nodes when topology changes need review.</p>
+      <div class="ref">.archcontext/model/relations/relation.sdk.client-session-to-cloud.yaml:1</div>
+    </div>
+  </div>
+</div>
+</section>
+
+</main>
+<script type="application/json" id="archimap-meta">
+{
+  "schema": "archimap/v1",
+  "project": "BYOK SDK",
+  "base": "346fdc4",
+  "generated": "2026-11-02",
+  "sources": [".archcontext/model", "docs/architecture/.projection-manifest.json", "measure.ts archimap-measure/v1", "packages/*/package.json"],
+  "boards": ["overview", "dependencies", "sequence", "interfaces", "remarks"],
+  "modules": [
+    { "id": "sdk-root", "label": "SDK Root", "include": ["packages/*"], "exclude": [], "nodes": ["capability.sdk.sdk-root"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "protocol", "label": "Wire protocol", "include": ["packages/protocol/**"], "exclude": [], "nodes": ["module.sdk.protocol"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "core", "label": "Platform contracts", "include": ["packages/core/**"], "exclude": [], "nodes": ["module.sdk.core"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "cloud", "label": "Coordination kernel", "include": ["packages/cloud/**"], "exclude": [], "nodes": ["module.sdk.cloud"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "server", "label": "Embedded server", "include": ["packages/server/**"], "exclude": [], "nodes": ["module.sdk.server"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "cloud-dataplane", "label": "Hosted data plane", "include": ["packages/cloud-dataplane/**"], "exclude": [], "nodes": ["module.sdk.cloud-dataplane"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "ui-runtime", "label": "Timeline projection", "include": ["packages/ui-runtime/**"], "exclude": [], "nodes": ["module.sdk.ui-runtime"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "keys", "label": "Provider key custody", "include": ["packages/keys/**"], "exclude": [], "nodes": ["module.sdk.keys"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "cloud-do", "label": "Durable Object agent host", "include": ["packages/cloud-do/**"], "exclude": [], "nodes": ["module.sdk.cloud-do"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "conformance", "label": "Composition conformance", "include": ["packages/conformance/**"], "exclude": [], "nodes": ["module.sdk.conformance"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "testkit", "label": "Device simulator", "include": ["packages/testkit/**"], "exclude": [], "nodes": ["module.sdk.testkit"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "client-session", "label": "Device access and session", "include": [
+      "packages/client/src/daemon/auth-manager.ts",
+      "packages/client/src/daemon/connection-manager.ts",
+      "packages/client/src/daemon/long-poll-transport.ts",
+      "packages/client/src/daemon/http-client.ts",
+      "packages/client/src/daemon/cursor-store.ts",
+      "packages/client/src/daemon/replay-cursor.ts",
+      "packages/client/src/daemon/journal/**",
+      "packages/client/src/daemon/presence-publisher.ts",
+      "packages/client/src/daemon/deterministic-jitter.ts",
+      "packages/client/src/daemon/device-credential-store.ts",
+      "packages/client/src/daemon/device-credential-provider.ts",
+      "packages/client/src/daemon/device-keys.ts",
+      "packages/client/src/daemon/device-proof-signer.ts",
+      "packages/client/src/daemon/device-assertion-signer.ts"
+    ], "exclude": [], "nodes": ["component.sdk.client-session"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "client-execution", "label": "Execution and runtime adapters", "include": [
+      "packages/client/src/daemon/task-runner.ts",
+      "packages/client/src/daemon/task-runner/**",
+      "packages/client/src/daemon/runtime-start.ts",
+      "packages/client/src/daemon/startup-ownership.ts",
+      "packages/client/src/daemon/owned-process-ledger.ts",
+      "packages/client/src/adapters/**",
+      "packages/client/src/runtime/**"
+    ], "exclude": [], "nodes": ["component.sdk.client-execution"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "client-approvals", "label": "Approvals and tool authorization", "include": [
+      "packages/client/src/daemon/approvals.ts",
+      "packages/client/src/tool-authorization.ts",
+      "packages/client/src/tool-authorization-ipc.ts"
+    ], "exclude": [], "nodes": ["component.sdk.client-approvals"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "client-agent-home", "label": "Agent home and local storage", "include": [
+      "packages/client/src/agent-home.ts",
+      "packages/client/src/agent-home-readers.ts",
+      "packages/client/src/agent-home-reader-retention.ts",
+      "packages/client/src/daemon/store.ts",
+      "packages/client/src/daemon/host-layout.ts",
+      "packages/client/src/daemon/retention/**"
+    ], "exclude": [], "nodes": ["component.sdk.client-agent-home"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "client-service", "label": "Install, service and diagnostics", "include": [
+      "packages/client/src/bin/**",
+      "packages/client/src/lifecycle/**",
+      "packages/client/src/diagnostics/**",
+      "packages/client/src/login-shell-environment.ts"
+    ], "exclude": [], "nodes": ["component.sdk.client-service"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] },
+    { "id": "client-daemon", "label": "Device daemon", "include": ["packages/client/**"], "exclude": [
+      "packages/client/src/daemon/auth-manager.ts",
+      "packages/client/src/daemon/connection-manager.ts",
+      "packages/client/src/daemon/long-poll-transport.ts",
+      "packages/client/src/daemon/http-client.ts",
+      "packages/client/src/daemon/cursor-store.ts",
+      "packages/client/src/daemon/replay-cursor.ts",
+      "packages/client/src/daemon/journal/**",
+      "packages/client/src/daemon/presence-publisher.ts",
+      "packages/client/src/daemon/deterministic-jitter.ts",
+      "packages/client/src/daemon/device-credential-store.ts",
+      "packages/client/src/daemon/device-credential-provider.ts",
+      "packages/client/src/daemon/device-keys.ts",
+      "packages/client/src/daemon/device-proof-signer.ts",
+      "packages/client/src/daemon/device-assertion-signer.ts",
+      "packages/client/src/daemon/task-runner.ts",
+      "packages/client/src/daemon/task-runner/**",
+      "packages/client/src/daemon/runtime-start.ts",
+      "packages/client/src/daemon/startup-ownership.ts",
+      "packages/client/src/daemon/owned-process-ledger.ts",
+      "packages/client/src/adapters/**",
+      "packages/client/src/runtime/**",
+      "packages/client/src/daemon/approvals.ts",
+      "packages/client/src/tool-authorization.ts",
+      "packages/client/src/tool-authorization-ipc.ts",
+      "packages/client/src/agent-home.ts",
+      "packages/client/src/agent-home-readers.ts",
+      "packages/client/src/agent-home-reader-retention.ts",
+      "packages/client/src/daemon/store.ts",
+      "packages/client/src/daemon/host-layout.ts",
+      "packages/client/src/daemon/retention/**",
+      "packages/client/src/bin/**",
+      "packages/client/src/lifecycle/**",
+      "packages/client/src/diagnostics/**",
+      "packages/client/src/login-shell-environment.ts"
+    ], "nodes": ["module.sdk.client"], "docs": ["docs/architecture/modules/sdk/sdk-root.md"] }
+  ]
+}
+</script>
+</body>
+</html>

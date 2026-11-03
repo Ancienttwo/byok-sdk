@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.conformance-to-protocol",
+  "kind": "depends-on",
+  "source": "module.sdk.conformance",
+  "target": "module.sdk.protocol",
+  "synchrony": "synchronous",
+  "intent": "Assert wire-level behavior."
+}

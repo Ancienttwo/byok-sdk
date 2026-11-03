@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.cloud-dataplane-to-cloud",
+  "kind": "depends-on",
+  "source": "module.sdk.cloud-dataplane",
+  "target": "module.sdk.cloud",
+  "synchrony": "synchronous",
+  "intent": "Drive kernel mailbox wake and truth transactions for the hosted composition."
+}

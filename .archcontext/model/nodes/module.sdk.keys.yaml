@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.keys",
+  "kind": "module",
+  "name": "Provider key custody",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "side",
+  "summary": "Provider profiles, credential-backed auth headers, direct provider transports, OS credential custody for provider keys and the Pi provider launcher.",
+  "source": {
+    "include": [
+      "packages/keys/**"
+    ]
+  },
+  "notes": [
+    "Not on the dispatch path. Entry points: ProviderRegistry (src/registry.ts), bin byok-pi-provider-launcher."
+  ]
+}
