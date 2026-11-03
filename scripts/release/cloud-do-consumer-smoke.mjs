@@ -6,40 +6,17 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runtimeSmokeImports } from '../api-surface/entry-closure.mjs';
 import { scanModule } from '../api-surface/module-scan.mjs';
+import { workerConsumerImports, workerSource } from './cloud-do-consumer-worker.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
-// The installed Worker consumer: the only @byok-sdk imports a Cloudflare Worker
-// needs, so the README's Worker install set is checked against this list.
-const workerSource = `import { AgentDO, DurableObjectSqliteDatabase, sessionObjectName } from '@byok-sdk/cloud-do';
-import { validateResultOutcome } from '@byok-sdk/protocol';
-
-export class ConsumerDO extends AgentDO {
-  protected instructions(): string { return 'Consumer hook reached.'; }
-
-  async probe() {
-    const hook = this.instructions();
-    const database = new DurableObjectSqliteDatabase(this.ctx.storage);
-    try {
-      await database.run('CREATE TABLE IF NOT EXISTS consumer_probe (value TEXT)');
-      await database.run('INSERT INTO consumer_probe (value) VALUES (?)', hook);
-      const row = await database.get<{ value: string }>('SELECT value FROM consumer_probe LIMIT 1');
-      const objectName = await sessionObjectName({ tenantId: 'consumer', workspaceId: 'workspace', agentId: 'agent', sessionId: 'session' });
-      const schema = { type: 'object', required: ['answer'], additionalProperties: false, properties: { answer: { type: 'string' } } };
-      const valid = validateResultOutcome(schema, { answer: hook });
-      const invalid = validateResultOutcome(schema, { answer: 1 });
-      return { hook, stored: row?.value, objectName, valid, invalid };
-    } finally { await database.close(); }
-  }
+// The Worker source owns its imports; workerConsumerImports is a projection
+// that this check holds equal to it, so tests can read the list without acorn.
+export function assertWorkerConsumerImports(source = workerSource, declared = workerConsumerImports) {
+  const scanned = [...new Set(scanModule(source, { declaration: true }).imports.map(edge => edge.specifier))].sort();
+  assert.deepEqual(declared, scanned,
+    'scripts/release/cloud-do-consumer-worker.mjs: workerConsumerImports must equal the imports of workerSource');
 }
-
-export default {
-  async fetch(_request: Request, env: { AGENTS: DurableObjectNamespace<ConsumerDO> }): Promise<Response> {
-    return Response.json(await env.AGENTS.getByName('consumer').probe());
-  },
-};
-`;
-export const workerConsumerImports = [...new Set(scanModule(workerSource, { declaration: true }).imports.map(edge => edge.specifier))].sort();
 
 function cliEntry(require, name, bin) {
   const manifestPath = require.resolve(name + '/package.json');
@@ -89,6 +66,7 @@ export async function cloudDoConsumerSmoke(installRoot, workerImports) {
   assert.equal(manifest.private, undefined);
   assert.equal(manifest.name, '@byok-sdk/cloud-do');
 
+  assertWorkerConsumerImports();
   const consumer = path.join(installRoot, 'cloud-do-consumer');
   mkdirSync(consumer);
   const typesDir = path.dirname(cloudRequire.resolve('@cloudflare/workers-types/package.json'));

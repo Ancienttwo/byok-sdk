@@ -364,6 +364,12 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/cloud-do-consumer-smoke.mjs': {
     tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
+  // #1386: the installed consumer's Worker source and its import list, without
+  // dependencies so install-matrix.test.mjs runs on a README-only change.
+  'scripts/release/cloud-do-consumer-worker.mjs': {
+    tests: ['scripts/release/install-matrix.test.mjs', 'scripts/release/pack-and-smoke.test.mjs'],
+    families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
+  },
   // #1378: the shared Secret Service wrapper that these family jobs run their
   // suites under. build-test also runs it, but plan-ci never lets a routine
   // path select build-test (the same rule as .node-version).

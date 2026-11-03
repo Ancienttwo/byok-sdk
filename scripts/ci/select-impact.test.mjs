@@ -404,6 +404,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs', 'scripts/release/check-retired-identities.mjs',
     'scripts/release/check-upgrade-manifest.mjs', 'scripts/release/check-upgrade-manifest.test.mjs',
     'scripts/release/cloud-do-consumer-smoke.mjs',
+    'scripts/release/cloud-do-consumer-worker.mjs',
     'scripts/release/execution-submit-smoke.mjs',
     'scripts/release/pack-and-smoke.mjs',
     'scripts/release/pack-and-smoke.test.mjs',
@@ -436,6 +437,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   });
   assert.deepEqual(selectImpact(['scripts/release/pack-and-smoke.mjs']).families, sorted(runners));
   assert.deepEqual(selectImpact(['scripts/release/cloud-do-consumer-smoke.mjs']).families, sorted(runners));
+  assert.deepEqual(selectImpact(['scripts/release/cloud-do-consumer-worker.mjs']).families, sorted(runners));
   assert.ok(runners.includes('npm-release-pack'));
   // Its store-path guard runs inside those same jobs.
   assert.deepEqual(selectImpact(['scripts/release/published-store-paths.mjs']).families, sorted(runners));
