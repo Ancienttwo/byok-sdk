@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { loginShellSnapshot, type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 
 /**
@@ -12,8 +15,9 @@ import { loginShellSnapshot, type LoginShellSnapshot, type ServiceEnvironmentUna
  *   environment, so a variable an embedding Host puts into `process.env` does
  *   not reach the runtime. A failed capture fails closed with
  *   {@link RuntimeEnvironmentUnavailableError}. On win32, which has no login
- *   shell, the base is {@link WINDOWS_SESSION_NAMES} from the live session
- *   environment.
+ *   shell, the base is {@link WINDOWS_SESSION_NAMES}: `PATH` and `PATHEXT`
+ *   as logon builds them from the registry (see {@link WindowsLogonRegistry}),
+ *   the other names from the live session environment.
  * - `allowlist`: the platform baseline plus `allow`, from the live
  *   environment; it needs no snapshot.
  *
@@ -116,7 +120,10 @@ const WINDOWS_BASE_ALLOWLIST: readonly string[] = [
 
 /**
  * The win32 runtime environment base under `login-shell`: the platform
- * baseline plus the names Windows itself sets for a logon session.
+ * baseline plus the names Windows itself sets for a logon session. `PATH` and
+ * `PATHEXT` are the logon registry values ({@link WINDOWS_LOGON_NAMES}), so a
+ * directory a shell profile adds to the session `PATH` is not in the base;
+ * every other name is the live session value.
  */
 const WINDOWS_SESSION_NAMES: readonly string[] = [
   ...BASE_PLATFORM_ALLOWLIST,
@@ -237,13 +244,277 @@ export interface RuntimeEnvironment {
   readonly report: RuntimeEnvironmentReport;
 }
 
-/** The login-shell capture failed, so no `login-shell` runtime environment exists in this process. */
+/**
+ * The base capture failed — the login-shell snapshot, or on win32 the logon
+ * registry read (`logon-registry-unavailable`) — so no `login-shell` runtime
+ * environment exists in this process.
+ */
 export class RuntimeEnvironmentUnavailableError extends Error {
   readonly code = 'runtime_environment_unavailable' as const;
   constructor(readonly reason: ServiceEnvironmentUnavailableCode) {
-    super(`runtime environment unavailable: the login-shell capture failed (${reason})`);
+    super(`runtime environment unavailable: the base capture failed (${reason})`);
     this.name = 'RuntimeEnvironmentUnavailableError';
   }
+}
+
+/*
+ * win32 logon registry (#1317). `PATH` and `PATHEXT` of the base are built
+ * the way Windows builds them at logon, measured with `CreateEnvironmentBlock`
+ * on windows-latest and windows-2022:
+ * https://github.com/Ancienttwo/byok-sdk/pull/1395#issuecomment-6599686570 and
+ * https://github.com/Ancienttwo/byok-sdk/pull/1395#issuecomment-6599840085
+ *
+ * - Read with `reg export` (UTF-16LE), not `reg query`, whose output follows
+ *   the console code page.
+ * - Within each key, every REG_SZ first, then every REG_EXPAND_SZ in key
+ *   order, expanded with what is defined so far; an undefined `%NAME%` stays.
+ * - Predefined names come in two stages: a few before the machine key, the
+ *   profile names before the user key. Volatile Environment names
+ *   (`HOMEDRIVE`, `LOGONSERVER`, ...) are set after logon and never expand.
+ * - REG_DWORD and other non-string values are ignored.
+ * - `PATH` is the machine value, then the user value's entries with every
+ *   empty entry and every entry byte-for-byte equal to a machine entry
+ *   removed, so a user `%PATH%` (expanded to the machine value) adds nothing
+ *   twice.
+ * - `PATHEXT` and every other name: the user value replaces the machine value.
+ */
+
+/** The win32 base names logon builds from the registry, upper case. */
+const WINDOWS_LOGON_NAMES: ReadonlySet<string> = new Set(['PATH', 'PATHEXT']);
+
+/** The keys logon reads, machine first. */
+export const WINDOWS_MACHINE_ENVIRONMENT_KEY = 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment';
+export const WINDOWS_USER_ENVIRONMENT_KEY = 'HKCU\\Environment';
+
+/** A REG_SZ (`expand: false`) or REG_EXPAND_SZ (`expand: true`) registry value. */
+export interface WindowsRegistryString {
+  readonly expand: boolean;
+  readonly value: string;
+}
+
+/**
+ * Reads the REG_SZ and REG_EXPAND_SZ values of one registry key, keyed by the
+ * upper-case value name. Rejects when the key cannot be read or parsed.
+ *
+ * @internal
+ */
+export type WindowsRegistryReader = (key: string) => Promise<ReadonlyMap<string, WindowsRegistryString>>;
+
+/**
+ * The machine and user Environment keys of this process's logon, read once
+ * per process like the login-shell snapshot, or the failed read.
+ *
+ * @internal
+ */
+export type WindowsLogonRegistry =
+  | { readonly source: 'registry'; readonly machine: ReadonlyMap<string, WindowsRegistryString>; readonly user: ReadonlyMap<string, WindowsRegistryString> }
+  | { readonly source: 'unavailable' };
+
+/**
+ * Reads both logon keys with `reader`, machine then user, one export at a
+ * time: concurrent `reg export` runs interfere (#1395 E1g: an exit code 1, or
+ * a file holding another key). Any failure is `unavailable`, which the build
+ * fails closed on.
+ *
+ * @internal
+ */
+export async function readWindowsLogonRegistry(reader: WindowsRegistryReader): Promise<WindowsLogonRegistry> {
+  try {
+    const machine = await reader(WINDOWS_MACHINE_ENVIRONMENT_KEY);
+    const user = await reader(WINDOWS_USER_ENVIRONMENT_KEY);
+    return { source: 'registry', machine, user };
+  } catch {
+    return { source: 'unavailable' };
+  }
+}
+
+const defaultWindowsLogonSource = (): Promise<WindowsLogonRegistry> => readWindowsLogonRegistry(readWindowsRegistryKey);
+let windowsLogonSource = defaultWindowsLogonSource;
+let windowsLogon: Promise<WindowsLogonRegistry> | undefined;
+
+/** This process's logon registry values, read on the first call. Never rejects. */
+function windowsLogonRegistry(): Promise<WindowsLogonRegistry> {
+  windowsLogon ??= windowsLogonSource();
+  return windowsLogon;
+}
+
+/**
+ * Test seam: replaces how {@link buildRuntimeEnvironment} reads the logon
+ * registry on win32 and forgets an earlier read; `undefined` restores the
+ * real read.
+ *
+ * @internal
+ */
+export function setWindowsLogonRegistrySource(source: (() => Promise<WindowsLogonRegistry>) | undefined): void {
+  windowsLogonSource = source ?? defaultWindowsLogonSource;
+  windowsLogon = undefined;
+}
+
+/**
+ * The names logon sets before it reads the machine Environment key, so a
+ * machine REG_EXPAND_SZ can name them (#1317 E1e, `CreateEnvironmentBlock` on
+ * windows-latest and windows-2022). Their values are taken from the live
+ * session, which logon gave them.
+ */
+const WINDOWS_LOGON_MACHINE_PREDEFINED_NAMES: readonly string[] = ['ALLUSERSPROFILE', 'ProgramData', 'PUBLIC', 'SystemDrive', 'SystemRoot'];
+
+/**
+ * The names logon sets from the user profile after the machine key and before
+ * the user key, so only a user REG_EXPAND_SZ can name them (#1317 E1e). The
+ * names a Host can set freely (`TMPDIR`, `LANG`, `HOME`, proxies, ...) are in
+ * neither list, so a Host value never reaches `PATH` through `%NAME%`.
+ */
+const WINDOWS_LOGON_USER_PREDEFINED_NAMES: readonly string[] = [
+  'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'COMPUTERNAME',
+  'CommonProgramFiles', 'CommonProgramFiles(x86)', 'CommonProgramW6432',
+  'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432',
+];
+
+/** `%NAME%` replaced by its value in `scope` (upper-case names); an undefined name stays as written. */
+function expandWindowsNames(value: string, scope: ReadonlyMap<string, string>): string {
+  return value.replace(/%([^%]+)%/gu, (reference, name: string) => scope.get(name.toUpperCase()) ?? reference);
+}
+
+/**
+ * Adds one Environment key to `scope` as logon does (#1317 E1d/E1e): every
+ * REG_SZ first, then every REG_EXPAND_SZ in key order, each expanded with
+ * `scope` as it stands, so an expandable value sees every plain value and the
+ * expandable values before it. `path` turns the key's `PATH` into the value
+ * the scope holds.
+ */
+function addWindowsEnvironmentKey(values: ReadonlyMap<string, WindowsRegistryString>, scope: Map<string, string>, path: (value: string) => string = (value) => value): void {
+  for (const expand of [false, true]) {
+    for (const [name, entry] of values) {
+      if (entry.expand !== expand) continue;
+      const value = expand ? expandWindowsNames(entry.value, scope) : entry.value;
+      scope.set(name, name === 'PATH' ? path(value) : value);
+    }
+  }
+}
+
+/**
+ * `PATH` and `PATHEXT` as logon builds them from the registry (#1317 E1):
+ * the machine predefined names, the machine key, the user predefined names,
+ * then the user key. `PATH` is the machine value, then the user value's
+ * entries that are not empty and not byte-for-byte an entry of the machine
+ * value, joined by `;`; so a user `%PATH%` adds nothing twice. A user value
+ * expanded after the user `PATH` sees the joined one. `PATHEXT` and every
+ * other name take the user value over the machine value. Registry names
+ * other than these two only feed the expansion.
+ */
+function windowsLogonBase(logon: Extract<WindowsLogonRegistry, { source: 'registry' }>, live: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const session = new Map<string, string>();
+  for (const [name, value] of Object.entries(live)) if (value !== undefined) session.set(name.toUpperCase(), value);
+  const scope = new Map<string, string>();
+  const predefine = (names: readonly string[]): void => {
+    for (const name of names) {
+      const value = session.get(name.toUpperCase());
+      if (value !== undefined) scope.set(name.toUpperCase(), value);
+    }
+  };
+  predefine(WINDOWS_LOGON_MACHINE_PREDEFINED_NAMES);
+  addWindowsEnvironmentKey(logon.machine, scope);
+  const machinePath = scope.get('PATH');
+  const machineEntries = new Set(machinePath?.split(';'));
+  predefine(WINDOWS_LOGON_USER_PREDEFINED_NAMES);
+  // When nothing of the user value is left, Windows still appends a `;`
+  // (#1395 E1 B11); this join deliberately leaves no empty entry.
+  addWindowsEnvironmentKey(logon.user, scope, (value) => [machinePath, ...value.split(';').filter((entry) => entry.length > 0 && !machineEntries.has(entry))]
+    .filter((part) => part !== undefined && part.length > 0).join(';'));
+  const pathValue = scope.get('PATH');
+  const pathext = scope.get('PATHEXT');
+  return {
+    ...(pathValue === undefined || pathValue.length === 0 ? {} : { Path: pathValue }),
+    ...(pathext === undefined ? {} : { PATHEXT: pathext }),
+  };
+}
+
+const REG_EXPORT_TIMEOUT_MS = 10_000;
+
+/**
+ * The real {@link WindowsRegistryReader}: `%SystemRoot%\\System32\\reg.exe`
+ * exports `key` to a UTF-16LE file in a private temp directory, removed once
+ * read. `reg query` is not used: its stdout follows the console code page,
+ * which loses non-ASCII directories (#1317 E1). The file may hold secrets a
+ * user keeps in environment variables, so no error carries its content.
+ *
+ * @internal
+ */
+export async function readWindowsRegistryKey(key: string): Promise<ReadonlyMap<string, WindowsRegistryString>> {
+  const systemRoot = process.env.SystemRoot;
+  if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot) || /[\u0000\r\n]/u.test(systemRoot)) throw new Error('SystemRoot is not an absolute path');
+  const reg = path.win32.join(systemRoot, 'System32', 'reg.exe');
+  // Loaded on the first read, so only a win32 build pulls it into this module's graph.
+  const { createPrivateSystemTempDir } = await import('../util/secure-dir');
+  const directory = await createPrivateSystemTempDir('byok-reg-');
+  try {
+    const file = path.join(directory, 'key.reg');
+    // Concurrent `reg export` runs that share TEMP/TMP mix up their output
+    // (an exit code 1, or a file holding another key); each run gets this
+    // read's private directory as both (#1395 E1g/E1h:
+    // https://github.com/Ancienttwo/byok-sdk/pull/1395#issuecomment-6604292991,
+    // https://github.com/Ancienttwo/byok-sdk/pull/1395#issuecomment-6604394309).
+    const env = { ...process.env, TEMP: directory, TMP: directory };
+    await new Promise<void>((resolve, reject) => {
+      execFile(reg, ['export', key, file, '/y'], { env, timeout: REG_EXPORT_TIMEOUT_MS, windowsHide: true }, (error) => error ? reject(error) : resolve());
+    });
+    return parseWindowsRegistryExport(await fs.readFile(file), key);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+}
+
+const REGISTRY_ROOTS: Readonly<Record<string, string>> = { HKLM: 'HKEY_LOCAL_MACHINE', HKCU: 'HKEY_CURRENT_USER' };
+
+/**
+ * The REG_SZ and REG_EXPAND_SZ values of `key` in a `reg export` file: a
+ * UTF-16LE BOM, the version 5 header, then `[<key>]` and one value per line —
+ * `"name"="text"` with `\\` and `\"` escaped, or `"name"=hex(2):..` with the
+ * UTF-16LE bytes of an expandable string, continued over lines ending in `\\`.
+ * Other value types are skipped; a subkey section ends the key. Anything else
+ * is a parse failure.
+ *
+ * @internal
+ */
+export function parseWindowsRegistryExport(bytes: Uint8Array, key: string): Map<string, WindowsRegistryString> {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xfe) throw new Error('reg export output has no UTF-16LE byte order mark');
+  const lines = Buffer.from(bytes.subarray(2)).toString('utf16le').split('\r\n');
+  const [root, ...rest] = key.split('\\');
+  const hive = REGISTRY_ROOTS[root!];
+  if (hive === undefined) throw new Error('registry key is not under HKLM or HKCU');
+  if (lines[0] !== 'Windows Registry Editor Version 5.00') throw new Error('reg export output has no version 5 header');
+  if (lines[1] !== '' || lines[2]?.toUpperCase() !== `[${[hive, ...rest].join('\\')}]`.toUpperCase()) throw new Error('reg export output does not start with the key');
+  const values = new Map<string, WindowsRegistryString>();
+  for (let index = 3; index < lines.length; index += 1) {
+    let line = lines[index]!;
+    if (line === '') continue;
+    if (line.startsWith('[')) break;
+    while (line.endsWith('\\') && /^(?:@|"(?:[^"\\]|\\.)*")=hex/u.test(line) && index + 1 < lines.length) line = line.slice(0, -1) + lines[(index += 1)]!.trimStart();
+    const entry = /^(?:@|"((?:[^"\\]|\\.)*)")=(.*)$/u.exec(line);
+    if (entry === null) throw new Error('reg export output has an unparsable value line');
+    const value = registryString(entry[2]!);
+    if (entry[1] !== undefined && value !== undefined) values.set(unescapeRegistry(entry[1]).toUpperCase(), value);
+  }
+  return values;
+}
+
+function unescapeRegistry(text: string): string {
+  return text.replace(/\\(.)/gu, '$1');
+}
+
+/** One exported value: a string, an expandable string, `undefined` for another type, or a parse failure. */
+function registryString(data: string): WindowsRegistryString | undefined {
+  const text = /^"((?:[^"\\]|\\.)*)"$/u.exec(data);
+  if (text !== null) return { expand: false, value: unescapeRegistry(text[1]!) };
+  const hex = /^hex\(([0-9a-f]+)\):((?:[0-9a-f]{2}(?:,[0-9a-f]{2})*)?)$/u.exec(data);
+  if (hex === null) {
+    if (/^(?:dword:[0-9a-f]{8}|hex:(?:[0-9a-f]{2}(?:,[0-9a-f]{2})*)?)$/u.test(data)) return undefined;
+    throw new Error('reg export output has an unparsable value');
+  }
+  if (hex[1] !== '2') return undefined;
+  const octets = hex[2] === '' ? [] : hex[2]!.split(',').map((octet) => Number.parseInt(octet, 16));
+  if (octets.length % 2 !== 0) throw new Error('reg export output has an odd-length expandable string');
+  return { expand: true, value: Buffer.from(octets).toString('utf16le').replace(/\0+$/u, '') };
 }
 
 const LOOPBACK_NO_PROXY = ['127.0.0.1', 'localhost'];
@@ -282,6 +553,8 @@ export interface ComposeRuntimeEnvironmentInput {
   policy: RuntimeEnvironmentPolicy;
   /** Required for `login-shell` off win32. */
   snapshot?: LoginShellSnapshot;
+  /** Required for `login-shell` on win32: the source of `PATH` and `PATHEXT`. */
+  windowsLogon?: WindowsLogonRegistry;
   /** The live environment (normally `process.env`). Never mutated. */
   live: Readonly<Record<string, string | undefined>>;
   conflicts?: RuntimeEnvironmentConflictRule;
@@ -315,7 +588,13 @@ export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput)
     base = admit(live, (name) => matchesAny(name, patterns, caseInsensitive));
     baseSource = 'allowlist';
   } else if (platform === 'win32') {
-    base = admit(live, (name) => matchesAny(name, WINDOWS_SESSION_NAMES, caseInsensitive));
+    const logon = input.windowsLogon;
+    if (logon?.source === 'unavailable') throw new RuntimeEnvironmentUnavailableError('logon-registry-unavailable');
+    if (logon?.source !== 'registry') throw new TypeError('a win32 login-shell runtime environment requires the logon registry values');
+    base = {
+      ...admit(live, (name) => !WINDOWS_LOGON_NAMES.has(name.toUpperCase()) && matchesAny(name, WINDOWS_SESSION_NAMES, caseInsensitive)),
+      ...windowsLogonBase(logon, live),
+    };
     baseSource = 'windows-session';
   } else {
     const status = input.snapshot?.status;
@@ -330,9 +609,11 @@ export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput)
   const removed = input.conflicts?.(new Set(Object.keys(passed).map((name) => caseInsensitive ? name.toUpperCase() : name))) ?? [];
   const env: Record<string, string> = {};
   const conflicted = new Set<string>();
+  // win32 names are case-insensitive: a passed `PATH` replaces the base `Path`, never sits beside it.
+  const passedNames = new Set(Object.keys(passed).map((name) => caseInsensitive ? name.toUpperCase() : name));
   for (const [name, value] of Object.entries(base)) {
     if (matchesAny(name, removed, caseInsensitive)) conflicted.add(name);
-    else env[name] = value;
+    else if (!passedNames.has(caseInsensitive ? name.toUpperCase() : name)) env[name] = value;
   }
   Object.assign(env, passed);
   const written = withLoopbackNoProxy(env, caseInsensitive);
@@ -377,14 +658,22 @@ function withLoopbackNoProxy(env: Record<string, string>, caseInsensitive: boole
 
 /**
  * The environment every child process of a task receives under `policy`, and
- * its report, from this process's login-shell snapshot (captured on first
- * use) and the live `process.env`. Throws
- * {@link RuntimeEnvironmentUnavailableError} when `login-shell` has no
- * snapshot to build from.
+ * its report, from this process's login-shell snapshot or, on win32, its
+ * logon registry values (each read on first use) and the live `process.env`.
+ * Throws {@link RuntimeEnvironmentUnavailableError} when `login-shell` has
+ * nothing to build from.
  */
 export async function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy, conflicts?: RuntimeEnvironmentConflictRule): Promise<RuntimeEnvironment> {
-  const snapshot = policy.base === 'allowlist' || process.platform === 'win32' ? undefined : await loginShellSnapshot();
-  return composeRuntimeEnvironment({ policy, live: process.env, ...(snapshot === undefined ? {} : { snapshot }), ...(conflicts === undefined ? {} : { conflicts }) });
+  const shell = policy.base !== 'allowlist';
+  const snapshot = shell && process.platform !== 'win32' ? await loginShellSnapshot() : undefined;
+  const windowsLogon = shell && process.platform === 'win32' ? await windowsLogonRegistry() : undefined;
+  return composeRuntimeEnvironment({
+    policy,
+    live: process.env,
+    ...(snapshot === undefined ? {} : { snapshot }),
+    ...(windowsLogon === undefined ? {} : { windowsLogon }),
+    ...(conflicts === undefined ? {} : { conflicts }),
+  });
 }
 
 function allowlistPatterns(platform: NodeJS.Platform, allow: readonly string[]): readonly string[] {

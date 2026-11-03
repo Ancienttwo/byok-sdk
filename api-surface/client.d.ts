@@ -12035,7 +12035,9 @@ export {};
  * `byok-agent start --service` additionally replaces `process.env` with the
  * snapshot (`lifecycle/service-environment.ts`). win32 has no login shell:
  * the snapshot source is `windows-session`, and the runtime environment takes
- * its baseline names from the live session environment.
+ * `PATH` and `PATHEXT` from the logon registry values and its other baseline
+ * names from the live session environment (`runtime/environment.ts`). A failed
+ * registry read fails closed as `logon-registry-unavailable`.
  *
  * Every report of the result — `start` stdout, `audit.jsonl`, `status` —
  * carries only {@link ServiceEnvironmentStatus}: a source, a closed code,
@@ -12052,7 +12054,7 @@ export declare const LOGIN_SHELL_ENV_MAX_BYTES: number;
 export declare const LOGIN_SHELL_SEED_NAMES: readonly string[];
 /** The login shell's starting `PATH`; `/etc/zprofile` (path_helper) and `/etc/profile` build the rest. */
 export declare const LOGIN_SHELL_SEED_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
-export declare const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES: readonly ['account-shell-unavailable', 'unsupported-shell', 'spawn-failed', 'timeout', 'output-too-large', 'bad-frame', 'shell-exit-nonzero'];
+export declare const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES: readonly ['account-shell-unavailable', 'unsupported-shell', 'spawn-failed', 'timeout', 'output-too-large', 'bad-frame', 'shell-exit-nonzero', 'logon-registry-unavailable'];
 export type ServiceEnvironmentUnavailableCode = (typeof SERVICE_ENVIRONMENT_UNAVAILABLE_CODES)[number];
 /**
  * Where the runtime environment base came from. `inherited`: no snapshot has
@@ -12805,7 +12807,7 @@ export interface RuntimeObservation {
     present: boolean;
     outcome: RuntimeDetectResult['kind'];
     reason?: RuntimeDetectionRefusalReason;
-    /** With `reason: 'runtime_environment_unavailable'`: why the login-shell capture failed. */
+    /** With `reason: 'runtime_environment_unavailable'`: why the login-shell capture or, on win32, the logon registry read failed. */
     code?: ServiceEnvironmentUnavailableCode;
     version?: string;
     qualifiedVersion?: string;
@@ -12983,8 +12985,9 @@ import { type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from 
  *   environment, so a variable an embedding Host puts into `process.env` does
  *   not reach the runtime. A failed capture fails closed with
  *   {@link RuntimeEnvironmentUnavailableError}. On win32, which has no login
- *   shell, the base is {@link WINDOWS_SESSION_NAMES} from the live session
- *   environment.
+ *   shell, the base is {@link WINDOWS_SESSION_NAMES}: `PATH` and `PATHEXT`
+ *   as logon builds them from the registry (see {@link WindowsLogonRegistry}),
+ *   the other names from the live session environment.
  * - `allowlist`: the platform baseline plus `allow`, from the live
  *   environment; it needs no snapshot.
  *
@@ -13074,12 +13077,82 @@ export interface RuntimeEnvironment {
     readonly env: Record<string, string>;
     readonly report: RuntimeEnvironmentReport;
 }
-/** The login-shell capture failed, so no `login-shell` runtime environment exists in this process. */
+/**
+ * The base capture failed — the login-shell snapshot, or on win32 the logon
+ * registry read (`logon-registry-unavailable`) — so no `login-shell` runtime
+ * environment exists in this process.
+ */
 export declare class RuntimeEnvironmentUnavailableError extends Error {
     readonly reason: ServiceEnvironmentUnavailableCode;
     readonly code: 'runtime_environment_unavailable';
     constructor(reason: ServiceEnvironmentUnavailableCode);
 }
+/** The keys logon reads, machine first. */
+export declare const WINDOWS_MACHINE_ENVIRONMENT_KEY = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment";
+export declare const WINDOWS_USER_ENVIRONMENT_KEY = "HKCU\\Environment";
+/** A REG_SZ (`expand: false`) or REG_EXPAND_SZ (`expand: true`) registry value. */
+export interface WindowsRegistryString {
+    readonly expand: boolean;
+    readonly value: string;
+}
+/**
+ * Reads the REG_SZ and REG_EXPAND_SZ values of one registry key, keyed by the
+ * upper-case value name. Rejects when the key cannot be read or parsed.
+ *
+ * @internal
+ */
+export type WindowsRegistryReader = (key: string) => Promise<ReadonlyMap<string, WindowsRegistryString>>;
+/**
+ * The machine and user Environment keys of this process's logon, read once
+ * per process like the login-shell snapshot, or the failed read.
+ *
+ * @internal
+ */
+export type WindowsLogonRegistry = {
+    readonly source: 'registry';
+    readonly machine: ReadonlyMap<string, WindowsRegistryString>;
+    readonly user: ReadonlyMap<string, WindowsRegistryString>;
+} | {
+    readonly source: 'unavailable';
+};
+/**
+ * Reads both logon keys with `reader`, machine then user, one export at a
+ * time: concurrent `reg export` runs interfere (#1395 E1g: an exit code 1, or
+ * a file holding another key). Any failure is `unavailable`, which the build
+ * fails closed on.
+ *
+ * @internal
+ */
+export declare function readWindowsLogonRegistry(reader: WindowsRegistryReader): Promise<WindowsLogonRegistry>;
+/**
+ * Test seam: replaces how {@link buildRuntimeEnvironment} reads the logon
+ * registry on win32 and forgets an earlier read; `undefined` restores the
+ * real read.
+ *
+ * @internal
+ */
+export declare function setWindowsLogonRegistrySource(source: (() => Promise<WindowsLogonRegistry>) | undefined): void;
+/**
+ * The real {@link WindowsRegistryReader}: `%SystemRoot%\\System32\\reg.exe`
+ * exports `key` to a UTF-16LE file in a private temp directory, removed once
+ * read. `reg query` is not used: its stdout follows the console code page,
+ * which loses non-ASCII directories (#1317 E1). The file may hold secrets a
+ * user keeps in environment variables, so no error carries its content.
+ *
+ * @internal
+ */
+export declare function readWindowsRegistryKey(key: string): Promise<ReadonlyMap<string, WindowsRegistryString>>;
+/**
+ * The REG_SZ and REG_EXPAND_SZ values of `key` in a `reg export` file: a
+ * UTF-16LE BOM, the version 5 header, then `[<key>]` and one value per line —
+ * `"name"="text"` with `\\` and `\"` escaped, or `"name"=hex(2):..` with the
+ * UTF-16LE bytes of an expandable string, continued over lines ending in `\\`.
+ * Other value types are skipped; a subkey section ends the key. Anything else
+ * is a parse failure.
+ *
+ * @internal
+ */
+export declare function parseWindowsRegistryExport(bytes: Uint8Array, key: string): Map<string, WindowsRegistryString>;
 /** Validates a policy at the adapter or daemon boundary and returns a frozen copy. */
 export declare function assertRuntimeEnvironmentPolicy(value: unknown, label: string): RuntimeEnvironmentPolicy;
 /** Inputs to {@link composeRuntimeEnvironment}. */
@@ -13087,6 +13160,8 @@ export interface ComposeRuntimeEnvironmentInput {
     policy: RuntimeEnvironmentPolicy;
     /** Required for `login-shell` off win32. */
     snapshot?: LoginShellSnapshot;
+    /** Required for `login-shell` on win32: the source of `PATH` and `PATHEXT`. */
+    windowsLogon?: WindowsLogonRegistry;
     /** The live environment (normally `process.env`). Never mutated. */
     live: Readonly<Record<string, string | undefined>>;
     conflicts?: RuntimeEnvironmentConflictRule;
@@ -13101,10 +13176,10 @@ export interface ComposeRuntimeEnvironmentInput {
 export declare function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput): RuntimeEnvironment;
 /**
  * The environment every child process of a task receives under `policy`, and
- * its report, from this process's login-shell snapshot (captured on first
- * use) and the live `process.env`. Throws
- * {@link RuntimeEnvironmentUnavailableError} when `login-shell` has no
- * snapshot to build from.
+ * its report, from this process's login-shell snapshot or, on win32, its
+ * logon registry values (each read on first use) and the live `process.env`.
+ * Throws {@link RuntimeEnvironmentUnavailableError} when `login-shell` has
+ * nothing to build from.
  */
 export declare function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy, conflicts?: RuntimeEnvironmentConflictRule): Promise<RuntimeEnvironment>;
 /**
@@ -13677,7 +13752,7 @@ export interface RuntimeDetectionAdvisory {
 /**
  * `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode.
  * `platform_unsupported`: the host platform is not in {@link RuntimeAdapterDescriptor.platforms}; no probe ran.
- * `runtime_environment_unavailable`: the login-shell capture failed (`code`), so the runtime has no environment to start in (#1095).
+ * `runtime_environment_unavailable`: the login-shell capture or, on win32, the logon registry read failed (`code`), so the runtime has no environment to start in (#1095, #1317).
  */
 export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported' | 'runtime_environment_unavailable';
 /**
@@ -14524,6 +14599,16 @@ export declare class SecureFileHardeningError extends Error {
  * own — see the inline comment on it).
  */
 export declare function ensureSecureDir(dir: string, opts?: EnsureSecureDirOptions): Promise<void>;
+/**
+ * The keys Pi projection DACL: {@link buildIcaclsArgs} plus OWNER RIGHTS
+ * (S-1-3-4) with READ_CONTROL only and no inheritance flags. That ACE takes
+ * away the owner's implicit WRITE_DAC, so the keys launcher can accept the
+ * directory without reading its owner (#1373). Only the projection directory
+ * gets it.
+ */
+export declare function buildProjectionIcaclsArgs(dir: string, username: string): string[];
+/** {@link ensureSecureDir} for the keys Pi projection directory, with {@link buildProjectionIcaclsArgs}. */
+export declare function ensurePiProjectionDir(dir: string, opts?: EnsureSecureDirOptions): Promise<void>;
 /** Re-asserts 0600 on POSIX and a non-inherited owner/SYSTEM/Admin DACL on Windows. */
 export declare function ensureSecureFile(filePath: string, opts?: EnsureSecureDirOptions): Promise<void>;
 /**

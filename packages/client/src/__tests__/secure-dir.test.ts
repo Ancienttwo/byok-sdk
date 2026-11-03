@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Runner } from '../util/exec-runner';
-import { buildIcaclsArgs, ensureSecureDir, SecureDirHardeningError } from '../util/secure-dir';
+import { buildIcaclsArgs, ensurePiProjectionDir, ensureSecureDir, SecureDirHardeningError } from '../util/secure-dir';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -106,6 +106,17 @@ describe('util/secure-dir: ensureSecureDir (finding F7/R4)', () => {
     expect(stat.isDirectory()).toBe(true);
     expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith('icacls', buildIcaclsArgs(dir, 'winuser'));
+  });
+
+  // #1373: only the keys Pi projection directory also grants OWNER RIGHTS READ_CONTROL, without inheritance.
+  it('on win32, the Pi projection directory adds an OWNER RIGHTS READ_CONTROL grant to the same DACL', async () => {
+    const dir = path.join(await tmpDir('byok-secure-dir-projection-'), 'pi-abc123');
+    vi.spyOn(os, 'userInfo').mockReturnValue({ username: 'winuser', uid: -1, gid: -1, shell: null, homedir: 'C:\\Users\\winuser' });
+    const run = vi.fn<Runner>().mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+
+    await ensurePiProjectionDir(dir, { platform: 'win32', run });
+
+    expect(run).toHaveBeenCalledExactlyOnceWith('icacls', [...buildIcaclsArgs(dir, 'winuser'), '/grant', '*S-1-3-4:(RC)']);
   });
 
   it('finding R4: on win32, a non-zero icacls exit THROWS SecureDirHardeningError — no longer a logged-and-ignored warning', async () => {

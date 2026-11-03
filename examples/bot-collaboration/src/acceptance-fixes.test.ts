@@ -42,27 +42,28 @@ async function setup() {
 
 it('keeps real outcome refusals private to their originating Bot in ordinary and room offers', async () => {
   const { bots, room } = await setup();
-  const refusal = await host().input('private-main', 'No field changes');
-  await finish(refusal, { update_bot: [{ botId: bots[0]!.id }] });
+  const refusal = await host().input('private-main', 'Add a note');
+  fixture.ledger.transaction(s => { stateOf(s.application).team.notes = Array.from({ length: 20 }, (_, i) => ({ id: `note-${i}`, text: 'Note' })); });
+  await finish(refusal, { team_note: { text: 'One more' } });
   const memberRefusal = await host().input('private-member', 'Ask once', bots[0]!.id);
   fixture.ledger.transaction(s => { stateOf(s.application).budgets[memberRefusal]!.continuation = 4; });
   await finish(memberRefusal, { delegate: [{ to: bots[0]!.id, request: 'continue' }] });
   expect(host().snapshot().rejected).toEqual(expect.arrayContaining([
-    expect.objectContaining({ botId: 'main', reason: 'An update must change a Bot field' }),
+    expect.objectContaining({ botId: 'main', reason: 'Team note limit is 20' }),
     expect.objectContaining({ botId: bots[0]!.id, reason: 'Continuation budget is 4' }),
   ]));
   const member = await host().input('member-context', 'Read my own refusals', bots[0]!.id);
   expect((await context(member)).rejectedActions).toEqual([expect.objectContaining({ botId: bots[0]!.id, reason: 'Continuation budget is 4' })]);
-  expect((await offered(member)).instruction).not.toContain('An update must change a Bot field');
+  expect((await offered(member)).instruction).not.toContain('Team note limit is 20');
   await finish(member);
   const main = await host().input('main-context', 'Read my own refusals');
-  expect((await context(main)).rejectedActions).toEqual([expect.objectContaining({ botId: 'main', reason: 'An update must change a Bot field' })]);
+  expect((await context(main)).rejectedActions).toEqual([expect.objectContaining({ botId: 'main', reason: 'Team note limit is 20' })]);
   expect((await offered(main)).instruction).not.toContain('Continuation budget is 4');
   await finish(main);
   const round = await host().roomInput('room-context', room.id, 'Read room context', [bots[1]!.id]);
   const seat = host().snapshot().team.rounds[round]!.seats[0]!;
   expect((await context(seat)).rejectedActions).toEqual([]);
-  expect((await offered(seat)).instruction).not.toContain('An update must change a Bot field');
+  expect((await offered(seat)).instruction).not.toContain('Team note limit is 20');
   expect((await offered(seat)).instruction).not.toContain('Continuation budget is 4');
   await finish(seat, { speech: { kind: 'pass' } });
 });

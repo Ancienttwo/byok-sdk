@@ -1,5 +1,6 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { Harness, GenerationTask, defineTask, hook, type Registry, type ConversationId } from '@earendil-works/pi-durable';
+import type { Context } from '@earendil-works/chord';
+import { Harness, GenerationTask, defineTask, hook, type Registry, type ConversationId, type SubmissionDraft } from '@earendil-works/pi-durable';
 import { AgentDO } from '../src/agent-do';
 import { CloudDoError, cloudErrorResponse } from '../src/errors';
 import type { InvocationRow, InvocationTerminalState } from '../src/invocation-ledger';
@@ -62,12 +63,13 @@ Harness.open = async (storage, options, context) => {
       return commit(fn, callContext);
     };
     const submit = conversation.submit.bind(conversation);
-    conversation.submit = async (input, callContext) => {
+    // Only the submit(draft, context) form runs here; the overloads cannot be implemented by one arrow.
+    conversation.submit = (async (input: SubmissionDraft, callContext: Context) => {
       const handle = await submit(input, callContext);
       // Native admission and scheduling have happened. Return the unchanged native handle after observation.
       if (nativePause === 'receipt') await nativeGate;
       return handle;
-    };
+    }) as typeof conversation.submit;
     const abort = conversation.abort.bind(conversation);
     conversation.abort = async (callContext, abortOptions) => {
       const outcome = await abort(callContext, abortOptions);

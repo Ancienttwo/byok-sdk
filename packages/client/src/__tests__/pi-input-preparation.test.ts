@@ -152,7 +152,7 @@ describe('B-P2 native composition: runtime identity', () => {
     expect(identity.packageVersion).toBe(pinned.version);
     expect(identity.packageName).toBe('@earendil-works/pi-coding-agent');
     expect(identity.tarballIntegrity).toMatch(/^sha512-/);
-    expect(identity.upstreamCommit).toBe('4a080252f06caf63a525d7873c5d94d3c23887e0');
+    expect(identity.upstreamCommit).toBe('f9a26365568127461c47a07a37dcb42c140a3ac5');
     expect(identity.closureDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(identity.envelopeFormat).toBe('byok.pi.prepared-input');
     expect(identity.requestFormat).toBe('byok.pi.openai-completions.request');
@@ -306,7 +306,9 @@ describe('B-P2 native composition: pure compile', () => {
     // Bun compiled binary with an empty `process.env`. Pi 1.4.0 adds
     // `@earendil-works/pi-telemetry` through pi-ai's request span schema; the
     // compile passes no telemetry context, so pi-ai uses its no-op context.
-    expect([...walked.thirdParty].sort()).toEqual(['@earendil-works/pi-telemetry', 'openai', 'partial-json', 'typebox']);
+    // Pi 1.5.0 validates tool arguments with `@earendil-works/pi-schema`
+    // instead of `typebox`.
+    expect([...walked.thirdParty].sort()).toEqual(['@earendil-works/pi-schema', '@earendil-works/pi-telemetry', 'openai', 'partial-json']);
     expect([...walked.builtins].sort()).toEqual(['node:fs']);
 
     // The exact file set the two entries reach, so a new one is a reviewable
@@ -345,14 +347,16 @@ describe('B-P2 native composition: pure compile', () => {
       'dist/utils/json-parse.js',
       'dist/utils/model-operations.js',
       'dist/utils/models-error.js',
+      'dist/utils/openrouter-cost.js',
       'dist/utils/overflow.js',
       'dist/utils/provider-env.js',
       'dist/utils/provider-retry.js',
       'dist/utils/retry.js',
       'dist/utils/sanitize-unicode.js',
+      'dist/utils/streaming-json.js',
+      'dist/utils/string-enum.js',
       'dist/utils/text.js',
       'dist/utils/transcript.js',
-      'dist/utils/typebox-helpers.js',
       'dist/utils/uuid.js',
       'dist/utils/validation.js',
       'dist/utils/version.js',

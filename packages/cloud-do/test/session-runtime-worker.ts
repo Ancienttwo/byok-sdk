@@ -2,6 +2,7 @@ import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import { Harness, GenerationTask, ToolTask, LiveDoc, UserEntry, AssistantEntry, SystemEntry, hook,
   type Registry, type JsonObject, type TaskId, type ConversationId } from '@earendil-works/pi-durable';
 import type { JsonValue } from '@earendil-works/chord';
+import { commitWrites } from '@earendil-works/pi-durable/testing';
 import { AgentDO } from '../src/agent-do';
 import { agentObjectName, sessionObjectName, getSessionObject, type SessionIdentity } from '../src/identity';
 import type { InvocationTerminalState } from '../src/invocation-ledger';
@@ -196,7 +197,7 @@ export class SessionAuditDO extends AgentDO {
         : await tx.createTask(ToolTask, { kind: 'model', assistant: assistant!.id, callId }, { ownership: { kind: 'conversation' } });
       const live = await tx.doc(LiveDoc, conversation.id);
       if (input.phase === 'request') {
-        live.run = { taskId, inputs: [] };
+        live.run = { taskId, inputs: [], turns: 0 };
         live.generation = { attempt: 1, ...(input.partial === undefined ? {} : { message: {
           role: 'assistant' as const, api: 'openai-completions', provider: 'zai_openai', model: PLATFORM_PROFILES.zai_openai.model,
           content: [{ type: 'text' as const, text: input.partial }], stopReason: 'stop' as const, timestamp: Date.now(),
@@ -209,7 +210,7 @@ export class SessionAuditDO extends AgentDO {
     const record = await harness.getTask(seeded.taskId as TaskId<JsonValue>, context);
     if (!record) throw new Error('Missing native seed task');
     const storage = await openDurableObjectStorage(this.ctx.storage);
-    await storage.commit([{ type: 'task', value: { ...record, state: { status: 'running', checkpoint: input.phase === 'request'
+    await commitWrites(storage, [{ type: 'task', value: { ...record, state: { status: 'running', checkpoint: input.phase === 'request'
       ? { phase: 'request', attempt: 1, model: { provider: 'zai_openai', modelId: PLATFORM_PROFILES.zai_openai.model }, thinkingLevel: 'off', streamOptions: { maxRetries: 0 }, cutoff: seeded.userId }
       : input.phase === 'execute' ? { phase: 'execute', arguments: args as JsonObject, replay: 'unsafe' } : { phase: 'call' } } } }], context);
     await storage.close(context);

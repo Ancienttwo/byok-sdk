@@ -2,12 +2,135 @@
 
 ## Unreleased
 
+- **Breaking (client)** — On Windows, the `login-shell` runtime environment
+  base takes `PATH` and `PATHEXT` from the logon registry values instead of
+  the live session (#1317). They are built as Windows builds them at logon
+  from `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment`
+  and `HKCU\Environment`, read once per process with `reg.exe export`: the
+  machine `Path`, then the user `Path` entries that are not empty and not
+  already a machine entry; the user `PATHEXT` over the machine one;
+  REG_EXPAND_SZ expanded with the names logon defines, never with
+  Host-settable or session-only names. A directory that only a PowerShell
+  profile adds to the session `PATH` no longer reaches the runtimes; add it to
+  the user `Path` instead. A failed read fails closed:
+  `RuntimeEnvironmentUnavailableError` with the new
+  `ServiceEnvironmentUnavailableCode` `logon-registry-unavailable`, and
+  runtimes report `refused:runtime_environment_unavailable:logon-registry-unavailable`
+  ([device setup](docs/device-setup.md)). The other `windows-session` names
+  still come from the live session, and report sources are unchanged.
 - **Internal (client)** — the SDK-owned OAR source moves from 0.83.0 to
   0.86.0 (`vendor/oar/47c2c3f/`, upstream commit `47c2c3f0`). The vendored
   Codex session takes upstream's manual compaction, which the SDK bridge does
   not expose. The Codex open no longer refuses `appendSystemPrompt` on resume,
   as upstream; the SDK Codex adapter never passes it. All sixteen BYOK deltas
   are preserved and the API surface is unchanged.
+- **Breaking (protocol, core, examples; #1375)** — `bot-turn-outcome.v1` runs
+  every rule that reads only the outcome, so the device refuses a violating
+  outcome on `submit_result` and the model corrects it in the same Turn. New
+  `contract-mismatch` keywords, each at the later repeat or the faulty item:
+  `duplicate-target` (a repeated `delegate` `to`, this Bot included),
+  `duplicate-local-id` (`create_bot`), `duplicate-id` (`cancel_routine`,
+  `cancel_delegation`), `duplicate-member` (`room_call`, `create_room`,
+  `update_room`), `admin-not-member` (`create_room`), `empty-update`
+  (`update_routine` with neither schedule nor prompt, `update_bot` or
+  `update_room` with no field), and `schedule-invalid`,
+  `schedule-unreachable`, `schedule-beyond-horizon`, `tz-invalid` for a
+  schedule that `checkRoutineSchedule` refuses.
+  - The routine calendar moved from `@byok-sdk/core` to `@byok-sdk/protocol`:
+    `checkRoutineSchedule`, `nextRoutineOccurrence`, `ROUTINE_DAYS_OF_WEEK`,
+    `ROUTINE_HORIZON_MS`, `ROUTINE_MIN_NOW`, `ROUTINE_MAX_NOW` and their types.
+    Core no longer exports them, and its `routine_schedule_invalid` code is
+    gone. `nextRoutineOccurrence` throws the protocol `RoutineScheduleError`
+    (code `routine_schedule_invalid`) instead of `ByokCoreError`. Import them
+    from `@byok-sdk/protocol`.
+  - A repeated weekday in `daysOfWeek` is `schedule_invalid`; before, it was
+    treated as one. A routine already stored with a repeated weekday, for
+    example by the byok-mcp-server example, throws `RoutineScheduleError` when
+    its next occurrence is computed: update it to distinct days before the
+    upgrade.
+  - The schedule fragment has one shape, a closed object without the `oneOf`.
+    `RoutineScheduleShape` and the `scheduleShape` option of `createRoutine`
+    and `updateRoutine` are removed. A schema over budget is
+    `schema-over-budget` with no flat fallback; K8 blocks such a Turn with
+    `Outcome schema over budget: <message>`. On a K8 team of three Bots,
+    one room and one routine, an ordinary Bot schema shrinks from 4,232 to
+    3,566 bytes and an owner Main Bot schema from 6,451 to 5,769 bytes.
+  - The room `mode` enum and `RoomFields.mode` have only `mention`; no Host
+    accepted `admin`.
+  - K8 drops its apply-time copies of these rules: a refused outcome ends its
+    K4 intent `outcome_failed`, and `rejectedActions` no longer carries
+    `Duplicate delegation target`, `Duplicate room_call member`,
+    `An update must change a Bot field`, `An update must change a room field`,
+    `Duplicate local Bot slot` or the delegation reason `duplicate_target`.
+    The owner `updateRoutine` and the sealed create and reseal still check an
+    empty update and the calendar at their entry, with `checkRoutineSchedule`.
+- **Breaking (examples; #1393)** — K8 publishes how each room seat ended and
+  when a round root ended, with or without `roomHistory`:
+  `room-seat:<roomId>:<seatId>` with `{ roomId, root, roundId, seatId, botId,
+  status, late, reason? }` when a seat becomes `post`, `pass`, `failed`,
+  `busy`, `removed` or `blocked`, and `room-root:<roomId>:<root>` with
+  `{ roomId, root, seats }` once every seat of the root, `room_call` seats
+  included, is terminal. A root that opens no seat is published in its
+  `room_input` transaction. `advanceRoomSeats` takes a `publish` argument.
+  A Host that refuses an unknown projection prefix must handle both before it
+  upgrades.
+
+- **Breaking (client, keys; Windows)** — The keys launcher no longer starts
+  Windows PowerShell to check the Pi projection directory, and no longer reads
+  its owner (#1373). It refuses any reparse point by listing the parent
+  directory, takes the current user SID from `whoami`, and reads the DACL with
+  `icacls /save`. The DACL must be protected, hold only allow ACEs for the
+  current user, SYSTEM and Administrators, give the current user inheritable
+  full control, and hold exactly one OWNER RIGHTS (`S-1-3-4`) ACE with
+  READ_CONTROL only. The client now adds that OWNER RIGHTS ACE when it creates
+  the projection directory. The built-in local Administrator account (RID 500),
+  whose ACE icacls writes as the alias `LA`, is supported. Run `@byok-sdk/client` and `@byok-sdk/keys` at the
+  same version. When they differ, the launch fails closed. A 0.37.0 launcher
+  refuses a directory made by an older client with
+  `pi_projection_acl_owner_rights_missing`. An older launcher refuses a
+  directory made by a 0.37.0 client with `pi_projection_acl_unauthorized_ace`.
+  A failed query now names its step:
+  `pi_projection_acl_query_failed: … (cause=<cause>, step=readdir|whoami|icacls[, exit=<code>])`.
+  The cause `powershell_unavailable` is replaced by `whoami_unavailable` and
+  `icacls_unavailable`.
+- **Breaking (client, cloud-do, keys; Pi 1.5.0)** — the official Pi closure is
+  pinned to exactly 1.5.0 (upstream commit `f9a26365`) and adds
+  `@earendil-works/pi-schema` as its tenth package. The closureDigest changes,
+  so a preparation compiled for 1.4.0 declines with
+  `preparation_runtime_identity_mismatch`; prepare it again.
+  - Durable state is one-way. pi-durable migrates a replica forward on open
+    (`pi.live` v3, `pi.tool` v3, `pi.generation` v2), and a 0.36.0 build
+    cannot open it afterwards. Do not roll a device or Durable Object back
+    past this release.
+  - A crash, eviction or reset while a model request is in flight no longer
+    sends that request again. Retry is off in both durable lanes, so the run
+    ends unanswered with reason `interrupted`. The client durable lane fails
+    the execution as `runtime_exited` with
+    `durable runtime was interrupted during a model request`; before, it sent
+    the request again. cloud-do still ends it with
+    `CLOUD_EXECUTION_INTERRUPTED`.
+  - Streamed progress (partial answers, tool status) reaches durable storage
+    within about one second instead of on every update. Watches still see it
+    at once; a crash can lose up to a second of streamed text, which an
+    interrupted run discards anyway.
+  - cloud-do tool schemas: `CloudToolDefinition.parameters` is typed by
+    pi-schema. `@earendil-works/pi-ai` no longer exports `Type`, `Static` or
+    `TSchema`; build schemas with `Type` from `typebox` or with pi-schema's
+    builders. pi-ai's `StringEnum` now returns a pi-schema `Schema`, which a
+    TypeBox `Type.Object` does not accept. Arguments are coerced before validation
+    (`"42"` becomes `42`, one value becomes an array, `null` becomes an
+    omitted optional property), and TypeBox-only features (`Type.Refine`,
+    codecs, `Format.Set` formats) no longer apply. The validation messages
+    the model sees changed, for example `- path: missing` instead of
+    `must have required properties path`.
+  - cloud-do storage: a `DurableObjectSqliteDatabase` implementation must
+    provide `runCounted(sql, ...params)`, which returns the number of changed
+    rows. The built-in adapter does.
+  - keys: `PI_MODEL_CATALOG_PI_AI_VERSION` is `1.5.0`. The 30 representable
+    entries Pi 1.5.0 dropped return `not_in_catalog`; check stored profiles
+    against `piModelConfigFromPinnedCatalog` before upgrading.
+  - A lane that does not pass the Host system prompt gets Pi 1.5.0's
+    tightened default prompt.
 
 ## 0.36.0 — 2026-11-03 (published)
 

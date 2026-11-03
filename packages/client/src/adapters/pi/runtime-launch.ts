@@ -4,7 +4,7 @@ import { buildAllowlistedEnv } from '../../runtime/environment';
 import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { createPrivateTempDir, ensureSecureDir } from '../../util/secure-dir';
+import { createPrivateTempDir, ensurePiProjectionDir, ensureSecureDir } from '../../util/secure-dir';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { CONTROLLED_PI_DIRECTORY_ENV_NAMES } from './mcp-environment';
 
@@ -68,8 +68,10 @@ async function createProjectionDir(projectionRoot: string, sessionCwd: string): 
   if (canonicalRoot === canonicalSession || canonicalRoot.startsWith(`${canonicalSession}${path.sep}`)) {
     throw failure('runtime projection root resolves inside session cwd');
   }
+  // The keys launcher accepts this leaf without reading its owner because it
+  // is created here by one exclusive mkdir; never reuse an existing directory.
   const projectionDir = await createPrivateTempDir(canonicalRoot, 'pi-');
-  await ensureSecureDir(projectionDir);
+  await ensurePiProjectionDir(projectionDir);
   return projectionDir;
 }
 

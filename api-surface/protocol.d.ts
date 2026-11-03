@@ -1666,15 +1666,30 @@ export type BlobRef = z.infer<typeof BlobRefSchema>;
 import type { ResultIssue } from './result-schema';
 export declare const BOT_TURN_OUTCOME_CONTRACT = "bot-turn-outcome.v1";
 /**
- * Any JSON value; a part of the wrong shape is skipped. A string that is empty
- * after trim() (outside confirmable_action[*].draft) is `blank-text`; a
- * repeated option id within ask_user is `duplicate-option-id` at the later id.
- * Messages never echo the value. The caller caps the list.
+ * Any JSON value; a part of the wrong shape is skipped. Messages never echo
+ * a model-written value. The caller caps the list. Each repeat is reported
+ * at the later occurrence.
+ * - `blank-text`: a string that is empty after trim(), outside
+ *   confirmable_action[*].draft.
+ * - `duplicate-option-id`: an option id repeated within ask_user.
+ * - `duplicate-target`: a delegate `to` repeated, this Bot included.
+ * - `duplicate-local-id`: a create_bot localId repeated.
+ * - `duplicate-id`: a cancel_routine routineId or cancel_delegation
+ *   delegationId repeated.
+ * - `duplicate-member`: a member repeated within room_call, or within one
+ *   create_room or update_room item.
+ * - `admin-not-member`: a create_room admin outside its members.
+ * - `empty-update`: an update_routine with neither schedule nor prompt, or an
+ *   update_bot or update_room item with no field besides its id.
+ * - `schedule-invalid`, `schedule-unreachable`, `schedule-beyond-horizon`,
+ *   `tz-invalid`: a create_routine or update_routine schedule that
+ *   checkRoutineSchedule refuses, with its code.
  */
 export declare function botTurnOutcomeRuleIssues(outcome: unknown): ResultIssue[];
 // ==== @byok-sdk/protocol dist/bot-turn-outcome.d.ts ====
 import { type ResultSchema } from './result-schema';
 import { BOT_TURN_OUTCOME_CONTRACT } from './bot-turn-outcome-contract';
+import { type RoutineDayOfWeek } from './routine-schedule';
 export { BOT_TURN_OUTCOME_CONTRACT };
 /** Code-point and item caps for Bot turn outcomes. */
 export declare const BOT_TURN_OUTCOME_LIMITS: Readonly<{
@@ -1708,35 +1723,21 @@ export declare const BOT_TURN_OUTCOME_LIMITS: Readonly<{
     teamNoteMaxLength: 300;
 }>;
 export type NonEmptyIds = readonly [string, ...string[]];
-/** ISO 8601 order, Monday first. Equal to core's list. A server test checks parity. */
-export declare const ROUTINE_DAYS_OF_WEEK: readonly ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-export type RoutineDayOfWeek = (typeof ROUTINE_DAYS_OF_WEEK)[number];
 export type BotTurnOutcomeSchemaErrorCode = 'not-subset' | 'schema-over-budget' | 'over-budget' | 'draft-over-budget';
 export declare class BotTurnOutcomeSchemaError extends Error {
     readonly code: BotTurnOutcomeSchemaErrorCode;
     constructor(code: BotTurnOutcomeSchemaErrorCode, message: string);
 }
 /**
- * `checked` (default): field types, ranges and enums sit once in the outer
- * properties; each oneOf branch lists only its allowed names and required
- * fields, with additionalProperties false. An instance matches exactly one
- * branch: daysOfWeek and dayOfMonth never appear together; month needs
- * dayOfMonth. `flat`: the same outer object without the oneOf; the Host then
- * refuses those two combinations at apply time. Use `flat` only under the
- * schema budget rule of composeBotTurnOutcomeSchema. Neither form sees
- * duplicate days, a day the month never has (Apr 31), or Feb 29.
- */
-export type RoutineScheduleShape = 'checked' | 'flat';
-/**
  * Every id is a Host-filled enum. New objects use Host-offered localId slots
  * (e.g. "new_bot_1"), so a same-outcome reference is also an enum member.
  */
 export declare const botTurnOutcomeFragments: {
-    /** `to` lists this Bot first: delegating to yourself is a continuation. */
+    /** `to` lists this Bot first: delegating to yourself is a continuation. The contract refuses a repeated `to`. */
     delegate(o: {
         to: NonEmptyIds;
     }): ResultSchema;
-    /** Owner-authorized Main Bot turns only. The Host lists open delegations. */
+    /** Owner-authorized Main Bot turns only. The Host lists open delegations. The contract refuses a repeated delegationId. */
     cancelDelegation(o: {
         delegationIds: NonEmptyIds;
     }): ResultSchema;
@@ -1756,25 +1757,28 @@ export declare const botTurnOutcomeFragments: {
         localIds: NonEmptyIds;
         timeZones: NonEmptyIds;
         targets?: NonEmptyIds;
-        scheduleShape?: RoutineScheduleShape;
     }): ResultSchema;
+    /** The contract refuses an item with neither schedule nor prompt. */
     updateRoutine(o: {
         routineIds: NonEmptyIds;
         timeZones: NonEmptyIds;
-        scheduleShape?: RoutineScheduleShape;
     }): ResultSchema;
+    /** The contract refuses a repeated routineId. */
     cancelRoutine(o: {
         routineIds: NonEmptyIds;
     }): ResultSchema;
     /** Room turns only. Exactly one of post or pass. */
     speech(): ResultSchema;
+    /** The contract refuses a repeated member. */
     roomCall(o: {
         members: NonEmptyIds;
     }): ResultSchema;
+    /** The contract refuses a repeated localId. */
     createBot(o: {
         localIds: NonEmptyIds;
         models: NonEmptyIds;
     }): ResultSchema;
+    /** The contract refuses an item that changes no field. */
     updateBot(o: {
         botIds: NonEmptyIds;
         models: NonEmptyIds;
@@ -1782,11 +1786,15 @@ export declare const botTurnOutcomeFragments: {
     deleteBot(o: {
         botIds: NonEmptyIds;
     }): ResultSchema;
-    /** `members`: team Bot ids plus the create_bot localId slots of this outcome. */
+    /**
+     * `members`: team Bot ids plus the create_bot localId slots of this outcome.
+     * The contract refuses a repeated member and an admin outside the members.
+     */
     createRoom(o: {
         localIds: NonEmptyIds;
         members: NonEmptyIds;
     }): ResultSchema;
+    /** The contract refuses an item that changes no field, or repeats a member. */
     updateRoom(o: {
         roomIds: NonEmptyIds;
         members: NonEmptyIds;
@@ -1800,10 +1808,8 @@ export type BotTurnOutcomeKind = 'delegate' | 'cancel_delegation' | 'ask_user' |
  * RESULT_SCHEMA_MAX_BYTES ('schema-over-budget'), or one whose largest
  * instance could exceed RESULT_OUTCOME_MAX_BYTES ('over-budget').
  *
- * Schema budget rule, before the offer is frozen: only 'schema-over-budget'
- * allows the Host to rebuild the routine fragments with scheduleShape 'flat'.
- * If the schema is still over, the Host blocks the turn with a visible reason
- * or runs its defined batch selection. It never drops authorized ids from an
+ * On 'schema-over-budget' the Host blocks the turn with a visible reason or
+ * runs its defined batch selection. It never drops authorized ids from an
  * enum silently.
  */
 export declare function composeBotTurnOutcomeSchema(fragments: BotTurnOutcomeFragments, required?: readonly BotTurnOutcomeKind[]): ResultSchema;
@@ -1833,8 +1839,8 @@ export interface ConfirmableAction<Draft = unknown> {
 }
 /**
  * No day field: every day. daysOfWeek and dayOfMonth never appear together;
- * month needs dayOfMonth. Under the 'flat' shape the schema does not enforce
- * this; the Host narrows to this type only after checkRoutineSchedule passes.
+ * month needs dayOfMonth. The bot-turn-outcome.v1 contract enforces this, so
+ * an outcome that passed validateResultOutcome has this type.
  */
 export type RoutineScheduleFields = {
     readonly minute: number;
@@ -1896,7 +1902,7 @@ export interface RoomFields {
     readonly name: string;
     readonly members: readonly string[];
     readonly admin?: string;
-    readonly mode?: 'mention' | 'admin';
+    readonly mode?: 'mention';
     readonly announcement?: string;
 }
 export interface CreateRoomAction extends RoomFields {
@@ -3429,6 +3435,7 @@ export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './i
 export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, E2eeScopeKeyPackageV2Schema, } from './e2ee-member';
 export type { E2eeClientPairingMac, E2eeKeyPackageAvailablePayload, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeMemberKeyRegisterRequest, E2eeScopeKeyPackage, } from './e2ee-member';
 export * from './bot-turn-outcome';
+export * from './routine-schedule';
 export { resultOutcomeMaxBytes } from './result-schema';
 // ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
 import { z } from 'zod';
@@ -7938,8 +7945,8 @@ export interface ResultSchema {
  * keyword at fault, or a document-level code: `not-serializable`,
  * `not-plain-json`, `over-cap`, `too-deep` (JSON nesting), `schema` (a
  * subschema that is not an object) or `depth` (subschema nesting). A contract
- * rule issue (reason `contract-mismatch`) uses the rule code:
- * `duplicate-option-id` or `blank-text`.
+ * rule issue (reason `contract-mismatch`) uses its bot-turn-outcome.v1
+ * rule code, for example `blank-text`, `duplicate-target` or `empty-update`.
  */
 export interface ResultIssue {
     readonly pointer: string;
@@ -7998,6 +8005,63 @@ export declare function validateResultOutcome(projection: {
  */
 export declare function resultOutcomeMaxBytes(schema: ResultSchema): number | null;
 export {};
+// ==== @byok-sdk/protocol dist/routine-schedule.d.ts ====
+import { ProtocolError } from './errors';
+/** ISO 8601 order, Monday first. */
+export declare const ROUTINE_DAYS_OF_WEEK: readonly ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+export type RoutineDayOfWeek = (typeof ROUTINE_DAYS_OF_WEEK)[number];
+/**
+ * One local time per matching day. No daysOfWeek and no dayOfMonth: every
+ * day. daysOfWeek: those weekdays only, each at most once. dayOfMonth: that
+ * day of every month, or of `month` only. daysOfWeek and dayOfMonth never
+ * appear together; `month` needs `dayOfMonth`.
+ */
+export interface RoutineSchedule {
+    readonly minute: number;
+    readonly hour: number;
+    readonly daysOfWeek?: readonly RoutineDayOfWeek[];
+    readonly dayOfMonth?: number;
+    readonly month?: number;
+    readonly tz: string;
+}
+/**
+ * 368 days: a yearly date can be 366 days plus a DST shift apart (leap year
+ * in between, DST state flips). The embedded wake limit must match this value.
+ */
+export declare const ROUTINE_HORIZON_MS: number;
+/**
+ * Supported `now`: [2000-01-01T00:00Z, 2200-01-01T00:00Z). Before 1972 some
+ * zones have second-level offsets (Africa/Monrovia); past 2200 tz rules are
+ * projections. Date and Intl themselves cover ±8.64e15 ms.
+ */
+export declare const ROUTINE_MIN_NOW: number;
+export declare const ROUTINE_MAX_NOW: number;
+export type RoutineScheduleIssueCode = 'schedule_invalid' | 'schedule_unreachable' | 'schedule_beyond_horizon' | 'tz_invalid';
+export type RoutineScheduleCheck = {
+    readonly ok: true;
+} | {
+    readonly ok: false;
+    readonly code: RoutineScheduleIssueCode;
+    readonly message: string;
+};
+/** {@link nextRoutineOccurrence} was given a schedule that {@link checkRoutineSchedule} refuses. */
+export declare class RoutineScheduleError extends ProtocolError {
+    readonly code = "routine_schedule_invalid";
+    constructor(message: string);
+}
+/** Validation only. The bot-turn-outcome.v1 contract runs it on every create_routine / update_routine schedule. */
+export declare function checkRoutineSchedule(schedule: RoutineSchedule): RoutineScheduleCheck;
+/**
+ * The first occurrence strictly after `now` (epoch ms): the instant at which
+ * the zone's wall clock shows the schedule's whole local minute on a matching
+ * date. Null when none falls within ROUTINE_HORIZON_MS. Throws on an invalid
+ * schedule.
+ *
+ * Scan from the local date before `now`; keep the running minimum `best` of
+ * candidates after `now`; stop at the first unshifted candidate, because a
+ * later local time never resolves earlier. Assumes a gap is at most one day.
+ */
+export declare function nextRoutineOccurrence(schedule: RoutineSchedule, now: number): number | null;
 // ==== @byok-sdk/protocol dist/sealed-payload.d.ts ====
 /**
  * Sealed payload on the hosted wire: v1 (#654 design §8.1, §8.3, §8.6) and

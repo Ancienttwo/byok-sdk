@@ -1,8 +1,10 @@
 import { testExecutionScratch } from './fixtures/execution-scratch';
+import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
@@ -59,6 +61,11 @@ describe('client runtime launch resources', () => {
       if (process.platform !== 'win32') {
         expect(stat.mode & 0o777).toBe(0o700);
         expect(stat.uid).toBe(process.getuid!());
+      } else {
+        // #1373: the keys launcher requires OWNER RIGHTS READ_CONTROL on the projection.
+        const save = path.join(f.root, 'projection.acl');
+        await promisify(execFile)('icacls', [projection, '/save', save], { windowsHide: true });
+        expect((await fs.readFile(save)).toString('utf16le')).toMatch(/^[^\r\n]+\r\nD:P[A-Z]*\(.*\(A;;RC;;;OW\)/u);
       }
       expect(await fs.readdir(projection)).toEqual([]);
       expect(path.dirname(projection)).toBe(f.options.scratch.sdkDir);

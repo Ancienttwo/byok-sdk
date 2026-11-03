@@ -212,8 +212,9 @@ of §1.1, so `delegate` runs last. Cross-Bot then replaces the
    origin `delegationId` (§3.6). #530 and #531 now write `hop: 0` in
    `addTurn` (`host.ts:67` on #530, `host.ts:70` on #531). X1 makes `addTurn`
    take the hop and the authority as inputs.
-3. Duplicate `to` in the same outcome: refuse the second item
-   (`duplicate_target`). #531 already does this.
+3. Duplicate `to` in the same outcome: the `bot-turn-outcome.v1` contract
+   refuses it at `submit_result` (#1375), so the apply transaction never sees
+   one.
 4. Target check: active, not archived, same team. Otherwise `refused`.
 5. Hop: `hop = A.turn.hop + 1`. If `hop > 4`, `refused` (`hop_limit`).
 6. Fan-out: until X3 ships the join, X1 accepts one cross-Bot item per
@@ -521,7 +522,7 @@ New map `CollaborationState.delegations: Record<string, Delegation>` in
 | `cancel` | `{ requestedAt, targetTurnId, delivered }`, frozen in the arbitration transaction (§8.8) |
 | `nextCheckAt` | Next reconcile time (§3.10) |
 | `verdict` | `answered` · `failed` · `cancelled` · `refused` · `expired` · `abandoned`; set once |
-| `reason` | Code: `target_archived`, `hop_limit`, `budget_exhausted`, `duplicate_target`, `no_reply`, `busy`, `user_cancelled`, `claim_raced_deadline`, `initiator_archived`, `room_seat`, `fan_out_not_enabled`, `continuation_refused`, `reply_held` |
+| `reason` | Code: `target_archived`, `hop_limit`, `budget_exhausted`, `no_reply`, `busy`, `user_cancelled`, `claim_raced_deadline`, `initiator_archived`, `room_seat`, `fan_out_not_enabled`, `continuation_refused`, `reply_held` |
 | `reply` | Accepted reply body reference (B's `taskId`) when `answered` or `cancelled` after acceptance |
 | `replyTurnId` | A's reply Turn id; set once |
 | `uncertainSince`, `resolvedAt` | Timers and audit |

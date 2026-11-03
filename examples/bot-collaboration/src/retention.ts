@@ -193,7 +193,7 @@ export function retainRoots(state: CollaborationState, input: RetentionInput, li
     for (const root of m.roots) store.retire('root', root);
     result.archivedRoots++;
   }
-  result.archivedRows += retainRootless(state, store);
+  result.archivedRows += retainRoomMessages(state, store, limits.contextTurnLimit) + retainRootless(state, store);
   // A record moves when its root has moved, or when it has no root. It then answers replays until it expires.
   for (const [id, record] of Object.entries(state.commands ?? {})) {
     if (record.root !== undefined && !store.isRetired('root', record.root)) continue;
@@ -203,6 +203,25 @@ export function retainRoots(state: CollaborationState, input: RetentionInput, li
   }
   result.afterBytes = bytes(state);
   return result;
+}
+/**
+ * Room messages of archived roots (#1394). A message's id is its round root (a room input) or its seat (a post), so a message
+ * whose id is in neither `team.rounds` nor `team.seats` belongs to an archived root. It moves unless it is one of the last
+ * `limit` messages of its room: a seat ContextPack reads at most that many, newest last. `visibleFrom` then counts in the
+ * kept list, so each member sees the same kept messages as before.
+ */
+function retainRoomMessages(state: CollaborationState, store: RetentionStore, limit: number): number {
+  let count = 0;
+  for (const room of values(state.team.rooms)) {
+    const window = room.messages.length - limit;
+    const moved = room.messages.map((message, index) => index < window && !own(state.team.rounds, message.id) && !own(state.team.seats, message.id));
+    if (!moved.includes(true)) continue;
+    for (const [botId, from] of Object.entries(room.visibleFrom)) room.visibleFrom[botId] = from - moved.slice(0, from).filter(Boolean).length;
+    room.messages.forEach((message, index) => { if (moved[index]) store.put('roomMessages', message.id, message as unknown as Json); });
+    room.messages = room.messages.filter((_, index) => !moved[index]);
+    count += moved.filter(Boolean).length;
+  }
+  return count;
 }
 /** Rows outside any root: audit lines, revoked push routes and settled persona deliveries. They stay as history. */
 function retainRootless(state: CollaborationState, store: RetentionStore): number {

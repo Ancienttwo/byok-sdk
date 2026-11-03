@@ -50,6 +50,11 @@ export class DurableObjectSqliteDatabase implements SqliteDatabase {
     return {
       exec: async sql => { query(sql, []).toArray(); },
       run: async (sql, ...params) => { query(sql, params).toArray(); },
+      // SQLite's changes(): the cursor's rowsWritten also counts index writes.
+      runCounted: async (sql, ...params) => {
+        query(sql, params).toArray();
+        return Number(this.storage.sql.exec('SELECT changes() AS changes').one().changes);
+      },
       get: async <T extends object>(sql: string, ...params: SqliteValue[]) => {
         const rows = query(sql, params).toArray();
         return rows[0] === undefined ? undefined : row<T>(rows[0]);
@@ -60,6 +65,7 @@ export class DurableObjectSqliteDatabase implements SqliteDatabase {
 
   exec(sql: string): Promise<void> { return this.queued(() => this.executor(() => true).exec(sql)); }
   run(sql: string, ...params: SqliteValue[]): Promise<void> { return this.queued(() => this.executor(() => true).run(sql, ...params)); }
+  runCounted(sql: string, ...params: SqliteValue[]): Promise<number> { return this.queued(() => this.executor(() => true).runCounted(sql, ...params)); }
   get<T extends object>(sql: string, ...params: SqliteValue[]): Promise<T | undefined> { return this.queued(() => this.executor(() => true).get<T>(sql, ...params)); }
   all<T extends object>(sql: string, ...params: SqliteValue[]): Promise<T[]> { return this.queued(() => this.executor(() => true).all<T>(sql, ...params)); }
 

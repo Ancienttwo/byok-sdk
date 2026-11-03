@@ -184,8 +184,15 @@ the Host sets does not reach an agent.
   `environment: unavailable code=<code>`, every `login-shell` runtime shows
   `refused:runtime_environment_unavailable:<code>` and offers are declined. Fix
   the rc and restart the daemon.
-- Windows has no login shell: runtimes get the platform baseline names of the
-  live session (`windows-session`). List any other name in `pass`.
+- Windows has no login shell: runtimes get the platform baseline names
+  (`windows-session`). `PATH` and `PATHEXT` are the values Windows builds at
+  logon from the machine and user `Environment` registry keys (System
+  Properties > Environment Variables), so a directory added only in a
+  PowerShell profile is not on a runtime's `PATH`: add it to the user `Path`
+  there instead. The other names come from the live session. If the registry
+  cannot be read, runtimes show
+  `refused:runtime_environment_unavailable:logon-registry-unavailable`. List
+  any other name in `pass`.
 - `byok-agent doctor` lists, per runtime, the names the running daemon builds
   with their source (`login-shell`, `windows-session`, `allowlist`, `pass`,
   `sdk`) and the names it removed (`deny`, `conflict`), never values. Offline

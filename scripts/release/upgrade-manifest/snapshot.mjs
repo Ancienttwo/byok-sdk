@@ -146,6 +146,7 @@ export const STORES = [
  */
 export const INTERPROCESS_PROTOCOLS = [
   { id: 'path-mutation-gate', source: 'packages/client/src/util/path-mutation-gate.ts', constant: 'PATH_MUTATION_GATE_PROTOCOL' },
+  { id: 'pi-projection-acl', source: 'packages/keys/src/pi-provider-launcher-core.ts', constant: 'PI_PROJECTION_ACL_PROTOCOL' },
 ];
 
 /** Examples that Hosts copy (vendor) instead of installing. */

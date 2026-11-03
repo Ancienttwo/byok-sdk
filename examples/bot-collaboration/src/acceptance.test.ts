@@ -4,6 +4,7 @@ import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
 import { hash, type Json } from '@byok-sdk/server/execution-core';
 import { botCompactVeto } from './compaction';
+import { seedRoutine } from './routines.test-support';
 
 let fixture: TestHost | undefined;
 let bot: BotCollaboration | undefined;
@@ -115,9 +116,10 @@ it('rejects conflicting decisions and preserves same-decision replay', async () 
 
 it('applies routine policy before questions and delegation, and publishes cards before questions', async () => {
   await setup();
+  for (let n = 0; n < 8; n++) await seedRoutine(bot!, `seed-${n}`, 'r');
   const root = await bot!.input('ordered-actions', 'Prepare actions');
   fixture!.ledger.transaction(s => { stateOf(s.application).budgets[root]!.continuation = 4; });
-  await finish(root, { create_routine: [{ localId: 'new_routine_1', schedule: { minute: 0, hour: 9, dayOfMonth: 31, month: 4, tz: 'UTC' }, prompt: 'invalid' }],
+  await finish(root, { create_routine: [{ localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: 'over the limit' }],
     confirmable_action: [action], ask_user: { question: 'Choose', answerKind: 'single_choice', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
     delegate: [{ to: 'main', request: 'continue' }] });
   expect(bot!.snapshot().rejected.map(r => r.action)).toEqual(['create_routine', 'delegate']);

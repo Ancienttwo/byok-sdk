@@ -1019,7 +1019,7 @@ export declare function classifyPiCatalogModel(model: Readonly<Record<string, un
 // ==== @byok-sdk/keys dist/pi-model-catalog.generated.d.ts ====
 import type { PiModelCatalogTable } from './pi-model-catalog';
 /** The pi-ai version this table and the thinking levels were generated from. */
-export declare const PI_MODEL_CATALOG_PI_AI_VERSION = "1.4.0";
+export declare const PI_MODEL_CATALOG_PI_AI_VERSION = "1.5.0";
 /** Pi's `MODEL_THINKING_LEVELS`, in Pi's order. */
 export declare const PI_THINKING_LEVELS: readonly ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 /** Every chat model of each vendor in `MODEL_PROVIDER_VENDORS`, for the Pi apis a profile projects. */
@@ -1290,7 +1290,28 @@ export declare function buildPiProviderChildEnvironment(options: {
     secret: string | undefined;
     platform?: NodeJS.Platform;
 }): Record<string, string>;
-/** Read-only Windows equivalent of uid + 0700; never repairs host ACLs. */
+/**
+ * Version of the Windows Pi projection ACL agreement between the client, which
+ * creates the directory (`createProjectionDir` with `ensurePiProjectionDir`),
+ * and this launcher, which checks it. 1 was the PowerShell query with the owner
+ * check; 2 requires the OWNER RIGHTS READ_CONTROL ACE and reads no owner
+ * (#1373). A client and a launcher of different versions refuse each other,
+ * so bump it with any change to that ACL.
+ */
+export declare const PI_PROJECTION_ACL_PROTOCOL = 2;
+/**
+ * Read-only Windows equivalent of uid + 0700; never repairs host ACLs.
+ *
+ * It does not read the owner. The client creates the projection leaf with one
+ * exclusive mkdir (`createProjectionDir` -> `createPrivateTempDir`, no reuse of
+ * an existing name) and then grants OWNER RIGHTS (S-1-3-4) only READ_CONTROL,
+ * which takes away the owner's implicit WRITE_DAC. OWNER RIGHTS limits only
+ * handles opened after it is in place, and nobody else can hold an older
+ * handle to a leaf this launch's client created exclusively. So whoever owns
+ * the directory can change its DACL only through an explicit ACE, and the
+ * rules below admit explicit ACEs only for the current user, SYSTEM and
+ * Administrators (#1373).
+ */
 export declare function assertWindowsPiProjectionAcl(directory: string, options?: {
     systemRoot?: string;
     run?: CommandRunner;

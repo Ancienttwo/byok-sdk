@@ -62,6 +62,17 @@ test('the retention soak workflow and harness select only reviewed light checks 
   });
 });
 
+test('the Pi closure definition selects the release pack jobs and its importer\'s jobs; its collector selects only script checks', () => {
+  const importer = selectImpact(['packages/client/src/adapters/pi/input-preparation.ts']).families;
+  const releasePack = selectImpact(['scripts/release/pack-and-smoke.mjs']).families;
+  assert.deepEqual(selectImpact(['scripts/release/pi-runtime-identity.mjs']), {
+    dirs: [], files: ['scripts/release/pi-runtime-identity.mjs'], families: sorted(new Set([...importer, ...releasePack])), reason: 'impacted',
+  });
+  assert.deepEqual(selectImpact(['scripts/release/collect-official-pi-closure.mjs']), {
+    dirs: [], files: ['scripts/release/collect-official-pi-closure.mjs'], families: [], reason: 'root-ci-scripts',
+  });
+});
+
 test('packages/AGENTS.md and packages/CLAUDE.md are docs-only like the root agent files', () => {
   assert.deepEqual(selectImpact(['packages/AGENTS.md', 'packages/CLAUDE.md']), {
     dirs: [], files: ['packages/AGENTS.md', 'packages/CLAUDE.md'], families: [], reason: 'docs-only',
@@ -220,6 +231,8 @@ test('Hermes adapter, fake and custody launcher paths select the Windows Hermes 
     'packages/client/src/__tests__/fixtures/fake-hermes-command.ts',
     'packages/keys/src/hermes-provider-launcher.ts',
     'packages/keys/src/__tests__/hermes-provider-launcher.test.ts',
+    'packages/client/src/runtime/environment.ts',
+    'packages/client/src/__tests__/environment.test.ts',
   ]) assert.ok(selectImpact([path]).families.includes('windows-client'), path);
   // The job does not run these, so a change to them does not select it.
   for (const path of ['packages/client/src/adapters/codex/codex-adapter.ts', 'packages/keys/src/pi-provider-launcher.ts', 'packages/client/src/__tests__/hermes-pipe-open-errors.test.ts']) {
@@ -412,6 +425,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/release/packaging-plugin-smoke.mjs',
     'scripts/release/pg-migrate-smoke.mjs',
     'scripts/release/pi-launcher-smoke.mjs',
+    'scripts/release/pi-runtime-identity.mjs',
     'scripts/release/publish-recovery.test.mjs', 'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/published-store-paths.mjs', 'scripts/release/registry-readback.mjs',
     'scripts/release/upgrade-manifest/dts-surface.mjs', 'scripts/release/upgrade-manifest/history.mjs', 'scripts/release/upgrade-manifest/manifest.mjs',
     'scripts/release/upgrade-manifest/snapshot.mjs',

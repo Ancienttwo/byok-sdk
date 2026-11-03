@@ -82,8 +82,8 @@
     {
       "path": "tool/types.ts",
       "upstreamSha256": "438deadac3a723fc6abe1e6f42db3c24022d3be313253cd28c35dd3748624d04",
-      "vendoredSha256": "60041cc5649e7894f1f6d1bb14f3d06c9216166bca21944835a46f505169e2c0",
-      "delta": "Use fork1005 public pure StringEnum subpath instead of root export; same function."
+      "vendoredSha256": "3947cdad25f239154acdaab1db46d8b3ae10fd998dee7e8e955ef20f000a6e24",
+      "delta": "Define StringEnum locally with pi-ai 1.4's TypeBox implementation, which pi-ai 1.5 removed; same schema."
     },
     {
       "path": "tool/normalize-params.ts",

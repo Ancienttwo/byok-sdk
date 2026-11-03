@@ -145,10 +145,6 @@ it('runs a real scheduled wake and returns the routine result to its owner', asy
   expect(Object.values(fixture.ledger.snapshot().occurrences)[0]).toMatchObject({ routineId: routine!.id, definitionVersion: 1, conclusion: 'succeeded' });
   expect(routineTurn).toMatchObject({ botId: 'main', request: 'Daily report' });
   expect(Object.values(fixture.ledger.snapshot().outbox)).toContainEqual(expect.objectContaining({ kind: 'projection', id: `bot-turn:${routineTurn.id}`, value: expect.objectContaining({ owner: 'main', source: 'routine', status: 'succeeded' }) }));
-  const emptyUpdate = await bot.input('empty-update', 'No changes');
-  await finish(emptyUpdate, { update_routine: [{ routineId: routine!.id }] });
-  expect(routineOf(bot, routine!.id).definition.version).toBe(1);
-  expect(bot.snapshot().rejected).toContainEqual(expect.objectContaining({ action: 'update_routine', reason: 'An update must change schedule or prompt' }));
   const update = await bot.input('update-routine', 'Change the report');
   await finish(update, { update_routine: [{ routineId: routine!.id, prompt: 'New daily report' }] });
   expect(botRoutines([routineOf(bot, routine!.id)])[0]).toMatchObject({ current: 2, pending: null });
@@ -186,18 +182,18 @@ it('settles old work before switching pending version, including pause and resum
   expect(Object.values(bot.snapshot().turns).filter(t => t.source === 'routine')).toHaveLength(1);
 });
 
-it('puts an invalid routine action in ContextPack and still applies a valid self delegation', async () => {
+it('puts a refused action in ContextPack and still applies a valid self delegation', async () => {
   await setup();
-  const root = await bot.input('bad-schedule', 'Create a report');
-  await finish(root, { create_routine: [{ localId: 'new_routine_1', schedule: { hour: 9, minute: 0, dayOfMonth: 31, month: 4, tz: 'UTC' }, prompt: 'Impossible date' }],
-    delegate: [{ to: 'main', request: 'Explain the refusal' }] });
-  expect(fixture.ledger.snapshot().routines).toEqual({});
-  expect(bot.snapshot().rejected).toContainEqual(expect.objectContaining({ action: 'create_routine', reason: expect.stringContaining('schedule_unreachable') }));
+  const root = await bot.input('full-notes', 'Add a note');
+  fixture.ledger.transaction(s => { stateOf(s.application).team.notes = Array.from({ length: 20 }, (_, i) => ({ id: `note-${i}`, text: 'Note' })); });
+  await finish(root, { team_note: { text: 'One more' }, delegate: [{ to: 'main', request: 'Explain the refusal' }] });
+  expect(bot.snapshot().team.notes).toHaveLength(20);
+  expect(bot.snapshot().rejected).toContainEqual(expect.objectContaining({ action: 'team_note', reason: 'Team note limit is 20' }));
   const child = Object.values(bot.snapshot().turns).find(t => t.source === 'continuation')!;
   await running(child.id);
   const offer = await fixture.server.tasks.offer(bot.core.intent(child.id)!.taskId);
   if (!offer || !('instruction' in offer.payload)) throw new Error('Expected an instruction offer');
-  expect(String(offer.payload.instruction)).toContain('schedule_unreachable');
+  expect(String(offer.payload.instruction)).toContain('Team note limit is 20');
   await finish(child.id);
 });
 
@@ -278,17 +274,6 @@ it('drains immediate real SDK terminals to a fixed point without stranding a con
   expect(bot.snapshot().rejected).toContainEqual(expect.objectContaining({ action: 'delegate', reason: 'Continuation budget is 4' }));
 });
 
-it('rejects duplicate targets without consuming a second continuation', async () => {
-  await setup();
-  const root = await bot.input('duplicate-actions', 'Choose');
-  await finish(root, { delegate: [{ to: 'main', request: 'one' }, { to: 'main', request: 'two' }] });
-  expect(bot.snapshot().budgets[root]).toEqual({ continuation: 1, delegation: 0 });
-  expect(bot.snapshot().rejected).toEqual(expect.arrayContaining([
-    expect.objectContaining({ action: 'delegate', reason: 'Duplicate delegation target' }),
-  ]));
-  const child = Object.values(bot.snapshot().turns).find(t => t.source === 'continuation')!;
-  await finish(child.id);
-});
 
 it('gives a user answer a new stable continuation budget', async () => {
   await setup();
@@ -346,14 +331,14 @@ it('#958: ends the card with an unknown outcome after an external effect and a f
 
 it('delivers rejected feedback to the Bot once while preserving the first frozen ContextPack', async () => {
   await setup();
-  const root = await bot.input('feedback-root', 'Create a report');
-  await finish(root, { create_routine: [{ localId: 'new_routine_1', schedule: { hour: 9, minute: 0, dayOfMonth: 31, month: 4, tz: 'UTC' }, prompt: 'invalid' }],
-    delegate: [{ to: 'main', request: 'Explain the refusal' }] });
+  const root = await bot.input('feedback-root', 'Add a note');
+  fixture.ledger.transaction(s => { stateOf(s.application).team.notes = Array.from({ length: 20 }, (_, i) => ({ id: `note-${i}`, text: 'Note' })); });
+  await finish(root, { team_note: { text: 'One more' }, delegate: [{ to: 'main', request: 'Explain the refusal' }] });
   const child = Object.values(bot.snapshot().turns).find(t => t.source === 'continuation')!;
   const task = bot.core.intent(child.id)!.taskId;
   const frozen = structuredClone(fixture.ledger.snapshot().executions[task]!.input);
   const firstContext = JSON.parse(String(frozen.payload.instruction).split('\n\nContextPack:\n')[1]!);
-  expect(firstContext.rejectedActions[0].reason).toContain('schedule_unreachable');
+  expect(firstContext.rejectedActions[0].reason).toBe('Team note limit is 20');
   expect(bot.snapshot().rejected[0]!.consumedBy).toBe(child.id);
   await finish(child.id);
   await vi.waitFor(() => expect(fixture.daemon.status().activeTaskCount).toBe(0), { timeout: 5000 });

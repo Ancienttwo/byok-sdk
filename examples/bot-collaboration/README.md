@@ -157,7 +157,7 @@ actions of a Bot Turn outside a room, from `delegate`, `ask_user`,
 extra actions of an owner Main Bot Turn, from the Bot and room management
 actions, `team_note` and `cancel_delegation`. A list only removes actions, and
 an empty list removes all of that kind. `timeZones` holds 1 to 8 IANA zones for
-`create_routine` and `update_routine`, checked by the `@byok-sdk/core` routine
+`create_routine` and `update_routine`, checked by the `@byok-sdk/protocol` routine
 calendar. The default is `UTC` and `America/New_York`. `confirmable` holds 1 to
 16 `confirmable_action` branches, each an action name and its draft schema. The
 default is `send_message`, and the connector receives only the offered names.
@@ -166,7 +166,7 @@ bounds with eight long time zones at the eight-routine limit, with room for
 heavier drafts (`CONFIRMABLE_MAX`).
 The constructor checks the offer and composes one schema with it. Turns that
 froze before keep their schema. A room seat always gets `speech`. A schema
-that is over budget even in the flat shape blocks its Turn, as before. The H
+that is over budget blocks its Turn. The H
 sync takes the same offer as `SyncOptions.offer`, a value from `outcomeOffer`.
 An offer with `actions.turn` also narrows the system
 prompt of a Bot Turn: it keeps only the sentences for every Bot Turn and for the
@@ -179,11 +179,12 @@ gets. An offer without `actions.turn` keeps
 
 Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
-answer does not reset that budget. Empty updates and duplicate
-targets are refused. A duplicate option id and model text that is blank after
-`trim()` break the `bot-turn-outcome.v1` contract rules: the device refuses
-the outcome on `submit_result`, and the Host refuses such an outcome whole.
-Duplicate weekdays are stored as a set.
+answer does not reset that budget. The rules that read only the outcome are
+`bot-turn-outcome.v1` contract rules (#1374, #1375): blank model text after
+`trim()`, a repeated option id, delegate target, `create_bot` localId,
+cancel id, room member or weekday, a `create_room` admin outside its members,
+an update that changes nothing, and an invalid schedule. The device refuses
+such an outcome on `submit_result`, and the Host refuses it whole.
 An expired card can appear in the recent ContextPack window. It creates no model turn.
 A confirmation card starts as `pending`. The owner can choose `confirmed` or
 `rejected`. A card becomes `expired` after 24 hours. Only a committed
@@ -286,8 +287,10 @@ K8 keeps the Bot policy. A Bot creates routines only for itself. Each owner
 has at most eight routines that are not completed. The routine id is
 `hash([taskId, 'create_routine', index])`. The hook input holds `owner`,
 `authority` and `prompt`, and a new version keeps the owner and the authority.
-An update must change the schedule or the prompt. Duplicate weekdays are
-stored once. The routine actions run as K4 routine commands in the outcome
+An update must change the schedule or the prompt, and a schedule repeats no
+weekday. The contract checks an outcome's routine actions; the owner
+`updateRoutine` and the sealed create and reseal check the same at their entry.
+The routine actions run as K4 routine commands in the outcome
 commit. A refused action changes no routine.
 
 The hook writes the routine Turn in the occurrence commit. The Turn id is the
@@ -421,8 +424,9 @@ Every transaction reads and rewrites the collaboration state, so settled
 history must leave it. `bot.retain({ acknowledgedRoots, now, retentionMs })`
 does that on the Host's explicit acknowledgement. It never runs on its own.
 
-- A root is the `root` field of a Turn projection, or the round root that
-  `roomInput` and a room `receive` return. One root holds its Turns,
+- A root is the `root` field of a Turn projection, the round root that
+  `roomInput` and a room `receive` return, or the `root` field of a
+  `room-seat:` or `room-root:` projection. One root holds its Turns,
   budget, delegations and their batches and units, replies, schemas, cards,
   questions, the rejections that its Turns consumed, its input batch and
   inputs, its rounds with their seats, seat Turns and `team.roots` row, its
@@ -462,7 +466,16 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
   and settled persona deliveries: applied ones except the newest of each Bot,
   and failures of an older profile revision. These archived rows stay.
 - `historyWindow.omitted*` counts only rows still in the state.
-- `room.messages` stays in the state: room offsets count from its start.
+- Each call moves the room messages of archived roots to application rows in
+  namespace `roomMessages`, by message id, with or without `roomHistory`. The
+  last `contextTurnLimit` messages of each room stay, because a seat
+  ContextPack reads at most that many. A message of a root that is still in
+  the state stays too. The same call recomputes `visibleFrom`: it is an offset
+  in the kept list, so each member sees the same kept messages as before. The
+  state, and so a snapshot, no longer holds the whole room history.
+  `historyWindow.omittedMessages` and `notice` of a seat ContextPack count only
+  messages still in the state, as `omittedTurns` does; a count over moved
+  messages would need a stored count for each Bot.
 
 After retention, a late message for an archived Turn gets `binding_mismatch`,
 and an echo can no longer match an archived delivery. Back up the whole SQLite
@@ -608,11 +621,12 @@ card's expiry, each unreleased seat's deadline, and the delegation times
 these times and its own L-only ones. H stores their minimum as the scope's due
 time (#793 S4). Routine slots are K4's, so they are not in the list.
 
-The room step of a Host sync is `advanceRoomSeats(state, facts, now, add)` in
-`src/rules/rooms.ts` (#793 S6). It runs `advanceRooms` on the seat facts,
+The room step of a Host sync is `advanceRoomSeats(state, facts, now, add, publish)`
+in `src/rules/rooms.ts` (#793 S6). It runs `advanceRooms` on the seat facts,
 fails a seat Turn whose work was not admitted, queues each new seat Turn
-through `add` (`seatTurn` gives its fields), and returns the seats whose
-admitted work the Host cancels. `src/rules/commands.ts` exports both. L builds
+through `add` (`seatTurn` gives its fields), publishes the room projections
+of the seats that became terminal through `publish`, and returns the seats
+whose admitted work the Host cancels. `src/rules/commands.ts` exports both. L builds
 the facts from its K4 intents; H builds them from its intent rows. A Turn
 step can release a seat (a blocked or retired seat Turn). Both Hosts then run
 the room step and the Turn steps again in the same sync, so the next seat gets
@@ -692,7 +706,8 @@ transaction, in the same phase as `history`.
   `room-message:<roomId>:<messageId>` with `{ roomId, id, from, text, late }`,
   the row that `room.messages` stores. The message id is the seat id, so a
   replay has the same id and body; the uploader delivers it at least once, and
-  the Host deduplicates by id. A `pass` and a refused post publish nothing.
+  the Host deduplicates by id. A `pass` and a refused post publish no
+  `room-message:` projection; their seats have `room-seat:` projections.
   Without the option, no `room-message:` projection exists.
 - The next seat of a room is not read while that room has an undelivered
   `room-message:` projection. K4 drops a projection only after the Host
@@ -704,8 +719,12 @@ transaction, in the same phase as `history`.
   message) is not projected. The Host writes it to its authority first, then
   calls K8, so the next seat reads it.
 - The ledger does not store the mode. Each time a Host turns the option on, it
-  first writes the posts made while it was off from `snapshot().team.rooms` to
-  its authority, deduplicated by id.
+  first writes the posts made while it was off to its authority, deduplicated
+  by id. Turn the option on before the first retention: retention moves the
+  room messages of archived roots out of `snapshot().team.rooms` (see
+  Retention). After a retention, the backfill also reads the archived rows of
+  namespace `roomMessages`, which the owner switch export carries in its
+  `archived` section.
 
 The team comes from this ledger, unless the `team: 'external'` option is set.
 
@@ -882,7 +901,7 @@ an ordered Bot id list or the structured value `all`. The default is empty.
 The optional `principal` is the verified sender ([IM channel input](#im-channel-input)).
 The Host never scans text for names or `[PASS]`. Rooms support mention mode.
 An admin identity grants a larger budget. It does not create an implicit seat.
-The optional admin mode is refused. `updateRoom` is an authenticated owner API
+A room has no admin mode, so the outcome fragment offers only `mention`. `updateRoom` is an authenticated owner API
 for membership, admin, name, and announcement changes.
 
 `createRoom(roomId, fields)` is an authenticated owner API that creates a room
@@ -963,13 +982,14 @@ Rejected feedback is private to its Bot. The next frozen input reserves it.
 An execution that fails before it starts releases that reservation.
 A turn that cannot pass Request or schema admission has status `blocked` and
 `blockedReason`. It creates no intent. `cancelTurn` can cancel it before admission.
-Other schema composition errors propagate as Host defects. Only
-`schema-over-budget` permits the flat-schedule fallback.
+Other schema composition errors propagate as Host defects.
 
 Unmentioned messages are stored as background. They do not create a seat, but
 a later selected member can see eligible background messages. Each member has
-a persisted append offset in `visibleFrom`. New members see only messages
-appended after joining. Retained members keep their offset. Leaving and
+a persisted offset into `room.messages` in `visibleFrom`. New members see only
+messages appended after joining. Retained members keep their offset; retention
+lowers it by the messages that it moves from before it, so the member sees the
+same kept messages. Leaving and
 rejoining resets it. Both owner edits and Main Bot room edits use this rule.
 A pre-join root request is also excluded from a new member's Request section.
 A delayed post appended after joining is visible. Already frozen offers keep
@@ -981,7 +1001,32 @@ SQLite reopen, persona writes, and submit_result helper. `src/rooms.test.ts`
 checks budgets, authority, atomic refusal, and context limits as state rules.
 `roomInput` and all other mutations use the same serial Host consumer. Do not
 call K4 mutation APIs directly. Upload projections with `core.flushProjections`
-or read `snapshot().team` for room history, seats, and profile delivery state.
+or read `snapshot().team` for seats, profile delivery state and the room
+messages that retention has not moved.
+
+### Room seat projections
+
+K8 publishes how each seat of a room round ended, and when a round root has
+ended, in every mode, with or without `roomHistory` (#1393). The state does
+not store them; each is published once, in the transaction that makes it
+true.
+
+- `room-seat:<roomId>:<seatId>` with `{ roomId, root, roundId, seatId, botId,
+  status, late, reason? }`, when the seat becomes terminal: `post`, `pass`,
+  `failed`, `busy`, `removed` or `blocked`. `late` is not terminal; a late
+  seat is published when its Turn ends. `reason` is the conclusion or block
+  reason that the seat stores. A seat with no admitted Turn, such as a
+  waiting seat whose Bot left the room, is published too, though it has no
+  `bot-turn:` projection.
+- `room-root:<roomId>:<root>` with `{ roomId, root, seats }`, when every seat
+  of every round of the root is terminal, the seats that a `room_call` added
+  included. `seats` lists their ids in reservation order; each has its
+  `room-seat:` projection in the same or an earlier transaction. A root that
+  opens no seat is published in its `room_input` or `receive` transaction,
+  with `seats: []`. The root is the id that `retain` acknowledges.
+- A Host must handle both prefixes before it upgrades to the release that
+  adds them: a Host that refuses an unknown projection prefix fails its flush
+  on the first one.
 
 ## Persona delivery failures
 
@@ -1026,7 +1071,7 @@ lists this Bot first, then each active team Bot after its first persona
 readback. It lists Bot ids only. A room seat has no `delegate` fragment.
 
 One outcome can hold two cross-Bot items. The Host refuses an item with
-a delegation verdict and a reason: `room_seat`, `duplicate_target`,
+a delegation verdict and a reason: `room_seat`,
 `target_archived`, `hop_limit`, or `budget_exhausted`.
 A refusal also enters the initiator's `rejectedActions`.
 An accepted item creates a `bot_request` Turn for the target. Its id is

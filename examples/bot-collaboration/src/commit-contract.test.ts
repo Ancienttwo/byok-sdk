@@ -98,6 +98,7 @@ function memorySubject(team?: SeedTeam): RetentionSubject & SyncSubject {
     concludeIntent(id, conclusion) { const next = structuredClone(stored); next.intents[id]!.conclusion = conclusion; stored = next; },
     projection: id => stored.outbox[id] === undefined ? [] : [structuredClone(stored.outbox[id]!)],
     stored: () => JSON.stringify(stored),
+    archived: (namespace, id) => memoryStore(stored.archive).get(namespace, id),
     state: () => structuredClone(stored.state),
   };
 }
@@ -133,6 +134,7 @@ function ledgerSubject(team?: SeedTeam): RetentionSubject & SyncSubject & { ledg
       return row && { key: row.key, source: row.source as SyncIntentRecord['source'], waitUntil: row.waitUntil, execution: row.execution };
     },
     stored: () => tables(file, ledger.tenant),
+    archived: (namespace, id) => ledger.transaction((_state, rows) => rows.get(namespace, id)),
     state: () => stateOf(ledger.snapshot().application),
   };
 }
@@ -235,7 +237,7 @@ function settlementSubject(): SettlementSubject & { ledger: HostLedger } {
     settle: (now, timers) => {
       ledger.transaction((s, rows) => {
         const state = stateOf(s.application);
-        advanceRoomsAndTurns(s, state, now, turn => syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now }));
+        advanceRoomsAndTurns(s, state, now, turn => syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now }), (id, value) => project(s, id, value));
         settleDelegations(s, state, now, (id, value) => project(s, id, value), timers);
       });
     },
@@ -309,7 +311,7 @@ function roomSubject(): RoomSubject {
     ...base,
     sync: now => {
       ledger.transaction((s, rows) => {
-        advanceRoomsAndTurns(s, stateOf(s.application), now, turn => syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now }));
+        advanceRoomsAndTurns(s, stateOf(s.application), now, turn => syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now }), (id, value) => project(s, id, value));
       });
     },
     claim: turnId => { ledger.transaction(s => { s.executions[taskId(turnId, 0)]!.started = true; }); },

@@ -1,4 +1,5 @@
-// Real Pi 1.0 request checkpoint, deliberately held until this process is killed.
+// Real Pi request checkpoint, deliberately held until this process is killed: at a tool call by default,
+// or, with mode `request`, inside the model request of execution `requestId`.
 import { appendFileSync } from 'node:fs';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { createModels, createProvider } from '@earendil-works/pi-ai/models';
@@ -8,11 +9,12 @@ import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { dirname } from 'node:path';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
-const [file, receipt] = process.argv.slice(2);
+const [file, receipt, mode = 'tool', requestId = 'terminal-old-task'] = process.argv.slice(2);
 const model = { id: 'test', name: 'test', api: 'openai-completions', provider: 'probe', baseUrl: 'http://127.0.0.1:9', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 4096, maxTokens: 64 };
 const stream = () => {
   appendFileSync(receipt, 'old-model-call\n');
   const out = createAssistantMessageEventStream();
+  if (mode === 'request') { process.stdout.write('checkpoint-ready\n'); return out; }
   const message = { role: 'assistant', content: [{ type: 'toolCall', id: 'old-call', name: 'bash', arguments: { command: 'printf OLD > old-effect' } }], api: model.api, provider: 'probe', model: 'test', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: 'toolUse', timestamp: Date.now() };
   queueMicrotask(() => { out.push({ type: 'done', reason: 'toolUse', message }); out.end(message); }); return out;
 };
@@ -23,4 +25,4 @@ setInterval(() => {}, 1000); // Only the test's confirmed KILL/close releases th
 const models = createModels(); models.setProvider(createProvider({ id: 'probe', auth: { apiKey: { name: 'synthetic', resolve: async () => ({ auth: { apiKey: 'synthetic' } }) } }, models: [model], api: { stream, streamSimple: stream } }));
 const harness = await Harness.open(await openNodeSqliteStorage(file), { models, registry, env: () => new NodeExecutionEnv({ cwd: dirname(file) }), settings: { retry: { enabled: false, maxRetries: 0 }, compaction: { enabled: false } } }, BACKGROUND_CONTEXT);
 const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model: { provider: 'probe', modelId: 'test' }, extensions: [held], tools: CodingTools.tools } });
-await root.submit({ type: 'input', content: 'Stale Host execution must never resume', requestId: 'terminal-old-task' }, BACKGROUND_CONTEXT);
+await root.submit({ type: 'input', content: 'Stale Host execution must never resume', requestId }, BACKGROUND_CONTEXT);

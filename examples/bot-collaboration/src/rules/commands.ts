@@ -251,11 +251,11 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
         refuseSuspended(state.team, command.botId);
         root = need(ports.admitInput, command.kind)({ id: hash(['user', command.botId, command.key]), key: command.key,
           botId: command.botId, request: command.request, sender: command.sender, authority: 'owner' });
-      } else root = roomInput(state.team, command.key, command.roomId, command.text, command.mentions, command.from);
+      } else root = roomInput(state.team, command.key, command.roomId, command.text, command.mentions, publish, command.from);
       ports.remember?.(root);
       return accepted(root);
     }
-    case 'room_input': return accepted(roomInput(state.team, command.key, command.roomId, command.text, command.mentions, command.from));
+    case 'room_input': return accepted(roomInput(state.team, command.key, command.roomId, command.text, command.mentions, publish, command.from));
     case 'answer': {
       const question = state.questions[command.questionId];
       if (!question) throw new Error('Question not found');

@@ -686,6 +686,7 @@ export declare class DurableObjectSqliteDatabase implements SqliteDatabase {
     private executor;
     exec(sql: string): Promise<void>;
     run(sql: string, ...params: SqliteValue[]): Promise<void>;
+    runCounted(sql: string, ...params: SqliteValue[]): Promise<number>;
     get<T extends object>(sql: string, ...params: SqliteValue[]): Promise<T | undefined>;
     all<T extends object>(sql: string, ...params: SqliteValue[]): Promise<T[]>;
     transaction<T>(callback: (transaction: SqliteExecutor) => Promise<T>): Promise<T>;

@@ -6,19 +6,7 @@ import { routineViews } from './routines.test-support';
 
 afterEach(() => vi.restoreAllMocks());
 
-it('retries only schema-over-budget with flat schedules and preserves valid outcomes', () => {
-  const compose = vi.spyOn(protocol, 'composeBotTurnOutcomeSchema').mockImplementationOnce(() => {
-    throw new protocol.BotTurnOutcomeSchemaError('schema-over-budget', 'injected checked schema cap');
-  });
-  const schema = outcomeSchema('main', stateOf({}));
-  expect(compose).toHaveBeenCalledTimes(2);
-  expect(compose.mock.calls[0]![0].create_routine!.items!.properties!.schedule!.oneOf).toBeDefined();
-  expect(compose.mock.calls[1]![0].create_routine!.items!.properties!.schedule!.oneOf).toBeUndefined();
-  expect(protocol.validateResultOutcome({ contract: protocol.BOT_TURN_OUTCOME_CONTRACT, schema }, { create_routine: [{ localId: 'new_routine_1',
-    schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: 'report' }] }).ok).toBe(true);
-});
-
-it.each(['not-subset', 'over-budget'] as const)('reports %s as a Host defect without flat fallback', code => {
+it.each(['not-subset', 'schema-over-budget', 'over-budget'] as const)('propagates %s without a second composition', code => {
   const error = new protocol.BotTurnOutcomeSchemaError(code, 'injected Host defect');
   const compose = vi.spyOn(protocol, 'composeBotTurnOutcomeSchema').mockImplementationOnce(() => { throw error; });
   expect(() => outcomeSchema('main', stateOf({}))).toThrow(error);

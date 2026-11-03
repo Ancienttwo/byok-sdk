@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { hash, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/server/execution-core';
+import { hash, MIN_TOMBSTONE_RETENTION_MS, type Json } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from './model';
 import type { CommitRequest } from './rules/commit';
 import { RetiredIdentityError, type Command } from './rules/commands';
+import { roomContext, type RoomMessage } from './rules/rooms';
 import { RetentionRefused, type RetentionInput, type RetentionLimits, type RetentionResult } from './retention';
 import type { CommitSubject } from './commit-vectors.test-support';
 
@@ -14,6 +15,8 @@ export interface RetentionSubject extends CommitSubject {
   retain(input: RetentionInput, limits: RetentionLimits): RetentionResult | Promise<RetentionResult>;
   /** Writes the stored collaboration state directly, as the Host's passes do. */
   change(edit: (state: CollaborationState) => void): void | Promise<void>;
+  /** The archived row of `namespace` and `id`, as the store's application row port reads it. */
+  archived(namespace: string, id: string): Json | undefined | Promise<Json | undefined>;
 }
 export const RETENTION_NOW = 10_000;
 const LIMITS: RetentionLimits = { contextTurnLimit: 1 };
@@ -156,6 +159,34 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       const state = await subject.state();
       expect(state.turns.seat).toBeUndefined();
       expect(state.channel!.deliveries.s).toBeUndefined();
+    });
+
+    it('moves the room messages of archived roots outside the window, and keeps what each member sees', async () => {
+      const limits = { contextTurnLimit: 2 };
+      const message = (id: string): RoomMessage => ({ id, from: 'main', text: id, late: false });
+      const subject = await opened();
+      await subject.change(state => {
+        settledRoot(state, 'r3');
+        room(state, { closed: true }, { released: true });
+        // `old`, `old2` and `old3` belong to roots archived before; `round` and `seat` to r1; `live` to an open round.
+        Object.assign(state.team.rooms.room!, { members: ['main', 'b'], visibleFrom: { main: 1, b: 4 },
+          messages: ['old', 'round', 'live', 'seat', 'old2', 'old3'].map(message) });
+        state.team.rounds.live = { id: 'live', root: 'live', roomId: 'room', input: '{}', seats: ['live:seat'], limit: 5, counts: { main: 1 }, closed: false };
+        state.team.seats['live:seat'] = { id: 'live:seat', roundId: 'live', botId: 'main', status: 'queued', released: false, late: false };
+      });
+      const seen = (state: CollaborationState) => {
+        const { historyWindow: _window, ...context } = roomContext(state.team, { id: 'live:seat' }, limits.contextTurnLimit);
+        return context;
+      };
+      const before = seen(await subject.state());
+      expect(await retain(subject, ['r1'], {}, limits)).toMatchObject({ archivedRoots: 1 });
+      const state = await subject.state();
+      // Outside the last two messages, only the open round's message stays; the window keeps `old2` and `old3`.
+      expect(state.team.rooms.room!.messages.map(row => row.id)).toEqual(['live', 'old2', 'old3']);
+      expect(state.team.rooms.room!.visibleFrom).toEqual({ main: 0, b: 1 });
+      expect(seen(state)).toEqual(before);
+      for (const id of ['old', 'round', 'seat']) expect(await subject.archived('roomMessages', id), id).toEqual(message(id));
+      expect(await subject.archived('roomMessages', 'live')).toBeUndefined();
     });
 
     it('replays a moved command record, and refuses a retired Turn id at admission until the end', async () => {

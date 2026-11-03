@@ -19,7 +19,7 @@ import { hostMessageDisposition, type MessageDisposition } from './rules/message
 import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, writeLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
-  updateDefinition, type BotRoutineInput } from './routines';
+  ownerRoutineUpdate, updateDefinition, type BotRoutineInput } from './routines';
 import { DEFAULT_AUTONOMY, autonomyOf, recordWouldDo, wouldDoRows, type Autonomy, type AutonomyGate, type WouldDo } from './rules/autonomy';
 import { DEVICE_CONCURRENCY, admitDeviceSlot, type DispatchIntent } from './rules/priority';
 
@@ -887,7 +887,7 @@ export class BotCollaboration {
   async updateRoutine(action: UpdateRoutineAction): Promise<void> {
     await this.exclusive(async () => {
       refuseExported(this.snapshot());
-      try { await this.core.updateRoutine(updateDefinition(this.routineRows(), this.options.botId, action)); }
+      try { await this.core.updateRoutine(updateDefinition(this.routineRows(), this.options.botId, ownerRoutineUpdate(action))); }
       finally { await this.process(); }
     });
   }
@@ -1051,7 +1051,7 @@ export class BotCollaboration {
     const materialized = advanceRoomsAndTurns(s, state, this.now(), turn => syncTurnInLedger(this.ledger, s, rows, turn, { now: this.now(),
       models: Object.keys(this.models()), readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history,
       history: injected?.turns.get(turn.id), roomHistoryMode: !!this.options.roomHistory, roomHistory: injected?.rooms.get(turn.id), routines,
-      offer: this.offer }));
+      offer: this.offer }), (key, value) => project(s, key, value));
     settleDelegations(s, state, this.now(), (key, value) => project(s, key, value), this.timers);
     reportCardDecisions(state, (key, value) => project(s, key, value));
     cleanReplyTokens(s, state, this.now());

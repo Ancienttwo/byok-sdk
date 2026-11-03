@@ -1,7 +1,8 @@
+import os from 'node:os';
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
+import { promises as fs, type Dirent } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { runCommand, windowsPowerShellExecutable, type CommandRunner } from './command-runner';
+import { runCommand, type CommandRunner } from './command-runner';
 import { configurationPendingError, withConfigurationLock } from './custody';
 import { ByokKeysError } from './errors';
 import { PI_PREPARED_COMPAT_KEYS } from './pi-model-config';
@@ -400,102 +401,181 @@ export function buildPiProviderChildEnvironment(options: {
   return result;
 }
 
-// Cmdlet-free on purpose: every value comes from .NET APIs, so Windows
-// PowerShell 5.1 never auto-loads a module. An inherited PSModulePath (a
-// PowerShell 7 session puts its own Microsoft.PowerShell.Security first)
-// therefore cannot break the query, and no per-user module analysis runs. The
-// path arrives alone on stdin and is decoded as strict UTF-8, independent of
-// the console code page, so a non-ASCII path reaches the API unchanged. No
-// serializer assembly is loaded (#1364: loading System.Web.Extensions and
-// running JavaScriptSerializer for the first time on a machine was most of a
-// cold query, up to 30s on a hosted runner). The output is written by hand:
-// every value is a boolean or a SID checked against S-1-[0-9-]+ first, so
-// nothing needs escaping; a SID of any other shape exits non-zero.
-const WINDOWS_PROJECTION_ACL_SCRIPT = String.raw`
-$ErrorActionPreference = 'Stop'
-try {
-  $path = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()
-  if ($path.Length -eq 0) { exit 2 }
-  $sidType = [System.Security.Principal.SecurityIdentifier]
-  $sidPattern = '^S-1-[0-9-]+\z'
-  $reparsePoint = ([System.IO.File]::GetAttributes($path) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
-  $acl = [System.IO.Directory]::GetAccessControl($path)
-  $rules = [System.Collections.Generic.List[string]]::new()
-  foreach ($rule in $acl.GetAccessRules($true, $true, $sidType)) {
-    $sid = [string]$rule.IdentityReference.Value
-    if ($sid -cnotmatch $sidPattern) { exit 1 }
-    $allow = [bool]($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow)
-    $fullControl = [bool](($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl)
-    $inherits = [bool](($rule.InheritanceFlags -band 3) -eq 3 -and $rule.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None)
-    $rules.Add('{"sid":"' + $sid + '","allow":' + ([string]$allow).ToLowerInvariant() + ',"fullControl":' + ([string]$fullControl).ToLowerInvariant() + ',"inherits":' + ([string]$inherits).ToLowerInvariant() + '}')
-  }
-  $owner = [string]$acl.GetOwner($sidType).Value
-  $currentUser = [string][System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-  if ($owner -cnotmatch $sidPattern -or $currentUser -cnotmatch $sidPattern) { exit 1 }
-  [Console]::Out.Write('{"reparsePoint":' + ([string][bool]$reparsePoint).ToLowerInvariant() + ',"owner":"' + $owner + '","currentUser":"' + $currentUser + '","protected":' + ([string][bool]$acl.AreAccessRulesProtected).ToLowerInvariant() + ',"rules":[' + [string]::Join(',', $rules) + ']}')
-  exit 0
-} catch {
-  $failure = $_.Exception
-  while ($failure -is [System.Management.Automation.MethodInvocationException] -and $null -ne $failure.InnerException) { $failure = $failure.InnerException }
-  if ($failure -is [System.IO.FileNotFoundException] -or $failure -is [System.IO.DirectoryNotFoundException]) { exit 3 }
-  if ($failure -is [System.UnauthorizedAccessException] -or $failure -is [System.Security.AccessControl.PrivilegeNotHeldException]) { exit 4 }
-  exit 1
-}
-`;
-
 /**
- * The closed cause of a failed ACL query, from the query's exit code alone:
- * stderr is never echoed, so no path or host detail reaches the error.
+ * The closed causes of a failed Windows ACL query. Tool exit codes are Win32
+ * error codes (#1381 E2): 2 and 3 are a missing path, 5 is access denied.
+ * stderr is never read, so no path or host detail reaches the error.
  */
-const WINDOWS_PROJECTION_ACL_QUERY_CAUSES: Readonly<Record<number, string>> = Object.freeze({
-  2: 'invalid_request',
+const WINDOWS_TOOL_EXIT_CAUSES: Readonly<Record<number, string>> = Object.freeze({
+  2: 'path_not_found',
   3: 'path_not_found',
-  4: 'access_denied',
-  127: 'powershell_unavailable',
+  5: 'access_denied',
+});
+const WINDOWS_READDIR_CAUSES: Readonly<Record<string, string>> = Object.freeze({
+  ENOENT: 'path_not_found',
+  EPERM: 'access_denied',
+  EACCES: 'access_denied',
 });
 
-/** Read-only Windows equivalent of uid + 0700; never repairs host ACLs. */
+function aclQueryFailure(step: string, cause: string, exit?: number): Error {
+  return new Error(`pi_projection_acl_query_failed: Pi projection ACL query failed (cause=${cause}, step=${step}${exit === undefined ? '' : `, exit=${exit}`})`);
+}
+
+/** A fixed tool from the system directory, never from `PATH`. */
+function windowsSystemTool(systemRoot: string | undefined, name: 'icacls.exe' | 'whoami.exe'): string {
+  if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot) || /[\u0000\r\n]/u.test(systemRoot)) {
+    throw new Error('Windows SystemRoot must be an absolute path');
+  }
+  return path.win32.join(systemRoot, 'System32', name);
+}
+
+async function runWindowsTool(run: CommandRunner, executable: string, step: 'icacls' | 'whoami', args: string[]): Promise<string> {
+  const result = await run(executable, args);
+  if (result.exitCode === 0) return result.stdout;
+  const cause = result.exitCode === 127 ? `${step}_unavailable` : WINDOWS_TOOL_EXIT_CAUSES[result.exitCode] ?? 'unexpected';
+  throw aclQueryFailure(step, cause, result.exitCode);
+}
+
+const SDDL_SIDS: Readonly<Record<string, string>> = Object.freeze({ OW: 'S-1-3-4', SY: 'S-1-5-18', BA: 'S-1-5-32-544' });
+const SDDL_RIGHTS: Readonly<Record<string, number>> = Object.freeze({
+  FA: 0x1f01ff, FR: 0x120089, FW: 0x120116, FX: 0x1200a0,
+  GA: 0x10000000, GR: 0x80000000, GW: 0x40000000, GX: 0x20000000,
+  RC: 0x20000, SD: 0x10000, WD: 0x40000, WO: 0x80000,
+  CC: 0x1, DC: 0x2, LC: 0x4, SW: 0x8, RP: 0x10, WP: 0x20, DT: 0x40, LO: 0x80, CR: 0x100,
+});
+const SDDL_ACE_FLAGS = new Set(['OI', 'CI', 'NP', 'IO', 'ID']);
+const FULL_CONTROL = 0x1f01ff;
+const READ_CONTROL = 0x20000;
+const SYNCHRONIZE = 0x100000;
+
+interface ProjectionAce { allow: boolean; flags: ReadonlySet<string>; mask: number; sid: string }
+
+/**
+ * The DACL of an `icacls /save` SDDL line. Anything outside the known grammar
+ * (another component, an unknown control flag, ACE type, ACE flag, right or
+ * SID alias, an object or conditional ACE) is refused, never skipped. The
+ * current user's SID is matched by the exact form icacls renders it in.
+ */
+function parseProjectionDacl(sddl: string, user: { sid: string; token: string }): ProjectionAce[] {
+  const dacl = /^D:((?:P|AI|AR)*)((?:\([^()]*\))*)$/u.exec(sddl);
+  if (!dacl) throw new Error('pi_projection_acl_invalid_sddl');
+  // Inherited ACEs carry aliases such as AU or CO, so judge protection first.
+  if (!dacl[1]!.includes('P')) throw new Error('pi_projection_acl_unprotected');
+  const aces: ProjectionAce[] = [];
+  for (const [, body] of dacl[2]!.matchAll(/\(([^()]*)\)/gu)) {
+    const fields = body!.split(';');
+    if (fields.length !== 6) throw new Error('pi_projection_acl_invalid_ace');
+    const [type, flagText, rightText, objectGuid, inheritGuid, sidText] = fields as [string, string, string, string, string, string];
+    if ((type !== 'A' && type !== 'D') || objectGuid !== '' || inheritGuid !== '') throw new Error('pi_projection_acl_invalid_ace');
+    const flags = flagText.match(/../gu) ?? [];
+    if (flags.join('') !== flagText || flags.some(flag => !SDDL_ACE_FLAGS.has(flag))) throw new Error('pi_projection_acl_invalid_ace');
+    let mask = 0;
+    if (/^0x[0-9a-f]+$/iu.test(rightText)) mask = Number.parseInt(rightText, 16);
+    else {
+      const rights = rightText.match(/../gu) ?? [];
+      if (rights.length === 0 || rights.join('') !== rightText || rights.some(right => SDDL_RIGHTS[right] === undefined)) {
+        throw new Error('pi_projection_acl_invalid_ace');
+      }
+      for (const right of rights) mask = (mask | SDDL_RIGHTS[right]!) >>> 0;
+    }
+    const sid = sidText === user.token ? user.sid : SDDL_SIDS[sidText] ?? (/^S-1-[0-9]+(?:-[0-9]+)+$/u.test(sidText) ? sidText : undefined);
+    if (sid === undefined) throw new Error('pi_projection_acl_invalid_ace');
+    aces.push({ allow: type === 'A', flags: new Set(flags), mask, sid });
+  }
+  return aces;
+}
+
+/** The SDDL of one `icacls /save` record, whose first line must be the target's leaf name. */
+async function saveSddl(run: CommandRunner, icacls: string, target: string, file: string): Promise<string> {
+  await runWindowsTool(run, icacls, 'icacls', [target, '/save', file]);
+  const lines = (await fs.readFile(file)).toString('utf16le').replace(/^\uFEFF/u, '').replace(/\r\n$/u, '').split('\r\n');
+  if (lines.length !== 2 || lines[0] !== path.basename(target)) throw new Error('pi_projection_acl_invalid_output');
+  return lines[1]!;
+}
+
+/**
+ * Version of the Windows Pi projection ACL agreement between the client, which
+ * creates the directory (`createProjectionDir` with `ensurePiProjectionDir`),
+ * and this launcher, which checks it. 1 was the PowerShell query with the owner
+ * check; 2 requires the OWNER RIGHTS READ_CONTROL ACE and reads no owner
+ * (#1373). A client and a launcher of different versions refuse each other,
+ * so bump it with any change to that ACL.
+ */
+export const PI_PROJECTION_ACL_PROTOCOL = 2;
+
+/**
+ * Read-only Windows equivalent of uid + 0700; never repairs host ACLs.
+ *
+ * It does not read the owner. The client creates the projection leaf with one
+ * exclusive mkdir (`createProjectionDir` -> `createPrivateTempDir`, no reuse of
+ * an existing name) and then grants OWNER RIGHTS (S-1-3-4) only READ_CONTROL,
+ * which takes away the owner's implicit WRITE_DAC. OWNER RIGHTS limits only
+ * handles opened after it is in place, and nobody else can hold an older
+ * handle to a leaf this launch's client created exclusively. So whoever owns
+ * the directory can change its DACL only through an explicit ACE, and the
+ * rules below admit explicit ACEs only for the current user, SYSTEM and
+ * Administrators (#1373).
+ */
 export async function assertWindowsPiProjectionAcl(
   directory: string,
   options: { systemRoot?: string; run?: CommandRunner } = {},
 ): Promise<void> {
-  const powershell = windowsPowerShellExecutable(options.systemRoot ?? process.env.SystemRoot);
-  if (powershell === undefined) throw new Error('Windows SystemRoot must be an absolute path');
-  const result = await (options.run ?? runCommand)(
-    powershell,
-    ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PROJECTION_ACL_SCRIPT, 'utf16le').toString('base64')],
-    directory,
-  );
-  if (result.exitCode !== 0) {
-    const cause = WINDOWS_PROJECTION_ACL_QUERY_CAUSES[result.exitCode] ?? 'unexpected';
-    throw new Error(`pi_projection_acl_query_failed: Pi projection ACL query failed (cause=${cause}, exit=${result.exitCode})`);
+  const systemRoot = options.systemRoot ?? process.env.SystemRoot;
+  const icacls = windowsSystemTool(systemRoot, 'icacls.exe');
+  const whoami = windowsSystemTool(systemRoot, 'whoami.exe');
+  const run = options.run ?? runCommand;
+
+  // libuv marks every entry that carries a reparse attribute as a link, for
+  // any reparse tag (#1381 E5), and lists it without opening it.
+  let entries: Dirent[];
+  try { entries = await fs.readdir(path.dirname(directory), { withFileTypes: true }); }
+  catch (error) {
+    throw aclQueryFailure('readdir', WINDOWS_READDIR_CAUSES[(error as NodeJS.ErrnoException).code ?? ''] ?? 'unexpected');
   }
-  let acl: unknown;
-  try { acl = JSON.parse(result.stdout); }
-  catch { throw new Error('pi_projection_acl_invalid_json'); }
-  const recordObject = (value: unknown): value is Record<string, unknown> =>
-    value !== null && typeof value === 'object' && !Array.isArray(value);
-  if (!recordObject(acl) || Object.keys(acl).sort().join(',') !== 'currentUser,owner,protected,reparsePoint,rules'
-    || typeof acl.owner !== 'string' || !/^S-1-[0-9-]+$/u.test(acl.owner)
-    || typeof acl.currentUser !== 'string' || !/^S-1-[0-9-]+$/u.test(acl.currentUser)
-    || typeof acl.protected !== 'boolean' || typeof acl.reparsePoint !== 'boolean' || !Array.isArray(acl.rules)) {
-    throw new Error('pi_projection_acl_invalid_shape');
+  const entry = entries.find(candidate => candidate.name === path.basename(directory));
+  if (entry === undefined) throw aclQueryFailure('readdir', 'path_not_found');
+  if (entry.isSymbolicLink()) throw new Error('pi_projection_reparse_point: Pi projection path must be a non-symlink directory');
+  if (!entry.isDirectory()) throw new Error('pi_projection_not_directory_or_symlink: Pi projection path must be a non-symlink directory');
+
+  const user = /^"[^\r\n]*","(S-1-[0-9]+(?:-[0-9]+)+)"$/u.exec((await runWindowsTool(run, whoami, 'whoami', ['/user', '/fo', 'csv', '/nh'])).trim());
+  if (!user) throw new Error('pi_projection_acl_invalid_output');
+  const currentUser = user[1]!;
+
+  const saveDir = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'byok-acl-'));
+  let userToken: string;
+  let sddl: string;
+  try {
+    // icacls writes some SIDs as aliases: the built-in local Administrator
+    // (RID 500) is `LA`. Render the current user's SID once, alone in the DACL
+    // of an empty file, and match exactly that form (#1373). The ACE is full
+    // control so the file can be deleted under a parent that grants Modify only.
+    const reference = path.join(saveDir, 'user');
+    await fs.writeFile(reference, '');
+    await runWindowsTool(run, icacls, 'icacls', [reference, '/inheritance:r', '/grant:r', `*${currentUser}:(F)`]);
+    const rendered = /^D:[A-Z]*\(A;;[^;()]*;;;([^;()]+)\)$/u.exec(await saveSddl(run, icacls, reference, path.join(saveDir, 'user.acl')));
+    if (!rendered) throw new Error('pi_projection_acl_invalid_output');
+    userToken = rendered[1]!;
+    const known = SDDL_SIDS[userToken] ?? (/^S-1-/u.test(userToken) ? userToken : undefined);
+    if (known !== undefined && known !== currentUser) throw new Error('pi_projection_acl_invalid_output');
+    sddl = await saveSddl(run, icacls, directory, path.join(saveDir, 'acl'));
+  } finally {
+    await fs.rm(saveDir, { recursive: true, force: true });
   }
-  if (acl.reparsePoint) throw new Error('pi_projection_reparse_point: Pi projection path must be a non-symlink directory');
-  if (acl.owner !== acl.currentUser) throw new Error('pi_projection_owner_mismatch: Pi projection directory must be owned by the current user');
-  if (!acl.protected) throw new Error('pi_projection_acl_unprotected');
-  const principals = new Set([acl.owner, 'S-1-5-18', 'S-1-5-32-544']);
-  let ownerControl = false;
-  for (const rule of acl.rules) {
-    if (!recordObject(rule) || Object.keys(rule).sort().join(',') !== 'allow,fullControl,inherits,sid'
-      || typeof rule.sid !== 'string' || !/^S-1-[0-9-]+$/u.test(rule.sid)
-      || typeof rule.allow !== 'boolean' || typeof rule.fullControl !== 'boolean' || typeof rule.inherits !== 'boolean') {
-      throw new Error('pi_projection_acl_invalid_ace');
-    }
-    if (!principals.has(rule.sid) || !rule.allow) throw new Error('pi_projection_acl_unauthorized_ace');
-    if (rule.sid === acl.owner && rule.fullControl && rule.inherits) ownerControl = true;
+  const aces = parseProjectionDacl(sddl, { sid: currentUser, token: userToken });
+
+  const ownerRights = aces.filter(ace => ace.sid === 'S-1-3-4');
+  if (ownerRights.length !== 1 || !ownerRights[0]!.allow || ownerRights[0]!.flags.size !== 0
+    || (ownerRights[0]!.mask !== READ_CONTROL && ownerRights[0]!.mask !== (READ_CONTROL | SYNCHRONIZE))) {
+    throw new Error('pi_projection_acl_owner_rights_missing: Pi projection directory must grant OWNER RIGHTS only READ_CONTROL');
   }
-  if (!ownerControl) throw new Error('pi_projection_acl_owner_access_missing');
+  const principals = new Set([currentUser, 'S-1-3-4', 'S-1-5-18', 'S-1-5-32-544']);
+  let userControl = false;
+  for (const ace of aces) {
+    if (!ace.allow || !principals.has(ace.sid)) throw new Error('pi_projection_acl_unauthorized_ace');
+    if (ace.sid === currentUser && (ace.mask & FULL_CONTROL) === FULL_CONTROL
+      && ace.flags.has('OI') && ace.flags.has('CI') && !ace.flags.has('IO') && !ace.flags.has('NP')) userControl = true;
+  }
+  if (!userControl) throw new Error('pi_projection_acl_owner_access_missing');
 }
 
 /** Validate the client-owned empty directory before any credential access. */
