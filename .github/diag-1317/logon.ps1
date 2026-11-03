@@ -118,6 +118,68 @@ try {
   $user.SetValue('E1PROBEU1317', '%E1SESSIONONLY1317%|%USERPROFILE%|%SystemRoot%', $expandKind)
   Show 'H logon E1PROBEU1317' ([E1Env]::Build()['E1PROBEU1317'])
 
+  # E1d: user Path naming other user variables, by creation order and by
+  # name order; chains among user and machine variables; a REG_DWORD; and
+  # which machine-key names see per-user predefined names.
+  $e1dUser = 'AAANVM1317', 'ZZZNVM1317', 'E1CHAINA1317', 'E1CHAINZ1317', 'E1LATER1317', 'E1DWORD1317', 'E1UREFM1317'
+  $e1dMachine = 'E1MREF1317', 'E1MA1317', 'E1MZ1317', 'E1MLATE1317'
+  function Clear-E1d { Clear-Case; foreach ($n in $e1dUser) { $user.DeleteValue($n, $false) }; foreach ($n in $e1dMachine) { $machine.DeleteValue($n, $false) } }
+  try {
+    foreach ($order in 'refs-first', 'path-first') {
+      Clear-E1d
+      $setRefs = { $user.SetValue('AAANVM1317', 'C:\nvm-a', $stringKind); $user.SetValue('ZZZNVM1317', 'C:\nvm-z', $stringKind) }
+      $setPath = { $user.SetValue('Path', '%AAANVM1317%;%ZZZNVM1317%;C:\e1d', $expandKind) }
+      if ($order -eq 'refs-first') { & $setRefs; & $setPath } else { & $setPath; & $setRefs }
+      Show "E1d $order user value order" ($user.GetValueNames())
+      Show "E1d $order logon Path with machine replaced by <M>" ([E1Env]::Build()['Path'].Replace($machineExpanded, '<M>'))
+    }
+
+    # Chains: a user variable naming a user variable created after it, and one created before it.
+    Clear-E1d
+    $user.SetValue('E1CHAINZ1317', 'zval', $stringKind)
+    $user.SetValue('E1CHAINA1317', '%E1CHAINZ1317%|%E1LATER1317%', $expandKind)
+    $user.SetValue('E1LATER1317', 'later', $stringKind)
+    $user.SetValue('E1UREFM1317', '%E1MREF1317%', $expandKind)
+    # Machine chains: a machine variable naming per-user and system predefined names, and machine variables in both orders.
+    $machine.SetValue('E1MREF1317', '%USERPROFILE%|%USERNAME%|%APPDATA%|%COMPUTERNAME%|%SystemRoot%|%ProgramFiles%|%ALLUSERSPROFILE%', $expandKind)
+    $machine.SetValue('E1MZ1317', 'mz', $stringKind)
+    $machine.SetValue('E1MA1317', '%E1MZ1317%|%E1MLATE1317%', $expandKind)
+    $machine.SetValue('E1MLATE1317', 'mlate', $stringKind)
+    $user.SetValue('E1DWORD1317', 5, [Microsoft.Win32.RegistryValueKind]::DWord)
+    $d = [E1Env]::Build()
+    Show 'E1d user value order' ($user.GetValueNames())
+    Show 'E1d machine value order (tail)' ($machine.GetValueNames() | Select-Object -Last 6)
+    Show 'E1d E1CHAINA1317 (names E1CHAINZ created before, E1LATER created after)' $d['E1CHAINA1317']
+    Show 'E1d E1UREFM1317 (user naming a machine variable)' $d['E1UREFM1317']
+    Show 'E1d E1MREF1317 (machine naming predefined names)' $d['E1MREF1317']
+    Show 'E1d E1MA1317 (machine naming machine before/after)' $d['E1MA1317']
+    Show 'E1d E1DWORD1317 present' ($d.ContainsKey('E1DWORD1317'))
+    Show 'E1d E1DWORD1317 value' $d['E1DWORD1317']
+    & $reg export 'HKCU\Environment' $file /y | Out-Null
+    Show 'E1d HKCU export DWORD line' (([IO.File]::ReadAllText($file, [Text.Encoding]::Unicode) -split "`r`n") | Where-Object { $_ -like '"E1DWORD1317"=*' })
+
+    # The predefined set: logon block names that neither Environment key defines.
+    Clear-E1d
+    $volatile = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Volatile Environment')
+    $volatileNames = @($volatile.GetValueNames()) + @($volatile.GetSubKeyNames() | ForEach-Object { $volatile.OpenSubKey($_).GetValueNames() })
+    $p = [E1Env]::Build()
+    $machineNames = $machine.GetValueNames()
+    $userNames = $user.GetValueNames()
+    $origin = foreach ($name in ($p.Keys | Sort-Object)) {
+      $where = @()
+      if ($machineNames -contains $name) { $where += 'machine' }
+      if ($userNames -contains $name) { $where += 'user' }
+      if ($volatileNames -contains $name) { $where += 'volatile' }
+      $session = [Environment]::GetEnvironmentVariable($name)
+      [pscustomobject]@{ name = $name; keys = ($where -join '+'); equalsSession = ($session -eq $p[$name]) }
+    }
+    Show 'E1d volatile environment names' $volatileNames
+    Show 'E1d logon block names with origin' $origin
+    Show 'E1d predefined (in no Environment key)' (@($origin | Where-Object { $_.keys -eq '' -or $_.keys -eq 'volatile' } | ForEach-Object { $_.name }))
+  } finally {
+    Clear-E1d
+  }
+
   # Case C: user Path REG_SZ (not REG_EXPAND_SZ) holding a %NAME%.
   Clear-Case
   $user.SetValue('Path', 'C:\e1-c;%USERPROFILE%\e1-c', $stringKind)
