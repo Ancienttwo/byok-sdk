@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.37.0 — source candidate
+
+0.37.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+The upgrade manifest that `@byok-sdk/client` ships
+(`packages/client/upgrade-manifest.json`, 0.36.0 to 0.37.0) lists the
+Host-visible changes since 0.36.0 that change an API, config or example item:
+4 breaking entries, each with a migration link. The wire stays v5
+(`PROTOCOL_VERSION = 5`) with an unchanged corpus. There is no new Postgres
+migration and no SQLite schema change; Pi 1.5.0 migrates pi-durable replicas
+forward on open, so a device or Durable Object cannot roll back past this
+release. See the [0.37.0 candidate notes](docs/releases/v0.37.0.md) and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.37.0.md). The breaking
+changes: `bot-turn-outcome.v1` runs every rule that reads only the outcome,
+and the routine calendar moves from core to protocol (protocol, core and K8,
+#1375), with the K8 room seat and root projections (#1393) and room message
+retention (#1394) in the same manifest entry; on Windows the `login-shell`
+runtime environment base takes `PATH` and `PATHEXT` from the logon registry
+values (client, #1317); the official Pi closure is pinned to exactly 1.5.0
+(client, cloud-do and keys); and on Windows the keys launcher requires the
+OWNER RIGHTS ACE that the client grants, so `@byok-sdk/client` and
+`@byok-sdk/keys` must run at the same version (client and keys, #1373).
+
 - **Breaking (client)** — On Windows, the `login-shell` runtime environment
   base takes `PATH` and `PATHEXT` from the logon registry values instead of
   the live session (#1317). They are built as Windows builds them at logon
@@ -18,12 +40,6 @@
   runtimes report `refused:runtime_environment_unavailable:logon-registry-unavailable`
   ([device setup](docs/device-setup.md)). The other `windows-session` names
   still come from the live session, and report sources are unchanged.
-- **Internal (client)** — the SDK-owned OAR source moves from 0.83.0 to
-  0.86.0 (`vendor/oar/47c2c3f/`, upstream commit `47c2c3f0`). The vendored
-  Codex session takes upstream's manual compaction, which the SDK bridge does
-  not expose. The Codex open no longer refuses `appendSystemPrompt` on resume,
-  as upstream; the SDK Codex adapter never passes it. All sixteen BYOK deltas
-  are preserved and the API surface is unchanged.
 - **Breaking (protocol, core, examples; #1375)** — `bot-turn-outcome.v1` runs
   every rule that reads only the outcome, so the device refuses a violating
   outcome on `submit_result` and the model corrects it in the same Turn. New
@@ -74,6 +90,23 @@
   `room_input` transaction. `advanceRoomSeats` takes a `publish` argument.
   A Host that refuses an unknown projection prefix must handle both before it
   upgrades.
+- **Breaking (examples; #1394)** — K8 `retainRoots` now also moves room
+  messages out of the collaboration state, with or without `roomHistory`: each
+  message whose round root or seat is no longer in the state, except the last
+  `contextTurnLimit` messages of its room, becomes an archived row in namespace
+  `roomMessages`, keyed by message id. The same call lowers each `visibleFrom`
+  offset by the messages it moves from before it, so every member's seat
+  ContextPack keeps the same messages; `historyWindow.omittedMessages` and
+  notice count only messages still in the state, as `omittedTurns` does. The
+  `Room` shape and the state version do not change. `snapshot().team.rooms` no
+  longer holds the whole room history: a Host that turns `roomHistory` on
+  should do so before the first retention; after a retention, its backfill
+  also reads the `roomMessages` archived rows, which the owner switch export
+  carries in its archived section. A Host that vendored K8 copies the new
+  `src/retention.ts`, `src/rules/rooms.ts` and
+  `src/retention-vectors.test-support.ts`, and adds `archived(namespace, id)`
+  to its `RetentionSubject`
+  ([K8 retention](examples/bot-collaboration/README.md#retention)).
 
 - **Breaking (client, keys; Windows)** — The keys launcher no longer starts
   Windows PowerShell to check the Pi projection directory, and no longer reads
@@ -131,6 +164,12 @@
     against `piModelConfigFromPinnedCatalog` before upgrading.
   - A lane that does not pass the Host system prompt gets Pi 1.5.0's
     tightened default prompt.
+- **Internal (client)** — the SDK-owned OAR source moves from 0.83.0 to
+  0.86.0 (`vendor/oar/47c2c3f/`, upstream commit `47c2c3f0`). The vendored
+  Codex session takes upstream's manual compaction, which the SDK bridge does
+  not expose. The Codex open no longer refuses `appendSystemPrompt` on resume,
+  as upstream; the SDK Codex adapter never passes it. All sixteen BYOK deltas
+  are preserved and the API surface is unchanged.
 
 ## 0.36.0 — 2026-11-03 (published)
 
