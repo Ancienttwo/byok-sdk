@@ -196,8 +196,9 @@ export const knownFamilies = Object.freeze([
 // family owns: its tests, smoke scripts and the source they qualify. Package
 // membership alone never selects a platform family; the Linux targeted job
 // runs the complete owning and dependent workspace suites, and explicit
-// release validation runs every family. The contract test checks that each
-// test file and script a family job runs is owned by that family.
+// release validation runs every family. The contract test reads each family
+// job in ci.yml and checks that a change to each test file and script it runs
+// selects that family.
 export const familyOwners = Object.freeze({
   'agent-memory-export-linux': [
     /^examples\/host-execution-core\/src\/fixtures\/memory-restore-crash\.ts$/,
@@ -321,14 +322,15 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/scripts\/(?:credential-audit-core|credential-audit-positive-control|linux-credential-audit|adapter-task-smoke)\.mjs$/,
     /^packages\/keys\/src\//,
   ],
+  // #1364: the Windows leg runs these suites under a freshly created
+  // standard-user account.
+  'npm-release-pack': [
+    // The real Pi projection ACL query, its evidence budget and native suite.
+    /^packages\/keys\/src\/(?:pi-provider-launcher-core\.ts|pi-projection-windows\.test\.ts|fixtures\/acl-evidence-budget\.ts)$/,
+    // #385: the keys launch sequence against the built pi-rpc host.
+    /^packages\/client\/src\/__tests__\/pi-rpc-key-custody\.test\.ts$/,
+  ],
 });
-// #1364: the real Windows Pi projection ACL query and its native suite run
-// only in npm-release-pack, under a freshly created standard-user account.
-const keysWindowsAclPaths = new Set([
-  'packages/keys/src/pi-provider-launcher-core.ts',
-  'packages/keys/src/pi-projection-windows.test.ts',
-  'packages/keys/src/fixtures/acl-evidence-budget.ts',
-]);
 // #649 and #702: release script paths that the owner reviewed for 0.28.2.
 // `tests` run the path (scripts/ci/run-targeted.mjs runs them); `install` marks
 // tests that need installed packages, so the targeted job installs first;
@@ -357,6 +359,12 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/cloud-do-consumer-smoke.mjs': {
     tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
+  // #1378: the shared Secret Service wrapper that these family jobs run their
+  // suites under. build-test also runs it, but plan-ci never lets a routine
+  // path select build-test (the same rule as .node-version).
+  'scripts/ci/with-secret-service.sh': {
+    tests: [], families: ['dataplane', 'execution-recovery-native', 'npm-release-pack', 'release-pack-migrate'],
+  },
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and
   // runs it in every family job; #925 selects npm-release-pack alone.
   'scripts/release/execution-submit-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
@@ -365,6 +373,8 @@ export const reviewedScripts = Object.freeze({
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and runs
   // it against the packed client's Pi launcher and todo assets.
   'scripts/release/pi-launcher-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
+  // #1378: release-pack-migrate runs this migration smoke on the packed tarballs.
+  'scripts/release/pg-migrate-smoke.mjs': { tests: [], families: ['release-pack-migrate'] },
   'scripts/release/pack-and-smoke.test.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true },
   // pack-and-smoke.mjs imports this tarball guard and runs it in each of its family jobs.
   'scripts/release/published-store-paths.mjs': {
@@ -470,7 +480,6 @@ export function selectImpact(paths, context = {}) {
         if (owners.some(owner => owner.test(path))) { families.add(id); owned = true; }
       }
     }
-    if (keysWindowsAclPaths.has(path)) families.add('npm-release-pack');
     if (path === '.gitattributes') {
       verifyReviewedContent(path, context);
       dirs.add('packages/client');
