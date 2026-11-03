@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Internal (client)** — the SDK-owned OAR source moves from 0.83.0 to
+  0.86.0 (`vendor/oar/47c2c3f/`, upstream commit `47c2c3f0`). The vendored
+  Codex session takes upstream's manual compaction, which the SDK bridge does
+  not expose. The Codex open no longer refuses `appendSystemPrompt` on resume,
+  as upstream; the SDK Codex adapter never passes it. All sixteen BYOK deltas
+  are preserved and the API surface is unchanged.
+
 ## 0.36.0 — 2026-11-03 (published)
 
 0.36.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

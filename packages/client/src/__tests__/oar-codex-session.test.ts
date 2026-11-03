@@ -49,7 +49,7 @@ describe('unconnected OAR Codex adapter', () => {
     const fake = fakeServer(); const session = await fake.open();
     expect(fake.spawn.mock.calls[0]![2]).toEqual({ cwd: '/workspace', env: { HOME: '/home' } });
     expect(fake.spawn.mock.calls[0]![1]).toContain('sandbox_mode="danger-full-access"');
-    expect(Object.keys(session).sort()).toEqual(['abort','capabilities','dispose','graph','id','prompt','queue','rawEvents','records','steer'].sort());
+    expect(Object.keys(session).sort()).toEqual(['abort','capabilities','compact','dispose','graph','id','prompt','queue','rawEvents','records','steer'].sort());
     await session.dispose(); expect(fake.child.kill).toHaveBeenCalledTimes(1);
   });
 

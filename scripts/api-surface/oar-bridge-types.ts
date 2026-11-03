@@ -165,8 +165,9 @@ export type CheckAcpControl = Assert<Equal<AcpBridge.AcpControl, BridgeControl>>
 export type CheckAcpRecord = Assert<Equal<AcpBridge.AcpRecord, Flatten<BridgeRecord>>>;
 export type CheckAcpSession = Assert<Equal<AcpBridge.RawAcpSession, AcpBridgeSession>>;
 // Name each intentional omission so new vendor members fail this check.
+// 'compact' (OAR 0.86 generic contract) is omitted on purpose, as for Codex.
 export type CheckAcpSessionMembers = Assert<Equal<
-  Exclude<keyof AdapterSession, 'capabilities' | 'goal' | 'steer' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown'>,
+  Exclude<keyof AdapterSession, 'capabilities' | 'goal' | 'steer' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact'>,
   keyof AcpBridge.RawAcpSession
 >>;
 export type CheckAcpVendorSession = Assert<Assignable<AdapterSession, AcpBridge.RawAcpSession>>;
