@@ -7,13 +7,30 @@
   },
   "to": {
     "version": "0.36.0",
-    "snapshotSha256": "f82fc8482c1054149c3e663b82e9f4b794834643da7f67197be8cdd6db721680"
+    "snapshotSha256": "cc8329e99efb2afee46c223f5e9bf7a16ef8acee87d4397f6e11e5264b1897dc"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "pi-projection-acl-owner-rights",
+      "impact": "breaking",
+      "summary": "On Windows, run @byok-sdk/client and @byok-sdk/keys at the same version. The keys launcher no longer starts PowerShell or reads the Pi projection directory's owner. It requires the OWNER RIGHTS (S-1-3-4) READ_CONTROL ACE that the client now grants when it creates the directory (#1373). When the versions differ, the launch fails closed. A 0.37.0 launcher refuses a directory made by an older client with pi_projection_acl_owner_rights_missing. An older launcher refuses a directory made by a 0.37.0 client with pi_projection_acl_unauthorized_ace. The projection directory is created fresh on every launch, so there is nothing to migrate.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "interprocess:pi-projection-acl"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "interprocess:pi-projection-acl",
+      "change": "added",
+      "after": "protocol=2",
+      "entry": "pi-projection-acl-owner-rights"
+    }
+  ]
 }

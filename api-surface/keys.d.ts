@@ -1291,6 +1291,15 @@ export declare function buildPiProviderChildEnvironment(options: {
     platform?: NodeJS.Platform;
 }): Record<string, string>;
 /**
+ * Version of the Windows Pi projection ACL agreement between the client, which
+ * creates the directory (`createProjectionDir` with `ensurePiProjectionDir`),
+ * and this launcher, which checks it. 1 was the PowerShell query with the owner
+ * check; 2 requires the OWNER RIGHTS READ_CONTROL ACE and reads no owner
+ * (#1373). A client and a launcher of different versions refuse each other,
+ * so bump it with any change to that ACL.
+ */
+export declare const PI_PROJECTION_ACL_PROTOCOL = 2;
+/**
  * Read-only Windows equivalent of uid + 0700; never repairs host ACLs.
  *
  * It does not read the owner. The client creates the projection leaf with one
