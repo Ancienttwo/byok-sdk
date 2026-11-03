@@ -9,6 +9,24 @@
   as upstream; the SDK Codex adapter never passes it. All sixteen BYOK deltas
   are preserved and the API surface is unchanged.
 
+- **Breaking (client, keys; Windows)** — The keys launcher no longer starts
+  Windows PowerShell to check the Pi projection directory, and no longer reads
+  its owner (#1373). It refuses any reparse point by listing the parent
+  directory, takes the current user SID from `whoami`, and reads the DACL with
+  `icacls /save`. The DACL must be protected, hold only allow ACEs for the
+  current user, SYSTEM and Administrators, give the current user inheritable
+  full control, and hold exactly one OWNER RIGHTS (`S-1-3-4`) ACE with
+  READ_CONTROL only. The client now adds that OWNER RIGHTS ACE when it creates
+  the projection directory. Run `@byok-sdk/client` and `@byok-sdk/keys` at the
+  same version. When they differ, the launch fails closed. A 0.37.0 launcher
+  refuses a directory made by an older client with
+  `pi_projection_acl_owner_rights_missing`. An older launcher refuses a
+  directory made by a 0.37.0 client with `pi_projection_acl_unauthorized_ace`.
+  A failed query now names its step:
+  `pi_projection_acl_query_failed: … (cause=<cause>, step=readdir|whoami|icacls[, exit=<code>])`.
+  The cause `powershell_unavailable` is replaced by `whoami_unavailable` and
+  `icacls_unavailable`.
+
 ## 0.36.0 — 2026-11-03 (published)
 
 0.36.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
