@@ -5,8 +5,9 @@ an earlier release first applies the [0.35.0 checklist](host-upgrade-0.35.0.md)
 and then this page, in the same maintenance window. 0.35.1 was prepared but
 never published; its fixes ship in 0.36.0, so there is no 0.35.1 step.
 
-Its fixed source is the release commit, the merge of the 0.36.0 release PR on
-`main`, not moving `main` or Unreleased. The rows below are counted from the
+Its fixed source is the release commit `644cf95a2`, the merge of the 0.36.0
+train #1390 on `main`, not moving `main` or Unreleased. 0.36.0 is published
+on npm `latest` for all nine packages. The rows below are counted from the
 upgrade manifest on the release PR. It has not been walked through. The
 behavior authorities are the upgrade manifest that `@byok-sdk/client` ships
 (`upgrade-manifest.json`, 0.35.0 to 0.36.0) and the CHANGELOG 0.36.0 section
@@ -44,8 +45,8 @@ All nine public packages move together. Pin each one to exactly 0.36.0.
 | Release field | Value |
 | --- | --- |
 | Git tag | `v0.36.0` |
-| Release commit SHA | the merge of the release PR on `main`, recorded at tagging |
-| Release PR base | main `de9c7960e` |
+| Release commit SHA | `644cf95a2894d259d31abfa20ece6202d24b9dc8` |
+| Release PR base | main `de9c7960e` (#1390) |
 
 Verify a source checkout with `git rev-parse 'v0.36.0^{commit}'`; the result
 must equal the release commit. The annotated tag object is not the source
@@ -151,9 +152,10 @@ package pin alone does not establish acceptance.
 
 ### Walkthrough evidence
 
-No one has walked this checklist through.
+This checklist is anchored to the release commit `644cf95a2`. No one has
+walked it through.
 
-- [ ] **Release commit recorded** in the fixed revisions table, and the tag
+- [x] **Release commit recorded** in the fixed revisions table, and the tag
   `v0.36.0` points to it.
 - [ ] **[unverified] Maintainer walked the complete checklist** in a clean
   environment, on macOS and on Windows (0.35.0 → 0.36.0).
