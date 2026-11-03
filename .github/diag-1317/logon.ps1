@@ -105,7 +105,12 @@ try {
       @{ id = 'B3'; value = 'C:\e1-b3;%path%;C:\e1-b3z'; kind = $expandKind },
       @{ id = 'B4'; value = '%PATH%;C:\e1-b4'; kind = $stringKind },
       @{ id = 'B5'; value = '%PATH%;C:\e1-b5;%PATH%'; kind = $expandKind },
-      @{ id = 'B6'; value = 'C:\e1-b6;%PATHEXT%'; kind = $expandKind })) {
+      @{ id = 'B6'; value = 'C:\e1-b6;%PATHEXT%'; kind = $expandKind },
+      @{ id = 'B7'; value = 'C:\e1-b7a;;C:\e1-b7b;'; kind = $expandKind },
+      @{ id = 'B8'; value = ';C:\e1-b8;'; kind = $stringKind },
+      @{ id = 'B9'; value = 'C:\e1-b9a;%PATH%%PATH%;C:\e1-b9b'; kind = $expandKind },
+      @{ id = 'B10'; value = 'C:\e1-b10a%PATH%C:\e1-b10b'; kind = $expandKind },
+      @{ id = 'B11'; value = '%PATH%'; kind = $expandKind })) {
     Clear-Case
     $user.SetValue('Path', $case.value, $case.kind)
     $built = [E1Env]::Build()['Path']
