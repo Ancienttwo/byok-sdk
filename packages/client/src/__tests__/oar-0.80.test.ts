@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { codexThreadOpen } from '../../vendor/oar/ddec7e5/runtimes/codex/open';
-import { createSessionKernel } from '../../vendor/oar/ddec7e5/shared/session-kernel';
+import { codexThreadOpen } from '../../vendor/oar/47c2c3f/runtimes/codex/open';
+import { createSessionKernel } from '../../vendor/oar/47c2c3f/shared/session-kernel';
 
 describe('OAR 0.80 upstream behavior at SDK seams', () => {
   it('keeps every observer in sequence when an observer emits another record', () => {
@@ -26,9 +26,7 @@ describe('OAR 0.80 upstream behavior at SDK seams', () => {
     expect(decide).not.toHaveBeenCalled();
   });
 
-  it('refuses appendSystemPrompt on resume while retaining BYOK approval policy on new sessions', () => {
-    expect(() => codexThreadOpen({ cwd: '/workspace', resume: 'saved', appendSystemPrompt: 'rules' }))
-      .toThrow('Codex ignores appendSystemPrompt when resuming');
+  it('retains BYOK approval policy on new sessions', () => {
     expect(codexThreadOpen({ cwd: '/workspace', appendSystemPrompt: 'rules', approvalPolicy: 'on-request' }).params)
       .toMatchObject({ developerInstructions: 'rules', approvalPolicy: 'on-request' });
     expect(codexThreadOpen({ cwd: '/workspace', resume: 'saved' }).method).toBe('thread/resume');

@@ -1,4 +1,6 @@
 // BYOK change: Modified from OAR c88a514 for injected processes, native-first recording, bounded request refusal, caller-selected sandbox, caller-owned open steps and session credential redaction without sealSession (Apache-2.0).
+import { manualCompaction } from "../../shared/manual-compaction.js";
+import { codexCompaction, codexCompactionBusy } from "./compaction.js";
 /* oxlint-disable import/max-dependencies -- The adapter composes protocol, input and process-lifetime mechanisms. */
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";
@@ -175,7 +177,10 @@ async function openCodexSession(
     // baseline this Session's token totals count from (projection.ts, #169).
     projection: initialCodexProjection(threadId, openMethod),
   };
-  const busy = (): boolean => state.active !== null || state.spontaneous;
+  const nativeBusy = (): boolean => state.active !== null || state.spontaneous;
+  let compactOperation: ReturnType<typeof codexCompaction> | null = null;
+  const compaction = manualCompaction(kernel, { busy: codexCompactionBusy(kernel, nativeBusy), busyReason: "Codex manual compaction requires an idle session without an active goal or queued input", create: () => { compactOperation = codexCompaction(client, threadId); return compactOperation; } });
+  const busy = (): boolean => nativeBusy() || compaction.busy();
   const abortFallback = createAbortFallback(() => { client.kill(); });
   let disposeRequest: RequestRecord | null = null;
   // A resume's effort update in flight: codex's thread/settings/updated answers it.
@@ -374,7 +379,7 @@ async function openCodexSession(
     const expectedTurnId = state.codexTurnId;
     return {
       body: { kind: "steer", input, ...inputOptions },
-      gate: () => (!busy() || expectedTurnId === null ? { kind: "rejected", code: "no_active_turn", reason: "not_steerable: no active turn" } : inputImagesRefusal(capabilities, inputOptions?.images)),
+      gate: () => compaction.busy() ? { kind: "rejected", code: "busy", reason: "Manual compaction is still in progress" } : (!busy() || expectedTurnId === null ? { kind: "rejected", code: "no_active_turn", reason: "not_steerable: no active turn" } : inputImagesRefusal(capabilities, inputOptions?.images)),
       method: "turn/steer",
       params: () => ({ threadId, input: codexUserInput(input, inputOptions?.images), expectedTurnId, clientUserMessageId: inputOptions?.inputId }),
       onReply: (reply) => {
@@ -389,8 +394,8 @@ async function openCodexSession(
   // The reply carries the runtime's submission id; it is retained on the response.
   const queuePlan = (input: string, inputOptions?: InputOptions): RpcControlPlan => ({
     body: { kind: "queue", input, ...inputOptions },
-    gate: () => options.outputSchema === undefined ? inputImagesRefusal(capabilities, inputOptions?.images)
-      : { kind: "rejected", code: "unsupported", reason: "codex queued input cannot carry outputSchema; use prompt after the current turn ends" },
+    gate: () => compaction.busy() ? { kind: "rejected", code: "busy", reason: "Wait for manual compaction before queuing another turn" } : (options.outputSchema === undefined ? inputImagesRefusal(capabilities, inputOptions?.images)
+      : { kind: "rejected", code: "unsupported", reason: "codex queued input cannot carry outputSchema; use prompt after the current turn ends" }),
     method: "thread/queue/add",
     params: () => ({ threadId, input: codexUserInput(input, inputOptions?.images), clientUserMessageId: inputOptions?.inputId ?? randomUUID() }),
     onReply: (reply) => ({ kind: "accepted", native: reply }),
@@ -399,17 +404,21 @@ async function openCodexSession(
   // An early or late interrupt can be refused; turn/completed is the outcome.
   const abortPlan = (): RpcControlPlan => {
     let refused: (() => void) | null = null;
+    const turnId = compaction.busy() ? compactOperation?.turnId() ?? null : state.codexTurnId;
     return {
       body: { kind: "abort" },
       gate: () => {
-        if (!busy() || state.codexTurnId === null) {
+        if (compaction.busy() && turnId === null) {
+          return { kind: "rejected", code: "busy", reason: "Codex has not yet reported the compaction turn id required by turn/interrupt" };
+        }
+        if (!busy() || turnId === null) {
           return { kind: "rejected", code: "no_active_turn", reason: "no active turn" };
         }
         return null;
       },
       onPending: (accept) => { refused = abortFallback.arm(accept); },
       method: "turn/interrupt",
-      params: () => ({ threadId, turnId: state.codexTurnId }),
+      params: () => ({ threadId, turnId }),
       onReply: (reply) => ({ kind: "accepted", native: reply }),
       onError: (message) => {
         refused?.();
@@ -419,13 +428,15 @@ async function openCodexSession(
   };
 
   // BYOK change: The upstream credentials.seal guard without sealSession: a control's thrown error is redacted.
-  const guard = <Args extends unknown[], Result>(method: (...args: Args) => Promise<Result>) =>
+  // As upstream, compact also redacts its outcome: its reasons can carry native error text.
+  const guard = <Args extends unknown[], Result>(method: (...args: Args) => Promise<Result>, cleanResult = false) =>
     async (...args: Args): Promise<Result> => {
-      try { return await method(...args); } catch (error) { throw redactValue(error); }
+      try { const result = await method(...args); return cleanResult ? redactValue(result) : result; } catch (error) { throw redactValue(error); }
     };
   const session: CodexAdapterSession = { // BYOK change: raw adapter without sealSession/observe dependencies.
     id: kernel.sessionId,
     capabilities,
+    compact: guard(compaction.compact, true),
     prompt: guard(via(promptPlan)),
     steer: guard(via(steerPlan)),
     queue: guard(via(queuePlan)),
