@@ -27,8 +27,8 @@ from evidence, not the author's judgment (see "Freeze rule" in
 `docs/protocol.md`). The wire is at major 5: v5 renames the runtime
 capability `durablePi` to `durableLane`. 0.33.0 is the last v4 release, and
 `golden/v5.releases.json` registers the corpus of the published 0.34.0, the
-first v5 release, and the same corpus for the published 0.35.0, and
-has no floor. No published v5 decoder is pinned as an oracle yet, so cross-release gates stay
+first v5 release, and the same corpus for the published 0.35.0 and the 0.35.1 source
+candidate, and has no floor. No published v5 decoder is pinned as an oracle yet, so cross-release gates stay
 unproven until one is pinned.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
