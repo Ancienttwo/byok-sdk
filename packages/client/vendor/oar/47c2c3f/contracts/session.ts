@@ -1,4 +1,6 @@
+/* oxlint-disable import/max-dependencies -- Session composes the independently owned control and observation contracts. */
 import type { AdapterGoalControl, GoalControl } from "./goal.js";
+import type { CompactionOptions, CompactionOutcome } from "./compaction.js";
 import type {
   ContextUsage,
   Cursor,
@@ -18,6 +20,7 @@ import type { ContextBreakdown } from "./context-breakdown.js";
 import type { SessionOptions } from "./session-options.js";
 
 export type { GoalControl, AdapterGoalControl, GoalSnapshot, GoalStatus, KnownGoalStatus, GoalSetOptions } from "./goal.js";
+export type { CompactionOptions, CompactionOutcome, ManualCompaction } from "./compaction.js";
 export type { ControlResult, ControlOutcome } from "./control.js";
 export type { McpServer, SessionOptions } from "./session-options.js";
 export type { CredentialProblem, FailedTurn, FailureClass } from "./failure.js";
@@ -55,14 +58,12 @@ export type { TaskEventBody, TaskStatus, TaskType } from "./tasks.js";
 export type { AgentStatus, RunningPhase } from "./status.js";
 export type { InputImage, InputOrigin } from "./input.js";
 export type { DeliverOptions, DeliverResult, DeliverWhen, DeliverMergeInput, DeliverMergeResult } from "./deliver.js";
-
 export interface QueryResult<T> {
   /** The fold's current value. */
   readonly value: T;
   /** The seq of the last consumed record, or -1 before any record. */
   readonly seq: number;
 }
-
 /** For prompt, steer and queue: empty text requires at least one image; otherwise rejected unsupported. Whitespace is not trimmed. */
 export interface InputOptions {
   /** UUID identifying one logical input across delivery attempts; generated when omitted. */
@@ -77,8 +78,6 @@ export interface InputOptions {
   /** Who the input comes from; kept on the request record, never sent to the runtime. */
   readonly origin?: InputOrigin;
 }
-
-
 /** A single prompt may also deliver earlier inputs, without changing their historical queue/withdraw records. */
 export interface PromptOptions extends InputOptions {
   readonly carries?: readonly string[];
@@ -115,7 +114,6 @@ export interface PromptOptions extends InputOptions {
  *   nothing. `SessionOptions.resume` reopens the runtime-native conversation
  *   with a fresh stream starting at seq 0.
  */
-
 /**
  * Execution capability entrypoint; composition probes installation first.
  * Rejects only on operational failure (spawn/load/auth errors carry the
@@ -192,17 +190,19 @@ export interface SessionResources {
 export interface AdapterSession {
   /** Optional recorded controls for the runtime's structured goal. */
   readonly goal?: AdapterGoalControl;
+  /** Native manual compaction. Waiting limits do not cancel it or free its input slot. */
+  compact?(options?: CompactionOptions): Promise<CompactionOutcome>;
   readonly id: string; // runtime-native persistent identity; pass to SessionOptions.resume to reattach later
   readonly capabilities: SessionCapabilities;
   prompt(input: string, options?: PromptOptions): Promise<ControlResult>; // ≤1 active turn: rejected `busy` while one runs; NEVER queues implicitly. The request record is the turn's start.
-  steer?(input: string, options?: InputOptions): Promise<ControlResult>; // mid-turn input; ABSENT when the runtime cannot inject into an active turn (kimi, antigravity, opencode v2): its presence is the capability. Rejected `no_active_turn` when nothing is active, `unsupported` when the runtime cannot take these inputs mid-turn (images on a cursor steer), `runtime_refused` when the runtime itself refuses (reasons start `not_steerable:`). Input written during runtime-autonomous compaction is HELD, not lost.
+  steer?(input: string, options?: InputOptions): Promise<ControlResult>; // mid-turn input; ABSENT when the runtime cannot inject into an active turn (kimi, antigravity, opencode v2, qwen, codebuddy): its presence is the capability. Rejected `no_active_turn` when nothing is active, `unsupported` when the runtime cannot take these inputs mid-turn (images on a cursor steer), `runtime_refused` when the runtime itself refuses (reasons start `not_steerable:`). Input written during runtime-autonomous compaction is HELD, not lost.
   queue(input: string, options?: InputOptions): Promise<ControlResult>; // input for a later turn, held by the runtime or the adapter (`capabilities.queue.durable` says which). That later turn has events but no request of its own: a spontaneous turn.
   withdraw?(inputId: string): Promise<ControlResult>; // take a held input (a queue request's `inputId`) back before it is sent; ABSENT where OAR cannot remove held input (codex, whose queue is the runtime's own): its presence is the capability. Accepted means the entry was removed before dispatch and the caller owns the input again; rejected `not_queued` when no held input with this id is waiting (already sent, never queued here, or already withdrawn). Atomic against the drain: never accepted when the input may already have been sent. The queue request and its response stay in the stream unchanged.
   abort(): Promise<ControlResult>; // interrupt the active turn; accepted means the interrupt was delivered, the outcome is the runtime's own turn_ended event. Rejected when nothing is active; a late abort is a normal race, not an error. Ending the turn does not promise that processes it started have stopped (codex keeps commands across turns; docs/spec/runtime-matrix.md#what-abort-stops); isolated dispose stops the owned process; shared cleanup can leave native work running; a borrowed Pi Durable harness keeps its own lifetime.
   rawEvents(observer: RawEventObserver, cursor?: Cursor): Unsubscribe; // the stream itself, one record at a time. Side-tap: sync, never awaited; a throwing observer must not affect the run or other observers. With a cursor: replays every retained record after `afterSeq` synchronously, then continues live: no loss, no duplication.
   records(): readonly RawEvent[]; // every record this process observed, in seq order
   graph(): SessionGraph;
-  resources?(): Promise<SessionResources | null>; // the runtime's memory, read now (`SessionResources`); null once its process has exited, and on Windows (no reader yet). ABSENT where the runtime has no process of its own (pi, cursor: its memory is the host's).
+  resources?(): Promise<SessionResources | null>; // the runtime's memory, read now (`SessionResources`); null once its process has exited, and on Windows (no reader yet). ABSENT where the runtime has no process of its own (in-process pi, cursor: its memory is the host's).
   contextBreakdown?(): Promise<ContextBreakdown | null>; // what fills the context window, by the runtime's own categories, asked of the runtime now and never recorded (`ContextBreakdown`); null from the start of a dispose and once its process has exited. A read can cost provider requests (claude counts tokens), so read on demand, never poll. ABSENT where the runtime cannot itemize its context (all but claude): a host then shows `contextUsage()`.
   /**
    * Bounded, recorded disposal. Success is idempotent; a failed close records rejected and can be retried.

@@ -1,8 +1,8 @@
-# OAR 044633e private runtime fork
+# OAR 47c2c3f private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.83.0, fixed commit `ddec7e575a5f8e65ea35011e64c0d35eef08f6bd`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.86.0, fixed commit `47c2c3f078b7706ec87b50ffc9c31040c116d7a7`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 92 source files plus LICENSE. Seventy-six source files keep upstream bytes. Sixteen source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, and the Codex goal-event projection. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 95 source files plus LICENSE. Seventy-nine source files keep upstream bytes. Sixteen source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the Codex goal-event projection, and the manual-compaction operation that the Codex session composes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
 
 Upstream has no dsh runtime. The SDK-owned dsh profile, `packages/client/src/runtime/dsh-acp-session.js`, builds on the vendored `shared/acp/session.ts` `acpSession`. It lives in SDK source, not in this fork, and adds no manifest row.
 
@@ -10,25 +10,25 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoritative release binding
 
-`@botiverse/oar@0.83.0` is the public npm release of this commit. Checked on
-2026-11-01:
+`@botiverse/oar@0.86.0` is the public npm release of this commit. Checked on
+2026-11-03:
 
-- The registry publishes `0.83.0` with tarball integrity
-  `sha512-NcuJljjWXegNwgeb8i91TOCC5N7+iL4nG1DyWiMur48p5l0ur3WACpOgMQf317+UYhTXv50Rv+eC0tLPbSv0aQ==`;
+- The registry publishes `0.86.0` with tarball integrity
+  `sha512-zso2RA/hKYT/L/OqRn//f5IbVuPEHucD1fJbJ+QR0ymaJhhfHWoBZOZr7igh5k2rQFvio+FnYl7VoSXMg4dXLw==`;
   the downloaded tarball has sha512
-  `35cb899638d65de80dc2079bf22f754ce082e4defe88be271b50f25a232eaf8f29e65d2eaf75800a93a03107f7d7bf946214d7bf9d11bfe782d2d2cf6d2bf469`
-  and its `package.json` declares `"name": "@botiverse/oar"`, `"version": "0.83.0"`.
+  `ceca36440fe12984ff2ff3aa467fff7f921b56e3c41ee703d5f25b27e411d3299a26185f1d6a0164e66bee2821e64dab405be2a3e167625ed5a125cc8387572f`
+  and its `package.json` declares `"name": "@botiverse/oar"`, `"version": "0.86.0"`.
 - Its SLSA v1 provenance attestation
-  (`https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.83.0`)
+  (`https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.86.0`)
   built `.github/workflows/release.yml` from
   `git+https://github.com/botiverse/oar@refs/heads/main` at
-  `ddec7e575a5f8e65ea35011e64c0d35eef08f6bd`, the same commit recorded here.
-- The annotated tag `refs/tags/v0.83.0` dereferences to that commit, whose
-  message is `chore: release v0.83.0 (#589)`.
-- All 93 `upstreamSha256` values in `source-manifest.json` match the files at
+  `47c2c3f078b7706ec87b50ffc9c31040c116d7a7`, the same commit recorded here.
+- The annotated tag `refs/tags/v0.86.0` dereferences to that commit, whose
+  message is `chore: release v0.86.0 (#613)`.
+- All 96 `upstreamSha256` values in `source-manifest.json` match the files at
   that commit's tree.
 
-The scheduled advisory scan therefore queries `@botiverse/oar@0.83.0` as an
+The scheduled advisory scan therefore queries `@botiverse/oar@0.86.0` as an
 npm package-version, not the bare commit. `source-manifest.json` keeps the
 commit and records the release name, version, tarball integrity and provenance
 URL under `release`; the scanner refuses the release claim unless every field
@@ -42,8 +42,8 @@ Policy: follow upstream. A file is maintained only where the SDK's ownership of 
 
 - `observe/events.ts`. Invariant: the SDK kernel owns current typed records only. Project those records directly without the upstream pre-0.14 shape translator. Upstream's open/released/cleanup response projections and exit-reason event are retained.
 - `runtimes/codex/app-server-client.ts`. Invariant: the caller owns the process. The injected LineProcess spawn receives exactly the explicit filtered environment, cwd and launch arguments. There is no ambient environment merge, home-initialization queue, executable manager, resources reader or `killTree` option. Server request ids keep their numeric or string type, and result and error replies go through the acknowledged stdin write. An exit or a kill sets one sticky terminal error; on exit it carries the bounded, redacted `exitError` of the BYOK transport and the upstream cleanup reason. It settles every pending request as `exited` at once, rejects later requests and writes, and ignores later lines. The client has no per-request deadline and no count budget.
-- `runtimes/codex/open.ts`. Invariant: interaction is opt-in. `codexThreadOpen` accepts `approvalPolicy` `never` or `on-request` and sends it on `thread/start` and `thread/resume`. The default stays `never`. Upstream refusals for unsupported user configuration and appendSystemPrompt on resume remain enforced.
-- `runtimes/codex/session.ts`. Invariants: the caller owns the process and its environment, native facts are retained first, and no server request gets a permissive fallback. Spawn is injected and an explicit filtered env is required. `sandboxMode` comes from the caller (default `danger-full-access`; `inherit` passes no override); ambient `OAR_CODEX_SANDBOX` is ignored. Native goals are not exposed: `options.goals` is omitted from the BYOK signature, no goal tools are enabled, and no `goal` control is returned. The function returns the raw AdapterSession without `sealSession`, `withSessionCredentials` or observe. It builds one `sessionCredentialRedactor` per open, creates the upstream kernel with it as the `redact` hook, and redacts errors from the open path and every control. The `onRecord` hook is registered as a kernel observer before any record is appended, so it sees every record from seq 0. Each notification is retained as a `body.origin="byok-native"` frame before the fold, and a fold failure kills the process visibly. Server requests go to the caller-owned bounded native interaction lifecycle when configured; otherwise they are declined or rejected -32601 synchronously under a 1000ms dispatch deadline. An `on-request` policy must be confirmed in the open reply. Spawn and adoption settle before the first protocol write, and a failed initialization kills. Optional caller-owned `beforeOpen` and `afterOpen` hooks run on the same client: `beforeOpen` before the `thread/start` or `thread/resume` request, returning its params, and `afterOpen` after the open reply's read-back, before `onReady`. A hook that throws kills the process. Without the hooks the open is unchanged. Codex `steer` is a required member.
+- `runtimes/codex/open.ts`. Invariant: interaction is opt-in. `codexThreadOpen` accepts `approvalPolicy` `never` or `on-request` and sends it on `thread/start` and `thread/resume`. The default stays `never`. The upstream refusal for unsupported user configuration remains enforced. Upstream 0.86 dropped the appendSystemPrompt-on-resume refusal, and the fork follows it.
+- `runtimes/codex/session.ts`. Invariants: the caller owns the process and its environment, native facts are retained first, and no server request gets a permissive fallback. Spawn is injected and an explicit filtered env is required. `sandboxMode` comes from the caller (default `danger-full-access`; `inherit` passes no override); ambient `OAR_CODEX_SANDBOX` is ignored. Native goals are not exposed: `options.goals` is omitted from the BYOK signature, no goal tools are enabled, and no `goal` control is returned. The function returns the raw AdapterSession without `sealSession`, `withSessionCredentials` or observe. It builds one `sessionCredentialRedactor` per open, creates the upstream kernel with it as the `redact` hook, and redacts errors from the open path and every control. The `onRecord` hook is registered as a kernel observer before any record is appended, so it sees every record from seq 0. Each notification is retained as a `body.origin="byok-native"` frame before the fold, and a fold failure kills the process visibly. Server requests go to the caller-owned bounded native interaction lifecycle when configured; otherwise they are declined or rejected -32601 synchronously under a 1000ms dispatch deadline. An `on-request` policy must be confirmed in the open reply. Spawn and adoption settle before the first protocol write, and a failed initialization kills. Optional caller-owned `beforeOpen` and `afterOpen` hooks run on the same client: `beforeOpen` before the `thread/start` or `thread/resume` request, returning its params, and `afterOpen` after the open reply's read-back, before `onReady`. A hook that throws kills the process. Without the hooks the open is unchanged. Codex `steer` is a required member. The upstream manual compaction (`compact`) is kept with upstream gates; its outcome and errors go through the same redaction guard.
 - `runtimes/grok/session.ts`. Invariant: session-local persona injection does not grant folder trust or replace built-in instructions. Append-only rules travel in the documented session metadata, not initialize metadata. The upstream resume refusal remains intact. This is fixture-verified transport routing, not live Grok qualification.
 - `shared/acp/process.ts`. Invariant: the caller owns the ACP agent process. The injected line process receives exactly the explicit filtered environment and cwd. It bounds line and registration-buffer bytes. The official `ndJsonStream` still owns framing, parse-error answers and write order. Upstream's incoming/outgoing credential filters and draining-EOF input remain in place around the injected streams. No native diagnostics, resources reader or shutdown/cancellation observation (`prepareShutdown`, `markNativeStop`, `observeCancellation`) enters the fork. The line process and `AcpProcess` carry one synchronous `observeDescendants()`: the SDK process-tree authority reads the process table and remembers the agent's descendants for its disposal, and it throws when the table cannot be read.
 - `shared/acp/session.ts`. Invariants: the caller owns every process and the environment, and the record consumer sees every record. `acpSession(profile)` returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit env. It returns the raw AdapterSession without `sealSession` or `withSessionCredentials`, and does not use the upstream shared-connection pool or session-lifecycle wrapper. It builds one `sessionCredentialRedactor` per open, creates the upstream kernel with it as the `redact` hook, and redacts errors from the open path and every control. The `onRecord` hook is registered as a kernel observer before the recorder binds. Dispose does not call `prepareShutdown` or `markNativeStop`, and a control does not wait for a pending cancellation observation: the SDK process-tree authority reads the descendants itself before it signals the tree.
@@ -614,3 +614,47 @@ stay the same set.
 - `shared/executable/process-tree.ts`: the ps reader runs `/bin/ps`, which
   macOS and Linux both provide, instead of a PATH lookup. A host PATH without
   `/bin` no longer hides the table from disposal.
+
+### 0.83.0 → 0.86.0 re-vendor
+
+The base changes from `ddec7e575a5f8e65ea35011e64c0d35eef08f6bd` (v0.83.0)
+to `47c2c3f078b7706ec87b50ffc9c31040c116d7a7` (v0.86.0). The vendor directory
+moves from `vendor/oar/ddec7e5` to `vendor/oar/47c2c3f`. Upstream changed eight
+of the 93 selected paths and deleted none. The closure grows to 95 source files
+plus LICENSE: 79 keep upstream bytes and the same 16 carry BYOK changes.
+
+Adopted:
+
+- `contracts/records.ts`, `contracts/runtime.ts`, `contracts/session-options.ts`,
+  `contracts/session.ts` and `contracts/status.ts` keep upstream bytes. They add
+  the optional `inputId`/`inputIds` on `turn_ended`, the `compact` control and
+  request, the `aborted` rejection code, the `resumedSessionOptions` and
+  `manualCompaction` runtime declarations, the resume semantics in the option
+  docs, the optional `AdapterSession.compact` and the `compaction` agent status.
+- `contracts/compaction.ts`, `runtimes/codex/compaction.ts` and
+  `shared/manual-compaction.ts` are new and keep upstream bytes. Their imports
+  are already in the closure.
+- `runtimes/codex/session.ts` takes the manual compaction (upstream #610): the
+  `compact` member, and a compaction busy check on the steer, queue and abort
+  gates. An abort during compaction interrupts the compaction turn. The
+  three-way merge conflicted on upstream's reformatting next to BYOK seams, so
+  the upstream hunks were applied by hand onto the BYOK file. Every BYOK seam
+  stays: injected spawn, no goals, the raw AdapterSession, the `onRecord`
+  observer registered first, the server-request handling and the
+  `beforeOpen`/`afterOpen` hooks. BYOK change: `compact` goes through the
+  existing redaction guard, which redacts its outcome as upstream's
+  `withSessionCredentials` seal does. Upstream's comment-only edits in this file
+  are not taken.
+- `runtimes/codex/open.ts` drops the refusal of `appendSystemPrompt` on resume
+  (upstream #606, which declares resume semantics instead). The SDK Codex
+  adapter never passes `appendSystemPrompt`, so its opens are unchanged. The
+  merge was clean.
+- `runtimes/grok/session.ts` takes the new wording of the append-only resume
+  refusal. The merge was clean.
+
+Not vendored: the Grok shared session and sharing modules, the ACP
+`routing-types` and `diagnostic-summary` modules and `stream-json/compaction`.
+No selected file imports them. The SDK bridge does not expose `compact`;
+`scripts/api-surface/oar-bridge-types.ts` names it as an intentional omission.
+
+Build assets copy this source to `dist/assets/provenance/oar/47c2c3f/`.

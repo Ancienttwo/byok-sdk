@@ -1,13 +1,13 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/ddec7e5/runtimes/codex/session';
-import * as projection from '../../vendor/oar/ddec7e5/runtimes/codex/projection';
-import * as rpc from '../../vendor/oar/ddec7e5/runtimes/codex/rpc-control';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/ddec7e5/runtimes/codex/app-server-client';
-import { SessionNotFoundError } from '../../vendor/oar/ddec7e5/contracts/session-not-found-error';
-import { SessionUnavailableError } from '../../vendor/oar/ddec7e5/contracts/session-unavailable-error';
-import { UnsupportedOptionError } from '../../vendor/oar/ddec7e5/contracts/errors';
-import { inputImagesRefusal } from '../../vendor/oar/ddec7e5/shared/input-images';
+import { codexSession } from '../../vendor/oar/47c2c3f/runtimes/codex/session';
+import * as projection from '../../vendor/oar/47c2c3f/runtimes/codex/projection';
+import * as rpc from '../../vendor/oar/47c2c3f/runtimes/codex/rpc-control';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/47c2c3f/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/47c2c3f/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/47c2c3f/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/47c2c3f/contracts/errors';
+import { inputImagesRefusal } from '../../vendor/oar/47c2c3f/shared/input-images';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -49,7 +49,7 @@ describe('unconnected OAR Codex adapter', () => {
     const fake = fakeServer(); const session = await fake.open();
     expect(fake.spawn.mock.calls[0]![2]).toEqual({ cwd: '/workspace', env: { HOME: '/home' } });
     expect(fake.spawn.mock.calls[0]![1]).toContain('sandbox_mode="danger-full-access"');
-    expect(Object.keys(session).sort()).toEqual(['abort','capabilities','dispose','graph','id','prompt','queue','rawEvents','records','steer'].sort());
+    expect(Object.keys(session).sort()).toEqual(['abort','capabilities','compact','dispose','graph','id','prompt','queue','rawEvents','records','steer'].sort());
     await session.dispose(); expect(fake.child.kill).toHaveBeenCalledTimes(1);
   });
 

@@ -1,4 +1,4 @@
-// OAR 0.83.0 shared/executable/process-tree.ts. scripts/api-surface/oar-bridge-types.ts checks these types against the vendor source.
+// OAR 0.86.0 shared/executable/process-tree.ts. scripts/api-surface/oar-bridge-types.ts checks these types against the vendor source.
 /** One process in the table. `start` tells it from a later process given the same pid. */
 export interface ProcessEntry {
   readonly pid: number;

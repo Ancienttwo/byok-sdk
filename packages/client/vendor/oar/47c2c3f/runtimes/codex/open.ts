@@ -1,6 +1,5 @@
 // BYOK change: Modified from OAR c88a514 for explicit native interaction approval policy (Apache-2.0).
 import { sessionCredentialRedactor } from "../../shared/credential-redactor.js";
-import { UnsupportedOptionError } from "../../contracts/errors.js";
 import path from "node:path";
 import { resolvedAdditionalDirectories } from "../../shared/additional-directories.js";
 import { validateCodexToolDenials } from "./tool-denials.js";
@@ -65,9 +64,6 @@ function workspaceRoots(options: SessionOptions): string[] | null {
  */
 export function codexThreadOpen(options: SessionOptions & { readonly approvalPolicy?: "never" | "on-request" }): { readonly method: CodexOpenMethod; readonly params: JsonRecord; readonly redact: (text: string) => string } {
   refuseSessionOptions(codexRefusedSessionOptions, options);
-  if (options.resume !== undefined && options.appendSystemPrompt !== undefined) {
-    throw new UnsupportedOptionError("appendSystemPrompt", "Codex ignores appendSystemPrompt when resuming. Omit appendSystemPrompt on resume to keep the saved developer instructions; create a new session to change them. A replacement systemPrompt remains supported on resume.");
-  }
   validateCodexToolDenials(options);
   checkSessionName(options);
   const { redact } = sessionCredentialRedactor(options);

@@ -7,9 +7,11 @@ import { type PlacementRequest, type RuntimePlacementOptions, placementSession }
 import type { UpdateChecker, Upgrader } from "./update.js";
 import type { AccountUsageReader } from "./account-usage.js";
 import type { InstallationProbe } from "./installation.js";
+import type { ManualCompaction } from "./compaction.js";
 import type { ModelLister } from "./list-models.js";
 import type { ProviderAuthReader } from "./provider-auth.js";
 import type { RuntimeBrand } from "./brand.js";
+import type { SessionOptions } from "./session-options.js";
 import type { StartSession } from "./session.js";
 
 /**
@@ -29,6 +31,26 @@ export type RefusableSessionOption = "systemPrompt" | "appendSystemPrompt" | "en
  * a tool name the native filter cannot disable); see the runtime page.
  */
 export type RefusedSessionOptions = Readonly<Partial<Record<RefusableSessionOption, string>>>;
+
+/** Native behavior of an accepted option when reopening a saved session. */
+export interface ResumeOptionSemantics {
+  /** When a supplied value DIFFERENT from the saved value takes effect. */
+  readonly provided: "immediate" | "next_compaction";
+  /**
+   * Without the option: `saved` retains the saved value; `default` uses what
+   * a new session without this option would get, including user configuration;
+   * `saved_until_compaction` retains the saved value until native compaction,
+   * then uses that default.
+   */
+  readonly omitted: "saved" | "default" | "saved_until_compaction";
+}
+
+/**
+ * Measured resume semantics, keyed by SessionOptions for future additions.
+ * An absent entry means untested, not refused or supported. Refused options
+ * belong in RefusedSessionOptions; value/state-specific refusals still apply.
+ */
+export type ResumedSessionOptions = Readonly<Partial<Record<keyof SessionOptions, ResumeOptionSemantics>>>;
 
 /**
  * Whether a running session's model sees a change an attached MCP server
@@ -61,6 +83,20 @@ export interface Runtime extends RuntimeInventories {
    * same error.
    */
   readonly refusedSessionOptions?: RefusedSessionOptions;
+  /**
+   * How accepted options behave on resume, declared before opening. Omitted
+   * entries are untested. Native vendor regressions verify each declaration;
+   * this does not inject prompts, compare values or change native timing.
+   * Codex declarations were verified with local compaction; ChatGPT remote
+   * compaction has only been inspected in native source, not exercised.
+   */
+  readonly resumedSessionOptions?: ResumedSessionOptions;
+  /**
+   * Manual compaction before opening; absence means untested, not unsupported.
+   * The opened session member expresses actual availability. Codex has native
+   * local-compaction tests; ChatGPT remote compaction has source evidence only.
+   */
+  readonly manualCompaction?: ManualCompaction;
   /**
    * How a running session takes a change to an attached MCP server's tools
    * (any server that sends `notifications/tools/list_changed`, such as
