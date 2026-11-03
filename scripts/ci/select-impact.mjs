@@ -373,6 +373,8 @@ export const reviewedScripts = Object.freeze({
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and runs
   // it against the packed client's Pi launcher and todo assets.
   'scripts/release/pi-launcher-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
+  // #1378: release-pack-migrate runs this migration smoke on the packed tarballs.
+  'scripts/release/pg-migrate-smoke.mjs': { tests: [], families: ['release-pack-migrate'] },
   'scripts/release/pack-and-smoke.test.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true },
   // pack-and-smoke.mjs imports this tarball guard and runs it in each of its family jobs.
   'scripts/release/published-store-paths.mjs': {

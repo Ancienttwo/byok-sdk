@@ -238,12 +238,24 @@ test('owned helper build scripts keep release packaging qualification', () => {
 // The job steps are read from ci.yml, whatever their shell. The registered
 // families run complete workspace suites chosen by package membership, not by
 // owned paths.
-const suiteFamilies = new Set(['build-test', 'macos-client', 'dataplane', 'release-pack-migrate']);
-// Job inputs that name no single checkable path: a matrix expression or a
-// downloaded script. Each entry must still occur in its job.
+const suiteFamilies = new Set(['build-test', 'macos-client', 'dataplane']);
+// Job inputs and run-step paths that do not have to select the family, each
+// with its reason. Each entry must still occur in its job.
 const registeredJobInputs = {
+  'agent-memory-helper': {
+    'packages/client/dist/native/agent-memory-fs/darwin-': 'build output that the macOS step compares with its own helper build',
+    'packages/client/dist/native/agent-memory-fs/win32-x64.exe': 'build output that the Windows junction smoke runs',
+  },
   'hermes-real-windows': { $installer: 'the pinned upstream Hermes installer, downloaded at run time' },
-  'packageability-smoke': { 'templates/packaging/${{ matrix.recipe }}/smoke-test.sh': 'one smoke per recipe under templates/packaging/' },
+  'packageability-smoke': {
+    'packages/client/scripts/build-agent-memory-helper.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
+    'packages/client/scripts/check-agent-memory-helper-build.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
+    'templates/packaging/${{ matrix.recipe }}/smoke-test.sh': 'one smoke per recipe under templates/packaging/',
+  },
+  'packaging-consistency': {
+    'packages/client/scripts/build-agent-memory-helper.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
+    'packages/client/scripts/check-agent-memory-helper-build.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
+  },
   'runtime-contract': { 'packages/client/src/__tests__/runtime-contract/${{ matrix.runtime }}.contract.ts': 'one contract per runtime under src/__tests__/runtime-contract/' },
 };
 test('family owners cover every test file and script their CI job runs', () => {
@@ -252,42 +264,63 @@ test('family owners cover every test file and script their CI job runs', () => {
   const scriptsOf = dir => JSON.parse(readFileSync(new URL(`${dir ? `${dir}/` : ''}package.json`, root), 'utf8')).scripts;
   const unchecked = Object.keys(registeredJobInputs).filter(family => suiteFamilies.has(family) || !knownFamilies.includes(family));
   assert.deepEqual(unchecked, []);
+  const repoPath = /(?<![\w./$-])((?:packages|examples|templates|scripts)\/(?:[\w./-]|\$\{\{[^}]*\}\})+)/;
   let checked = 0;
   for (const family of knownFamilies.filter(id => !suiteFamilies.has(id))) {
     const start = workflow.indexOf(`\n  ${family}:\n`);
     assert.ok(start >= 0, family);
     const next = workflow.slice(start + 1).search(/\n  [a-z0-9-]+:\n/);
-    const block = workflow.slice(start, next < 0 ? undefined : start + 1 + next)
-      .split('\n').filter(line => !/^\s*#/.test(line)).join('\n').replace(/[`\\]\r?\n\s*/g, ' ');
+    const steps = workflow.slice(start, next < 0 ? undefined : start + 1 + next)
+      .split('\n').filter(line => !/^\s*#/.test(line)).join('\n').split(/\n {6}- /).slice(1);
     const inputs = [];
-    for (const match of block.matchAll(/bun run (?:--filter (\S+) |--cwd (\S+) )?(test|[a-z]+:[a-z-]+)(?=\s|$)(?: --([^\n]*))?/g)) {
-      const dir = match[2] ?? (match[1] && dirOf(match[1]));
-      assert.ok(dir || !match[1], match[0]);
-      assert.ok(dir || match[3] !== 'test', `${family}: ${match[0]} runs every workspace suite`);
-      const files = [...(match[4] ?? '').matchAll(/(?:\$\{\{[^}]*\}\}|\S)+/g)].map(([arg]) => arg.replace(/^["']|["')]+$/g, '')).filter(arg => /\.[cm]?[jt]s$/.test(arg));
-      const own = files.map(file => `${dir}/${file}`);
-      if (match[3] === 'test') own.push(...(files.length ? [] : [`${dir}/src/suite-probe.ts`]));
-      else if (match[3] !== 'build:agent-memory-helper') {
-        const script = scriptsOf(dir)[match[3]];
-        assert.ok(script, `${family}: ${match[0]} names no package script`);
-        for (const path of script.matchAll(/(?:node|bun) ((?:packages|examples|templates|scripts)\/[\w./-]+\.mjs)/g)) own.push(dir ? `${dir}/${path[1]}` : path[1]);
-        assert.ok(own.length > 0, `${family}: ${match[0]} runs no checkable file`);
+    const named = [];
+    for (const step of steps) {
+      const lines = step.split('\n');
+      const at = lines.findIndex(line => /^(?: {8})?run: /.test(line));
+      if (at < 0) continue;
+      const body = [lines[at].replace(/^\s*run: /, '')];
+      for (const line of lines.slice(at + 1)) { if (line && !/^ {9}/.test(line)) break; body.push(line); }
+      const run = body.join('\n').replace(/[`\\]\r?\n\s*/g, ' ');
+      // A command that names a repo path is a job input; any other path the step names must be registered.
+      const captured = new Set();
+      for (const match of run.matchAll(/bun run (?:--filter (\S+) |--cwd (\S+) )?(test|[a-z]+:[a-z-]+)(?=\s|$)(?: --([^\n]*))?/g)) {
+        const dir = match[2] ?? (match[1] && dirOf(match[1]));
+        assert.ok(dir || !match[1], match[0]);
+        assert.ok(dir || match[3] !== 'test', `${family}: ${match[0]} runs every workspace suite`);
+        if (match[2]) captured.add(match[2]);
+        const files = [...(match[4] ?? '').matchAll(/(?:\$\{\{[^}]*\}\}|\S)+/g)].map(([arg]) => arg.replace(/^["']|["')]+$/g, '')).filter(arg => /\.[cm]?[jt]s$/.test(arg));
+        const own = files.map(file => `${dir}/${file}`);
+        if (match[3] === 'test') own.push(...(files.length ? [] : [`${dir}/src/suite-probe.ts`]));
+        else {
+          const script = scriptsOf(dir)[match[3]];
+          assert.ok(script, `${family}: ${match[0]} names no package script`);
+          for (const path of script.matchAll(/(?:node|bun) ((?:packages|examples|templates|scripts)\/[\w./-]+\.mjs)/g)) own.push(dir ? `${dir}/${path[1]}` : path[1]);
+          assert.ok(own.length > 0, `${family}: ${match[0]} runs no checkable file`);
+        }
+        inputs.push(...own);
       }
-      inputs.push(...own);
+      for (const [, path] of run.matchAll(/(?:node|bun) ((?:packages|examples|templates|scripts)\/[\w./-]+\.mjs)/g)) { inputs.push(path); captured.add(path); }
+      for (const [, path] of run.matchAll(/(?:^|\bbash )((?:packages|examples|templates|scripts)\/(?:[\w./-]|\$\{\{[^}]*\}\})+\.sh)/g)) { inputs.push(path); captured.add(path); }
+      for (const [, path] of run.matchAll(/\bpwsh\b[^\n]*? -File (\S+)/g)) inputs.push(path);
+      if (/\bgo test\b/.test(run)) {
+        const directory = /^ {8}working-directory: (\S+)$/m.exec(step);
+        assert.ok(directory, `${family}: a go test step names no working-directory`);
+        inputs.push(`${directory[1]}/suite-probe.go`);
+      }
+      for (const [, path] of run.matchAll(new RegExp(repoPath, 'g'))) {
+        if (!captured.has(path)) named.push(path);
+      }
     }
-    for (const match of block.matchAll(/(?:node|bun) ((?:packages|examples|templates|scripts)\/[\w./-]+\.mjs)/g)) inputs.push(match[1]);
-    for (const match of block.matchAll(/(?:\bbash |run: )((?:packages|examples|templates|scripts)\/(?:[\w./-]|\$\{\{[^}]*\}\})+\.sh)/g)) inputs.push(match[1]);
-    for (const match of block.matchAll(/\bpwsh\b[^\n]*? -File (\S+)/g)) inputs.push(match[1]);
-    for (const match of block.matchAll(/working-directory: (\S+)\s+run: [^\n]*\bgo test\b/g)) inputs.push(`${match[1]}/suite-probe.go`);
     assert.ok(inputs.length > 0, `${family}: no job input checked`);
     const registered = registeredJobInputs[family] ?? {};
+    for (const path of named) assert.ok(path in registered, `${family} names ${path} in a run step that no job input pattern reads; register it`);
     for (const input of new Set(inputs)) {
       if (input in registered) continue;
       assert.ok(!/[$*]|\/$/.test(input), `${family} runs ${input}, which names no single path; register it`);
       assert.ok(selectImpact([input]).families.includes(family), `${family} runs ${input} but a change to it does not select ${family}`);
       checked++;
     }
-    for (const input of Object.keys(registered)) assert.ok(inputs.includes(input), `${family} no longer runs registered ${input}`);
+    for (const input of Object.keys(registered)) assert.ok(inputs.includes(input) || named.includes(input), `${family} no longer runs registered ${input}`);
   }
   assert.ok(checked >= 30, `only ${checked} job inputs checked`);
 });
@@ -338,7 +371,7 @@ test('the W5 power-cut harness selects the helper job that runs it (#605)', () =
 });
 
 test('unknown, broad policy/dependency inputs and malformed paths fail closed', () => {
-  for (const path of ['bun.lock', 'package.json', 'packages/client/package.json', 'api-surface/entries.json', '.github/workflows/unreviewed.yml', 'packages/new/src/index.ts', 'packages/client/vendor/new.js', 'scripts/release/pg-migrate-smoke.mjs', 'other/a.md', '../README.md', './README.md', '/README.md', 'docs//a.md', 'docs/../README.md', 'docs/a\nb.md', 'docs\\a.md', '', null]) {
+  for (const path of ['bun.lock', 'package.json', 'packages/client/package.json', 'api-surface/entries.json', '.github/workflows/unreviewed.yml', 'packages/new/src/index.ts', 'packages/client/vendor/new.js', 'scripts/release/pg-unreviewed-smoke.mjs', 'other/a.md', '../README.md', './README.md', '/README.md', 'docs//a.md', 'docs/../README.md', 'docs/a\nb.md', 'docs\\a.md', '', null]) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required|requires exact CI_BASE/i, String(path));
   }
   for (const paths of [[], null, {}, 'README.md']) assert.throws(() => selectImpact(paths), /reviewed CI mapping required|requires exact CI_BASE/i);
@@ -361,6 +394,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/release/pack-and-smoke.mjs',
     'scripts/release/pack-and-smoke.test.mjs',
     'scripts/release/packaging-plugin-smoke.mjs',
+    'scripts/release/pg-migrate-smoke.mjs',
     'scripts/release/pi-launcher-smoke.mjs',
     'scripts/release/publish-recovery.test.mjs', 'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/published-store-paths.mjs', 'scripts/release/registry-readback.mjs',
     'scripts/release/upgrade-manifest/dts-surface.mjs', 'scripts/release/upgrade-manifest/history.mjs', 'scripts/release/upgrade-manifest/manifest.mjs',
@@ -423,7 +457,7 @@ test('store precheck fixtures select the server, keys and client suites', () => 
 });
 
 test('release script siblings outside the reviewed list still fail closed', () => {
-  for (const path of ['scripts/release/publish-unreviewed.test.mjs', 'scripts/release/pg-migrate-smoke.mjs', 'scripts/release/registry-contract.mjs',
+  for (const path of ['scripts/release/publish-unreviewed.test.mjs', 'scripts/release/pg-unreviewed-smoke.mjs', 'scripts/release/registry-contract.mjs',
     'scripts/release/nested/publish.mjs', 'scripts/api-surface/check-api-surface.mjs', 'scripts/api-surface/check-version-authority.js']) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
   }
