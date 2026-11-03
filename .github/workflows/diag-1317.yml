@@ -30,3 +30,74 @@ jobs:
       - name: E1b logon merge (CreateEnvironmentBlock) and E1c real HKCU Path read
         shell: pwsh
         run: ./.github/diag-1317/logon.ps1
+
+  # E1g: why a reg export read can fail. Both jobs run the #1400 head with
+  # readWindowsRegistryKey instrumented by .github/diag-1317/e1g-instrument.mjs.
+  e1g-reads:
+    name: "diag-1317 E1g reads (windows-latest)"
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dbe37f2d72f4f4120275f467082176d68b4a7a11
+          path: impl
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: impl/package.json
+      - name: Instrument and read 200 times in series, then 200 at concurrency 8 under full CPU load
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'e1g-reads.jsonl'
+          node .github/diag-1317/e1g-instrument.mjs impl $log
+          bun .github/diag-1317/e1g-reads.mjs impl serial
+          node .github/diag-1317/e1g-summary.mjs serial $log
+          Move-Item $log (Join-Path $env:RUNNER_TEMP 'e1g-serial.jsonl')
+          $stress = Start-Process node -ArgumentList '.github/diag-1317/e1g-stress.mjs' -PassThru -NoNewWindow
+          Start-Sleep -Seconds 2
+          bun .github/diag-1317/e1g-reads.mjs impl parallel
+          Stop-Process -Id $stress.Id -Force
+          node .github/diag-1317/e1g-summary.mjs parallel $log
+
+  e1g-smoke:
+    name: "diag-1317 E1g lifecycle smoke x5 (windows-latest)"
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dbe37f2d72f4f4120275f467082176d68b4a7a11
+          path: impl
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: impl/.node-version
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: impl/package.json
+      - name: Instrument, install and build the #1400 head
+        shell: pwsh
+        run: |
+          node .github/diag-1317/e1g-instrument.mjs impl (Join-Path $env:RUNNER_TEMP 'e1g-smoke.jsonl')
+          Set-Location impl
+          bun ci
+          bun run build
+      - name: Run the built adapter lifecycle smoke 5 times
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'e1g-smoke.jsonl'
+          Set-Location impl
+          $passed = 0
+          for ($i = 1; $i -le 5; $i++) {
+            bun run --filter @byok-sdk/client smoke:adapters *> (Join-Path $env:RUNNER_TEMP "e1g-smoke-$i.txt")
+            $code = $LASTEXITCODE
+            if ($code -eq 0) { $passed++ }
+            Write-Output "[e1g] smoke run ${i} exit ${code}"
+            Get-Content (Join-Path $env:RUNNER_TEMP "e1g-smoke-$i.txt") | Select-String -Pattern 'logon-registry-unavailable|adapter-task-smoke: (PASS|FAIL)' | ForEach-Object { "[e1g] smoke run ${i}: $($_.Line.Trim())" } | Select-Object -First 4
+          }
+          Write-Output "[e1g] smoke passed $passed/5"
+          node ../.github/diag-1317/e1g-summary.mjs smoke $log
