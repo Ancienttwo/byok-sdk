@@ -196,8 +196,9 @@ export const knownFamilies = Object.freeze([
 // family owns: its tests, smoke scripts and the source they qualify. Package
 // membership alone never selects a platform family; the Linux targeted job
 // runs the complete owning and dependent workspace suites, and explicit
-// release validation runs every family. The contract test checks that each
-// test file and script a family job runs is owned by that family.
+// release validation runs every family. The contract test reads each family
+// job in ci.yml and checks that a change to each test file and script it runs
+// selects that family.
 export const familyOwners = Object.freeze({
   'agent-memory-export-linux': [
     /^examples\/host-execution-core\/src\/fixtures\/memory-restore-crash\.ts$/,
@@ -321,14 +322,15 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/scripts\/(?:credential-audit-core|credential-audit-positive-control|linux-credential-audit|adapter-task-smoke)\.mjs$/,
     /^packages\/keys\/src\//,
   ],
+  // #1364: the Windows leg runs these suites under a freshly created
+  // standard-user account.
+  'npm-release-pack': [
+    // The real Pi projection ACL query, its evidence budget and native suite.
+    /^packages\/keys\/src\/(?:pi-provider-launcher-core\.ts|pi-projection-windows\.test\.ts|fixtures\/acl-evidence-budget\.ts)$/,
+    // #385: the keys launch sequence against the built pi-rpc host.
+    /^packages\/client\/src\/__tests__\/pi-rpc-key-custody\.test\.ts$/,
+  ],
 });
-// #1364: the real Windows Pi projection ACL query and its native suite run
-// only in npm-release-pack, under a freshly created standard-user account.
-const keysWindowsAclPaths = new Set([
-  'packages/keys/src/pi-provider-launcher-core.ts',
-  'packages/keys/src/pi-projection-windows.test.ts',
-  'packages/keys/src/fixtures/acl-evidence-budget.ts',
-]);
 // #649 and #702: release script paths that the owner reviewed for 0.28.2.
 // `tests` run the path (scripts/ci/run-targeted.mjs runs them); `install` marks
 // tests that need installed packages, so the targeted job installs first;
@@ -470,7 +472,6 @@ export function selectImpact(paths, context = {}) {
         if (owners.some(owner => owner.test(path))) { families.add(id); owned = true; }
       }
     }
-    if (keysWindowsAclPaths.has(path)) families.add('npm-release-pack');
     if (path === '.gitattributes') {
       verifyReviewedContent(path, context);
       dirs.add('packages/client');

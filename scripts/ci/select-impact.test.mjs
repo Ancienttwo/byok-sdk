@@ -160,6 +160,7 @@ test('a platform family is selected only by a path it owns', () => {
     'credential-isolation-audit': 'packages/keys/src/index.ts',
     'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
     'runtime-contract': 'packages/client/src/__tests__/runtime-contract/contract.ts',
+    'npm-release-pack': 'packages/keys/src/pi-projection-windows.test.ts',
   };
   assert.deepEqual(Object.keys(owned).sort(), Object.keys(familyOwners).sort());
   const tracked = new Set(spawnSync('git', ['ls-files'], { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean));
@@ -234,34 +235,65 @@ test('owned helper build scripts keep release packaging qualification', () => {
 });
 
 // Each test file and script that a family job runs must select that family.
+// The job steps are read from ci.yml, whatever their shell. The registered
+// families run complete workspace suites chosen by package membership, not by
+// owned paths.
+const suiteFamilies = new Set(['build-test', 'macos-client', 'dataplane', 'release-pack-migrate']);
+// Job inputs that name no single checkable path (a matrix expression or a
+// downloaded script), and job inputs the selector refuses until a reviewed
+// mapping exists. Each entry must still occur in its job.
+const registeredJobInputs = {
+  'execution-recovery-native': { 'scripts/ci/with-secret-service.sh': 'shared Secret Service wrapper; the selector refuses it' },
+  'hermes-real-windows': { $installer: 'the pinned upstream Hermes installer, downloaded at run time' },
+  'npm-release-pack': { 'scripts/ci/with-secret-service.sh': 'shared Secret Service wrapper; the selector refuses it' },
+  'packageability-smoke': { 'templates/packaging/${{ matrix.recipe }}/smoke-test.sh': 'one smoke per recipe under templates/packaging/' },
+  'runtime-contract': { 'packages/client/src/__tests__/runtime-contract/${{ matrix.runtime }}.contract.ts': 'one contract per runtime under src/__tests__/runtime-contract/' },
+};
 test('family owners cover every test file and script their CI job runs', () => {
   const workflow = readFileSync(new URL('.github/workflows/ci.yml', root), 'utf8');
   const dirOf = name => Object.keys(workspaceGraph).find(dir => workspaceGraph[dir].name === name);
-  const clientScripts = JSON.parse(readFileSync(new URL('packages/client/package.json', root), 'utf8')).scripts;
+  const scriptsOf = dir => JSON.parse(readFileSync(new URL(`${dir ? `${dir}/` : ''}package.json`, root), 'utf8')).scripts;
+  const unchecked = Object.keys(registeredJobInputs).filter(family => suiteFamilies.has(family) || !knownFamilies.includes(family));
+  assert.deepEqual(unchecked, []);
   let checked = 0;
-  for (const family of Object.keys(familyOwners)) {
+  for (const family of knownFamilies.filter(id => !suiteFamilies.has(id))) {
     const start = workflow.indexOf(`\n  ${family}:\n`);
     assert.ok(start >= 0, family);
     const next = workflow.slice(start + 1).search(/\n  [a-z0-9-]+:\n/);
-    const block = workflow.slice(start, next < 0 ? undefined : start + 1 + next).replace(/[`\\]\r?\n\s*/g, ' ');
-    const paths = [];
-    for (const match of block.matchAll(/bun run (?:--filter (\S+)|--cwd (\S+)) (test|[a-z]+:[a-z-]+)(?=\s|$)(?: --([^\n]*))?/g)) {
-      const dir = match[2] ?? dirOf(match[1]);
-      assert.ok(dir, match[0]);
-      if (match[3] === 'test') {
-        const files = (match[4] ?? '').split(/\s+/).map(file => file.replace(/\)$/, '')).filter(file => /\.test\.ts$/.test(file));
-        paths.push(...(files.length ? files.map(file => `${dir}/${file}`) : [`${dir}/src/suite-probe.ts`]));
-      } else if (dir === 'packages/client' && match[3] !== 'build:agent-memory-helper') {
-        for (const script of clientScripts[match[3]].matchAll(/scripts\/[a-z-]+\.mjs/g)) paths.push(`packages/client/${script[0]}`);
+    const block = workflow.slice(start, next < 0 ? undefined : start + 1 + next)
+      .split('\n').filter(line => !/^\s*#/.test(line)).join('\n').replace(/[`\\]\r?\n\s*/g, ' ');
+    const inputs = [];
+    for (const match of block.matchAll(/bun run (?:--filter (\S+) |--cwd (\S+) )?(test|[a-z]+:[a-z-]+)(?=\s|$)(?: --([^\n]*))?/g)) {
+      const dir = match[2] ?? (match[1] && dirOf(match[1]));
+      assert.ok(dir || !match[1], match[0]);
+      assert.ok(dir || match[3] !== 'test', `${family}: ${match[0]} runs every workspace suite`);
+      const files = [...(match[4] ?? '').matchAll(/(?:\$\{\{[^}]*\}\}|\S)+/g)].map(([arg]) => arg.replace(/^["']|["')]+$/g, '')).filter(arg => /\.[cm]?[jt]s$/.test(arg));
+      const own = files.map(file => `${dir}/${file}`);
+      if (match[3] === 'test') own.push(...(files.length ? [] : [`${dir}/src/suite-probe.ts`]));
+      else if (match[3] !== 'build:agent-memory-helper') {
+        const script = scriptsOf(dir)[match[3]];
+        assert.ok(script, `${family}: ${match[0]} names no package script`);
+        for (const path of script.matchAll(/(?:node|bun) ((?:packages|examples|templates|scripts)\/[\w./-]+\.mjs)/g)) own.push(dir ? `${dir}/${path[1]}` : path[1]);
+        assert.ok(own.length > 0, `${family}: ${match[0]} runs no checkable file`);
       }
+      inputs.push(...own);
     }
-    for (const match of block.matchAll(/(?:node|bun) ((?:packages|examples|templates|scripts)\/[\w./-]+\.mjs)/g)) paths.push(match[1]);
-    for (const match of block.matchAll(/working-directory: (\S+)\s+run: [^\n]*\bgo test\b/g)) paths.push(`${match[1]}/suite-probe.go`);
-    assert.ok(paths.length > 0, `${family}: no job input checked`);
-    for (const path of paths) {
-      assert.ok(selectImpact([path]).families.includes(family), `${family} runs ${path} but a change to it does not select ${family}`);
+    for (const match of block.matchAll(/(?:node|bun) ((?:packages|examples|templates|scripts)\/[\w./-]+\.mjs)/g)) inputs.push(match[1]);
+    for (const match of block.matchAll(/(?:\bbash |run: )((?:packages|examples|templates|scripts)\/(?:[\w./-]|\$\{\{[^}]*\}\})+\.sh)/g)) inputs.push(match[1]);
+    for (const match of block.matchAll(/\bpwsh\b[^\n]*? -File (\S+)/g)) inputs.push(match[1]);
+    for (const match of block.matchAll(/working-directory: (\S+)\s+run: [^\n]*\bgo test\b/g)) inputs.push(`${match[1]}/suite-probe.go`);
+    assert.ok(inputs.length > 0, `${family}: no job input checked`);
+    const registered = registeredJobInputs[family] ?? {};
+    for (const input of new Set(inputs)) {
+      if (input in registered) {
+        if (!/[$*]|\/$/.test(input)) assert.throws(() => selectImpact([input]), /reviewed CI mapping required/i, `${family}: ${input} is mapped now; drop its registration`);
+        continue;
+      }
+      assert.ok(!/[$*]|\/$/.test(input), `${family} runs ${input}, which names no single path; register it`);
+      assert.ok(selectImpact([input]).families.includes(family), `${family} runs ${input} but a change to it does not select ${family}`);
       checked++;
     }
+    for (const input of Object.keys(registered)) assert.ok(inputs.includes(input), `${family} no longer runs registered ${input}`);
   }
   assert.ok(checked >= 30, `only ${checked} job inputs checked`);
 });
