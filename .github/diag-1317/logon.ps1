@@ -181,6 +181,42 @@ try {
     Show 'E1d volatile environment names' $volatileNames
     Show 'E1d logon block names with origin' $origin
     Show 'E1d predefined (in no Environment key)' (@($origin | Where-Object { $_.keys -eq '' -or $_.keys -eq 'volatile' } | ForEach-Object { $_.name }))
+    Show 'E1d machine-key names' ($machineNames | Sort-Object)
+    Show 'E1d session names' (@([Environment]::GetEnvironmentVariables().Keys) | Sort-Object)
+
+    # E1e: which names each stage expands, one name per variable.
+    Clear-E1d
+    $probeNames = @($p.Keys | Where-Object { $machineNames -notcontains $_ -and $userNames -notcontains $_ }) + 'USERNAME', 'OS', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE', 'TEMP', 'windir', 'ComSpec'
+    $e1eMachine = @(); $e1eUser = @()
+    $i = 0
+    foreach ($name in $probeNames) {
+      $i += 1
+      $machine.SetValue("E1EM$i", "%$name%", $expandKind); $e1eMachine += "E1EM$i"
+      $user.SetValue("E1EU$i", "%$name%", $expandKind); $e1eUser += "E1EU$i"
+    }
+    # EXPAND naming EXPAND, both creation orders, in both keys; and a non-Path user variable naming %PATH%.
+    $machine.SetValue('E1EMXA', '%E1EMXB%', $expandKind); $machine.SetValue('E1EMXB', 'mxb-%SystemRoot%', $expandKind); $machine.SetValue('E1EMXC', '%E1EMXB%', $expandKind)
+    $user.SetValue('E1EUXA', '%E1EUXB%', $expandKind); $user.SetValue('E1EUXB', 'uxb-%USERPROFILE%', $expandKind); $user.SetValue('E1EUXC', '%E1EUXB%', $expandKind)
+    $user.SetValue('E1EUP', '%PATH%', $expandKind)
+    $user.SetValue('E1EUPE', '%PATHEXT%', $expandKind)
+    $user.SetValue('Path', 'C:\e1e', $expandKind)
+    $e1eMachine += 'E1EMXA', 'E1EMXB', 'E1EMXC'; $e1eUser += 'E1EUXA', 'E1EUXB', 'E1EUXC', 'E1EUP', 'E1EUPE'
+    try {
+      $e = [E1Env]::Build()
+      $i = 0
+      $rows = foreach ($name in $probeNames) {
+        $i += 1
+        [pscustomobject]@{ name = $name; machine = ($e["E1EM$i"] -ne "%$name%"); user = ($e["E1EU$i"] -ne "%$name%") }
+      }
+      Show 'E1e expanded per stage' $rows
+      Show 'E1e machine EXPAND naming EXPAND (A before B, C after)' @($e['E1EMXA'], $e['E1EMXB'], $e['E1EMXC'])
+      Show 'E1e user EXPAND naming EXPAND (A before B, C after)' @($e['E1EUXA'], $e['E1EUXB'], $e['E1EUXC'])
+      Show 'E1e user %PATH% outside Path, machine replaced by <M>' ($e['E1EUP'].Replace($machineExpanded, '<M>'))
+      Show 'E1e user %PATHEXT% outside PATHEXT' $e['E1EUPE']
+    } finally {
+      foreach ($n in $e1eMachine) { $machine.DeleteValue($n, $false) }
+      foreach ($n in $e1eUser) { $user.DeleteValue($n, $false) }
+    }
   } finally {
     Clear-E1d
   }
