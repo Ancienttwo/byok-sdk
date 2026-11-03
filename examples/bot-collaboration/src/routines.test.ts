@@ -1,13 +1,13 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { WAKE_MAX_FUTURE_MS } from '@byok-sdk/server';
-import { ROUTINE_HORIZON_MS } from '@byok-sdk/core';
+import { ROUTINE_HORIZON_MS } from '@byok-sdk/protocol';
 import { BOT_TURN_OUTCOME_CONTRACT, validateResultOutcome, type RoutineScheduleFields } from '@byok-sdk/protocol';
 import { join } from 'node:path';
 import { hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, WAKE_HORIZON_MS, type HostJobHandler, type HostJobRoutineDefinition } from '@byok-sdk/server/execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { json, stateOf } from './model';
-import { botRoutines, createDefinition, endable, owned, routineOccurrence, updateDefinition } from './routines';
+import { botRoutines, createDefinition, endable, owned, ownerRoutineUpdate, routineOccurrence, updateDefinition } from './routines';
 import { DAILY, deliverRoutine, routineOf, routineRow, seedRoutine } from './routines.test-support';
 import { outcomeSchema } from './schema';
 import { botCompactVeto } from './compaction';
@@ -69,12 +69,11 @@ it('offers all ordinary Bot actions and rejects a target field', () => {
   expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema }, { update_routine: [{ routineId: routines[0]!.id, prompt: 'new' }] }).ok).toBe(true);
 });
 
-it('builds a K4 hostOccurrence definition with the Bot policy: self only, checked schedule, at most eight open routines per owner', () => {
+it('builds a K4 hostOccurrence definition with the Bot policy: self only, at most eight open routines per owner', () => {
   expect(createDefinition([], 'main', 'task-1', 0, action('old prompt'), 'owner')).toEqual({ id: hash(['task-1', 'create_routine', 0]), version: 1,
     timeZone: 'UTC', rule: DAILY, waitMs: 300_000, lateAfterMs: 60_000,
     hostOccurrence: { type: 'bot-routine', input: { owner: 'main', authority: 'owner', prompt: 'old prompt' } } });
   expect(() => createDefinition([], 'main', 'task-1', 0, { ...action('test'), target: 'other' }, 'bot')).toThrow('An ordinary Bot cannot supply target');
-  expect(() => createDefinition([], 'main', 'task-1', 0, action('test', { ...DAILY, dayOfMonth: 31, month: 4 }), 'bot')).toThrow('schedule_unreachable');
   const rows = Array.from({ length: 8 }, (_, n) => routineRow(createDefinition([], 'main', `seed-${n}`, 0, action('r'), 'bot')));
   expect(() => createDefinition(rows, 'main', 'ninth', 0, action('r'), 'bot')).toThrow('Routine limit is 8');
   // A completed routine, another owner's routine and a Host job routine do not count.
@@ -83,12 +82,13 @@ it('builds a K4 hostOccurrence definition with the Bot policy: self only, checke
   expect(createDefinition([...rows, ...others], 'main', 'ninth', 0, action('r'), 'bot').id).toBe(hash(['ninth', 'create_routine', 0]));
 });
 
-it('rejects empty updates, builds on pending, keeps owner and authority, and stores duplicate weekdays as a set', () => {
+it('refuses an empty or invalid owner update, builds on pending, and keeps owner and authority', () => {
   const row = routineRow(createDefinition([], 'main', 'task-1', 0, action('old prompt'), 'owner'));
   const id = row.definition.id;
-  expect(() => updateDefinition([row], 'main', { routineId: id })).toThrow('An update must change schedule or prompt');
-  const weekly = { ...DAILY, daysOfWeek: ['mon', 'mon'] } as RoutineScheduleFields;
-  row.pending = updateDefinition([row], 'main', { routineId: id, schedule: weekly });
+  expect(() => ownerRoutineUpdate({ routineId: id })).toThrow('An update must change schedule or prompt');
+  expect(() => ownerRoutineUpdate({ routineId: id, schedule: { ...DAILY, daysOfWeek: ['mon', 'mon'] } })).toThrow('schedule_invalid: daysOfWeek repeats a day');
+  const weekly = { ...DAILY, daysOfWeek: ['mon'] } as RoutineScheduleFields;
+  row.pending = updateDefinition([row], 'main', ownerRoutineUpdate({ routineId: id, schedule: weekly }));
   expect(row.pending).toMatchObject({ version: 2, rule: { ...DAILY, daysOfWeek: ['mon'] },
     hostOccurrence: { input: { owner: 'main', authority: 'owner', prompt: 'old prompt' } } });
   expect(updateDefinition([row], 'main', { routineId: id, prompt: 'third' })).toMatchObject({ version: 3, rule: { daysOfWeek: ['mon'] },

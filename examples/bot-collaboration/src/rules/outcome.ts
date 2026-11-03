@@ -63,7 +63,7 @@ export function applyTurnOutcome(state: OutcomeState, turnId: string, taskId: st
     state.audit.push(`Outcome audit only: ${taskId}`); return;
   }
   if (seat) {
-    applySpeech(state.team, turn.id, outcome, taskId, ports.now(), accept, ports.autonomy);
+    applySpeech(state.team, turn.id, outcome, taskId, ports.now(), ports.publish, accept, ports.autonomy);
     if (state.team.seats[turn.id]?.status === 'post' && outcome.speech?.kind === 'post') {
       ports.deliver?.(turn, `speech:${turn.id}`, outcome.speech.text);
       if (ports.roomPosts) {

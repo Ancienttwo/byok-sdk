@@ -7,6 +7,8 @@ import { applyManagement, roomFields } from './team';
 import { outcomeSchema, turnContext } from './schema';
 import { HISTORY_MAX_BYTES } from './history';
 import { BOT_TURN_OUTCOME_CONTRACT, validateResultOutcome } from '@byok-sdk/protocol';
+/** These cases do not read the room projections. */
+const noPublish = (): void => {};
 
 function setup(count = 3, admin?: string) {
   const ledger = { application: {}, intents: {}, executions: {} } as LedgerState;
@@ -20,31 +22,31 @@ function setup(count = 3, admin?: string) {
   const rejected: string[] = [];
   const accept = (kind: string, work: () => void) => { try { work(); } catch (error) { rejected.push(`${kind}: ${(error as Error).message}`); } };
   const add = (id: string, botId: string, request: string) => { state.turns[id] = { id, root: id, botId, source: 'room_slot', request, hop: 0, status: 'queued' }; };
-  const advance = (now = 0) => advanceRooms(ledger, state, now, add);
+  const advance = (now = 0) => advanceRooms(ledger, state, now, add, noPublish);
   const speech = (id: string, members?: string[], now = 0, text?: string) => applySpeech(state, state.turns[id]!, {
     speech: text === undefined ? { kind: 'pass' } : { kind: 'post', text }, ...(members ? { room_call: { members } } : {}),
-  }, `task-${id}`, now, accept);
+  }, `task-${id}`, now, noPublish, accept);
   return { ledger, state, rejected, accept, advance, speech };
 }
 
 it('uses structured mentions only, keeps their order, and deduplicates input', () => {
   const { state, advance } = setup();
-  const id = roomInput(state, 'ordinary', 'r', '@b0 @all [PASS]', []);
+  const id = roomInput(state, 'ordinary', 'r', '@b0 @all [PASS]', [], noPublish);
   advance();
   expect(state.team.rounds[id]!.seats).toEqual([]);
   expect(state.turns).toEqual({});
-  expect(roomInput(state, 'ordinary', 'r', '@b0 @all [PASS]', [])).toBe(id);
-  expect(() => roomInput(state, 'ordinary', 'r', 'changed', [])).toThrow('identity conflict');
-  const selected = roomInput(state, 'select', 'r', 'Review', ['b2', 'b1', 'b2']);
+  expect(roomInput(state, 'ordinary', 'r', '@b0 @all [PASS]', [], noPublish)).toBe(id);
+  expect(() => roomInput(state, 'ordinary', 'r', 'changed', [], noPublish)).toThrow('identity conflict');
+  const selected = roomInput(state, 'select', 'r', 'Review', ['b2', 'b1', 'b2'], noPublish);
   advance();
   expect(state.team.rounds[selected]!.seats.map(s => state.team.seats[s]!.botId)).toEqual(['b2', 'b1']);
   expect(Object.values(state.turns).map(t => t.botId)).toEqual(['b2']);
-  expect(() => roomInput(state, 'invalid', 'r', 'Review', ['stranger'])).toThrow('not a member');
+  expect(() => roomInput(state, 'invalid', 'r', 'Review', ['stranger'], noPublish)).toThrow('not a member');
 });
 
 it('reserves at most initial + 4 seats, with member caps and atomic batch refusal', () => {
   const { state, advance, speech, rejected } = setup();
-  const id = roomInput(state, 'budget', 'r', 'Discuss', ['b0']);
+  const id = roomInput(state, 'budget', 'r', 'Discuss', ['b0'], noPublish);
   advance();
   let round = state.team.rounds[id]!;
   expect(round.limit).toBe(5);
@@ -60,7 +62,7 @@ it('reserves at most initial + 4 seats, with member caps and atomic batch refusa
 
 it('caps ordinary members at two and admins at four without implicit admin selection', () => {
   const { state, advance, speech, rejected } = setup(3, 'b0');
-  const roundId = roomInput(state, 'admin', 'r', 'Discuss', ['b1']); advance();
+  const roundId = roomInput(state, 'admin', 'r', 'Discuss', ['b1'], noPublish); advance();
   expect(state.team.rounds[roundId]!.limit).toBe(9);
   expect(Object.values(state.turns).map(t => t.botId)).toEqual(['b1']);
   speech(state.team.rounds[roundId]!.seats[0]!, ['b0', 'b1']); advance();
@@ -77,7 +79,7 @@ it('caps ordinary members at two and admins at four without implicit admin selec
 
 it('requires explicit speech, offers management only to Main Bots, and checks current role on apply', () => {
   const { state, advance, accept, rejected } = setup();
-  roomInput(state, 'schema', 'r', 'Speak', ['b1']); advance();
+  roomInput(state, 'schema', 'r', 'Speak', ['b1'], noPublish); advance();
   const turn = Object.values(state.turns)[0]!;
   const group = outcomeSchema('b1', state, turn);
   expect(validateResultOutcome({ contract: BOT_TURN_OUTCOME_CONTRACT, schema: group }, {}).ok).toBe(false);
@@ -97,7 +99,7 @@ it('requires explicit speech, offers management only to Main Bots, and checks cu
 
 it('limits late posts to ten per user root and autonomous rounds to three', () => {
   const { state, ledger, advance, speech, rejected } = setup(12);
-  const roundId = roomInput(state, 'late', 'r', 'Discuss', 'all');
+  const roundId = roomInput(state, 'late', 'r', 'Discuss', 'all', noPublish);
   let now = 0;
   for (let i = 0; i < 12; i++) {
     advance(now);
@@ -113,7 +115,7 @@ it('limits late posts to ten per user root and autonomous rounds to three', () =
   expect(rejected.filter(r => r.includes('Late post budget'))).toHaveLength(2);
 
   const fresh = setup(1);
-  const root = roomInput(fresh.state, 'autonomous', 'r', 'Discuss', ['b0']);
+  const root = roomInput(fresh.state, 'autonomous', 'r', 'Discuss', ['b0'], noPublish);
   for (let i = 0; i < 4; i++) {
     fresh.advance(i * ROOM_GRACE_MS);
     const seat = Object.values(fresh.state.team.seats).find(s => !s.released)!;
@@ -130,7 +132,7 @@ it('limits late posts to ten per user root and autonomous rounds to three', () =
 
 it('windows excess room history with a notice and keeps other Bots private turns out of context', () => {
   const { state, advance } = setup();
-  roomInput(state, 'context', 'r', 'Discuss', ['b1']); advance();
+  roomInput(state, 'context', 'r', 'Discuss', ['b1'], noPublish); advance();
   const turn = Object.values(state.turns)[0]!;
   state.team.notes.push({ id: 'note', text: 'Shared rule' });
   state.turns.secret = { ...turn, id: 'secret', source: 'user', botId: 'b0', request: 'private owner message' };
@@ -157,16 +159,15 @@ it('windows excess room history with a notice and keeps other Bots private turns
   expect(state.team.rooms.r!.messages[0]!.text).toHaveLength(65536);
 });
 
-it('refuses duplicate local slots and invalid room edits without partial room mutation', () => {
+it('refuses invalid room edits without partial room mutation', () => {
   const { state, accept, rejected } = setup();
   const action = { localId: 'new_bot_1', name: 'New', role: 'Worker', persona: 'Persona', model: 'default' };
-  applyManagement(state, 'b0', 'create', { create_bot: [action, action],
+  applyManagement(state, 'b0', 'create', { create_bot: [action],
     create_room: [{ localId: 'new_room_1', name: 'Created', members: ['new_bot_1'] }],
   }, { default: template('device') }, accept);
   expect(Object.values(state.team.bots)).toHaveLength(4);
   const created = Object.values(state.team.rooms).find(r => r.name === 'Created')!;
   expect(created.members).toEqual([Object.values(state.team.bots).find(b => b.name === 'New')!.id]);
-  expect(rejected).toContain('create_bot: Duplicate local Bot slot');
   const prior = structuredClone(state.team.rooms.r);
   applyManagement(state, 'b0', 'bad-room', { update_room: [{ roomId: 'r', admin: created.members[0]!, announcement: 'Must not apply' }] },
     { default: template('device') }, accept);
@@ -179,15 +180,15 @@ it('bounds shared notes at twenty and preserves other valid actions after a refu
   for (let i = 0; i < 21; i++) applyManagement(state, 'b0', `note-${i}`, { team_note: { text: `Note ${i}` } }, { default: template('device') }, accept);
   expect(state.team.notes).toHaveLength(20);
   expect(rejected).toContain('team_note: Team note limit is 20');
-  applyManagement(state, 'b0', 'partial', { update_bot: [{ botId: 'b1' }], update_room: [{ roomId: 'r', announcement: 'Valid' }] }, { default: template('device') }, accept);
-  expect(state.team.bots.b1!.revision).toBe('1');
+  applyManagement(state, 'b0', 'partial', { update_bot: [{ botId: 'absent', name: 'X' }], update_room: [{ roomId: 'r', announcement: 'Valid' }] },
+    { default: template('device') }, accept);
   expect(state.team.rooms.r!.announcement).toBe('Valid');
-  expect(rejected).toContain('update_bot: An update must change a Bot field');
+  expect(rejected).toContain('update_bot: Bot is archived or absent');
 });
 
 it('gives a member a full running grace after waiting 239 seconds and keeps that deadline across scans', () => {
   const { state, ledger, advance } = setup();
-  const round = roomInput(state, 'two-graces', 'r', 'Discuss', ['b1', 'b2']);
+  const round = roomInput(state, 'two-graces', 'r', 'Discuss', ['b1', 'b2'], noPublish);
   advance(0);
   const [first, second] = state.team.rounds[round]!.seats;
   ledger.intents[hash(first!)] = { taskId: first } as LedgerState['intents'][string];
@@ -206,7 +207,7 @@ it('gives a member a full running grace after waiting 239 seconds and keeps that
 
 it('preserves completed post and pass when members are removed, but revokes a pending late seat', () => {
   const { state, ledger, advance, speech } = setup();
-  const round = roomInput(state, 'stable-completed', 'r', 'Discuss', ['b0', 'b1', 'b2']); advance();
+  const round = roomInput(state, 'stable-completed', 'r', 'Discuss', ['b0', 'b1', 'b2'], noPublish); advance();
   const ids = state.team.rounds[round]!.seats;
   speech(ids[0]!, undefined, 0, 'Already published'); advance();
   speech(ids[1]!); advance();
@@ -223,7 +224,7 @@ it('preserves completed post and pass when members are removed, but revokes a pe
 
 it.each(['failed', 'cancelled', 'declined'] as const)('settles a late seat after a %s terminal and keeps the failure stable', conclusion => {
   const { state, ledger, advance } = setup();
-  const round = roomInput(state, 'late-failure', 'r', 'Discuss', ['b1']); advance(0);
+  const round = roomInput(state, 'late-failure', 'r', 'Discuss', ['b1'], noPublish); advance(0);
   const id = state.team.rounds[round]!.seats[0]!;
   ledger.intents[hash(id)] = { taskId: id } as LedgerState['intents'][string];
   ledger.executions[id] = { started: true } as LedgerState['executions'][string];

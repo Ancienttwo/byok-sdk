@@ -110,7 +110,7 @@ it('measures the Main Bot schema with 24 delegate ids: eight routines fit; rooms
   const schema = outcomeSchema(main.id, state, turn, ['default'], routines);
   expect(schema.properties!.delegate!.items!.properties!.to!.enum).toHaveLength(24);
   expect(schema.properties).toHaveProperty('create_bot');
-  expect(Buffer.byteLength(JSON.stringify(schema))).toBe(14_820);
+  expect(Buffer.byteLength(JSON.stringify(schema))).toBe(14_146);
   expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThanOrEqual(protocol.RESULT_SCHEMA_MAX_BYTES);
   expect(protocol.resultOutcomeMaxBytes(schema)).toBeLessThanOrEqual(protocol.RESULT_OUTCOME_MAX_BYTES);
   // update_room adds a room enum and members. The Host blocks such a Turn with a visible reason.

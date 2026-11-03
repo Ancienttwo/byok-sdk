@@ -67,7 +67,7 @@ it('blocks an oversized UTF-8 ContextPack with a readable reason and no retry sp
   expect(transactions).not.toHaveBeenCalled();
 });
 
-it('blocks a schema still above its cap after flat fallback without dropping authorized ids', async () => {
+it('blocks a schema above its cap without dropping authorized ids', async () => {
   await setup();
   const compose = vi.spyOn(protocol, 'composeBotTurnOutcomeSchema').mockImplementation(() => {
     throw new protocol.BotTurnOutcomeSchemaError('schema-over-budget', 'still too large');
@@ -77,8 +77,7 @@ it('blocks a schema still above its cap after flat fallback without dropping aut
   for (const [fragments] of compose.mock.calls) {
     expect(fragments.create_routine!.items!.properties!.localId!.enum).toEqual(['new_routine_1']);
   }
-  expect(compose.mock.calls.some(([fragments]) => fragments.create_routine!.items!.properties!.schedule!.oneOf === undefined)).toBe(true);
-  expect(bot!.snapshot().turns[id]).toMatchObject({ status: 'blocked', blockedReason: expect.stringContaining('after flat fallback') });
+  expect(bot!.snapshot().turns[id]).toMatchObject({ status: 'blocked', blockedReason: expect.stringContaining('Outcome schema over budget') });
   expect(bot!.core.intent(id)).toBeUndefined();
 });
 

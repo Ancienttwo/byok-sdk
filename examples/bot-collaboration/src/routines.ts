@@ -1,5 +1,5 @@
-import { checkRoutineSchedule, nextRoutineOccurrence, type RoutineSchedule } from '@byok-sdk/core';
-import { TaskOfferSealedPayloadSchema, type CreateRoutineAction, type RoutineScheduleFields, type UpdateRoutineAction } from '@byok-sdk/protocol';
+import { checkRoutineSchedule, nextRoutineOccurrence, TaskOfferSealedPayloadSchema, type CreateRoutineAction, type RoutineSchedule, type RoutineScheduleFields,
+  type UpdateRoutineAction } from '@byok-sdk/protocol';
 import { canonical, concludeOccurrence, hash, occurrenceIntentKey, occurrenceOfIntentKey, type ExecutionTemplate, type HostOccurrenceRoutineDefinition, type HostOccurrenceRun, type LedgerState,
   type NextOccurrence, type Routine } from '@byok-sdk/server/execution-core';
 import { addTurn, json, type Authority, type CollaborationState, type Turn } from './model';
@@ -55,11 +55,23 @@ function fields(routine: Routine): BotRoutineInput | undefined {
   return spec?.type === BOT_ROUTINE ? spec.input as unknown as BotRoutineInput : undefined;
 }
 function definition(id: string, version: number, schedule: RoutineScheduleFields, input: BotRoutineInput): HostOccurrenceRoutineDefinition {
+  return { id, version, timeZone: schedule.tz, rule: json(schedule), waitMs: ROUTINE_WAIT_MS, lateAfterMs: ROUTINE_LATE_AFTER_MS,
+    hostOccurrence: { type: BOT_ROUTINE, input: json(input) } };
+}
+/**
+ * A schedule from an owner or member command. The bot-turn-outcome.v1 contract checks the schedules of an outcome, so
+ * only these entries check here.
+ */
+function scheduled(schedule: RoutineScheduleFields): RoutineScheduleFields {
   const check = checkRoutineSchedule(schedule);
   if (!check.ok) throw new Error(`${check.code}: ${check.message}`);
-  const rule = 'daysOfWeek' in schedule ? { ...schedule, daysOfWeek: [...new Set(schedule.daysOfWeek)] } : schedule;
-  return { id, version, timeZone: schedule.tz, rule: json(rule), waitMs: ROUTINE_WAIT_MS, lateAfterMs: ROUTINE_LATE_AFTER_MS,
-    hostOccurrence: { type: BOT_ROUTINE, input: json(input) } };
+  return schedule;
+}
+/** The owner `updateRoutine` API. An outcome's update_routine passed the contract, which refuses the same as this. */
+export function ownerRoutineUpdate(action: UpdateRoutineAction): UpdateRoutineAction {
+  if (action.schedule === undefined && action.prompt === undefined) throw new Error('An update must change schedule or prompt');
+  if (action.schedule !== undefined) scheduled(action.schedule);
+  return action;
 }
 /** The Bot routines among the Host's K4 routine rows. */
 export function botRoutines(routines: Iterable<Routine>): BotRoutine[] {
@@ -99,7 +111,6 @@ export function endable(routines: readonly Routine[], id: string): Routine {
 /** The next version for `RoutineCommands.update`. It builds on `pending` when one is staged. */
 export function updateDefinition(routines: readonly Routine[], owner: string, action: UpdateRoutineAction): HostOccurrenceRoutineDefinition {
   const routine = owned(routines, owner, action.routineId);
-  if (action.schedule === undefined && action.prompt === undefined) throw new Error('An update must change schedule or prompt');
   const prior = routine.pending ?? routine.definition, input = prior.hostOccurrence!.input as unknown as BotRoutineInput;
   // Only the member can seal a new version, so neither a Bot nor an owner prompt edit reaches a sealed routine.
   if ('sealed' in input) throw new Error('A sealed routine changes only through resealRoutine');
@@ -138,7 +149,7 @@ function checkSealed(id: string, version: number, sealed: SealedRoutineTemplate,
 export function sealedDefinition(routines: readonly Routine[], owner: string, action: SealedRoutineAction,
   execution: ExecutionTemplate): HostOccurrenceRoutineDefinition {
   if (action.definitionVersion !== 1) throw new SealedRoutineVersionError(1);
-  const next = definition(action.routineId, 1, action.schedule, { owner, authority: 'owner', sealed: action.sealed });
+  const next = definition(action.routineId, 1, scheduled(action.schedule), { owner, authority: 'owner', sealed: action.sealed });
   const existing = routines.find(routine => routine.definition.id === action.routineId);
   // A member retry after a lost response resends the same bytes.
   if (existing) {
@@ -160,7 +171,7 @@ export function resealDefinition(routines: readonly Routine[], owner: string, ac
   const routine = owned(routines, owner, action.routineId);
   const prior = routine.pending ?? routine.definition, input = prior.hostOccurrence!.input as unknown as BotRoutineInput;
   if (!('sealed' in input)) throw new Error('Only a sealed routine takes a new template');
-  const next = definition(action.routineId, version, action.schedule, { owner: input.owner, authority: input.authority, sealed: action.sealed });
+  const next = definition(action.routineId, version, scheduled(action.schedule), { owner: input.owner, authority: input.authority, sealed: action.sealed });
   // A member retry resends the same bytes: the current or staged version it made already is a K4 no-op.
   if ([routine.definition, routine.pending].some(row => canonical(row) === canonical(next))) return next;
   if (version !== prior.version + 1) throw new SealedRoutineVersionError(prior.version + 1);

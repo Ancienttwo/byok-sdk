@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { code, imports } from './import-scan.test-support';
 
 /**
- * #606 §5.5: `rules/` can be copied alone. Its files import only `@byok-sdk/protocol`, `@byok-sdk/core`,
+ * #606 §5.5: `rules/` can be copied alone. Its files import only `@byok-sdk/protocol`,
  * `hash` and `canonical` of the K4 `@byok-sdk/server/execution-core/canonical` entry, and other files in `rules/`. Rule tests can also import vitest.
  * So no rule and no rule test reaches `LedgerState`, `HostLedger`, `stateOf` or `CollaborationState`.
  * #884: the K4 root entry loads `node:sqlite` and `node:async_hooks`, so the rules never import it.
@@ -15,7 +15,7 @@ const K4_NAMES = new Set(['hash', 'canonical']);
 const HOST_STATE = /\b(?:LedgerState|HostLedger|stateOf|CollaborationState)\b/;
 
 function violations(file: string, source: string): string[] {
-  const allowed = ({ from, names }: { from: string; names?: string[] }) => from === '@byok-sdk/protocol' || from === '@byok-sdk/core'
+  const allowed = ({ from, names }: { from: string; names?: string[] }) => from === '@byok-sdk/protocol'
     || from === K4 && !!names?.length && names.every(name => K4_NAMES.has(name))
     || from.startsWith('./') && !from.includes('..')
     || file.endsWith('.test.ts') && from === 'vitest';

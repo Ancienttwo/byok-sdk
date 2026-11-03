@@ -85,16 +85,15 @@ it('fan-out of 2: both targets run, one batch reply Turn carries both verdicts, 
 
 it('delivers all refused items of one outcome in one refusal report Turn whose schema has no delegate', async () => {
   fixture = await openTeam({ routeMessages: true });
-  const [a, b] = await t.createBots(2) as [string, string];
-  const root = await t.host().input('stale-offer', 'Ask Bot 2', a);
+  const [a, b, c] = await t.createBots(3) as [string, string, string];
+  const root = await t.host().input('stale-offer', 'Ask Bots 2 and 3', a);
   await t.running(root);
-  expect(t.host().snapshot().schemas[root]!.properties!.delegate!.items!.properties!.to!.enum).toContain(b);
-  const archive = await t.host().input('archive', 'Archive Bot 2');
-  await t.finish(archive, { delete_bot: [{ botId: b }] });
-  await t.finish(root, { delegate: [{ to: b, request: 'one' }, { to: b, request: 'two' }] });
+  expect(t.host().snapshot().schemas[root]!.properties!.delegate!.items!.properties!.to!.enum).toEqual(expect.arrayContaining([b, c]));
+  for (const botId of [b, c]) await t.finish(await t.host().input(`archive-${botId}`, 'Archive a Bot'), { delete_bot: [{ botId }] });
+  await t.finish(root, { delegate: [{ to: b, request: 'one' }, { to: c, request: 'two' }] });
   const task = t.taskOf(root);
   expect([t.delegationOf(task, 0), t.delegationOf(task, 1)].map(d => [d.verdict, d.reason])).toEqual([
-    ['refused', 'target_archived'], ['refused', 'duplicate_target']]);
+    ['refused', 'target_archived'], ['refused', 'target_archived']]);
   const reportId = hash(['bot_reply', task]);
   const report = t.host().snapshot().turns[reportId]!;
   expect(report).toMatchObject({ botId: a, source: 'bot_reply', refusalReport: true, hop: 0 });

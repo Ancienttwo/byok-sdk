@@ -1,6 +1,5 @@
-import { botTurnOutcomeFragments as f, composeBotTurnOutcomeSchema, type NonEmptyIds, type BotTurnOutcomeFragments, BotTurnOutcomeSchemaError, type RoutineScheduleShape,
+import { botTurnOutcomeFragments as f, checkRoutineSchedule, composeBotTurnOutcomeSchema, type NonEmptyIds, type BotTurnOutcomeFragments,
   type ResultSchema } from '@byok-sdk/protocol';
-import { checkRoutineSchedule } from '@byok-sdk/core';
 import type { Turn } from './turn';
 import type { RoomsState } from './rooms';
 import { inactive } from './team';
@@ -71,7 +70,7 @@ function distinct<T extends string>(values: readonly T[], what: string, allowed?
   }
   return [...values];
 }
-/** Checks an offer and returns a copy. The routine calendar of `@byok-sdk/core` decides which time zones are valid. */
+/** Checks an offer and returns a copy. The routine calendar of `@byok-sdk/protocol` decides which time zones are valid. */
 export function outcomeOffer(offer: OutcomeOffer): CheckedOffer {
   const { actions, timeZones, confirmable } = offer;
   if (timeZones !== undefined) {
@@ -163,47 +162,41 @@ export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, m
   const owned = routines.filter(r => r.owner === botId && r.lifecycle !== 'completed'), ids = owned.map(r => r.id);
   const updatable = owned.filter(r => !r.definition?.sealed).map(r => r.id);
   const timeZones = (offer?.timeZones ?? DEFAULT_TIME_ZONES) as unknown as NonEmptyIds;
-  const compose = (scheduleShape: RoutineScheduleShape) => {
-    const fragments: BotTurnOutcomeFragments = turn?.source === 'room_slot' ? (() => {
-      const seat = state.team.seats[turn.id]!, room = state.team.rooms[state.team.rounds[seat.roundId]!.roomId]!;
-      const members = room.members.filter(id => !inactive(state.team.bots[id]));
-      return { speech: f.speech(), ...(members.length ? { room_call: f.roomCall({ members: members as unknown as NonEmptyIds }) } : {}) };
-    })() : allow({
-      // A refusal report has no delegate fragment, so it cannot cause another report (§8.2).
-      // A target stays offered while a newer profile is pending; its Turn waits for readback (§2.2).
-      ...(turn?.refusalReport ? {} : { delegate: f.delegate({ to: [botId, ...Object.values(state.team.bots)
-        .filter(b => b.id !== botId && !inactive(b) && personaApplied(state, b)).map(b => b.id)] }) }),
-      ask_user: f.askUser(),
-      confirmable_action: f.confirmableAction({ actions: (offer?.confirmable ?? DEFAULT_CONFIRMABLE) as [ConfirmableSpec, ...ConfirmableSpec[]] }),
-      create_routine: f.createRoutine({ localIds: ['new_routine_1'], timeZones, scheduleShape }),
-      ...(updatable.length ? { update_routine: f.updateRoutine({ routineIds: updatable as unknown as NonEmptyIds, timeZones, scheduleShape }) } : {}),
-      ...(ids.length ? { cancel_routine: f.cancelRoutine({ routineIds: ids as unknown as NonEmptyIds }) } : {}),
-    }, offer?.actions?.turn);
-    if (ownerMainTurn(state, botId, turn)) {
-      const open = openDelegations(state).items.map(d => d.id);
-      const botIds = Object.values(state.team.bots).filter(b => !b.archived).map(b => b.id) as unknown as NonEmptyIds;
-      // A room can name a Bot that the same outcome creates, so new_bot_* ids follow the create_bot offer.
-      const createsBots = !state.team.external && (offer?.actions?.main?.includes('create_bot') ?? true);
-      const memberIds = (createsBots ? [...botIds, ...NEW_BOTS] : botIds) as unknown as NonEmptyIds;
-      Object.assign(fragments, allow({
-        // T3: in external team mode, the authority owns the Bots, so these three actions are not offered.
-        ...(state.team.external ? {} : {
-          create_bot: f.createBot({ localIds: NEW_BOTS, models: models as unknown as NonEmptyIds }),
-          update_bot: f.updateBot({ botIds, models: models as unknown as NonEmptyIds }), delete_bot: f.deleteBot({ botIds }),
-        }),
-        // #1321: in the external rooms mode, the authority owns the rooms, so these two actions are not offered.
-        ...(state.team.external?.rooms ? {} : {
-          create_room: f.createRoom({ localIds: NEW_ROOMS, members: memberIds }),
-          ...(Object.keys(state.team.rooms).length ? { update_room: f.updateRoom({ roomIds: Object.keys(state.team.rooms) as unknown as NonEmptyIds, members: memberIds }) } : {}),
-        }),
-        team_note: f.teamNote(),
-        ...(open.length ? { cancel_delegation: f.cancelDelegation({ delegationIds: open as unknown as NonEmptyIds }) } : {}),
-      }, offer?.actions?.main));
-    }
-    return composeBotTurnOutcomeSchema(fragments, turn?.source === 'room_slot' ? ['speech'] : []);
-  };
-  try { return compose('checked'); } catch (error) {
-    if (!(error instanceof BotTurnOutcomeSchemaError) || error.code !== 'schema-over-budget') throw error;
-    return compose('flat');
+  const fragments: BotTurnOutcomeFragments = turn?.source === 'room_slot' ? (() => {
+    const seat = state.team.seats[turn.id]!, room = state.team.rooms[state.team.rounds[seat.roundId]!.roomId]!;
+    const members = room.members.filter(id => !inactive(state.team.bots[id]));
+    return { speech: f.speech(), ...(members.length ? { room_call: f.roomCall({ members: members as unknown as NonEmptyIds }) } : {}) };
+  })() : allow({
+    // A refusal report has no delegate fragment, so it cannot cause another report (§8.2).
+    // A target stays offered while a newer profile is pending; its Turn waits for readback (§2.2).
+    ...(turn?.refusalReport ? {} : { delegate: f.delegate({ to: [botId, ...Object.values(state.team.bots)
+      .filter(b => b.id !== botId && !inactive(b) && personaApplied(state, b)).map(b => b.id)] }) }),
+    ask_user: f.askUser(),
+    confirmable_action: f.confirmableAction({ actions: (offer?.confirmable ?? DEFAULT_CONFIRMABLE) as [ConfirmableSpec, ...ConfirmableSpec[]] }),
+    create_routine: f.createRoutine({ localIds: ['new_routine_1'], timeZones }),
+    ...(updatable.length ? { update_routine: f.updateRoutine({ routineIds: updatable as unknown as NonEmptyIds, timeZones }) } : {}),
+    ...(ids.length ? { cancel_routine: f.cancelRoutine({ routineIds: ids as unknown as NonEmptyIds }) } : {}),
+  }, offer?.actions?.turn);
+  if (ownerMainTurn(state, botId, turn)) {
+    const open = openDelegations(state).items.map(d => d.id);
+    const botIds = Object.values(state.team.bots).filter(b => !b.archived).map(b => b.id) as unknown as NonEmptyIds;
+    // A room can name a Bot that the same outcome creates, so new_bot_* ids follow the create_bot offer.
+    const createsBots = !state.team.external && (offer?.actions?.main?.includes('create_bot') ?? true);
+    const memberIds = (createsBots ? [...botIds, ...NEW_BOTS] : botIds) as unknown as NonEmptyIds;
+    Object.assign(fragments, allow({
+      // T3: in external team mode, the authority owns the Bots, so these three actions are not offered.
+      ...(state.team.external ? {} : {
+        create_bot: f.createBot({ localIds: NEW_BOTS, models: models as unknown as NonEmptyIds }),
+        update_bot: f.updateBot({ botIds, models: models as unknown as NonEmptyIds }), delete_bot: f.deleteBot({ botIds }),
+      }),
+      // #1321: in the external rooms mode, the authority owns the rooms, so these two actions are not offered.
+      ...(state.team.external?.rooms ? {} : {
+        create_room: f.createRoom({ localIds: NEW_ROOMS, members: memberIds }),
+        ...(Object.keys(state.team.rooms).length ? { update_room: f.updateRoom({ roomIds: Object.keys(state.team.rooms) as unknown as NonEmptyIds, members: memberIds }) } : {}),
+      }),
+      team_note: f.teamNote(),
+      ...(open.length ? { cancel_delegation: f.cancelDelegation({ delegationIds: open as unknown as NonEmptyIds }) } : {}),
+    }, offer?.actions?.main));
   }
+  return composeBotTurnOutcomeSchema(fragments, turn?.source === 'room_slot' ? ['speech'] : []);
 }

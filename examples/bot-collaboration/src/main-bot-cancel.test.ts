@@ -153,7 +153,7 @@ it('measures the Main Bot schema with 24 Bots, 8 routines and 24 open delegation
   const schema = outcomeSchema(ids[0]!, state, owner, ['default'], routineViews(ids[0]!, 8));
   expect(schema.properties!.cancel_delegation!.items!.properties!.delegationId!.enum).toHaveLength(OPEN_DELEGATIONS_MAX_ITEMS);
   expect(schema.properties!.cancel_delegation!.maxItems).toBe(2);
-  expect(Buffer.byteLength(JSON.stringify(schema))).toBe(15_949);
+  expect(Buffer.byteLength(JSON.stringify(schema))).toBe(15_941);
   expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThanOrEqual(protocol.RESULT_SCHEMA_MAX_BYTES);
   expect(protocol.resultOutcomeMaxBytes(schema)).toBeLessThanOrEqual(protocol.RESULT_OUTCOME_MAX_BYTES);
 });

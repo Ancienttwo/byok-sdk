@@ -1,4 +1,4 @@
-import { checkRoutineSchedule, nextRoutineOccurrence, type RoutineSchedule } from '@byok-sdk/core';
+import { checkRoutineSchedule, nextRoutineOccurrence, type RoutineSchedule } from '@byok-sdk/protocol';
 import { hash as hostKey, type ExecutionTemplate, type HostExecutionCore, type Json, type LedgerState, type NextOccurrence,
   type Routine, type AgentRoutineDefinition } from '@byok-sdk/server/execution-core';
 import type { ByokServer } from '@byok-sdk/server';
