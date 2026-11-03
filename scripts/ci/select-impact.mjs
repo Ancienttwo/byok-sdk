@@ -448,6 +448,7 @@ const reviewedBuildConfigOwners = Object.freeze({
   'packages/client/tsup.sealed.config.ts': 'packages/client',
   'packages/cloud-dataplane/tsup.config.ts': 'packages/cloud-dataplane',
   'packages/cloud-do/tsup.config.ts': 'packages/cloud-do',
+  'packages/cloud-do/scripts/check-dist.mjs': 'packages/cloud-do',
   'packages/cloud/tsup.config.ts': 'packages/cloud',
   'packages/protocol/tsup.config.ts': 'packages/protocol',
   'packages/server/tsup.config.ts': 'packages/server',

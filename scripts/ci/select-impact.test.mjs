@@ -681,6 +681,11 @@ test('reviewed M package build configs keep owner consumers and packed artifacts
     assert.throws(() => selectImpact([`packages/${owner}/tsup.unreviewed.config.ts`]), /reviewed CI mapping required/i);
     assert.throws(() => selectImpact([`packages/${owner}/tsup.config.mjs`]), /reviewed CI mapping required/i);
   }
+  // #1387: cloud-do's build runs scripts/check-dist.mjs; a sibling script stays unreviewed.
+  const checkDist = selectImpact(['packages/cloud-do/scripts/check-dist.mjs']);
+  const cloudDo = selectImpact(['packages/cloud-do/tsconfig.json']);
+  assert.deepEqual([checkDist.dirs, checkDist.families], [cloudDo.dirs, sorted(new Set([...cloudDo.families, 'npm-release-pack']))]);
+  assert.throws(() => selectImpact(['packages/cloud-do/scripts/unreviewed.mjs']), /reviewed CI mapping required/i);
   assert.throws(() => selectImpact(['packages/client/tsup.other.config.ts']), /reviewed CI mapping required/i);
   assert.throws(() => selectImpact(['packages/unreviewed/tsup.config.ts']), /reviewed CI mapping required/i);
 });
