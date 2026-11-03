@@ -424,8 +424,9 @@ Every transaction reads and rewrites the collaboration state, so settled
 history must leave it. `bot.retain({ acknowledgedRoots, now, retentionMs })`
 does that on the Host's explicit acknowledgement. It never runs on its own.
 
-- A root is the `root` field of a Turn projection, or the round root that
-  `roomInput` and a room `receive` return. One root holds its Turns,
+- A root is the `root` field of a Turn projection, the round root that
+  `roomInput` and a room `receive` return, or the `root` field of a
+  `room-seat:` or `room-root:` projection. One root holds its Turns,
   budget, delegations and their batches and units, replies, schemas, cards,
   questions, the rejections that its Turns consumed, its input batch and
   inputs, its rounds with their seats, seat Turns and `team.roots` row, its
@@ -611,11 +612,12 @@ card's expiry, each unreleased seat's deadline, and the delegation times
 these times and its own L-only ones. H stores their minimum as the scope's due
 time (#793 S4). Routine slots are K4's, so they are not in the list.
 
-The room step of a Host sync is `advanceRoomSeats(state, facts, now, add)` in
-`src/rules/rooms.ts` (#793 S6). It runs `advanceRooms` on the seat facts,
+The room step of a Host sync is `advanceRoomSeats(state, facts, now, add, publish)`
+in `src/rules/rooms.ts` (#793 S6). It runs `advanceRooms` on the seat facts,
 fails a seat Turn whose work was not admitted, queues each new seat Turn
-through `add` (`seatTurn` gives its fields), and returns the seats whose
-admitted work the Host cancels. `src/rules/commands.ts` exports both. L builds
+through `add` (`seatTurn` gives its fields), publishes the room projections
+of the seats that became terminal through `publish`, and returns the seats
+whose admitted work the Host cancels. `src/rules/commands.ts` exports both. L builds
 the facts from its K4 intents; H builds them from its intent rows. A Turn
 step can release a seat (a blocked or retired seat Turn). Both Hosts then run
 the room step and the Turn steps again in the same sync, so the next seat gets
@@ -695,7 +697,8 @@ transaction, in the same phase as `history`.
   `room-message:<roomId>:<messageId>` with `{ roomId, id, from, text, late }`,
   the row that `room.messages` stores. The message id is the seat id, so a
   replay has the same id and body; the uploader delivers it at least once, and
-  the Host deduplicates by id. A `pass` and a refused post publish nothing.
+  the Host deduplicates by id. A `pass` and a refused post publish no
+  `room-message:` projection; their seats have `room-seat:` projections.
   Without the option, no `room-message:` projection exists.
 - The next seat of a room is not read while that room has an undelivered
   `room-message:` projection. K4 drops a projection only after the Host
@@ -984,6 +987,30 @@ checks budgets, authority, atomic refusal, and context limits as state rules.
 `roomInput` and all other mutations use the same serial Host consumer. Do not
 call K4 mutation APIs directly. Upload projections with `core.flushProjections`
 or read `snapshot().team` for room history, seats, and profile delivery state.
+
+### Room seat projections
+
+K8 publishes how each seat of a room round ended, and when a round root has
+ended, in every mode, with or without `roomHistory` (#1393). The state does
+not store them; each is published once, in the transaction that makes it
+true.
+
+- `room-seat:<roomId>:<seatId>` with `{ roomId, root, roundId, seatId, botId,
+  status, late, reason? }`, when the seat becomes terminal: `post`, `pass`,
+  `failed`, `busy`, `removed` or `blocked`. `late` is not terminal; a late
+  seat is published when its Turn ends. `reason` is the conclusion or block
+  reason that the seat stores. A seat with no admitted Turn, such as a
+  waiting seat whose Bot left the room, is published too, though it has no
+  `bot-turn:` projection.
+- `room-root:<roomId>:<root>` with `{ roomId, root, seats }`, when every seat
+  of every round of the root is terminal, the seats that a `room_call` added
+  included. `seats` lists their ids in reservation order; each has its
+  `room-seat:` projection in the same or an earlier transaction. A root that
+  opens no seat is published in its `room_input` or `receive` transaction,
+  with `seats: []`. The root is the id that `retain` acknowledges.
+- A Host must handle both prefixes before it upgrades to the release that
+  adds them: a Host that refuses an unknown projection prefix fails its flush
+  on the first one.
 
 ## Persona delivery failures
 

@@ -512,7 +512,7 @@ export class HostedCollaborationStore {
         // As L's sync, the room step runs before the Turn steps, so a seat Turn that it adds freezes in this round. The K4
         // cancel of a seat's admitted work is H's `cancelIntent`, as for a delegation cancel.
         const seats = await seatFacts(client, scope, Object.keys(state.team.seats));
-        for (const seatId of advanceRoomSeats(state, seats, options.now, (id, botId, request) => addTurn(state, seatTurn(id, botId, request)))) {
+        for (const seatId of advanceRoomSeats(state, seats, options.now, (id, botId, request) => addTurn(state, seatTurn(id, botId, request)), emit)) {
           await cancelIntent(client, scope, seatId, options.now);
         }
         const released = releasedSeats(state);

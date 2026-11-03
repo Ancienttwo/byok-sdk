@@ -5,6 +5,8 @@ import { classifyInbound, inboundKey, isOwner, type InboundMessage, type Princip
 import { stateOf } from './model';
 import { advanceRooms, roomInput } from './rooms';
 import { roomFields } from './team';
+/** These cases do not read the room projections. */
+const noPublish = (): void => {};
 
 const owner: Principal = { id: 'owner', kind: 'human' };
 const member: Principal = { id: 'im:member', kind: 'human' };
@@ -63,25 +65,25 @@ function room() {
     archived: false, revision: '1', readyRevision: '1', execution: template('device', id) };
   state.team.rooms.r = { id: 'r', ...roomFields(state.team, { name: 'Room', members: ['b0', 'b1'] }), messages: [] };
   const add = (id: string, botId: string, request: string) => { state.turns[id] = { id, root: id, botId, source: 'room_slot', request, hop: 0, status: 'queued' }; };
-  return { state, advance: () => advanceRooms(ledger, state, 0, add) };
+  return { state, advance: () => advanceRooms(ledger, state, 0, add, noPublish) };
 }
 
 it('records the sender principal id on the room message and the seat request', () => {
   const { state, advance } = room();
-  const id = roomInput(state, 'k', 'r', 'Review', ['b1'], 'im:member');
+  const id = roomInput(state, 'k', 'r', 'Review', ['b1'], noPublish, 'im:member');
   advance();
   expect(state.team.rooms.r!.messages).toEqual([{ id, from: 'im:member', text: 'Review', late: false }]);
   const seat = state.team.rounds[id]!.seats[0]!;
   expect(JSON.parse(state.turns[seat]!.request)).toMatchObject({ request: 'Review', requestFrom: 'im:member' });
-  expect(roomInput(state, 'k', 'r', 'Review', ['b1'], 'im:member')).toBe(id);
-  expect(() => roomInput(state, 'k', 'r', 'Review', ['b1'], 'im:someone-else')).toThrow('Room input identity conflict');
-  expect(() => roomInput(state, 'k', 'r', 'Review', ['b1'])).toThrow('Room input identity conflict');
+  expect(roomInput(state, 'k', 'r', 'Review', ['b1'], noPublish, 'im:member')).toBe(id);
+  expect(() => roomInput(state, 'k', 'r', 'Review', ['b1'], noPublish, 'im:someone-else')).toThrow('Room input identity conflict');
+  expect(() => roomInput(state, 'k', 'r', 'Review', ['b1'], noPublish)).toThrow('Room input identity conflict');
 });
 
 it('keeps the K8b sender and input identity without a principal', () => {
   const { state } = room();
-  const id = roomInput(state, 'legacy', 'r', 'Hello', ['b1']);
+  const id = roomInput(state, 'legacy', 'r', 'Hello', ['b1'], noPublish);
   expect(state.team.rooms.r!.messages.at(-1)).toEqual({ id, from: 'user', text: 'Hello', late: false });
   expect(state.team.rounds[id]!.input).toBe(JSON.stringify({ text: 'Hello', mentions: ['b1'] }));
-  expect(roomInput(state, 'legacy', 'r', 'Hello', ['b1'])).toBe(id);
+  expect(roomInput(state, 'legacy', 'r', 'Hello', ['b1'], noPublish)).toBe(id);
 });

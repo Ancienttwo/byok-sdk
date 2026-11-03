@@ -235,7 +235,7 @@ function settlementSubject(): SettlementSubject & { ledger: HostLedger } {
     settle: (now, timers) => {
       ledger.transaction((s, rows) => {
         const state = stateOf(s.application);
-        advanceRoomsAndTurns(s, state, now, turn => syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now }));
+        advanceRoomsAndTurns(s, state, now, turn => syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now }), (id, value) => project(s, id, value));
         settleDelegations(s, state, now, (id, value) => project(s, id, value), timers);
       });
     },
@@ -309,7 +309,7 @@ function roomSubject(): RoomSubject {
     ...base,
     sync: now => {
       ledger.transaction((s, rows) => {
-        advanceRoomsAndTurns(s, stateOf(s.application), now, turn => syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now }));
+        advanceRoomsAndTurns(s, stateOf(s.application), now, turn => syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now }), (id, value) => project(s, id, value));
       });
     },
     claim: turnId => { ledger.transaction(s => { s.executions[taskId(turnId, 0)]!.started = true; }); },

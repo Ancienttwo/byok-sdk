@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.36.0",
-    "snapshotSha256": "a54b143f25fd91d2fc189a420d858a7ebc91d8e4b58e4ff405f9936f77c61155"
+    "snapshotSha256": "97b2e2c53da639e96818470402a2f8fb64bea6b3ca2de8353ab001cbad83c957"
   },
   "configFields": {
     "status": "tracked",
@@ -18,7 +18,7 @@
     {
       "id": "bot-turn-outcome-stateless-rules",
       "impact": "breaking",
-      "summary": "bot-turn-outcome.v1 runs every rule that reads only the outcome (#1375), so the device refuses a violating outcome on submit_result and the model corrects it in the same Turn. New contract-mismatch keywords: duplicate-target (a repeated delegate to, this Bot included), duplicate-local-id (create_bot), duplicate-id (cancel_routine, cancel_delegation), duplicate-member (room_call, create_room, update_room), admin-not-member (create_room), empty-update (update_routine with neither schedule nor prompt, update_bot or update_room with no field), and schedule-invalid, schedule-unreachable, schedule-beyond-horizon, tz-invalid for a schedule that checkRoutineSchedule refuses. The routine calendar moved from @byok-sdk/core to @byok-sdk/protocol: import checkRoutineSchedule, nextRoutineOccurrence, the ROUTINE_* constants and their types from @byok-sdk/protocol. Core drops them and its routine_schedule_invalid code; nextRoutineOccurrence throws the protocol RoutineScheduleError (code routine_schedule_invalid) instead of ByokCoreError. A repeated daysOfWeek day is schedule_invalid instead of being merged. A routine already stored with a repeated weekday (for example by the byok-mcp-server example) throws RoutineScheduleError when its next occurrence is computed: update it to distinct days before the upgrade. The schedule fragment has one closed shape without the oneOf: RoutineScheduleShape and the scheduleShape option are removed, and a schema over budget is schema-over-budget with no flat fallback. The room mode enum and RoomFields.mode have only 'mention'. K8 drops its apply-time copies of these rules and the delegation reason duplicate_target; the owner updateRoutine and the sealed create and reseal check an empty update and the calendar at their entry. A Host that vendors K8 copies the changed files and imports the calendar from @byok-sdk/protocol.",
+      "summary": "bot-turn-outcome.v1 runs every rule that reads only the outcome (#1375), so the device refuses a violating outcome on submit_result and the model corrects it in the same Turn. New contract-mismatch keywords: duplicate-target (a repeated delegate to, this Bot included), duplicate-local-id (create_bot), duplicate-id (cancel_routine, cancel_delegation), duplicate-member (room_call, create_room, update_room), admin-not-member (create_room), empty-update (update_routine with neither schedule nor prompt, update_bot or update_room with no field), and schedule-invalid, schedule-unreachable, schedule-beyond-horizon, tz-invalid for a schedule that checkRoutineSchedule refuses. The routine calendar moved from @byok-sdk/core to @byok-sdk/protocol: import checkRoutineSchedule, nextRoutineOccurrence, the ROUTINE_* constants and their types from @byok-sdk/protocol. Core drops them and its routine_schedule_invalid code; nextRoutineOccurrence throws the protocol RoutineScheduleError (code routine_schedule_invalid) instead of ByokCoreError. A repeated daysOfWeek day is schedule_invalid instead of being merged. A routine already stored with a repeated weekday (for example by the byok-mcp-server example) throws RoutineScheduleError when its next occurrence is computed: update it to distinct days before the upgrade. The schedule fragment has one closed shape without the oneOf: RoutineScheduleShape and the scheduleShape option are removed, and a schema over budget is schema-over-budget with no flat fallback. The room mode enum and RoomFields.mode have only 'mention'. K8 drops its apply-time copies of these rules and the delegation reason duplicate_target; the owner updateRoutine and the sealed create and reseal check an empty update and the calendar at their entry. A Host that vendors K8 copies the changed files and imports the calendar from @byok-sdk/protocol. K8 also publishes two new projection prefixes (#1393): room-seat:<roomId>:<seatId> when a room seat becomes terminal (post, pass, failed, busy, removed or blocked), and room-root:<roomId>:<root> when every seat of a round root is terminal; advanceRoomSeats takes a publish argument. The Host must handle both prefixes before it upgrades, since a Host that refuses an unknown projection prefix fails its flush on the first one.",
       "migration": "docs/spec.md#bot-turn-outcome-fragments-and-routine-time-points",
       "items": [
         "example:bot-collaboration",
@@ -53,7 +53,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=627add813b3eea45",
-      "after": "K8 0.0.1 src-sha256=b2f859a3564feff3",
+      "after": "K8 0.0.1 src-sha256=01b016b003fc15d0",
       "entry": "bot-turn-outcome-stateless-rules"
     },
     {

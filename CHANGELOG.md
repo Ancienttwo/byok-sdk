@@ -42,6 +42,16 @@
     `Duplicate local Bot slot` or the delegation reason `duplicate_target`.
     The owner `updateRoutine` and the sealed create and reseal still check an
     empty update and the calendar at their entry, with `checkRoutineSchedule`.
+- **Breaking (examples; #1393)** — K8 publishes how each room seat ended and
+  when a round root ended, with or without `roomHistory`:
+  `room-seat:<roomId>:<seatId>` with `{ roomId, root, roundId, seatId, botId,
+  status, late, reason? }` when a seat becomes `post`, `pass`, `failed`,
+  `busy`, `removed` or `blocked`, and `room-root:<roomId>:<root>` with
+  `{ roomId, root, seats }` once every seat of the root, `room_call` seats
+  included, is terminal. A root that opens no seat is published in its
+  `room_input` transaction. `advanceRoomSeats` takes a `publish` argument.
+  A Host that refuses an unknown projection prefix must handle both before it
+  upgrades.
 
 ## 0.36.0 — 2026-11-03 (published)
 

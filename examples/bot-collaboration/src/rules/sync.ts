@@ -6,7 +6,7 @@ import { CurrentRequestTooLargeError } from './history';
 import { outcomeSchema, promptActions, type ContextBot, type ContextRoutine, type ContextState, type CheckedOffer } from './schema';
 import { botTurnInstruction, type BotHistoryState, type ContextTurn, type InstructionLimits } from './context';
 import { admitBotToolsets, inactive } from './team';
-import type { RoomMessage, Seat } from './rooms';
+import { publishSettled, seatSettled, type RoomMessage, type Seat } from './rooms';
 
 /**
  * The per-Turn step of a Host sync as a pure rule (#793 D2b Q2). L and H run the same step, so a frozen offer is the same in both.
@@ -114,11 +114,15 @@ export type SyncStep<E> =
   | { kind: 'cancel' }
   | { kind: 'ended' };
 
-/** Blocks a Turn that cannot freeze. A blocked seat is released. */
+/** Blocks a Turn that cannot freeze. A blocked seat is released and terminal, so it is published (#1393). */
 function blockTurn(state: Pick<SyncState<FreezeExecution>, 'team'>, turn: Turn, reason: string, publish: Publish): void {
   if (turn.blockedReason !== reason) publish(`blocked:${turn.id}`, { owner: turn.botId, turnId: turn.id, reason });
   const seat = state.team.seats[turn.id];
-  if (seat) { seat.status = 'blocked'; seat.released = true; seat.reason = reason; }
+  if (seat) {
+    const settled = seatSettled(seat);
+    seat.status = 'blocked'; seat.released = true; seat.reason = reason;
+    if (!settled) publishSettled(state.team, [seat.id], publish);
+  }
   turn.status = 'blocked'; turn.blockedReason = reason;
 }
 
@@ -150,7 +154,10 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     turn.status = 'failed'; turn.conclusion = 'failed';
     // The seat facts no longer see the intent, so release the seat here, as for a failed conclusion. Its round moves on.
     const seat = state.team.seats[turn.id];
-    if (seat && !seat.released) { seat.status = 'failed'; seat.released = true; seat.reason = retired; }
+    if (seat && !seat.released) {
+      seat.status = 'failed'; seat.released = true; seat.reason = retired;
+      publishSettled(state.team, [seat.id], publish);
+    }
     state.audit.push(`Turn ${retired === 'result_retired' ? 'result retired before sync' : 'identity retired'}: ${turn.id}`);
     publish(`bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn, reason: retired }));
     turn.reported = true;
