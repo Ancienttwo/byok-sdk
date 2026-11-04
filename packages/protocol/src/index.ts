@@ -198,12 +198,14 @@ export {
   AGENT_HOME_PROJECTION_MAX_BYTES,
   AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM,
   AgentHomeProjectionProfileRevisionSchema,
+  AgentHomeProjectionHostRevisionSchema,
   AgentHomeProjectionHashSchema,
   AgentHomeProjectionOutcomeSchema,
   AgentHomeProjectionValueSchema,
 } from './agent-home-projection';
 export type {
   AgentHomeProjectionProfileRevision,
+  AgentHomeProjectionHostRevision,
   AgentHomeProjectionHash,
   AgentHomeProjectionOutcome,
   AgentHomeProjectionValue,

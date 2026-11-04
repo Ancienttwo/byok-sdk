@@ -188,7 +188,7 @@ it('cancels a blocked turn before admission without an intent or repeat publicat
   expect(bot!.snapshot().turns[id]).toMatchObject({ status: 'failed', conclusion: 'cancelled', reported: true });
   expect(bot!.core.intent(id)).toBeUndefined();
   await bot!.core.flushProjections(async () => {});
-  await bot!.cancelTurn(id);
+  await expect(bot!.cancelTurn(id)).resolves.toEqual({ turnId: id, result: 'already_settled', conclusion: 'cancelled' });
   expect(Object.values(ledger!.snapshot().outbox).filter(row => row.kind === 'projection')).toEqual([]);
   const transactions = vi.spyOn(ledger!, 'transaction');
   await vi.advanceTimersByTimeAsync(60_000);

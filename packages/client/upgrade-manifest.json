@@ -7,13 +7,81 @@
   },
   "to": {
     "version": "0.37.0",
-    "snapshotSha256": "a74d19105a074c7a5c075410cb9fb764234c0e71da44b62f6c538c5a786249ea"
+    "snapshotSha256": "917122320a6789ce58de932ad79665c4bb9b077bd800075f759da03231f4e81b"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "k8-idempotent-owner-cancels",
+      "impact": "breaking",
+      "summary": "K8 owner cancels are idempotent and its refusals carry codes (#1405). cancelTurn returns TurnCancelResult { turnId, result, conclusion? } and cancelDelegation returns DelegationCancelResult { delegationId, result, verdict? }, in the shape of cancelHostIntent and read from the ledger, so a replay and a restart give the same answer: cancelled (this call committed the cancel), cancel_pending (an earlier cancel has no terminal yet) or already_settled (the target had ended, with its conclusion or verdict). cancel_pending and already_settled write nothing and do not call core.cancel, so a repeated cancel no longer raises the K8 revision. Breaking: cancelDelegation on a resolved delegation resolves already_settled instead of rejecting with 'Delegation already resolved'. cancelDelegation, and cancelTurn on a chain Turn, refuse with the new DelegationError (key = delegation id): unknown_delegation, and not_cancellable for a reply_held or uncertain delegation (end it with abandonDelegation). failStuckIntent refuses with HostIntentError: unknown_intent, already_settled, or not_stuck; HostIntentError gains the codes already_settled and not_stuck. The messages stay the same and both classes extend Error. A Bot Turn settled by failStuckIntent records settleCode: 'outcome_failed' on the Turn, in the ledger and its bot-turn projection; the audit row stays. The field is optional, so an older K8 reads the ledger and ignores it: a rollback keeps working, but the older K8 writes no settleCode. index.ts now exports DelegationError, HostIntentError, DelegationCancelResult, HostIntentCancelResult and TurnCancelResult. A Host that vendored K8 copies src/host.ts, src/index.ts, src/delegation.ts, src/rules/delegation.ts and src/rules/turn.ts, and switches on error.code instead of message prefixes such as 'Intent already settled'. Added (#1407): the read-only inputRoot(key, botId) returns the Turn id that input returned for that key from the ledger's command record, or undefined when the input is not committed; it runs no process() pass, writes nothing and leaves the K8 revision unchanged, so a Host can tell whether an input that rejected on its drain committed. It is in src/host.ts, which the copy list above already names.",
+      "migration": "examples/bot-collaboration/README.md#idempotent-owner-cancels-1405",
+      "items": [
+        "example:bot-collaboration"
+      ]
+    },
+    {
+      "id": "agent-home-projection-host-revision",
+      "impact": "additive",
+      "summary": "An Agent-home projection may carry an optional hostRevision, a non-negative safe integer owned by the Host. The daemon orders projections by (profileRevision, hostRevision), an absent hostRevision being 0: a greater key applies whatever the projectionHash, a lower key is stale, and an equal key is idempotent or conflict by hash. A Host that changes its rendering of the home without a new profileRevision raises hostRevision, and the existing home is projected again without clearing data. A Host that never sends hostRevision keeps the profileRevision order. The daemon advertises the new device flag agent-home-projection-host-revision, and the Cloud refuses a projection carrying hostRevision for a device that did not advertise it. The ordering record .byok/agent-home-projection.json keeps version 1 and stores hostRevision only when the applied payload carried it. An older client reads only the fields it knows, so after a rollback it ignores the stored hostRevision and orders by profileRevision alone.",
+      "migration": "docs/protocol.md#22-task-free-agent-home-projection",
+      "items": [
+        "export:@byok-sdk/protocol#AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY",
+        "export:@byok-sdk/protocol#AgentHomeProjectionHostRevision",
+        "export:@byok-sdk/protocol#AgentHomeProjectionHostRevisionSchema",
+        "export:@byok-sdk/protocol#AgentHomeProjectionPayloadSchema",
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=eb3615893afed74e",
+      "after": "K8 0.0.1 src-sha256=f28fb891884de485",
+      "entry": "k8-idempotent-owner-cancels"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY",
+      "change": "added",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionHostRevision",
+      "change": "added",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionHostRevisionSchema",
+      "change": "added",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionPayloadSchema",
+      "change": "changed",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY",
+      "change": "added",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "agent-home-projection-host-revision"
+    }
+  ]
 }

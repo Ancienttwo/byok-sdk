@@ -34,6 +34,11 @@ export interface Turn {
   sealedRoutine?: SealedRoutineRef;
   /** Set while the sync holds this Turn because its Bot's device has no active binding (#956) or is frozen for an owner switch (#957). */
   held?: 'device_not_bound' | 'device_switching';
+  /**
+   * The refusal code of the K4 terminal when the owner's `failStuckIntent` settled this Turn's intent (#1405). Set in the
+   * settle transaction, so a reader need not match the audit row, which keeps the message.
+   */
+  settleCode?: 'outcome_failed';
   blockedReason?: string; profileFailure?: { sequence: number; revision: string; reason: string }; outcome?: Json; conclusion?: string; reported?: boolean;
 }
 export interface SealedRoutineRef { routineId: string; definitionVersion: number }
