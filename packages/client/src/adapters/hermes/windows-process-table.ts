@@ -94,13 +94,18 @@ export type ScriptHostRead =
 
 /**
  * Only a script host that could not run the script counts as unavailable:
- * cscript.exe did not start (an application control policy, or no such
- * file), or it exited 1 with no table line (Windows Script Host disabled; the
- * script itself exits 2). A timeout, an abort, exit 2 and any other exit fail.
+ * cscript.exe could not be started because it is missing (ENOENT) or access
+ * to it is denied (EACCES), or it exited 1 with no table line (Windows Script
+ * Host disabled; the script itself exits 2). A spawn that ran out of
+ * resources (EMFILE, ENFILE, EAGAIN), a timeout, an abort, exit 2 and any
+ * other exit fail. Other spawn errors, such as EPERM or UNKNOWN, are thrown
+ * synchronously by `execFile` and never reach this function, so they fail too.
  */
 export function classifyScriptHostRead(error: ExecFileException | null, stdout: string): ScriptHostRead {
   if (error === null) return { kind: 'table', table: parseWindowsProcessTable(stdout) };
-  if (error.syscall?.startsWith('spawn')) return { kind: 'unavailable', reason: `cscript.exe did not start (${String(error.code)})` };
+  if (error.syscall?.startsWith('spawn') && (error.code === 'ENOENT' || error.code === 'EACCES')) {
+    return { kind: 'unavailable', reason: `cscript.exe did not start (${error.code})` };
+  }
   if (error.code === 1 && parseWindowsProcessTable(stdout).size === 0) return { kind: 'unavailable', reason: 'cscript.exe exited 1 without a process table' };
   return { kind: 'failed', error };
 }
@@ -124,7 +129,8 @@ async function readThroughScriptHost(signal?: AbortSignal): Promise<ScriptHostRe
       });
     });
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    // After an abort cscript can still hold the script open for a moment; retry instead of masking the read's own error with EBUSY.
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 3 });
   }
 }
 

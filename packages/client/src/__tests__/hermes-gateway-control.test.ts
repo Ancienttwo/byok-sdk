@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hermesGatewayPipeName, identifyHermesGateway, servesHermesHome } from '../adapters/hermes/gateway-identity';
 import { mayStopForeignHermesGateway } from '../adapters/hermes/gateway-ownership';
 import { loadKoffi } from '../adapters/win32-job-object';
@@ -129,6 +129,9 @@ describe('Hermes gateway ownership on Windows', () => {
       failure({ code: 1 }),
       failure({ code: null, killed: true, signal: 'SIGTERM' }),
       failure({ code: 'ABORT_ERR', name: 'AbortError' }),
+      // Resource exhaustion is not an unavailable script host.
+      failure({ code: 'EMFILE', syscall: 'spawn C:\\Windows\\System32\\cscript.exe' }),
+      failure({ code: 'EAGAIN', syscall: 'spawn C:\\Windows\\System32\\cscript.exe' }),
     ]) expect(classifyScriptHostRead(error, error.code === 1 ? '10 4 200' : '').kind).toBe('failed');
   });
 
@@ -137,6 +140,19 @@ describe('Hermes gateway ownership on Windows', () => {
     expect(table.get(process.pid)?.parent).toBe(process.ppid);
     expect(table.get(process.pid)?.created).toBeGreaterThan(0n);
   }, 30_000); // a cold Windows PowerShell start takes seconds; the read itself stays bounded at 15 s.
+
+  // A runner that silently fell back to PowerShell would warn here.
+  it.runIf(process.platform === 'win32')('reads the process table through Windows Script Host without the PowerShell fallback', async () => {
+    vi.resetModules(); // a fresh module, so an earlier fallback in this file cannot have spent the one warning
+    const { descendsOnWindows } = await import('../adapters/hermes/windows-process-table');
+    const warn = vi.spyOn(console, 'warn');
+    try {
+      expect(await descendsOnWindows(process.ppid, process.pid)).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  }, 30_000);
 });
 
 describe.runIf(process.platform === 'win32')('Hermes gateway pipe client on Windows', () => {
