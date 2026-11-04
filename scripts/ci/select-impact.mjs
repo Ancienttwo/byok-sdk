@@ -249,6 +249,8 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/adapters\/hermes\//,
     /^packages\/client\/src\/__tests__\/(?:hermes-(?:adapter|custody|gateway-control|home)\.test\.ts|fixtures\/fake-hermes(?:\.mjs|-command\.ts))$/,
     /^packages\/keys\/src\/(?:hermes-provider-launcher\.ts|__tests__\/hermes-provider-launcher\.test\.ts)$/,
+    // #1423 PR-2a: the diagnostic file-scope probe this job runs first.
+    /^packages\/client\/scripts\/windows-file-scope-probe\.mjs$/,
     // #1317: the win32 runtime environment base and the suite that reads the real registry.
     /^packages\/client\/src\/(?:runtime\/environment\.ts|__tests__\/environment\.test\.ts)$/,
   ],
