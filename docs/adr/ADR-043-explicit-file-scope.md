@@ -196,7 +196,7 @@ interface ToolAuthorizationTask {
 | 网络卷/UNC root | Windows：`\\` 开头的根和目标（UNC、`\\?\`、`\\.\`、`\\?\GLOBALROOT\`、`\\?\UNC\`）在任何 lstat 之前报 path_syntax，根报 invalid_file_scope；POSIX 网络挂载在契约上不支持，但 D14 的 Node 原语不能可靠分类，Host 不应配置 | `\\?\C:\…` 经 `realpath.native` 会得到普通盘符路径，包含判断会通过，所以必须在语法这一步拒绝；POSIX 检测属于 open item（§7） |
 | Windows symlink/junction/AppExecLink | 从盘符根开始逐段 lstat，`isSymbolicLink()` 一律报 symlink | PR-2a 实测 Node 和 Bun 的 lstat 都把这三种报成 symlink |
 | Windows 卷挂载点和其他 reparse point | 不另做分类：卷挂载点 lstat 报目录，`realpath.native` 落到它自己的卷，报 outside_scope；没有盘符的卷靠 dev 比较报 cross_device，所以 Windows 上的 dev 比较是真防线。WOF、云占位、dedup 当成它呈现的文件或目录 | 实测卷挂载点 tag 与 junction 相同，但 lstat 不报 symlink，规范化后的路径能拦住它 |
-| Windows 8.3 短名和大小写 | `realpath.native` 把最深的现存前缀展开成长名和磁盘上的大小写，之后所有检查（internal_path、根匹配、包含、identity）都在规范路径上逐字节比较，不另做大小写折叠；`.byok` 的短名和大小写变体因此报 internal_path。没有长名的 `~N` 名字按字面新建，不加额外规则 | 实测同一路径两次解析逐字节相同；已有长名的别名命中同一个文件（wx 报 EEXIST） |
+| Windows 8.3 短名和大小写 | `realpath.native` 把最深的现存前缀展开成长名和磁盘上的大小写，之后所有检查（internal_path、根匹配、包含、identity）都在规范路径上逐字节比较，不另做大小写折叠；`.byok` 的短名和大小写变体因此报 internal_path。只有逐字节写出 run.path 或 run 的 lexicalPath 的路径才归 run；盘符或前缀的大小写不同、用 8.3 短名的写法，都算 home 下 `.byok` 的别名，报 internal_path。没有长名的 `~N` 名字按字面新建，不加额外规则 | 实测同一路径两次解析逐字节相同；已有长名的别名命中同一个文件（wx 报 EEXIST） |
 | Windows 尾点/尾空格/保留设备名/ADS | 解析后逐段检查：段里有 `:`、以点或空格结尾、保留设备名（CON、PRN、AUX、NUL、COM0–9、LPT0–9、上标 ¹²³ 变体、CONIN$、CONOUT$，不分大小写，带不带扩展名）都报 path_syntax；盘符相对和根相对路径也在这一步之前拒绝 | 实测 Node 按字面建这些文件，Win32 程序把它们当成设备或去掉尾部字符，两边理解不一致；ADS 的“新建”写进已有文件的流，绕过对已有文件的检查 |
 | macOS 大小写/Unicode 规范化/Data 别名 | realpath.native + dev/ino identity + lstat；不做字符串 case-fold 保证 | APFS 大小写/Unicode 语义交由文件系统与 identity；仍有 check-then-open 残余 |
 | 其他平台（无 Node 内建语义 / 未知平台） | file_scope_unsupported | 不退回未校验的普通 fs 路径操作 |
