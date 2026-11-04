@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template as k4template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration } from './host';
@@ -47,6 +47,10 @@ it('archives a settled root out of the window, replays its input, and refuses a 
   expect(state.turns[first]).toBeUndefined();
   expect(state.commands?.[hash(['input', 'main', 'k1'])]).toBeUndefined();
   const revision = state.revision;
+  // #1407: the moved record still answers inputRoot, and the read changes no ledger state.
+  const archived = ledger.snapshot();
+  expect(bot.inputRoot('k1')).toBe(first);
+  expect(ledger.snapshot()).toEqual(archived);
   // A retry of the owner input replays its moved record.
   expect(await bot.input('k1', 'hello')).toBe(first);
   expect(bot.snapshot().revision).toBe(revision);
@@ -56,6 +60,22 @@ it('archives a settled root out of the window, replays its input, and refuses a 
   expect(ledger.compact({ acknowledgedIntentKeys: [first], ...retention, tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS })).toMatchObject({ compactedIntents: 1 });
   await bot.drain();
   expect(bot.snapshot().turns[first]).toBeUndefined();
+});
+
+it('reads the root of an input whose drain threw, without a drain or a write, also after a restart (#1407)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'k8-input-root-')), file = join(root, 'host.sqlite'); roots.push(root);
+  const options = { botId: 'main', execution: template, connector: async () => ({}) };
+  const open = () => { const ledger = new HostLedger(file, 'tenant', { compactVeto: botCompactVeto });
+    return { ledger, bot: new BotCollaboration(server as never, ledger, options) }; };
+  const { ledger, bot } = open();
+  const drain = vi.spyOn(bot as unknown as { process(): Promise<void> }, 'process').mockRejectedValueOnce(new Error('drain failed'));
+  await expect(bot.input('k1', 'hello')).rejects.toThrow('drain failed');
+  const before = ledger.snapshot(), turn = bot.inputRoot('k1');
+  expect([turn && bot.snapshot().turns[turn]?.source, bot.inputRoot('k2'), drain.mock.calls.length]).toEqual(['user', undefined, 1]);
+  expect(ledger.snapshot()).toEqual(before);
+  await bot.close(); ledger.close();
+  const restarted = open(); closers.push(() => restarted.ledger.close(), () => restarted.bot.close());
+  expect([restarted.bot.inputRoot('k1'), restarted.bot.inputRoot('k2')]).toEqual([turn, undefined]);
 });
 
 it('L: refuses a Turn that still has its K4 intent and is not reported, and a routine Turn with an open occurrence', () => {

@@ -1,9 +1,10 @@
-export { BotCollaboration, IntentOutcomeError } from './host';
+export { BotCollaboration, DelegationError, HostIntentError, IntentOutcomeError } from './host';
 export { botCompactVeto } from './compaction';
 export { RetentionRefused, retainRoots } from './retention';
 export type { RetentionFacts, RetentionInput, RetentionRefusedCode, RetentionLimits, RetentionResult, RetentionStore } from './retention';
 export { refuseRetired, retiredIdentity, RetiredIdentityError, type AdmittedIds, type RetiredNamespace } from './rules/commands';
-export type { AgentMessageInput, BotOptions, HostIntentHandler, HostIntentMessageHandler, MessageServer } from './host';
+export type { AgentMessageInput, BotOptions, DelegationCancelResult, HostIntentCancelResult, HostIntentHandler, HostIntentMessageHandler, MessageServer,
+  TurnCancelResult } from './host';
 export type { MessageDisposition } from './rules/message';
 export { contextTurns, historyRowFromTurn, type ContextTurn } from './rules/context';
 export { classifyInbound, inboundKey } from './channel';

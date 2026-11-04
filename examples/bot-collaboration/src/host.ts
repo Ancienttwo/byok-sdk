@@ -8,9 +8,9 @@ import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOpti
 import type { HostJobHandler, Routine } from '@byok-sdk/server/execution-core';
 import { HostLedger, type Conclusion } from '@byok-sdk/server/execution-core';
 import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
-import { json, stateOf, type CollaborationState, type Turn } from './model';
+import { json, stateOf, type CollaborationState, type Turn, type Verdict } from './model';
 import { contextTurns, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
-import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
+import { cancellable, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
 import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, expireCards, replyCheckDue, reportCardDecisions,
   commandBots, type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
@@ -163,9 +163,13 @@ export class IntentOutcomeError extends Error {
     super(message); this.name = 'IntentOutcomeError';
   }
 }
-/** `cancelHostIntent` refuses a key that is no Host intent (#1320): `unknown_intent` as in `IntentOutcomeError`, or a Bot Turn. */
+/**
+ * A refused intent key. `cancelHostIntent` (#1320): `unknown_intent` as in `IntentOutcomeError`, or `not_host_intent` for a Bot
+ * Turn. `failStuckIntent` (#1405): `unknown_intent` for a key with no K4 intent, `already_settled`, or `not_stuck` for an intent
+ * whose terminal K8 did not refuse.
+ */
 export class HostIntentError extends Error {
-  constructor(readonly key: string, readonly code: 'unknown_intent' | 'not_host_intent', message: string) {
+  constructor(readonly key: string, readonly code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck', message: string) {
     super(message); this.name = 'HostIntentError';
   }
 }
@@ -174,15 +178,60 @@ export class HostIntentError extends Error {
  * settles the intent at its terminal. `already_settled`: no cancel was sent; `conclusion` is the earlier one.
  */
 export interface HostIntentCancelResult { key: string; result: 'cancelled' | 'cancel_pending' | 'already_settled'; conclusion?: Conclusion }
+/**
+ * `cancelTurn` refuses with `cancelDelegation`'s codes on a chain Turn, and `cancelDelegation` with `unknown_delegation` or with
+ * `not_cancellable` for a delegation whose state a cancel cannot act on: end a `reply_held` or `uncertain` one with
+ * `abandonDelegation` (#1405). `key` is the delegation id. A delegation is no intent key, so this is not a `HostIntentError`.
+ */
+export class DelegationError extends Error {
+  constructor(readonly key: string, readonly code: 'unknown_delegation' | 'not_cancellable', message: string) {
+    super(message); this.name = 'DelegationError';
+  }
+}
+/**
+ * `cancelTurn` and `cancelDelegation` (#1405), read from the ledger, so a replay or a restart gives the same answer.
+ * `cancelled`: this call committed the cancel. `cancel_pending`: an earlier cancel has no terminal yet, so this call writes
+ * nothing and sends no cancel. `already_settled`: the target had ended, and this call writes nothing; `conclusion` is the
+ * Turn's earlier one (the K4 intent's when the Turn has one) and `verdict` the delegation's.
+ */
+export interface TurnCancelResult { turnId: string; result: HostIntentCancelResult['result']; conclusion?: string }
+export interface DelegationCancelResult { delegationId: string; result: HostIntentCancelResult['result']; verdict?: Verdict }
 function hostIntent(state: CollaborationState, key: string): { handler: string } | undefined {
   return state.hostIntents && Object.hasOwn(state.hostIntents, key) ? state.hostIntents[key] : undefined;
 }
 /** The open K4 intent of `key`. Refuses an unknown or settled key. */
 function openIntent(intents: LedgerState['intents'], key: string): Intent {
   const intent = intents[hash(key)];
-  if (!intent) throw new Error(`Unknown intent: ${key}`);
-  if (intent.conclusion) throw new Error(`Intent already settled: ${key}`);
+  if (!intent) throw new HostIntentError(key, 'unknown_intent', `Unknown intent: ${key}`);
+  if (intent.conclusion) throw new HostIntentError(key, 'already_settled', `Intent already settled: ${key}`);
   return intent;
+}
+/**
+ * The answer of a delegation cancel that writes nothing, or `undefined` when the cancel commits. Refuses before any write what
+ * `arbitrateCancel` would refuse, with a code.
+ */
+function settledDelegationCancel(state: CollaborationState, id: string): Omit<DelegationCancelResult, 'delegationId'> | undefined {
+  const d = Object.hasOwn(state.delegations, id) ? state.delegations[id]! : undefined;
+  if (!d) throw new DelegationError(id, 'unknown_delegation', 'Delegation not found');
+  if (d.verdict) return { result: 'already_settled', verdict: d.verdict };
+  if (d.cancel) return { result: 'cancel_pending' };
+  if (!cancellable(d.status)) throw new DelegationError(id, 'not_cancellable', 'Delegation cannot be cancelled in this state; use abandonDelegation');
+  return undefined;
+}
+/**
+ * The answer of a Turn cancel that writes nothing, or `undefined` when the cancel commits. It follows the `cancel_turn` rule:
+ * a chain Turn with no verdict is its delegation's cancel, an input names its batch, and an open batch commits its seal.
+ * A missing Turn commits, so the rule refuses it.
+ */
+function settledTurnCancel(s: LedgerState, id: string): Omit<TurnCancelResult, 'turnId'> | undefined {
+  const state = stateOf(s.application), chain = state.turns[id]?.delegationId;
+  if (chain && !state.delegations[chain]!.verdict) return settledDelegationCancel(state, chain);
+  const input = state.inputs?.[id], batch = input && state.inputBatches![input.batchId]!;
+  if (batch?.state === 'open') return undefined;
+  const target = batch ? batch.id : id, turn = state.turns[target], intent = s.intents[hash(target)];
+  if (!turn) return undefined;
+  if (intent) return intent.conclusion ? { result: 'already_settled', conclusion: intent.conclusion } : intent.cancelReason ? { result: 'cancel_pending' } : undefined;
+  return turn.conclusion ? { result: 'already_settled', conclusion: turn.conclusion } : undefined;
 }
 /** Phase 1 of a history-mode sync: the injected rows of each Turn that can freeze its offer next, by Turn id. */
 interface InjectedHistory {
@@ -409,6 +458,18 @@ export class BotCollaboration {
     });
   }
   /**
+   * Read-only (#1407): the id that `input` returned for this key, from its command record, or `undefined` when the
+   * input is not committed. It runs no `process()` and changes no ledger state, so a caller can tell whether an `input`
+   * that threw on its drain committed. A record that retention moved is read from its K4 row in a transaction that writes
+   * nothing new; once that row expires, the key reads as not committed.
+   */
+  inputRoot(key: string, botId = this.options.botId): string | undefined {
+    const id = hash(['input', botId, key]), commands = stateOf(this.ledger.snapshot().application).commands;
+    const record = commands && Object.hasOwn(commands, id) ? commands[id]
+      : this.ledger.transaction((_, rows) => rows.get('commands', id) as CommandRecord | undefined);
+    return record && turnOf(record.result);
+  }
+  /**
    * IM entry (#552). Classify one message that the channel adapter translated (docs/host-im-adapter.md §3).
    * The input key is `inboundKey(message)`. Only audit rows record a refused or 1:1 bot message.
    * `id` is the Turn id of `owner_input`, or the room input id of `room_input` and `bot_background`.
@@ -612,9 +673,10 @@ export class BotCollaboration {
    * moves on. A fresh K4 drain decides that the intent is stuck, so the call also works right after a restart. One transaction
    * settles it and writes the audit row. The settle runs no handler, and the intent records no terminal; the server task
    * keeps it. The drain before the settle applies the terminal once more, so a `handler_failed` handler runs once inside
-   * the call. If that drain applies the outcome, the call refuses with `Intent already settled`.
-   * A Host intent keeps its `hostIntents` record until K4 compacts it, so an exact replay of `enqueueHostIntent` returns
-   * the failed intent. Refuses an unknown key, a settled intent, and an intent whose terminal K8 did not refuse.
+   * the call. If that drain applies the outcome, the call refuses with `already_settled`. A Bot Turn records the refusal
+   * code as its `settleCode`. A Host intent keeps its `hostIntents` record until K4 compacts it, so an exact replay of
+   * `enqueueHostIntent` returns the failed intent. Refuses with `HostIntentError`: `unknown_intent`, `already_settled`, and
+   * `not_stuck` for an intent whose terminal K8 did not refuse.
    */
   failStuckIntent(key: string, ...by: PrincipalArg): Promise<void> {
     return this.exclusive(async () => {
@@ -626,8 +688,10 @@ export class BotCollaboration {
       const refused = this.intentFailures.get(key);
       this.write(s => {
         const intent = openIntent(s.intents, key);
-        if (!refused) throw drained ? drained.error : new Error(`Intent is not stuck: ${key} has no refused terminal`);
+        if (!refused) throw drained ? drained.error : new HostIntentError(key, 'not_stuck', `Intent is not stuck: ${key} has no refused terminal`);
         settle(s, intent, 'failed');
+        // Only a Bot Turn's outcome commit refuses with `outcome_failed`, so the key is a Turn.
+        if (refused.code === 'outcome_failed') stateOf(s.application).turns[key]!.settleCode = refused.code;
         stateOf(s.application).audit.push(`Intent failed by owner ${refused.code}: ${key} ${refused.message}`.slice(0, 1024));
       });
       this.intentFailures.delete(key);
@@ -693,13 +757,17 @@ export class BotCollaboration {
     return disposition.outcome === 'accepted' ? { outcome: 'accepted' } : { outcome: 'refused', reasonCode: disposition.reasonCode };
   }
   /**
-   * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn.
+   * Owner API ("Cancel", §8.8), from A's delegation chip or from B's `bot_request` Turn. Idempotent (#1405): an earlier cancel
+   * gives `cancel_pending` and a verdict `already_settled`, and neither writes or sends. Refuses with `DelegationError`.
    * It rejects when `core.cancel` fails. The cancel fact is already committed, and the timer delivers it later.
    */
-  cancelDelegation(id: string, ...by: PrincipalArg): Promise<void> {
-    return this.exclusive(() => {
+  cancelDelegation(id: string, ...by: PrincipalArg): Promise<DelegationCancelResult> {
+    return this.exclusive(async () => {
       this.ownerOnly(by, 'cancelDelegation', id);
-      return this.settleChain(this.commitKeyless({ kind: 'cancel_delegation', delegationId: id }));
+      const settled = settledDelegationCancel(this.snapshot(), id);
+      if (settled) return { delegationId: id, ...settled };
+      await this.settleChain(this.commitKeyless({ kind: 'cancel_delegation', delegationId: id }));
+      return { delegationId: id, result: 'cancelled' };
     });
   }
   /** Owner API ("End", §8.3): close a held reply or an uncertain delegation with `abandoned`. */
@@ -899,18 +967,29 @@ export class BotCollaboration {
     try { await this.core.consume(wake, signal); } finally { await this.process(); }
   });
   drain(): Promise<void> { return this.exclusive(() => this.process()); }
-  cancelTurn(id: string, ...by: PrincipalArg): Promise<void> {
+  /**
+   * Owner API. Cancels a Turn, an input batch by its id or a member input id, or B's chain Turn through its delegation.
+   * Idempotent (#1405): a Turn whose K4 intent already has a cancel gives `cancel_pending`, and an ended Turn
+   * `already_settled`; neither writes or calls `core.cancel`.
+   */
+  cancelTurn(id: string, ...by: PrincipalArg): Promise<TurnCancelResult> {
     return this.exclusive(async () => {
       this.ownerOnly(by, 'cancelTurn', id);
-      await this.cancelOneTurn(id);
+      return this.cancelOneTurn(id);
     });
   }
-  private async cancelOneTurn(id: string): Promise<void> {
+  private async cancelOneTurn(id: string): Promise<TurnCancelResult> {
+    // The read and the commit run in one synchronous step, so no K4 transaction lands between them.
+    const settled = settledTurnCancel(this.ledger.snapshot(), id);
+    if (settled) return { turnId: id, ...settled };
     const result = this.commitKeyless({ kind: 'cancel_turn', turnId: id });
     const value = valueOf<{ deliver: boolean } | { target: string; admitted: boolean }>(result);
-    if ('deliver' in value) return this.settleChain(result);
-    if (value.admitted) await this.core.cancel(value.target);
-    await this.process();
+    if ('deliver' in value) await this.settleChain(result);
+    else {
+      if (value.admitted) await this.core.cancel(value.target);
+      await this.process();
+    }
+    return { turnId: id, result: 'cancelled' };
   }
   /** The L owner record of a device (#957, §4.1). A device with no record is L at revision 0. */
   topology(deviceId: string): DeviceTopology { return deviceTopology(this.snapshot(), deviceId); }
