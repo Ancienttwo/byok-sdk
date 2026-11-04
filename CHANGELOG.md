@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed (client; #1437)** — `requestDeviceAssertion` and
+  `requestTaskAssertion` wait up to 90 s for the daemon by default instead of
+  the generic 10 s control timeout. Both handlers read the device record from
+  the OS credential store on every call, and on Windows a cold read first
+  compiles the credential bridge under a 60 s deadline, so the first assertion
+  after a daemon start could time out before the read finished. An explicit
+  `timeoutMs` still wins.
+
 ## 0.38.0 — 2026-11-04 (published)
 
 0.38.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

@@ -3233,6 +3233,14 @@ import { type AssertionIssueErrorCode, type TaskAssertionIssueErrorCode } from '
  * the index exports nothing else. See also `daemon/control-client.ts`'s own doc
  * comment for why connecting never throws.
  */
+/**
+ * The default control request timeout for `assertion.issue` and
+ * `task_assertion.issue`. Both handlers read the device record from the OS
+ * credential store on every call, and on Windows one read can take the
+ * credential bridge's 60 s compile deadline plus its 15 s command deadline, so
+ * the generic 10 s cannot cover it.
+ */
+export declare const ASSERTION_REQUEST_TIMEOUT_MS = 90000;
 export interface RequestDeviceAssertionOptions {
     /** Same `productId` the daemon was configured with — selects which daemon's socket to dial. */
     productId: string;
@@ -3240,7 +3248,7 @@ export interface RequestDeviceAssertionOptions {
     storeDir?: string;
     /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
     audience: string;
-    /** Bound on the control-socket round trip, ms. Default 10s (the control client's own default). */
+    /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
     timeoutMs?: number;
 }
 /**
@@ -3312,7 +3320,7 @@ export interface RequestTaskAssertionOptions {
     contextToken: string;
     /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
     audience: string;
-    /** Bound on the control-socket round trip, ms. Default 10s (the control client's own default). */
+    /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
     timeoutMs?: number;
 }
 /**

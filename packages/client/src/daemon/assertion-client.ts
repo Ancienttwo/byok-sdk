@@ -29,6 +29,15 @@ import { DeviceStore } from './store';
  * comment for why connecting never throws.
  */
 
+/**
+ * The default control request timeout for `assertion.issue` and
+ * `task_assertion.issue`. Both handlers read the device record from the OS
+ * credential store on every call, and on Windows one read can take the
+ * credential bridge's 60 s compile deadline plus its 15 s command deadline, so
+ * the generic 10 s cannot cover it.
+ */
+export const ASSERTION_REQUEST_TIMEOUT_MS = 90_000;
+
 export interface RequestDeviceAssertionOptions {
   /** Same `productId` the daemon was configured with — selects which daemon's socket to dial. */
   productId: string;
@@ -36,7 +45,7 @@ export interface RequestDeviceAssertionOptions {
   storeDir?: string;
   /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
   audience: string;
-  /** Bound on the control-socket round trip, ms. Default 10s (the control client's own default). */
+  /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
   timeoutMs?: number;
 }
 
@@ -94,7 +103,7 @@ export async function requestDeviceAssertion(
   const connected = await connectControlClient({
     storeDir,
     productId: options.productId,
-    ...(options.timeoutMs === undefined ? {} : { requestTimeoutMs: options.timeoutMs }),
+    requestTimeoutMs: options.timeoutMs ?? ASSERTION_REQUEST_TIMEOUT_MS,
   });
   if (!connected.ok) return { ok: false, code: 'unavailable', reason: connected.reason };
 
@@ -146,7 +155,7 @@ export interface RequestTaskAssertionOptions {
   contextToken: string;
   /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
   audience: string;
-  /** Bound on the control-socket round trip, ms. Default 10s (the control client's own default). */
+  /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
   timeoutMs?: number;
 }
 
@@ -192,7 +201,7 @@ export async function requestTaskAssertion(
   const connected = await connectControlClient({
     storeDir,
     productId: options.productId,
-    ...(options.timeoutMs === undefined ? {} : { requestTimeoutMs: options.timeoutMs }),
+    requestTimeoutMs: options.timeoutMs ?? ASSERTION_REQUEST_TIMEOUT_MS,
   });
   if (!connected.ok) return { ok: false, code: 'unavailable', reason: connected.reason };
 
