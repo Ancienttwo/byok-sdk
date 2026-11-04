@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.37.0 — source candidate
+## 0.37.0 — 2026-11-04 (published)
 
 0.37.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 The upgrade manifest that `@byok-sdk/client` ships
@@ -12,7 +12,7 @@ Host-visible changes since 0.36.0 that change an API, config or example item:
 (`PROTOCOL_VERSION = 5`) with an unchanged corpus. There is no new Postgres
 migration and no SQLite schema change; Pi 1.5.0 migrates pi-durable replicas
 forward on open, so a device or Durable Object cannot roll back past this
-release. See the [0.37.0 candidate notes](docs/releases/v0.37.0.md) and the
+release. See the [0.37.0 release notes](docs/releases/v0.37.0.md) and the
 [Host upgrade checklist](docs/releases/host-upgrade-0.37.0.md). The breaking
 changes: `bot-turn-outcome.v1` runs every rule that reads only the outcome,
 and the routine calendar moves from core to protocol (protocol, core and K8,
@@ -23,6 +23,10 @@ values (client, #1317); the official Pi closure is pinned to exactly 1.5.0
 (client, cloud-do and keys); and on Windows the keys launcher requires the
 OWNER RIGHTS ACE that the client grants, so `@byok-sdk/client` and
 `@byok-sdk/keys` must run at the same version (client and keys, #1373).
+The npm registry lists all nine public packages at 0.37.0 as `latest`,
+published on 2026-11-04 (UTC). The release commit is `1ba3779fd` on `main`,
+and the annotated tag `v0.37.0` and its GitHub Release point to it. This
+release does not say that 0.37.0, or a Host on it, is ready for production.
 
 - **Breaking (client)** — On Windows, the `login-shell` runtime environment
   base takes `PATH` and `PATHEXT` from the logon registry values instead of
