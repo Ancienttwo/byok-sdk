@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.38.0 — source candidate
+## 0.38.0 — 2026-11-04 (published)
 
 0.38.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 The upgrade manifest that `@byok-sdk/client` ships
@@ -14,7 +14,7 @@ is a gated addition behind the new device flag
 `agent-home-projection-host-revision`, and the v5 corpus gains one envelope
 line. There is no new Postgres migration and no SQLite schema change, and the
 Pi closure stays at 1.5.0. See the
-[0.38.0 candidate notes](docs/releases/v0.38.0.md) and the
+[0.38.0 release notes](docs/releases/v0.38.0.md) and the
 [Host upgrade checklist](docs/releases/host-upgrade-0.38.0.md). The breaking
 change: K8 `cancelTurn` and `cancelDelegation` are idempotent and return
 results read from the ledger, and the K8 refusals carry codes (examples,
@@ -26,6 +26,10 @@ scoped file tools could read and write the Agent home's `.byok` through a
 case variant such as `.BYOK/x` (client, #1426). It also fixes
 `byok-agent pair` against a running service, which reported a control timeout
 after 10 s while the pairing went on to succeed (client, #1434).
+The npm registry lists all nine public packages at 0.38.0 as `latest`,
+published on 2026-11-04 (UTC). The release commit is `47a3ac47c` on `main`,
+and the annotated tag `v0.38.0` and its GitHub Release point to it. This
+release does not say that 0.38.0, or a Host on it, is ready for production.
 
 - **Breaking (examples)** — K8 `cancelTurn` and `cancelDelegation` are
   idempotent and return a result in the shape of `cancelHostIntent` (#1405):
