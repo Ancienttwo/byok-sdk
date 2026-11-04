@@ -24,7 +24,7 @@ export const TOOL_FILE_ACCESS: readonly ToolFileAccess[] = Object.freeze(['read'
  * Host configures, never a model or wire value.
  */
 export interface ToolFileScopeRoot {
-  /** Unique, nonempty local label; never emitted on the wire. */
+  /** Unique, nonempty local label; never emitted on the wire. `home` and `run` are reserved. */
   readonly id: string;
   /** Absolute local path; canonicalized and identity-checked at admission, not here. */
   readonly path: string;
@@ -35,12 +35,14 @@ export interface ToolFileScopeRoot {
 /**
  * The optional explicit file scope of a tool-authorization policy (#1061
  * slice 1, D15). Absent means `inherit`: the current behavior is unchanged.
- * `home` authorizes read+write of the canonical Agent home; `workspaces`
- * additionally authorizes the listed roots. Only legal when the offer's
+ * `home` authorizes the canonical Agent home; `workspaces` additionally
+ * authorizes the listed roots. A writer task gets the home read+write; a
+ * memory-reader task gets the home read-only plus read+write of its own run
+ * directory (`<home>/.byok/runs/<name>`, its cwd). Only legal when the offer's
  * effective mode is `auto`.
  */
 export interface ToolFileScope {
-  /** `home` always grants read+write of the canonical Agent home. */
+  /** `home` grants the canonical Agent home: read+write for a writer, read-only for a memory reader. */
   readonly mode: 'home' | 'workspaces';
   /** Only for `workspaces`; at least one unique-id, existing absolute root. */
   readonly roots?: readonly ToolFileScopeRoot[];
@@ -251,6 +253,8 @@ function parseByRuntime(value: unknown): Readonly<Record<string, ToolAuthorizati
 const MAX_FILE_SCOPE_ROOTS = 32;
 const MAX_FILE_SCOPE_ID_CHARS = 128;
 const MAX_FILE_SCOPE_PATH_CHARS = 4_096;
+/** Root ids the resolved grant owns: the Agent home and a memory reader's run directory. */
+const RESERVED_FILE_SCOPE_ROOT_IDS: readonly string[] = Object.freeze(['home', 'run']);
 
 /**
  * A syntactically invalid file-scope policy. It is a `TypeError` like the
@@ -327,6 +331,9 @@ function parseFileScope(value: unknown): ToolFileScope {
       id = ruleText(root.id, 'fileScope root id', MAX_FILE_SCOPE_ID_CHARS);
     } catch (error) {
       throw new FileScopePolicyError(error instanceof Error ? error.message : 'invalid tool authorization fileScope root id');
+    }
+    if (RESERVED_FILE_SCOPE_ROOT_IDS.includes(id)) {
+      throw new FileScopePolicyError(`tool authorization fileScope root id ${JSON.stringify(id)} is reserved`);
     }
     if (ids.has(id)) throw new FileScopePolicyError(`duplicate tool authorization fileScope root id: ${id}`);
     ids.add(id);

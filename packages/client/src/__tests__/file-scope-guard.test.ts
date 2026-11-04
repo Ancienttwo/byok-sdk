@@ -42,7 +42,7 @@ async function grantWith(root: string, access: 'read' | 'write' = 'write'): Prom
   const { home, identity } = await fixture();
   return resolveFileScopeGrant({
     fileScope: { mode: 'workspaces', roots: [{ id: 'repo', path: root, access }] },
-    home: { path: home, identity },
+    attempt: { homeAccess: 'writer' }, home: { path: home, identity },
   });
 }
 
@@ -89,17 +89,17 @@ describe('file-scope guard root resolution (#1061 slice 2)', () => {
     const { home, identity } = await fixture();
     const wrong = Object.freeze({ dev: identity.dev, ino: identity.ino + 1n });
     expect(await guardReason(() => resolveFileScopeGrant({
-      fileScope: { mode: 'home' }, home: { path: home, identity: wrong },
+      fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: home, identity: wrong },
     }))).toMatchObject({ code: 'file_scope_unavailable', reason: 'root_identity_changed', rootId: 'home' });
   });
 
   it('refuses Windows and unknown platforms without touching the filesystem', async () => {
     const { home, identity } = await fixture();
     expect(await guardReason(() => resolveFileScopeGrant({
-      fileScope: { mode: 'home' }, home: { path: home, identity }, platform: 'win32',
+      fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: home, identity }, platform: 'win32',
     }))).toMatchObject({ code: 'file_scope_unsupported', reason: 'unsupported_platform' });
     expect(await guardReason(() => resolveFileScopeGrant({
-      fileScope: { mode: 'home' }, home: { path: home, identity }, platform: 'freebsd',
+      fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: home, identity }, platform: 'freebsd',
     }))).toMatchObject({ code: 'file_scope_unsupported', reason: 'unsupported_platform' });
   });
 });
@@ -213,7 +213,7 @@ describe('file-scope guard target checks (#1061 slice 2)', () => {
 
   it('refuses a path that only canonicalizes into .byok', async () => {
     const { home, identity } = await fixture();
-    const grant = await resolveFileScopeGrant({ fileScope: { mode: 'home' }, home: { path: home, identity } });
+    const grant = await resolveFileScopeGrant({ fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: home, identity } });
     const alias = path.join(home, 'alias');
     await fs.mkdir(alias);
     const io: FileScopeIo = {
@@ -223,6 +223,52 @@ describe('file-scope guard target checks (#1061 slice 2)', () => {
     expect(await guardReason(() => resolveFileScopeTarget({
       grant, path: path.join(alias, 'new.txt'), access: 'write', cwd: home, io,
     }))).toMatchObject({ code: 'file_scope_denied', reason: 'internal_path' });
+  });
+
+  async function readerGrant(): Promise<{ home: string; run: string; grant: FileScopeGrant }> {
+    const { home, identity } = await fixture();
+    const run = path.join(home, '.byok', 'runs', 'reader-1');
+    await fs.mkdir(run, { recursive: true });
+    const grant = await resolveFileScopeGrant({
+      fileScope: { mode: 'home' }, attempt: { homeAccess: 'memory-reader', cwd: run }, home: { path: home, identity },
+    });
+    return { home, run, grant };
+  }
+
+  it('gives a memory reader a read-only home and its run root, and keeps the rest of .byok internal', async () => {
+    const { home, run, grant } = await readerGrant();
+    expect(grant.home.access).toBe('read');
+    expect(grant.run).toEqual({ id: 'run', path: run, lexicalPath: run, access: 'write', identity: await identityOf(run) });
+    await fs.writeFile(path.join(home, 'notes.md'), 'memory');
+    await expect(resolveFileScopeTarget({ grant, path: path.join(home, 'notes.md'), access: 'read', cwd: run }))
+      .resolves.toMatchObject({ root: { id: 'home' }, exists: true });
+    await expect(resolveFileScopeTarget({ grant, path: 'out.txt', access: 'write', cwd: run }))
+      .resolves.toMatchObject({ root: { id: 'run' }, path: path.join(run, 'out.txt'), exists: false });
+    expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join(home, 'notes.md'), access: 'write', cwd: run })))
+      .toMatchObject({ code: 'file_scope_denied', reason: 'read_only', rootId: 'home' });
+    for (const target of [
+      path.join(home, '.byok', 'runs', 'other', 'x.txt'), path.join(home, '.byok', 'agent-home.lease'),
+      path.join(run, '.byok', 'x.txt'), path.join(home, '.BYOK', 'runs', 'reader-1', 'x.txt'),
+    ]) {
+      expect(await guardReason(() => resolveFileScopeTarget({ grant, path: target, access: 'read', cwd: run })))
+        .toMatchObject({ code: 'file_scope_denied', reason: 'internal_path' });
+    }
+  });
+
+  it('refuses a run-root symlink into home and an alias that reaches the run root through home', async () => {
+    const { home, run, grant } = await readerGrant();
+    await fs.symlink(home, path.join(run, 'link'), 'dir');
+    expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join(run, 'link', 'x.txt'), access: 'write', cwd: run })))
+      .toMatchObject({ code: 'file_scope_denied', reason: 'symlink', rootId: 'run' });
+    await expect(fs.access(path.join(home, 'x.txt'))).rejects.toThrow();
+    const alias = path.join(home, 'alias');
+    await fs.mkdir(alias);
+    const io: FileScopeIo = {
+      ...nodeFileScopeIo,
+      realpath: async (candidate) => candidate === alias ? run : nodeFileScopeIo.realpath(candidate),
+    };
+    expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join(alias, 'x.txt'), access: 'read', cwd: run, io })))
+      .toMatchObject({ code: 'file_scope_denied', reason: 'internal_path' });
   });
 
   it('expands ~ to the OS home and then treats it as outside the scope', async () => {

@@ -177,6 +177,8 @@ describe('parseToolAuthorizationPolicy fileScope (#1061 slice 1)', () => {
       { id: 'repo', path: '/workspace/repo', access: 'write' },
       { id: 'repo', path: '/workspace/other', access: 'read' },
     ] }],
+    ['the reserved home root id', { mode: 'workspaces', roots: [{ id: 'home', path: '/workspace/repo', access: 'write' }] }],
+    ['the reserved run root id', { mode: 'workspaces', roots: [{ id: 'run', path: '/workspace/repo', access: 'write' }] }],
   ])('rejects %s with the typed file-scope error', (_label, fileScope) => {
     expect(() => parseToolAuthorizationPolicy({ default: 'auto', fileScope }))
       .toThrow(FileScopePolicyError);
@@ -289,21 +291,20 @@ describe('fileScope admission support matrix (#1061)', () => {
   const durablePi = new PiAdapter({ durableLane: true }).descriptor;
   const claude = { id: 'claude' };
   it.each([
-    ['ordinary Pi RPC on darwin', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }],
-    ['ordinary Pi RPC on linux', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }],
-    ['the Pi prepared lane', { descriptor: pi, lane: 'prepared' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }],
-    ['the durable Pi worker', { descriptor: durablePi, lane: 'durable' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }],
-    ['any runtime that declares the lane', { descriptor: { id: 'acme', fileScope: { lanes: ['rpc' as const] } }, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }],
+    ['ordinary Pi RPC on darwin', { descriptor: pi, lane: 'rpc' as const, platform: 'darwin' as NodeJS.Platform }],
+    ['ordinary Pi RPC on linux', { descriptor: pi, lane: 'rpc' as const, platform: 'linux' as NodeJS.Platform }],
+    ['the Pi prepared lane', { descriptor: pi, lane: 'prepared' as const, platform: 'darwin' as NodeJS.Platform }],
+    ['the durable Pi worker', { descriptor: durablePi, lane: 'durable' as const, platform: 'linux' as NodeJS.Platform }],
+    ['any runtime that declares the lane', { descriptor: { id: 'acme', fileScope: { lanes: ['rpc' as const] } }, lane: 'rpc' as const, platform: 'linux' as NodeJS.Platform }],
   ])('admits %s', (_label, facts) => {
     expect(fileScopeAdmission(facts)).toEqual({ supported: true });
   });
 
   it.each([
-    ['another runtime', { descriptor: claude, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }, /runtime claude/],
-    ['a runtime named pi that declares no scope', { descriptor: { id: 'pi' }, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }, /runtime pi cannot enforce/],
-    ['a lane the adapter does not declare', { descriptor: pi, lane: 'durable' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }, /durable lane of this runtime/],
-    ['a memory-reader offer', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'memory-reader' as const, platform: 'darwin' as NodeJS.Platform }, /memory-reader/],
-    ['Windows', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'win32' as NodeJS.Platform }, /not supported on win32/],
+    ['another runtime', { descriptor: claude, lane: 'rpc' as const, platform: 'darwin' as NodeJS.Platform }, /runtime claude/],
+    ['a runtime named pi that declares no scope', { descriptor: { id: 'pi' }, lane: 'rpc' as const, platform: 'darwin' as NodeJS.Platform }, /runtime pi cannot enforce/],
+    ['a lane the adapter does not declare', { descriptor: pi, lane: 'durable' as const, platform: 'linux' as NodeJS.Platform }, /durable lane of this runtime/],
+    ['Windows', { descriptor: pi, lane: 'rpc' as const, platform: 'win32' as NodeJS.Platform }, /not supported on win32/],
   ])('refuses %s', (_label, facts, reason) => {
     const admission = fileScopeAdmission(facts);
     expect(admission.supported).toBe(false);
@@ -464,5 +465,28 @@ describe('fileScope root validation at task start (#1061 slice 2)', () => {
     expect(audits).toEqual([expect.objectContaining({
       decision: 'deny', rootId: 'repo', access: 'read', code: 'file_scope_unavailable', reason: 'symlink',
     })]);
+  });
+});
+
+describe('fileScope for memory-reader attempts (#1422)', () => {
+  it('binds a read-only home and the lease run directory, which is the handoff run directory on resume', async () => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const audits: FileScopeAudit[] = [];
+    const runner = makeRunner(adapter, sent, () => ({ default: 'auto', fileScope: { mode: 'home' } }),
+      { onFileScopeAudit: (event) => audits.push(event) });
+    const agentRef = freshTestAgentRef();
+    const readerOffer = (taskId: string, session: typeof FRESH_OFFER | { session: { mode: 'resume'; sessionRef: string } }) => runner.handleEnvelope(createEnvelope(
+      'task.offer', { agentRef, ...session, instruction: 'read memory', homeAccess: 'memory-reader' }, { taskId, seq: 1 }));
+    await readerOffer('reader-fresh', FRESH_OFFER);
+    const fresh = fileScopeGateBinding(adapter.inputs[0]!.toolAuthorization!)!.grant;
+    expect(fresh).toMatchObject({ home: { access: 'read' }, run: { id: 'run', access: 'write', path: adapter.inputs[0]!.manifest.cwd } });
+    expect(fresh.run!.path).toBe(path.join(fresh.home.path, '.byok', 'runs', 'reader-fresh'));
+    expect(audits).toEqual([expect.objectContaining({ decision: 'policy-adoption', homeAccess: 'memory-reader', rootIds: ['home', 'run'] })]);
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+    await readerOffer('reader-resume', { session: { mode: 'resume' as const, sessionRef: adapter.sessions[0]!.sessionRef } });
+    expect(declineReason(sent)).toBeUndefined();
+    expect(fileScopeGateBinding(adapter.inputs[1]!.toolAuthorization!)!.grant.run!.path).toBe(fresh.run!.path);
   });
 });

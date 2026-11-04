@@ -40,7 +40,7 @@ async function identityOf(filePath: string): Promise<FileScopeIdentity> {
 }
 
 async function homeGrant(home: string): Promise<FileScopeGrant> {
-  return resolveFileScopeGrant({ fileScope: { mode: 'home' }, home: { path: home, identity: await identityOf(home) } });
+  return resolveFileScopeGrant({ fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: home, identity: await identityOf(home) } });
 }
 
 function gateConfig(fileScope?: SerializedFileScopeGrant, required = true): ToolAuthorizationIpcConfig {

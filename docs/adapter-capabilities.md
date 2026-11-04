@@ -1042,8 +1042,10 @@ built-in runtime name does not inherit them.
 - `RuntimeAdapterDescriptor.fileScope: { lanes }`: the lanes on which the
   adapter enforces an explicit `ToolAuthorizationPolicy.fileScope` (#1061).
   A scoped offer on any other lane, or on an adapter without the declaration,
-  declines before claim with `file_scope_unsupported`. Memory-reader offers
-  and platforms other than darwin and linux still decline. `PiAdapter`
+  declines before claim with `file_scope_unsupported`. Platforms other than
+  darwin and linux still decline. Writer and memory-reader offers are admitted
+  alike; a reader's grant makes the home read-only and adds its run directory
+  as a writable `run` root. `PiAdapter`
   declares `['rpc', 'prepared']`, and `['durable']` with `durableLane: true`.
 - `RuntimeAdapterDescriptor.providerProfileBinding: true`: the adapter runs an
   exact `byok-profile` dispatch selection. The daemon advertises

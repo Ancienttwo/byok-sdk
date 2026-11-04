@@ -79,9 +79,15 @@ export interface FileScopeRootGrant {
 /** The immutable grant an admitted offer hands to the scoped tools. */
 export interface FileScopeGrant {
   readonly mode: 'home' | 'workspaces';
-  /** The canonical Agent home; always read+write and never absent. */
+  /** The canonical Agent home; never absent. Read+write for a writer, read-only for a memory reader. */
   readonly home: FileScopeRootGrant;
-  /** Explicit workspace roots only; home is carried separately. */
+  /**
+   * A memory reader's own run directory (`<home>/.byok/runs/<name>`, the
+   * reader lease's cwd), read+write. Present only for a memory reader; it is
+   * the one path under `.byok` that is not internal.
+   */
+  readonly run?: FileScopeRootGrant;
+  /** Explicit workspace roots only; home and run are carried separately. */
   readonly roots: readonly FileScopeRootGrant[];
   /** Stable digest over the canonical grant; audit/log only, never a wire value. */
   readonly digest: string;
@@ -235,15 +241,31 @@ async function resolveRoot(
   });
 }
 
+/**
+ * The home access of this attempt. A writer owns the home read+write. A
+ * memory reader reads the home and writes only its run directory: the cwd of
+ * its reader lease, which on resume is the run directory the session handoff
+ * recorded, so it is never derived from the task id.
+ */
+export type FileScopeAttempt =
+  | { readonly homeAccess: 'writer' }
+  | { readonly homeAccess: 'memory-reader'; readonly cwd: string };
+
 export interface ResolveFileScopeGrantInput {
   readonly fileScope: ToolFileScope;
-  /** The canonical Agent home and the writer-lease identity captured for this offer. */
+  /** The canonical Agent home and the lease identity captured for this offer. */
   readonly home: { readonly path: string; readonly identity: FileScopeIdentity };
+  readonly attempt: FileScopeAttempt;
   readonly platform?: NodeJS.Platform;
   readonly io?: FileScopeIo;
 }
 
-function digestGrant(mode: 'home' | 'workspaces', home: FileScopeRootGrant, roots: readonly FileScopeRootGrant[]): string {
+function digestGrant(
+  mode: 'home' | 'workspaces',
+  home: FileScopeRootGrant,
+  run: FileScopeRootGrant | undefined,
+  roots: readonly FileScopeRootGrant[],
+): string {
   const rootJson = (root: FileScopeRootGrant) => ({
     id: root.id,
     path: root.path,
@@ -256,6 +278,7 @@ function digestGrant(mode: 'home' | 'workspaces', home: FileScopeRootGrant, root
     version: 1,
     mode,
     home: rootJson(home),
+    ...(run === undefined ? {} : { run: rootJson(run) }),
     roots: roots.map(rootJson),
   })).digest('hex');
 }
@@ -272,17 +295,22 @@ export function fileScopePolicyDigest(fileScope: ToolFileScope): string {
 /**
  * Verify every configured root exists, is a real directory (not a symlink),
  * canonicalizes under its canonical parent and still has the expected identity.
- * The Agent home identity comes from the writer lease, never from cwd text.
+ * The Agent home identity comes from the lease, never from cwd text; a memory
+ * reader's run root is resolved by the same rules.
  */
 export async function resolveFileScopeGrant(input: ResolveFileScopeGrantInput): Promise<FileScopeGrant> {
   const platform = input.platform ?? process.platform;
   assertPlatform(platform);
   const io = input.io ?? nodeFileScopeIo;
+  const { attempt } = input;
   const home = await resolveRoot(
-    { id: 'home', path: input.home.path, access: 'write' },
+    { id: 'home', path: input.home.path, access: attempt.homeAccess === 'memory-reader' ? 'read' : 'write' },
     io,
     input.home.identity,
   );
+  const run = attempt.homeAccess === 'memory-reader'
+    ? await resolveRoot({ id: 'run', path: attempt.cwd, access: 'write' }, io)
+    : undefined;
   const roots: FileScopeRootGrant[] = [];
   for (const root of input.fileScope.roots ?? []) {
     roots.push(await resolveRoot(root, io));
@@ -291,8 +319,9 @@ export async function resolveFileScopeGrant(input: ResolveFileScopeGrantInput): 
   return Object.freeze({
     mode: input.fileScope.mode,
     home,
+    ...(run === undefined ? {} : { run }),
     roots: frozenRoots,
-    digest: digestGrant(input.fileScope.mode, home, frozenRoots),
+    digest: digestGrant(input.fileScope.mode, home, run, frozenRoots),
   });
 }
 
@@ -355,8 +384,20 @@ function matchRoot(roots: readonly FileScopeRootGrant[], absolute: string): { ro
 // macOS APFS default) opens `.BYOK` as `.byok`, and no platform branch decides it.
 const INTERNAL_SEGMENT = /^\.[bB][yY][oO][kK]$/u;
 
-function internalPath(roots: readonly FileScopeRootGrant[], absolute: string): boolean {
-  for (const root of roots) {
+function insideRoot(root: FileScopeRootGrant, absolute: string): boolean {
+  return relativeInside(root.path, absolute) !== undefined || relativeInside(root.lexicalPath, absolute) !== undefined;
+}
+
+/**
+ * `.byok` under any root is internal. The one exception is a path inside a
+ * memory reader's `run` root: `run` then owns it, and only `run`'s own `.byok`
+ * child is internal. Callers pass `run` only where `run` is the root that will
+ * handle the path, so an alias that reaches the run directory through another
+ * root stays internal.
+ */
+function internalPath(roots: readonly FileScopeRootGrant[], absolute: string, run: FileScopeRootGrant | undefined): boolean {
+  const owners = run !== undefined && insideRoot(run, absolute) ? [run] : roots;
+  for (const root of owners) {
     for (const base of [root.path, root.lexicalPath]) {
       const relative = relativeInside(base, absolute);
       if (relative !== undefined && INTERNAL_SEGMENT.test(relative.split(path.sep)[0] ?? '')) return true;
@@ -395,8 +436,11 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
   if (input.cwd.length === 0 || !path.isAbsolute(input.cwd) || /[\u0000\r\n]/u.test(input.cwd)) throw fail('path_syntax');
   const expanded = expandHome(input.path, osHome);
   const absolute = path.resolve(input.cwd, expanded);
-  const allRoots = Object.freeze([input.grant.home, ...input.grant.roots]);
-  if (internalPath(allRoots, absolute)) throw fail('internal_path');
+  const run = input.grant.run;
+  const allRoots = Object.freeze([input.grant.home, ...(run === undefined ? [] : [run]), ...input.grant.roots]);
+  // Before matching, a path inside `run` is handed to `run`: matchRoot picks
+  // the longest root, and `run` is nested in home.
+  if (internalPath(allRoots, absolute, run)) throw fail('internal_path');
 
   if (!path.isAbsolute(expanded)) {
     const cwdRoot = matchRoot(allRoots, path.resolve(input.cwd));
@@ -452,7 +496,7 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
   }
   const canonicalTarget = path.join(canonicalExisting, ...segments.slice(existingCount));
   // Aliases that only canonicalization reveals (case variants, short names) land here.
-  if (internalPath(allRoots, canonicalTarget)) throw fail('internal_path');
+  if (internalPath(allRoots, canonicalTarget, root === run ? run : undefined)) throw fail('internal_path');
   const existingStat = targetStat ?? lastStat;
   if (existingStat !== undefined && existingStat.dev !== root.identity.dev) throw fail('cross_device', root.id, input.access);
   if (targetStat !== undefined) {
@@ -507,7 +551,7 @@ export interface FileScopeAudit {
     readonly mode: 'home' | 'workspaces';
     readonly digest: string;
   };
-  /** Adoption only: every root id the grant covers, home first. */
+  /** Adoption only: every root id the grant covers, home first, then run when present. */
   readonly rootIds?: readonly string[];
   /** Denial only: the root that failed, when one was identified. */
   readonly rootId?: string;

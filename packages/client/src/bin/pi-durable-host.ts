@@ -49,7 +49,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   if (args.length !== 2 || args[0] !== '--config' || !path.isAbsolute(args[1]!)) throw new Error('durable accepts only --config <absolute path>');
   if (process.platform === 'win32') throw new Error('durable Pi requires validated parent-death process-tree recovery; Windows is unavailable');
   const config = object(readPiHostConfig(args[1]!, digest));
-  if (config.format !== 'byok.pi.durable-launch' || config.version !== 3) throw new Error('unsupported durable launch config');
+  if (config.format !== 'byok.pi.durable-launch' || config.version !== 4) throw new Error('unsupported durable launch config');
   const replica = object(config.replica);
   const agent = object(replica.agentRef);
   const authority: DurableReplicaBinding = { agentRef: { tenantId: string(agent.tenantId), agentId: string(agent.agentId), profileRevision: string(agent.profileRevision) }, taskId: string(replica.taskId), leaseId: string(replica.leaseId), canonicalHome: string(replica.canonicalHome) };

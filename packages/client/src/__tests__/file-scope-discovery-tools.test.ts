@@ -47,7 +47,7 @@ async function fixture(access: 'read' | 'write' = 'write'): Promise<Fixture> {
   await fs.symlink(path.join(outside, 'secret.txt'), path.join(root, 'file-link.txt'), 'file');
   const grant = await resolveFileScopeGrant({
     fileScope: { mode: 'workspaces', roots: [{ id: 'repo', path: root, access }] },
-    home: { path: home, identity: await identityOf(home) },
+    attempt: { homeAccess: 'writer' }, home: { path: home, identity: await identityOf(home) },
   });
   return { home, root, outside, grant };
 }

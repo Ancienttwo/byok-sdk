@@ -122,12 +122,14 @@ export interface DaemonConfig {
    *
    * The optional `fileScope` (#1061) is an explicit file boundary for the
    * SDK-owned file tools: absent means inherit (unchanged behavior);
-   * `home` authorizes read+write of the canonical Agent home; `workspaces`
-   * adds explicit read/write roots. It applies only to `auto` tasks, requires
-   * `agentHome`, and is never selected by the wire or the model. It is
-   * enforced on the Pi rpc, prepared and durable lanes on darwin/linux;
-   * Windows, memory-reader offers and every non-Pi runtime decline before
-   * claim with `file_scope_unsupported`. After admission every configured
+   * `home` authorizes the canonical Agent home; `workspaces` adds explicit
+   * read/write roots (ids `home` and `run` are reserved). A writer task gets
+   * the home read+write; a memory-reader task gets it read-only plus its own
+   * run directory (`<home>/.byok/runs/<name>`, its cwd) read+write. It
+   * applies only to `auto` tasks, requires `agentHome`, and is never selected
+   * by the wire or the model. It is enforced on the Pi rpc, prepared and
+   * durable lanes on darwin/linux; Windows and every non-Pi runtime decline
+   * before claim with `file_scope_unsupported`. After admission every configured
    * root is revalidated once before the runtime starts; a missing, symlinked,
    * replaced or otherwise unresolvable root fails the claimed task with a
    * typed `file_scope_unavailable` reason instead of starting unscoped. The

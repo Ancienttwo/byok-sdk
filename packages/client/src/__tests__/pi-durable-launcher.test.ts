@@ -90,7 +90,7 @@ async function scopedGate(home: string, fileScope: ToolFileScope, asked: string[
     return call.toolName === 'bash' ? { decision: 'deny', code: 'tool_authorization_denied', reason: 'synthetic denial' } : { decision: 'allow' };
   } };
   const identity = await stat(home, { bigint: true });
-  const grant = await resolveFileScopeGrant({ fileScope, home: { path: home, identity: { dev: identity.dev, ino: identity.ino } } });
+  const grant = await resolveFileScopeGrant({ fileScope, attempt: { homeAccess: 'writer' }, home: { path: home, identity: { dev: identity.dev, ino: identity.ino } } });
   bindFileScopeGate(gate, { grant, taskId: 'task', lane: 'durable', homeAccess: 'writer', onDeny: denial => denials.push(denial) });
   return gate;
 }
