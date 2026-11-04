@@ -48,6 +48,7 @@ export function sameAgentHomeProjectionRequest(
     expected.requestId === actual.requestId &&
     expected.agentRef.agentId === actual.agentRef.agentId &&
     expected.agentRef.profileRevision === actual.agentRef.profileRevision &&
+    expected.hostRevision === actual.hostRevision &&
     expected.projectionHash === actual.projectionHash &&
     JSON.stringify(expected.projection) === JSON.stringify(actual.projection)
   );

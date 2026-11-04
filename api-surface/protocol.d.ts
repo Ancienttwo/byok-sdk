@@ -479,6 +479,13 @@ export declare const AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM: '9223372036
  */
 export declare const AgentHomeProjectionProfileRevisionSchema: z.ZodString;
 export type AgentHomeProjectionProfileRevision = z.infer<typeof AgentHomeProjectionProfileRevisionSchema>;
+/**
+ * Optional Host-owned revision of the projection rendering, compared after an
+ * equal `profileRevision`. Absent means 0. The pair
+ * `(profileRevision, hostRevision)` orders projections.
+ */
+export declare const AgentHomeProjectionHostRevisionSchema: z.ZodNumber;
+export type AgentHomeProjectionHostRevision = z.infer<typeof AgentHomeProjectionHostRevisionSchema>;
 /** The projection hash uses the package-wide lowercase SHA-256 transport form. */
 export declare const AgentHomeProjectionHashSchema: z.ZodString;
 export type AgentHomeProjectionHash = z.infer<typeof AgentHomeProjectionHashSchema>;
@@ -1957,6 +1964,8 @@ export declare const AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY: 'agent-content-tr
 export declare const AGENT_CONTENT_ARTIFACT_READ_CAPABILITY: 'agent-content-artifact-read';
 /** Capability required before a task-free Agent-home projection is admitted. */
 export declare const AGENT_HOME_PROJECTION_CAPABILITY: 'agent-home-projection';
+/** Device capability required before an Agent-home projection may carry `hostRevision`. */
+export declare const AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY: 'agent-home-projection-host-revision';
 /** Capability required before an offer may select terminal projection behavior. */
 export declare const TERMINAL_PROJECTION_SELECTION_CAPABILITY: 'terminal-projection-selection';
 /** Contract §8.1's capability gate for `byok-task-assertion-v1` tool authority. */
@@ -3408,8 +3417,8 @@ export { AgentEventSchema, AgentEventSpillSchema, AGENT_EVENT_SPILL_UNSTORED_REA
 export type { AgentEvent, AgentEventSpill, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
 export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliableQuotaPolicySchema, ContentReadPolicySchema, AgentEgressLaneSchema, AgentEgressDropReasonSchema, AgentContentReadSurfaceSchema, AgentContentActorKindSchema, AgentContentActorSchema, AgentContentDecodeAsSchema, AgentContentMimeTypeSchema, AgentContentReadDecisionSchema, AgentContentReadDenialReasonSchema, AgentEgressContentHashSchema, AgentEgressPolicyRevisionSchema, AgentMessageContractSchema, AgentMessageContentTypeSchema, AgentMessageDestinationBindingSchema, AgentMessageFreshnessCursorSchema, AgentMessageServerContextSchema, AgentMessageEgressRequirementSchema, AGENT_MESSAGE_MAX_BYTES, AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES, } from './agent-egress';
 export type { AgentEgressPolicy, AgentEgressActivityPolicy, AgentReliableQuotaPolicy, ContentReadPolicy, AgentEgressLane, AgentEgressDropReason, AgentMessageContentType, AgentMessageEgressRequirement, AgentMessageServerContext, AgentContentReadSurface, AgentContentActorKind, AgentContentActor, AgentContentDecodeAs, AgentContentReadDecision, AgentContentReadDenialReason, } from './agent-egress';
-export { AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
-export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
+export { AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHostRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
+export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHostRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
 export { InputPreparationContentHashSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
 export type { InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationMessage, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
 export { AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionPlainMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionPlainReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
@@ -5601,6 +5610,8 @@ export type AgentContentReceiptPayload = z.infer<typeof AgentContentReceiptPaylo
  * `agentRef.profileRevision` is the projection contract's canonical comparable
  * revision. It is validated without interpreting the opaque product
  * projection, whose fields are never inspected for product semantics.
+ * `hostRevision` (absent means 0) breaks a `profileRevision` tie; a payload
+ * carrying it needs the `agent-home-projection-host-revision` device flag.
  */
 export declare const AgentHomeProjectionPayloadSchema: z.ZodObject<{
     requestId: z.ZodUUID;
@@ -5608,6 +5619,7 @@ export declare const AgentHomeProjectionPayloadSchema: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>;
+    hostRevision: z.ZodOptional<z.ZodNumber>;
     projectionHash: z.ZodString;
     projection: z.ZodType<import("./agent-home-projection").AgentHomeProjectionValue, unknown, z.core.$ZodTypeInternals<import("./agent-home-projection").AgentHomeProjectionValue, unknown>>;
 }, z.core.$strict>;
@@ -8710,7 +8722,7 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * MCP configuration.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-payload-v2", "sealed-output-ciphertext-ref", "runtime-failure-class", "runtime-quota-scope", "runtime-unavailable-cause"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-home-projection-host-revision", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-payload-v2", "sealed-output-ciphertext-ref", "runtime-failure-class", "runtime-quota-scope", "runtime-unavailable-cause"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**

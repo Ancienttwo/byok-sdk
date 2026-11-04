@@ -2,6 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   AGENT_HOME_PROJECTION_CAPABILITY,
+  AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY,
   byokAgentHomeProjectionCompletionPath,
   type Envelope,
 } from '@byok-sdk/protocol';
@@ -71,6 +72,13 @@ describe('reference task-free Agent-home projection', () => {
     await expect(started.byok.enqueueAgentHomeProjection({ deviceId: daemon.deviceId, payload: desired() }))
       .rejects.toThrow(AGENT_HOME_PROJECTION_CAPABILITY);
     expect(await started.byok.readAgentHomeProjection(daemon.deviceId, desired().agentRef, REQUEST_ID)).toBeUndefined();
+    const projector = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID,
+      capabilities: ['agent-home-contract', AGENT_HOME_PROJECTION_CAPABILITY],
+    });
+    await expect(started.byok.enqueueAgentHomeProjection({ deviceId: projector.deviceId, payload: { ...desired(), hostRevision: 1 } }))
+      .rejects.toThrow(AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY);
+    expect(await started.byok.readAgentHomeProjection(projector.deviceId, desired().agentRef, REQUEST_ID)).toBeUndefined();
     expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
   });
 

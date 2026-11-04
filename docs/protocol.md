@@ -814,9 +814,19 @@ rerouted. The daemon applies the local ordering contract under the canonical
 Agent-home lease. The host consumer is an atomic/idempotent ensure of opaque
 product-derived bytes. A new request with the exact current revision/hash runs
 that consumer again and returns `idempotent`; stale or same-revision/different-
-hash requests never invoke it. Consumer, containment or lease failure leaves
-the request pending and the cursor behind. After a successful local outcome the
-daemon calls:
+hash requests never invoke it.
+
+The order key is `(agentRef.profileRevision, hostRevision)`, compared in that
+order. `hostRevision` is an optional non-negative safe integer owned by the
+Host, for example the version of the device's rendering of the home; absent
+means 0. A greater key applies whatever the hash, a lower key is `stale`, and
+an equal key is `idempotent` or `conflict` by hash. A Host that never sends
+`hostRevision` keeps the plain `profileRevision` order. A payload carrying
+`hostRevision` is gated on the device flag
+`agent-home-projection-host-revision`; Cloud refuses it before allocating the
+request when the device did not advertise the flag. Consumer, containment or
+lease failure leaves the request pending and the cursor behind. After a
+successful local outcome the daemon calls:
 
 ```text
 PUT /byok/agent-home-projections/:requestId/completion

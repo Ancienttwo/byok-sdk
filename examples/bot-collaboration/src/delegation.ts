@@ -6,7 +6,7 @@ import * as rules from './rules/delegation';
 export { BOT_REPLY_MAX_BYTES, BOT_REQUEST_MAX_BYTES, CONTEXT_FIXED_MAX_BYTES, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   FRAME_MAX_BYTES, HOP_LIMIT, OPEN_DELEGATION_ENTRY_MAX_BYTES, OPEN_DELEGATIONS_MAX_BYTES, OPEN_DELEGATIONS_MAX_ITEMS,
   REPLY_REQUEST_MAX_BYTES, REPLY_RETRY_MAX_MS, REPLY_UNCERTAIN_AFTER_MS, ROOT_BOT_BUDGET, ROSTER_ENTRY_MAX_BYTES,
-  applyDelegate, claimUnit, crossBotRequest, delegationBlock, delegationDue, endChain, instructionOverhead, isCrossBot,
+  applyDelegate, cancellable, claimUnit, crossBotRequest, delegationBlock, delegationDue, endChain, instructionOverhead, isCrossBot,
   minimumInstructionBytes, observeStart, openDelegations, openDelegationsContext, reconcileReply, releaseUnit, reserveUnits,
   resolveDelegation, retryReply, type DelegationTimers } from './rules/delegation';
 

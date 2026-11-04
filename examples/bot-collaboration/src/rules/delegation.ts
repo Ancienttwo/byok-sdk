@@ -331,6 +331,8 @@ function resolveCancel(state: DelegationState, d: Delegation, taskId: string | u
   resolveDelegation(state, d, 'cancelled', now, emit, d.cancel!.reason ?? 'user_cancelled', reply);
 }
 const CANCELLABLE = new Set<Delegation['status']>(['queued', 'waiting_device', 'running', 'reply_pending']);
+/** A delegation status that a cancel can act on (§8.8). The owner cancel refuses another one with a code before it commits (#1405). */
+export function cancellable(status: Delegation['status']): boolean { return CANCELLABLE.has(status); }
 /**
  * Open delegations that a Main Bot can cancel (§8.8): no verdict, no cancel yet,
  * and a state that a cancel can act on. Newest first; the rest are only counted.

@@ -30,6 +30,7 @@ import {
 } from './agent-egress';
 import {
   AgentHomeProjectionHashSchema,
+  AgentHomeProjectionHostRevisionSchema,
   AgentHomeProjectionProfileRevisionSchema,
   AgentHomeProjectionValueSchema,
 } from './agent-home-projection';
@@ -784,11 +785,14 @@ export type AgentContentReceiptPayload = z.infer<typeof AgentContentReceiptPaylo
  * `agentRef.profileRevision` is the projection contract's canonical comparable
  * revision. It is validated without interpreting the opaque product
  * projection, whose fields are never inspected for product semantics.
+ * `hostRevision` (absent means 0) breaks a `profileRevision` tie; a payload
+ * carrying it needs the `agent-home-projection-host-revision` device flag.
  */
 export const AgentHomeProjectionPayloadSchema = z
   .object({
     requestId: z.uuid(),
     agentRef: AgentHomeProjectionAgentRefSchema,
+    hostRevision: AgentHomeProjectionHostRevisionSchema.optional(),
     projectionHash: AgentHomeProjectionHashSchema,
     projection: AgentHomeProjectionValueSchema,
   })

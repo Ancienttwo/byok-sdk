@@ -44,7 +44,7 @@ it('cancel commits before acceptance -> B message refused, cancelled with no rep
   gate.arm(task);
   (await t.running(d.id)).finish({});
   await gate.arrived;
-  await t.host().cancelDelegation(d.id);
+  await expect(t.host().cancelDelegation(d.id)).resolves.toEqual({ delegationId: d.id, result: 'cancelled' });
   expect(t.delegation(d.id).cancel).toMatchObject({ targetTurnId: d.id, delivered: true });
   expect(t.host().core.intent(d.id)!.cancelReason).toBe('cancelled');
   gate.release();
@@ -56,7 +56,7 @@ it('cancel commits before acceptance -> B message refused, cancelled with no rep
   expect(state.turns[d.id]!.outcome).toBeUndefined();
   expect(state.turns[hash(['bot_reply', d.id])]!.replies).toEqual([expect.not.objectContaining({ reply: expect.anything() })]);
   expect(t.events(d.id).map(e => [e.status, e.verdict])).toEqual([['queued', undefined], ['running', undefined], ['resolved', 'cancelled']]);
-  await expect(t.host().cancelDelegation(d.id)).rejects.toThrow('already resolved');
+  await expect(t.host().cancelDelegation(d.id)).resolves.toEqual({ delegationId: d.id, result: 'already_settled', verdict: 'cancelled' });
   await t.finish(hash(['bot_reply', d.id]));
 });
 
@@ -117,10 +117,16 @@ it('crash after the arbitration commit and before core.cancel -> restart deliver
   expect(t.delegation(d.id)).toMatchObject({ status: 'running', cancel: { targetTurnId: d.id, delivered: false } });
   expect(t.delegation(d.id).verdict).toBeUndefined();
   expect(t.host().core.intent(d.id)!.cancelReason).toBeUndefined();
+  // #1405: the committed cancel is pending, so a repeat neither commits nor calls core.cancel; the pass delivers it.
+  const revision = t.host().snapshot().revision;
+  await expect(t.host().cancelDelegation(d.id)).resolves.toEqual({ delegationId: d.id, result: 'cancel_pending' });
+  expect({ revision: t.host().snapshot().revision, cancels: vi.mocked(t.host().core.cancel).mock.calls.length }).toEqual({ revision, cancels: 1 });
   await fixture.reopen();
   expect(t.delegation(d.id).cancel).toMatchObject({ targetTurnId: d.id, delivered: true });
   expect(t.host().core.intent(d.id)!.cancelReason).toBe('cancelled');
   expect(await verdict(d.id)).toMatchObject({ verdict: 'cancelled', reason: 'user_cancelled' });
+  await fixture.reopen();
+  await expect(t.host().cancelDelegation(d.id)).resolves.toEqual({ delegationId: d.id, result: 'already_settled', verdict: 'cancelled' });
   expect(t.delegation(d.id).chainTurnIds).toEqual([d.id]);
   await t.finish(hash(['bot_reply', d.id]));
 });
@@ -139,7 +145,9 @@ it('B drops while running; cancel finds no terminal -> uncertain, no resubmit; E
   clock += 1; await t.host().drain();
   expect(t.delegation(d.id)).toMatchObject({ status: 'uncertain', uncertainSince: clock });
   expect(t.delegation(d.id).verdict).toBeUndefined();
-  await expect(t.host().cancelDelegation(d.id)).resolves.toBeUndefined();
+  const cancel = vi.spyOn(t.host().core, 'cancel');
+  await expect(t.host().cancelDelegation(d.id)).resolves.toEqual({ delegationId: d.id, result: 'cancel_pending' });
+  expect(cancel).not.toHaveBeenCalled();
   // No resubmit and no new generation.
   expect(t.host().core.intent(d.id)).toMatchObject({ generation: 0, taskId: task });
   expect(fixture.adapter.starts.filter(start => start.manifest.taskId === task)).toHaveLength(1);
@@ -167,7 +175,8 @@ it('claimed with no terminal for uncertainAfterMs -> uncertain, then a later ter
   expect(t.delegation(d.id).claimed?.at).toBe(clock);
   clock += 30 * 60_000; await t.host().drain();
   expect(t.delegation(d.id)).toMatchObject({ status: 'uncertain', uncertainSince: clock });
-  await expect(t.host().cancelDelegation(d.id)).rejects.toThrow('use abandonDelegation');
+  await expect(t.host().cancelDelegation(d.id)).rejects.toMatchObject({ name: 'DelegationError', key: d.id, code: 'not_cancellable' });
+  await expect(t.host().cancelDelegation('missing')).rejects.toMatchObject({ key: 'missing', code: 'unknown_delegation' });
   session.finish({});
   expect(await verdict(d.id)).toMatchObject({ verdict: 'answered', reply: t.taskOf(d.id) });
   expect(t.events(d.id).map(e => e.status)).toEqual(['queued', 'running', 'uncertain', 'resolved']);
@@ -178,9 +187,10 @@ it('cancelTurn on B\'s bot_request Turn runs the delegation cancel', async () =>
   fixture = await openTeam({ routeMessages: true });
   const { d } = await delegated('cancel-turn');
   await t.running(d.id);
-  await t.host().cancelTurn(d.id);
+  await expect(t.host().cancelTurn(d.id)).resolves.toEqual({ turnId: d.id, result: 'cancelled' });
   expect(t.delegation(d.id).cancel).toMatchObject({ targetTurnId: d.id, delivered: true });
   expect(await verdict(d.id)).toMatchObject({ verdict: 'cancelled', reason: 'user_cancelled' });
+  await expect(t.host().cancelTurn(d.id)).resolves.toEqual({ turnId: d.id, result: 'already_settled', conclusion: 'cancelled' });
   await t.finish(hash(['bot_reply', d.id]));
 });
 

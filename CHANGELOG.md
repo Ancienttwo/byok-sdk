@@ -19,6 +19,46 @@
   without a process table); the client then logs one
   `[byok/hermes-adapter]` warning per process.
 
+- **Breaking (examples)** — K8 `cancelTurn` and `cancelDelegation` are
+  idempotent and return a result in the shape of `cancelHostIntent` (#1405):
+  `TurnCancelResult` `{ turnId, result, conclusion? }` and
+  `DelegationCancelResult` `{ delegationId, result, verdict? }`, read from the
+  ledger, so a replay and a restart give the same answer. `cancelled` means this
+  call committed the cancel; `cancel_pending` (an earlier cancel has no terminal
+  yet) and `already_settled` (the target had ended, with its conclusion or
+  verdict) write nothing and do not call `core.cancel`. `cancelDelegation` on a
+  resolved delegation now resolves `already_settled` instead of rejecting with
+  `Delegation already resolved`. The refusals carry codes: `DelegationError`
+  (`unknown_delegation`, `not_cancellable`) for `cancelDelegation` and a chain
+  `cancelTurn`, and `HostIntentError` (`unknown_intent`, `already_settled`,
+  `not_stuck`) for `failStuckIntent`; the messages stay and both classes extend
+  `Error`. A Bot Turn that `failStuckIntent` settles records
+  `settleCode: 'outcome_failed'`, so a reader no longer matches the audit row;
+  an older K8 ignores the optional field, so a rollback keeps working. A Host
+  that vendored K8 copies `src/host.ts`, `src/index.ts`, `src/delegation.ts`,
+  `src/rules/delegation.ts` and `src/rules/turn.ts` ([migration](examples/bot-collaboration/README.md#idempotent-owner-cancels-1405)).
+
+- **Added (examples)** — K8 `inputRoot(key, botId)` (#1407) is a read-only
+  query for whether an `input` committed. It returns the Turn id that `input`
+  returned for that key, from the ledger's command record, or `undefined` when
+  no input with that key committed. It runs no `process()` pass, writes nothing
+  and leaves the K8 revision unchanged, so it answers the same after a restart
+  and after an `input` that rejected on its drain. A Host that vendored K8
+  copies `src/host.ts` ([input root](examples/bot-collaboration/README.md#input-root-1407)).
+
+- **Added (protocol, client, cloud)** — An Agent-home projection may carry an
+  optional `hostRevision`, a non-negative safe integer owned by the Host
+  (#1404). The daemon orders projections by `(profileRevision, hostRevision)`,
+  an absent `hostRevision` being 0: a greater key applies whatever the hash, a
+  lower one is `stale`, and an equal one is `idempotent` or `conflict` by
+  hash. A Host that changes its rendering of the home without a new
+  `profileRevision` raises `hostRevision`, and the existing home is projected
+  again without clearing data. A payload carrying it needs the new device flag
+  `agent-home-projection-host-revision`, which the daemon advertises with
+  `agent-home-projection`. A Host that never sends `hostRevision` is
+  unchanged. After a rollback, an older client ignores the stored
+  `hostRevision` and orders by `profileRevision` alone.
+
 ## 0.37.0 — 2026-11-04 (published)
 
 0.37.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
