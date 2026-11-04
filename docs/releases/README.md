@@ -28,7 +28,7 @@ from evidence, not the author's judgment (see "Freeze rule" in
 capability `durablePi` to `durableLane`. 0.33.0 is the last v4 release, and
 `golden/v5.releases.json` registers the corpus of the published 0.34.0, the
 first v5 release, the same corpus for the published 0.35.0, 0.36.0 and
-0.37.0, and the 0.38.0 source candidate with one more envelope line, and has
+0.37.0, and the published 0.38.0 with one more envelope line, and has
 no floor. No published v5 decoder is pinned as an oracle yet, so cross-release gates stay
 unproven until one is pinned.
 
