@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { AgentRef } from './agent-home';
+import { win32FileScopePath } from './file-scope-types';
 
 /**
  * The only product tool-authorization modes, chosen by the local Host per task
@@ -288,7 +289,7 @@ function fileScopeRootPath(value: unknown): string {
   if (value === '~' || value.startsWith('~/') || value.startsWith('~\\')) {
     throw new FileScopePolicyError('tool authorization fileScope root path must not start with "~"; write the absolute path');
   }
-  if (!isAbsolute(value)) {
+  if (process.platform !== 'win32' && !isAbsolute(value)) {
     throw new FileScopePolicyError('tool authorization fileScope root path must be absolute');
   }
   if (value.split(/[\\/]/).some(segment => segment === '.' || segment === '..')) {
@@ -296,6 +297,15 @@ function fileScopeRootPath(value: unknown): string {
   }
   // Pure lexical normalization; existence and identity are admission checks
   // that read the filesystem, which this parser must never do.
+  if (process.platform === 'win32') {
+    const resolved = win32FileScopePath(value);
+    if (resolved === undefined) {
+      throw new FileScopePolicyError(
+        'tool authorization fileScope root path must be an absolute drive path (X:\\…) with no \\\\ prefix, stream, reserved device name, or trailing dot or space',
+      );
+    }
+    return resolved;
+  }
   return resolve(value);
 }
 
