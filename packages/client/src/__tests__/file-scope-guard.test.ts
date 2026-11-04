@@ -103,6 +103,12 @@ describe('file-scope guard root resolution (#1061 slice 2)', () => {
     }))).toMatchObject({ code: 'file_scope_unavailable', reason: 'root_identity_changed', rootId: 'home' });
   });
 
+  it('admits a filesystem root (/ or a drive root) as a root', async () => {
+    const root = path.parse(await canonicalTmpDir('byok-guard-fsroot-')).root;
+    const grant = await grantWith(root);
+    expect(grant.roots).toMatchObject([{ id: 'repo', path: root, lexicalPath: root }]);
+  });
+
   it('refuses unknown platforms without touching the filesystem', async () => {
     const { home, identity } = await fixture();
     expect(await guardReason(() => resolveFileScopeGrant({
@@ -359,6 +365,49 @@ describe.runIf(process.platform === 'win32')('file-scope guard on win32 (#1423)'
       expect(await guardReason(() => resolveFileScopeTarget({ grant, path: target, access: 'read', cwd: home })), target)
         .toMatchObject({ code: 'file_scope_denied', reason: 'internal_path' });
     }
+  });
+
+  it('reads and writes under a drive root', async () => {
+    const dir = await canonicalTmpDir('byok-guard-win-drive-');
+    const grant = await grantWith(path.parse(dir).root);
+    await fs.writeFile(path.join(dir, 'a.txt'), 'a');
+    await expect(resolveFileScopeTarget({ grant, path: path.join(dir, 'a.txt'), access: 'read', cwd: dir }))
+      .resolves.toMatchObject({ path: path.join(dir, 'a.txt'), exists: true, root: { id: 'repo' } });
+    await expect(resolveFileScopeTarget({ grant, path: 'new.txt', access: 'write', cwd: dir }))
+      .resolves.toMatchObject({ path: path.join(dir, 'new.txt'), exists: false, root: { id: 'repo' } });
+  });
+
+  it('names a junction only for a path confirmed inside a root', async () => {
+    const parent = await canonicalTmpDir('byok-guard-win-confirm-');
+    const root = path.join(parent, 'Long Root Directory');
+    const outside = path.join(parent, 'Long Outside Directory');
+    await fs.mkdir(root);
+    await fs.mkdir(outside);
+    const target = await canonicalTmpDir('byok-guard-win-target-');
+    await fs.symlink(target, path.join(root, 'jn'), 'junction');
+    await fs.symlink(target, path.join(outside, 'jn'), 'junction');
+    const grant = await grantWith(root);
+    expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join(outside, 'jn', 'x.txt'), access: 'write', cwd: root })))
+      .toMatchObject({ code: 'file_scope_denied', reason: 'outside_scope' });
+    // The 8.3 spelling misses the root lexically; its verified prefix canonicalizes into it.
+    const shortRoot = shortPath(root);
+    expect(shortRoot).not.toBe(root);
+    expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join(shortRoot, 'jn', 'x.txt'), access: 'write', cwd: root })))
+      .toMatchObject({ code: 'file_scope_denied', reason: 'symlink', rootId: 'repo' });
+    await expect(fs.access(path.join(target, 'x.txt'))).rejects.toThrow();
+  });
+
+  it('refuses a root that canonicalizes onto a network share (injected)', async () => {
+    const root = await canonicalTmpDir('byok-guard-win-share-');
+    const io: FileScopeIo = {
+      ...nodeFileScopeIo,
+      realpath: async (candidate) => candidate === root ? '\\\\server\\share\\ws' : nodeFileScopeIo.realpath(candidate),
+    };
+    const { home, identity } = await fixture();
+    expect(await guardReason(() => resolveFileScopeGrant({
+      fileScope: { mode: 'workspaces', roots: [{ id: 'repo', path: root, access: 'write' }] },
+      attempt: { homeAccess: 'writer' }, home: { path: home, identity }, io,
+    }))).toMatchObject({ code: 'file_scope_unavailable', reason: 'path_syntax', rootId: 'repo' });
   });
 
   // A second volume and mountvol exist on the GitHub Windows runner (D:, administrator).
