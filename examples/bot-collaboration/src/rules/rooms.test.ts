@@ -98,12 +98,15 @@ it('applies a room_call batch as a unit: a refused batch changes no seat, an acc
   expect(slice.seats[called]).toMatchObject({ botId: 'b', status: 'waiting', triggerMessageId: seat });
   expect(advanceRooms(slice, {}, 2).turns).toEqual([{ id: called, botId: 'b',
     request: JSON.stringify({ roomId: 'r', roundId: id, request: 'Over to b', requestFrom: 'a' }) }]);
+  const values: unknown[] = [];
+  advanceRoomSeats({ team: slice, turns: {} }, {}, 2 + ROOM_GRACE_MS, () => {}, (_id, value) => { values.push(value); });
+  expect(values[0]).toMatchObject({ seatId: called, status: 'busy', triggerMessageId: seat });
 });
 
 it('#1393: publishes each seat once as it becomes terminal, and the root once all its seats are, room_call seats included', () => {
   rejected.length = 0;
   const { slice, id, seats: [a, b], published, publish } = round(['a', 'b']);
-  const state = { team: slice, turns: {} }, step = (facts: Record<string, SeatFacts>, now: number) => advanceRoomSeats(state, facts, now, () => {}, publish);
+  const requests: string[] = [], state = { team: slice, turns: {} }, step = (facts: Record<string, SeatFacts>, now: number) => advanceRoomSeats(state, facts, now, (_id, _botId, request) => { requests.push(request); }, publish);
   step({}, 0);
   applySpeech(slice, a!, { speech: { kind: 'pass' }, room_call: { members: ['c'] } }, 'task-a', 1, publish, accept);
   const c = slice.rounds[id]!.seats[2]!;
@@ -113,9 +116,10 @@ it('#1393: publishes each seat once as it becomes terminal, and the root once al
   step({}, 1);
   step({}, 1 + ROOM_GRACE_MS);
   expect(published).toEqual([seat(a!, 'a', 'pass'), seat(b!, 'b', 'busy')]);
+  expect(requests).toEqual(Array(3).fill(JSON.stringify({ roomId: 'r', roundId: id, request: 'Review', requestFrom: 'user' })));
   slice.rooms.r!.members = ['a', 'b'];
   step({}, 2 + ROOM_GRACE_MS);
-  const settled = [seat(a!, 'a', 'pass'), seat(b!, 'b', 'busy'), seat(c, 'c', 'removed'), [`room-root:r:${id}`, { roomId: 'r', root: id, seats: [a, b, c] }]];
+  const settled = [seat(a!, 'a', 'pass'), seat(b!, 'b', 'busy'), [`room-seat:r:${c}`, { ...seat(c, 'c', 'removed')[1] as object, triggerMessageId: id }], [`room-root:r:${id}`, { roomId: 'r', root: id, seats: [a, b, c] }]];
   expect(published).toEqual(settled);
   step({}, 3 + ROOM_GRACE_MS);
   expect(published).toEqual(settled);
