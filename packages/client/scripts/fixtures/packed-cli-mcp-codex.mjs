@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
-import { AGENT_MEMORY_GUIDANCE } from '../../src/daemon/memory-guidance.ts';
+import { prependAgentMemoryModeGuidance } from '../../src/daemon/memory-guidance.ts';
 
 // Packed-artifact probe: emulate the qualified app-server transport, but call
 // the actual projected MCP child. No model request or exec compatibility lane.
@@ -139,7 +140,10 @@ createInterface({ input: process.stdin }).on('line', line => {
     assert.ok(opened); assert.equal(params.threadId, threadId); assert.equal(active, false);
     // Every v4 task is an Agent task, so the daemon prefixes each
     // instruction with its memory guidance.
-    const instruction = `${AGENT_MEMORY_GUIDANCE}\n\ncall echo`;
+    // A packed daemon admits the memory MCP, so this fresh task carries the new Agent's empty MEMORY.md.
+    const instruction = prependAgentMemoryModeGuidance('call echo', 'read-write', false, {
+      content: '', revision: `sha256:${createHash('sha256').digest('hex')}`, byteCount: 0,
+    });
     assert.ok(params.input.some(item => item.type === 'text' && item.text === instruction));
     active = true; const turnId = `turn-${++turn}`;
     send({ jsonrpc: '2.0', id, result: { turn: { id: turnId } } });

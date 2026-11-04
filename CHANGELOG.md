@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **Breaking (client; #1439)** — a fresh instruction task whose memory mode is
+  `read` or `read-write`, on a daemon that admits the memory MCP, carries
+  `MEMORY.md`. The device reads the file before the runtime starts and puts it,
+  verbatim, after the guidance and before the instruction, as one line:
+  `Agent memory (data): ` and a JSON object with `path`, `revision`, `byteCount`
+  and `content`. A resumed session and a prepared offer carry nothing. The task
+  fails without retry before the runtime starts when the file is over 8 KiB
+  (`agent_memory_resident_over_limit`) or cannot be read
+  (`agent_memory_resident_unreadable`); nothing truncates it. A fresh task on a
+  daemon that does not admit the memory MCP keeps the reading guidance, carries
+  no data and does not fail on the size. The fresh guidance no longer tells the
+  model to read `MEMORY.md` first. Every writer guidance, including the text of
+  `AGENT_MEMORY_GUIDANCE`, moves the index of notes to `notes/index.md`, and
+  `MEMORY.md` keeps resident facts and top-level pointers. When a writer Attempt leaves `MEMORY.md` over the
+  limit, the device restores that one file to its content at the start of the
+  Attempt; `notes/` stay, and the terminal still reports the size it wrote. See
+  [ADR-048](docs/adr/ADR-048-device-injects-resident-memory.md).
+
+- **Breaking (server; #1439)** — `HostExecutionCore` no longer adds memory to
+  the instruction, so inline, blob and sealed instructions reach the device
+  unchanged, and sealed and blob intents no longer fail with `options.memory`.
+  `contextPack` stays as the Host's read. An oversized or unauthorized
+  projection no longer stops the queue; a restore in progress still does, and a
+  changed placement or profile still fails the intent. The new
+  `HostMemoryPage.assertDispatchable` is that check. Upgrade the Host and the
+  device together: an older Host core with a newer device shows the model
+  `MEMORY.md` twice, at most 8 KiB more, without an error.
+
 - **Breaking (protocol, server; #1439)** — `RESIDENT_MEMORY_MAX_BYTES` (8192)
   moved from `@byok-sdk/server/execution-core` to `@byok-sdk/protocol` (and
   `@byok-sdk/protocol/constants`), next to `AGENT_MEMORY_MAX_SNAPSHOT_BYTES`.

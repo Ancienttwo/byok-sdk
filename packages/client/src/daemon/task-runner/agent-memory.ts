@@ -1,6 +1,9 @@
 // `TaskRunner` members for the Agent memory context and filesystem
 // (see ./support.ts for how a member module runs).
-import { isAgentMemorySecureFilesystemAvailable, snapshotAndProjectAgentMemory, type AgentMemoryTaskContext } from '../agent-memory';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
+import { appendAgentMemoryHomeAudit, compareAndSwapAgentMemoryHomeFile, isAgentMemorySecureFilesystemAvailable, observeAgentMemoryHomeFile, snapshotAndProjectAgentMemory, type AgentMemoryTaskContext } from '../agent-memory';
 import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper';
 import type { ActiveTask } from './support';
 import { errorMessage, taskFinalizing } from './support';
@@ -82,6 +85,7 @@ export async function quiesceAndSnapshotAgentMemory(this: TaskRunner, active: Ac
       leaseId: active.agentBinding.lease.leaseId,
       homeIdentity: active.agentBinding.lease.homeIdentity,
     });
+    await restoreResidentMemory(context, active.residentMemoryStart);
     await snapshotAndProjectAgentMemory(context, this['deps'].agentMemoryHostedProjection, this['deps'].sealedTasks);
   } catch (error) {
     // Projection never becomes a second task-terminal authority. A failed
@@ -91,6 +95,36 @@ export async function quiesceAndSnapshotAgentMemory(this: TaskRunner, active: Ac
   } finally {
     await this['closeAgentMemoryFilesystem'](active.taskId);
   }
+}
+
+/**
+ * The one memory write the SDK makes itself (#1439): a writer Attempt that left
+ * `MEMORY.md` over the limit gets that file back as it started. The runtime has
+ * stopped and in-flight memory operations have drained, so the projection after
+ * this sees the restored file; the terminal already reported the written size.
+ * `notes/` stay as they are. A failed compare-and-swap leaves the file for the
+ * next fresh task to refuse, and is audited, not retried.
+ */
+async function restoreResidentMemory(context: AgentMemoryTaskContext, start: ActiveTask['residentMemoryStart']): Promise<void> {
+  if (start === undefined) return;
+  const stat = await fs.lstat(path.join(context.canonicalHome, 'MEMORY.md')).catch(() => undefined);
+  if (stat?.isFile() !== true || stat.size <= RESIDENT_MEMORY_MAX_BYTES) return;
+  const record = (values: Record<string, unknown>): Promise<void> => appendAgentMemoryHomeAudit(context, {
+    kind: 'resident_memory_restore', taskId: context.taskId, agentRef: context.agentRef, path: 'MEMORY.md', byteCount: stat.size, ...values,
+  }).catch((error: unknown) => {
+    console.error(`[byok/client] Agent memory restore audit failed for ${context.taskId}: ${errorMessage(error)}`);
+  });
+  try {
+    const current = await observeAgentMemoryHomeFile(context, 'MEMORY.md');
+    await compareAndSwapAgentMemoryHomeFile(context, {
+      path: 'MEMORY.md', operation: 'replace', expectedRevision: current.revision, content: start.content,
+    });
+  } catch (error) {
+    console.error(`[byok/client] Agent memory restore failed for ${context.taskId}: ${errorMessage(error)}`);
+    await record({ outcome: 'failed' });
+    return;
+  }
+  await record({ outcome: 'restored', revision: start.revision });
 }
 
 export async function bindAgentMemoryFilesystem(this: TaskRunner, context: AgentMemoryTaskContext): Promise<AgentMemoryTaskContext> {

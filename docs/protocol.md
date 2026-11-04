@@ -982,9 +982,12 @@ limit. A runtime can still write a larger `MEMORY.md` with its own file tools.
 Then the terminal of a writer Attempt that became active (`task.complete`,
 `task.fail` or `task.cancelled`) carries `residentMemoryOverLimit:
 { byteCount }`, the size of the regular file `MEMORY.md` in the canonical home
-at the terminal decision. The device does not read, truncate or repair the
-file. The schema does not compare `byteCount` with the limit, so a later lower
-limit cannot make an older receiver refuse the terminal.
+at the terminal decision. The device measures the file without reading it and
+never truncates it. When the Attempt ends, the device restores the file to its
+content at the start of the Attempt, so the size reported here is the size the
+Attempt wrote, and the task-close projection sees the restored file. The schema
+does not compare `byteCount` with the limit, so a later lower limit cannot make
+an older receiver refuse the terminal.
 
 The field is gated on the server flag `resident-memory-over-limit`, because the
 sealed terminal branches are strict. A daemon talking to a server without the
@@ -993,9 +996,21 @@ flag sends the terminal without the field. On a task whose `sealing` names
 `agentHomeMemoryChange`. Absence does not mean the file is within the limit: a
 reader terminal, a claimed failure before the Attempt became active, a failed
 measurement, a server without the flag and an older daemon all leave it absent.
-The Host's `contextPack` still refuses an over-limit `MEMORY.md`, so it remains
-the gate. The hosted cloud advertises the flag, and `readTaskResult` projects
-the field verbatim.
+The check the device makes at the start of a fresh task is the gate: on a daemon
+that admits the memory MCP, an over-limit `MEMORY.md` fails that task before the
+runtime starts. A daemon that does not admit it cannot write memory, so its fresh
+task keeps the reading guidance, carries no data and does not fail on the size.
+The hosted cloud advertises the flag, and `readTaskResult` projects the field
+verbatim.
+
+Known limit: a `MEMORY.md` over 256 KiB (`AGENT_MEMORY_MAX_FILE_BYTES`, the read
+limit of one memory file) cannot be read by a snapshot, an export, a projection,
+an intent or the restore, so neither the restore nor a Host intent repairs it.
+To repair it, the Host sends a writer task with `agentMemory: 'none'` whose
+instruction tells the model to bring `MEMORY.md` under the limit and move the
+details to `notes/`. `none` adds no memory guidance, file tools have no such
+limit, and that Attempt has no start copy, so nothing restores the file at its
+end. The file can also be edited by hand on the device.
 
 **`agentMemory` selects the Agent memory of one ordinary task.** Without the
 field, the daemon admission decides, as before. `none` binds no SDK memory MCP

@@ -88,7 +88,7 @@ describe('Agent-only daemon admission (#925)', () => {
       instruction: 'agent work', agentRef: { agentId: 'duplicate-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
     }, { taskId: 'agent-duplicate', seq: server.nextSeq() });
     server.send(duplicate);
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'agent-duplicate');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'agent-duplicate');
     server.send({ ...duplicate, seq: server.nextSeq() });
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(server.received.filter((entry) => entry.type === 'task.claim' && entry.task_id === 'agent-duplicate')).toHaveLength(1);
@@ -100,7 +100,7 @@ describe('Agent-only daemon admission (#925)', () => {
     server.send(createEnvelope('task.offer', {
       instruction: 'agent work', agentRef: { agentId: 'no-root-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
     }, { taskId: 'no-root-agent-offer', seq: server.nextSeq() }));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'no-root-agent-offer');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'no-root-agent-offer');
     expect(adapter.sessions).toHaveLength(1);
     adapter.sessions[0]!.emit({ type: 'progress', text: 'done' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });

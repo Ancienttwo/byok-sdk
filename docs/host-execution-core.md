@@ -470,14 +470,19 @@ cannot supply an ordinary edit baseline. This follows WO-01 v2 and leaves P5b un
 
 A Host-owned redactor emits only policy-approved resident text in the existing opaque
 projection bytes. The receiver checks the outer schema, hash, grant and monotone ordering.
-It stores Host receipt time with the text. ContextPack checks authorization again and reads
-only the exact device and Agent profile. Missing or null resident memory is omitted, so
-bootstrap can submit the first task. Text over 8 KiB parks the intent in persistent
-`memory_blocked` state before submit. Unauthorized projections also park until repair.
-A changed placement or profile and a blob instruction settle as `failed` before submit.
-The result records `preparationError`. These failures spend no attempt or generation.
-The next intent for that Agent can start. Startup recovery also settles old blocks
-whose cause cannot be repaired by a projection.
+It stores Host receipt time with the text. `contextPack` is the Host's read of that text. It
+checks authorization again, reads only the exact device and Agent profile, omits missing or
+null resident memory, and refuses text over 8 KiB and an unauthorized projection.
+The core adds no memory to the instruction: inline, blob and sealed instructions reach the
+device unchanged, and the device carries `MEMORY.md` into a fresh task
+([ADR-048](adr/ADR-048-device-injects-resident-memory.md)).
+
+Two things stop the queue. A restore in progress parks the intent in persistent
+`memory_blocked` state before submit. A changed placement or profile settles as `failed`
+before submit, and the result records `preparationError`. That failure spends no attempt or
+generation, and the next intent for that Agent can start. An oversized or unauthorized
+projection does not stop the queue. Startup recovery resumes a row that an earlier release
+parked for one of those reasons.
 Blocked heads keep deadline wakes. They do not schedule now+1 polling wakes.
 Accepted projections recheck the exact blocked binding and commit a reconciliation wake.
 If that schedule fails, the core makes one attempt to restore a deadline wake.
@@ -486,12 +491,12 @@ also fails, the deadline stays in the durable outbox. Recovery or a later drain
 retries it. Startup recovery covers a crash between projection commit and wake.
 
 A verified applied `MEMORY.md` replacement of at most 8192 raw UTF-8 bytes invalidates
-the old display for ContextPack. The queued task can then run without resident memory.
-The SDK publishes a real policy-approved snapshot at task close. The replacement body
-is not a projection and never enters ContextPack directly. Old ordering metadata stays.
+the old display for `contextPack`. The SDK publishes a real policy-approved snapshot at
+task close. The replacement body is not a projection and never enters `contextPack`
+directly. Old ordering metadata stays.
 Late old-task projections cannot clear the refresh marker. The core binds the next
 submission to that marker before sending it to the SDK. Only its task-close projection
-can clear the marker. A valid pack is frozen with the execution input.
+can clear the marker.
 
 Terminal memory intent rows and their approval keys stay in the Host ledger until the Host
 selects them with `acknowledgedMemoryIntentIds` in an explicit `HostLedger.compact` call.
@@ -1022,9 +1027,8 @@ sees the scope key or the instruction.
   `promoteOccurrence` refuse another one. Every version needs its own template, and a retry
   generation reuses the frozen bytes.
 - The Host does not check `notAfter`; the device declines a passed one (#843).
-- A sealed intent takes no memory ContextPack: with `options.memory` it fails with
-  `A sealed execution takes no Host memory ContextPack`, and no plaintext is written next to the
-  sealed instruction.
+- With `options.memory`, a sealed intent runs like any other. The core writes no plaintext next
+  to the sealed instruction, and the device adds `MEMORY.md` after it opens the instruction.
 - Sealed dispatch is the optional `submitSealed` of `ExecutionServer.executions` and
   `FrozenSubmitPort`, the cloud's `submitSealedAgentExecution`. Without it, the core fails a
   sealed intent before any submit (`preparationError: 'sealed_dispatch_unavailable'`), and
@@ -1331,8 +1335,9 @@ that file cannot be deleted.
 Before export or notification, the ledger commits a `preparing` restore and a
 durable gate for that device/Agent home. A matching in-flight K4 execution,
 independent pending memory intent, or another restore refuses admission. During
-restore, ordinary approvals are blocked and `contextPack` uses the existing
-`MemoryBlockedError` / `memory_blocked` queue mechanism. Other Agents continue.
+restore, ordinary approvals are blocked and the queue uses `assertDispatchable`
+with the existing `MemoryBlockedError` / `memory_blocked` mechanism. `contextPack`
+only calls that check. Other Agents continue.
 No running task is cancelled. The gate covers K4 submissions only, not external
 filesystem writers or other execution systems.
 
@@ -1369,39 +1374,36 @@ Use `null` when the snapshot has no `MEMORY.md`. Send no paths or raw source rev
 This profile is not an SDK edit-view format and conveys no completeness proof.
 Set `authorizeProjection` to check the exact task, device, session, runtime, grant,
 policy revision and writer epoch from trusted Host records. The model destination
-must also be allowed by that policy. The core calls this check again at ContextPack read.
+must also be allowed by that policy. The core calls this check again in `contextPack`.
 
 Pass the memory page to `HostExecutionCore` as `options.memory`.
-The scanner adds only the resident text and projection metadata to the inline instruction.
-It freezes this input before submit. Blob instructions need an embedder-owned composition step.
-Notes do not enter this ContextPack. The model can recall them through the SDK tools.
-An absent projection or null resident text omits resident memory from the instruction.
-This lets a new Agent run its first task and publish at task close. A new profile revision
-uses the same bootstrap path. No manual projection publish is required.
-Text above 8192 UTF-8 bytes puts the queue head in persisted `memory_blocked` state.
-Unauthorized projections also park until repair. A changed placement or profile and
-a blob instruction settle as `failed` before submit. The result includes `preparationError`.
-The next intent for that Agent can start. Submit a new intent with an inline instruction
-to replace a failed blob intent.
-No text is truncated. The block spends no attempt or generation.
+The scanner adds no memory to the instruction, so an embedder needs no composition step for
+a blob or sealed instruction. `contextPack` is a Host read. The device carries `MEMORY.md`
+into a fresh task, and the model can recall notes through the SDK tools. A new Agent has an
+empty `MEMORY.md`, so it needs no manual projection publish, and neither does a new profile
+revision.
+A restore in progress puts the queue head in persisted `memory_blocked` state. A changed
+placement or profile settles as `failed` before submit. The result includes `preparationError`,
+and the next intent for that Agent can start. An oversized or unauthorized projection does
+not stop the queue. The block spends no attempt or generation.
 Only deadline wakes remain while blocked. Accepted projections recheck the blocked binding
 and commit a reconciliation wake. If that schedule fails, the core makes one attempt
 to restore a deadline wake. Duplicate publish can request an earlier scan again.
 If the fallback fails too, the durable outbox keeps its deadline for recovery or a later drain.
 Startup recovery also rechecks stored blocks and settles failures that cannot be repaired.
 
-To refresh after the size block, the user approves a whole-file `MEMORY.md` replacement
-of at most 8192 raw UTF-8 bytes. A verified `applied` completion invalidates the old display
-for ContextPack and wakes the parked queue. It keeps the old ordering metadata.
-The next core task runs without resident memory. Its normal task close sends a fresh,
-policy-approved projection. The replacement body never enters ContextPack directly.
-Late projections from older tasks keep the refresh pending. Only a projection from a
-new core submission after the repair clears it. Conflict, rejected, uncertain and
-oversized replacements cannot bypass the size block.
+On a daemon that admits the memory MCP, an over-limit `MEMORY.md` fails a fresh task on the
+device before the runtime starts. To repair it, the user approves a whole-file `MEMORY.md` replacement of at most 8192 raw UTF-8
+bytes. A verified `applied` completion invalidates the old display for `contextPack` and keeps
+the old ordering metadata. The next core task runs on the repaired file, and its normal task
+close sends a fresh, policy-approved projection. The replacement body never enters
+`contextPack` directly. Late projections from older tasks keep the refresh pending. Only a
+projection from a new core submission after the repair clears it. The device rejects an
+oversized replacement with `content_invalid`.
 
 Projection receipt time is `projectedAt`. It is not the device's file modification time.
 An applied intent does not create a projection. Task-close projection may still be old.
-The original timestamp stays with the old display. An invalidated display is omitted from ContextPack.
+The original timestamp stays with the old display. An invalidated display is omitted from `contextPack`.
 
 Linux tests use a real cloud mailbox, daemon, home lease, native CAS and device ACK.
 The runtime is synthetic. No model provider is called.

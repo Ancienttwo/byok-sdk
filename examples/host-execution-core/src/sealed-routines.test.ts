@@ -194,7 +194,7 @@ describe('a sealed routine on the K4 core (#953)', () => {
     expect(await host.server.tasks.offer(intents()[0]!.taskId)).toBeUndefined();
   });
 
-  it('fails a sealed occurrence with memory on, and writes no instruction next to the sealed one', async () => {
+  it('runs a sealed occurrence with memory on, and writes no instruction next to the sealed one', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'sealed-memory-'));
     const ledger = new HostLedger(path.join(root, 'ledger.sqlite'), 'product:host-core-test');
     try {
@@ -202,9 +202,8 @@ describe('a sealed routine on the K4 core (#953)', () => {
       const lane = sealedLane();
       host = await openHost({ memory: page, wrapServer: lane.wrap });
       await host.core.addRoutine(await sealedRoutine(host.deviceId));
-      await vi.waitFor(async () => { await host!.core.drain(); expect(intents()[0]).toMatchObject({ conclusion: 'failed',
-        preparationError: 'A sealed execution takes no Host memory ContextPack' }); }, { timeout: 5000 });
-      expect(lane.submitted).toEqual([]);
+      await vi.waitFor(async () => { await host!.core.drain(); expect(lane.submitted).toHaveLength(1); }, { timeout: 5000 });
+      expect(intents()[0]!.preparationError).toBeUndefined();
       const { input } = Object.values(host.ledger.snapshot().executions)[0]!;
       expect(input.payload).not.toHaveProperty('instruction');
     } finally {

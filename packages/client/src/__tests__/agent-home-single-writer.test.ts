@@ -163,9 +163,9 @@ describe('canonical Agent home single writer (WP0)', () => {
     const harness = await start();
 
     server.send(offer('home-a', 'agent-a', 'pi'));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'home-a');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'home-a');
     server.send(offer('home-b', 'agent-b', 'pi'));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'home-b');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'home-b');
 
     expect(harness.pi.startCalls).toHaveLength(2);
     expect(harness.pi.startCalls[0]!.ctx.workspaceDir).not.toBe(harness.pi.startCalls[1]!.ctx.workspaceDir);
@@ -182,7 +182,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     const harness = await start();
 
     server.send(offer('release-first', 'release-agent', 'pi'));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'release-first');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'release-first');
     const session = harness.pi.sessions[0]!;
     session.emit({ type: 'turn_end' });
     await server.waitFor((entry) => entry.type === 'task.complete' && entry.task_id === 'release-first');
@@ -193,7 +193,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     expect(session.closeCalled).toBe(true);
 
     server.send(offer('release-second', 'release-agent', 'claude'));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'release-second');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'release-second');
     expect(harness.claude.startCalls).toHaveLength(1);
   });
 
@@ -201,7 +201,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     const harness = await start();
 
     server.send(offer('disposal-first', 'disposal-agent', 'pi'));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'disposal-first');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'disposal-first');
     const session = harness.pi.sessions[0]!;
     let closeAttempted = false;
     session.close = async (): Promise<void> => {
@@ -233,7 +233,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     const harness = await start();
 
     server.send(offer('cancel-first', 'cancel-agent', 'pi'));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'cancel-first');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'cancel-first');
     const session = harness.pi.sessions[0]!;
     // Observe the count from INSIDE `Session.close()`: the slot must still be
     // held while the runtime is being torn down, and only then surrendered.
@@ -257,7 +257,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     expect(attemptsDuringClose).toBe(1);
 
     server.send(offer('cancel-second', 'cancel-agent', 'claude'));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'cancel-second');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'cancel-second');
     expect(harness.claude.startCalls).toHaveLength(1);
   });
 
@@ -338,7 +338,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     // Agent on purpose — a same-home offer would be declined busy and would
     // prove nothing about whether the duplicate consumed a slot.
     server.send(offer('ordering-barrier', 'ordering-other-agent', 'claude'));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'ordering-barrier');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'ordering-barrier');
     expect(server.received.filter(declineFor('ordering-first'))).toHaveLength(0);
     expect(harness.pi.startCalls).toHaveLength(1);
     // One attempt per home, two homes: the duplicate consumed no second slot.

@@ -9,7 +9,8 @@ import { terminalIdentity } from '../terminal-identity';
 import { abortedStartOf, startOwnedRuntime } from '../runtime-start';
 import type { DeclaredSessionMembers } from '../session-contract';
 import path from 'node:path';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { RESIDENT_MEMORY_MAX_BYTES, createEnvelope } from '@byok-sdk/protocol';
+import { readResidentMemory } from '../../agent-home-readers';
 import { sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types';
 import { admitPreparedOffer, type PreparedOfferServerProjection } from '../prepared-offer-admission';
 import type { InputPreparationStore } from '../input-preparation-store';
@@ -399,7 +400,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
 }
 
 export interface OfferStartInput
-  extends Pick<OfferRequest, 'ordinaryMemoryMode' | 'readerAttempt'>,
+  extends Pick<OfferRequest, 'ordinaryMemoryMode' | 'ordinaryMemoryMcp' | 'readerAttempt' | 'sessionRef'>,
     Pick<OfferRuntime, 'env' | 'mcpEnv' | 'mcpToolsetTools' | 'mcpToolApprovals' | 'pick' | 'prepared' | 'scratch'>,
     Pick<OfferManifest, 'manifest' | 'preparedLaunch' | 'runtimeLaunch' | 'toolAuthorization'>,
     Pick<OfferClaim, 'resolvedInstruction' | 'taskMcpServers'> {
@@ -424,7 +425,7 @@ export async function startOfferRuntime(
   phase: OfferPhaseContext,
   held: OfferHeld,
   input: OfferStartInput,
-  activation: Omit<OfferActivationInput, 'session' | 'sessionMembers'>,
+  activation: Omit<OfferActivationInput, 'session' | 'sessionMembers' | 'residentMemoryStart'>,
 ): Promise<void> {
   let settleLaunch!: () => void;
   const launch: LaunchGate = { settled: false, promise: new Promise<void>((resolve) => { settleLaunch = resolve; }) };
@@ -443,12 +444,12 @@ async function startAndActivateRuntime(
   phase: OfferPhaseContext,
   held: OfferHeld,
   input: OfferStartInput,
-  activation: Omit<OfferActivationInput, 'session' | 'sessionMembers'>,
+  activation: Omit<OfferActivationInput, 'session' | 'sessionMembers' | 'residentMemoryStart'>,
   launch: LaunchGate,
 ): Promise<void> {
   const { taskId } = phase;
   const {
-    agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
+    agentBinding, ordinaryMemoryMode, ordinaryMemoryMcp, readerAttempt, sessionRef, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
     preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
   } = input;
   const requestApproval = (summary: string, signal?: AbortSignal, kind: ApprovalKind = 'task-terminal') => launch.settled
@@ -507,6 +508,23 @@ async function startAndActivateRuntime(
       return;
     }
   }
+  // #1439: a fresh instruction task that binds the memory MCP carries MEMORY.md,
+  // and fails before the runtime starts when it cannot. Without the MCP the SDK
+  // could not repair the file, so that task reads it itself. A writer Attempt keeps
+  // the same read as its start copy; a reader never restores, because it runs
+  // beside a writer and a restore would overwrite that writer's work.
+  const injectsResidentMemory = preparedLaunch === undefined && sessionRef === undefined && ordinaryMemoryMcp;
+  const residentMemory = (injectsResidentMemory || !readerAttempt) && !blobAbort.signal.aborted
+    ? await readResidentMemory(agentBinding.resolution.canonicalHome, agentBinding.lease.homeIdentity)
+    : undefined;
+  if (injectsResidentMemory && residentMemory !== undefined && residentMemory.kind !== 'read') {
+    const reason = residentMemory.kind === 'over-limit'
+      ? `agent_memory_resident_over_limit: ${residentMemory.byteCount}/${RESIDENT_MEMORY_MAX_BYTES}`
+      : `agent_memory_resident_unreadable: ${residentMemory.reason}`;
+    await this['failClaimedAgent'](taskId, reason, false, { binding: agentBinding, runtimeId: pick.descriptor.id });
+    return;
+  }
+  const residentMemoryRead = residentMemory?.kind === 'read' ? residentMemory : undefined;
   const effectiveToolAuthorization = toolAuthorizationMode(toolAuthorization, pick.descriptor.id);
   const toolAuthorizationGate = effectiveToolAuthorization !== 'auto' ? undefined : createAutoToolAuthorizationGate({
     workspace: manifest.workspace.workspaceDir,
@@ -578,7 +596,7 @@ async function startAndActivateRuntime(
     ...(preparedLaunch === undefined
       ? {
         kind: 'instruction' as const,
-        instruction: prependAgentMemoryModeGuidance(resolvedInstruction, ordinaryMemoryMode, readerAttempt),
+        instruction: prependAgentMemoryModeGuidance(resolvedInstruction, ordinaryMemoryMode, readerAttempt, injectsResidentMemory ? residentMemoryRead : undefined),
       }
       : { kind: 'prepared' as const, preparation: preparedLaunch }),
     manifest,
@@ -716,5 +734,7 @@ async function startAndActivateRuntime(
       startedAtMs: Date.now(),
     },
   });
-  await activateOffer.call(this, phase, held, { ...activation, session, sessionMembers });
+  await activateOffer.call(this, phase, held, {
+    ...activation, session, sessionMembers, residentMemoryStart: readerAttempt ? undefined : residentMemoryRead,
+  });
 }

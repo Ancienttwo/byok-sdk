@@ -3,6 +3,8 @@
 > **来源**：PR [#523](https://github.com/Ancienttwo/byok-sdk/pull/523) 加入本文，PR [#524](https://github.com/Ancienttwo/byok-sdk/pull/524) 写入 v3 裁定，PR [#579](https://github.com/Ancienttwo/byok-sdk/pull/579) 补 K8b 对齐。决定在 §3（M1–M3、A1、R1、L1、G1）、§12 决策表和「PRODUCT RULINGS 2026-10-19」。其余各节是这些决定的背景。
 > **移入**：#1291 把本文从已退役的 plans 目录（`2026-10-18-bot-mode-product-prd.md`）移到这里。正文未改；只把指向已移走或已删除文件的链接改为新位置或合入它的 PR。
 
+> **部分取代**：本文有关常驻档案进入 ContextPack 和超限阻塞的条款已被取代，范围见 [ADR-048 §5](ADR-048-device-injects-resident-memory.md#5-取代)。
+
 > 版本：v3，2026-10-19。v1、v2 为 2026-10-18。v3 写入第一批 WO-01..05 的事实修正和 Aimpact 裁定。修订依据见 §13。上限表仍是 v1 提议值。
 > 状态：草案。只写文档，不授权实现、发布、issue 修改或下游迁移。
 > 依据：byok-sdk `origin/main@becc9f57`（0.27.0，2026-10-18）。上游 OAR `c264f17`（0.67.0）。Aiphabee 核验基线为 `main@2eae75c7`（2026-10-18；WO-04）。本文记录该快照，不声称它是当前部署状态。

@@ -285,10 +285,15 @@ export class HostMemoryPage {
       return result;
     } };
   }
-  contextPack(binding: MemoryBinding): MemoryContextPack {
+  /** What an Agent's queue waits for: a current placement and no restore in progress. */
+  assertDispatchable(binding: MemoryBinding): void {
     if (!this.options.isCurrent(binding)) throw new Error('Memory placement or profile changed');
+    if (memoryRestoreBlocked(this.ledger.snapshot(), binding)) throw new MemoryBlockedError('Memory restore in progress');
+  }
+  /** The Host's read of the projected resident text. The device, not this read, puts `MEMORY.md` into a task. */
+  contextPack(binding: MemoryBinding): MemoryContextPack {
+    this.assertDispatchable(binding);
     const state = this.ledger.snapshot();
-    if (memoryRestoreBlocked(state, binding)) throw new MemoryBlockedError('Memory restore in progress');
     const projection = state.memory?.projections[bindingKey(binding)];
     if (!projection || projection.text === null || projection.invalidatedByIntent) return {};
     if (!this.options.authorizeProjection(binding.deviceId, projection.mutation)) throw new MemoryBlockedError('Memory projection no longer authorized');

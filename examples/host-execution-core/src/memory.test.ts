@@ -34,6 +34,13 @@ function projection(text: string | null, rest: Partial<AgentMemoryProjectionPlai
     mutationId: randomUUID(), policyRevision: 'policy-1', snapshot: { redactedHash: memoryRevision(bytes),
       redactedByteCount: Buffer.byteLength(bytes), redactedBytes: Buffer.from(bytes).toString('base64url') }, ...rest };
 }
+/** Holds an Agent's queue the way a restore in progress does; returns the release. */
+function holdQueue(deviceId: string): () => void {
+  ledger.transaction(state => {
+    state.memory!.restores = { held: { deviceId, agentRef, restoreId: 'held', status: 'applying', files: [] } as never };
+  });
+  return () => ledger.transaction(state => { delete state.memory!.restores!['held']; });
+}
 function completion(intentId: string, outcome: 'applied' | 'conflict' | 'uncertain' | 'rejected' = 'applied'): AgentMemoryIntentCompletion {
   const { agentRef, path, operation, operationDigest, targetRevision } = page.intent(intentId)!.intent;
   const identity = { intentId, agentRef, path, operation, operationDigest };
@@ -243,37 +250,44 @@ it('allows absent memory, blocks oversized text and counts UTF-8 bytes', async (
   expect(page.contextPack(binding).residentMemory!.text).toBe('');
 });
 
-it('blocks execution before submit, then freezes a resident ContextPack in the real offered instruction', async () => {
-  let host: TestHost | undefined;
+it('passes the instruction through unchanged: the device, not the Host, carries memory', async () => {
+  const host = await openHost({ memory: page });
   try {
-    host = await openHost({ memory: page });
-    await page.projectionPort(host.deviceId).publish({ mutation: projection('x'.repeat(8193)) });
-    const offer = await host.core.enqueue(host.intent('memory-turn'));
-    expect(await host.server.tasks.offer(offer.taskId)).toBeUndefined();
-    expect(host.core.intent('memory-turn')!.attempts).toBe(0);
-    expect(Object.values(host.ledger.snapshot().outbox).some(row => row.lastError?.includes('Memory blocked'))).toBe(true);
-    await page.projectionPort(host.deviceId).publish({ mutation: projection('resident [redacted]', { sourceSeq: 2 }) });
-    await host.core.drain();
-    const payload = (await host.server.tasks.offer(offer.taskId))!.payload;
-    if (!('instruction' in payload)) throw new Error('Expected an inline instruction');
-    const frozen = payload.instruction;
-    expect(frozen).toContain('resident [redacted]');
-    expect(frozen).toContain('ContextPack');
-    await page.projectionPort(host.deviceId).publish({ mutation: projection('new projection', { sourceSeq: 3 }) });
-    await host.core.drain();
-    expect((await host.server.tasks.offer(offer.taskId))!.payload).toEqual(payload);
-  } finally { await host?.close(); }
+    await page.projectionPort(host.deviceId).publish({ mutation: projection('resident [redacted]') });
+    const input = host.intent('memory-turn');
+    const offer = await host.core.enqueue(input);
+    await vi.waitFor(async () => expect(await host.server.tasks.offer(offer.taskId)).toBeDefined(), { timeout: 5000 });
+    expect((await host.server.tasks.offer(offer.taskId))!.payload).toHaveProperty('instruction', input.execution.payload.instruction);
+    expect(JSON.stringify(host.ledger.snapshot().executions[offer.taskId]!.input)).not.toContain('resident [redacted]');
+  } finally { await host.close(); }
 });
 
+it.each([
+  ['an oversized', 'x'.repeat(8193), true],
+  ['an unauthorized', 'old authorized text', false],
+])('starts behind %s projection, which only the Host read refuses', async (_label, text, authorized) => {
+  let allowed = true;
+  page = new HostMemoryPage(ledger, { ...options(), authorizeProjection: () => allowed });
+  const host = await openHost({ memory: page });
+  try {
+    await page.projectionPort(host.deviceId).publish({ mutation: projection(text) });
+    allowed = authorized;
+    const intent = await host.core.enqueue(host.intent('not-held'));
+    await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true), { timeout: 5000 });
+    expect(host.core.intent(intent.key)).toMatchObject({ phase: 'inflight', attempts: 1 });
+    expect(() => page.contextPack({ deviceId: host.deviceId, agentRef })).toThrow();
+  } finally { await host.close(); }
+});
 
 it('bootstraps without a resident projection', () => {
   expect(page.contextPack(binding)).toEqual({});
 });
 
-it('parks an oversized queue head without hot wake polling', async () => {
+it('parks a queue head behind a restore without hot wake polling', async () => {
   const host = await openHost({ memory: page });
   try {
-    await page.projectionPort(host.deviceId).publish({ mutation: projection('x'.repeat(8193)) });
+    await page.projectionPort(host.deviceId).publish({ mutation: projection('resident') });
+    holdQueue(host.deviceId);
     const wakes = vi.spyOn(host.server.wakes, 'schedule');
     await host.core.enqueue(host.intent('parked'));
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -283,43 +297,32 @@ it('parks an oversized queue head without hot wake polling', async () => {
 });
 
 
-it('settles a blob instruction without attempts and starts the next inline intent', async () => {
-  const host = await openHost({ memory: page, reconcileMs: 100 });
+it('offers a blob instruction with memory on', async () => {
+  const host = await openHost({ memory: page });
   try {
-    const input = host.intent('blob-rejected');
-    input.execution.payload.instruction = { blobRef: { blobId: 'blob', contentHash: memoryRevision('blob'), size: 4, contentType: 'text/plain' } };
-    const rejected = await host.core.enqueue(input);
-    expect(rejected).toMatchObject({ phase: 'settled', conclusion: 'failed', attempts: 0, generation: 0,
-      preparationError: 'Memory ContextPack requires an inline instruction' });
-    expect(rejected.memoryBlocked).toBeUndefined();
-    expect(await host.server.tasks.offer(rejected.taskId)).toBeUndefined();
-    const next = await host.core.enqueue(host.intent('inline-after-blob'));
-    await vi.waitFor(() => expect(host.adapter.sessions.has(next.taskId)).toBe(true), { timeout: 5000 });
-    await host.restartCore();
-    expect(host.core.intent(input.key)).toEqual(rejected);
-    const results: unknown[] = [];
-    await host.core.flushProjections(async (_id, value) => { results.push(value); });
-    expect(results).toContainEqual(expect.objectContaining({ intentKey: input.key, conclusion: 'failed',
-      preparationError: rejected.preparationError }));
+    const input = host.intent('blob-offered');
+    const instruction = { blobRef: { blobId: 'blob', contentHash: memoryRevision('blob'), size: 4, contentType: 'text/plain' } };
+    input.execution.payload.instruction = instruction;
+    const intent = await host.core.enqueue(input);
+    expect(intent).toMatchObject({ attempts: 1 });
+    expect(intent.preparationError).toBeUndefined();
+    expect((await host.server.tasks.offer(intent.taskId))!.payload).toHaveProperty('instruction', instruction);
   } finally { await host.close(); }
 });
 
-it('settles a legacy blob block during startup recovery', async () => {
+it('resumes a row parked by an earlier release during startup recovery', async () => {
   const host = await openHost({ memory: page });
   try {
     await host.core.close();
-    const input = host.intent('legacy-blob');
-    input.execution.payload.instruction = { blobRef: { blobId: 'blob', contentHash: memoryRevision('blob'), size: 4, contentType: 'text/plain' } };
+    const input = host.intent('legacy-parked');
     host.ledger.transaction(state => {
       const row = enqueue(state, host.ledger.tenant, input);
       row.phase = 'memory_blocked';
-      row.memoryBlocked = { resume: 'queued', reason: 'Memory ContextPack requires an inline instruction' };
+      row.memoryBlocked = { resume: 'queued', reason: 'Memory blocked: MEMORY.md exceeds 8 KiB. Reduce its size.' };
     });
     await host.restartCore();
-    expect(host.core.intent(input.key)).toMatchObject({ phase: 'settled', conclusion: 'failed', attempts: 0,
-      preparationError: 'Memory ContextPack requires an inline instruction' });
+    await vi.waitFor(() => expect(host.core.intent(input.key)).toMatchObject({ phase: 'inflight', attempts: 1 }), { timeout: 5000 });
     expect(host.core.intent(input.key)?.memoryBlocked).toBeUndefined();
-    expect(await host.server.tasks.offer(host.core.intent(input.key)!.taskId)).toBeUndefined();
   } finally { await host.close(); }
 });
 
@@ -329,11 +332,14 @@ it.each(['queued', 'memory_blocked'] as const)('starts profile rev2 behind a sta
   const host = await openHost({ memory: page, reconcileMs: 100 });
   try {
     const old = host.intent(`stale-profile-${initial}`);
+    let released = () => {};
     if (initial === 'memory_blocked') {
-      await page.projectionPort(host.deviceId).publish({ mutation: projection('x'.repeat(8193)) });
+      await page.projectionPort(host.deviceId).publish({ mutation: projection('resident') });
+      released = holdQueue(host.deviceId);
       expect(await host.core.enqueue(old)).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
     }
     revision = '2';
+    released();
     if (initial === 'queued') await host.core.enqueue(old);
     const next = host.intent(`current-profile-${initial}`);
     next.execution.payload.agentRef.profileRevision = revision;
@@ -347,30 +353,14 @@ it.each(['queued', 'memory_blocked'] as const)('starts profile rev2 behind a sta
   } finally { await host.close(); }
 });
 
-it('keeps an unauthorized projection blocked until an authorized projection arrives', async () => {
-  let authorized = true;
-  page = new HostMemoryPage(ledger, { ...options(), authorizeProjection: () => authorized });
-  const host = await openHost({ memory: page, reconcileMs: 100 });
-  try {
-    const port = page.projectionPort(host.deviceId);
-    await port.publish({ mutation: projection('old authorized text') });
-    authorized = false;
-    const intent = await host.core.enqueue(host.intent('authorization-repair'));
-    expect(intent).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
-    expect(await host.server.tasks.offer(intent.taskId)).toBeUndefined();
-    authorized = true;
-    await port.publish({ mutation: projection('authorized again', { sourceSeq: 2 }) });
-    await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true), { timeout: 5000 });
-    expect(host.core.intent(intent.key)).toMatchObject({ phase: 'inflight', attempts: 1 });
-  } finally { await host.close(); }
-});
-
 it('restores a deadline wake when the projection reconciliation wake fails', async () => {
   const host = await openHost({ memory: page, reconcileMs: 100 });
   try {
     const port = page.projectionPort(host.deviceId);
-    await port.publish({ mutation: projection('x'.repeat(8193)) });
+    await port.publish({ mutation: projection('resident') });
+    const release = holdQueue(host.deviceId);
     const intent = await host.core.enqueue(host.intent('refresh-wake-failure', { waitUntil: Date.now() + 2000 }));
+    release();
     const wakes = vi.spyOn(host.server.wakes, 'schedule').mockRejectedValueOnce(new Error('schedule failed'));
     await expect(port.publish({ mutation: projection('repaired', { sourceSeq: 2 }) })).rejects.toThrow('Memory reconciliation wake failed');
     expect(await host.server.wakes.pending()).toEqual([expect.objectContaining({ availableAt: intent.waitUntil })]);
@@ -384,8 +374,10 @@ it('bounds projection wake fallback failures and retains the deadline outbox for
   const host = await openHost({ memory: page, reconcileMs: 100 });
   try {
     const port = page.projectionPort(host.deviceId);
-    await port.publish({ mutation: projection('x'.repeat(8193)) });
+    await port.publish({ mutation: projection('resident') });
+    const release = holdQueue(host.deviceId);
     const intent = await host.core.enqueue(host.intent('persistent-refresh-wake-failure'));
+    release();
     const wakes = vi.spyOn(host.server.wakes, 'schedule')
       .mockRejectedValueOnce(new Error('initial failure')).mockRejectedValueOnce(new Error('fallback failure'));
     await expect(port.publish({ mutation: projection('repaired', { sourceSeq: 2 }) }))
@@ -407,8 +399,10 @@ it('starts on duplicate publish after restoring a fallback deadline wake', async
   const host = await openHost({ memory: page, reconcileMs: 100 });
   try {
     const port = page.projectionPort(host.deviceId);
-    await port.publish({ mutation: projection('x'.repeat(8193)) });
+    await port.publish({ mutation: projection('resident') });
+    const release = holdQueue(host.deviceId);
     const intent = await host.core.enqueue(host.intent('wake-after-refresh'));
+    release();
     const wakes = vi.spyOn(host.server.wakes, 'schedule').mockRejectedValueOnce(new Error('wake response lost'));
     const refreshed = projection('new resident', { sourceSeq: 2 });
     await expect(port.publish({ mutation: refreshed })).rejects.toThrow('Memory reconciliation wake failed');
@@ -452,9 +446,11 @@ it('recovers an accepted projection after the core was offline during its notifi
   const host = await openHost({ memory: page });
   try {
     const port = page.projectionPort(host.deviceId);
-    await port.publish({ mutation: projection('x'.repeat(8193)) });
+    await port.publish({ mutation: projection('resident') });
+    const release = holdQueue(host.deviceId);
     const intent = await host.core.enqueue(host.intent('offline-refresh'));
     await host.core.close();
+    release();
     await port.publish({ mutation: projection('fresh after restart', { sourceSeq: 2 }) });
     expect(host.core.intent(intent.key)).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
     await host.restartCore();

@@ -652,14 +652,8 @@ export class HostExecutionCore {
     });
     if (outcome === 'delivered') this.ledger.transaction(state => { state.executions[intent.taskId]!.submission = 'delivered'; });
   }
-  private memoryInstruction(intent: Intent): string | undefined {
-    if (!this.options.memory) return undefined;
-    // A sealed instruction is member content: the Host neither reads it nor adds plaintext next to it.
-    if (isSealed(intent.execution)) throw new Error('A sealed execution takes no Host memory ContextPack');
-    const instruction = intent.execution.payload.instruction;
-    if (typeof instruction !== 'string') throw new Error('Memory ContextPack requires an inline instruction');
-    const pack = this.options.memory.contextPack({ deviceId: intent.execution.deviceId, agentRef: intent.execution.payload.agentRef });
-    return pack.residentMemory ? `${instruction}\n\nContextPack (memory data):\n${JSON.stringify(pack)}` : instruction;
+  private assertMemoryDispatchable(intent: Intent): void {
+    this.options.memory?.assertDispatchable({ deviceId: intent.execution.deviceId, agentRef: intent.execution.payload.agentRef });
   }
   private resumeMemory(binding?: MemoryBinding): boolean {
     return this.ledger.transaction(state => {
@@ -667,7 +661,7 @@ export class HostExecutionCore {
       for (const intent of Object.values(state.intents)) {
         if (intent.phase !== 'memory_blocked' || binding && (intent.execution.deviceId !== binding.deviceId
           || canonical(intent.execution.payload.agentRef) !== canonical(binding.agentRef))) continue;
-        try { this.memoryInstruction(intent); }
+        try { this.assertMemoryDispatchable(intent); }
         catch (error) {
           this.memoryFailure(state, intent, error);
           changed = intent.phase !== 'memory_blocked' || changed;
@@ -708,8 +702,7 @@ export class HostExecutionCore {
         settle(state, row, 'failed');
         return undefined;
       }
-      let instruction: string | undefined;
-      try { instruction = this.memoryInstruction(row); }
+      try { this.assertMemoryDispatchable(row); }
       catch (error) {
         this.memoryFailure(state, row, error);
         return undefined;
@@ -719,7 +712,6 @@ export class HostExecutionCore {
         row.taskId = taskId(row.key, row.generation);
         state.executions[row.taskId] = { input: frozenInput(row.execution, row.taskId), submission: 'reserved', started: false };
       }
-      if (instruction !== undefined) state.executions[row.taskId]!.input.payload.instruction = instruction;
       row.phase = 'inflight'; row.attempts++;
       state.executions[row.taskId]!.submission = 'uncertain';
       if (row.occurrence) state.occurrences[row.occurrence]!.attempts = row.attempts;
