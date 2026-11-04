@@ -166,15 +166,15 @@ it('fails a failed handler intent after a restart, and only the probe drain of t
 it('refuses to fail an unknown key, an intent that can still settle, a settled intent and a non-owner', async () => {
   paused = true;
   bot = openBot({ research: () => {} });
-  await expect(bot.failStuckIntent('missing')).rejects.toThrow('Unknown intent: missing');
+  await expect(bot.failStuckIntent('missing')).rejects.toMatchObject({ name: 'HostIntentError', key: 'missing', code: 'unknown_intent' });
   await bot.enqueueHostIntent(input(), 'research');
-  await expect(bot.failStuckIntent(KEY)).rejects.toThrow(`Intent is not stuck: ${KEY} has no refused terminal`);
+  await expect(bot.failStuckIntent(KEY)).rejects.toMatchObject({ code: 'not_stuck', message: `Intent is not stuck: ${KEY} has no refused terminal` });
   const turnId = await bot.input('k1', 'hello');
-  await expect(bot.failStuckIntent(turnId)).rejects.toThrow(`Intent is not stuck: ${turnId}`);
+  await expect(bot.failStuckIntent(turnId)).rejects.toMatchObject({ key: turnId, code: 'not_stuck' });
   await expect(bot.failStuckIntent(KEY, { id: 'guest', kind: 'human' })).rejects.toThrow('not_owner: failStuckIntent needs the owner principal');
   paused = false;
   await bot.drain();
-  await expect(bot.failStuckIntent(KEY)).rejects.toThrow(`Intent already settled: ${KEY}`);
+  await expect(bot.failStuckIntent(KEY)).rejects.toMatchObject({ code: 'already_settled', message: `Intent already settled: ${KEY}` });
   expect(bot.core.intent(KEY)?.conclusion).toBe('succeeded');
   expect(ownerFailures()).toEqual([]);
 });
@@ -219,9 +219,13 @@ it('fails a Bot Turn whose outcome commit throws on an owner call, so its FIFO m
   expect(next().phase).toBe('queued');
   await bot.failStuckIntent(turnId);
   expect(bot.core.intent(turnId)?.conclusion).toBe('failed');
-  expect(bot.snapshot().turns[turnId]).toMatchObject({ status: 'failed', conclusion: 'failed', reported: true });
+  expect(bot.snapshot().turns[turnId]).toMatchObject({ status: 'failed', conclusion: 'failed', reported: true, settleCode: 'outcome_failed' });
   expect(ownerFailures()).toEqual([`Intent failed by owner outcome_failed: ${turnId} Outcome differs from the frozen schema`]);
   expect(next().phase).toBe('inflight');
+  // #1405: the code is in the ledger, so a restart reads it, and a retry refuses by code.
+  bot = await restart({});
+  expect(bot.snapshot().turns[turnId]!.settleCode).toBe('outcome_failed');
+  await expect(bot.failStuckIntent(turnId)).rejects.toMatchObject({ code: 'already_settled' });
 });
 
 it('refuses an async handler, and consumes its rejection', async () => {
@@ -321,6 +325,25 @@ it('runs the handler once for a Host intent that completed before the cancel', a
   await expect(bot.cancelHostIntent(KEY)).resolves.toEqual({ key: KEY, result: 'cancel_pending' });
   await bot.drain();
   expect({ conclusion: bot.core.intent(KEY)?.conclusion, keys, cancels }).toEqual({ conclusion: 'succeeded', keys: [KEY], cancels: [] });
+});
+
+it('cancels a Bot Turn once: a repeat writes nothing and sends no cancel, also after a restart (#1405)', async () => {
+  paused = true;
+  bot = openBot({});
+  const turnId = await bot.input('k1', 'hello');
+  const cancel = vi.spyOn(bot.core, 'cancel');
+  await expect(bot.cancelTurn(turnId)).resolves.toEqual({ turnId, result: 'cancelled' });
+  const revision = bot.snapshot().revision, transaction = vi.spyOn(ledger!, 'transaction');
+  await expect(bot.cancelTurn(turnId)).resolves.toEqual({ turnId, result: 'cancel_pending' });
+  expect({ transactions: transaction.mock.calls.length, revision: bot.snapshot().revision, cancels: cancel.mock.calls.length })
+    .toEqual({ transactions: 0, revision, cancels: 1 });
+  transaction.mockRestore();
+  paused = false;
+  await bot.drain();
+  await expect(bot.cancelTurn(turnId)).resolves.toEqual({ turnId, result: 'already_settled', conclusion: 'cancelled' });
+  bot = await restart({});
+  await expect(bot.cancelTurn(turnId)).resolves.toEqual({ turnId, result: 'already_settled', conclusion: 'cancelled' });
+  expect({ revision: bot.snapshot().revision, sdkCancels: new Set(cancels).size }).toEqual({ revision, sdkCancels: 1 });
 });
 
 it('refuses to cancel an unknown key, a direct K4 intent, a Bot Turn and a non-owner', async () => {

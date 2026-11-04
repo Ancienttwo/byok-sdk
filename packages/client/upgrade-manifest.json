@@ -7,13 +7,31 @@
   },
   "to": {
     "version": "0.37.0",
-    "snapshotSha256": "a74d19105a074c7a5c075410cb9fb764234c0e71da44b62f6c538c5a786249ea"
+    "snapshotSha256": "21928d253541a1f48982870051e8a75f710e571684c60f893066f3a4eb12c7b4"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "k8-idempotent-owner-cancels",
+      "impact": "breaking",
+      "summary": "K8 owner cancels are idempotent and its refusals carry codes (#1405). cancelTurn returns TurnCancelResult { turnId, result, conclusion? } and cancelDelegation returns DelegationCancelResult { delegationId, result, verdict? }, in the shape of cancelHostIntent and read from the ledger, so a replay and a restart give the same answer: cancelled (this call committed the cancel), cancel_pending (an earlier cancel has no terminal yet) or already_settled (the target had ended, with its conclusion or verdict). cancel_pending and already_settled write nothing and do not call core.cancel, so a repeated cancel no longer raises the K8 revision. Breaking: cancelDelegation on a resolved delegation resolves already_settled instead of rejecting with 'Delegation already resolved'. cancelDelegation, and cancelTurn on a chain Turn, refuse with the new DelegationError (key = delegation id): unknown_delegation, and not_cancellable for a reply_held or uncertain delegation (end it with abandonDelegation). failStuckIntent refuses with HostIntentError: unknown_intent, already_settled, or not_stuck; HostIntentError gains the codes already_settled and not_stuck. The messages stay the same and both classes extend Error. A Bot Turn settled by failStuckIntent records settleCode: 'outcome_failed' on the Turn, in the ledger and its bot-turn projection; the audit row stays. The field is optional, so an older K8 reads the ledger and ignores it: a rollback keeps working, but the older K8 writes no settleCode. index.ts now exports DelegationError, HostIntentError, DelegationCancelResult, HostIntentCancelResult and TurnCancelResult. A Host that vendored K8 copies src/host.ts, src/index.ts, src/delegation.ts, src/rules/delegation.ts and src/rules/turn.ts, and switches on error.code instead of message prefixes such as 'Intent already settled'.",
+      "migration": "examples/bot-collaboration/README.md#idempotent-owner-cancels-1405",
+      "items": [
+        "example:bot-collaboration"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=eb3615893afed74e",
+      "after": "K8 0.0.1 src-sha256=d3f9cadba2502856",
+      "entry": "k8-idempotent-owner-cancels"
+    }
+  ]
 }

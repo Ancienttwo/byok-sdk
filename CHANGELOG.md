@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Breaking (examples)** — K8 `cancelTurn` and `cancelDelegation` are
+  idempotent and return a result in the shape of `cancelHostIntent` (#1405):
+  `TurnCancelResult` `{ turnId, result, conclusion? }` and
+  `DelegationCancelResult` `{ delegationId, result, verdict? }`, read from the
+  ledger, so a replay and a restart give the same answer. `cancelled` means this
+  call committed the cancel; `cancel_pending` (an earlier cancel has no terminal
+  yet) and `already_settled` (the target had ended, with its conclusion or
+  verdict) write nothing and do not call `core.cancel`. `cancelDelegation` on a
+  resolved delegation now resolves `already_settled` instead of rejecting with
+  `Delegation already resolved`. The refusals carry codes: `DelegationError`
+  (`unknown_delegation`, `not_cancellable`) for `cancelDelegation` and a chain
+  `cancelTurn`, and `HostIntentError` (`unknown_intent`, `already_settled`,
+  `not_stuck`) for `failStuckIntent`; the messages stay and both classes extend
+  `Error`. A Bot Turn that `failStuckIntent` settles records
+  `settleCode: 'outcome_failed'`, so a reader no longer matches the audit row;
+  an older K8 ignores the optional field, so a rollback keeps working. A Host
+  that vendored K8 copies `src/host.ts`, `src/index.ts`, `src/delegation.ts`,
+  `src/rules/delegation.ts` and `src/rules/turn.ts` ([migration](examples/bot-collaboration/README.md#idempotent-owner-cancels-1405)).
+
 ## 0.37.0 — 2026-11-04 (published)
 
 0.37.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

@@ -121,15 +121,48 @@ adds the audit row `Intent failed by owner <code>: <key> <reason>`. The settle
 runs no handler, and the intent records no terminal; the server task keeps it.
 The drain before the settle applies the terminal once more, so a `handler_failed`
 handler runs once inside the call. If that drain applies the outcome, the call
-refuses with `Intent already settled`. If that drain rejects and the intent has
+refuses with `already_settled`. If that drain rejects and the intent has
 no refusal of its own, the call throws the drain error. Later drains move past
 the intent. The call settles the key first. Its closing pass, like every API
 that runs a pass, rejects if another intent is stuck, and a retry for this key
-then says `Intent already settled`. A Host intent keeps its `hostIntents` record until K4 compacts it,
+then refuses with `already_settled`. A Host intent keeps its `hostIntents` record until K4 compacts it,
 so an exact replay of `enqueueHostIntent` returns the failed intent. The call
-refuses an unknown key, a settled intent, and an intent whose terminal K8 did not
-refuse, such as one still running. `BotOptions` passes `reconcileMs` (default
-100) and `onOutbox` to the K4 core.
+refuses with `HostIntentError`: `unknown_intent` for a key with no K4 intent,
+`already_settled` for a settled intent, and `not_stuck` for an intent whose
+terminal K8 did not refuse, such as one still running. The settle of a Bot Turn
+also writes the refusal code to the Turn as `settleCode: 'outcome_failed'`, in
+the ledger and in its `bot-turn:<id>` projection, so a reader does not match the
+audit row (#1405). A Host intent and a key that K8 did not write keep the code
+only in the audit row. `BotOptions` passes `reconcileMs` (default 100) and
+`onOutbox` to the K4 core.
+
+### Idempotent owner cancels (#1405)
+
+`cancelTurn(id)` and `cancelDelegation(id)` return a result in the shape of
+`cancelHostIntent`, read from the ledger, so a replay and a restart give the
+same answer: `TurnCancelResult` `{ turnId, result, conclusion? }` and
+`DelegationCancelResult` `{ delegationId, result, verdict? }`.
+
+- `cancelled`: this call committed the cancel.
+- `cancel_pending`: an earlier cancel has no terminal yet: the Turn's K4 intent
+  has a `cancelReason`, or the delegation has a cancel fact and no verdict. The
+  call writes nothing and does not call `core.cancel`. A cancel fact that is not
+  delivered yet still goes out with the next pass.
+- `already_settled`: the target had ended, and the call writes nothing. A Turn
+  gives its earlier `conclusion` (its K4 intent's when it has one), a
+  delegation its `verdict`.
+
+`cancelTurn` on B's chain Turn whose delegation has no verdict answers as
+`cancelDelegation` does; once the verdict is in, it answers from the Turn. An
+input batch id or a member input id names the batch Turn, and an open batch
+commits its seal, so it gives `cancelled`. A Turn id that is not in the state
+still throws `Turn not found`.
+
+`cancelDelegation` refuses with `DelegationError`, whose `key` is the
+delegation id: `unknown_delegation`, and `not_cancellable` for a `reply_held`
+or `uncertain` delegation; end those with `abandonDelegation`. Both error
+classes extend `Error`, so an `instanceof Error` check still holds, and the
+messages are the same as before.
 
 ## Actions and context
 
@@ -544,6 +577,8 @@ card decisions, team snapshots, and three K4 callbacks: a terminal outcome, an A
 and a Bot routine occurrence. The keyless commands are `setMainBot`,
 `updateRoom`, `retryPersona`, `personaReady`, `enablePushRoute`, `revokePushRoute`,
 `resendDelivery`, `cancelDelegation`, `abandonDelegation`, `cancelTurn` and `endRoutine`.
+A `cancelTurn` or `cancelDelegation` that answers `cancel_pending` or
+`already_settled` commits nothing ([idempotent owner cancels](#idempotent-owner-cancels-1405)).
 `src/rules/commands.ts` decides all of them. The Host checks the principal
 and the channel before the commit, and it calls K4 cancel and delivers cancel
 facts after the commit. `updateRoutine` and `setRoutineLifecycle` are K4
@@ -1108,7 +1143,9 @@ It does not call `core.cancel`. With an intent, the Host calls `core.cancel`
 after the commit and then sets `delivered`. Each `process` pass delivers an
 undelivered cancel to its frozen target, so a restart completes it. When
 `core.cancel` fails, `cancelDelegation` rejects, but the cancel stays
-committed and the timer delivers it.
+committed and the timer delivers it. A repeat gives `cancel_pending` until the
+verdict and `already_settled` with the verdict after it; neither writes or calls
+`core.cancel` ([idempotent owner cancels](#idempotent-owner-cancels-1405)).
 
 A message accepted before the cancel stays. The verdict is then `cancelled`
 with that reply marked `partial`. A message after the cancel is refused

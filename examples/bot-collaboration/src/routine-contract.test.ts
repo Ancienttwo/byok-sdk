@@ -52,7 +52,7 @@ async function ledgerSubject(): Promise<RoutineSubject> {
         new AbortController().signal);
     },
     sync: () => host.drain(),
-    cancelTurn: turnId => host.cancelTurn(turnId),
+    cancelTurn: async turnId => { await host.cancelTurn(turnId); },
     update: action => host.updateRoutine(action),
     lifecycle: (id, value) => host.setRoutineLifecycle(id, value),
     end: id => host.endRoutine(id),
