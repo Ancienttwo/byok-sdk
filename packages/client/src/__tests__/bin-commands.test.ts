@@ -10,7 +10,7 @@ import { ControlError } from '../daemon/control-protocol';
 import type { ConnectControlResult, ControlClient } from '../daemon/control-client';
 import { runApprovalsCommand } from '../bin/commands/approvals';
 import { runApproveCommand, runRejectCommand } from '../bin/commands/approve-reject';
-import { readPairInput, runPairCommand } from '../bin/commands/pair';
+import { ENROLLMENT_PAIR_REQUEST_TIMEOUT_MS, readPairInput, runPairCommand } from '../bin/commands/pair';
 import { runRuntimesCommand } from '../bin/commands/runtimes';
 import { runStatusCommand } from '../bin/commands/status';
 import { runTasksFollowCommand, runTasksListCommand } from '../bin/commands/tasks';
@@ -248,6 +248,15 @@ describe('bin/commands/pair: runPairCommand', () => {
     expect(handleRequest).toHaveBeenCalledWith('enrollment.pair', { pairingCode: 'opaque-pair-code' });
     expect(close).toHaveBeenCalledTimes(1);
     expect(lines).toEqual(['paired: deviceId=dev-service-1']);
+  });
+
+  it('connects to the service control endpoint with the pairing request timeout (#1434)', async () => {
+    const connected = fakeConnected(vi.fn().mockResolvedValue({ deviceId: 'dev-service-1' }));
+    const connectControl = vi.fn(connected.connectControl);
+
+    await runPairCommand(baseConfig('/service-store'), 'opaque-pair-code', { log: collectLog().log, connectControl });
+
+    expect(connectControl).toHaveBeenCalledWith(expect.objectContaining({ requestTimeoutMs: ENROLLMENT_PAIR_REQUEST_TIMEOUT_MS }));
   });
 
   it('splits <code>.<pv> only under --e2ee, on the last dot (#654 §50c)', () => {

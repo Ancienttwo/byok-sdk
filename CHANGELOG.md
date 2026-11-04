@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fixed (client; #1434)** — `byok-agent pair` against a running service
+  waits up to 10 minutes for `enrollment.pair` instead of the generic 10 s
+  control timeout. The handler runs many serial OS credential operations, and
+  on Windows each one compiles the credential bridge first, so the pairing
+  succeeded while the CLI reported `control request "enrollment.pair" timed
+  out` and exited 1. Other control requests keep the 10 s timeout.
+
 ## 0.38.0 — source candidate
 
 0.38.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

@@ -3,6 +3,13 @@ import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
 import { connectControlClient } from '../../daemon/control-client';
 import { resolveStoreDir } from '../config';
 
+/**
+ * The control request timeout for `enrollment.pair`. The handler runs many
+ * serial OS credential operations, and on Windows each one first compiles the
+ * credential bridge under a 60 s deadline, so the generic 10 s cannot cover it.
+ */
+export const ENROLLMENT_PAIR_REQUEST_TIMEOUT_MS = 600_000;
+
 export interface PairDeps {
   log?: (line: string) => void;
   /** DI for tests: skip constructing a real `createDaemon(config)` and drive a stub/pre-built instance instead. */
@@ -51,7 +58,11 @@ export async function runPairCommand(
   }
 
   const connectControl = deps.connectControl ?? connectControlClient;
-  const conn = await connectControl({ storeDir: resolveStoreDir(config), productId: config.productId });
+  const conn = await connectControl({
+    storeDir: resolveStoreDir(config),
+    productId: config.productId,
+    requestTimeoutMs: ENROLLMENT_PAIR_REQUEST_TIMEOUT_MS,
+  });
   if (conn.ok) {
     try {
       const result = await conn.client.request<{ deviceId: string }>('enrollment.pair', { pairingCode: code, ...options });
