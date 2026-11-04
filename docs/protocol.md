@@ -824,9 +824,9 @@ an equal key is `idempotent` or `conflict` by hash. A Host that never sends
 `hostRevision` keeps the plain `profileRevision` order. A payload carrying
 `hostRevision` is gated on the device flag
 `agent-home-projection-host-revision`; Cloud refuses it before allocating the
-request when the device did not advertise the flag. Consumer, containment or lease failure leaves
-the request pending and the cursor behind. After a successful local outcome the
-daemon calls:
+request when the device did not advertise the flag. Consumer, containment or
+lease failure leaves the request pending and the cursor behind. After a
+successful local outcome the daemon calls:
 
 ```text
 PUT /byok/agent-home-projections/:requestId/completion

@@ -2696,11 +2696,12 @@ ordering record at `.byok/agent-home-projection.json`. The revision is the
 pair `(profileRevision, hostRevision)`, where the optional Host-owned
 `hostRevision` is 0 when absent and is written to the record only when the
 applied payload carried it. Equal revision/equal hash is idempotent, equal
-revision/different hash conflicts, and a lower revision is stale. Only a dedicated authenticated completion PUT returning an
-exact durable readback lets the handler resolve and the mailbox cursor advance.
-Busy, containment, hook, fsync, transport, or readback mismatch leaves the
-cursor at its prior value and redelivers after reconnect/restart. No fake task,
-runtime, session, terminal event, or task journal record is created.
+revision/different hash conflicts, and a lower revision is stale. Only a
+dedicated authenticated completion PUT returning an exact durable readback
+lets the handler resolve and the mailbox cursor advance. Busy, containment,
+hook, fsync, transport, or readback mismatch leaves the cursor at its prior
+value and redelivers after reconnect/restart. No fake task, runtime, session,
+terminal event, or task journal record is created.
 
 The consumer hook input carries `writeHomeFile(name, body)` (#738). It
 atomically replaces one file at the root of the canonical Agent home, under the
