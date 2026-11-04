@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.37.0",
-    "snapshotSha256": "3bd9423ac95e82886be04f66711bf2985af17eaf7ed3bd39c30a66f5c954cafe"
+    "snapshotSha256": "917122320a6789ce58de932ad79665c4bb9b077bd800075f759da03231f4e81b"
   },
   "configFields": {
     "status": "tracked",
@@ -47,6 +47,41 @@
       "before": "K8 0.0.1 src-sha256=eb3615893afed74e",
       "after": "K8 0.0.1 src-sha256=f28fb891884de485",
       "entry": "k8-idempotent-owner-cancels"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY",
+      "change": "added",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionHostRevision",
+      "change": "added",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionHostRevisionSchema",
+      "change": "added",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionPayloadSchema",
+      "change": "changed",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY",
+      "change": "added",
+      "entry": "agent-home-projection-host-revision"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "agent-home-projection-host-revision"
     }
   ]
 }
