@@ -123,7 +123,7 @@
                 "home",
                 "workspaces"
               ],
-              "description": "`home` always grants read+write of the canonical Agent home."
+              "description": "`home` grants the canonical Agent home: read+write for a writer, read-only for a memory reader."
             },
             "roots": {
               "type": "array",
@@ -132,7 +132,7 @@
                 "properties": {
                   "id": {
                     "type": "string",
-                    "description": "Unique, nonempty local label; never emitted on the wire."
+                    "description": "Unique, nonempty local label; never emitted on the wire. `home` and `run` are reserved."
                   },
                   "path": {
                     "type": "string",
@@ -164,7 +164,7 @@
       "required": [
         "default"
       ],
-      "description": "Per-task tool authorization, decided by this Host for every runtime:\n`all` (default) never blocks and emits a `tool-reminder` event for each\nhigh-risk call; `auto` asks the user through the task's approval path\nbefore a high-risk call runs and is declined before claim on a runtime\nwithout `toolAuthorizationAuto`. `byRuntime` overrides the mode for one\nruntime id. `rules` move single calls across the ask boundary and apply\nto every runtime. A config file and an embedded Host supply the same\nobject; it is validated, copied and frozen before claim, once per offer\n(including resume). Invalid policies decline the offer. Rules never\nchange the wire or native launch.\n\nThe optional `fileScope` (#1061) is an explicit file boundary for the\nSDK-owned file tools: absent means inherit (unchanged behavior);\n`home` authorizes read+write of the canonical Agent home; `workspaces`\nadds explicit read/write roots. It applies only to `auto` tasks, requires\n`agentHome`, and is never selected by the wire or the model. It is\nenforced on the Pi rpc, prepared and durable lanes on darwin/linux;\nWindows, memory-reader offers and every non-Pi runtime decline before\nclaim with `file_scope_unsupported`. After admission every configured\nroot is revalidated once before the runtime starts; a missing, symlinked,\nreplaced or otherwise unresolvable root fails the claimed task with a\ntyped `file_scope_unavailable` reason instead of starting unscoped. The\nSDK `read`/`write`/`edit`/`find`/`grep`/`ls` tools replace Pi's native\nfile tools and enforce the scope (the prepared lane has no native file\ntools). Bash, MCP and extension tools are outside the scope and ask on\nevery call unless an `allowWithoutAsking` rule matches. This is not an\nOS sandbox."
+      "description": "Per-task tool authorization, decided by this Host for every runtime:\n`all` (default) never blocks and emits a `tool-reminder` event for each\nhigh-risk call; `auto` asks the user through the task's approval path\nbefore a high-risk call runs and is declined before claim on a runtime\nwithout `toolAuthorizationAuto`. `byRuntime` overrides the mode for one\nruntime id. `rules` move single calls across the ask boundary and apply\nto every runtime. A config file and an embedded Host supply the same\nobject; it is validated, copied and frozen before claim, once per offer\n(including resume). Invalid policies decline the offer. Rules never\nchange the wire or native launch.\n\nThe optional `fileScope` (#1061) is an explicit file boundary for the\nSDK-owned file tools: absent means inherit (unchanged behavior);\n`home` authorizes the canonical Agent home; `workspaces` adds explicit\nread/write roots (ids `home` and `run` are reserved). A writer task gets\nthe home read+write; a memory-reader task gets it read-only plus its own\nrun directory (`<home>/.byok/runs/<name>`, its cwd) read+write. It\napplies only to `auto` tasks, requires `agentHome`, and is never selected\nby the wire or the model. It is enforced on the Pi rpc, prepared and\ndurable lanes on darwin/linux; Windows and every non-Pi runtime decline\nbefore claim with `file_scope_unsupported`. After admission every configured\nroot is revalidated once before the runtime starts; a missing, symlinked,\nreplaced or otherwise unresolvable root fails the claimed task with a\ntyped `file_scope_unavailable` reason instead of starting unscoped. The\nSDK `read`/`write`/`edit`/`find`/`grep`/`ls` tools replace Pi's native\nfile tools and enforce the scope (the prepared lane has no native file\ntools). Bash, MCP and extension tools are outside the scope and ask on\nevery call unless an `allowWithoutAsking` rule matches. This is not an\nOS sandbox."
     },
     "localToolApproval": {
       "const": "allow",
