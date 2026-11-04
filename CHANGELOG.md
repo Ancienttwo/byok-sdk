@@ -21,6 +21,14 @@
   that vendored K8 copies `src/host.ts`, `src/index.ts`, `src/delegation.ts`,
   `src/rules/delegation.ts` and `src/rules/turn.ts` ([migration](examples/bot-collaboration/README.md#idempotent-owner-cancels-1405)).
 
+- **Added (examples)** — K8 `inputRoot(key, botId)` (#1407) is a read-only
+  query for whether an `input` committed. It returns the Turn id that `input`
+  returned for that key, from the ledger's command record, or `undefined` when
+  no input with that key committed. It runs no `process()` pass, writes nothing
+  and leaves the K8 revision unchanged, so it answers the same after a restart
+  and after an `input` that rejected on its drain. A Host that vendored K8
+  copies `src/host.ts` ([input root](examples/bot-collaboration/README.md#input-root-1407)).
+
 ## 0.37.0 — 2026-11-04 (published)
 
 0.37.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

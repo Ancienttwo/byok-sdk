@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.37.0",
-    "snapshotSha256": "21928d253541a1f48982870051e8a75f710e571684c60f893066f3a4eb12c7b4"
+    "snapshotSha256": "3bd9423ac95e82886be04f66711bf2985af17eaf7ed3bd39c30a66f5c954cafe"
   },
   "configFields": {
     "status": "tracked",
@@ -18,7 +18,7 @@
     {
       "id": "k8-idempotent-owner-cancels",
       "impact": "breaking",
-      "summary": "K8 owner cancels are idempotent and its refusals carry codes (#1405). cancelTurn returns TurnCancelResult { turnId, result, conclusion? } and cancelDelegation returns DelegationCancelResult { delegationId, result, verdict? }, in the shape of cancelHostIntent and read from the ledger, so a replay and a restart give the same answer: cancelled (this call committed the cancel), cancel_pending (an earlier cancel has no terminal yet) or already_settled (the target had ended, with its conclusion or verdict). cancel_pending and already_settled write nothing and do not call core.cancel, so a repeated cancel no longer raises the K8 revision. Breaking: cancelDelegation on a resolved delegation resolves already_settled instead of rejecting with 'Delegation already resolved'. cancelDelegation, and cancelTurn on a chain Turn, refuse with the new DelegationError (key = delegation id): unknown_delegation, and not_cancellable for a reply_held or uncertain delegation (end it with abandonDelegation). failStuckIntent refuses with HostIntentError: unknown_intent, already_settled, or not_stuck; HostIntentError gains the codes already_settled and not_stuck. The messages stay the same and both classes extend Error. A Bot Turn settled by failStuckIntent records settleCode: 'outcome_failed' on the Turn, in the ledger and its bot-turn projection; the audit row stays. The field is optional, so an older K8 reads the ledger and ignores it: a rollback keeps working, but the older K8 writes no settleCode. index.ts now exports DelegationError, HostIntentError, DelegationCancelResult, HostIntentCancelResult and TurnCancelResult. A Host that vendored K8 copies src/host.ts, src/index.ts, src/delegation.ts, src/rules/delegation.ts and src/rules/turn.ts, and switches on error.code instead of message prefixes such as 'Intent already settled'.",
+      "summary": "K8 owner cancels are idempotent and its refusals carry codes (#1405). cancelTurn returns TurnCancelResult { turnId, result, conclusion? } and cancelDelegation returns DelegationCancelResult { delegationId, result, verdict? }, in the shape of cancelHostIntent and read from the ledger, so a replay and a restart give the same answer: cancelled (this call committed the cancel), cancel_pending (an earlier cancel has no terminal yet) or already_settled (the target had ended, with its conclusion or verdict). cancel_pending and already_settled write nothing and do not call core.cancel, so a repeated cancel no longer raises the K8 revision. Breaking: cancelDelegation on a resolved delegation resolves already_settled instead of rejecting with 'Delegation already resolved'. cancelDelegation, and cancelTurn on a chain Turn, refuse with the new DelegationError (key = delegation id): unknown_delegation, and not_cancellable for a reply_held or uncertain delegation (end it with abandonDelegation). failStuckIntent refuses with HostIntentError: unknown_intent, already_settled, or not_stuck; HostIntentError gains the codes already_settled and not_stuck. The messages stay the same and both classes extend Error. A Bot Turn settled by failStuckIntent records settleCode: 'outcome_failed' on the Turn, in the ledger and its bot-turn projection; the audit row stays. The field is optional, so an older K8 reads the ledger and ignores it: a rollback keeps working, but the older K8 writes no settleCode. index.ts now exports DelegationError, HostIntentError, DelegationCancelResult, HostIntentCancelResult and TurnCancelResult. A Host that vendored K8 copies src/host.ts, src/index.ts, src/delegation.ts, src/rules/delegation.ts and src/rules/turn.ts, and switches on error.code instead of message prefixes such as 'Intent already settled'. Added (#1407): the read-only inputRoot(key, botId) returns the Turn id that input returned for that key from the ledger's command record, or undefined when the input is not committed; it runs no process() pass, writes nothing and leaves the K8 revision unchanged, so a Host can tell whether an input that rejected on its drain committed. It is in src/host.ts, which the copy list above already names.",
       "migration": "examples/bot-collaboration/README.md#idempotent-owner-cancels-1405",
       "items": [
         "example:bot-collaboration"
@@ -30,7 +30,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=eb3615893afed74e",
-      "after": "K8 0.0.1 src-sha256=d3f9cadba2502856",
+      "after": "K8 0.0.1 src-sha256=f28fb891884de485",
       "entry": "k8-idempotent-owner-cancels"
     }
   ]

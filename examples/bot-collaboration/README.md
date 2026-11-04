@@ -33,6 +33,7 @@ Use `autonomy`, `wouldDoRecords` and `setBotAutonomy` for the owner's observe/au
 Read `inboundDispositions` for the destination of every inbound human message
 ([Inbound disposition](#inbound-disposition-1229)).
 Read `snapshot` or upload K4 projections with `core.flushProjections`.
+Read `inputRoot` to learn whether an `input` committed ([Input root](#input-root-1407)).
 
 The execution template selects this Bot's Agent. It must use a runtime profile
 without external-effect connector tools or ambient credentials. Required MCP
@@ -163,6 +164,18 @@ delegation id: `unknown_delegation`, and `not_cancellable` for a `reply_held`
 or `uncertain` delegation; end those with `abandonDelegation`. Both error
 classes extend `Error`, so an `instanceof Error` check still holds, and the
 messages are the same as before.
+
+### Input root (#1407)
+
+`input` commits first and then runs a pass, so it can reject with a drain error
+after the input committed, and the Turn still runs. `inputRoot(key, botId)` is
+read-only: it returns the id that `input` returns for that key and Bot, from the
+input's command record, or `undefined` when no input with that key committed.
+It runs no pass, writes nothing and does not change the K8 revision, so it
+gives the same answer after a restart. A record that retention moved still
+answers until its row expires; the key then reads as not committed. The call
+checks no principal and does not compare the request text: a replay of `input`
+does both.
 
 ## Actions and context
 

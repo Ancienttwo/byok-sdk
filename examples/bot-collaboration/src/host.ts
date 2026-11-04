@@ -458,6 +458,18 @@ export class BotCollaboration {
     });
   }
   /**
+   * Read-only (#1407): the id that `input` returned for this key, from its command record, or `undefined` when the
+   * input is not committed. It runs no `process()` and changes no ledger state, so a caller can tell whether an `input`
+   * that threw on its drain committed. A record that retention moved is read from its K4 row in a transaction that writes
+   * nothing new; once that row expires, the key reads as not committed.
+   */
+  inputRoot(key: string, botId = this.options.botId): string | undefined {
+    const id = hash(['input', botId, key]), commands = stateOf(this.ledger.snapshot().application).commands;
+    const record = commands && Object.hasOwn(commands, id) ? commands[id]
+      : this.ledger.transaction((_, rows) => rows.get('commands', id) as CommandRecord | undefined);
+    return record && turnOf(record.result);
+  }
+  /**
    * IM entry (#552). Classify one message that the channel adapter translated (docs/host-im-adapter.md §3).
    * The input key is `inboundKey(message)`. Only audit rows record a refused or 1:1 bot message.
    * `id` is the Turn id of `owner_input`, or the room input id of `room_input` and `bot_background`.
