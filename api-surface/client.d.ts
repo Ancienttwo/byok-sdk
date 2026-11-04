@@ -5009,16 +5009,18 @@ export interface DaemonConfig {
      * SDK-owned file tools: absent means inherit (unchanged behavior);
      * `home` authorizes read+write of the canonical Agent home; `workspaces`
      * adds explicit read/write roots. It applies only to `auto` tasks, requires
-     * `agentHome`, and is never selected by the wire or the model. v1 admits it
-     * only on the ordinary Pi RPC lane on darwin/linux; other adapters, the
-     * prepared/durable lanes, memory-reader offers and Windows decline before
-     * claim with `file_scope_unsupported`. On the admitted path every configured
-     * root is revalidated after claim and before the runtime starts; a missing,
-     * symlinked, replaced or otherwise unresolvable root fails the claimed task
-     * with a typed `file_scope_unavailable` reason instead of starting
-     * unscoped. This is not an OS sandbox and slice 2 does not replace Pi's
-     * native file tools: shell, MCP servers and extensions remain outside it,
-     * and scoped file tools/tool-call enforcement ship in a later slice.
+     * `agentHome`, and is never selected by the wire or the model. It is
+     * enforced on the Pi rpc, prepared and durable lanes on darwin/linux;
+     * Windows, memory-reader offers and every non-Pi runtime decline before
+     * claim with `file_scope_unsupported`. After admission every configured
+     * root is revalidated once before the runtime starts; a missing, symlinked,
+     * replaced or otherwise unresolvable root fails the claimed task with a
+     * typed `file_scope_unavailable` reason instead of starting unscoped. The
+     * SDK `read`/`write`/`edit`/`find`/`grep`/`ls` tools replace Pi's native
+     * file tools and enforce the scope (the prepared lane has no native file
+     * tools). Bash, MCP and extension tools are outside the scope and ask on
+     * every call unless an `allowWithoutAsking` rule matches. This is not an
+     * OS sandbox.
      */
     toolAuthorization?: ToolAuthorizationPolicy;
     /**
