@@ -494,6 +494,7 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
   const allRoots = Object.freeze([input.grant.home, ...(run === undefined ? [] : [run]), ...input.grant.roots]);
   let absolute: string;
   let lexical: string | undefined;
+  let runOwnsCanonical = true;
   let relativeCwd: string | undefined;
   if (platform === 'win32') {
     const cwd = win32FileScopePath(input.cwd);
@@ -507,6 +508,10 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
     const owner = matchRoot(allRoots, resolved)?.root;
     absolute = await win32CanonicalPath(resolved, io, (reason) => fail(reason, owner?.id, owner === undefined ? undefined : input.access));
     lexical = resolved;
+    // `run` owns the canonical path only when the path does not name another
+    // root: a path through home that canonicalizes into the run directory is
+    // an alias and stays internal, as on darwin/linux.
+    runOwnsCanonical = owner === undefined || owner === run;
     if (!/^[A-Za-z]:\\/u.test(expanded)) relativeCwd = await win32CanonicalPath(cwd, io, fail);
   } else {
     if (!path.isAbsolute(input.cwd)) throw fail('path_syntax');
@@ -518,7 +523,8 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
   // the longest root, and `run` is nested in home. On win32 the lexical path is
   // checked too, so `.BYOK\runs\<run>` stays internal although it
   // canonicalizes into the run root, as it does on darwin/linux.
-  if (internalPath(allRoots, absolute, run) || (lexical !== undefined && internalPath(allRoots, lexical, run))) {
+  if (internalPath(allRoots, absolute, runOwnsCanonical ? run : undefined)
+    || (lexical !== undefined && internalPath(allRoots, lexical, run))) {
     throw fail('internal_path');
   }
 
