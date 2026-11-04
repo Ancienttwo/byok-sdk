@@ -3,11 +3,14 @@ import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hermesGatewayPipeName, identifyHermesGateway, servesHermesHome } from '../adapters/hermes/gateway-identity';
 import { mayStopForeignHermesGateway } from '../adapters/hermes/gateway-ownership';
 import { loadKoffi } from '../adapters/win32-job-object';
-import { descendsFrom, parseWindowsProcessTable, type WindowsProcessEntry } from '../adapters/hermes/windows-process-table';
+import type { ExecFileException } from 'node:child_process';
+import {
+  classifyScriptHostRead, descendsFrom, parseWindowsProcessTable, readThroughPowerShell, type WindowsProcessEntry,
+} from '../adapters/hermes/windows-process-table';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -112,6 +115,48 @@ describe('Hermes gateway ownership on Windows', () => {
     expect(descendsFrom(deep, 2, 6)).toBe(true);
     expect(descendsFrom(deep, 1, 6)).toBe(false);
   });
+
+  // #1410: PowerShell runs only when Windows Script Host cannot run the script.
+  it('falls back to PowerShell only when the script host could not run the script', () => {
+    const failure = (fields: Partial<ExecFileException>): ExecFileException => Object.assign(new Error('cscript'), fields);
+    expect(classifyScriptHostRead(null, '10 4 200\r\n20 10 300')).toEqual({ kind: 'table', table: new Map([[10, entry(4, 200n)], [20, entry(10, 300n)]]) });
+    expect(classifyScriptHostRead(failure({ code: 'EACCES', syscall: 'spawn C:\\Windows\\System32\\cscript.exe' }), '')).toEqual({ kind: 'unavailable', reason: 'cscript.exe did not start (EACCES)' });
+    // Windows Script Host disabled, as windows-latest prints it (#1410 B1).
+    const disabled = 'CScript Error: Windows Script Host access is disabled on this machine. Contact your administrator for details.\r\n';
+    // Thrown synchronously by spawn: access denied, and an AppLocker or App Control block.
+    expect(classifyScriptHostRead(failure({ code: 'EPERM', syscall: 'spawn' }), '')).toEqual({ kind: 'unavailable', reason: 'cscript.exe did not start (EPERM)' });
+    expect(classifyScriptHostRead(failure({ code: 'UNKNOWN', syscall: 'spawn' }), '')).toEqual({ kind: 'unavailable', reason: 'cscript.exe did not start (UNKNOWN)' });
+    expect(classifyScriptHostRead(failure({ code: 1 }), disabled)).toEqual({ kind: 'unavailable', reason: 'cscript.exe exited 1 without a process table' });
+    for (const error of [
+      failure({ code: 2 }),
+      failure({ code: 1 }),
+      failure({ code: null, killed: true, signal: 'SIGTERM' }),
+      failure({ code: 'ABORT_ERR', name: 'AbortError' }),
+      // Resource exhaustion is not an unavailable script host.
+      failure({ code: 'EMFILE', syscall: 'spawn C:\\Windows\\System32\\cscript.exe' }),
+      failure({ code: 'EAGAIN', syscall: 'spawn C:\\Windows\\System32\\cscript.exe' }),
+      failure({ code: 'ENOMEM', syscall: 'spawn' }), // thrown synchronously by spawn
+    ]) expect(classifyScriptHostRead(error, error.code === 1 ? '10 4 200' : '').kind).toBe('failed');
+  });
+
+  it.runIf(process.platform === 'win32')('reads this process and its parent through the PowerShell fallback', async () => {
+    const table = await readThroughPowerShell();
+    expect(table.get(process.pid)?.parent).toBe(process.ppid);
+    expect(table.get(process.pid)?.created).toBeGreaterThan(0n);
+  }, 30_000); // a cold Windows PowerShell start takes seconds; the read itself stays bounded at 15 s.
+
+  // A runner that silently fell back to PowerShell would warn here.
+  it.runIf(process.platform === 'win32')('reads the process table through Windows Script Host without the PowerShell fallback', async () => {
+    vi.resetModules(); // a fresh module, so an earlier fallback in this file cannot have spent the one warning
+    const { descendsOnWindows } = await import('../adapters/hermes/windows-process-table');
+    const warn = vi.spyOn(console, 'warn');
+    try {
+      expect(await descendsOnWindows(process.ppid, process.pid)).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  }, 30_000);
 });
 
 describe.runIf(process.platform === 'win32')('Hermes gateway pipe client on Windows', () => {
