@@ -139,7 +139,7 @@ interface ToolAuthorizationTask {
 - { mode: 'home' }：canonical Agent home 读+写。home 的路径与 identity 来自本次 offer 的 writer lease，不是 cwd 字符串，也不是 workspaceHint。
 - { mode: 'workspaces', roots: [...] }：home 仍读+写；每个 root 按其 access 授权。write root 同时可读。
 - 用户主目录 ~ 不会自动成为 root。~ 按 OS user home 展开；只有显式 root 覆盖时才允许。把 ~ 映射成 Agent home 会造成语义混淆，不采用。
-- .byok 始终是 SDK 内部 namespace，文件工具在任何模式下都拒绝读写；既有的 memory/result helper、lease/audit 有各自 authority（与本设计无关，不新增 helper）。MEMORY.md 与 notes/ 仍可读写（它们不在 .byok 下）。
+- .byok 始终是 SDK 内部 namespace，文件工具在任何模式下都拒绝读写；根下第一段按 ASCII 不分大小写匹配 .byok（.BYOK、.Byok 同样拒绝），并在规范路径上再判断一次（#1426）；既有的 memory/result helper、lease/audit 有各自 authority（与本设计无关，不新增 helper）。MEMORY.md 与 notes/ 仍可读写（它们不在 .byok 下）。
 - memory-reader 的 cwd 是 HOME/.byok/runs/TASKID。第一版决定对 reader offer 直接 decline file_scope_unsupported，直到单独设计 reader 的「run dir 可写、home 可读」语义；不要用 .byok 一刀切后让 reader 的相对路径全部失效，也不要悄悄把 reader 提升为 writer。
 - 额外 workspace 必须在本机存在且是真实目录；这是 admission 条件（见 §3）。不提供「以后会创建」的 root，因为无法 pin identity。
 - roots 可以嵌套（例如 home 下的某个项目）。若嵌套，宽范围授权不会被窄范围撤回；重复路径去重，冲突的 id 拒绝。若 owner 希望支持「父目录 read、子目录 write」这类降级，需要另定 most-specific-match 语义；本设计不引入。
@@ -394,7 +394,7 @@ v1 时两条 lane 在 claim 前 decline file_scope_unsupported。#1239 的逐次
 | F7 | symlink 越界 | home 内 link -> /tmp/outside；mid-path symlink；dangling symlink（稳定 fixture） | 拒绝 symlink；不读/不写外部目标；外部 sentinel 不变；不创建目标；不宣称 race-free |
 | F8 | 显式 workspace | 配置 { mode:'workspaces', roots:[{id:'repo', path:W, access:'write'}] } | W 内 read/write/edit 成功；W 外仍拒绝；真实内容写入 W |
 | F9 | 只读 workspace | root access:'read' | 读成功；写/编辑拒绝 reason read_only，目标不创建；不进入审批 |
-| F10 | .byok | read('.byok/agent-home.lease')、write('.byok/x') | 拒绝 internal_path；lease/结果文件不被改 |
+| F10 | .byok | read('.byok/agent-home.lease')、write('.byok/x')、read/write('.BYOK/x') | 拒绝 internal_path；lease/结果文件不被改 |
 | F11 | 敏感路径 floor | 显式 root 覆盖 home 后 read('.ssh/...')（合成 fixture，不读真实凭据） | file scope 允许后仍触发 floor/审批；Allow 不能压掉 |
 | R1 | resume 使用当前策略 | 先 workspace A 启动，resume 时改为 home-only | resume 后的 provider request tools 与行为按新策略；对 A 的读写拒绝；旧 session 不恢复旧 root |
 | R2 | resume 工具集一致 | 同一策略 resume | 首次与 resume 的 provider request tools 名字 + schema digest 一致；active/registered 集合一致；没有旧 pending builtin 复活 |

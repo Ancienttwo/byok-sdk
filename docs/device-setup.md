@@ -236,10 +236,9 @@ and a static tool-authorization policy in `toolAuthorization`:
   "serverUrl": "http://localhost:8787",
   "storeDir": "/tmp/byok-example-store",
   "agentHome": { "hostStorageRoot": "/tmp/byok-example-home" },
-  "runtimeAllowlist": ["pi", "claude"],
+  "runtimeAllowlist": ["pi"],
   "runtimes": {
-    "pi": { "agentUserContext": "excluded" },
-    "claude": { "agentUserContext": "excluded", "agentSessionPersistence": "disabled" }
+    "pi": { "agentUserContext": "excluded" }
   },
   "toolAuthorization": {
     "default": "auto",
@@ -264,21 +263,31 @@ and a static tool-authorization policy in `toolAuthorization`:
   `createDaemonWithAdapters` rejects `runtimes`: configure injected adapters
   directly.
 - A `fileScope` is only legal when every runtime of the daemon resolves to
-  `auto`, because it never applies to an `all` task. The example therefore
-  lists Pi and Claude but not Codex, which has no `toolAuthorizationAuto`
-  capability. To run Codex instead, remove `fileScope`, keep Codex in
-  `runtimeAllowlist`, and set `toolAuthorization.byRuntime.codex` to `"all"`.
-  Codex isolation still comes from `runtimes.codex.agentUserMcpServers`.
+  `auto`, because it never applies to an `all` task. Only Pi enforces a file
+  scope, so the example lists Pi alone. On a daemon with `fileScope`, every
+  Claude task declines before claim with `file_scope_unsupported`; Codex,
+  Grok, Hermes and dsh have no `toolAuthorizationAuto` capability, so a static
+  `auto` for them is a construction error. To run Codex instead, remove
+  `fileScope`, keep Codex in `runtimeAllowlist`, and set
+  `toolAuthorization.byRuntime.codex` to `"all"`. Codex isolation still comes
+  from `runtimes.codex.agentUserMcpServers`.
 - `toolAuthorization.byRuntime` gives a runtime its own mode; `default` covers
   the rest. A `byRuntime` key that is not a runtime of the daemon is an error.
 - Static `auto` requires the runtime's `toolAuthorizationAuto` capability.
   Codex has none: set it to `all` (as above), or remove it from
   `runtimeAllowlist`.
-- `toolAuthorization.fileScope` (ordinary Pi RPC on darwin/linux) limits the
-  SDK `read`/`write`/`edit` tools to the Agent home plus explicit roots.
-  Other tools are outside that boundary and ask on every call; opt one out
-  deliberately with an `allowWithoutAsking` rule (exact tool name, bash
-  command glob, or trusted MCP identity). It is not an OS sandbox.
+- `toolAuthorization.fileScope` applies only to `auto` tasks and requires
+  `agentHome`; the wire and the model never select it. It is enforced on the
+  Pi rpc, prepared and durable lanes on darwin/linux. Windows, memory-reader
+  offers and every non-Pi runtime decline before claim with
+  `file_scope_unsupported`. After admission each root is revalidated once
+  before the runtime starts, and a root that no longer resolves fails the task
+  with `file_scope_unavailable`. The SDK `read`/`write`/`edit`/`find`/`grep`/
+  `ls` tools replace Pi's native file tools and are limited to the Agent home
+  plus explicit roots. Bash, MCP and extension tools are outside that boundary
+  and ask on every call; opt one out deliberately with an `allowWithoutAsking`
+  rule (exact tool name, bash command glob, or trusted MCP identity). It is
+  not an OS sandbox.
 - An embedded Host may pass a function instead of the static policy; a config
   file cannot.
 
