@@ -90,7 +90,7 @@ import {
  */
 
 const CONFIG_FORMAT = 'byok.pi.prepared-launch';
-const CONFIG_VERSION = 7;
+const CONFIG_VERSION = 8;
 /**
  * Where this process's provider credential comes from, and the ONE switch the
  * rest of this file branches on. Written by the adapter from

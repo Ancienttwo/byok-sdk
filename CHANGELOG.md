@@ -18,36 +18,28 @@
   `outside_scope`. The durable Pi lane stays darwin/linux only, and other
   platforms still decline.
 
-- **Added (client; #1422)** — with `toolAuthorization.fileScope` configured,
-  a memory-reader task runs on the Pi rpc and prepared lanes on darwin and
-  linux instead of declining before claim with `file_scope_unsupported`. Its
-  Agent home is read-only (a write is `file_scope_denied` / `read_only`). Its
-  run directory, the reader lease's cwd `<home>/.byok/runs/<name>` (on resume,
-  the run directory its session handoff recorded), is a writable `run` root,
-  and every other path under `.byok` stays `internal_path`. The durable lane
-  still refuses memory-reader offers. A `fileScope` root id `home` or `run` is
-  reserved and now refused when the policy is constructed
-  (`FileScopePolicyError`, code `invalid_file_scope`); before, `home` failed
-  only at launch. The digest-bound Pi launch configs move to
-  `byok.pi.rpc-launch` version 11 and `byok.pi.durable-launch` version 4, so
-  the daemon and the Pi hosts must come from the same SDK version.
+## 0.38.0 — source candidate
 
-- **Fixed (client; darwin; #1426)** — the scoped file tools no longer reach
-  the Agent home's `.byok` through a case variant such as `.BYOK/x` or
-  `.Byok/x`. On a case-insensitive volume (the macOS APFS default) those
-  paths opened `.byok`, so read and write passed the guard. A first segment
-  under a root that matches `.byok` without ASCII case is now
-  `internal_path` on every platform, and the guard checks the canonical
-  target again, so an alias that only canonicalization reveals is refused
-  too. On Linux a directory named `.BYOK` is now refused as well.
-
-- **Fixed (client; Windows; #1410)** — the Hermes gateway ownership check
-  reads the process table through Windows Script Host (cscript.exe, JScript
-  and WMI) instead of Windows PowerShell, whose cold start could pass the
-  15 s limit and fail the check. Windows PowerShell starts only when Windows
-  Script Host cannot run the script (cscript.exe does not start, or exits 1
-  without a process table); the client then logs one
-  `[byok/hermes-adapter]` warning per process.
+0.38.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+The upgrade manifest that `@byok-sdk/client` ships
+(`packages/client/upgrade-manifest.json`, 0.37.0 to 0.38.0) lists the
+Host-visible changes since 0.37.0 that change an API, config or example item:
+1 breaking entry and 1 additive entry, each with a migration link. The wire
+stays v5 (`PROTOCOL_VERSION = 5`); the Agent-home projection `hostRevision`
+is a gated addition behind the new device flag
+`agent-home-projection-host-revision`, and the v5 corpus gains one envelope
+line. There is no new Postgres migration and no SQLite schema change, and the
+Pi closure stays at 1.5.0. See the
+[0.38.0 candidate notes](docs/releases/v0.38.0.md) and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.38.0.md). The breaking
+change: K8 `cancelTurn` and `cancelDelegation` are idempotent and return
+results read from the ledger, and the K8 refusals carry codes (examples,
+#1405). With `toolAuthorization.fileScope`, a memory-reader task now runs
+under the file scope with a read-only home and a writable run root, and the
+`fileScope` root ids `home` and `run` are reserved (client, #1422). The
+release also fixes a file-scope bypass: on a case-insensitive volume, the
+scoped file tools could read and write the Agent home's `.byok` through a
+case variant such as `.BYOK/x` (client, #1426).
 
 - **Breaking (examples)** — K8 `cancelTurn` and `cancelDelegation` are
   idempotent and return a result in the shape of `cancelHostIntent` (#1405):
@@ -88,6 +80,38 @@
   `agent-home-projection`. A Host that never sends `hostRevision` is
   unchanged. After a rollback, an older client ignores the stored
   `hostRevision` and orders by `profileRevision` alone.
+
+- **Added (client; #1422)** — with `toolAuthorization.fileScope` configured,
+  a memory-reader task runs on the Pi rpc and prepared lanes on darwin and
+  linux instead of declining before claim with `file_scope_unsupported`. Its
+  Agent home is read-only (a write is `file_scope_denied` / `read_only`). Its
+  run directory, the reader lease's cwd `<home>/.byok/runs/<name>` (on resume,
+  the run directory its session handoff recorded), is a writable `run` root,
+  and every other path under `.byok` stays `internal_path`. The durable lane
+  still refuses memory-reader offers. A `fileScope` root id `home` or `run` is
+  reserved and now refused when the policy is constructed
+  (`FileScopePolicyError`, code `invalid_file_scope`); before, `home` failed
+  only at launch. The digest-bound Pi launch configs move to
+  `byok.pi.rpc-launch` version 11 and `byok.pi.durable-launch` version 4, so
+  the daemon and the Pi hosts must come from the same SDK version.
+  `byok.pi.prepared-launch` 7 → 8, since it carries the same grant.
+
+- **Fixed (client; #1426)** — the scoped file tools no longer reach
+  the Agent home's `.byok` through a case variant such as `.BYOK/x` or
+  `.Byok/x`. On a case-insensitive volume (the macOS APFS default) those
+  paths opened `.byok`, so read and write passed the guard. A first segment
+  under a root that matches `.byok` without ASCII case is now
+  `internal_path` on every platform, and the guard checks the canonical
+  target again, so an alias that only canonicalization reveals is refused
+  too. On Linux a directory named `.BYOK` is now refused as well.
+
+- **Fixed (client; Windows; #1410)** — the Hermes gateway ownership check
+  reads the process table through Windows Script Host (cscript.exe, JScript
+  and WMI) instead of Windows PowerShell, whose cold start could pass the
+  15 s limit and fail the check. Windows PowerShell starts only when Windows
+  Script Host cannot run the script (cscript.exe does not start, or exits 1
+  without a process table); the client then logs one
+  `[byok/hermes-adapter]` warning per process.
 
 ## 0.37.0 — 2026-11-04 (published)
 
