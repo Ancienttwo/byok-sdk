@@ -92,6 +92,40 @@ describe('task-free Agent-home projection', () => {
     expect(calls).toEqual([HASH_A, HASH_A, HASH_B]);
   });
 
+  it('orders by (profileRevision, hostRevision) across restarts and in either delivery order', async () => {
+    const root = await makeRoot();
+    const calls: string[] = [];
+    // A new manager per call reads the ordering record back, as after a restart.
+    const open = (storageRoot = root) => new AgentHomeManager({
+      hostStorageRoot: storageRoot,
+      projection: createAgentHomeProjectionConsumer(({ projectionHash }) => { calls.push(projectionHash); }),
+    });
+    const id = (n: number) => `00000000-0000-4000-8000-0000000001${String(n).padStart(2, '0')}`;
+    const state = async (storageRoot = root) => JSON.parse(await fs.readFile(
+      path.join(storageRoot, 'agents', 'agent-one', '.byok', AGENT_HOME_PROJECTION_STATE_FILE), 'utf8',
+    )) as Record<string, unknown>;
+
+    await expect(open().project(desired('3', HASH_A, id(1)))).resolves.toBe('applied');
+    await expect(open().project({ ...desired('3', HASH_B, id(2)), hostRevision: 0 })).resolves.toBe('conflict');
+    await expect(open().project({ ...desired('3', HASH_B, id(3)), hostRevision: 2 })).resolves.toBe('applied');
+    expect(await state()).toMatchObject({ projectionHash: HASH_B, hostRevision: 2 });
+    await expect(open().project({ ...desired('3', HASH_A, id(4)), hostRevision: 1 })).resolves.toBe('stale');
+    await expect(open().project(desired('3', HASH_A, id(5)))).resolves.toBe('stale');
+    await expect(open().project({ ...desired('3', HASH_B, id(6)), hostRevision: 2 })).resolves.toBe('idempotent');
+    await expect(open().project({ ...desired('3', HASH_A, id(7)), hostRevision: 2 })).resolves.toBe('conflict');
+    await expect(open().project({ ...desired('2', HASH_A, id(8)), hostRevision: 9 })).resolves.toBe('stale');
+    await expect(open().project(desired('4', HASH_A, id(9)))).resolves.toBe('applied');
+    expect(await state()).not.toHaveProperty('hostRevision');
+    expect(calls).toEqual([HASH_A, HASH_B, HASH_B, HASH_A]);
+
+    for (const [first, second, outcome] of [[4, 5, 'applied'], [5, 4, 'stale']] as const) {
+      const other = await makeRoot();
+      await expect(open(other).project({ ...desired('3', HASH_A, id(10)), hostRevision: first })).resolves.toBe('applied');
+      await expect(open(other).project({ ...desired('3', HASH_B, id(11)), hostRevision: second })).resolves.toBe(outcome);
+      expect(await state(other)).toMatchObject({ hostRevision: 5 });
+    }
+  });
+
   it('pre-claims one same-Agent writer while a different Agent remains independent', async () => {
     const root = await makeRoot();
     let releaseFirst!: () => void;

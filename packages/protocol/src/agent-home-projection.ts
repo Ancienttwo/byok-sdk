@@ -26,6 +26,14 @@ export const AgentHomeProjectionProfileRevisionSchema = z
   );
 export type AgentHomeProjectionProfileRevision = z.infer<typeof AgentHomeProjectionProfileRevisionSchema>;
 
+/**
+ * Optional Host-owned revision of the projection rendering, compared after an
+ * equal `profileRevision`. Absent means 0. The pair
+ * `(profileRevision, hostRevision)` orders projections.
+ */
+export const AgentHomeProjectionHostRevisionSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+export type AgentHomeProjectionHostRevision = z.infer<typeof AgentHomeProjectionHostRevisionSchema>;
+
 /** The projection hash uses the package-wide lowercase SHA-256 transport form. */
 export const AgentHomeProjectionHashSchema = AgentEgressContentHashSchema;
 export type AgentHomeProjectionHash = z.infer<typeof AgentHomeProjectionHashSchema>;

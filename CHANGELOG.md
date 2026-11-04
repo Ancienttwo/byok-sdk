@@ -37,6 +37,19 @@
   and after an `input` that rejected on its drain. A Host that vendored K8
   copies `src/host.ts` ([input root](examples/bot-collaboration/README.md#input-root-1407)).
 
+- **Added (protocol, client, cloud)** — An Agent-home projection may carry an
+  optional `hostRevision`, a non-negative safe integer owned by the Host
+  (#1404). The daemon orders projections by `(profileRevision, hostRevision)`,
+  an absent `hostRevision` being 0: a greater key applies whatever the hash, a
+  lower one is `stale`, and an equal one is `idempotent` or `conflict` by
+  hash. A Host that changes its rendering of the home without a new
+  `profileRevision` raises `hostRevision`, and the existing home is projected
+  again without clearing data. A payload carrying it needs the new device flag
+  `agent-home-projection-host-revision`, which the daemon advertises with
+  `agent-home-projection`. A Host that never sends `hostRevision` is
+  unchanged. After a rollback, an older client ignores the stored
+  `hostRevision` and orders by `profileRevision` alone.
+
 ## 0.37.0 — 2026-11-04 (published)
 
 0.37.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

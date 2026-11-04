@@ -32,6 +32,9 @@ export const AGENT_CONTENT_ARTIFACT_READ_CAPABILITY = 'agent-content-artifact-re
 /** Capability required before a task-free Agent-home projection is admitted. */
 export const AGENT_HOME_PROJECTION_CAPABILITY = 'agent-home-projection' as const;
 
+/** Device capability required before an Agent-home projection may carry `hostRevision`. */
+export const AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY = 'agent-home-projection-host-revision' as const;
+
 /** Capability required before an offer may select terminal projection behavior. */
 export const TERMINAL_PROJECTION_SELECTION_CAPABILITY = 'terminal-projection-selection' as const;
 

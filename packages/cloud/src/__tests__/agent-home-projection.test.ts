@@ -60,6 +60,10 @@ describe('task-free Agent-home projection', () => {
     await expect(harness.cloud.enqueueAgentHomeProjection(TENANT_A, device.deviceId, desired())).rejects.toMatchObject({
       code: 'agent_capability_missing',
     });
+    // A daemon without the host-revision flag never receives `hostRevision`.
+    await admitProjection(harness, device.deviceId);
+    await expect(harness.cloud.enqueueAgentHomeProjection(TENANT_A, device.deviceId, { ...desired(), hostRevision: 1 }))
+      .rejects.toMatchObject({ code: 'agent_capability_missing' });
     await expect(
       harness.stores.receipts.get(TENANT_A, agentHomeProjectionRequestKey(device.deviceId, AGENT_A, REQUEST_A)),
     ).resolves.toBeUndefined();
@@ -112,6 +116,12 @@ describe('task-free Agent-home projection', () => {
     await expect(
       harness.cloud.enqueueAgentHomeProjection(TENANT_A, device.deviceId, desired(REQUEST_A, HASH_A, { enabled: false })),
     ).rejects.toMatchObject({ code: 'agent_home_projection_request_conflict' });
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: ['agent-home-contract', 'agent-home-projection', 'agent-home-projection-host-revision'],
+    });
+    await expect(harness.cloud.enqueueAgentHomeProjection(TENANT_A, device.deviceId, { ...desired(), hostRevision: 1 }))
+      .rejects.toMatchObject({ code: 'agent_home_projection_request_conflict' });
 
     const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
     expect(page.messages).toHaveLength(1);
