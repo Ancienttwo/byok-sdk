@@ -988,7 +988,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     configPath = path.join(configDir, 'prepared-launch.json');
     const serialized = serializePiHostConfig({
         format: 'byok.pi.prepared-launch',
-        version: 7,
+        version: 8,
         // The host's single branch switch. It is not a second opinion about
         // the launch: it is `resolvePiRuntimeLaunch`'s own decision carried to
         // the process that must act on it, and it travels inside the

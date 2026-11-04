@@ -15,6 +15,7 @@
   only at launch. The digest-bound Pi launch configs move to
   `byok.pi.rpc-launch` version 11 and `byok.pi.durable-launch` version 4, so
   the daemon and the Pi hosts must come from the same SDK version.
+  `byok.pi.prepared-launch` 7 → 8, since it carries the same grant.
 
 - **Fixed (client; darwin; #1426)** — the scoped file tools no longer reach
   the Agent home's `.byok` through a case variant such as `.BYOK/x` or
