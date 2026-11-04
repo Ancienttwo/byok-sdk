@@ -4,16 +4,24 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { verifyDeviceAssertion, verifyTaskAssertion } from '@byok-sdk/core';
 import { createPublicKey, verify as edVerify } from 'node:crypto';
 import * as publicApi from '../index';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { requestDeviceAssertion, requestTaskAssertion } from '../daemon/assertion-client';
+import { connectControlClient } from '../daemon/control-client';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 import { TestServer } from './fixtures/test-server';
+
+// Pass-through spy: the real control client still dials the daemon; the spy
+// only records the request timeout each call asked for (#1437).
+vi.mock('../daemon/control-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../daemon/control-client')>();
+  return { ...actual, connectControlClient: vi.fn(actual.connectControlClient) };
+});
 
 /**
  * Plan `device-assertion-broker`, public-surface half.
@@ -228,6 +236,7 @@ describe('requestDeviceAssertion', () => {
       audience: ALLOWED_AUDIENCE,
     });
 
+    expect(connectControlClient).toHaveBeenLastCalledWith(expect.objectContaining({ requestTimeoutMs: 90_000 }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.assertion.protected.audience).toBe(ALLOWED_AUDIENCE);
@@ -282,7 +291,9 @@ describe('requestDeviceAssertion', () => {
       productId: 'acme-req-none',
       storeDir,
       audience: ALLOWED_AUDIENCE,
+      timeoutMs: 1_234,
     });
+    expect(connectControlClient).toHaveBeenLastCalledWith(expect.objectContaining({ requestTimeoutMs: 1_234 }));
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe('unavailable');
@@ -373,6 +384,7 @@ describe('requestTaskAssertion', () => {
       audience: ALLOWED_AUDIENCE,
     });
 
+    expect(connectControlClient).toHaveBeenLastCalledWith(expect.objectContaining({ requestTimeoutMs: 90_000 }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.assertion.schema).toBe('byok-task-assertion-v1');
@@ -462,7 +474,9 @@ describe('requestTaskAssertion', () => {
       storeDir,
       contextToken: 'b'.repeat(43),
       audience: ALLOWED_AUDIENCE,
+      timeoutMs: 1_234,
     });
+    expect(connectControlClient).toHaveBeenLastCalledWith(expect.objectContaining({ requestTimeoutMs: 1_234 }));
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe('unavailable');

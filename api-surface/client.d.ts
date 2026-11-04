@@ -3240,7 +3240,7 @@ export interface RequestDeviceAssertionOptions {
     storeDir?: string;
     /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
     audience: string;
-    /** Bound on the control-socket round trip, ms. Default 10s (the control client's own default). */
+    /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
     timeoutMs?: number;
 }
 /**
@@ -3312,7 +3312,7 @@ export interface RequestTaskAssertionOptions {
     contextToken: string;
     /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
     audience: string;
-    /** Bound on the control-socket round trip, ms. Default 10s (the control client's own default). */
+    /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
     timeoutMs?: number;
 }
 /**
