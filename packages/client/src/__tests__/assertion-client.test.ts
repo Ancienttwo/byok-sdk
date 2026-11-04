@@ -9,7 +9,7 @@ import { verifyDeviceAssertion, verifyTaskAssertion } from '@byok-sdk/core';
 import { createPublicKey, verify as edVerify } from 'node:crypto';
 import * as publicApi from '../index';
 import { createEnvelope } from '@byok-sdk/protocol';
-import { ASSERTION_REQUEST_TIMEOUT_MS, requestDeviceAssertion, requestTaskAssertion } from '../daemon/assertion-client';
+import { requestDeviceAssertion, requestTaskAssertion } from '../daemon/assertion-client';
 import { connectControlClient } from '../daemon/control-client';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -236,7 +236,7 @@ describe('requestDeviceAssertion', () => {
       audience: ALLOWED_AUDIENCE,
     });
 
-    expect(connectControlClient).toHaveBeenLastCalledWith(expect.objectContaining({ requestTimeoutMs: ASSERTION_REQUEST_TIMEOUT_MS }));
+    expect(connectControlClient).toHaveBeenLastCalledWith(expect.objectContaining({ requestTimeoutMs: 90_000 }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.assertion.protected.audience).toBe(ALLOWED_AUDIENCE);
@@ -384,7 +384,7 @@ describe('requestTaskAssertion', () => {
       audience: ALLOWED_AUDIENCE,
     });
 
-    expect(connectControlClient).toHaveBeenLastCalledWith(expect.objectContaining({ requestTimeoutMs: ASSERTION_REQUEST_TIMEOUT_MS }));
+    expect(connectControlClient).toHaveBeenLastCalledWith(expect.objectContaining({ requestTimeoutMs: 90_000 }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.assertion.schema).toBe('byok-task-assertion-v1');

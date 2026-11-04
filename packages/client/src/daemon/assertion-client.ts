@@ -29,15 +29,6 @@ import { DeviceStore } from './store';
  * comment for why connecting never throws.
  */
 
-/**
- * The default control request timeout for `assertion.issue` and
- * `task_assertion.issue`. Both handlers read the device record from the OS
- * credential store on every call, and on Windows one read can take the
- * credential bridge's 60 s compile deadline plus its 15 s command deadline, so
- * the generic 10 s cannot cover it.
- */
-export const ASSERTION_REQUEST_TIMEOUT_MS = 90_000;
-
 export interface RequestDeviceAssertionOptions {
   /** Same `productId` the daemon was configured with — selects which daemon's socket to dial. */
   productId: string;
@@ -76,6 +67,15 @@ export type RequestDeviceAssertionErrorCode =
 export type RequestDeviceAssertionResult =
   | { ok: true; assertion: DeviceAssertionEnvelopeV1; expiresAt: string }
   | { ok: false; code: RequestDeviceAssertionErrorCode; reason: string };
+
+/**
+ * The default control request timeout for `assertion.issue` and
+ * `task_assertion.issue`. Both handlers read the device record from the OS
+ * credential store on every call, and on Windows one read can take the
+ * credential bridge's 60 s compile deadline plus its 15 s command deadline, so
+ * the generic 10 s cannot cover it.
+ */
+const ASSERTION_REQUEST_TIMEOUT_MS = 90_000;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
