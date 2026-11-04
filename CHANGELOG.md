@@ -62,7 +62,7 @@ through a case variant such as `.BYOK/x` (client, #1426).
   unchanged. After a rollback, an older client ignores the stored
   `hostRevision` and orders by `profileRevision` alone.
 
-- **Fixed (client; darwin; #1426)** — the scoped file tools no longer reach
+- **Fixed (client; #1426)** — the scoped file tools no longer reach
   the Agent home's `.byok` through a case variant such as `.BYOK/x` or
   `.Byok/x`. On a case-insensitive volume (the macOS APFS default) those
   paths opened `.byok`, so read and write passed the guard. A first segment
