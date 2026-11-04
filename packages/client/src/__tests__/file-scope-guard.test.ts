@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fs, realpathSync } from 'node:fs';
@@ -28,6 +28,15 @@ async function canonicalTmpDir(prefix: string): Promise<string> {
 afterEach(async () => {
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 });
+
+/** The full 8.3 spelling of an existing win32 path, from cmd's `%~sI`. */
+function shortPath(filePath: string): string {
+  const result = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `for %I in ("${filePath}") do @echo %~sI`], {
+    encoding: 'utf8', windowsVerbatimArguments: true,
+  });
+  if (result.status !== 0) throw new Error(`short name lookup failed: ${result.stderr}`);
+  return result.stdout.trim();
+}
 
 async function identityOf(filePath: string): Promise<FileScopeIdentity> {
   const value = await fs.stat(filePath, { bigint: true });
@@ -250,7 +259,7 @@ describe('file-scope guard target checks (#1061 slice 2)', () => {
       // win32: a case-variant home prefix, an 8.3 profile prefix and the 8.3 name of .byok.
       ...(process.platform === 'win32' ? [
         path.join(home.toUpperCase(), '.byok', 'runs', 'reader-1', 'x.txt'),
-        path.join(os.tmpdir(), path.basename(home), '.byok', 'runs', 'reader-1', 'x.txt'),
+        path.join(shortPath(home), '.byok', 'runs', 'reader-1', 'x.txt'),
         path.join(home, 'BYOK~1', 'runs', 'reader-1', 'x.txt'),
       ] : []),
     ]) {
@@ -312,16 +321,17 @@ describe.runIf(process.platform === 'win32')('file-scope guard on win32 (#1423)'
     await fs.mkdir(dir);
     const file = path.join(dir, 'Long File Name Alpha.txt');
     await fs.writeFile(file, 'alpha');
-    // os.tmpdir() on the runner is C:\Users\RUNNER~1\…, an 8.3 spelling of the home's parent.
-    const viaTmp = path.join(os.tmpdir(), path.basename(home));
+    // The runner's C: keeps 8.3 names, so the home has a distinct short spelling (C:\Users\RUNNER~1\…).
+    const shortHome = shortPath(home);
+    expect(shortHome).not.toBe(home);
     for (const variant of [
-      path.join(home, 'LONGDI~1', 'LONGFI~1.TXT'), path.join(viaTmp, 'Long Directory Alpha', 'Long File Name Alpha.txt'),
+      path.join(home, 'LONGDI~1', 'LONGFI~1.TXT'), path.join(shortHome, 'Long Directory Alpha', 'Long File Name Alpha.txt'),
       file.toUpperCase(), file[0]!.toLowerCase() + file.slice(1),
     ]) {
       await expect(resolveFileScopeTarget({ grant, path: variant, access: 'write', cwd: home }), variant)
         .resolves.toMatchObject({ path: file, exists: true, root: { id: 'home' } });
     }
-    await expect(resolveFileScopeTarget({ grant, path: path.join(viaTmp, 'LONGDI~1', 'new.txt'), access: 'write', cwd: home }))
+    await expect(resolveFileScopeTarget({ grant, path: path.join(shortHome, 'LONGDI~1', 'new.txt'), access: 'write', cwd: home }))
       .resolves.toMatchObject({ path: path.join(dir, 'new.txt'), exists: false });
     // An 8.3-form name with no long owner is an ordinary new name.
     await expect(resolveFileScopeTarget({ grant, path: 'LONGFI~7.TXT', access: 'write', cwd: home }))
