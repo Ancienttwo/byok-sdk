@@ -1,8 +1,15 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
-// The Windows process-table read runs PowerShell through `execFile`; this test answers for it.
+// The Windows process-table read runs cscript through `execFile`; this test answers for it.
 const execFile = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', async (original) => ({ ...await original<typeof import('node:child_process')>(), execFile }));
+// The read writes its script into a private directory whose icacls ACL needs a real Windows; a plain temp directory stands in.
+vi.mock('../util/secure-dir', async (original) => {
+  const { promises: fs } = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  return { ...await original<typeof import('../util/secure-dir')>(), createPrivateSystemTempDir: (prefix: string) => fs.mkdtemp(path.join(os.tmpdir(), prefix)) };
+});
 
 const { mayStopForeignHermesGateway } = await import('../adapters/hermes/gateway-ownership');
 

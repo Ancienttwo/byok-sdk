@@ -5,9 +5,16 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ExecutionScratch } from '../daemon/retention/scratch';
 import type { HermesSessionDependencies } from '../adapters/hermes/hermes-session-runtime';
 
-// The Windows process-table read runs PowerShell through `execFile`; these tests answer for it.
+// The Windows process-table read runs cscript through `execFile`; these tests answer for it.
 const execFile = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', async (original) => ({ ...await original<typeof import('node:child_process')>(), execFile }));
+// The read writes its script into a private directory whose icacls ACL needs a real Windows; a plain temp directory stands in.
+vi.mock('../util/secure-dir', async (original) => {
+  const { promises: fs } = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  return { ...await original<typeof import('../util/secure-dir')>(), createPrivateSystemTempDir: (prefix: string) => fs.mkdtemp(path.join(os.tmpdir(), prefix)) };
+});
 
 const { mayStopForeignHermesGateway, ownsHermesGatewayPid } = await import('../adapters/hermes/gateway-ownership');
 const { sweepStaleHermesProfiles } = await import('../adapters/hermes/hermes-home');
@@ -30,7 +37,7 @@ function asWindows(): void {
   process.env.SystemRoot = 'C:\\Windows';
 }
 
-it('ends the PowerShell read when the foreign-gateway deadline passes, and does not stop the gateway', async () => {
+it('ends the process-table read when the foreign-gateway deadline passes, and does not stop the gateway', async () => {
   asWindows();
   const aborted: boolean[] = [];
   execFile.mockImplementation((_command, _args, options: { signal?: AbortSignal }, callback) => {
@@ -55,7 +62,7 @@ it('keeps a stale profile when the Windows pipe client fails', async () => {
   expect((await fs.stat(home)).isDirectory()).toBe(true);
 });
 
-/** A PowerShell read that answers only an abort. Returns the signals it got. */
+/** A process-table read that answers only an abort. Returns the signals it got. */
 function hangingProcessTableRead(): AbortSignal[] {
   const signals: AbortSignal[] = [];
   execFile.mockImplementation((_command, _args, options: { signal?: AbortSignal }, callback) => {
