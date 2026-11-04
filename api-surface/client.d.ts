@@ -13422,7 +13422,7 @@ export declare const TOOL_FILE_ACCESS: readonly ToolFileAccess[];
  * Host configures, never a model or wire value.
  */
 export interface ToolFileScopeRoot {
-    /** Unique, nonempty local label; never emitted on the wire. */
+    /** Unique, nonempty local label; never emitted on the wire. `home` and `run` are reserved. */
     readonly id: string;
     /** Absolute local path; canonicalized and identity-checked at admission, not here. */
     readonly path: string;
@@ -13432,12 +13432,14 @@ export interface ToolFileScopeRoot {
 /**
  * The optional explicit file scope of a tool-authorization policy (#1061
  * slice 1, D15). Absent means `inherit`: the current behavior is unchanged.
- * `home` authorizes read+write of the canonical Agent home; `workspaces`
- * additionally authorizes the listed roots. Only legal when the offer's
+ * `home` authorizes the canonical Agent home; `workspaces` additionally
+ * authorizes the listed roots. A writer task gets the home read+write; a
+ * memory-reader task gets the home read-only plus read+write of its own run
+ * directory (`<home>/.byok/runs/<name>`, its cwd). Only legal when the offer's
  * effective mode is `auto`.
  */
 export interface ToolFileScope {
-    /** `home` always grants read+write of the canonical Agent home. */
+    /** `home` grants the canonical Agent home: read+write for a writer, read-only for a memory reader. */
     readonly mode: 'home' | 'workspaces';
     /** Only for `workspaces`; at least one unique-id, existing absolute root. */
     readonly roots?: readonly ToolFileScopeRoot[];
