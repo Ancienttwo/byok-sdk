@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed (client; Windows; #1410)** — the Hermes gateway ownership check
+  reads the process table through Windows Script Host (cscript.exe, JScript
+  and WMI) instead of Windows PowerShell, whose cold start could pass the
+  15 s limit and fail the check. Windows PowerShell starts only when Windows
+  Script Host cannot run the script (cscript.exe does not start, or exits 1
+  without a process table); the client then logs one
+  `[byok/hermes-adapter]` warning per process.
+
 ## 0.37.0 — 2026-11-04 (published)
 
 0.37.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
