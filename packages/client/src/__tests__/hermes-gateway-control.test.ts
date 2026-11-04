@@ -123,6 +123,9 @@ describe('Hermes gateway ownership on Windows', () => {
     expect(classifyScriptHostRead(failure({ code: 'EACCES', syscall: 'spawn C:\\Windows\\System32\\cscript.exe' }), '')).toEqual({ kind: 'unavailable', reason: 'cscript.exe did not start (EACCES)' });
     // Windows Script Host disabled, as windows-latest prints it (#1410 B1).
     const disabled = 'CScript Error: Windows Script Host access is disabled on this machine. Contact your administrator for details.\r\n';
+    // Thrown synchronously by spawn: access denied, and an AppLocker or App Control block.
+    expect(classifyScriptHostRead(failure({ code: 'EPERM', syscall: 'spawn' }), '')).toEqual({ kind: 'unavailable', reason: 'cscript.exe did not start (EPERM)' });
+    expect(classifyScriptHostRead(failure({ code: 'UNKNOWN', syscall: 'spawn' }), '')).toEqual({ kind: 'unavailable', reason: 'cscript.exe did not start (UNKNOWN)' });
     expect(classifyScriptHostRead(failure({ code: 1 }), disabled)).toEqual({ kind: 'unavailable', reason: 'cscript.exe exited 1 without a process table' });
     for (const error of [
       failure({ code: 2 }),
@@ -132,6 +135,7 @@ describe('Hermes gateway ownership on Windows', () => {
       // Resource exhaustion is not an unavailable script host.
       failure({ code: 'EMFILE', syscall: 'spawn C:\\Windows\\System32\\cscript.exe' }),
       failure({ code: 'EAGAIN', syscall: 'spawn C:\\Windows\\System32\\cscript.exe' }),
+      failure({ code: 'ENOMEM', syscall: 'spawn' }), // thrown synchronously by spawn
     ]) expect(classifyScriptHostRead(error, error.code === 1 ? '10 4 200' : '').kind).toBe('failed');
   });
 

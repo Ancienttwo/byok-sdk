@@ -92,19 +92,22 @@ export type ScriptHostRead =
   | { readonly kind: 'unavailable'; readonly reason: string }
   | { readonly kind: 'failed'; readonly error: ExecFileException };
 
+/** Spawn errors that say the machine ran out of resources for a moment, not that cscript.exe cannot run. */
+const TRANSIENT_SPAWN_ERRORS = new Set(['EMFILE', 'ENFILE', 'EAGAIN', 'ENOMEM']);
+
 /**
  * Only a script host that could not run the script counts as unavailable:
- * cscript.exe could not be started because it is missing (ENOENT) or access
- * to it is denied (EACCES), or it exited 1 with no table line (Windows Script
- * Host disabled; the script itself exits 2). A spawn that ran out of
- * resources (EMFILE, ENFILE, EAGAIN), a timeout, an abort, exit 2 and any
- * other exit fail. Other spawn errors, such as EPERM or UNKNOWN, are thrown
- * synchronously by `execFile` and never reach this function, so they fail too.
+ * cscript.exe could not be started, or it exited 1 with no table line
+ * (Windows Script Host disabled; the script itself exits 2). Any spawn error
+ * counts except a transient resource error (EMFILE, ENFILE, EAGAIN, ENOMEM):
+ * libuv reports a missing file as ENOENT, ERROR_ACCESS_DENIED as EPERM, and
+ * AppLocker (ERROR_ACCESS_DISABLED_BY_POLICY) or App Control blocks as
+ * UNKNOWN. A timeout, an abort, exit 2 and any other exit fail.
  */
 export function classifyScriptHostRead(error: ExecFileException | null, stdout: string): ScriptHostRead {
   if (error === null) return { kind: 'table', table: parseWindowsProcessTable(stdout) };
-  if (error.syscall?.startsWith('spawn') && (error.code === 'ENOENT' || error.code === 'EACCES')) {
-    return { kind: 'unavailable', reason: `cscript.exe did not start (${error.code})` };
+  if (error.syscall?.startsWith('spawn') && !TRANSIENT_SPAWN_ERRORS.has(String(error.code))) {
+    return { kind: 'unavailable', reason: `cscript.exe did not start (${String(error.code)})` };
   }
   if (error.code === 1 && parseWindowsProcessTable(stdout).size === 0) return { kind: 'unavailable', reason: 'cscript.exe exited 1 without a process table' };
   return { kind: 'failed', error };
@@ -124,9 +127,14 @@ async function readThroughScriptHost(signal?: AbortSignal): Promise<ScriptHostRe
     const script = path.join(directory, 'process-table.js');
     await fs.writeFile(script, PROCESS_TABLE_JSCRIPT, { flag: 'wx' });
     return await new Promise((resolve) => {
-      execFile(cscript, ['//NoLogo', '//E:JScript', script], { ...QUERY_OPTIONS, signal }, (error, stdout) => {
-        resolve(classifyScriptHostRead(error, stdout));
-      });
+      try {
+        execFile(cscript, ['//NoLogo', '//E:JScript', script], { ...QUERY_OPTIONS, signal }, (error, stdout) => {
+          resolve(classifyScriptHostRead(error, stdout));
+        });
+      } catch (error) {
+        // Node throws most spawn errors (EPERM, UNKNOWN, ENOMEM) here instead of passing them to the callback.
+        resolve(classifyScriptHostRead(error as ExecFileException, ''));
+      }
     });
   } finally {
     // After an abort cscript can still hold the script open for a moment; retry instead of masking the read's own error with EBUSY.
