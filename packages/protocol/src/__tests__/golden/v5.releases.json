@@ -43,17 +43,6 @@
         "lines": 30,
         "sha256": "5dec1f41cbc7ad90b2633bc7887149adf3ba54af72f83b166e6e5ecbe6124ca6"
       }
-    },
-    {
-      "version": "0.38.0",
-      "envelopes": {
-        "lines": 343,
-        "sha256": "2e4df1d00c62dfc37bee2607fc0dfc52247d3308fef107b387f7fb56bcf2570f"
-      },
-      "http": {
-        "lines": 30,
-        "sha256": "5dec1f41cbc7ad90b2633bc7887149adf3ba54af72f83b166e6e5ecbe6124ca6"
-      }
     }
   ]
 }
