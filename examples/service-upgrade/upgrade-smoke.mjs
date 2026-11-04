@@ -243,11 +243,14 @@ async function lifecycle(variant, cmd, server, payloads) {
   log(`${owner}: v1 running pid=${pid}`);
 
   if (isWindows) {
-    execFileSync('taskkill', ['/F', '/PID', String(pid)]);
     const killed = pid;
+    const killedAt = Date.now();
+    execFileSync('taskkill', ['/F', '/PID', String(killed)]);
+    // Windows can hand the freed pid to the replacement, so a restart is a daemon whose uptime began after the kill.
     pid = await until(async () => {
-      const next = await runningPid(variant);
-      return next !== killed ? next : undefined;
+      const { stdout } = await run([agentCli, 'status', '--config', variant.config]);
+      const match = /^live: pid=(\d+) uptimeMs=(\d+) .*\brunning\b/mu.exec(stdout);
+      return match !== null && Number(match[2]) < Date.now() - killedAt ? Number(match[1]) : undefined;
     }, `${owner} restart after taskkill /F`);
     log(`${owner}: taskkill /F ${killed} → ${owner === 'app' ? 'launcher' : 'SCM'} restarted pid=${pid}`);
   }
