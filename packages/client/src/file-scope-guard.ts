@@ -351,9 +351,16 @@ function matchRoot(roots: readonly FileScopeRootGrant[], absolute: string): { ro
   return best;
 }
 
+// ASCII-only case folding on every platform: a case-insensitive volume (the
+// macOS APFS default) opens `.BYOK` as `.byok`, and no platform branch decides it.
+const INTERNAL_SEGMENT = /^\.[bB][yY][oO][kK]$/u;
+
 function internalPath(roots: readonly FileScopeRootGrant[], absolute: string): boolean {
   for (const root of roots) {
-    if (isWithin(path.join(root.path, '.byok'), absolute) || isWithin(path.join(root.lexicalPath, '.byok'), absolute)) return true;
+    for (const base of [root.path, root.lexicalPath]) {
+      const relative = relativeInside(base, absolute);
+      if (relative !== undefined && INTERNAL_SEGMENT.test(relative.split(path.sep)[0] ?? '')) return true;
+    }
   }
   return false;
 }
@@ -444,6 +451,8 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
     throw new FileScopeGuardError('file_scope_unavailable', 'root_identity_changed', { rootId: root.id, access: root.access });
   }
   const canonicalTarget = path.join(canonicalExisting, ...segments.slice(existingCount));
+  // Aliases that only canonicalization reveals (case variants, short names) land here.
+  if (internalPath(allRoots, canonicalTarget)) throw fail('internal_path');
   const existingStat = targetStat ?? lastStat;
   if (existingStat !== undefined && existingStat.dev !== root.identity.dev) throw fail('cross_device', root.id, input.access);
   if (targetStat !== undefined) {

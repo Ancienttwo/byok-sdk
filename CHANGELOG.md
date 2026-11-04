@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fixed (client; darwin; #1426)** — the scoped file tools no longer reach
+  the Agent home's `.byok` through a case variant such as `.BYOK/x` or
+  `.Byok/x`. On a case-insensitive volume (the macOS APFS default) those
+  paths opened `.byok`, so read and write passed the guard. A first segment
+  under a root that matches `.byok` without ASCII case is now
+  `internal_path` on every platform, and the guard checks the canonical
+  target again, so an alias that only canonicalization reveals is refused
+  too. On Linux a directory named `.BYOK` is now refused as well.
+
 - **Fixed (client; Windows; #1410)** — the Hermes gateway ownership check
   reads the process table through Windows Script Host (cscript.exe, JScript
   and WMI) instead of Windows PowerShell, whose cold start could pass the
