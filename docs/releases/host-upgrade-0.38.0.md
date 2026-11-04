@@ -63,7 +63,7 @@ All nine public packages move together. Pin each one to exactly 0.38.0.
 | --- | --- |
 | Git tag | `v0.38.0` |
 | Release commit SHA | the merge of the release PR on `main`, recorded at tagging |
-| Release PR base | main `34ff7b950` |
+| Release PR base | main `316604bf9` |
 
 Verify a source checkout with `git rev-parse 'v0.38.0^{commit}'`; the result
 must equal the release commit. The annotated tag object is not the source
