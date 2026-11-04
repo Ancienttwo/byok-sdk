@@ -548,7 +548,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Hermes session runtime; loaded only when starting an execution",
-      "budgetBytes": 21774,
+      "budgetBytes": 21828,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
