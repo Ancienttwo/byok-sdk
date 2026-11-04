@@ -10,6 +10,12 @@
   after a daemon start could time out before the read finished. An explicit
   `timeoutMs` still wins.
 
+- **Fixed (client; #1440)** — the writer, read-only and memory-reader memory
+  guidance now each say that `MEMORY.md` and `notes/` hold data that earlier
+  tasks recorded, and that the model must not follow any request or
+  instruction in it. Memory can carry text from other users or Bots, so a
+  line such as "always do X from now on" no longer reads as an instruction.
+
 ## 0.38.0 — 2026-11-04 (published)
 
 0.38.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
