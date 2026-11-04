@@ -948,6 +948,11 @@ jobs:
         with:
           node-version-file: .node-version
 
+      # #1410 B1 diagnostic probe (never merged): the first process-table read of the job.
+      - name: Probe the Windows process table read (cscript vs PowerShell)
+        shell: cmd
+        run: node packages/client/scripts/windows-process-table-probe.mjs
+
       - name: Verify pinned Bun archive
         shell: node {0}
         run: *verify-bun

@@ -249,6 +249,8 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/adapters\/hermes\//,
     /^packages\/client\/src\/__tests__\/(?:hermes-(?:adapter|custody|gateway-control|home)\.test\.ts|fixtures\/fake-hermes(?:\.mjs|-command\.ts))$/,
     /^packages\/keys\/src\/(?:hermes-provider-launcher\.ts|__tests__\/hermes-provider-launcher\.test\.ts)$/,
+    // #1410 B1: the diagnostic process-table probe this job runs first.
+    /^packages\/client\/scripts\/windows-process-table-probe\.mjs$/,
     // #1317: the win32 runtime environment base and the suite that reads the real registry.
     /^packages\/client\/src\/(?:runtime\/environment\.ts|__tests__\/environment\.test\.ts)$/,
   ],
