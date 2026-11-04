@@ -54,20 +54,29 @@ it.each(['exec-sdk', 'daemon-temp', 'reader-run'] as const)('%s drains a real ov
   const target = id === 'exec-sdk' ? execution.sdkDir : id === 'daemon-temp'
     ? path.join(f.store, 'tmp/daemon/diag-abc123') : path.join(f.home, '.byok/runs/run-large');
   await populate(target, 16_384);
-  let bytes = 0, deleted = 0, registry = f.registry;
-  for (let pass = 0; pass < 40 && await fs.lstat(target).then(() => true, () => false); pass++) {
+  const exists = () => fs.lstat(target).then(() => true, () => false);
+  // exec-sdk and daemon-temp passes are bounded only by the 1024-inspection share, so 40 drain 16,384
+  // entries. reader-run deletion also stops at a 250 ms wall-clock window, so its pass count follows
+  // runner speed; it must still make progress every other pass, which bounds the loop by the entry count.
+  const passes = id === 'reader-run' ? Infinity : 40;
+  let bytes = 0, deleted = 0, idle = 0, registry = f.registry;
+  for (let pass = 0; pass < passes && await exists(); pass++) {
     const before = await count(target), b = budget();
     await registry.sweep(id, b.value);
     bytes += b.tally.bytes + (runtimeReclaimedBytes.get(b.value) ?? 0); deleted += b.tally.deleted;
     expect(b.tally.inspections).toBeLessThanOrEqual(1024);
-    expect(before - await count(target)).toBeLessThanOrEqual(1024);
+    const after = await count(target);
+    expect(before - after).toBeLessThanOrEqual(1024);
+    // A pass that finds the agents cursor at its end only rewinds it, so progress may skip one pass.
+    idle = after < before || !await exists() ? 0 : idle + 1;
+    expect(idle).toBeLessThanOrEqual(1);
     if (pass === 0) {
       expect(await count(target)).toBeLessThan(16_384); expect(b.tally.truncated).toBe(true);
       expect((await fs.stat(target)).mtimeMs).toBe(old.getTime());
       await registry.close(); registry = f.createRegistry();
     }
   }
-  expect(await fs.lstat(target).then(() => true, () => false)).toBe(false);
+  expect(await exists()).toBe(false);
   expect(bytes).toBe(16_384); expect(deleted).toBe(1);
 }, 60_000);
 it('startup makes bounded SDK progress without publishing a released marker until secrets are gone', async () => {
