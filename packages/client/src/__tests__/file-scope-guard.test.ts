@@ -195,6 +195,36 @@ describe('file-scope guard target checks (#1061 slice 2)', () => {
     }))).toMatchObject({ reason: 'cwd_outside_scope' });
   });
 
+  it('refuses .byok case variants for read and write without touching the internal file', async () => {
+    const grant = await grantWith(await canonicalTmpDir('byok-guard-case-'));
+    const internal = path.join(grant.home.path, '.byok');
+    await fs.mkdir(internal);
+    await fs.writeFile(path.join(internal, 'secret.txt'), 'unchanged');
+    for (const target of ['.BYOK/secret.txt', '.Byok/secret.txt', '.BYOK/new.txt']) {
+      for (const access of ['read', 'write'] as const) {
+        expect(await guardReason(() => resolveFileScopeTarget({
+          grant, path: path.join(grant.home.path, target), access, cwd: grant.home.path,
+        }))).toMatchObject({ code: 'file_scope_denied', reason: 'internal_path' });
+      }
+    }
+    await expect(fs.readFile(path.join(internal, 'secret.txt'), 'utf8')).resolves.toBe('unchanged');
+    expect(await fs.readdir(internal)).toEqual(['secret.txt']);
+  });
+
+  it('refuses a path that only canonicalizes into .byok', async () => {
+    const { home, identity } = await fixture();
+    const grant = await resolveFileScopeGrant({ fileScope: { mode: 'home' }, home: { path: home, identity } });
+    const alias = path.join(home, 'alias');
+    await fs.mkdir(alias);
+    const io: FileScopeIo = {
+      ...nodeFileScopeIo,
+      realpath: async (candidate) => candidate === alias ? path.join(home, '.byok', 'runs') : nodeFileScopeIo.realpath(candidate),
+    };
+    expect(await guardReason(() => resolveFileScopeTarget({
+      grant, path: path.join(alias, 'new.txt'), access: 'write', cwd: home, io,
+    }))).toMatchObject({ code: 'file_scope_denied', reason: 'internal_path' });
+  });
+
   it('expands ~ to the OS home and then treats it as outside the scope', async () => {
     const root = await canonicalTmpDir('byok-guard-tilde-');
     const grant = await grantWith(root);
