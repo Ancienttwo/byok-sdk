@@ -394,6 +394,7 @@ export {
   TerminalPreparedObservationSchema,
   TerminalAgentHomeProjectionSchema,
   TerminalAgentHomeMemoryChangeSchema,
+  TerminalResidentMemoryOverLimitSchema,
   AGENT_HOME_MEMORY_DIGEST_MAX_FILES,
   AGENT_HOME_MEMORY_DIGEST_MAX_BYTES,
   AGENT_HOME_MEMORY_PATH_MAX_LENGTH,
@@ -467,6 +468,7 @@ export type {
   TerminalPreparedObservation,
   TerminalAgentHomeProjection,
   TerminalAgentHomeMemoryChange,
+  TerminalResidentMemoryOverLimit,
   AgentHomeAccess,
   AgentMemorySelection,
 } from './messages';

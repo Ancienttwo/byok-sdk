@@ -10,7 +10,7 @@ import {
   type AgentMemoryProjectionMutation,
   type AgentMemoryProjectionSealedMutation,
 } from '@byok-sdk/protocol';
-import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES as PROTOCOL_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES as PROTOCOL_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
+import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES as PROTOCOL_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES as PROTOCOL_MEMORY_MAX_SNAPSHOT_FILES, RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
 import { AGENT_HOME_INTERNAL_DIRECTORY, type AgentHomeLease, type AgentRef } from '../agent-home';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
 import { AgentMemoryError, AgentMemoryValidationError, validateAgentMemoryPath, type AgentMemoryFile, type AgentMemoryProjectionPort, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
@@ -687,6 +687,21 @@ export async function probeAgentMemoryStrictDirectorySync(directory: string): Pr
   }
 }
 
+/**
+ * The one size check of the resident `MEMORY.md` (#1439), shared by
+ * `memory_save` and Host intents: new content over `RESIDENT_MEMORY_MAX_BYTES`
+ * is refused. Only the new content is checked, so an over-limit file can be
+ * replaced by a smaller one. A `notes/` file keeps `AGENT_MEMORY_MAX_FILE_BYTES`.
+ */
+export function assertResidentMemoryWithinLimit(relativePath: string, content: string): void {
+  if (relativePath !== 'MEMORY.md') return;
+  const byteCount = Buffer.byteLength(content, 'utf8');
+  if (byteCount <= RESIDENT_MEMORY_MAX_BYTES) return;
+  throw new AgentMemoryValidationError(
+    `MEMORY.md takes at most ${RESIDENT_MEMORY_MAX_BYTES} UTF-8 bytes, but this content has ${byteCount}; keep it to resident facts and pointers, and move details into notes/`,
+  );
+}
+
 export class AgentMemoryService {
   constructor(private readonly input: AgentMemoryTaskContext) {}
   async recall(input: { readonly path: unknown; readonly ifRevision?: unknown }): Promise<Readonly<AgentMemoryRecallResult>> {
@@ -712,6 +727,7 @@ export class AgentMemoryService {
     if ((input.op !== 'replace' && input.op !== 'delete') || !revision(input.expectedRevision)) throw new AgentMemoryValidationError('memory save requires op and sha256 expectedRevision');
     if (input.op === 'replace' && typeof input.content !== 'string') throw new AgentMemoryValidationError('replace requires string content');
     if (input.op === 'delete' && input.content !== undefined) throw new AgentMemoryValidationError('delete does not accept content');
+    if (typeof input.content === 'string') assertResidentMemoryWithinLimit(relativePath, input.content);
     const expectedRevision = input.expectedRevision;
     const content = input.content;
     return exclusiveAgentMemoryHome(context.canonicalHome, async () => {

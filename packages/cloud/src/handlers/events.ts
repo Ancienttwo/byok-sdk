@@ -1,6 +1,7 @@
 import {
   MAILBOX_READ_AHEAD_CAPABILITY,
   MAILBOX_READ_AHEAD_MAX_SEQS,
+  RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY,
   RUNTIME_FAILURE_CLASS_CAPABILITY,
   RUNTIME_QUOTA_SCOPE_CAPABILITY,
   SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY,
@@ -103,6 +104,9 @@ export const CLOUD_PROTOCOL_CAPABILITIES = [
   RUNTIME_FAILURE_CLASS_CAPABILITY,
   // ... with a quota failure's `scope` (#1271).
   RUNTIME_QUOTA_SCOPE_CAPABILITY,
+  // The inbound gate parses a terminal's `residentMemoryOverLimit` on both
+  // branches, and `projectTerminalResult` copies it (#1439).
+  RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY,
 ];
 
 export interface EventsRouteDeps extends DeviceRouteDeps {

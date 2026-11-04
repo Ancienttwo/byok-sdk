@@ -99,6 +99,12 @@ export const RUNTIME_FAILURE_CLASS_CAPABILITY = 'runtime-failure-class' as const
 export const RUNTIME_QUOTA_SCOPE_CAPABILITY = 'runtime-quota-scope' as const;
 
 /**
+ * A server advertises it before a device may send `residentMemoryOverLimit`
+ * on `task.complete`, `task.fail` or `task.cancelled` (#1439).
+ */
+export const RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY = 'resident-memory-over-limit' as const;
+
+/**
  * The connection understands the typed pre-claim runtime-unavailable cause
  * (#1103 D8): `task.decline.runtimeUnavailable`, `conn.hello.runtimeUnavailable`
  * and the presence projection. A daemon declares it when it emits the cause.

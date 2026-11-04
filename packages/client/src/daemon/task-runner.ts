@@ -17,6 +17,7 @@ import {
   type TerminalPreparedObservation,
   type TerminalAgentHomeProjection,
   type TerminalAgentHomeMemoryChange,
+  type TerminalResidentMemoryOverLimit,
   type TerminalProjectionSelection,
   type TaskDeclinePayload,
   type TaskFailure,
@@ -1609,6 +1610,7 @@ export class TaskRunner {
     harnessId?: string;
     agentHomeProjection?: TerminalAgentHomeProjection;
     agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
+    residentMemoryOverLimit?: TerminalResidentMemoryOverLimit;
   } {
     return agentTerminalPayload.call(this, active);
   }

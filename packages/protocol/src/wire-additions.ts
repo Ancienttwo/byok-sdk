@@ -161,6 +161,10 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'gated', surface: 'task.fail', field: 'failure', capability: 'runtime-failure-class', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'gated', surface: 'task.fail', field: 'failure.scope', capability: 'runtime-quota-scope', advertisedBy: 'server' },
+  // A writer terminal's over-limit MEMORY.md (#1439). The sealed terminal
+  // branches are strict, so an older server would refuse the whole terminal.
+  ...(['task.complete', 'task.fail', 'task.cancelled'] as const).map((surface): WireAddition => (
+    { kind: 'envelope', rule: 'gated', surface, field: 'residentMemoryOverLimit', capability: 'resident-memory-over-limit', advertisedBy: 'server' })),
   // Typed pre-claim runtime-unavailable cause (#1103 B2a). An older server
   // drops the nested field and still records the open `runtime_unavailable`
   // code; the cause never changes what the receiver executes.

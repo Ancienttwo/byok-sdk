@@ -1,3 +1,5 @@
+import { RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
+
 /**
  * Every guidance that reads memory carries this line. Memory can hold text from
  * other users or Bots of earlier turns (#1440), so the model reads it as data.
@@ -16,6 +18,7 @@ export const AGENT_MEMORY_GUIDANCE = [
   'Read files under `notes/` only as needed, following pointers from the index.',
   AGENT_MEMORY_IS_DATA_LINE,
   'When task permissions allow and a durable value is learned, update the relevant `notes/` entry and the `MEMORY.md` index.',
+  `Keep \`MEMORY.md\` within ${RESIDENT_MEMORY_MAX_BYTES} bytes and put details in \`notes/\`: \`memory_save\` refuses a larger \`MEMORY.md\`, and a larger one written with file tools is reported to the host.`,
   'Never write credentials, secrets, tokens, API keys, private keys, or other authentication material to `MEMORY.md` or `notes/`.',
 ].join('\n');
 

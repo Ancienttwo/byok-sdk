@@ -15,10 +15,10 @@ import { MemoryRestoreCoordinator, memoryRestoreBlocked, recordRestoreTerminal, 
 import { canonical, hash } from './model';
 import type { LedgerState } from './model';
 import type { AgentMemoryExport, AgentMemoryIntentTransport, AgentMemoryProjectionPort } from '@byok-sdk/protocol/agent-memory';
+import { RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
 
 // Only repairable projection failures can hold an Agent queue.
 export class MemoryBlockedError extends Error {}
-export const RESIDENT_MEMORY_MAX_BYTES = 8 * 1024;
 export function memoryRevision(text: string): string { return `sha256:${createHash('sha256').update(text, 'utf8').digest('hex')}`; }
 export const EMPTY_MEMORY_REVISION = memoryRevision('');
 type AgentRef = AgentMemoryIntentV1['agentRef'];

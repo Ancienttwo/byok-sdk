@@ -7,6 +7,7 @@ import {
   type TerminalPreparedObservation,
   type TerminalAgentHomeProjection,
   type TerminalAgentHomeMemoryChange,
+  type TerminalResidentMemoryOverLimit,
   type TaskFailPayload,
   type TaskFailureReading,
   type TaskDeclineCodeReading,
@@ -71,6 +72,13 @@ export interface TerminalResult {
    * before the Attempt became active, and for an older daemon.
    */
   readonly agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
+  /**
+   * A writer Attempt left `MEMORY.md` larger than `RESIDENT_MEMORY_MAX_BYTES`,
+   * verbatim from the winning terminal (#1439). Absence does not mean the file
+   * is within the limit: a reader, a claimed failure before the Attempt became
+   * active, a failed measurement and an older daemon all leave it absent.
+   */
+  readonly residentMemoryOverLimit?: TerminalResidentMemoryOverLimit;
   readonly summary?: string;
   /**
    * The runtime's closing reply, verbatim `task.complete.finalMessage`. Absent
@@ -157,6 +165,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
           ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
           ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+          ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
           sessionRef: envelope.payload.sessionRef,
           ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
           ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
@@ -169,6 +178,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
         ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+        ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
         summary: envelope.payload.summary,
         ...(envelope.payload.finalMessage === undefined ? {} : { finalMessage: envelope.payload.finalMessage }),
         sessionRef: envelope.payload.sessionRef,
@@ -191,6 +201,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
           ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
           ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+          ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
           ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
           ...(envelope.payload.failure === undefined ? {} : { failure: readTaskFailure(envelope.payload.failure) }),
           ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
@@ -204,6 +215,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
         ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+        ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
         ...(envelope.payload.recovery === undefined ? {} : { recovery: envelope.payload.recovery }),
         reason: envelope.payload.reason,
         terminalCause: envelope.payload.reason,
@@ -254,6 +266,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
           ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
           ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+          ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
           ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
           ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
           recordedAt: receipt.recordedAt,
@@ -265,6 +278,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
         ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+        ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
         ...(envelope.payload.reason !== undefined ? { reason: envelope.payload.reason } : {}),
         ...(envelope.payload.reason === undefined ? {} : { terminalCause: envelope.payload.reason }),
         ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),

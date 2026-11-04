@@ -62,6 +62,14 @@ describe('Agent memory external filesystem helper', () => {
       expect(saved.deleted).toBe(false);
       expect((await service.recall({ path: 'MEMORY.md' })).content).toBe('local durable value');
 
+      // #1439: MEMORY.md takes at most 8192 bytes; a note keeps the file limit.
+      const atLimit = await service.save({ op: 'replace', path: 'MEMORY.md', expectedRevision: saved.revision!, content: 'x'.repeat(8192) });
+      await expect(service.save({ op: 'replace', path: 'MEMORY.md', expectedRevision: atLimit.revision!, content: 'x'.repeat(8193) }))
+        .rejects.toThrow(/MEMORY\.md takes at most 8192 UTF-8 bytes, but this content has 8193/);
+      expect((await service.recall({ path: 'MEMORY.md' })).revision).toBe(atLimit.revision);
+      await service.save({ op: 'replace', path: 'notes/topic.md', expectedRevision: initial.revision, content: 'y'.repeat(9 * 1024) });
+      await service.save({ op: 'replace', path: 'MEMORY.md', expectedRevision: atLimit.revision!, content: 'local durable value' });
+
       await fs.writeFile(path.join(binding.resolution.canonicalHome, 'notes', 'topic.md'), 'snapshot note', 'utf8');
       const snapshot = await captureAgentMemorySnapshot(context);
       expect(snapshot.files.map((file) => file.path)).toEqual(['MEMORY.md', 'notes/topic.md']);
