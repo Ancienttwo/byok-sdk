@@ -2,13 +2,6 @@
 
 ## Unreleased
 
-- **Fixed (client; #1434)** — `byok-agent pair` against a running service
-  waits up to 10 minutes for `enrollment.pair` instead of the generic 10 s
-  control timeout. The handler runs many serial OS credential operations, and
-  on Windows each one compiles the credential bridge first, so the pairing
-  succeeded while the CLI reported `control request "enrollment.pair" timed
-  out` and exited 1. Other control requests keep the 10 s timeout.
-
 ## 0.38.0 — source candidate
 
 0.38.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
@@ -30,7 +23,9 @@ under the file scope with a read-only home and a writable run root, and the
 `fileScope` root ids `home` and `run` are reserved (client, #1422). The
 release also fixes a file-scope bypass: on a case-insensitive volume, the
 scoped file tools could read and write the Agent home's `.byok` through a
-case variant such as `.BYOK/x` (client, #1426).
+case variant such as `.BYOK/x` (client, #1426). It also fixes
+`byok-agent pair` against a running service, which reported a control timeout
+after 10 s while the pairing went on to succeed (client, #1434).
 
 - **Breaking (examples)** — K8 `cancelTurn` and `cancelDelegation` are
   idempotent and return a result in the shape of `cancelHostIntent` (#1405):
@@ -103,6 +98,13 @@ case variant such as `.BYOK/x` (client, #1426).
   Script Host cannot run the script (cscript.exe does not start, or exits 1
   without a process table); the client then logs one
   `[byok/hermes-adapter]` warning per process.
+
+- **Fixed (client; #1434)** — `byok-agent pair` against a running service
+  waits up to 10 minutes for `enrollment.pair` instead of the generic 10 s
+  control timeout. The handler runs many serial OS credential operations, and
+  on Windows each one compiles the credential bridge first, so the pairing
+  succeeded while the CLI reported `control request "enrollment.pair" timed
+  out` and exited 1. Other control requests keep the 10 s timeout.
 
 ## 0.37.0 — 2026-11-04 (published)
 
