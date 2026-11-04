@@ -129,7 +129,6 @@ Other changes a Host may see in 0.38.0:
   reserved and refused when the policy is constructed
   (`FileScopePolicyError`, `invalid_file_scope`): rename such a root before
   the upgrade.
-
 - **Agent-home projection `hostRevision`** (#1404, additive entry
   `agent-home-projection-host-revision`): a Host that changes its rendering of
   the home without a new `profileRevision` may raise `hostRevision`, after its
