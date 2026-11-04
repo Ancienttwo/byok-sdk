@@ -247,6 +247,12 @@ describe('file-scope guard target checks (#1061 slice 2)', () => {
     for (const target of [
       path.join(home, '.byok', 'runs', 'other', 'x.txt'), path.join(home, '.byok', 'agent-home.lease'),
       path.join(run, '.byok', 'x.txt'), path.join(home, '.BYOK', 'runs', 'reader-1', 'x.txt'),
+      // win32: a case-variant home prefix, an 8.3 profile prefix and the 8.3 name of .byok.
+      ...(process.platform === 'win32' ? [
+        path.join(home.toUpperCase(), '.byok', 'runs', 'reader-1', 'x.txt'),
+        path.join(os.tmpdir(), path.basename(home), '.byok', 'runs', 'reader-1', 'x.txt'),
+        path.join(home, 'BYOK~1', 'runs', 'reader-1', 'x.txt'),
+      ] : []),
     ]) {
       expect(await guardReason(() => resolveFileScopeTarget({ grant, path: target, access: 'read', cwd: run })))
         .toMatchObject({ code: 'file_scope_denied', reason: 'internal_path' });

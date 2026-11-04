@@ -508,10 +508,11 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
     const owner = matchRoot(allRoots, resolved)?.root;
     absolute = await win32CanonicalPath(resolved, io, (reason) => fail(reason, owner?.id, owner === undefined ? undefined : input.access));
     lexical = resolved;
-    // `run` owns the canonical path only when the path does not name another
-    // root: a path through home that canonicalizes into the run directory is
-    // an alias and stays internal, as on darwin/linux.
-    runOwnsCanonical = owner === undefined || owner === run;
+    // `run` owns the canonical path only when the path names `run` exactly,
+    // as on darwin/linux. Any other spelling that canonicalizes into the run
+    // directory (a case variant, an 8.3 name, a path through home) is an alias
+    // of home's `.byok` and stays internal.
+    runOwnsCanonical = owner === run;
     if (!/^[A-Za-z]:\\/u.test(expanded)) relativeCwd = await win32CanonicalPath(cwd, io, fail);
   } else {
     if (!path.isAbsolute(input.cwd)) throw fail('path_syntax');
