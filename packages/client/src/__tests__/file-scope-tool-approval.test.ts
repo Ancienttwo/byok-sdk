@@ -281,9 +281,9 @@ describe('the scoped approval floor through the real Pi tool pipeline (#1061 sli
     ].join('\n'));
 
     const provider = await scriptedProvider([
-      { name: 'bash', arguments: { command: 'cat ' + outsideFile } },
-      { name: 'bash', arguments: { command: 'touch ' + deniedFile } },
-      { name: 'bash', arguments: { command: 'touch ' + allowedFile } },
+      { name: 'bash', arguments: { command: `cat '${outsideFile}'` } },
+      { name: 'bash', arguments: { command: `touch '${deniedFile}'` } },
+      { name: 'bash', arguments: { command: `touch '${allowedFile}'` } },
       { name: 'write', arguments: { path: inScopeFile, content: 'scoped write' } },
       { name: 'probe_tool', arguments: {} },
     ]);
@@ -295,7 +295,7 @@ describe('the scoped approval floor through the real Pi tool pipeline (#1061 sli
 
     const g = scopedGate({
       workspace: cwd, grant: await homeGrant(cwd),
-      rules: { allowWithoutAsking: [{ id: 'allow-touch', match: { toolName: 'bash', commandGlob: 'touch ' + allowedFile } }] },
+      rules: { allowWithoutAsking: [{ id: 'allow-touch', match: { toolName: 'bash', commandGlob: `touch '${allowedFile}'` } }] },
     });
     const session = await startPreparedOperation(adapter(), { instruction: 'Run the scripted calls, then finish.' }, {
       workspaceDir: cwd, agentHome: cwd,
@@ -309,8 +309,8 @@ describe('the scoped approval floor through the real Pi tool pipeline (#1061 sli
     // summary a human sees names the concrete command.
     expect(g.summaries).toHaveLength(3);
     expect(g.summaries[0]).toContain('Tool call outside the file scope (outside-file-scope): bash');
-    expect(g.summaries[0]).toContain('cat ' + outsideFile);
-    expect(g.summaries[1]).toContain('touch ' + deniedFile);
+    expect(g.summaries[0]).toContain(`cat '${outsideFile}'`);
+    expect(g.summaries[1]).toContain(`touch '${deniedFile}'`);
     expect(g.summaries[2]).toContain('probe_tool');
     const denials = g.decisions.filter(decision => decision.verdict.decision === 'deny');
     expect(denials).toHaveLength(3);
@@ -361,7 +361,7 @@ describe('the scoped approval floor through the real Pi tool pipeline (#1061 sli
 
   it('keeps an unscoped ordinary shell command running without asking', async () => {
     const marker = path.join(await tmpDir('byok-scope-unscoped-'), 'marker.txt');
-    const f = await realPiFixture([{ name: 'bash', arguments: { command: 'touch ' + marker } }]);
+    const f = await realPiFixture([{ name: 'bash', arguments: { command: `touch '${marker}'` } }]);
     const g = scopedGate({ workspace: f.cwd });
     const session = await startPreparedOperation(adapter(), { instruction: 'Run the scripted call, then finish.' }, {
       workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization,

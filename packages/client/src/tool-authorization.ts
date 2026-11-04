@@ -27,7 +27,11 @@ export const TOOL_FILE_ACCESS: readonly ToolFileAccess[] = Object.freeze(['read'
 export interface ToolFileScopeRoot {
   /** Unique, nonempty local label; never emitted on the wire. `home` and `run` are reserved. */
   readonly id: string;
-  /** Absolute local path; canonicalized and identity-checked at admission, not here. */
+  /**
+   * Absolute local path; canonicalized and identity-checked at admission, not
+   * here. On win32 an absolute drive path (`X:\…`) without a `\\` prefix,
+   * stream, reserved device name, or trailing dot or space.
+   */
   readonly path: string;
   /** `write` implies `read`. */
   readonly access: ToolFileAccess;
@@ -100,7 +104,7 @@ export interface ToolAuthorizationPolicy {
    * preserves the existing behavior exactly. Only legal when the offer's
    * effective mode is `auto`; an `all` runtime with a scope is rejected
    * before claim. An unsupported lane/adapter/platform is declined as
-   * `file_scope_unsupported` before claim; on the admitted POSIX path every
+   * `file_scope_unsupported` before claim; on an admitted platform every
    * root is revalidated after claim, before runtime start, and again before
    * the Pi session exists, and an unresolvable root fails the claimed task as
    * `file_scope_unavailable`. A configured scope is never silently dropped.

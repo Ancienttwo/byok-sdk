@@ -4318,7 +4318,8 @@ encoded payloads, aliases) are not recognized. It is a tool gate, not an
 execution sandbox and not a file-scope boundary: an allowed shell command can
 still reach any file, network or local resource the OS user can. The optional
 `toolAuthorization.fileScope` policy (#1061) is enforced on the ordinary Pi
-RPC and durable lanes on darwin/linux by six SDK-owned scoped tools: `read`,
+RPC lane on darwin, linux and win32 and on the durable lane on darwin/linux by
+six SDK-owned scoped tools: `read`,
 `write`, `edit`, `find`, `grep` and `ls`. They shadow the native Pi tools of
 the same names (on the durable lane they replace the harness `read`, `write`
 and `edit`, and every worker spawn, the first and each respawn, re-verifies the
@@ -4332,7 +4333,7 @@ claim and before the runtime starts. The session never falls back to an
 unscoped or native file tool. The prepared lane has no native file tools and
 gets no scoped ones, because its counted tool manifest is MCP-only; a scoped
 prepared task gets the same gate and scope floor, so every counted tool call
-asks. Windows and other adapters decline before claim. A memory-reader offer
+asks. Other adapters and other platforms decline before claim. A memory-reader offer
 runs scoped on the ordinary RPC and prepared lanes (the durable lane refuses
 readers on its own, scope or not): the Agent home is read-only, and its run
 directory, the reader lease's cwd `<home>/.byok/runs/<name>` (on resume, the
@@ -4355,6 +4356,30 @@ command/path and trusted MCP server/tool. This is a file-tool boundary for
 those six tools, not an OS sandbox: `bash`, MCP servers and user extensions
 are not covered, the guard is canonical check-then-open using Node built-ins,
 and it is not race-free against same-user processes.
+
+On win32 (#1423) the guard uses no native code and checks a path in a fixed
+order. First the syntax: `/` becomes `\`; a path starting with `\` (UNC,
+`\\?\`, `\\.\`, root-relative) or a drive-relative `C:foo` is refused;
+the rest resolves with `path.win32` against the cwd and must be `X:\…`; a
+segment holding `:` (an alternate data stream), ending in `.` or a space, or
+naming a reserved device (CON, PRN, AUX, NUL, COM0–COM9, LPT0–LPT9 with the
+superscript ¹²³ variants, CONIN$, CONOUT$; any case, any extension) is
+refused as `path_syntax`, because Node creates those names literally while
+Win32 programs read them as a device or strip the trailing characters, and a
+stream "create" writes into an existing file. Configured roots follow the same
+syntax and are refused with `invalid_file_scope`. Then every existing segment
+from the drive root is lstat'ed and a symlink, junction or AppExecLink is
+`symlink`; then `realpath.native` of the deepest existing prefix expands 8.3
+short names and returns the on-disk case. Every check above runs on that
+canonical path, comparing bytes without case folding, so a `.byok` case
+variant or 8.3 name is `internal_path`, and an 8.3 or case variant of a root
+matches it. A volume mount point inside a root presents as a directory and
+canonicalizes onto its own volume, so it is `outside_scope`, or
+`cross_device` by dev for a volume without a drive letter. Other reparse
+points (WOF compression, cloud placeholders, deduplication) are the file or
+directory they present. An 8.3-form name with no long owner is an ordinary
+new name. `O_NOFOLLOW` is undefined on win32; the post-open fstat check and a
+write that truncates only after it refuse a replaced final segment.
 
 A scoped session may offer native pi-subagents children only with the same
 boundary. The host writes the serialized grant and digest into the child gate

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Added (client; Windows; #1423)** — with `toolAuthorization.fileScope`
+  configured, Pi rpc and prepared tasks (writer and memory reader) run scoped
+  on Windows instead of declining before claim with `file_scope_unsupported`.
+  The guard still uses only Node built-ins. A path starting with `\` (UNC,
+  `\\?\`, `\\.\`, root-relative), a drive-relative path, a segment with
+  `:` (an alternate data stream), a segment ending in a dot or space, and a
+  reserved device name (CON, NUL, COM1, `CON.txt`, `COM¹`, …) are refused as
+  `file_scope_denied` / `path_syntax`, and as `invalid_file_scope` in a
+  configured root, which must be an absolute drive path. Every existing segment
+  from the drive root is lstat'ed, so a symlink, junction or AppExecLink is
+  `symlink`; then `realpath.native` expands 8.3 short names and the on-disk
+  case, and every other check runs on that canonical path, so a `.byok` short
+  name is `internal_path` and a volume mount point inside a root is
+  `outside_scope`. The durable Pi lane stays darwin/linux only, and other
+  platforms still decline.
+
 - **Added (client; #1422)** — with `toolAuthorization.fileScope` configured,
   a memory-reader task runs on the Pi rpc and prepared lanes on darwin and
   linux instead of declining before claim with `file_scope_unsupported`. Its

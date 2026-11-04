@@ -488,7 +488,10 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
     throw fail('path_syntax');
   }
   if (input.cwd.length === 0 || /[\u0000\r\n]/u.test(input.cwd)) throw fail('path_syntax');
+  const run = input.grant.run;
+  const allRoots = Object.freeze([input.grant.home, ...(run === undefined ? [] : [run]), ...input.grant.roots]);
   let absolute: string;
+  let lexical: string | undefined;
   let relativeCwd: string | undefined;
   if (platform === 'win32') {
     const cwd = win32FileScopePath(input.cwd);
@@ -497,7 +500,11 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
     const expanded = raw === '~' ? osHome : raw.startsWith('~\\') ? path.win32.join(osHome, raw.slice(2)) : raw;
     const resolved = win32FileScopePath(expanded, cwd);
     if (resolved === undefined) throw fail('path_syntax');
-    absolute = await win32CanonicalPath(resolved, io, fail);
+    // A segment denial happens before root matching; the root the path names
+    // lexically labels it, as the shared walk does on darwin/linux.
+    const owner = matchRoot(allRoots, resolved)?.root;
+    absolute = await win32CanonicalPath(resolved, io, (reason) => fail(reason, owner?.id, owner === undefined ? undefined : input.access));
+    lexical = resolved;
     if (!/^[A-Za-z]:\\/u.test(expanded)) relativeCwd = await win32CanonicalPath(cwd, io, fail);
   } else {
     if (!path.isAbsolute(input.cwd)) throw fail('path_syntax');
@@ -505,11 +512,13 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
     absolute = path.resolve(input.cwd, expanded);
     if (!path.isAbsolute(expanded)) relativeCwd = path.resolve(input.cwd);
   }
-  const run = input.grant.run;
-  const allRoots = Object.freeze([input.grant.home, ...(run === undefined ? [] : [run]), ...input.grant.roots]);
   // Before matching, a path inside `run` is handed to `run`: matchRoot picks
-  // the longest root, and `run` is nested in home.
-  if (internalPath(allRoots, absolute, run)) throw fail('internal_path');
+  // the longest root, and `run` is nested in home. On win32 the lexical path is
+  // checked too, so `.BYOK\runs\<run>` stays internal although it
+  // canonicalizes into the run root, as it does on darwin/linux.
+  if (internalPath(allRoots, absolute, run) || (lexical !== undefined && internalPath(allRoots, lexical, run))) {
+    throw fail('internal_path');
+  }
 
   if (relativeCwd !== undefined && matchRoot(allRoots, relativeCwd) === undefined) throw fail('cwd_outside_scope');
   const matched = matchRoot(allRoots, absolute);
