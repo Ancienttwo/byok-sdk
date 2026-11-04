@@ -26,7 +26,7 @@ async function grantFixture(): Promise<FileScopeGrant> {
   const root = await tmpDir('byok-launch-root-');
   return resolveFileScopeGrant({
     fileScope: { mode: 'workspaces', roots: [{ id: 'repo', path: root, access: 'write' }] },
-    home: { path: home, identity: await identityOf(home) },
+    attempt: { homeAccess: 'writer' }, home: { path: home, identity: await identityOf(home) },
   });
 }
 
@@ -81,6 +81,30 @@ describe('Pi file-scope launch serialization (#1061 slice 3)', () => {
     expect(() => parseOrThrow({ ...serialized, roots: [{ ...roots[0], id: 'home' }] })).toThrow(/reserved home id/);
     expect(() => parseOrThrow({ ...serialized, mode: 'home' })).toThrow(/must not carry workspace roots/);
     expect(() => parseOrThrow({ ...serialized, digest: 'short' })).toThrow(/sha256/);
+  });
+
+  it('round-trips a memory-reader grant and refuses every other reader shape', async () => {
+    const home = await tmpDir('byok-launch-reader-');
+    const run = path.join(home, '.byok', 'runs', 'reader-1');
+    await fs.mkdir(run, { recursive: true });
+    const grant = await resolveFileScopeGrant({
+      fileScope: { mode: 'home' }, attempt: { homeAccess: 'memory-reader', cwd: run }, home: { path: home, identity: await identityOf(home) },
+    });
+    const serialized = serializeFileScopeGrant(grant);
+    expect(serialized).toMatchObject({ home: { access: 'read' }, run: { id: 'run', path: run, lexicalPath: run, access: 'write' } });
+    const json = JSON.parse(JSON.stringify(serialized)) as Record<string, Record<string, unknown>>;
+    expect(parseOrThrow(json)).toEqual(serialized);
+    // The Pi host and a subagent child re-verify the same grant to the same digest.
+    expect((await verifySerializedFileScopeGrant(serialized)).digest).toBe(grant.digest);
+    const { run: _run, ...withoutRun } = json;
+    expect(() => parseOrThrow(withoutRun)).toThrow(/read-only with a run root and writable without one/);
+    expect(() => parseOrThrow({ ...json, home: { ...json.home, access: 'write' } })).toThrow(/read-only with a run root/);
+    expect(() => parseOrThrow({ ...json, run: { ...json.run, access: 'read' } })).toThrow(/run root must be id "run" with write access/);
+    expect(() => parseOrThrow({ ...json, run: { ...json.run, path: home } })).toThrow(/under <home>\/\.byok\/runs/);
+    expect(() => parseOrThrow({ ...json, mode: 'workspaces', roots: [{ ...json.run, id: 'run', path: home }] }))
+      .toThrow(/reserved run id/);
+    await fs.rm(run, { recursive: true });
+    expect(await verifyFailure(serialized)).toMatchObject({ code: 'file_scope_unavailable', reason: 'root_missing', rootId: 'run' });
   });
 
   it('fails closed for Windows and unknown platforms', async () => {

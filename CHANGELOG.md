@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Added (client; #1422)** — with `toolAuthorization.fileScope` configured,
+  a memory-reader task runs on the Pi rpc and prepared lanes on darwin and
+  linux instead of declining before claim with `file_scope_unsupported`. Its
+  Agent home is read-only (a write is `file_scope_denied` / `read_only`). Its
+  run directory, the reader lease's cwd `<home>/.byok/runs/<name>` (on resume,
+  the run directory its session handoff recorded), is a writable `run` root,
+  and every other path under `.byok` stays `internal_path`. The durable lane
+  still refuses memory-reader offers. A `fileScope` root id `home` or `run` is
+  reserved and now refused when the policy is constructed
+  (`FileScopePolicyError`, code `invalid_file_scope`); before, `home` failed
+  only at launch. The digest-bound Pi launch configs move to
+  `byok.pi.rpc-launch` version 11 and `byok.pi.durable-launch` version 4, so
+  the daemon and the Pi hosts must come from the same SDK version.
+
 - **Fixed (client; darwin; #1426)** — the scoped file tools no longer reach
   the Agent home's `.byok` through a case variant such as `.BYOK/x` or
   `.Byok/x`. On a case-insensitive volume (the macOS APFS default) those

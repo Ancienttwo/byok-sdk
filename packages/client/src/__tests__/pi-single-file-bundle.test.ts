@@ -532,7 +532,7 @@ describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
       await fs.writeFile(slotPreload, SLOT_OWNER_PRELOAD);
       const cwd = path.join(release, 'workspace');
       await fs.mkdir(cwd);
-      const launch = serializePiHostConfig({ format: 'byok.pi.rpc-launch', version: 10, credentialSource: 'pi-auth-store', cwd,
+      const launch = serializePiHostConfig({ format: 'byok.pi.rpc-launch', version: 11, credentialSource: 'pi-auth-store', cwd,
         agentUserContext: 'inherit', agentHome: null, agentSkillPaths: [], agentExtensionPaths: [], toolAuthorization: null,
         fileScope: null, mcp: { mcpEnv: {}, mcpServers: {}, observation: {} } });
       const configPath = path.join(release, 'launch.json');

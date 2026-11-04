@@ -207,7 +207,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
       home: f.root,
       mcpIdentities: new Map([['mcp__salesko__echo', { server: 'salesko', tool: 'echo' }]]),
       ...(mode === 'fileScope'
-        ? { fileScope: await resolveFileScopeGrant({ fileScope: { mode: 'home' }, home: { path: f.cwd, identity: { dev: cwdIdentity.dev, ino: cwdIdentity.ino } } }) }
+        ? { fileScope: await resolveFileScopeGrant({ fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: f.cwd, identity: { dev: cwdIdentity.dev, ino: cwdIdentity.ino } } }) }
         : { rules: { alwaysAsk: [{ id: 'ask-salesko', match: { mcpServer: 'salesko' } }] } }),
     });
     const session = await startPreparedOperation(adapter(), { instruction: 'Run the scripted call, then finish.' }, {

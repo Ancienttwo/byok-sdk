@@ -82,7 +82,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       return;
     }
     const admissionOfScope = fileScopeAdmission({
-      descriptor: pick.descriptor, lane, homeAccess, platform: process.platform,
+      descriptor: pick.descriptor, lane, platform: process.platform,
     });
     if (!admissionOfScope.supported) {
       if (!admissionWithdrawn()) decline(`file_scope_unsupported: ${admissionOfScope.reason}`, false);
@@ -474,12 +474,16 @@ async function startAndActivateRuntime(
       const grant = await resolveFileScopeGrant({
         fileScope: toolAuthorization.fileScope,
         home: { path: agentBinding.resolution.canonicalHome, identity: agentBinding.lease.homeIdentity },
+        // A reader's run root is its lease cwd: fresh, or the handoff's run directory on resume.
+        attempt: fileScopeHomeAccess === 'memory-reader'
+          ? { homeAccess: 'memory-reader', cwd: agentBinding.lease.cwd }
+          : { homeAccess: 'writer' },
       });
       fileScopeGrant = grant;
       audit({
         taskId, decision: 'policy-adoption', lane: fileScopeLane, homeAccess: fileScopeHomeAccess,
         scope: { source: 'host', mode: grant.mode, digest: grant.digest },
-        rootIds: ['home', ...grant.roots.map((root) => root.id)],
+        rootIds: ['home', ...(grant.run === undefined ? [] : ['run']), ...grant.roots.map((root) => root.id)],
       });
     } catch (error) {
       const guard = error instanceof FileScopeGuardError ? error : undefined;

@@ -278,9 +278,12 @@ and a static tool-authorization policy in `toolAuthorization`:
   `runtimeAllowlist`.
 - `toolAuthorization.fileScope` applies only to `auto` tasks and requires
   `agentHome`; the wire and the model never select it. It is enforced on the
-  Pi rpc, prepared and durable lanes on darwin/linux. Windows, memory-reader
-  offers and every non-Pi runtime decline before claim with
-  `file_scope_unsupported`. After admission each root is revalidated once
+  Pi rpc, prepared and durable lanes on darwin/linux. Windows and every
+  non-Pi runtime decline before claim with `file_scope_unsupported`. A
+  memory-reader task gets the Agent home read-only and its own run directory
+  (`<home>/.byok/runs/<name>`, its cwd) read+write; the rest of `.byok` stays
+  internal. Root ids `home` and `run` are reserved and refused with
+  `invalid_file_scope`. After admission each root is revalidated once
   before the runtime starts, and a root that no longer resolves fails the task
   with `file_scope_unavailable`. The SDK `read`/`write`/`edit`/`find`/`grep`/
   `ls` tools replace Pi's native file tools and are limited to the Agent home

@@ -643,6 +643,13 @@ export class PiAdapter implements RuntimeAdapter {
             if (gate?.fileScope !== undefined && gate.fileScope.home.path !== startInput.manifest.lease?.canonicalHome) {
               throw authorityFailure('Pi file scope home does not match the manifest lease');
             }
+            // A memory reader's scope writes only its run root, which is the
+            // manifest cwd; a writer's scope has no run root.
+            if (gate?.fileScope !== undefined && (startInput.manifest.homeAccess === 'memory-reader'
+              ? gate.fileScope.run?.lexicalPath !== startInput.manifest.cwd
+              : gate.fileScope.run !== undefined)) {
+              throw authorityFailure('Pi file scope run root does not match the manifest attempt');
+            }
             const retainedScratch = scratch;
             if (gate !== undefined) scratch = Object.freeze({ ...scratch, release: async () => {
               await gate.close();
@@ -664,7 +671,7 @@ export class PiAdapter implements RuntimeAdapter {
             // What is written is the START observation, already compared
             // above with the one this operation was admitted with.
             const serialized = serializePiHostConfig({
-              format: 'byok.pi.rpc-launch', version: 10,
+              format: 'byok.pi.rpc-launch', version: 11,
               // Digest-bound, as in the prepared lane: under `keys-profile`
               // the host takes the provider key over the launcher's private
               // IPC channel and refuses to start without it.

@@ -44,6 +44,9 @@ export async function verifySerializedFileScopeGrant(
     grant = await resolveFileScopeGrant({
       fileScope,
       home: { path: serialized.home.lexicalPath, identity: { dev: BigInt(serialized.home.dev), ino: BigInt(serialized.home.ino) } },
+      attempt: serialized.run === undefined
+        ? { homeAccess: 'writer' }
+        : { homeAccess: 'memory-reader', cwd: serialized.run.lexicalPath },
       ...(options.platform === undefined ? {} : { platform: options.platform }),
       ...(options.io === undefined ? {} : { io: options.io }),
     });
@@ -56,6 +59,10 @@ export async function verifySerializedFileScopeGrant(
     || grant.home.lexicalPath !== serialized.home.lexicalPath
     || grant.roots.length !== serialized.roots.length) {
     throw new FileScopeGuardError('file_scope_unavailable', 'root_identity_changed', { rootId: 'home' });
+  }
+  if (serialized.run !== undefined
+    && (grant.run?.path !== serialized.run.path || grant.run.lexicalPath !== serialized.run.lexicalPath)) {
+    throw new FileScopeGuardError('file_scope_unavailable', 'root_identity_changed', { rootId: 'run' });
   }
   for (let index = 0; index < grant.roots.length; index += 1) {
     const actual = grant.roots[index]!;
