@@ -4,9 +4,10 @@ This page lists what a Host must do to move from 0.36.0 to 0.37.0. A Host on
 an earlier release first applies the [0.36.0 checklist](host-upgrade-0.36.0.md)
 and then this page, in the same maintenance window.
 
-Its fixed source is the release commit, the merge of the 0.37.0 release PR on
-`main`, not moving `main` or Unreleased. The rows below are counted from the
-upgrade manifest on the release PR. It has not been walked through. The
+Its fixed source is the release commit `1ba3779fd`, the squash merge of the
+0.37.0 release PR #1411 on `main`, not moving `main` or Unreleased. 0.37.0 is
+published on npm `latest` for all nine packages. The rows below are counted
+from the upgrade manifest on the release PR. It has not been walked through. The
 behavior authorities are the upgrade manifest that `@byok-sdk/client` ships
 (`upgrade-manifest.json`, 0.36.0 to 0.37.0) and the CHANGELOG 0.37.0 section
 at that commit. When this page and them disagree, they win. Source paths and
@@ -43,8 +44,8 @@ All nine public packages move together. Pin each one to exactly 0.37.0.
 | Release field | Value |
 | --- | --- |
 | Git tag | `v0.37.0` |
-| Release commit SHA | the merge of the release PR on `main`, recorded at tagging |
-| Release PR base | main `b5bc36ac8` |
+| Release commit SHA | `1ba3779fdca8839ca1003dec0ef737751f3d2aeb` |
+| Release PR base | main `b5bc36ac8` (#1411) |
 
 Verify a source checkout with `git rev-parse 'v0.37.0^{commit}'`; the result
 must equal the release commit. The annotated tag object is not the source
@@ -157,9 +158,10 @@ package pin alone does not establish acceptance.
 
 ### Walkthrough evidence
 
-No one has walked this checklist through.
+This checklist is anchored to the release commit `1ba3779fd`. No one has
+walked it through.
 
-- [ ] **Release commit recorded** in the fixed revisions table, and the tag
+- [x] **Release commit recorded** in the fixed revisions table, and the tag
   `v0.37.0` points to it.
 - [ ] **[unverified] Maintainer walked the complete checklist** in a clean
   environment, on macOS and on Windows (0.36.0 → 0.37.0).
