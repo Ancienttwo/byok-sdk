@@ -1,8 +1,7 @@
 import { homedir } from 'node:os';
 import { lstatSync, realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path';
 import type { AgentRef } from './agent-home';
-import { win32FileScopePath } from './file-scope-types';
 
 /**
  * The only product tool-authorization modes, chosen by the local Host per task
@@ -281,6 +280,34 @@ function fileScopeRecord(value: unknown, keys: readonly string[], label: string)
   } catch (error) {
     throw new FileScopePolicyError(error instanceof Error ? error.message : `invalid tool authorization ${label}`);
   }
+}
+
+// Win32 device names, including the superscript-digit COM/LPT variants Win32
+// also maps, with or without an extension.
+const WIN32_RESERVED_NAME = /^(?:CON|PRN|AUX|NUL|COM[0-9\u00b9\u00b2\u00b3]|LPT[0-9\u00b9\u00b2\u00b3]|CONIN\$|CONOUT\$)(?: *\..*)?$/iu;
+
+/**
+ * The pure win32 path syntax of a file scope (#1423, steps 1-3), shared by the
+ * policy parser and the file-scope guard. `/` becomes `\`; a path that starts with `\`
+ * (`\\?\`, `\\.\`, UNC, root-relative) or is drive-relative (`C:foo`) is
+ * refused; the rest resolves against `cwd` with `path.win32` and must be
+ * `X:\…`. Each segment is then refused when it holds `:` (an alternate data
+ * stream), ends in `.` or a space, or is a reserved device name: Node creates
+ * those names literally while Win32 programs read them as a device or strip the
+ * trailing characters, and a stream "create" writes into an existing file.
+ * Returns the resolved path, or undefined when the syntax is refused.
+ */
+export function win32FileScopePath(value: string, cwd?: string): string | undefined {
+  const raw = value.replaceAll('/', '\\');
+  if (raw.startsWith('\\') || /^[A-Za-z]:(?!\\)/u.test(raw)) return undefined;
+  if (cwd === undefined && !/^[A-Za-z]:\\/u.test(raw)) return undefined;
+  const resolved = cwd === undefined ? win32.resolve(raw) : win32.resolve(cwd, raw);
+  if (!/^[A-Za-z]:\\/u.test(resolved)) return undefined;
+  for (const segment of resolved.slice(3).split('\\')) {
+    if (segment === '') continue;
+    if (segment.includes(':') || segment.endsWith('.') || segment.endsWith(' ') || WIN32_RESERVED_NAME.test(segment)) return undefined;
+  }
+  return resolved;
 }
 
 function fileScopeRootPath(value: unknown): string {

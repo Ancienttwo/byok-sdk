@@ -4,11 +4,13 @@ import { lstat, open, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolFileAccess, ToolFileScope } from './tool-authorization';
+import {
+  win32FileScopePath,
+  type ToolAuthorizationHomeAccess, type ToolAuthorizationLane, type ToolFileAccess, type ToolFileScope,
+} from './tool-authorization';
 import {
   FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS,
   type FileScopeGuardCode, type FileScopeGuardReason,
-  win32FileScopePath,
 } from './file-scope-types';
 export {
   FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS,

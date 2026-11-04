@@ -13537,6 +13537,18 @@ export declare class FileScopePolicyError extends TypeError {
     readonly code: 'invalid_file_scope';
     constructor(message: string);
 }
+/**
+ * The pure win32 path syntax of a file scope (#1423, steps 1-3), shared by the
+ * policy parser and the file-scope guard. `/` becomes `\`; a path that starts with `\`
+ * (`\\?\`, `\\.\`, UNC, root-relative) or is drive-relative (`C:foo`) is
+ * refused; the rest resolves against `cwd` with `path.win32` and must be
+ * `X:\…`. Each segment is then refused when it holds `:` (an alternate data
+ * stream), ends in `.` or a space, or is a reserved device name: Node creates
+ * those names literally while Win32 programs read them as a device or strip the
+ * trailing characters, and a stream "create" writes into an existing file.
+ * Returns the resolved path, or undefined when the syntax is refused.
+ */
+export declare function win32FileScopePath(value: string, cwd?: string): string | undefined;
 /** The admission boundary: one copied, frozen policy for every source. */
 export declare function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy;
 /** One native tool call, before execution. `input` is the runtime's own argument object. */

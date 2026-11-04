@@ -201,9 +201,9 @@ describe('scoped find/grep/ls tools (#1061 slice 5)', () => {
       .toContain('outside_scope');
   });
 
-  it('fails closed on Windows before touching a path', async () => {
+  it('fails closed on an unknown platform before touching a path', async () => {
     const { root, grant } = await fixture();
-    const tools = createScopedFileTools({ grant, platform: 'win32' });
+    const tools = createScopedFileTools({ grant, platform: 'freebsd' });
     for (const run of [
       toolByName(tools, 'find')('find-win', { pattern: '*', path: root }, root),
       toolByName(tools, 'ls')('ls-win', { path: root }, root),
