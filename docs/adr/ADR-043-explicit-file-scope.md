@@ -136,8 +136,8 @@ interface ToolAuthorizationTask {
 ### 2.4 默认值与范围语义
 
 - 未配置 fileScope：inherit。不改变现有行为，不改变 Pi 工具集，不新增拒绝。
-- { mode: 'home' }：canonical Agent home 读+写。home 的路径与 identity 来自本次 offer 的 writer lease，不是 cwd 字符串，也不是 workspaceHint。
-- { mode: 'workspaces', roots: [...] }：home 仍读+写；每个 root 按其 access 授权。write root 同时可读。
+- { mode: 'home' }：writer 任务的 canonical Agent home 读+写。home 的路径与 identity 来自本次 offer 的 writer lease，不是 cwd 字符串，也不是 workspaceHint。memory-reader 见下面 reader 那一条。
+- { mode: 'workspaces', roots: [...] }：writer 任务的 home 仍读+写；每个 root 按其 access 授权。write root 同时可读。
 - 用户主目录 ~ 不会自动成为 root。~ 按 OS user home 展开；只有显式 root 覆盖时才允许。把 ~ 映射成 Agent home 会造成语义混淆，不采用。
 - .byok 始终是 SDK 内部 namespace，文件工具在任何模式下都拒绝读写；根下第一段按 ASCII 不分大小写匹配 .byok（.BYOK、.Byok 同样拒绝），并在规范路径上再判断一次（#1426）；既有的 memory/result helper、lease/audit 有各自 authority（与本设计无关，不新增 helper）。MEMORY.md 与 notes/ 仍可读写（它们不在 .byok 下）。
 - memory-reader 的 cwd 是 reader lease 的 run 目录 HOME/.byok/runs/NAME（resume 时是 session handoff 记下的那个，不按这次的 taskId 拼）。reader 在 darwin/linux 的 Pi rpc、prepared lane 上带 file scope 运行（#1422）：home 只读，identity 取自 reader lease；run 目录作为单独的 `run` 根可读写，和其他根一样必须存在、是真实目录、不是 symlink、identity 固定；workspace roots 照 policy 授权。`.byok` 下只有落在 `run` 根里的路径例外，先按规范化路径判断是否在 `run` 里，在就交给 `run` 根，字面匹配和规范路径上的再判断都按这条例外处理；经其他根的别名到达 run 目录仍算 internal_path。reader 往 home 写返回 read_only；claim 后 run 目录消失或被替换，走现有的 root_missing / root_identity_changed。根 id `home` 与 `run` 保留，构造 policy 时即以 invalid_file_scope 拒绝。durable lane 仍单独拒绝 reader。
