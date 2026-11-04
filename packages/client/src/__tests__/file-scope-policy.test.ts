@@ -476,7 +476,7 @@ describe('fileScope for memory-reader attempts (#1422)', () => {
     const runner = makeRunner(adapter, sent, () => ({ default: 'auto', fileScope: { mode: 'home' } }),
       { onFileScopeAudit: (event) => audits.push(event) });
     const agentRef = freshTestAgentRef();
-    const readerOffer = (taskId: string, session: object) => runner.handleEnvelope(createEnvelope(
+    const readerOffer = (taskId: string, session: typeof FRESH_OFFER | { session: { mode: 'resume'; sessionRef: string } }) => runner.handleEnvelope(createEnvelope(
       'task.offer', { agentRef, ...session, instruction: 'read memory', homeAccess: 'memory-reader' }, { taskId, seq: 1 }));
     await readerOffer('reader-fresh', FRESH_OFFER);
     const fresh = fileScopeGateBinding(adapter.inputs[0]!.toolAuthorization!)!.grant;
@@ -485,7 +485,7 @@ describe('fileScope for memory-reader attempts (#1422)', () => {
     expect(audits).toEqual([expect.objectContaining({ decision: 'policy-adoption', homeAccess: 'memory-reader', rootIds: ['home', 'run'] })]);
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
-    await readerOffer('reader-resume', { session: { mode: 'resume', sessionRef: adapter.sessions[0]!.sessionRef } });
+    await readerOffer('reader-resume', { session: { mode: 'resume' as const, sessionRef: adapter.sessions[0]!.sessionRef } });
     expect(declineReason(sent)).toBeUndefined();
     expect(fileScopeGateBinding(adapter.inputs[1]!.toolAuthorization!)!.grant.run!.path).toBe(fresh.run!.path);
   });
