@@ -389,6 +389,9 @@ describe.runIf(process.platform === 'win32')('file-scope guard on win32 (#1423)'
     const grant = await grantWith(root);
     expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join(outside, 'jn', 'x.txt'), access: 'write', cwd: root })))
       .toMatchObject({ code: 'file_scope_denied', reason: 'outside_scope' });
+    // From a cwd outside every root, a relative target is refused before its walk reaches the junction.
+    expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join('jn', 'x.txt'), access: 'write', cwd: outside })))
+      .toMatchObject({ code: 'file_scope_denied', reason: 'cwd_outside_scope' });
     // The 8.3 spelling misses the root lexically; its verified prefix canonicalizes into it.
     const shortRoot = shortPath(root);
     expect(shortRoot).not.toBe(root);

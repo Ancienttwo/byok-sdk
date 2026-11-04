@@ -532,6 +532,12 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
           ? new FileScopeGuardError('file_scope_unavailable', 'io_error', { rootId: confirmed.id, access: confirmed.access, cause })
           : fail(reason, confirmed.id, input.access);
       };
+    // A relative target from a cwd outside every root is refused before its
+    // walk, whose outcome would otherwise describe the disk outside the scope.
+    if (!/^[A-Za-z]:\\/u.test(expanded)) {
+      relativeCwd = await win32CanonicalPath(cwd, io, refuseUnconfirmed(matchRoot(allRoots, cwd)?.root, 'cwd_outside_scope'));
+      if (matchRoot(allRoots, relativeCwd) === undefined) throw fail('cwd_outside_scope');
+    }
     const owner = matchRoot(allRoots, resolved)?.root;
     absolute = await win32CanonicalPath(resolved, io, refuseUnconfirmed(owner, 'outside_scope'));
     lexical = resolved;
@@ -540,9 +546,6 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
     // directory (a case variant, an 8.3 name, a path through home) is an alias
     // of home's `.byok` and stays internal.
     runOwnsCanonical = owner === run;
-    if (!/^[A-Za-z]:\\/u.test(expanded)) {
-      relativeCwd = await win32CanonicalPath(cwd, io, refuseUnconfirmed(matchRoot(allRoots, cwd)?.root, 'cwd_outside_scope'));
-    }
   } else {
     if (!path.isAbsolute(input.cwd)) throw fail('path_syntax');
     const expanded = expandHome(input.path, osHome);
