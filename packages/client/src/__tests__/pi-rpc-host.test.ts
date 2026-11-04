@@ -49,7 +49,7 @@ function fixture() {
   const entry = join(root, 'host-entry.ts');
   writeFileSync(entry, `import {runPiRpcHost} from ${JSON.stringify(resolve(import.meta.dirname, '../../dist/bin/pi-runtime-host.js'))}; runPiRpcHost(process.argv.slice(2)).catch(error=>{console.error(String(error));process.exit(1)});`);
   const command = spawnSync(bun, ['--print', 'process.execPath'], {encoding:'utf8'}).stdout.trim();
-  const config = { format: 'byok.pi.rpc-launch', version: 10, credentialSource: 'pi-auth-store', cwd,
+  const config = { format: 'byok.pi.rpc-launch', version: 11, credentialSource: 'pi-auth-store', cwd,
     agentUserContext: 'inherit', agentHome: null as string | null, agentSkillPaths: [], agentExtensionPaths: [], toolAuthorization: null as unknown,
     fileScope: null, mcp: { mcpEnv: {}, mcpServers: {}, observation: {} } };
   const configPath = join(root, 'config.json');

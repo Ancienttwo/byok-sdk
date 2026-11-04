@@ -26,7 +26,7 @@ const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
-  readonly version: 10;
+  readonly version: 11;
   /**
    * `keys-profile`: the keys launcher parents this host, and the provider key
    * arrives over its private IPC channel. `pi-auth-store`: the device's own
@@ -86,7 +86,7 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (Object.keys(raw).some((key) => !keys.includes(key)) || keys.some((key) => !(key in raw))) {
     fail(`config must contain exactly ${keys.join(', ')}`);
   }
-  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 10) fail('unsupported config format/version');
+  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 11) fail('unsupported config format/version');
   const resources = parsePiAgentResources({ userContext: raw.agentUserContext, skillPaths: raw.agentSkillPaths, extensionPaths: raw.agentExtensionPaths });
   const credentialSource = raw.credentialSource;
   if (typeof credentialSource !== 'string' || !(CREDENTIAL_SOURCES as readonly string[]).includes(credentialSource)) {
@@ -103,7 +103,7 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   return {
-    format: 'byok.pi.rpc-launch', version: 10,
+    format: 'byok.pi.rpc-launch', version: 11,
     credentialSource: credentialSource as PiRpcHostConfig['credentialSource'], cwd: raw.cwd, mcp,
     agentUserContext: resources.userContext,
     agentHome: agentHome as string | null,

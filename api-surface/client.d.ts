@@ -5010,12 +5010,14 @@ export interface DaemonConfig {
      *
      * The optional `fileScope` (#1061) is an explicit file boundary for the
      * SDK-owned file tools: absent means inherit (unchanged behavior);
-     * `home` authorizes read+write of the canonical Agent home; `workspaces`
-     * adds explicit read/write roots. It applies only to `auto` tasks, requires
-     * `agentHome`, and is never selected by the wire or the model. It is
-     * enforced on the Pi rpc, prepared and durable lanes on darwin/linux;
-     * Windows, memory-reader offers and every non-Pi runtime decline before
-     * claim with `file_scope_unsupported`. After admission every configured
+     * `home` authorizes the canonical Agent home; `workspaces` adds explicit
+     * read/write roots (ids `home` and `run` are reserved). A writer task gets
+     * the home read+write; a memory-reader task gets it read-only plus its own
+     * run directory (`<home>/.byok/runs/<name>`, its cwd) read+write. It
+     * applies only to `auto` tasks, requires `agentHome`, and is never selected
+     * by the wire or the model. It is enforced on the Pi rpc, prepared and
+     * durable lanes on darwin/linux; Windows and every non-Pi runtime decline
+     * before claim with `file_scope_unsupported`. After admission every configured
      * root is revalidated once before the runtime starts; a missing, symlinked,
      * replaced or otherwise unresolvable root fails the claimed task with a
      * typed `file_scope_unavailable` reason instead of starting unscoped. The
@@ -13425,7 +13427,7 @@ export declare const TOOL_FILE_ACCESS: readonly ToolFileAccess[];
  * Host configures, never a model or wire value.
  */
 export interface ToolFileScopeRoot {
-    /** Unique, nonempty local label; never emitted on the wire. */
+    /** Unique, nonempty local label; never emitted on the wire. `home` and `run` are reserved. */
     readonly id: string;
     /** Absolute local path; canonicalized and identity-checked at admission, not here. */
     readonly path: string;
@@ -13435,12 +13437,14 @@ export interface ToolFileScopeRoot {
 /**
  * The optional explicit file scope of a tool-authorization policy (#1061
  * slice 1, D15). Absent means `inherit`: the current behavior is unchanged.
- * `home` authorizes read+write of the canonical Agent home; `workspaces`
- * additionally authorizes the listed roots. Only legal when the offer's
+ * `home` authorizes the canonical Agent home; `workspaces` additionally
+ * authorizes the listed roots. A writer task gets the home read+write; a
+ * memory-reader task gets the home read-only plus read+write of its own run
+ * directory (`<home>/.byok/runs/<name>`, its cwd). Only legal when the offer's
  * effective mode is `auto`.
  */
 export interface ToolFileScope {
-    /** `home` always grants read+write of the canonical Agent home. */
+    /** `home` grants the canonical Agent home: read+write for a writer, read-only for a memory reader. */
     readonly mode: 'home' | 'workspaces';
     /** Only for `workspaces`; at least one unique-id, existing absolute root. */
     readonly roots?: readonly ToolFileScopeRoot[];

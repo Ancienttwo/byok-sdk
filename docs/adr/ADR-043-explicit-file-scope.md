@@ -124,7 +124,7 @@ interface ToolAuthorizationTask {
   readonly agentRef?: AgentRef;
   /** 新增：同一 runtime 的 ordinary/prepared/durable 不能共用一个选择。 */
   readonly lane: 'rpc' | 'prepared' | 'durable';
-  /** 新增：memory-reader 的 cwd 在 .byok/runs/TASKID，文件范围语义不同。 */
+  /** 新增：memory-reader 的 cwd 是 reader lease 的 run 目录 .byok/runs/NAME，文件范围语义不同。 */
   readonly homeAccess: 'writer' | 'memory-reader';
 }
 ~~~
@@ -140,7 +140,7 @@ interface ToolAuthorizationTask {
 - { mode: 'workspaces', roots: [...] }：home 仍读+写；每个 root 按其 access 授权。write root 同时可读。
 - 用户主目录 ~ 不会自动成为 root。~ 按 OS user home 展开；只有显式 root 覆盖时才允许。把 ~ 映射成 Agent home 会造成语义混淆，不采用。
 - .byok 始终是 SDK 内部 namespace，文件工具在任何模式下都拒绝读写；根下第一段按 ASCII 不分大小写匹配 .byok（.BYOK、.Byok 同样拒绝），并在规范路径上再判断一次（#1426）；既有的 memory/result helper、lease/audit 有各自 authority（与本设计无关，不新增 helper）。MEMORY.md 与 notes/ 仍可读写（它们不在 .byok 下）。
-- memory-reader 的 cwd 是 HOME/.byok/runs/TASKID。第一版决定对 reader offer 直接 decline file_scope_unsupported，直到单独设计 reader 的「run dir 可写、home 可读」语义；不要用 .byok 一刀切后让 reader 的相对路径全部失效，也不要悄悄把 reader 提升为 writer。
+- memory-reader 的 cwd 是 reader lease 的 run 目录 HOME/.byok/runs/NAME（resume 时是 session handoff 记下的那个，不按这次的 taskId 拼）。reader 在 darwin/linux 的 Pi rpc、prepared lane 上带 file scope 运行（#1422）：home 只读，identity 取自 reader lease；run 目录作为单独的 `run` 根可读写，和其他根一样必须存在、是真实目录、不是 symlink、identity 固定；workspace roots 照 policy 授权。`.byok` 下只有落在 `run` 根里的路径例外，先按规范化路径判断是否在 `run` 里，在就交给 `run` 根，字面匹配和规范路径上的再判断都按这条例外处理；经其他根的别名到达 run 目录仍算 internal_path。reader 往 home 写返回 read_only；claim 后 run 目录消失或被替换，走现有的 root_missing / root_identity_changed。根 id `home` 与 `run` 保留，构造 policy 时即以 invalid_file_scope 拒绝。durable lane 仍单独拒绝 reader。
 - 额外 workspace 必须在本机存在且是真实目录；这是 admission 条件（见 §3）。不提供「以后会创建」的 root，因为无法 pin identity。
 - roots 可以嵌套（例如 home 下的某个项目）。若嵌套，宽范围授权不会被窄范围撤回；重复路径去重，冲突的 id 拒绝。若 owner 希望支持「父目录 read、子目录 write」这类降级，需要另定 most-specific-match 语义；本设计不引入。
 - root 的 id 只用于审计和 Host 展示；真实路径不进 audit，root 路径也不进 wire。
@@ -438,7 +438,7 @@ D1–D11、D13 已获 **owner 批准（2026-10-31）**；D12、D14、D15 按 own
 | D3 | fileScope 只在 auto 有效 | 已批准 | all 合同不变；all + scope 报错 |
 | D4 | scoped 默认 home 读+写 | 已批准 | 聊天任务无需额外授权即可读写 MEMORY/notes |
 | D5 | workspace roots 形状 | 已批准 | id + path + access（read/write），write 隐含 read，root 必须存在 |
-| D6 | .byok 与 reader | 已批准 | .byok 永久拒绝；reader 首版 decline file_scope_unsupported |
+| D6 | .byok 与 reader | 已批准 | .byok 永久拒绝，唯一例外是 reader 自己的 `run` 根；reader 的 cwd 是 reader lease 的 run 目录（resume 时是 handoff 记下的那个），home 只读、run 可写（#1422） |
 | D7 | symlink 策略 | 已批准 | scoped 模式逐段 lstat，一律拒绝（含 in-root） |
 | D8 | hard link / 跨设备 / 网络卷 | 已批准 | nlink>1 拒绝；显式跨设备拒绝；网络卷契约上不支持（POSIX 检测限制见 open items） |
 | D9 | 越界硬拒绝 | 已批准 | 不走审批；临时访问改下一个 offer 的策略 |

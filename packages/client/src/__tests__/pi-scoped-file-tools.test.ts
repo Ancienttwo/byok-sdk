@@ -30,7 +30,7 @@ async function grantFixture(): Promise<{ home: string; grant: FileScopeGrant }> 
   const home = await tmpDir('byok-real-home-');
   return {
     home,
-    grant: await resolveFileScopeGrant({ fileScope: { mode: 'home' }, home: { path: home, identity: await identityOf(home) } }),
+    grant: await resolveFileScopeGrant({ fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: home, identity: await identityOf(home) } }),
   };
 }
 
@@ -106,6 +106,46 @@ describe('scoped tools in a real Pi 1.5.0 session (#1061 slice 3)', () => {
         expect.objectContaining({ toolName: 'read', toolCallId: 'read-outside', reason: 'outside_scope' }),
         expect.objectContaining({ toolName: 'find', toolCallId: 'find-outside', reason: 'outside_scope' }),
       ]);
+    } finally {
+      session.dispose();
+    }
+  }, 30_000);
+
+  it('runs a memory reader with a read-only home, a writable run root and a policy workspace root', async () => {
+    const home = await tmpDir('byok-real-reader-home-');
+    const workspace = await tmpDir('byok-real-reader-workspace-');
+    const run = path.join(home, '.byok', 'runs', 'reader-1');
+    await fs.mkdir(run, { recursive: true });
+    await fs.writeFile(path.join(home, 'notes.md'), 'memory');
+    await fs.symlink(home, path.join(run, 'home-link'), 'dir');
+    const grant = await resolveFileScopeGrant({
+      fileScope: { mode: 'workspaces', roots: [{ id: 'repo', path: workspace, access: 'write' }] },
+      attempt: { homeAccess: 'memory-reader', cwd: run }, home: { path: home, identity: await identityOf(home) },
+    });
+    const agentDir = await tmpDir('byok-real-reader-agent-');
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: run, agentDir, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+      extensionFactories: [{ name: 'byok-file-scope', factory: createPiFileScopeExtension({
+        grant, gate: { url: 'http://127.0.0.1:9/file-scope-audit', token: 'a'.repeat(64), timeoutMs: 100 }, onTransportFailure: () => {},
+      }) }] as never,
+    });
+    await resourceLoader.reload();
+    const { session } = await createAgentSession({
+      cwd: run, agentDir, resourceLoader, settingsManager: SettingsManager.inMemory({}), sessionManager: SessionManager.inMemory(run),
+    });
+    try {
+      type Exec = (id: string, p: unknown, s: undefined, u: undefined, c: never) => Promise<{ content: { text: string }[] }>;
+      const call = (name: string, input: unknown) => (session.getToolDefinition(name)!.execute as never as Exec)(name, input, undefined, undefined, { cwd: run } as never);
+      expect((await call('read', { path: path.join(home, 'notes.md') })).content.map((part) => part.text).join('')).toBe('memory');
+      await call('write', { path: 'answer.md', content: 'run' });
+      expect(await fs.readFile(path.join(run, 'answer.md'), 'utf8')).toBe('run');
+      await call('write', { path: path.join(workspace, 'out.md'), content: 'repo' });
+      expect(await fs.readFile(path.join(workspace, 'out.md'), 'utf8')).toBe('repo');
+      await expect(call('write', { path: path.join(home, 'new.md'), content: 'x' })).rejects.toThrow(/\(read_only\)/);
+      await expect(call('write', { path: path.join(home, '.byok', 'runs', 'other.md'), content: 'x' })).rejects.toThrow(/\(internal_path\)/);
+      await expect(call('write', { path: 'home-link/linked.md', content: 'x' })).rejects.toThrow(/\(symlink\)/);
+      expect((await fs.readdir(home)).sort()).toEqual(['.byok', 'notes.md']);
+      expect((await fs.readdir(path.join(home, '.byok', 'runs'))).sort()).toEqual(['reader-1']);
     } finally {
       session.dispose();
     }

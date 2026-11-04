@@ -27,7 +27,7 @@ async function identityOf(filePath: string): Promise<FileScopeIdentity> {
 async function grantFixture(): Promise<FileScopeGrant> {
   const home = await tmpDir('byok-audit-home-');
   return resolveFileScopeGrant({
-    fileScope: { mode: 'home' }, home: { path: home, identity: await identityOf(home) },
+    fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: home, identity: await identityOf(home) },
   });
 }
 

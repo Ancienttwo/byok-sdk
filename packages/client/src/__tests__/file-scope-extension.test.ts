@@ -26,7 +26,7 @@ async function grantFixture(): Promise<{ home: string; grant: FileScopeGrant }> 
   const home = await tmpDir('byok-ext-home-');
   return {
     home,
-    grant: await resolveFileScopeGrant({ fileScope: { mode: 'home' }, home: { path: home, identity: await identityOf(home) } }),
+    grant: await resolveFileScopeGrant({ fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: home, identity: await identityOf(home) } }),
   };
 }
 

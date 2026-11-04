@@ -24,7 +24,10 @@ export interface SerializedFileScopeRoot {
 
 export interface SerializedFileScopeGrant {
   readonly mode: 'home' | 'workspaces';
+  /** `read` exactly when `run` is present (a memory reader); `write` otherwise. */
   readonly home: SerializedFileScopeRoot;
+  /** A memory reader's run directory under `<home>/.byok/runs/`, always `write`. */
+  readonly run?: SerializedFileScopeRoot;
   readonly roots: readonly SerializedFileScopeRoot[];
   readonly digest: string;
 }
@@ -54,6 +57,7 @@ export function serializeFileScopeGrant(grant: FileScopeGrant): SerializedFileSc
   return Object.freeze({
     mode: grant.mode,
     home: serializeRoot(grant.home),
+    ...(grant.run === undefined ? {} : { run: serializeRoot(grant.run) }),
     roots: Object.freeze(grant.roots.map(serializeRoot)),
     digest: grant.digest,
   });
@@ -83,13 +87,7 @@ function identity(value: Record<string, unknown>, fail: (message: string) => nev
   return Object.freeze({ dev: BigInt(dev), ino: BigInt(ino) });
 }
 
-function parseRoot(value: unknown, label: string, fail: (message: string) => never): {
-  readonly id: string;
-  readonly path: string;
-  readonly lexicalPath: string;
-  readonly access: ToolFileAccess;
-  readonly identity: FileScopeIdentity;
-} {
+function parseRoot(value: unknown, label: string, fail: (message: string) => never): SerializedFileScopeRoot {
   if (!record(value) || Object.keys(value).some((key) => !['id', 'path', 'lexicalPath', 'access', 'dev', 'ino'].includes(key))) {
     return fail('file scope ' + label + ' must contain exactly id, path, lexicalPath, access, dev and ino');
   }
@@ -100,52 +98,57 @@ function parseRoot(value: unknown, label: string, fail: (message: string) => nev
   const lexical = absolutePath(value.lexicalPath);
   if (lexical === '') fail('file scope ' + label + ' lexicalPath must be a normalized absolute path');
   if (value.access !== 'read' && value.access !== 'write') fail('file scope ' + label + ' access must be read or write');
+  const { dev, ino } = identity(value, fail);
   return Object.freeze({
-    id,
-    path: canonical,
-    lexicalPath: lexical,
-    access: value.access,
-    identity: identity(value, fail),
+    id, path: canonical, lexicalPath: lexical, access: value.access, dev: dev.toString(10), ino: ino.toString(10),
   });
 }
+
+/** Root ids the grant itself owns; a workspace root may use neither. */
+const RESERVED_ROOT_IDS: readonly string[] = Object.freeze(['home', 'run']);
 
 /** Validate the serialized grant shape without touching the filesystem. */
 export function parseSerializedFileScopeGrant(
   value: unknown,
   fail: (message: string) => never,
 ): SerializedFileScopeGrant {
-  if (!record(value) || Object.keys(value).some((key) => !['mode', 'home', 'roots', 'digest'].includes(key))) {
-    fail('file scope grant must contain exactly mode, home, roots and digest');
+  if (!record(value) || Object.keys(value).some((key) => !['mode', 'home', 'run', 'roots', 'digest'].includes(key))) {
+    fail('file scope grant must contain exactly mode, home, roots and digest, and run only for a memory reader');
   }
   if (value.mode !== 'home' && value.mode !== 'workspaces') fail('file scope grant mode must be home or workspaces');
   if (typeof value.digest !== 'string' || !SHA256.test(value.digest)) fail('file scope grant digest must be a sha256 hex string');
   const home = parseRoot(value.home, 'home', fail);
-  if (home.id !== 'home' || home.access !== 'write') fail('file scope home root must be id "home" with write access');
+  const run = Object.hasOwn(value, 'run') ? parseRoot(value.run, 'run', fail) : undefined;
+  if (home.id !== 'home') fail('file scope home root must be id "home"');
+  if (home.access !== (run === undefined ? 'write' : 'read')) {
+    fail('file scope home root must be read-only with a run root and writable without one');
+  }
+  if (run !== undefined) {
+    if (run.id !== 'run' || run.access !== 'write') fail('file scope run root must be id "run" with write access');
+    if (path.dirname(run.path) !== path.join(home.path, '.byok', 'runs')) {
+      fail('file scope run root must be a run directory under <home>/.byok/runs/');
+    }
+  }
   if (!Array.isArray(value.roots)) fail('file scope grant roots must be an array');
   if (value.mode === 'home' && value.roots.length !== 0) fail('file scope grant with mode home must not carry workspace roots');
   if (value.mode === 'workspaces' && value.roots.length === 0) fail('file scope grant with mode workspaces requires roots');
   if (value.roots.length > 32) fail('file scope grant must contain at most 32 workspace roots');
-  const ids = new Set<string>(['home']);
+  const ids = new Set<string>();
   const paths = new Set<string>();
   const roots: SerializedFileScopeRoot[] = [];
   for (const entry of value.roots) {
     const root = parseRoot(entry, 'root', fail);
-    if (root.id === 'home') fail('file scope workspace root must not reuse the reserved home id');
+    if (RESERVED_ROOT_IDS.includes(root.id)) fail('file scope workspace root must not reuse the reserved ' + root.id + ' id');
     if (ids.has(root.id)) fail('duplicate file scope root id: ' + root.id);
     if (paths.has(root.path)) fail('duplicate file scope root path: ' + root.id);
     ids.add(root.id);
     paths.add(root.path);
-    roots.push(Object.freeze({
-      id: root.id, path: root.path, lexicalPath: root.lexicalPath, access: root.access,
-      dev: root.identity.dev.toString(10), ino: root.identity.ino.toString(10),
-    }));
+    roots.push(root);
   }
   return Object.freeze({
     mode: value.mode,
-    home: Object.freeze({
-      id: home.id, path: home.path, lexicalPath: home.lexicalPath, access: home.access,
-      dev: home.identity.dev.toString(10), ino: home.identity.ino.toString(10),
-    }),
+    home,
+    ...(run === undefined ? {} : { run }),
     roots: Object.freeze(roots),
     digest: value.digest,
   });
