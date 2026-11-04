@@ -2,22 +2,25 @@
 
 ## Unreleased
 
-- **Fixed (client; darwin; #1426)** — the scoped file tools no longer reach
-  the Agent home's `.byok` through a case variant such as `.BYOK/x` or
-  `.Byok/x`. On a case-insensitive volume (the macOS APFS default) those
-  paths opened `.byok`, so read and write passed the guard. A first segment
-  under a root that matches `.byok` without ASCII case is now
-  `internal_path` on every platform, and the guard checks the canonical
-  target again, so an alias that only canonicalization reveals is refused
-  too. On Linux a directory named `.BYOK` is now refused as well.
+## 0.38.0 — source candidate
 
-- **Fixed (client; Windows; #1410)** — the Hermes gateway ownership check
-  reads the process table through Windows Script Host (cscript.exe, JScript
-  and WMI) instead of Windows PowerShell, whose cold start could pass the
-  15 s limit and fail the check. Windows PowerShell starts only when Windows
-  Script Host cannot run the script (cscript.exe does not start, or exits 1
-  without a process table); the client then logs one
-  `[byok/hermes-adapter]` warning per process.
+0.38.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+The upgrade manifest that `@byok-sdk/client` ships
+(`packages/client/upgrade-manifest.json`, 0.37.0 to 0.38.0) lists the
+Host-visible changes since 0.37.0 that change an API, config or example item:
+1 breaking entry and 1 additive entry, each with a migration link. The wire
+stays v5 (`PROTOCOL_VERSION = 5`); the Agent-home projection `hostRevision`
+is a gated addition behind the new device flag
+`agent-home-projection-host-revision`, and the v5 corpus gains one envelope
+line. There is no new Postgres migration and no SQLite schema change, and the
+Pi closure stays at 1.5.0. See the
+[0.38.0 candidate notes](docs/releases/v0.38.0.md) and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.38.0.md). The breaking
+change: K8 `cancelTurn` and `cancelDelegation` are idempotent and return
+results read from the ledger, and the K8 refusals carry codes (examples,
+#1405). The release also fixes a file-scope bypass: on a case-insensitive
+volume, the scoped file tools could read and write the Agent home's `.byok`
+through a case variant such as `.BYOK/x` (client, #1426).
 
 - **Breaking (examples)** — K8 `cancelTurn` and `cancelDelegation` are
   idempotent and return a result in the shape of `cancelHostIntent` (#1405):
@@ -58,6 +61,23 @@
   `agent-home-projection`. A Host that never sends `hostRevision` is
   unchanged. After a rollback, an older client ignores the stored
   `hostRevision` and orders by `profileRevision` alone.
+
+- **Fixed (client; darwin; #1426)** — the scoped file tools no longer reach
+  the Agent home's `.byok` through a case variant such as `.BYOK/x` or
+  `.Byok/x`. On a case-insensitive volume (the macOS APFS default) those
+  paths opened `.byok`, so read and write passed the guard. A first segment
+  under a root that matches `.byok` without ASCII case is now
+  `internal_path` on every platform, and the guard checks the canonical
+  target again, so an alias that only canonicalization reveals is refused
+  too. On Linux a directory named `.BYOK` is now refused as well.
+
+- **Fixed (client; Windows; #1410)** — the Hermes gateway ownership check
+  reads the process table through Windows Script Host (cscript.exe, JScript
+  and WMI) instead of Windows PowerShell, whose cold start could pass the
+  15 s limit and fail the check. Windows PowerShell starts only when Windows
+  Script Host cannot run the script (cscript.exe does not start, or exits 1
+  without a process table); the client then logs one
+  `[byok/hermes-adapter]` warning per process.
 
 ## 0.37.0 — 2026-11-04 (published)
 

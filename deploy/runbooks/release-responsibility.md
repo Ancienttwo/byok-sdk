@@ -77,6 +77,9 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
+The next source candidate is 0.38.0 for all nine packages, a MINOR. It is
+not published.
+See the [candidate notes](../../docs/releases/v0.38.0.md).
 The current release is 0.37.0 for all nine packages, keys included. The
 registry lists it as `latest`.
 See the [release notes](../../docs/releases/v0.37.0.md).
@@ -98,9 +101,8 @@ differs from the train. `@byok-sdk/implementation-identity` remains retired. Eve
 the dist-tag `latest`, observed at 0.37.0 for all nine packages on 2026-11-04 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the prior `latest` for all nine packages. It still records 0.36.0,
-the baseline of the 0.37.0 publication. It does not describe the current
-registry. Review it in the next release preparation.
+records that prior `latest` for all nine packages: 0.37.0. A registry read at
+release confirms it.
 This train has no first publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
@@ -121,6 +123,7 @@ the [0.31.0 notes](../../docs/releases/v0.31.0.md), the
 [0.36.0 notes](../../docs/releases/v0.36.0.md) and the
 [0.37.0 notes](../../docs/releases/v0.37.0.md) hold the ones for 0.31.0,
 0.32.0, 0.33.0, 0.34.0, 0.35.0, 0.36.0 and 0.37.0.
+The 0.38.0 candidate has source-preparation authorization only.
 Live qualification and production rollout remain separate operations.
 The [publication record](../../docs/releases/v0.27.0-publication.md) confirms
 the exact source, package order and completed registry readback.
