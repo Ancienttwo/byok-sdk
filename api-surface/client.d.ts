@@ -1756,7 +1756,10 @@ export declare class AgentHomeManager {
      * used by Agent execution. The host hook owns an atomic/idempotent ensure of
      * its opaque product bytes, so an exact desired-state replay invokes it again
      * before returning `idempotent`. Only a successful new-state hook followed
-     * by the SDK-owned fsynced ordering record can return `applied`.
+     * by the SDK-owned fsynced ordering record can return `applied`. The order
+     * key is `(profileRevision, hostRevision)`, an absent `hostRevision` being 0:
+     * a greater key applies whatever the hash, a lower one is `stale`, and an
+     * equal one is `idempotent` or `conflict` by hash.
      */
     project(input: AgentHomeProjectionPayload): Promise<AgentHomeProjectionOutcome>;
 }

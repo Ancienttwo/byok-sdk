@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
+  AgentHomeProjectionHostRevisionSchema,
   AgentHomeProjectionPayloadSchema,
   AgentRefSchema,
   type AgentHomeProjectionOutcome,
@@ -1102,7 +1103,11 @@ interface StoredAgentHomeProjectionState {
   readonly agentRef: AgentRef;
   readonly requestId: string;
   readonly projectionHash: string;
+  /** Written only when the applied payload carried it; absent means 0. */
+  readonly hostRevision?: number;
 }
+
+type ProjectionOrderKey = Pick<StoredAgentHomeProjectionState, 'agentRef' | 'requestId' | 'projectionHash' | 'hostRevision'>;
 
 function projectionStatePath(resolution: AgentHomeResolution): string {
   return path.join(
@@ -1143,7 +1148,13 @@ async function readProjectionState(
   ) {
     throw new AgentHomeResolutionError('Agent projection state has an invalid shape');
   }
-  const candidate = parsed as Omit<StoredAgentHomeProjectionState, 'agentRef'> & { agentRef?: unknown };
+  const candidate = parsed as Omit<StoredAgentHomeProjectionState, 'agentRef' | 'hostRevision'> & {
+    agentRef?: unknown;
+    hostRevision?: unknown;
+  };
+  if (candidate.hostRevision !== undefined && !AgentHomeProjectionHostRevisionSchema.safeParse(candidate.hostRevision).success) {
+    throw new AgentHomeResolutionError('Agent projection state has an invalid shape');
+  }
   const agentRef = validateAgentRef(candidate.agentRef);
   if (agentRef.agentId !== resolution.agentRef.agentId) {
     throw new AgentHomeCollisionError('Agent projection state belongs to a different Agent home');
@@ -1153,12 +1164,13 @@ async function readProjectionState(
     agentRef,
     requestId: candidate.requestId,
     projectionHash: candidate.projectionHash,
+    ...(candidate.hostRevision === undefined ? {} : { hostRevision: candidate.hostRevision as number }),
   });
 }
 
 async function writeProjectionState(
   resolution: AgentHomeResolution,
-  payload: Pick<AgentHomeProjectionPayload, 'agentRef' | 'requestId' | 'projectionHash'>,
+  payload: ProjectionOrderKey,
 ): Promise<void> {
   const filePath = projectionStatePath(resolution);
   const existing = await fs.lstat(filePath).catch((error: NodeJS.ErrnoException) => {
@@ -1173,6 +1185,7 @@ async function writeProjectionState(
     agentRef: payload.agentRef,
     requestId: payload.requestId,
     projectionHash: payload.projectionHash,
+    ...(payload.hostRevision === undefined ? {} : { hostRevision: payload.hostRevision }),
   };
   await atomicWriteFile(filePath, `${JSON.stringify(state)}\n`, { mode: 0o600, fsync: true });
 }
@@ -1246,10 +1259,14 @@ function homeFileWriter(canonicalHome: string) {
   };
 }
 
-function compareProjectionRevision(left: string, right: string): -1 | 0 | 1 {
-  const leftRevision = BigInt(left);
-  const rightRevision = BigInt(right);
-  return leftRevision < rightRevision ? -1 : leftRevision > rightRevision ? 1 : 0;
+/** Orders projections by `(profileRevision, hostRevision)`; an absent `hostRevision` is 0. */
+function compareProjectionOrder(left: ProjectionOrderKey, right: ProjectionOrderKey): -1 | 0 | 1 {
+  const leftRevision = BigInt(left.agentRef.profileRevision);
+  const rightRevision = BigInt(right.agentRef.profileRevision);
+  if (leftRevision !== rightRevision) return leftRevision < rightRevision ? -1 : 1;
+  const leftHost = left.hostRevision ?? 0;
+  const rightHost = right.hostRevision ?? 0;
+  return leftHost < rightHost ? -1 : leftHost > rightHost ? 1 : 0;
 }
 
 /** Coordinates SDK-owned initialization, optional projection, and the lease. */
@@ -1454,7 +1471,10 @@ export class AgentHomeManager {
    * used by Agent execution. The host hook owns an atomic/idempotent ensure of
    * its opaque product bytes, so an exact desired-state replay invokes it again
    * before returning `idempotent`. Only a successful new-state hook followed
-   * by the SDK-owned fsynced ordering record can return `applied`.
+   * by the SDK-owned fsynced ordering record can return `applied`. The order
+   * key is `(profileRevision, hostRevision)`, an absent `hostRevision` being 0:
+   * a greater key applies whatever the hash, a lower one is `stale`, and an
+   * equal one is `idempotent` or `conflict` by hash.
    */
   async project(input: AgentHomeProjectionPayload): Promise<AgentHomeProjectionOutcome> {
     const payload = AgentHomeProjectionPayloadSchema.parse(input);
@@ -1490,10 +1510,7 @@ export class AgentHomeManager {
       };
       const current = await readProjectionState(resolution);
       if (current !== undefined) {
-        const order = compareProjectionRevision(
-          payload.agentRef.profileRevision,
-          current.agentRef.profileRevision,
-        );
+        const order = compareProjectionOrder(payload, current);
         if (order <= 0) {
           const outcome = order < 0 ? 'stale'
             : payload.projectionHash !== current.projectionHash ? 'conflict' : 'idempotent';

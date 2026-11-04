@@ -2692,9 +2692,11 @@ daemon or missing capability is rejected before either fact is allocated.
 The client handles `agent.home.projection` before the task runner or hosted
 task journal. Under the canonical Agent-home lease it initializes/preserves
 `MEMORY.md` and `notes/`, applies only a higher revision, and fsyncs the SDK
-ordering record at `.byok/agent-home-projection.json`. Equal revision/equal
-hash is idempotent, equal revision/different hash conflicts, and a lower
-revision is stale. Only a dedicated authenticated completion PUT returning an
+ordering record at `.byok/agent-home-projection.json`. The revision is the
+pair `(profileRevision, hostRevision)`, where the optional Host-owned
+`hostRevision` is 0 when absent and is written to the record only when the
+applied payload carried it. Equal revision/equal hash is idempotent, equal
+revision/different hash conflicts, and a lower revision is stale. Only a dedicated authenticated completion PUT returning an
 exact durable readback lets the handler resolve and the mailbox cursor advance.
 Busy, containment, hook, fsync, transport, or readback mismatch leaves the
 cursor at its prior value and redelivers after reconnect/restart. No fake task,
