@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.38.0",
-    "snapshotSha256": "ccd5c68eba8688a05744f62b1c89bffadddcbdf7886af0ab208c5e634ad3172a"
+    "snapshotSha256": "0fa1fb244f2fa76f8d0fda58c4f221b506241538b3a4da4223af8991b085dd93"
   },
   "configFields": {
     "status": "tracked",
@@ -145,7 +145,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=f28fb891884de485",
-      "after": "K8 0.0.1 src-sha256=41a6f6ff4a006d30",
+      "after": "K8 0.0.1 src-sha256=3f37f98fe946637e",
       "entry": "k8-room-turn-read-only-memory"
     },
     {
