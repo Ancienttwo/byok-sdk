@@ -2939,8 +2939,10 @@ is restored without a start copy or without the memory filesystem (a native
 Linux descriptor backend or the release helper). A failed compare-and-swap is
 audited and not retried, and a crash before the restore loses the copy. On a
 daemon that carries the file, the next fresh task then fails until a Host intent
-replaces it. See [protocol.md §2.2](protocol.md#22-task-free-agent-home-projection)
-for a file over 256 KiB.
+replaces it. The compare hashes raw bytes, with no size limit and no UTF-8
+requirement, so the restore handles a file of any size, on both backends. See
+[protocol.md §2.2](protocol.md#22-task-free-agent-home-projection) for the repair
+after a crash.
 
 The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary

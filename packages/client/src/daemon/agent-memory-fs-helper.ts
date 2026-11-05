@@ -4,11 +4,11 @@ import path from 'node:path';
 import type { AgentHomeLease } from '../agent-home';
 import { verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
 import { AgentMemoryRevisionConflictError } from './agent-memory';
-import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
+import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry } from './agent-memory-filesystem';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 
-export const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 2;
-export const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = '2';
+export const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 3;
+export const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = '3';
 const HELPER_REQUEST_TIMEOUT_MS = 10_000;
 const HELPER_MAX_JSON_LINE_BYTES = 2 * 1024 * 1024;
 const HELPER_MAX_CONTENT_BYTES = 1 * 1024 * 1024;
@@ -17,13 +17,13 @@ const HELPER_MAX_STDERR_BYTES = 4 * 1024;
 interface HelperSuccess {
   readonly id: string;
   readonly ok: true;
-  readonly protocol: 2;
+  readonly protocol: 3;
   readonly result: Record<string, unknown>;
 }
 interface HelperFailure {
   readonly id: string;
   readonly ok: false;
-  readonly protocol: 2;
+  readonly protocol: 3;
   readonly error: { readonly code: string; readonly message: string; readonly actualRevision?: string };
 }
 type HelperResponse = HelperSuccess | HelperFailure;
@@ -51,7 +51,7 @@ export function isAgentMemoryFilesystemHelperSupported(): boolean {
   return helperPlatformSupported();
 }
 
-/** Private protocol 2 identity. Decimal strings keep all 64 bits. */
+/** Private helper protocol identity. Decimal strings keep all 64 bits. */
 export type AgentMemoryHelperIdentity =
   | Readonly<{ kind: 'unix'; dev: string; ino: string }>
   | Readonly<{ kind: 'windows'; volumeSerial: string; fileIndex: string }>;
@@ -95,6 +95,12 @@ function responseRecord(value: unknown): HelperResponse | undefined {
   return record as unknown as HelperFailure;
 }
 
+function walkEntry(value: unknown): value is AgentMemoryWalkEntry {
+  if (value === null || typeof value !== 'object') return false;
+  const entry = value as Record<string, unknown>;
+  return typeof entry.path === 'string' && (entry.kind === 'file' || entry.kind === 'directory' || entry.kind === 'opaque-directory' || entry.kind === 'other');
+}
+
 function boundedFileState(result: Record<string, unknown>, maxBytes: number): AgentMemoryFilesystemFileState {
   let content: string;
   try {
@@ -128,7 +134,7 @@ function encodeReplaceContent(content: string, maxBytes: number): string {
   if (bytes.byteLength > maxBytes) {
     throw new AgentMemoryError('Agent memory filesystem helper replacement exceeds its requested byte limit');
   }
-  // The private v2 protocol intentionally uses unpadded standard base64. It
+  // The private protocol intentionally uses unpadded standard base64. It
   // keeps arbitrary UTF-8 bytes below the bounded JSON-lines transport limit.
   return bytes.toString('base64').replace(/=+$/u, '');
 }
@@ -205,16 +211,35 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     }
   }
 
+  async observe(relativePath: string): Promise<AgentMemoryFileObservation> {
+    const result = await this.request('observe', { path: relativePath });
+    if (typeof result.exists !== 'boolean' || typeof result.revision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(result.revision)) {
+      throw new AgentMemoryError('Agent memory filesystem helper returned an invalid observation');
+    }
+    return Object.freeze({ exists: result.exists, revision: result.revision });
+  }
+
+  async cleanupForRestore(record: AgentMemoryRestoreRecord): Promise<AgentMemoryRestoreCleanup> {
+    const result = await this.request('cleanup', { files: record.files, entries: record.entries });
+    if (typeof result.deleted !== 'number' || !Number.isSafeInteger(result.deleted) || result.deleted < 0) {
+      throw new AgentMemoryError('Agent memory filesystem helper returned an invalid cleanup result');
+    }
+    return Object.freeze({ deleted: result.deleted });
+  }
+
   async append(relativePath: string, content: string, maxBytes: number): Promise<void> {
     await this.request('append', { path: relativePath, content, maxBytes });
   }
 
-  async walk(relativePath: string, maxEntries: number): Promise<readonly string[]> {
+  async walk(relativePath: string, maxEntries: number): Promise<AgentMemoryWalk> {
     const result = await this.request('walk', { path: relativePath, maxEntries });
-    if (!Array.isArray(result.paths) || result.paths.length > maxEntries || result.paths.some((candidate) => typeof candidate !== 'string')) {
+    if (
+      !Array.isArray(result.paths) || result.paths.length > maxEntries || result.paths.some((candidate) => typeof candidate !== 'string') ||
+      !Array.isArray(result.entries) || result.entries.length > maxEntries || !result.entries.every(walkEntry)
+    ) {
       throw new AgentMemoryError('Agent memory filesystem helper returned an invalid walk result');
     }
-    return Object.freeze([...result.paths] as string[]);
+    return Object.freeze({ paths: Object.freeze([...result.paths] as string[]), entries: Object.freeze(result.entries.map((entry: AgentMemoryWalkEntry) => Object.freeze({ path: entry.path, kind: entry.kind }))) });
   }
 
   close(): Promise<void> {

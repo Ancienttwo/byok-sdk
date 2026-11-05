@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
@@ -187,7 +189,69 @@ func TestReplaceCASAndAtomicDelete(t *testing.T) {
 	helper.close()
 }
 
-func TestReplaceRequiresV2Base64Wire(t *testing.T) {
+// A compare hashes raw bytes, so a file the read path refuses can still be
+// replaced or deleted with its correct revision, and only with that revision.
+func TestCompareUsesRawBytesBeyondTheReadLimit(t *testing.T) {
+	for name, content := range map[string][]byte{
+		"over-the-read-limit": bytes.Repeat([]byte("x"), maxLocalLogBytes+1),
+		"not-utf8":            {0xff, 0xfe, 0x00, 0x41},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := newMemoryHome(t)
+			path := filepath.Join(home, "notes", "entry.md")
+			helper := startOpenedHelper(t, home)
+			sum := sha256.Sum256(content)
+			revision := "sha256:" + hex.EncodeToString(sum[:])
+			mutate := func(op, expected string) wireResponse {
+				request := map[string]any{"id": helper.id(op), "protocol": protocolVersion, "op": op, "path": "notes/entry.md", "expectedRevision": expected}
+				if op == "replace" {
+					request["contentBase64"] = base64.RawStdEncoding.EncodeToString([]byte("next"))
+					request["maxBytes"] = maxFileBytes
+				}
+				return helper.request(request)
+			}
+			for _, op := range []string{"replace", "delete"} {
+				if err := os.WriteFile(path, content, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				observed := helper.request(map[string]any{"id": helper.id("observe"), "protocol": protocolVersion, "op": "observe", "path": "notes/entry.md"})
+				requireSuccess(t, observed)
+				var observation fileObservation
+				decodeResult(t, observed, &observation)
+				if !observation.Exists || observation.Revision != revision {
+					t.Fatalf("observation = %#v, want %s", observation, revision)
+				}
+				conflict := mutate(op, emptyFileState().Revision)
+				requireFailure(t, conflict, "revision_conflict")
+				if conflict.Error.ActualRevision != revision {
+					t.Fatalf("actual revision = %q", conflict.Error.ActualRevision)
+				}
+				if data, err := os.ReadFile(path); err != nil || !bytes.Equal(data, content) {
+					t.Fatalf("a conflict changed the file: %v", err)
+				}
+				requireSuccess(t, mutate(op, revision))
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("delete did not remove entry: %v", err)
+			}
+			helper.close()
+		})
+	}
+}
+
+func TestObserveReportsAMissingParentAsAbsent(t *testing.T) {
+	helper := startOpenedHelper(t, newMemoryHome(t))
+	observed := helper.request(map[string]any{"id": helper.id("observe"), "protocol": protocolVersion, "op": "observe", "path": "notes/missing/entry.md"})
+	requireSuccess(t, observed)
+	var observation fileObservation
+	decodeResult(t, observed, &observation)
+	if observation != (fileObservation{Revision: emptyFileState().Revision}) {
+		t.Fatalf("observation = %#v", observation)
+	}
+	helper.close()
+}
+
+func TestReplaceRequiresBase64Wire(t *testing.T) {
 	home := newMemoryHome(t)
 	helper := startOpenedHelper(t, home)
 	before := helper.read("MEMORY.md", maxFileBytes)

@@ -30,6 +30,17 @@ func TestWindowsRootIdentityUsesNativeHandleFields(t *testing.T) {
 	}
 }
 
+func TestWindowsRefusesRestoreCleanup(t *testing.T) {
+	home := newMemoryHome(t)
+	writeLiteral(t, filepath.Join(home, "notes"), "new.md", "written during the Attempt")
+	active := openNamesSession(t, home)
+	_, failure := active.cleanup(cleanupRequest{ID: "cleanup", Protocol: protocolVersion, Op: "cleanup", Files: []string{"MEMORY.md"}})
+	if failure == nil || failure.code != "unsupported" {
+		t.Fatalf("cleanup on Windows = %#v", failure)
+	}
+	requireEntry(t, filepath.Join(home, "notes"), "new.md")
+}
+
 func TestWindowsJunctionRootIsRefusedAndPreservesOutsideSentinel(t *testing.T) {
 	parent := t.TempDir()
 	outside := t.TempDir()

@@ -1866,6 +1866,8 @@ export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helpe
 export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem';
 /** One file's state as reported by that filesystem authority. */
 export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
+/** Types of the observe, walk and restore cleanup methods of `AgentMemoryFilesystem`. */
+export type { AgentMemoryFileObservation, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry, AgentMemoryWalkEntryKind, } from '../daemon/agent-memory-filesystem';
 /** Serves `memory_recall`/`memory_save` as a stdio MCP server over host-provided streams. */
 export { serveAgentMemoryMcpOverStdio } from './mcp-server';
 /** MCP tool name a host must allowlist for reads. */
@@ -2545,8 +2547,12 @@ export interface AgentMemoryFilesystem {
     read(path: string, maxBytes: number): Promise<AgentMemoryFilesystemFileState>;
     replace(path: string, expectedRevision: string, content: string, maxBytes: number): Promise<AgentMemoryFilesystemFileState>;
     delete(path: string, expectedRevision: string): Promise<void>;
+    /** The revision of the file's raw bytes, with no size limit and no UTF-8 requirement. */
+    observe(path: string): Promise<AgentMemoryFileObservation>;
+    /** Restore-only (#1440): see `cleanupAgentMemoryHomeForRestore`. */
+    cleanupForRestore(record: AgentMemoryRestoreRecord): Promise<AgentMemoryRestoreCleanup>;
     append(path: string, content: string, maxBytes: number): Promise<void>;
-    walk(path: string, maxEntries: number): Promise<readonly string[]>;
+    walk(path: string, maxEntries: number): Promise<AgentMemoryWalk>;
     close(): Promise<void>;
 }
 export interface AgentMemoryFilesystemFileState {
@@ -2555,13 +2561,45 @@ export interface AgentMemoryFilesystemFileState {
     readonly revision: string;
     readonly byteCount: number;
 }
+/** One observation of a memory file: existence and the sha256 of its exact bytes. */
+export interface AgentMemoryFileObservation {
+    readonly exists: boolean;
+    readonly revision: string;
+}
+/**
+ * `directory` was entered, so its contents are in the record too.
+ * `opaque-directory` was seen and not entered, so only the directory itself is.
+ */
+export type AgentMemoryWalkEntryKind = 'file' | 'directory' | 'opaque-directory' | 'other';
+/** One entry a walk saw, listed or not. The path is only ever compared with another walk's. */
+export interface AgentMemoryWalkEntry {
+    readonly path: string;
+    readonly kind: AgentMemoryWalkEntryKind;
+}
+export interface AgentMemoryWalk {
+    /** Regular files with one link that the walk lists; a caller filters them to memory paths. */
+    readonly paths: readonly string[];
+    /** Everything the walk saw, including what it left out of `paths`. */
+    readonly entries: readonly AgentMemoryWalkEntry[];
+}
+/** What an Attempt started with, as a restore needs it. */
+export interface AgentMemoryRestoreRecord {
+    /** The paths of the start copy, including `MEMORY.md`. */
+    readonly files: readonly string[];
+    /** The `entries` of the walk at the start. */
+    readonly entries: readonly AgentMemoryWalkEntry[];
+}
+/** Entries a restore cleanup removed. A directory removed with its contents counts once. */
+export interface AgentMemoryRestoreCleanup {
+    readonly deleted: number;
+}
 // ==== @byok-sdk/client dist/daemon/agent-memory-fs-helper.d.ts ====
 import type { AgentHomeLease } from '../agent-home';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
-export declare const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 2;
-export declare const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = "2";
+export declare const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 3;
+export declare const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = "3";
 export declare function isAgentMemoryFilesystemHelperSupported(): boolean;
-/** Private protocol 2 identity. Decimal strings keep all 64 bits. */
+/** Private helper protocol identity. Decimal strings keep all 64 bits. */
 export type AgentMemoryHelperIdentity = Readonly<{
     kind: 'unix';
     dev: string;
@@ -2739,7 +2777,7 @@ export declare function createAgentMemoryIntentProcessor(options: AgentMemoryInt
 // ==== @byok-sdk/client dist/daemon/agent-memory.d.ts ====
 import { AGENT_MEMORY_PROJECTION_CAPABILITY, type AgentMemoryProjectionMutation, type AgentMemoryProjectionSealedMutation } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentRef } from '../agent-home';
-import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
+import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalkEntry } from './agent-memory-filesystem';
 import { AgentMemoryError, AgentMemoryValidationError, type AgentMemoryProjectionPort, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
 export declare const AGENT_MEMORY_AUDIT_FILENAME = "agent-memory-audit-v1.jsonl";
 /** v2 is one atomically replaced state file, never an append-only log. */
@@ -2886,11 +2924,6 @@ export interface AgentMemorySaveResult {
 }
 /** Validate and freeze a task-free home binding built from a live writer lease. */
 export declare function agentMemoryHomeBinding(input: AgentMemoryHomeBinding): AgentMemoryHomeBinding;
-/** One observation of a memory file: existence and the sha256 of its exact bytes. */
-export interface AgentMemoryFileObservation {
-    readonly exists: boolean;
-    readonly revision: string;
-}
 /**
  * Observe one allowed memory path (`MEMORY.md` or `notes/**.md`) through the
  * pinned home, for evidence only (never for recall or save).
@@ -2906,8 +2939,8 @@ export interface AgentMemoryFileObservation {
  * symlink or non-regular leaf, or a leaf with more than one hard link; a
  * name below notes that differs only in letter case from another; any other
  * open/read/stat I/O error; and a file that changed while it was hashed
- * (transient). With an external `filesystem` backend the observation is that
- * backend's bounded UTF-8 `read`.
+ * (transient). The native backend and an external `filesystem` backend give the
+ * same observation of the same file.
  */
 export declare function observeAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, relativePath: string): Promise<AgentMemoryFileObservation>;
 export interface AgentMemoryHomeCompareAndSwap {
@@ -2926,6 +2959,12 @@ export interface AgentMemoryHomeCompareAndSwap {
  * {@link AgentMemoryValidationError} for a refused input, and
  * {@link AgentMemoryIoError} (or a backend error) otherwise.
  *
+ * The live revision is streamed over the file's raw bytes with no size limit
+ * and no UTF-8 requirement, so an oversized or non-UTF-8 file can be replaced
+ * or deleted with its correct revision. The file must still be a regular file
+ * with one link, unchanged while it is hashed. New content stays bounded: 256
+ * KiB, and the caller limits `MEMORY.md` to 8 KiB.
+ *
  * Native backend: every conflict is thrown before the rename that would
  * install new bytes (replace compares before the temp file, before its write
  * and after it; delete compares twice before its tombstone rename), so a
@@ -2934,6 +2973,27 @@ export interface AgentMemoryHomeCompareAndSwap {
  * disk, and an `EINVAL`/`EPERM` refusal after it throws {@link AgentMemoryIoError}.
  */
 export declare function compareAndSwapAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, input: AgentMemoryHomeCompareAndSwap): Promise<AgentMemoryFilesystemFileState>;
+/**
+ * The cleanup step of a restore after a failed commit-on-success Attempt
+ * (#1440). The caller holds the writer lease and the runtime has stopped.
+ *
+ * It compares paths and types with the start record, and knows no memory-path
+ * rule. Below `notes` it walks the directories the start walk entered and
+ * deletes, without following a link, every entry outside the record, including
+ * one whose path is in it with another type, and a directory with its contents.
+ * A path of the start copy that is no longer a regular file with one link goes
+ * too; other links to that file do not change. Entries in the record stay. In
+ * the home root it takes only the exact names: `MEMORY.md` when it is not a
+ * regular file with one link, and `notes` when it is not a directory. The
+ * caller writes those back. A case variant in the root stays, because no rule
+ * refuses one at the start.
+ *
+ * There is no compare and no entry limit: the lease is exclusive. A delete
+ * refuses to cross onto another volume, so the restore fails and is retried.
+ * The helper backend refuses this on Windows, which declares no commit on
+ * success. Not a public export.
+ */
+export declare function cleanupAgentMemoryHomeForRestore(binding: AgentMemoryHomeBinding, record: AgentMemoryRestoreRecord): Promise<AgentMemoryRestoreCleanup>;
 /** Read one SDK-internal state file under `.byok` through the pinned home. */
 export declare function readAgentMemoryHomeInternalFile(binding: AgentMemoryHomeBinding, fileName: string): Promise<AgentMemoryFilesystemFileState>;
 /**
@@ -2981,6 +3041,11 @@ export declare class AgentMemoryService {
         readonly content?: unknown;
     }): Promise<Readonly<AgentMemorySaveResult>>;
 }
+/**
+ * The start record of a commit-on-success Attempt (#1440): each entry the walk
+ * saw in `notes`, with its type. The caller must hold the exclusive home lease.
+ */
+export declare function recordAgentMemoryHomeEntries(input: AgentMemoryHomeBinding): Promise<readonly AgentMemoryWalkEntry[]>;
 /** Internal bounded capture; the caller must hold the exclusive home lease throughout. */
 export declare function captureAgentMemoryHomeSnapshot(input: AgentMemoryHomeBinding, signal?: AbortSignal): Promise<AgentMemorySnapshot>;
 /** Bounded stable snapshot, called after Session.close() while the Agent lease still exists. */

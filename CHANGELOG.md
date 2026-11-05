@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Breaking (client; #1440)** — `AgentMemoryFilesystem` gains `observe` and
+  `cleanupForRestore`, and `walk` now resolves with
+  `{ paths, entries }`: `paths` is the same list of files as before, and
+  `entries` is everything the walk saw, with its type. An embedder that
+  implements the interface must add both methods and change `walk`.
+  `AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL` and
+  `AGENT_MEMORY_FILESYSTEM_HELPER_VERSION` are now 3, with no support for the
+  previous helper: the release carries the new helper binaries. Replace and
+  delete compare the current revision by hashing the file's raw bytes, on both
+  backends, with no size limit and no UTF-8 requirement, so
+  `compareAndSwapAgentMemoryHomeFile` and `observeAgentMemoryHomeFile` work on an
+  oversized or non-UTF-8 file. The file must still be a regular file with one
+  link, unchanged while it is hashed; new content stays limited, and reads keep
+  their limits. The native walk now refuses an entry on another volume, as the
+  helper does. A `MEMORY.md` of any size can now be restored, so the known limit
+  of #1439 shrinks to a daemon crash before the restore.
+
 - **Breaking (client; #1439)** — a fresh instruction task whose memory mode is
   `read` or `read-write`, on a daemon that admits the memory MCP, carries
   `MEMORY.md`. The device reads the file before the runtime starts and puts it,

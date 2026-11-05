@@ -13,6 +13,7 @@ import {
   AgentMemoryRevisionConflictError,
   AgentMemoryService,
   captureAgentMemorySnapshot,
+  cleanupAgentMemoryHomeForRestore,
   snapshotAndProjectAgentMemory,
   type AgentMemoryTaskContext,
 } from '../daemon/agent-memory';
@@ -24,7 +25,7 @@ import { TaskRunner } from '../daemon/task-runner';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
-import { expectAgentMemoryNameRules } from './fixtures/agent-memory-name-rules';
+import { expectAgentMemoryNameRules, expectAgentMemoryRawByteCompare, expectAgentMemoryRestoreCleanup } from './fixtures/agent-memory-name-rules';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
@@ -97,6 +98,33 @@ describe('Agent memory MCP local authority', () => {
     } finally { await release(); }
   });
 
+  itWithSecureDescriptors.each([
+    ['compares raw bytes', expectAgentMemoryRawByteCompare],
+    ['cleans a home for a restore', expectAgentMemoryRestoreCleanup],
+  ])('%s through the native backend (#1440)', async (_label, expectation) => {
+    const { context, release } = await memory();
+    try {
+      await expectation(context, await root());
+    } finally { await release(); }
+  });
+
+  itWithSecureDescriptors('refuses a directory on another volume in the walk and in a restore cleanup (#1440)', async () => {
+    const { context, release } = await memory();
+    const tree = path.join(context.canonicalHome, 'notes', 'tree');
+    await fs.mkdir(path.join(tree, 'mounted'), { recursive: true });
+    await fs.writeFile(path.join(tree, 'mounted', 'other-volume.txt'), 'on another volume');
+    const lstat = fs.lstat.bind(fs);
+    const spy = vi.spyOn(fs, 'lstat').mockImplementation((async (target: Parameters<typeof fs.lstat>[0], options?: { bigint?: boolean }) => {
+      const stat = await lstat(target, options as { bigint: true });
+      return target.toString().endsWith('/mounted') ? Object.assign(Object.create(stat) as typeof stat, { dev: stat.dev + 1n }) : stat;
+    }) as unknown as typeof fs.lstat);
+    try {
+      await expect(captureAgentMemorySnapshot(context)).rejects.toThrow('on another volume');
+      await expect(cleanupAgentMemoryHomeForRestore(context, { files: ['MEMORY.md'], entries: [] })).rejects.toThrow('on another volume');
+      expect(await fs.readFile(path.join(tree, 'mounted', 'other-volume.txt'), 'utf8')).toBe('on another volume');
+    } finally { spy.mockRestore(); await release(); }
+  });
+
   itWithSecureDescriptors('rejects FIFO memory paths without blocking recall, replace, or delete', async () => {
     const { context, release } = await memory();
     const fifoPath = path.join(context.canonicalHome, 'notes', 'blocked.md');
@@ -110,12 +138,12 @@ describe('Agent memory MCP local authority', () => {
         path: 'notes/blocked.md',
         expectedRevision: sha256(''),
         content: 'replacement',
-      })).rejects.toThrow('bounded regular file');
+      })).rejects.toThrow('regular file with one link');
       await expect(service.save({
         op: 'delete',
         path: 'notes/blocked.md',
         expectedRevision: sha256(''),
-      })).rejects.toThrow('bounded regular file');
+      })).rejects.toThrow('regular file with one link');
       expect(Date.now() - startedAt).toBeLessThan(1_000);
     } finally { await release(); }
   });

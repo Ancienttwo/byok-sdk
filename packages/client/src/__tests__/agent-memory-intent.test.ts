@@ -199,8 +199,13 @@ class FakeBackend {
         await fs.rm(file);
         this.durable.set(file, undefined);
       },
+      observe: async (relative) => {
+        const current = fileState(await readOptional(resolve(relative)));
+        return { exists: current.exists, revision: current.revision };
+      },
+      cleanupForRestore: async () => { throw new Error('cleanup is not an intent operation'); },
       append: async () => { throw new Error('append is not an intent operation'); },
-      walk: async () => Object.freeze([]),
+      walk: async () => ({ paths: [], entries: [] }),
       close: async () => {},
     };
   }

@@ -28,8 +28,8 @@ import (
 )
 
 const (
-	protocolVersion = 2
-	helperVersion   = "2"
+	protocolVersion = 3
+	helperVersion   = "3"
 
 	maxFileBytes      = 256 * 1024
 	maxLocalLogBytes  = 1 * 1024 * 1024
@@ -91,6 +91,13 @@ type deleteRequest struct {
 	ExpectedRevision string `json:"expectedRevision"`
 }
 
+type observeRequest struct {
+	ID       string `json:"id"`
+	Protocol int    `json:"protocol"`
+	Op       string `json:"op"`
+	Path     string `json:"path"`
+}
+
 type appendRequest struct {
 	ID       string `json:"id"`
 	Protocol int    `json:"protocol"`
@@ -121,6 +128,8 @@ type request struct {
 	read    *readRequest
 	replace *replaceRequest
 	delete  *deleteRequest
+	observe *observeRequest
+	cleanup *cleanupRequest
 	append  *appendRequest
 	walk    *walkRequest
 	close   *closeRequest
@@ -167,13 +176,25 @@ type fileState struct {
 	ByteCount     int    `json:"byteCount"`
 }
 
+type fileObservation struct {
+	Exists   bool   `json:"exists"`
+	Revision string `json:"revision"`
+}
+
 type openResult struct {
 	Identity      rootIdentity `json:"identity"`
 	HelperVersion string       `json:"helperVersion"`
 }
 
+// walkEntry is one entry a walk saw, listed or not.
+type walkEntry struct {
+	Path string `json:"path"`
+	Kind string `json:"kind"`
+}
+
 type walkResult struct {
-	Paths []string `json:"paths"`
+	Paths   []string    `json:"paths"`
+	Entries []walkEntry `json:"entries"`
 }
 
 type session struct {
@@ -292,6 +313,10 @@ func (s *session) handle(req request) (any, *protocolError) {
 		return s.replace(*req.replace)
 	case "delete":
 		return s.delete(*req.delete)
+	case "observe":
+		return s.observe(*req.observe)
+	case "cleanup":
+		return s.cleanup(*req.cleanup)
 	case "append":
 		return s.append(*req.append)
 	case "walk":
@@ -398,7 +423,7 @@ func (s *session) replace(req replaceRequest) (fileState, *protocolError) {
 		return fileState{}, err
 	}
 
-	before, err := parent.readState(leaf, req.MaxBytes)
+	before, err := parent.observe(leaf)
 	if err != nil {
 		return fileState{}, err
 	}
@@ -428,7 +453,7 @@ func (s *session) replace(req replaceRequest) (fileState, *protocolError) {
 	temp = nil
 
 	beforeFinalCAS()
-	final, err := parent.readState(leaf, req.MaxBytes)
+	final, err := parent.observe(leaf)
 	if err != nil {
 		return fileState{}, err
 	}
@@ -458,7 +483,7 @@ func (s *session) delete(req deleteRequest) (map[string]bool, *protocolError) {
 		return nil, err
 	}
 
-	before, err := parent.readState(leaf, maxFileBytes)
+	before, err := parent.observe(leaf)
 	if err != nil {
 		return nil, err
 	}
@@ -466,7 +491,7 @@ func (s *session) delete(req deleteRequest) (map[string]bool, *protocolError) {
 		return nil, revisionConflict(before.Revision)
 	}
 	beforeFinalCAS()
-	final, err := parent.readState(leaf, maxFileBytes)
+	final, err := parent.observe(leaf)
 	if err != nil {
 		return nil, err
 	}
@@ -488,6 +513,23 @@ func (s *session) delete(req deleteRequest) (map[string]bool, *protocolError) {
 		return nil, failure("io_failure", "filesystem operation failed")
 	}
 	return map[string]bool{"deleted": true}, nil
+}
+
+// observe reports a missing parent directory as an absent file, as the native
+// backend does.
+func (s *session) observe(req observeRequest) (fileObservation, *protocolError) {
+	if !validRequestID(req.ID) || req.Protocol != protocolVersion || req.Op != "observe" || !validRelativePath(req.Path) {
+		return fileObservation{}, failure("invalid_request", "request is invalid")
+	}
+	parent, leaf, err := s.openParent(req.Path)
+	if err != nil {
+		if err.code == "not_found" {
+			return fileObservation{Revision: emptyFileState().Revision}, nil
+		}
+		return fileObservation{}, err
+	}
+	defer parent.Close()
+	return parent.observe(leaf)
 }
 
 func (s *session) append(req appendRequest) (fileState, *protocolError) {
@@ -564,15 +606,15 @@ func (s *session) walk(req walkRequest) (walkResult, *protocolError) {
 	defer directory.Close()
 
 	entriesSeen := 0
-	paths := make([]string, 0)
-	if err := walkPinned(directory.root, req.Path, req.MaxEntries, &entriesSeen, &paths); err != nil {
+	result := walkResult{Paths: make([]string, 0), Entries: make([]walkEntry, 0)}
+	if err := walkPinned(directory.root, req.Path, req.MaxEntries, &entriesSeen, &result); err != nil {
 		return walkResult{}, err
 	}
-	sort.Strings(paths)
-	return walkResult{Paths: paths}, nil
+	sort.Strings(result.Paths)
+	return result, nil
 }
 
-func walkPinned(directory *os.Root, prefix string, maximum int, entriesSeen *int, paths *[]string) *protocolError {
+func walkPinned(directory *os.Root, prefix string, maximum int, entriesSeen *int, result *walkResult) *protocolError {
 	file, err := directory.Open(".")
 	if err != nil {
 		return failure("io_failure", "filesystem operation failed")
@@ -603,6 +645,13 @@ func walkPinned(directory *os.Root, prefix string, maximum int, entriesSeen *int
 		// name check comes before Lstat: on Windows, os.Root refuses a device
 		// name and drops a trailing dot, so Lstat could fail or see another file.
 		if !portableSegment(name) || folded[asciiLower(name)] > 1 {
+			kind := kindOther
+			if entry.IsDir() {
+				kind = kindOpaqueDirectory
+			} else if entry.Type().IsRegular() {
+				kind = kindFile
+			}
+			result.Entries = append(result.Entries, walkEntry{Path: prefix + "/" + name, Kind: kind})
 			continue
 		}
 		info, err := directory.Lstat(name)
@@ -617,7 +666,8 @@ func walkPinned(directory *os.Root, prefix string, maximum int, entriesSeen *int
 			if childErr != nil {
 				return childErr
 			}
-			walkErr := walkPinned(child, prefix+"/"+name, maximum, entriesSeen, paths)
+			result.Entries = append(result.Entries, walkEntry{Path: prefix + "/" + name, Kind: kindDirectory})
+			walkErr := walkPinned(child, prefix+"/"+name, maximum, entriesSeen, result)
 			_ = child.Close()
 			if walkErr != nil {
 				return walkErr
@@ -640,10 +690,11 @@ func walkPinned(directory *os.Root, prefix string, maximum int, entriesSeen *int
 		if linkErr != nil {
 			return failure("io_failure", "filesystem operation failed")
 		}
+		result.Entries = append(result.Entries, walkEntry{Path: prefix + "/" + name, Kind: kindFile})
 		if links > 1 {
 			continue
 		}
-		*paths = append(*paths, prefix+"/"+name)
+		result.Paths = append(result.Paths, prefix+"/"+name)
 	}
 	return nil
 }
@@ -682,14 +733,9 @@ func (s *session) openParent(relative string) (*pinnedDirectory, string, *protoc
 // usually open either name as the other one. A rename between this listing
 // and the open is not detected; the name rule is not a containment check.
 func requireUniqueName(directory *os.Root, name string) *protocolError {
-	file, err := directory.Open(".")
+	names, err := directoryNames(directory)
 	if err != nil {
-		return failure("io_failure", "filesystem operation failed")
-	}
-	names, readErr := file.Readdirnames(-1)
-	_ = file.Close()
-	if readErr != nil {
-		return failure("io_failure", "filesystem operation failed")
+		return err
 	}
 	folded := asciiLower(name)
 	for _, other := range names {
@@ -698,6 +744,19 @@ func requireUniqueName(directory *os.Root, name string) *protocolError {
 		}
 	}
 	return nil
+}
+
+func directoryNames(directory *os.Root) ([]string, *protocolError) {
+	file, err := directory.Open(".")
+	if err != nil {
+		return nil, failure("io_failure", "filesystem operation failed")
+	}
+	names, readErr := file.Readdirnames(-1)
+	_ = file.Close()
+	if readErr != nil {
+		return nil, failure("io_failure", "filesystem operation failed")
+	}
+	return names, nil
 }
 
 func asciiLower(value string) string {
@@ -789,6 +848,30 @@ func (p *pinnedDirectory) readState(name string, maximum int) (fileState, *proto
 	}
 	defer file.Close()
 	return fileStateFromOpenFile(file, info, maximum)
+}
+
+// observe streams one file's raw bytes into its revision, so a compare has no
+// size limit and no UTF-8 requirement. The file must stay a regular file with
+// one link, and unchanged while it is hashed.
+func (p *pinnedDirectory) observe(name string) (fileObservation, *protocolError) {
+	file, before, exists, err := p.openSingleLink(name, os.O_RDONLY)
+	if err != nil {
+		return fileObservation{}, err
+	}
+	if !exists {
+		return fileObservation{Revision: emptyFileState().Revision}, nil
+	}
+	defer file.Close()
+	hash := sha256.New()
+	hashed, copyErr := io.Copy(hash, file)
+	if copyErr != nil {
+		return fileObservation{}, failure("io_failure", "filesystem operation failed")
+	}
+	after, statErr := file.Stat()
+	if statErr != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) || hashed != before.Size() || after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+		return fileObservation{}, failure("file_changed", "file changed while it was read")
+	}
+	return fileObservation{Exists: true, Revision: "sha256:" + hex.EncodeToString(hash.Sum(nil))}, nil
 }
 
 func (p *pinnedDirectory) openExisting(name string, flags int) (*os.File, fs.FileInfo, bool, *protocolError) {
@@ -1034,6 +1117,18 @@ func decodeRequest(line []byte) (request, *protocolError) {
 			return requestValue, failure("malformed_request", "request is malformed")
 		}
 		requestValue.delete = &typed
+	case "observe":
+		var typed observeRequest
+		if err := strictJSON(line, &typed); err != nil || !hasRequiredJSONFields(line, "id", "protocol", "op", "path") {
+			return requestValue, failure("malformed_request", "request is malformed")
+		}
+		requestValue.observe = &typed
+	case "cleanup":
+		var typed cleanupRequest
+		if err := strictJSON(line, &typed); err != nil || !hasRequiredJSONFields(line, "id", "protocol", "op", "files", "entries") {
+			return requestValue, failure("malformed_request", "request is malformed")
+		}
+		requestValue.cleanup = &typed
 	case "append":
 		var typed appendRequest
 		if err := strictJSON(line, &typed); err != nil || !hasRequiredJSONFields(line, "id", "protocol", "op", "path", "content", "maxBytes") {

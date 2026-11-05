@@ -30,7 +30,7 @@ appliesTo:
 - wire 不变，不加 flag，compat corpus 不变。
 - 这对用 core 的 Host 是 breaking 改动，见 upgrade manifest。Host 和设备一起升级；旧 Host core 配新设备时，模型会看到两份 `MEMORY.md`，最多多出 8 KiB，不会出错。
 - `MEMORY.md` 超限后，接纳 memory MCP 的设备上，下一个 fresh task 不会启动，直到恢复成功或 Host 用 intent 修复。
-- 超过 256 KiB 的 `MEMORY.md` 恢复和 intent 都读不了。这是已知限制，修复办法见 `docs/protocol.md` §2.2。
+- 恢复按原始字节比较，不受文件大小限制（[#1440](https://github.com/Ancienttwo/byok-sdk/issues/1440)）。开始副本在内存里：daemon 在恢复前崩溃时副本丢失，下一个 fresh task 会失败。这是已知限制，修复办法见 `docs/protocol.md` §2.2。
 
 ## 4. 不做
 
