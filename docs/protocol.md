@@ -1003,14 +1003,14 @@ task keeps the reading guidance, carries no data and does not fail on the size.
 The hosted cloud advertises the flag, and `readTaskResult` projects the field
 verbatim.
 
-Known limit: a `MEMORY.md` over 256 KiB (`AGENT_MEMORY_MAX_FILE_BYTES`, the read
-limit of one memory file) cannot be read by a snapshot, an export, a projection,
-an intent or the restore, so neither the restore nor a Host intent repairs it.
-To repair it, the Host sends a writer task with `agentMemory: 'none'` whose
-instruction tells the model to bring `MEMORY.md` under the limit and move the
-details to `notes/`. `none` adds no memory guidance, file tools have no such
-limit, and that Attempt has no start copy, so nothing restores the file at its
-end. The file can also be edited by hand on the device.
+Known limit: the restore compares raw bytes, so it handles a `MEMORY.md` of any
+size, but its start copy is in memory. When the daemon crashes before the
+restore, the copy is lost and the next fresh task fails. To repair it, the Host
+sends a writer task with `agentMemory: 'none'` whose instruction tells the model
+to bring `MEMORY.md` under the limit and move the details to `notes/`. `none`
+adds no memory guidance, file tools have no size limit, and that Attempt has no
+start copy, so nothing restores the file at its end. The file can also be edited
+by hand on the device.
 
 **`agentMemory` selects the Agent memory of one ordinary task.** Without the
 field, the daemon admission decides, as before. `none` binds no SDK memory MCP

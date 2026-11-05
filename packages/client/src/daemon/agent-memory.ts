@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { constants as fsConstants, existsSync, promises as fs } from 'node:fs';
+import { constants as fsConstants, existsSync, promises as fs, type BigIntStats } from 'node:fs';
 import path from 'node:path';
 
 import {
@@ -12,7 +12,7 @@ import {
 } from '@byok-sdk/protocol';
 import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES as PROTOCOL_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES as PROTOCOL_MEMORY_MAX_SNAPSHOT_FILES, RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
 import { AGENT_HOME_INTERNAL_DIRECTORY, type AgentHomeLease, type AgentRef } from '../agent-home';
-import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
+import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry } from './agent-memory-filesystem';
 import { AgentMemoryError, AgentMemoryValidationError, validateAgentMemoryPath, type AgentMemoryFile, type AgentMemoryProjectionPort, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
 
 export const AGENT_MEMORY_AUDIT_FILENAME = 'agent-memory-audit-v1.jsonl';
@@ -196,7 +196,7 @@ function descriptorPath(handle: Awaited<ReturnType<typeof fs.open>>): string {
   return `${requireSecureDirectoryDescriptors()}/${handle.fd}`;
 }
 
-async function openPinnedDirectory(target: string, expectedIdentity?: AgentMemoryHomeBinding['homeIdentity']): Promise<Awaited<ReturnType<typeof fs.open>>> {
+async function openPinnedDirectory(target: string | Buffer, expectedIdentity?: AgentMemoryHomeBinding['homeIdentity']): Promise<Awaited<ReturnType<typeof fs.open>>> {
   requireSecureDirectoryDescriptors();
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
   try {
@@ -300,17 +300,17 @@ async function replaceNative(context: AgentMemoryHomeBinding, relativePath: stri
   const byteCount = encoder.encode(content).byteLength;
   if (byteCount > AGENT_MEMORY_MAX_FILE_BYTES) throw new AgentMemoryValidationError('memory content exceeds its bounded file size');
   return withMemoryParent(context, relativePath, async (directory, fileName) => {
-    const before = await readPinnedFile(directory, fileName);
+    const before = await observePinnedFileBytes(directory, fileName);
     if (before.revision !== expected) throw new AgentMemoryRevisionConflictError(expected, before.revision);
     const parent = descriptorPath(directory);
     const temporary = `${parent}/.byok-memory-${randomUUID()}.tmp`;
     let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
     try {
-      const check = await readPinnedFile(directory, fileName);
+      const check = await observePinnedFileBytes(directory, fileName);
       if (check.revision !== expected || check.exists !== before.exists) throw new AgentMemoryRevisionConflictError(expected, check.revision);
       handle = await fs.open(temporary, noFollowFlags(fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL), 0o600);
       await handle.writeFile(content, 'utf8'); await handle.sync(); await handle.close(); handle = undefined;
-      const finalCheck = await readPinnedFile(directory, fileName);
+      const finalCheck = await observePinnedFileBytes(directory, fileName);
       if (finalCheck.revision !== expected || finalCheck.exists !== before.exists) throw new AgentMemoryRevisionConflictError(expected, finalCheck.revision);
       await fs.rename(temporary, `${parent}/${fileName}`); await syncDirectoryMode(directory, directorySync);
       return Object.freeze({ exists: true, content, revision: digest(content), byteCount });
@@ -328,12 +328,12 @@ async function replace(context: AgentMemoryHomeBinding, relativePath: string, ex
 async function removeNative(context: AgentMemoryHomeBinding, relativePath: string, expected: string, directorySync: 'tolerant' | 'strict'): Promise<void> {
   if (relativePath === 'MEMORY.md') throw new AgentMemoryValidationError('MEMORY.md may not be deleted');
   await withMemoryParent(context, relativePath, async (directory, fileName) => {
-    const before = await readPinnedFile(directory, fileName);
+    const before = await observePinnedFileBytes(directory, fileName);
     if (!before.exists || before.revision !== expected) throw new AgentMemoryRevisionConflictError(expected, before.revision);
     const parent = descriptorPath(directory);
     const tombstone = `${parent}/.byok-memory-delete-${randomUUID()}.tmp`;
     try {
-      const check = await readPinnedFile(directory, fileName);
+      const check = await observePinnedFileBytes(directory, fileName);
       if (!check.exists || check.revision !== expected) throw new AgentMemoryRevisionConflictError(expected, check.revision);
       await fs.rename(`${parent}/${fileName}`, tombstone); await syncDirectoryMode(directory, directorySync);
       await fs.rm(tombstone); await syncDirectoryMode(directory, directorySync);
@@ -497,12 +497,6 @@ function internalFileName(fileName: string): string {
   return fileName;
 }
 
-/** One observation of a memory file: existence and the sha256 of its exact bytes. */
-export interface AgentMemoryFileObservation {
-  readonly exists: boolean;
-  readonly revision: string;
-}
-
 const OBSERVATION_CHUNK_BYTES = 64 * 1024;
 
 /**
@@ -520,15 +514,14 @@ const OBSERVATION_CHUNK_BYTES = 64 * 1024;
  * symlink or non-regular leaf, or a leaf with more than one hard link; a
  * name below notes that differs only in letter case from another; any other
  * open/read/stat I/O error; and a file that changed while it was hashed
- * (transient). With an external `filesystem` backend the observation is that
- * backend's bounded UTF-8 `read`.
+ * (transient). The native backend and an external `filesystem` backend give the
+ * same observation of the same file.
  */
 export async function observeAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, relativePath: string): Promise<AgentMemoryFileObservation> {
   const home = agentMemoryHomeBinding(binding);
   const memoryPath = validateAgentMemoryPath(relativePath);
   if (home.filesystem !== undefined) {
-    const current = await home.filesystem.read(memoryPath, AGENT_MEMORY_MAX_FILE_BYTES);
-    return Object.freeze({ exists: current.exists, revision: current.revision });
+    return home.filesystem.observe(memoryPath);
   }
   const parts = memoryPath.split('/');
   const fileName = parts.pop()!;
@@ -607,6 +600,12 @@ export interface AgentMemoryHomeCompareAndSwap {
  * {@link AgentMemoryValidationError} for a refused input, and
  * {@link AgentMemoryIoError} (or a backend error) otherwise.
  *
+ * The live revision is streamed over the file's raw bytes with no size limit
+ * and no UTF-8 requirement, so an oversized or non-UTF-8 file can be replaced
+ * or deleted with its correct revision. The file must still be a regular file
+ * with one link, unchanged while it is hashed. New content stays bounded: 256
+ * KiB, and the caller limits `MEMORY.md` to 8 KiB.
+ *
  * Native backend: every conflict is thrown before the rename that would
  * install new bytes (replace compares before the temp file, before its write
  * and after it; delete compares twice before its tombstone rename), so a
@@ -629,6 +628,156 @@ export async function compareAndSwapAgentMemoryHomeFile(binding: AgentMemoryHome
   if (input.operation !== 'replace' || typeof input.content !== 'string') throw new AgentMemoryValidationError('replace requires string content');
   const content = input.content;
   return exclusiveAgentMemoryHome(home.canonicalHome, () => replace(home, relativePath, expectedRevision, content, 'strict'));
+}
+
+/**
+ * Names below `notes` stay in latin1, one character per byte, from the listing
+ * to this path: a name that is not UTF-8 survives the round trip. A memory path
+ * is ASCII, so it reads the same either way.
+ */
+function memoryEntryPath(directory: Awaited<ReturnType<typeof fs.open>>, name: string): Buffer {
+  return Buffer.from(`${descriptorPath(directory)}/${name}`, 'latin1');
+}
+
+/** An entry on another device, such as a volume mounted below the home, is refused. */
+async function requireParentVolume(directory: Awaited<ReturnType<typeof fs.open>>, entry: BigIntStats): Promise<void> {
+  if ((await directory.stat({ bigint: true })).dev !== entry.dev) throw new AgentMemoryValidationError('memory entry is on another volume');
+}
+
+/** One step down: a no-follow descriptor on the volume of its parent. */
+async function openMemoryChild(directory: Awaited<ReturnType<typeof fs.open>>, name: string): Promise<Awaited<ReturnType<typeof fs.open>>> {
+  const child = await openPinnedDirectory(memoryEntryPath(directory, name));
+  try {
+    await requireParentVolume(directory, await child.stat({ bigint: true }));
+    return child;
+  } catch (error) {
+    await child.close().catch(() => {});
+    throw error;
+  }
+}
+
+/** Delete one entry without following a link; a directory goes with its contents. */
+async function removeMemoryEntry(directory: Awaited<ReturnType<typeof fs.open>>, name: string, stat: BigIntStats): Promise<void> {
+  await requireParentVolume(directory, stat);
+  const entry = memoryEntryPath(directory, name);
+  if (!stat.isDirectory()) { await fs.unlink(entry); return; }
+  const child = await openMemoryChild(directory, name);
+  try {
+    for (const nested of await fs.readdir(descriptorPath(child), { encoding: 'latin1' })) {
+      await removeMemoryEntry(child, nested, await fs.lstat(memoryEntryPath(child, nested), { bigint: true }));
+    }
+  } finally { await child.close().catch(() => {}); }
+  await fs.rmdir(entry);
+}
+
+interface RestoreRecord {
+  readonly kinds: ReadonlyMap<string, AgentMemoryWalkEntry['kind']>;
+  readonly files: ReadonlySet<string>;
+}
+
+function restoreRecord(input: AgentMemoryRestoreRecord): RestoreRecord {
+  const refuse = (): never => { throw new AgentMemoryValidationError('restore record is invalid'); };
+  const kinds = new Map<string, AgentMemoryWalkEntry['kind']>();
+  for (const { path: entryPath, kind } of input.entries) {
+    if (kinds.has(entryPath) || !entryPath.startsWith('notes/')) refuse();
+    kinds.set(entryPath, kind);
+  }
+  const files = new Set<string>();
+  for (const candidate of input.files) {
+    const memoryPath = validateAgentMemoryPath(candidate);
+    if (files.has(memoryPath) || (memoryPath !== 'MEMORY.md' && kinds.get(memoryPath) !== 'file')) refuse();
+    files.add(memoryPath);
+  }
+  if (!files.has('MEMORY.md')) refuse();
+  return { kinds, files };
+}
+
+/**
+ * Whether an entry has the path and the type it had at the start. A memory file
+ * must also still be a regular file with one link. The walk refuses a symlink,
+ * so no symlink is ever in the record.
+ */
+function staysAfterRestore(record: RestoreRecord, relativePath: string, stat: BigIntStats): boolean {
+  switch (record.kinds.get(relativePath)) {
+    case 'directory':
+    case 'opaque-directory': return stat.isDirectory();
+    case 'other': return !stat.isFile() && !stat.isDirectory() && !stat.isSymbolicLink();
+    case 'file': return stat.isFile() && (!record.files.has(relativePath) || stat.nlink === 1n);
+    default: return false;
+  }
+}
+
+async function cleanRestoreDirectory(directory: Awaited<ReturnType<typeof fs.open>>, relativeDirectory: string, record: RestoreRecord): Promise<number> {
+  let removedHere = 0;
+  let removedBelow = 0;
+  for (const name of await fs.readdir(descriptorPath(directory), { encoding: 'latin1' })) {
+    const relativePath = `${relativeDirectory}/${name}`;
+    const stat = await fs.lstat(memoryEntryPath(directory, name), { bigint: true });
+    if (!staysAfterRestore(record, relativePath, stat)) {
+      await removeMemoryEntry(directory, name, stat);
+      removedHere += 1;
+    } else if (record.kinds.get(relativePath) === 'directory') {
+      await requireParentVolume(directory, stat);
+      const child = await openMemoryChild(directory, name);
+      try { removedBelow += await cleanRestoreDirectory(child, relativePath, record); } finally { await child.close().catch(() => {}); }
+    }
+  }
+  if (removedHere > 0) await syncDirectoryStrict(directory);
+  return removedHere + removedBelow;
+}
+
+async function cleanupNative(context: AgentMemoryHomeBinding, record: RestoreRecord): Promise<AgentMemoryRestoreCleanup> {
+  try {
+    return await withPinnedDirectory(context.canonicalHome, [], async (root) => {
+      let removedHere = 0;
+      let removedBelow = 0;
+      for (const name of ['MEMORY.md', 'notes']) {
+        const stat = await fs.lstat(memoryEntryPath(root, name), { bigint: true }).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return undefined;
+          throw error;
+        });
+        if (stat === undefined) continue;
+        if (name === 'MEMORY.md' ? !(stat.isFile() && stat.nlink === 1n) : !stat.isDirectory()) {
+          await removeMemoryEntry(root, name, stat);
+          removedHere += 1;
+        } else if (name === 'notes') {
+          const child = await openMemoryChild(root, name);
+          try { removedBelow += await cleanRestoreDirectory(child, name, record); } finally { await child.close().catch(() => {}); }
+        }
+      }
+      if (removedHere > 0) await syncDirectoryStrict(root);
+      return Object.freeze({ deleted: removedHere + removedBelow });
+    }, context.homeIdentity);
+  } catch (error) {
+    if (error instanceof AgentMemoryError) throw error;
+    throw new AgentMemoryIoError('could not clean the Agent memory home for a restore');
+  }
+}
+
+/**
+ * The cleanup step of a restore after a failed commit-on-success Attempt
+ * (#1440). The caller holds the writer lease and the runtime has stopped.
+ *
+ * It compares paths and types with the start record, and knows no memory-path
+ * rule. Below `notes` it walks the directories the start walk entered and
+ * deletes, without following a link, every entry outside the record, including
+ * one whose path is in it with another type, and a directory with its contents.
+ * A path of the start copy that is no longer a regular file with one link goes
+ * too; other links to that file do not change. Entries in the record stay. In
+ * the home root it takes only the exact names: `MEMORY.md` when it is not a
+ * regular file with one link, and `notes` when it is not a directory. The
+ * caller writes those back. A case variant in the root stays, because no rule
+ * refuses one at the start.
+ *
+ * There is no compare and no entry limit: the lease is exclusive. A delete
+ * refuses to cross onto another volume, so the restore fails and is retried.
+ * The helper backend refuses this on Windows, which declares no commit on
+ * success. Not a public export.
+ */
+export async function cleanupAgentMemoryHomeForRestore(binding: AgentMemoryHomeBinding, record: AgentMemoryRestoreRecord): Promise<AgentMemoryRestoreCleanup> {
+  const home = agentMemoryHomeBinding(binding);
+  const parsed = restoreRecord(record);
+  return exclusiveAgentMemoryHome(home.canonicalHome, () => (home.filesystem !== undefined ? home.filesystem.cleanupForRestore(record) : cleanupNative(home, parsed)));
 }
 
 /** Read one SDK-internal state file under `.byok` through the pinned home. */
@@ -744,42 +893,69 @@ export class AgentMemoryService {
   }
 }
 
-async function memoryNotePaths(context: AgentMemoryHomeBinding): Promise<readonly string[]> {
-  if (context.filesystem !== undefined) {
-    const paths = await context.filesystem.walk('notes', AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES);
-    const candidates: string[] = [];
-    for (const candidate of paths) {
-      try { candidates.push(validateAgentMemoryPath(candidate)); } catch { /* opaque non-memory file */ }
-    }
-    return Object.freeze(candidates);
-  }
-  const candidates: string[] = [];
+/**
+ * A directory component has the same safe-name policy as a leaf. An unsafe
+ * directory is opaque local state and is never traversed.
+ */
+function walkEntersDirectory(name: string): boolean {
+  return safeSegment(name) && !SECRET_LIKE.test(name) && name !== '.byok';
+}
+
+async function walkNotesNative(context: AgentMemoryHomeBinding): Promise<AgentMemoryWalk> {
+  const paths: string[] = [];
+  const entries: AgentMemoryWalkEntry[] = [];
   let entriesSeen = 0;
   async function walk(directory: Awaited<ReturnType<typeof fs.open>>, relativeDirectory: string): Promise<void> {
-    const entries = await fs.readdir(descriptorPath(directory), { withFileTypes: true });
-    const folded = entries.map((entry) => asciiLower(entry.name));
-    for (const entry of entries) {
+    const names = await fs.readdir(descriptorPath(directory), { encoding: 'latin1' });
+    const folded = names.map((name) => asciiLower(name));
+    for (const name of names) {
       entriesSeen += 1;
       if (entriesSeen > AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES) throw new AgentMemorySnapshotLimitError('memory snapshot exceeds bounded directory entries');
-      const candidate = `${relativeDirectory}/${entry.name}`;
-      if (entry.isSymbolicLink()) throw new AgentMemoryError('memory notes contains a symlink');
+      const candidate = `${relativeDirectory}/${name}`;
+      const stat = await fs.lstat(memoryEntryPath(directory, name), { bigint: true });
+      if (stat.isSymbolicLink()) throw new AgentMemoryError('memory notes contains a symlink');
       // Direct operations refuse both names of a case pair, so walk leaves them out.
-      if (folded.indexOf(asciiLower(entry.name)) !== folded.lastIndexOf(asciiLower(entry.name))) continue;
-      if (entry.isDirectory()) {
-        // A directory component has the same safe-name policy as a leaf. An
-        // unsafe directory is opaque local state and is never traversed.
-        if (safeSegment(entry.name) && !SECRET_LIKE.test(entry.name) && entry.name !== '.byok') {
-          const nested = await openPinnedDirectory(`${descriptorPath(directory)}/${entry.name}`);
-          try { await walk(nested, candidate); } finally { await nested.close().catch(() => {}); }
-        }
+      const listed = folded.indexOf(asciiLower(name)) === folded.lastIndexOf(asciiLower(name));
+      if (stat.isDirectory()) {
+        if (!listed || !walkEntersDirectory(name)) { entries.push(Object.freeze({ path: candidate, kind: 'opaque-directory' })); continue; }
+        entries.push(Object.freeze({ path: candidate, kind: 'directory' }));
+        await requireParentVolume(directory, stat);
+        const nested = await openMemoryChild(directory, name);
+        try { await walk(nested, candidate); } finally { await nested.close().catch(() => {}); }
         continue;
       }
-      if (!entry.isFile() || (await fs.lstat(`${descriptorPath(directory)}/${entry.name}`, { bigint: true })).nlink > 1n) continue;
-      try { candidates.push(validateAgentMemoryPath(candidate)); } catch { /* opaque non-memory file */ }
+      if (!stat.isFile()) { entries.push(Object.freeze({ path: candidate, kind: 'other' })); continue; }
+      entries.push(Object.freeze({ path: candidate, kind: 'file' }));
+      if (!listed || stat.nlink > 1n) continue;
+      await requireParentVolume(directory, stat);
+      paths.push(candidate);
     }
   }
-  await withPinnedDirectory(context.canonicalHome, ['notes'], (directory) => walk(directory, 'notes'), context.homeIdentity);
+  await withPinnedDirectory(context.canonicalHome, [], async (root) => {
+    const notes = await openMemoryChild(root, 'notes');
+    try { await walk(notes, 'notes'); } finally { await notes.close().catch(() => {}); }
+  }, context.homeIdentity);
+  return Object.freeze({ paths: Object.freeze(paths), entries: Object.freeze(entries) });
+}
+
+function walkMemoryNotes(context: AgentMemoryHomeBinding): Promise<AgentMemoryWalk> {
+  return context.filesystem !== undefined ? context.filesystem.walk('notes', AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES) : walkNotesNative(context);
+}
+
+async function memoryNotePaths(context: AgentMemoryHomeBinding): Promise<readonly string[]> {
+  const candidates: string[] = [];
+  for (const candidate of (await walkMemoryNotes(context)).paths) {
+    try { candidates.push(validateAgentMemoryPath(candidate)); } catch { /* opaque non-memory file */ }
+  }
   return Object.freeze(candidates);
+}
+
+/**
+ * The start record of a commit-on-success Attempt (#1440): each entry the walk
+ * saw in `notes`, with its type. The caller must hold the exclusive home lease.
+ */
+export async function recordAgentMemoryHomeEntries(input: AgentMemoryHomeBinding): Promise<readonly AgentMemoryWalkEntry[]> {
+  return (await walkMemoryNotes(agentMemoryHomeBinding(input))).entries;
 }
 
 /** Internal bounded capture; the caller must hold the exclusive home lease throughout. */

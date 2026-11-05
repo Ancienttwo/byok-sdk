@@ -60,8 +60,8 @@ const helperHarness = vi.hoisted(() => {
           stdout.emit('data', Buffer.from(`${JSON.stringify({
             id: request.id,
             ok: true,
-            protocol: 2,
-            result: { helperVersion: '2', identity: request.expectedIdentity },
+            protocol: 3,
+            result: { helperVersion: '3', identity: request.expectedIdentity },
           })}\n`));
           return;
         }

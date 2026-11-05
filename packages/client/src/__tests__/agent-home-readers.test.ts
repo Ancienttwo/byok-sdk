@@ -304,7 +304,10 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     expect(Object.hasOwn(payloadOf(await complete(harness, 0, 'resident-reader')), 'residentMemoryOverLimit')).toBe(false);
   });
 
-  itWithMemoryFilesystem('restores only MEMORY.md after a writer overran it, and reports the size it wrote (#1439)', async () => {
+  itWithMemoryFilesystem.each([
+    ['12 KiB', 12288],
+    ['300 KiB', 300 * 1024],
+  ])('restores only MEMORY.md after a writer overran it to %s, and reports the size it wrote (#1439)', async (_label, size) => {
     server.setAckCapabilities(['resident-memory-over-limit']);
     const harness = await start();
     const home = await harness.home('restored');
@@ -316,10 +319,10 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
 
     offer('restored-writer', 'restored');
     await claimed('restored-writer');
-    await fs.writeFile(path.join(home, 'MEMORY.md'), 'overrun '.repeat(1536));
+    await fs.writeFile(path.join(home, 'MEMORY.md'), 'overrun '.repeat(size / 8));
     await fs.writeFile(path.join(home, 'notes', 'kept.md'), 'kept note\n');
     const terminal = await complete(harness, 1, 'restored-writer');
-    expect(payloadOf(terminal).residentMemoryOverLimit).toEqual({ byteCount: 12288 });
+    expect(payloadOf(terminal).residentMemoryOverLimit).toEqual({ byteCount: size });
     await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the writer to release');
 
     expect(await fs.readFile(path.join(home, 'MEMORY.md'), 'utf8')).toBe('as it started\n');
@@ -327,7 +330,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     const audit = await fs.readFile(path.join(home, '.byok', 'agent-memory-audit-v1.jsonl'), 'utf8');
     expect(audit).toContain('"kind":"resident_memory_restore"');
     expect(audit).toContain('"taskId":"restored-writer"');
-    expect(audit).toContain('"byteCount":12288,"outcome":"restored"');
+    expect(audit).toContain(`"byteCount":${size},"outcome":"restored"`);
     expect(audit).not.toContain('overrun');
   });
 

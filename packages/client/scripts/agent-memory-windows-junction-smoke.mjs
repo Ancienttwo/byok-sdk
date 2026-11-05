@@ -12,11 +12,12 @@ import path from 'node:path';
 
 assert.equal(process.platform, 'win32', 'this matrix requires real Windows');
 const helperBin = process.argv[2];
+const PROTOCOL = 3;
 assert.ok(helperBin && path.isAbsolute(helperBin), 'use an explicit helper path');
 const version = spawnSync(helperBin, ['--version'], { env: {}, encoding: 'utf8', timeout: 10_000, windowsHide: true });
 assert.ifError(version.error);
 assert.equal(version.status, 0, version.stderr);
-assert.equal(version.stdout, '2\n');
+assert.equal(version.stdout, `${PROTOCOL}\n`);
 
 const scratch = await mkdtemp(path.join(os.tmpdir(), 'wo09-windows-'));
 const results = [];
@@ -57,9 +58,9 @@ try {
     if (junction) await symlink(target, junction, 'junction');
     try {
       const requests = [
-        { id: 'open', protocol: 2, op: 'open', root, expectedIdentity: { kind: 'windows', volumeSerial: identity.dev.toString(10), fileIndex: identity.ino.toString(10) } },
-        { id: 'write', protocol: 2, op: 'replace', path: write.path, expectedRevision: write.expectedRevision, contentBase64: 'eA', maxBytes: 1024 },
-        { id: 'close', protocol: 2, op: 'close' },
+        { id: 'open', protocol: PROTOCOL, op: 'open', root, expectedIdentity: { kind: 'windows', volumeSerial: identity.dev.toString(10), fileIndex: identity.ino.toString(10) } },
+        { id: 'write', protocol: PROTOCOL, op: 'replace', path: write.path, expectedRevision: write.expectedRevision, contentBase64: 'eA', maxBytes: 1024 },
+        { id: 'close', protocol: PROTOCOL, op: 'close' },
       ];
       const child = spawnSync(helperBin, ['serve'], {
         env: {}, input: requests.map((request) => JSON.stringify(request)).join('\n') + '\n',
@@ -72,8 +73,8 @@ try {
       assert.equal(child.status, opened ? 0 : 1, child.stderr);
       const responses = child.stdout.trim().split('\n').map((line) => JSON.parse(line));
       assert.deepEqual(responses.map((reply) => [reply.id, reply.protocol, reply.ok, reply.error?.code]), opened
-        ? [['open', 2, true, undefined], ['write', 2, write.code === undefined, write.code], ['close', 2, true, undefined]]
-        : [['open', 2, false, 'unsafe_root'], ['write', 2, false, 'protocol_sequence'], ['close', 2, false, 'protocol_sequence']]);
+        ? [['open', PROTOCOL, true, undefined], ['write', PROTOCOL, write.code === undefined, write.code], ['close', PROTOCOL, true, undefined]]
+        : [['open', PROTOCOL, false, 'unsafe_root'], ['write', PROTOCOL, false, 'protocol_sequence'], ['close', PROTOCOL, false, 'protocol_sequence']]);
       assert.equal(await readFile(path.join(outside, 'sentinel.txt'), 'utf8'), 'outside sentinel');
       assert.deepEqual(await readdir(outside), ['sentinel.txt']);
       const children = (await readdir(realHome)).filter((name) => !['notes', '.byok'].includes(name));

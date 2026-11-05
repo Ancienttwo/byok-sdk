@@ -18,6 +18,16 @@ func pinnedOperation(active *session, operation, path, revision string) *protoco
 	switch operation {
 	case "read":
 		_, failure = active.read(readRequest{ID: "read", Protocol: protocolVersion, Op: "read", Path: path, MaxBytes: maxFileBytes})
+	case "observe":
+		_, failure = active.observe(observeRequest{ID: "observe", Protocol: protocolVersion, Op: "observe", Path: path})
+	case "cleanup":
+		// Record the other file, so path is the one the cleanup has to delete.
+		other := "notes/sub/deep.md"
+		if path == other {
+			other = "notes/entry.md"
+		}
+		_, failure = active.cleanup(cleanupRequest{ID: "cleanup", Protocol: protocolVersion, Op: "cleanup", Files: []string{"MEMORY.md"},
+			Entries: []walkEntry{{Path: "notes/sub", Kind: kindDirectory}, {Path: other, Kind: kindFile}}})
 	case "replace":
 		_, failure = active.replace(replaceRequest{ID: "replace", Protocol: protocolVersion, Op: "replace", Path: path, ExpectedRevision: revision,
 			ContentBase64: base64.RawStdEncoding.EncodeToString([]byte("must-not-write-outside")), MaxBytes: maxFileBytes})

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.38.0",
-    "snapshotSha256": "226019e5157176828ba81448b1ce8bf327260a54ff9c93367bf837e31be154bb"
+    "snapshotSha256": "551c3309ab0c679f26ec5c1022884463ffc2360a2b1ccaf26c2268f6d3d5d14f"
   },
   "configFields": {
     "status": "tracked",
@@ -57,9 +57,59 @@
         "export:@byok-sdk/server/execution-core#HostExecutionCore",
         "export:@byok-sdk/server/execution-core#HostMemoryPage"
       ]
+    },
+    {
+      "id": "agent-memory-filesystem-raw-byte-compare",
+      "impact": "breaking",
+      "summary": "AgentMemoryFilesystem gains observe and cleanupForRestore, and walk now resolves with { paths, entries }: paths is the same list of files as before, and entries is everything the walk saw, with its type (#1440). An embedder that implements the interface adds both methods and changes walk. The helper protocol and version are now 3, with no support for the previous helper; the release carries the new binaries. Replace and delete compare the current revision over the file's raw bytes, on both backends, with no size limit and no UTF-8 requirement; the file must still be a regular file with one link, unchanged while it is hashed. New content stays limited, and reads keep their limits. The native walk now refuses an entry on another volume, as the helper does.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/client/agent-memory#AgentMemoryFileObservation",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryFilesystem",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryRestoreCleanup",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryRestoreRecord",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryWalk",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntry",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntryKind"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryFileObservation",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryFilesystem",
+      "change": "changed",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryRestoreCleanup",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryRestoreRecord",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryWalk",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntry",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntryKind",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
     {
       "item": "export:@byok-sdk/cloud#TerminalResult",
       "change": "changed",

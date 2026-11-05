@@ -16,6 +16,7 @@ import {
 import type {
   AgentMemoryFilesystem,
   AgentMemoryFilesystemFileState,
+  AgentMemoryWalk,
 } from '../daemon/agent-memory-filesystem';
 import { AgentMemoryError, type AgentMemoryProjectionPort } from '@byok-sdk/protocol/agent-memory';
 
@@ -101,8 +102,10 @@ class AuditRaceFilesystem implements AgentMemoryFilesystem {
     this.files.delete(filePath);
   }
 
+  async observe(): Promise<never> { throw new Error('not_used'); }
+  async cleanupForRestore(): Promise<never> { throw new Error('not_used'); }
   async append(): Promise<void> {}
-  async walk(): Promise<readonly string[]> { return Object.freeze([]); }
+  async walk(): Promise<AgentMemoryWalk> { return { paths: [], entries: [] }; }
   async close(): Promise<void> {}
 }
 
