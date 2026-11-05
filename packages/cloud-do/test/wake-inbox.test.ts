@@ -1052,9 +1052,17 @@ describe('4e-2 terminal-first settlement and stable admission', () => {
   }, 65_000);
 
   it('keeps the admission digest and original selection when cancel and expiry shrink a real claim', async () => {
-    const name = await setup({ audit: true, pauseAdmission: true }); const at = Date.now() + 200;
+    const name = await setup({ audit: true, pauseAdmission: true, pauseAlarm: true }); const at = Date.now() + 200;
     const selected: Row[] = [];
-    for (let i = 0; i < 3; i++) selected.push(await enqueue(name, { dedupKey: `shrink:${i}`, text: `selected text ${i}`, availableAt: at }));
+    for (let i = 0; i < 3; i++) {
+      selected.push(await enqueue(name, { dedupKey: `shrink:${i}`, text: `selected text ${i}`, availableAt: at }));
+      if (i === 1) {
+        // Let the real alarm arrive before the third enqueue: setup must not depend on winning a 200 ms race.
+        await eventually(async () => expect((await dump(name)).fixture_alarms).toHaveLength(1));
+        expect((await dump(name)).fixture_admission_details).toHaveLength(0);
+      }
+    }
+    await json(name, 'release-alarm');
     await eventually(async () => expect((await dump(name)).fixture_admission_details).toHaveLength(1));
     const original = await dump(name); const admission = JSON.parse(String(original.fixture_admission_details![0]!.detailJson)) as { digest: string; seqs: number[] };
     expect(admission.seqs).toEqual(selected.map(row => row.seq)); expect(admission.digest).toMatch(/^[a-f0-9]{64}$/);
