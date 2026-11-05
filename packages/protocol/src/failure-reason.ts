@@ -57,6 +57,56 @@ function redact(text: string): string {
   return out;
 }
 
+const marker = (droppedBytes: number): string => `\u2026[truncated ${droppedBytes} bytes]`;
+
+/** UTF-8 bytes of `text`; a lone surrogate encodes as U+FFFD. */
+function utf8Bytes(text: string): number {
+  return encoder.encode(text).length;
+}
+
+function wellFormed(text: string): string {
+  return decoder.decode(encoder.encode(text));
+}
+
+export interface TruncateOptions {
+  /** Size of a text, additive over its code points. Default: its UTF-8 bytes. */
+  readonly measure?: (text: string) => number;
+  /** Keep the end of the text too, with the marker in the middle. Default: the head only. */
+  readonly keepTail?: boolean;
+}
+
+/**
+ * The single text cut of the protocol: `text` as it is when it measures at
+ * most `maxBytes`, else the kept code points and a `…[truncated N bytes]`
+ * marker, where N counts the dropped measured bytes. The kept text is
+ * re-encoded, so a lone surrogate in it becomes U+FFFD. A `maxBytes` that
+ * cannot hold the marker gives the marker alone, which is then over `maxBytes`.
+ */
+export function truncateUtf8(text: string, maxBytes: number, options: TruncateOptions = {}): string {
+  const { measure = utf8Bytes, keepTail = false } = options;
+  const total = measure(text);
+  if (total <= maxBytes) return text;
+  // Reserve the widest marker this input can need; the final one is no wider.
+  const room = maxBytes - measure(marker(total));
+  if (room <= 0) return marker(total);
+  const points = Array.from(text);
+  let start = 0, kept = 0;
+  for (const headRoom = keepTail ? Math.ceil(room / 2) : room; start < points.length; start += 1) {
+    const size = measure(points[start]!);
+    if (kept + size > headRoom) break;
+    kept += size;
+  }
+  let end = points.length;
+  while (keepTail && end > start) {
+    const size = measure(points[end - 1]!);
+    if (kept + size > room) break;
+    kept += size;
+    end -= 1;
+  }
+  const head = wellFormed(points.slice(0, start).join(''));
+  return `${head}${marker(total - kept)}${wellFormed(points.slice(end).join(''))}`;
+}
+
 /**
  * Redact credentials from a failure reason, then cap it at
  * {@link TASK_FAIL_REASON_MAX_BYTES} UTF-8 bytes on a code-point boundary
@@ -64,11 +114,5 @@ function redact(text: string): string {
  * bytes.
  */
 export function boundFailureReason(reason: string): string {
-  const redacted = redact(reason);
-  const bytes = encoder.encode(redacted);
-  if (bytes.length <= TASK_FAIL_REASON_MAX_BYTES) return redacted;
-  // Reserve the widest marker this input can need; the final one is no wider.
-  let keep = TASK_FAIL_REASON_MAX_BYTES - encoder.encode(`\u2026[truncated ${bytes.length} bytes]`).length;
-  while (keep > 0 && ((bytes[keep] ?? 0) & 0xc0) === 0x80) keep -= 1;
-  return `${decoder.decode(bytes.subarray(0, keep))}\u2026[truncated ${bytes.length - keep} bytes]`;
+  return truncateUtf8(redact(reason), TASK_FAIL_REASON_MAX_BYTES);
 }

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.38.0",
-    "snapshotSha256": "c24ece5ce5402979b4a4d2772b7466ccfadc4e72a9824fc5d9c8db3b66c58a57"
+    "snapshotSha256": "c645074310a0e878f3586d5dde8c0ac7df90aa9c458861ab27e46d421f173e9d"
   },
   "configFields": {
     "status": "tracked",
@@ -23,6 +23,25 @@
       "items": [
         "example:bot-collaboration"
       ]
+    },
+    {
+      "id": "protocol-build-handoff-pack",
+      "impact": "additive",
+      "summary": "buildHandoffPack builds a bounded conversation handoff from turns that a Host holds; nothing calls it for a Host. truncateUtf8 is the text cut that it shares with boundFailureReason, whose output does not change.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1441",
+      "items": [
+        "export:@byok-sdk/protocol#HANDOFF_EXCERPT_LINE_MAX_BYTES",
+        "export:@byok-sdk/protocol#HandoffJson",
+        "export:@byok-sdk/protocol#HandoffLine",
+        "export:@byok-sdk/protocol#HandoffPack",
+        "export:@byok-sdk/protocol#HandoffPackBudgets",
+        "export:@byok-sdk/protocol#HandoffTurn",
+        "export:@byok-sdk/protocol#TruncateOptions",
+        "export:@byok-sdk/protocol#buildHandoffPack",
+        "export:@byok-sdk/protocol#truncateUtf8",
+        "export:@byok-sdk/protocol/constants#TruncateOptions",
+        "export:@byok-sdk/protocol/constants#truncateUtf8"
+      ]
     }
   ],
   "changes": [
@@ -32,6 +51,61 @@
       "before": "K8 0.0.1 src-sha256=f28fb891884de485",
       "after": "K8 0.0.1 src-sha256=4fba320e77adca95",
       "entry": "k8-room-turn-read-only-memory"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HANDOFF_EXCERPT_LINE_MAX_BYTES",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffJson",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffLine",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffPack",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffPackBudgets",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffTurn",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TruncateOptions",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#buildHandoffPack",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#truncateUtf8",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#TruncateOptions",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#truncateUtf8",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
     }
   ]
 }
