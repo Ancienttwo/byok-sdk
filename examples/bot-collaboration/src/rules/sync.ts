@@ -1,5 +1,5 @@
-import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, type AgentRef, type ResultSchema, type TaskOfferSealedPayload,
-  type TaskSealing } from '@byok-sdk/protocol';
+import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, type AgentMemorySelection, type AgentRef, type ResultSchema,
+  type TaskOfferSealedPayload, type TaskSealing } from '@byok-sdk/protocol';
 import { json, type SealedRoutineRef, type Turn } from './turn';
 import { BOT_REPLY_MAX_BYTES, type IntentFacts, type Publish } from './delegation';
 import { CurrentRequestTooLargeError } from './history';
@@ -22,6 +22,7 @@ export const OFFER_WAIT_MS = 300_000;
 export interface FreezeExecution {
   readonly agentMessageContext?: { readonly freshnessCursor?: string };
   readonly payload: { readonly requiredToolsets?: readonly string[]; readonly messageEgress?: { readonly maxBytes: number };
+    readonly agentMemory?: AgentMemorySelection;
     /** Read only by a sealed routine freeze, which needs the Agent its template is sealed for. */
     readonly agentRef?: { readonly agentId: string; readonly profileRevision: string } };
 }
@@ -38,6 +39,12 @@ export interface SealedRoutineTemplate {
 /** A sealed routine Turn that cannot freeze ends `failed` with one of these reasons (#953). */
 export const SEALED_ROUTINE_TEMPLATE_MISSING = 'sealed_routine_template_missing';
 export const SEALED_ROUTINE_AGENT_CHANGED = 'sealed_routine_agent_changed';
+/**
+ * The memory mode that a room Turn freezes with (#1446). Other users' and Bots' text reaches a room Turn, so it never gets
+ * `memory_save`; a mode only goes down, and an absent mode stays subject to the daemon's admission.
+ */
+const ROOM_AGENT_MEMORY: Readonly<Record<AgentMemorySelection, AgentMemorySelection>> = { none: 'none', read: 'read',
+  'read-if-admitted': 'read-if-admitted', 'read-write': 'read', 'read-write-if-admitted': 'read-if-admitted' };
 export interface SyncBot<E extends FreezeExecution> extends ContextBot { readonly revision: string; readonly model: string; readonly execution: E }
 /** The rows that the sync step reads and changes. */
 export interface SyncState<E extends FreezeExecution> extends ContextState, BotHistoryState {
@@ -226,7 +233,8 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     agentMessageContext: { ...base.agentMessageContext!, freshnessCursor: turn.id },
     payload: { ...base.payload, messageEgress: { ...egress, maxBytes: Math.min(egress.maxBytes, BOT_REPLY_MAX_BYTES) } },
   } : undefined;
-  const execution = turn.source === 'room_slot' ? { ...base, agentMessageContext: undefined, payload: roomPayload } : { ...base, ...chain };
+  const execution = turn.source === 'room_slot' ? { ...base, agentMessageContext: undefined,
+    payload: { ...roomPayload, agentMemory: ROOM_AGENT_MEMORY[roomPayload.agentMemory ?? 'read-if-admitted'] } } : { ...base, ...chain };
   // The offer keeps every template field, and sets the frozen instruction and result contract.
   const offer = { ...execution, payload: { ...execution.payload, instruction: frozen.instruction,
     terminalProjection: { mode: 'result-document' as const, contract: BOT_TURN_OUTCOME_CONTRACT, schema } } } as unknown as E;

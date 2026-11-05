@@ -16,10 +16,10 @@
   },
   "entries": [
     {
-      "id": "k8-room-seat-trigger-message",
-      "impact": "additive",
-      "summary": "K8 room-seat: projection values gain the optional triggerMessageId (#1449). Only a seat that a room_call opened has it: the message the seat answers, which is the caller's post (its seat id) or, when the caller passed, the message the caller answered (its own triggerMessageId, else the root). A mentioned seat never has it, so a Host tells the two apart by this field and does not derive it from the seat id. A Host that validates the value with a closed schema allows the field before it upgrades; a Host that vendored K8 copies src/rules/rooms.ts. Seats opened before the upgrade are not backfilled.",
-      "migration": "examples/bot-collaboration/README.md#room-seat-projections",
+      "id": "k8-room-turn-read-only-memory",
+      "impact": "breaking",
+      "summary": "K8 freezes a room Turn with read-only Agent memory. read-write becomes read, read-write-if-admitted becomes read-if-admitted, and a template without agentMemory freezes as read-if-admitted, so a room Turn loses memory_save. Other Turns keep the template value. A room Turn of a template without agentMemory now needs a device that advertises agent-memory-selection and agent-memory-read-if-admitted. A Host that vendors K8 copies src/rules/sync.ts. K8 room-seat: projection values gain the optional triggerMessageId (#1449). Only a seat that a room_call opened has it: the message the seat answers, which is the caller's post (its seat id) or, when the caller passed, the message the caller answered (its own triggerMessageId, else the root). A mentioned seat never has it, so a Host tells the two apart by this field and does not derive it from the seat id. A Host that validates the value with a closed schema allows the field before it upgrades; a Host that vendored K8 copies src/rules/rooms.ts. Seats opened before the upgrade are not backfilled. See examples/bot-collaboration/README.md#room-seat-projections.",
+      "migration": "examples/bot-collaboration/README.md#group-chat-and-main-bot",
       "items": [
         "example:bot-collaboration"
       ]
@@ -127,7 +127,7 @@
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=f28fb891884de485",
       "after": "K8 0.0.1 src-sha256=41a6f6ff4a006d30",
-      "entry": "k8-room-seat-trigger-message"
+      "entry": "k8-room-turn-read-only-memory"
     },
     {
       "item": "export:@byok-sdk/client#AgentHomeLeaseManager",
