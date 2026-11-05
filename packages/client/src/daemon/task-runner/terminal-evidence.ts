@@ -3,7 +3,9 @@
 // module runs).
 import type { ResultReplyFailure } from '../result-reply-failure';
 import { terminalIdentity } from '../terminal-identity';
-import { TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { RESIDENT_MEMORY_MAX_BYTES, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, requiredReceiverCapabilities, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit } from '@byok-sdk/protocol';
 import type { AgentRef } from '../../agent-home';
 import { compareAgentHomeMemory, digestAgentHomeMemory } from '../../agent-home-readers';
 import type { AgentTerminalCause } from '../agent-session-handoff-store';
@@ -60,12 +62,29 @@ export function agentTerminalPayload(
   harnessId?: string;
   agentHomeProjection?: TerminalAgentHomeProjection;
   agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
+  residentMemoryOverLimit?: TerminalResidentMemoryOverLimit;
 } {
   return {
     ...terminalIdentity(active.adapter.descriptor.id, active.agentRef),
     ...(active.appliedAgentHomeProjection === undefined ? {} : { agentHomeProjection: active.appliedAgentHomeProjection }),
     ...(active.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: active.agentHomeMemoryChange }),
+    ...residentMemoryOverLimitField(active.residentMemoryOverLimit, this['deps'].getServerCapabilities?.() ?? []),
   };
+}
+
+/**
+ * `residentMemoryOverLimit`, sent only to a server that advertised its gate on
+ * every terminal type (#1439); otherwise the terminal goes without it. Server
+ * flags are live-only, so a terminal built with no connection has none.
+ */
+function residentMemoryOverLimitField(
+  residentMemoryOverLimit: TerminalResidentMemoryOverLimit | undefined,
+  serverCapabilities: readonly string[],
+): { residentMemoryOverLimit?: TerminalResidentMemoryOverLimit } {
+  if (residentMemoryOverLimit === undefined) return {};
+  const admitted = (['task.complete', 'task.fail', 'task.cancelled'] as const).every((type) =>
+    requiredReceiverCapabilities(type, { residentMemoryOverLimit }).every((flag) => serverCapabilities.includes(flag)));
+  return admitted ? { residentMemoryOverLimit } : {};
 }
 
 export async function resolveStagedResult(
@@ -120,6 +139,7 @@ export async function persistAgentTerminalEvidence(
   active.terminalCause = cause;
   active.terminalReason = reason;
   await this['measureReaderMemoryChange'](active);
+  await measureResidentMemorySize(active);
   const agentRef = active.agentRef;
   const handoff = active.agentHandoff;
   const result = await this['retryAgentTerminalEvidence'](() =>
@@ -155,6 +175,18 @@ export async function measureReaderMemoryChange(this: TaskRunner, active: Active
     after,
     active.agentBinding.lease.writerOverlapped(),
   );
+}
+
+/**
+ * A writer Attempt's `MEMORY.md` over `RESIDENT_MEMORY_MAX_BYTES` (#1439):
+ * one `lstat` of the canonical home's file, a regular file only, its size from
+ * the stat as `digestAgentHomeMemory` does. Content is not read, truncated or
+ * repaired. A failed `lstat` leaves the evidence absent.
+ */
+async function measureResidentMemorySize(active: ActiveTask): Promise<void> {
+  if (active.agentHandoff.homeAccess !== undefined) return;
+  const stat = await fs.lstat(path.join(active.agentBinding.resolution.canonicalHome, 'MEMORY.md')).catch(() => undefined);
+  active.residentMemoryOverLimit = stat?.isFile() === true && stat.size > RESIDENT_MEMORY_MAX_BYTES ? { byteCount: stat.size } : undefined;
 }
 
 export async function retryAgentTerminalEvidence(

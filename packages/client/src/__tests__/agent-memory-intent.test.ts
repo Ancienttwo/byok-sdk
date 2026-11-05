@@ -656,6 +656,11 @@ describe('WP2I-S2 typed rejections (zero memory writes, no applying)', () => {
     expect(code).toBe('content_invalid');
   });
 
+  it('MEMORY.md content over the 8 KiB resident limit -> content_invalid (#1439)', async () => {
+    const { code } = await rejected({ path: 'MEMORY.md', operation: 'replace', base: EMPTY, content: 'm'.repeat(8193) });
+    expect(code).toBe('content_invalid');
+  });
+
   it('content that is not well-formed Unicode (not UTF-8 encodable) -> content_invalid', async () => {
     const { code } = await rejected({ path: 'notes/host-a.md', operation: 'replace', base: EMPTY, content: 'bad \uD800 surrogate', targetRevision: sha('anything') });
     expect(code).toBe('content_invalid');

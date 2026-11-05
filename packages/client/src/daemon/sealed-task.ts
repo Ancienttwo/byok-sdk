@@ -115,12 +115,20 @@ const TERMINAL_TYPES: ReadonlySet<MessageType> = new Set(['task.complete', 'task
  */
 class SealedRetryError extends Error {}
 
+/** A terminal's memory evidence: the fields the split table moves into its ciphertext only when the task seals `memory-projection`. */
+function memoryEvidenceFields(type: SealableMessageType): readonly string[] {
+  const own = sealedMovedFields(type, []);
+  return sealedMovedFields(type, ['memory-projection']).filter((field) => !own.includes(field));
+}
+
 /** Fields a `task.fail` keeps when a task that cannot seal reports `sealed_key_unavailable`. */
-const UNSEALABLE_FAIL_FIELDS = ['harnessId', 'usage', 'agentRef', 'agentHomeProjection', 'agentHomeMemoryChange'] as const;
+const UNSEALABLE_FAIL_FIELDS = ['harnessId', 'usage', 'agentRef', 'agentHomeProjection', ...memoryEvidenceFields('task.fail')];
 
 /** The fields a closed plaintext terminal keeps: a task that seals `memory-projection` keeps its memory evidence sealed only (#1045). */
 function plainTerminalFields(fields: readonly string[], categories: readonly SealedCategory[]): readonly string[] {
-  return categories.includes('memory-projection') ? fields.filter((field) => field !== 'agentHomeMemoryChange') : fields;
+  if (!categories.includes('memory-projection')) return fields;
+  const evidence = memoryEvidenceFields('task.fail');
+  return fields.filter((field) => !evidence.includes(field));
 }
 
 /** The family that binds a sealed Agent-memory projection; it is an HTTP write, not a wire type. */
@@ -503,7 +511,7 @@ export class SealedTasks {
       case 'task.fail':
         return createEnvelope('task.fail', { reason: code, retryable: false, ...this.#daemonFailure(), ...pick(payload, plainTerminalFields(UNSEALABLE_FAIL_FIELDS, categories)) } as never, { taskId });
       case 'task.cancelled':
-        return createEnvelope('task.cancelled', omit(payload, categories.includes('memory-projection') ? ['reason', 'agentHomeMemoryChange'] : ['reason']) as never, { taskId });
+        return createEnvelope('task.cancelled', omit(payload, ['reason', ...(categories.includes('memory-projection') ? memoryEvidenceFields('task.cancelled') : [])]) as never, { taskId });
       case 'task.decline':
         return createEnvelope('task.decline', { reason: code, code, retryable: false, ...pick(payload, ['agentRef', 'admission']) } as never, { taskId });
       default:

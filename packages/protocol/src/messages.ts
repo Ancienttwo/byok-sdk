@@ -1385,6 +1385,19 @@ export const TerminalAgentHomeMemoryChangeSchema = z.discriminatedUnion('outcome
 export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemoryChangeSchema>;
 
 /**
+ * A writer terminal's resident `MEMORY.md` that a runtime left larger than
+ * `RESIDENT_MEMORY_MAX_BYTES` with its own file tools (#1439): `byteCount` is
+ * the file size at the terminal decision. The device reports it only for a
+ * writer Attempt that became active, only when the file is a regular file over
+ * the limit, and only to a server that advertises `resident-memory-over-limit`.
+ * Absence does not mean the file is within the limit. The schema does not
+ * compare `byteCount` with the limit, so lowering the limit later cannot make
+ * an older receiver refuse the terminal. Nothing truncates the file.
+ */
+export const TerminalResidentMemoryOverLimitSchema = z.object({ byteCount: z.number().int().nonnegative() }).strict();
+export type TerminalResidentMemoryOverLimit = z.infer<typeof TerminalResidentMemoryOverLimitSchema>;
+
+/**
  * daemon -> server: task finished successfully.
  *
  * `document` (docs/protocol.md §7.2): the OPTIONAL
@@ -1435,6 +1448,7 @@ const TaskCompletePlainPayloadSchema = z.object({
   agentRef: AgentRefSchema.optional(),
   agentHomeProjection: TerminalAgentHomeProjectionSchema.optional(),
   agentHomeMemoryChange: TerminalAgentHomeMemoryChangeSchema.optional(),
+  residentMemoryOverLimit: TerminalResidentMemoryOverLimitSchema.optional(),
 });
 
 /** A runtime failure class this version knows (#869). `unknown` means the runtime gave no structured evidence. */
@@ -1496,6 +1510,7 @@ const TaskFailPlainPayloadSchema = z.object({
   agentRef: AgentRefSchema.optional(),
   agentHomeProjection: TerminalAgentHomeProjectionSchema.optional(),
   agentHomeMemoryChange: TerminalAgentHomeMemoryChangeSchema.optional(),
+  residentMemoryOverLimit: TerminalResidentMemoryOverLimitSchema.optional(),
 });
 
 /**
@@ -1525,6 +1540,7 @@ const TaskCancelledPlainPayloadSchema = z.object({
   agentRef: AgentRefSchema.optional(),
   agentHomeProjection: TerminalAgentHomeProjectionSchema.optional(),
   agentHomeMemoryChange: TerminalAgentHomeMemoryChangeSchema.optional(),
+  residentMemoryOverLimit: TerminalResidentMemoryOverLimitSchema.optional(),
 });
 
 /**

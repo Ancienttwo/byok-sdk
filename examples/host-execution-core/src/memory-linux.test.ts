@@ -159,7 +159,7 @@ describe.skipIf(process.platform !== 'linux').each(['cloud', 'embedded'] as cons
     expect(forbidden.readback!.completion).toMatchObject({ outcome: 'rejected', code: 'memory_md_not_deletable' });
   });
 
-  it('projects only redacted resident text after task close and blocks oversized text after replace', async () => {
+  it('projects only redacted resident text after task close and refuses an oversized Host replace', async () => {
     await host.project();
     const binding = { deviceId: host.deviceId, agentRef: host.agentRef };
     const first = host.page.contextPack(binding);
@@ -167,10 +167,10 @@ describe.skipIf(process.platform !== 'linux').each(['cloud', 'embedded'] as cons
     expect(JSON.stringify(first)).not.toContain('private-value');
     const replacement = 'é'.repeat(4096) + 'x';
     const row = await host.command({ baseRevision: memoryRevision('original private-value\n'), content: replacement });
-    expect(row.readback!.completion.outcome).toBe('applied');
+    expect(row.readback!.completion).toMatchObject({ outcome: 'rejected', code: 'content_invalid' });
     expect(host.page.contextPack(binding)).toEqual(first); // Intent results do not forge a fresh projection.
-    await host.project();
-    expect(() => host.page.contextPack(binding)).toThrow('exceeds 8 KiB');
+    await host.project(); // A new projection has its own mutationId and projectedAt; the refused content never reaches it.
+    expect(host.page.contextPack(binding).residentMemory!.text).toBe(first.residentMemory!.text);
   });
 });
 

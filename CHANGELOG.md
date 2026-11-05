@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **Breaking (protocol, server; #1439)** — `RESIDENT_MEMORY_MAX_BYTES` (8192)
+  moved from `@byok-sdk/server/execution-core` to `@byok-sdk/protocol` (and
+  `@byok-sdk/protocol/constants`), next to `AGENT_MEMORY_MAX_SNAPSHOT_BYTES`.
+  The server entry no longer exports it and there is no re-export: import it
+  from `@byok-sdk/protocol`.
+
+- **Breaking (client; #1439)** — `MEMORY.md` takes at most 8 KiB. `memory_save`
+  refuses a `MEMORY.md` replace whose new content is over 8192 UTF-8 bytes,
+  with a message that names the limit and the size, and a Host intent that
+  would write such content is rejected with `content_invalid`. Only the new
+  content is checked, so an over-limit file can be replaced by a smaller one.
+  Files under `notes/` keep the 256 KiB limit. The writer memory guidance asks
+  the model to keep `MEMORY.md` within the limit and to put details in
+  `notes/`. Nothing truncates the file.
+
+- **Added (protocol, client, cloud; #1439)** — `task.complete`, `task.fail` and
+  `task.cancelled` gain an optional `residentMemoryOverLimit: { byteCount }`
+  (`TerminalResidentMemoryOverLimitSchema`): a writer Attempt left `MEMORY.md`
+  over the limit with the runtime's own file tools, and `byteCount` is the file
+  size at the terminal decision. It is gated on the new server flag
+  `resident-memory-over-limit` (`RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY`); a
+  daemon sends the terminal without it to a server that did not advertise the
+  flag. On a task that seals `memory-projection` it is sealed with
+  `agentHomeMemoryChange`. Absence does not mean the file is within the limit.
+  The hosted cloud advertises the flag and `TerminalResult` projects the field.
+
 - **Fixed (client; #1437)** — `requestDeviceAssertion` and
   `requestTaskAssertion` wait up to 90 s for the daemon by default instead of
   the generic 10 s control timeout. Both handlers read the device record from

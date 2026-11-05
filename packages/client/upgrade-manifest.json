@@ -23,6 +23,39 @@
       "items": [
         "example:bot-collaboration"
       ]
+    },
+    {
+      "id": "resident-memory-max-bytes-to-protocol",
+      "impact": "breaking",
+      "summary": "RESIDENT_MEMORY_MAX_BYTES (8192, the UTF-8 byte limit of MEMORY.md) moved from @byok-sdk/server/execution-core to @byok-sdk/protocol and @byok-sdk/protocol/constants (#1439). The server entry no longer exports it and there is no re-export: a Host that imported it from @byok-sdk/server/execution-core imports it from @byok-sdk/protocol instead. The value is unchanged, and the Host contextPack and record checks keep using it.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/server/execution-core#RESIDENT_MEMORY_MAX_BYTES",
+        "export:@byok-sdk/protocol#RESIDENT_MEMORY_MAX_BYTES",
+        "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_MAX_BYTES"
+      ]
+    },
+    {
+      "id": "resident-memory-over-limit",
+      "impact": "additive",
+      "summary": "task.complete, task.fail and task.cancelled gain an optional residentMemoryOverLimit: { byteCount } (TerminalResidentMemoryOverLimitSchema, #1439): the terminal of a writer Attempt that became active reports a MEMORY.md that the runtime left over RESIDENT_MEMORY_MAX_BYTES with its own file tools, byteCount being the file size at the terminal decision. The device does not truncate or repair the file. The field is gated on the new server flag resident-memory-over-limit (RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY, in CAPABILITY_FLAGS), because the sealed terminal branches are strict; a daemon talking to a server without the flag sends the terminal without it. SEALED_SPLIT_TABLE moves it into the terminal ciphertext with agentHomeMemoryChange when the task seals memory-projection. Absence does not mean the file is within the limit: a reader terminal, an early failure, a failed measurement, a server without the flag and an older daemon all leave it absent. The hosted cloud advertises the flag and TerminalResult projects the field verbatim. A Host on its own server parses the field with the protocol schemas and advertises the flag only when it accepts it. Separately, the device refuses a memory_save of MEMORY.md over the limit and rejects such a Host intent with content_invalid.",
+      "migration": "docs/protocol.md#22-task-free-agent-home-projection",
+      "items": [
+        "export:@byok-sdk/cloud#TerminalResult",
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+        "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+        "export:@byok-sdk/protocol#TaskCancelledPayloadSchema",
+        "export:@byok-sdk/protocol#TaskCancelledSealedPayload",
+        "export:@byok-sdk/protocol#TaskCompletePayloadSchema",
+        "export:@byok-sdk/protocol#TaskCompleteSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+        "export:@byok-sdk/protocol#TaskFailSealedPayload",
+        "export:@byok-sdk/protocol#TerminalResidentMemoryOverLimit",
+        "export:@byok-sdk/protocol#TerminalResidentMemoryOverLimitSchema",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY"
+      ]
     }
   ],
   "changes": [
@@ -32,6 +65,91 @@
       "before": "K8 0.0.1 src-sha256=f28fb891884de485",
       "after": "K8 0.0.1 src-sha256=41a6f6ff4a006d30",
       "entry": "k8-room-seat-trigger-message"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TerminalResult",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RESIDENT_MEMORY_MAX_BYTES",
+      "change": "added",
+      "entry": "resident-memory-max-bytes-to-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+      "change": "added",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelledPayloadSchema",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelledSealedPayload",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCompletePayloadSchema",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCompleteSealedPayload",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailSealedPayload",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TerminalResidentMemoryOverLimit",
+      "change": "added",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TerminalResidentMemoryOverLimitSchema",
+      "change": "added",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_MAX_BYTES",
+      "change": "added",
+      "entry": "resident-memory-max-bytes-to-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+      "change": "added",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#RESIDENT_MEMORY_MAX_BYTES",
+      "change": "removed",
+      "entry": "resident-memory-max-bytes-to-protocol"
     }
   ]
 }

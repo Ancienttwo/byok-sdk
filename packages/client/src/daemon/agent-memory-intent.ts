@@ -30,6 +30,7 @@ import {
   AgentMemoryRevisionConflictError,
   agentMemoryHomeBinding,
   appendAgentMemoryHomeAudit,
+  assertResidentMemoryWithinLimit,
   compareAndSwapAgentMemoryHomeFile,
   observeAgentMemoryHomeFile,
   readAgentMemoryHomeInternalFile,
@@ -774,8 +775,16 @@ export function createAgentMemoryIntentProcessor(
     if (intent.operation === 'delete' && intent.path === 'MEMORY.md') return reject('memory_md_not_deletable');
     // The body digest is checked before anything durable happens: the CAS is
     // never handed bytes the owner did not approve.
-    if (intent.operation === 'replace' && (intent.content === undefined || sha256Revision(intent.content) !== intent.targetRevision)) {
-      return reject('content_invalid');
+    if (intent.operation === 'replace') {
+      if (intent.content === undefined || sha256Revision(intent.content) !== intent.targetRevision) return reject('content_invalid');
+      // A Host restore is an intent too. The device owns the file, so an
+      // over-limit MEMORY.md never comes from the Host either (#1439).
+      try {
+        assertResidentMemoryWithinLimit(intent.path, intent.content);
+      } catch (error) {
+        if (error instanceof AgentMemoryValidationError) return reject('content_invalid');
+        throw error;
+      }
     }
     return Object.freeze({ kind: 'apply', identity, content: intent.operation === 'replace' ? intent.content : undefined });
   }

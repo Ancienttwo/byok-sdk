@@ -2937,6 +2937,13 @@ export declare function appendAgentMemoryHomeAudit(binding: AgentMemoryHomeBindi
  * decline to promise a durable barrier the filesystem cannot give.
  */
 export declare function probeAgentMemoryStrictDirectorySync(directory: string): Promise<boolean>;
+/**
+ * The one size check of the resident `MEMORY.md` (#1439), shared by
+ * `memory_save` and Host intents: new content over `RESIDENT_MEMORY_MAX_BYTES`
+ * is refused. Only the new content is checked, so an over-limit file can be
+ * replaced by a smaller one. A `notes/` file keeps `AGENT_MEMORY_MAX_FILE_BYTES`.
+ */
+export declare function assertResidentMemoryWithinLimit(relativePath: string, content: string): void;
 export declare class AgentMemoryService {
     private readonly input;
     constructor(input: AgentMemoryTaskContext);

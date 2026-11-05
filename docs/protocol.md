@@ -646,9 +646,9 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId` (required — §5.3) | A session or the control socket requested approval (§5) |
-| `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2) | Runtime reached `turn_end` |
-| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error; `failure` is gated on the server's `runtime-failure-class` flag, and its quota `scope` on `runtime-quota-scope` |
-| `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends `Cancelled` (server- or daemon-initiated) |
+| `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2), `residentMemoryOverLimit?` (gated on the server's `resident-memory-over-limit` flag — §2.2) | Runtime reached `turn_end` |
+| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?`, `residentMemoryOverLimit?` | Task ends in error; `failure` is gated on the server's `runtime-failure-class` flag, its quota `scope` on `runtime-quota-scope`, and `residentMemoryOverLimit` on `resident-memory-over-limit` (§2.2) |
+| `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?`, `residentMemoryOverLimit?` | Task ends `Cancelled` (server- or daemon-initiated); `residentMemoryOverLimit` is gated on the server's `resident-memory-over-limit` flag (§2.2) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2); baseline, no capability gate |
 | `agent.message.draft` | D→S | **required** | optional | `agentRef`, `revision`, UTF-8 `offset`, `text` (≤ 16 KiB), `overflow?: true` | Display-only snapshot frames; server-advertised `agent-message-draft` gate |
 | `agent.egress.reliable` | D→S | optional | optional | exact Agent/session/policy identity, stable `eventId`/`cursor`, payload hash and byte count | A locally fsynced reliable event is sent or retried |
@@ -971,6 +971,31 @@ sees only Attempts it runs. A host that writes memory files itself
 while readers run makes the attribution ambiguous. The field is absent on a
 writer terminal and on a claimed failure before the Attempt became active. The
 cloud read model (`readTaskResult`) projects it verbatim.
+
+**`MEMORY.md` takes at most 8 KiB (#1439).** `RESIDENT_MEMORY_MAX_BYTES`
+(8192 UTF-8 bytes, exported by `@byok-sdk/protocol`) bounds the resident
+memory file. The device refuses a `memory_save` replace of `MEMORY.md` whose
+new content is larger, and rejects a Host intent that would write such content
+with `content_invalid`. Only the new content is checked, so a smaller replace
+of an over-limit file succeeds. Files under `notes/` keep the 256 KiB file
+limit. A runtime can still write a larger `MEMORY.md` with its own file tools.
+Then the terminal of a writer Attempt that became active (`task.complete`,
+`task.fail` or `task.cancelled`) carries `residentMemoryOverLimit:
+{ byteCount }`, the size of the regular file `MEMORY.md` in the canonical home
+at the terminal decision. The device does not read, truncate or repair the
+file. The schema does not compare `byteCount` with the limit, so a later lower
+limit cannot make an older receiver refuse the terminal.
+
+The field is gated on the server flag `resident-memory-over-limit`, because the
+sealed terminal branches are strict. A daemon talking to a server without the
+flag sends the terminal without the field. On a task whose `sealing` names
+`memory-projection`, the field moves into the terminal ciphertext with
+`agentHomeMemoryChange`. Absence does not mean the file is within the limit: a
+reader terminal, a claimed failure before the Attempt became active, a failed
+measurement, a server without the flag and an older daemon all leave it absent.
+The Host's `contextPack` still refuses an over-limit `MEMORY.md`, so it remains
+the gate. The hosted cloud advertises the flag, and `readTaskResult` projects
+the field verbatim.
 
 **`agentMemory` selects the Agent memory of one ordinary task.** Without the
 field, the daemon admission decides, as before. `none` binds no SDK memory MCP

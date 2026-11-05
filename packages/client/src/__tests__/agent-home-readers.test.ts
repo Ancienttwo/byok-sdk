@@ -260,6 +260,23 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     expect(Object.hasOwn(payloadOf(writerTerminal), 'agentHomeMemoryChange')).toBe(false);
   });
 
+  it.each([
+    [['resident-memory-over-limit'], 9 * 1024, { byteCount: 9 * 1024 }],
+    [[], 9 * 1024, undefined],
+    [['resident-memory-over-limit'], 8 * 1024, undefined],
+  ])('reports a writer MEMORY.md over the limit only to a server with the flag, never on a reader (#1439, flags %j, %i bytes)', async (flags, size, expected) => {
+    server.setAckCapabilities(flags);
+    const harness = await start();
+    const home = await harness.home('resident');
+    offer('resident-reader', 'resident', { reader: true });
+    await claimed('resident-reader');
+    offer('resident-writer', 'resident');
+    await claimed('resident-writer');
+    await fs.writeFile(path.join(home, 'MEMORY.md'), 'x'.repeat(size));
+    expect(payloadOf(await complete(harness, 1, 'resident-writer')).residentMemoryOverLimit).toEqual(expected);
+    expect(Object.hasOwn(payloadOf(await complete(harness, 0, 'resident-reader')), 'residentMemoryOverLimit')).toBe(false);
+  });
+
   it('attributes a memory change to readers when no writer overlapped', async () => {
     const harness = await start();
     const home = await harness.home('attributed');

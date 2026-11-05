@@ -48,9 +48,10 @@ export interface SealedSplitEntry {
   /**
    * Top-level fields that also move into this ciphertext when the task's
    * frozen `sealing` names the category (#1045): on a task that seals
-   * `memory-projection`, a terminal seals its `agentHomeMemoryChange`. The
-   * sealed branch schema cannot see the task's sealing, so the Host and the
-   * device check these fields; read them with {@link sealedMovedFields}.
+   * `memory-projection`, a terminal seals its `agentHomeMemoryChange` and
+   * `residentMemoryOverLimit`. The sealed branch schema cannot see the task's
+   * sealing, so the Host and the device check these fields; read them with
+   * {@link sealedMovedFields}.
    */
   readonly movedWith?: { readonly [category in SealedPayloadCategory]?: readonly string[] };
   /** Top-level fields of the plaintext branch that the sealed branch drops. */
@@ -75,8 +76,8 @@ export interface SealedSplitEntry {
   readonly inlineOnly?: true;
 }
 
-/** A terminal of a task that seals `memory-projection` seals its memory-change evidence. */
-const MEMORY_EVIDENCE = { 'memory-projection': ['agentHomeMemoryChange'] } as const;
+/** A terminal of a task that seals `memory-projection` seals its memory evidence. */
+const MEMORY_EVIDENCE = { 'memory-projection': ['agentHomeMemoryChange', 'residentMemoryOverLimit'] } as const;
 
 /** The Host wrote the projection it names, so its hash tells the Host nothing new. */
 const TERMINAL_DIGESTS = {

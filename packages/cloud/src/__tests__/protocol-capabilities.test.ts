@@ -39,6 +39,7 @@ const EXPECTED_CAPABILITIES = [
   'sealed-payload-v2',
   'runtime-failure-class',
   'runtime-quota-scope',
+  'resident-memory-over-limit',
 ];
 
 describe('GET /byok/events protocol capability advertisement', () => {

@@ -8,6 +8,13 @@ export * from './failure-reason';
 export const AGENT_MEMORY_MAX_SNAPSHOT_BYTES = 1024 * 1024;
 /** Maximum memory files in one local Host export, including MEMORY.md. */
 export const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
+/**
+ * Maximum UTF-8 bytes of the resident Agent-memory file, `MEMORY.md` (#1439).
+ * The device refuses a larger `memory_save` or Host intent, and a writer
+ * terminal reports a larger file a runtime left with its own file tools
+ * (`residentMemoryOverLimit`). Nothing truncates it.
+ */
+export const RESIDENT_MEMORY_MAX_BYTES = 8 * 1024;
 
 /** The frozen wire runtime ids. Any other adapter id is a custom harness (`harnessId`). */
 export const RUNTIME_IDS = Object.freeze(['pi', 'claude', 'codex'] as const);
