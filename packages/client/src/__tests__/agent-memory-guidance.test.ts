@@ -274,6 +274,10 @@ describe('Agent memory at the start of a fresh task', () => {
   it.each([
     ['one byte over the limit', async (file: string) => fs.writeFile(file, 'x'.repeat(8193)), 'agent_memory_resident_over_limit: 8193/8192'],
     ['invalid UTF-8', async (file: string) => fs.writeFile(file, Buffer.from([0xff, 0xfe])), 'agent_memory_resident_unreadable: not valid UTF-8'],
+    ['a file with a second hard link', async (file: string) => {
+      await fs.writeFile(file, 'small');
+      await fs.link(file, `${path.dirname(file)}-outside.md`);
+    }, 'agent_memory_resident_unreadable: multiple links'],
   ])('fails a fresh task on %s before the runtime starts, without retry', async (_label, plant, reason) => {
     const { adapter, offer, failureOf, prepareHome } = await createMemoryRunner('auto');
     const home = await prepareHome('agent-refused');

@@ -2927,9 +2927,9 @@ the first user message, never the system prompt, after blob and sealed
 instructions are opened. The task fails without retry and without truncation
 before the runtime starts when the file is over the limit
 (`agent_memory_resident_over_limit: <bytes>/<limit>`), or when it is missing,
-not a regular file or not valid UTF-8, or the home identity changed
-(`agent_memory_resident_unreadable: <reason>`). These prefixes are reason text,
-not wire values.
+not a regular file or not valid UTF-8, has more than one hard link, or the home
+identity changed (`agent_memory_resident_unreadable: <reason>`). These prefixes
+are reason text, not wire values.
 
 Every writer Attempt keeps that read in memory as its start copy when the file
 was valid. When the Attempt ends, the runtime has stopped and `MEMORY.md` is a

@@ -26,12 +26,12 @@
   `Agent memory (data): ` and a JSON object with `path`, `revision`, `byteCount`
   and `content`. A resumed session and a prepared offer carry nothing. The task
   fails without retry before the runtime starts when the file is over 8 KiB
-  (`agent_memory_resident_over_limit`) or cannot be read
-  (`agent_memory_resident_unreadable`); nothing truncates it. A fresh task on a
-  daemon that does not admit the memory MCP keeps the reading guidance, carries
-  no data and does not fail on the size. The fresh guidance no longer tells the
-  model to read `MEMORY.md` first. Every writer guidance, including the text of
-  `AGENT_MEMORY_GUIDANCE`, moves the index of notes to `notes/index.md`, and
+  (`agent_memory_resident_over_limit`), or cannot be read or has more than one
+  hard link (`agent_memory_resident_unreadable`); nothing truncates it. A fresh
+  task on a daemon that does not admit the memory MCP keeps the reading guidance,
+  carries no data and does not fail on the size. The fresh guidance no longer
+  tells the model to read `MEMORY.md` first. Every writer guidance, including the
+  text of `AGENT_MEMORY_GUIDANCE`, moves the index of notes to `notes/index.md`, and
   `MEMORY.md` keeps resident facts and top-level pointers. When a writer Attempt leaves `MEMORY.md` over the
   limit, the device restores that one file to its content at the start of the
   Attempt; `notes/` stay, and the terminal still reports the size it wrote. See

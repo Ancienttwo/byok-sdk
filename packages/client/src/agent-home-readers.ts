@@ -146,6 +146,8 @@ export async function readResidentMemory(
     try {
       const stat = await handle.stat();
       if (!stat.isFile()) return { kind: 'unreadable', reason: 'not a regular file' };
+      // Another hard link can name a file outside the home.
+      if (stat.nlink !== 1) return { kind: 'unreadable', reason: 'multiple links' };
       const current = await fs.stat(home, { bigint: true });
       if (current.dev !== homeIdentity.dev || current.ino !== homeIdentity.ino) return { kind: 'unreadable', reason: 'home identity changed' };
       const bytes = Buffer.alloc(RESIDENT_MEMORY_MAX_BYTES + 1);
