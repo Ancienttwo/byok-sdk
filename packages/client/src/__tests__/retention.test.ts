@@ -34,9 +34,9 @@ const cleanups: (()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const cleanup of cleanups.splice(0).reverse())await cleanup();vi.restoreAllMocks();});
 const DAY=86_400_000;
 const identity:JournalIdentity={productId:'retention',tenantId:'tenant',deviceId:'device'};
-async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number;piSessionDir?:string}={}) {
+async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number;piSessionDir?:string;ttlMs?:Partial<Record<ExpiringClassId,number>>}={}) {
  const store=input.store??testScratchRoot();let time=Date.parse('2026-10-14T00:00:00.000Z');const clock=()=>new Date(time);
- const config=resolveStorageConfig(store,{scratchRoot:testScratchRoot(),retention:{maxDeletionsPerPass:input.max??256},...(input.budget?{budget:input.budget}:{})});
+ const config=resolveStorageConfig(store,{scratchRoot:testScratchRoot(),retention:{maxDeletionsPerPass:input.max??256,ttlMs:input.ttlMs},...(input.budget?{budget:input.budget}:{})});
  const scratch=new ScratchRoot(config.scratchRoot,clock);await scratch.open(store);
  const registry=createRetentionRegistry({storeDir:store,scratch,config,clock,journal:()=>input.journal,identity:()=>identity,preparation:()=>undefined,
   ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit}),...(input.piSessionDir===undefined?{}:{piSessionDir:input.piSessionDir})});
@@ -434,6 +434,53 @@ async function sessionLedgers(directory:string,files:Record<string,string>){
  return root;
 }
 const EXPIRED='2026-09-01T00:00:00Z',FRESH='2026-10-13T00:00:00Z';
+it('keeps a custom-task resume authority until the session-ledger TTL despite zero terminal-evidence TTL',async()=>{
+ const {home,binding,directory}=await idleHome(),handoffs=new AgentSessionHandoffStore();
+ const match={agentRef:{agentId:'agent',profileRevision:'1'},runtimeId:'custom-task',sessionRef:'custom-session',cwd:directory};
+ await handoffs.record({...match,taskId:'recorded-task',leaseId:binding.lease.leaseId});
+ await binding.lease.release();
+ const root=path.join(directory,'.byok','runtime-sessions'),[name]=await fs.readdir(root),file=path.join(root,name!);
+ const f=await fixture({home,ttlMs:{'terminal-evidence':0,'session-ledger':30*DAY}});
+ await fs.utimes(file,f.clock(),f.clock());
+ await expect(handoffs.requireMatch(match)).resolves.toMatchObject({sessionRef:match.sessionRef});
+ f.advance(DAY);await f.sweeper.runPass('periodic');
+ await expect(handoffs.requireMatch(match)).resolves.toMatchObject({sessionRef:match.sessionRef});
+ expect(f.failures).toEqual([]);
+ f.advance(29*DAY-1);await f.sweeper.runPass('periodic');expect(await exists(file)).toBe(true);
+ f.advance(1);await f.sweeper.runPass('periodic');expect(await exists(file)).toBe(false);
+ await expect(handoffs.requireMatch(match)).rejects.toThrow('does not exist on this device');
+});
+it('expires an unambiguous pi session ledger immediately with zero session TTL despite longer terminal TTL',async()=>{
+ const {home,binding,directory}=await idleHome(),handoffs=new AgentSessionHandoffStore();
+ const match={agentRef:{agentId:'agent',profileRevision:'1'},runtimeId:'pi',sessionRef:'ordinary-session',cwd:directory};
+ await handoffs.record({...match,taskId:'recorded-task',leaseId:binding.lease.leaseId});
+ await binding.lease.release();
+ const root=path.join(directory,'.byok','runtime-sessions'),[name]=await fs.readdir(root),file=path.join(root,name!);
+ const f=await fixture({home,ttlMs:{'session-ledger':0,'terminal-evidence':30*DAY}});
+ await fs.utimes(file,f.clock(),f.clock());
+ await expect(handoffs.requireMatch(match)).resolves.toMatchObject({sessionRef:match.sessionRef});
+ const report=await f.sweeper.runPass('periodic');
+ expect(report.deleted).toBe(1);expect(await exists(file)).toBe(false);expect(f.failures).toEqual([]);
+ await expect(handoffs.requireMatch(match)).rejects.toThrow('does not exist on this device');
+});
+it.each([
+ {runtimeId:'pi',sessionTtlMs:30*DAY,terminalTtlMs:0,expiresAfter:30*DAY},
+ {runtimeId:'pi',sessionTtlMs:0,terminalTtlMs:30*DAY,expiresAfter:30*DAY},
+ {runtimeId:'x'.repeat(59),sessionTtlMs:30*DAY,terminalTtlMs:0,expiresAfter:30*DAY},
+ {runtimeId:'x'.repeat(60),sessionTtlMs:30*DAY,terminalTtlMs:0,expiresAfter:0},
+])('terminal evidence respects both possible TTLs only for ambiguous names: $runtimeId / $sessionTtlMs / $terminalTtlMs',async({runtimeId,sessionTtlMs,terminalTtlMs,expiresAfter})=>{
+ const {home,binding,directory}=await idleHome(),handoffs=new AgentSessionHandoffStore();
+ await handoffs.recordTaskTerminal({agentRef:{agentId:'agent',profileRevision:'1'},runtimeId,taskId:'failed-task',cwd:directory,leaseId:binding.lease.leaseId,terminalReason:'start failed'});
+ await binding.lease.release();
+ const root=path.join(directory,'.byok','runtime-sessions'),[name]=await fs.readdir(root),file=path.join(root,name!);
+ const f=await fixture({home,ttlMs:{'session-ledger':sessionTtlMs,'terminal-evidence':terminalTtlMs}});
+ await fs.utimes(file,f.clock(),f.clock());
+ if(expiresAfter>0){
+  f.advance(expiresAfter-1);await f.sweeper.runPass('periodic');expect(await exists(file)).toBe(true);
+  f.advance(1);
+ }
+ await f.sweeper.runPass('periodic');expect(await exists(file)).toBe(false);expect(f.failures).toEqual([]);
+});
 it('session ledgers and terminal evidence expire by last append; other names, directories and symlinks stay',async()=>{
  const {home,binding,directory}=await idleHome();await binding.lease.release();
  const root=await sessionLedgers(directory,{[`pi-${ledgerHex('a')}.jsonl`]:EXPIRED,[`pi-${ledgerHex('b')}.jsonl`]:FRESH,[`my-task-runner-${ledgerHex('c')}.jsonl`]:EXPIRED,

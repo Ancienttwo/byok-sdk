@@ -136,6 +136,13 @@ until it has one. TTLs are `storage.retention.ttlMs[<class>]`.
 | `store-authority` | Exempt: fixed device records and self-bounded logs (`audit.jsonl` rewrites past 10 MiB) | SDK, with the store |
 | `runtime-session-external` | Exempt: Claude, Codex, Grok and Pi-login session records under the runtime's own config directory, mixed with the user's sessions; never measured or deleted | Host: `ClaudeAdapterOptions.agentSessionPersistence: 'disabled'` for Claude, the runtime's own session management otherwise |
 
+Session-ledger and task-terminal filenames can overlap when a sanitized runtime
+id ends in `-task`. Those files remain counted as `terminal-evidence`, but deletion
+waits for **both** configured TTLs to expire (the longer TTL). No file contents are
+parsed, including corrupt records. As a conservative consequence, actual terminal
+evidence whose filename also fits a session ledger can remain longer than its
+own class TTL. Names that fit only one kind retain that kind's TTL.
+
 `pi-session-dir` is `DaemonConfig.piByokLauncher.sessionDir`. The SDK deletes
 only Pi's own session files there, flat `<ISO time>_<session id>.jsonl` names,
 once their last write is older than the TTL; other names, folders and symbolic

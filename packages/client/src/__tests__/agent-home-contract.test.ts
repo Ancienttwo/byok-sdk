@@ -410,7 +410,7 @@ describe('SDK-owned Agent home contract', () => {
     expect(ledgers).toHaveLength(runtimes.length);
     expect(terminals).toHaveLength(runtimes.length);
     for (const name of terminals) expect([isAgentSessionLedgerName(name), isAgentTaskTerminalName(name)]).toEqual([false, true]);
-    // A runtime id ending in `-task` makes a ledger name that reads as terminal evidence; both expire after 30 days.
+    // A runtime id ending in `-task` is classified as terminal evidence; sweeping must honor both TTLs (#1455).
     for (const name of ledgers) expect(isAgentSessionLedgerName(name)).toBe(!name.startsWith('custom-task-'));
     expect(ledgers.filter((name) => name.startsWith('custom-task-'))).toHaveLength(1);
   });
