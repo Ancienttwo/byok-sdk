@@ -405,6 +405,15 @@ export const AgentMemorySelectionSchema = z.enum([
 export type AgentMemorySelection = z.infer<typeof AgentMemorySelectionSchema>;
 
 /**
+ * `on-success` keeps what a writer Attempt did to `MEMORY.md` and `notes/` only
+ * when the task ends in `task.complete`; any other end restores the files as
+ * they were at the start of the Attempt (#1440). Absent, writes take effect at
+ * once and stay.
+ */
+export const AgentMemoryCommitSchema = z.literal('on-success');
+export type AgentMemoryCommit = z.infer<typeof AgentMemoryCommitSchema>;
+
+/**
  * How a `task.offer` starts its runtime session. `resume` continues the named
  * session; `fresh` lets the selected runtime mint one after start. It is
  * required, so an offer without a resume reference is never read as fresh.
@@ -426,13 +435,16 @@ export type SessionSelection = z.infer<typeof SessionSelectionSchema>;
  * `preparation` names an already-counted prepared Execution (see
  * {@link offerRule}): every value under it is the Host re-presenting what the
  * device already told it, and the device declines non-retryably on any
- * difference from its own record.
+ * difference from its own record. `agentMemoryCommit` (see
+ * {@link AgentMemoryCommitSchema}) is for a writer: a reader runs beside the
+ * writer, so its restore would overwrite that writer's work.
  */
 const OFFER_FIELDS = {
   agentRef: AgentRefSchema,
   session: SessionSelectionSchema,
   preparation: InputPreparationOfferBindingSchema.optional(),
   agentMemory: AgentMemorySelectionSchema.optional(),
+  agentMemoryCommit: AgentMemoryCommitSchema.optional(),
   homeAccess: AgentHomeAccessSchema.optional(),
   requiredToolsets: RequiredToolsetsSchema.optional(),
   runtime: RuntimeIdSchema.optional(),
@@ -455,6 +467,8 @@ type OfferRuleInput = {
   readonly session: SessionSelection;
   readonly preparation?: unknown;
   readonly agentMemory?: AgentMemorySelection;
+  readonly agentMemoryCommit?: AgentMemoryCommit;
+  readonly homeAccess?: AgentHomeAccess;
   readonly egressPolicy?: unknown;
   readonly messageEgress?: unknown;
   readonly routineRef?: unknown;
@@ -470,9 +484,10 @@ type OfferRuleInput = {
  *   offer's instruction is checked by {@link sealedOfferRule}.
  * - A fresh or prepared offer carries an `egressPolicy`; `messageEgress` needs one.
  * - A `routineRef` names an execution, so it needs a fresh session.
+ * - `agentMemoryCommit` needs a writer.
  */
 function offerRule(payload: OfferRuleInput, ctx: z.RefinementCtx, plaintext: boolean): void {
-  const { instruction, session, preparation, agentMemory, egressPolicy, messageEgress, routineRef } = payload;
+  const { instruction, session, preparation, agentMemory, agentMemoryCommit, homeAccess, egressPolicy, messageEgress, routineRef } = payload;
   if (preparation !== undefined) {
     if (instruction !== undefined) ctx.addIssue({ code: 'custom', path: ['instruction'], message: 'a prepared offer carries no instruction' });
     if (session.mode !== 'fresh') ctx.addIssue({ code: 'custom', path: ['session'], message: 'a prepared offer never resumes' });
@@ -490,6 +505,9 @@ function offerRule(payload: OfferRuleInput, ctx: z.RefinementCtx, plaintext: boo
   }
   if (routineRef !== undefined && session.mode !== 'fresh') {
     ctx.addIssue({ code: 'custom', path: ['routineRef'], message: 'a routine occurrence is an execution, so it needs a fresh session' });
+  }
+  if (agentMemoryCommit !== undefined && homeAccess === 'memory-reader') {
+    ctx.addIssue({ code: 'custom', path: ['agentMemoryCommit'], message: 'agentMemoryCommit needs a writer; a memory-reader Attempt reads the live files' });
   }
 }
 

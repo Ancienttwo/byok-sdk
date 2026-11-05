@@ -81,6 +81,24 @@
         "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntry",
         "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntryKind"
       ]
+    },
+    {
+      "id": "agent-memory-commit-on-success",
+      "impact": "additive",
+      "summary": "An Agent offer may carry agentMemoryCommit: 'on-success' (AgentMemoryCommitSchema, gated on the new device flag agent-memory-commit-on-success, #1440): MEMORY.md and notes/ keep what a writer Attempt did only when the task ends in task.complete, and any other end restores them byte for byte, including what the runtime changed with its own file tools. A memory-reader offer with the field fails schema validation; a device configured for durable Pi declines it. The device declares the flag only on the proven strict backend of agent-memory-intent.v1, so Windows does not. Nothing changes without the field. A Host submits it on the payload, and cloud refuses the submission when the device lacks the flag. AgentHomeLeaseManager takes the optional settleAgentMemoryCommit hook; an existing caller passes the same ownerId option.",
+      "migration": "docs/protocol.md#22-task-free-agent-home-projection",
+      "items": [
+        "export:@byok-sdk/client#AgentHomeLeaseManager",
+        "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY",
+        "export:@byok-sdk/protocol#AgentMemoryCommit",
+        "export:@byok-sdk/protocol#AgentMemoryCommitSchema",
+        "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol/constants#AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY"
+      ]
     }
   ],
   "changes": [
@@ -90,6 +108,11 @@
       "before": "K8 0.0.1 src-sha256=f28fb891884de485",
       "after": "K8 0.0.1 src-sha256=41a6f6ff4a006d30",
       "entry": "k8-room-seat-trigger-message"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentHomeLeaseManager",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
     },
     {
       "item": "export:@byok-sdk/client/agent-memory#AgentMemoryFileObservation",
@@ -127,9 +150,34 @@
       "entry": "agent-memory-filesystem-raw-byte-compare"
     },
     {
+      "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
       "item": "export:@byok-sdk/cloud#TerminalResult",
       "change": "changed",
       "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY",
+      "change": "added",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryCommit",
+      "change": "added",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryCommitSchema",
+      "change": "added",
+      "entry": "agent-memory-commit-on-success"
     },
     {
       "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
@@ -182,6 +230,21 @@
       "entry": "resident-memory-over-limit"
     },
     {
+      "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TerminalResidentMemoryOverLimit",
       "change": "added",
       "entry": "resident-memory-over-limit"
@@ -190,6 +253,11 @@
       "item": "export:@byok-sdk/protocol#TerminalResidentMemoryOverLimitSchema",
       "change": "added",
       "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY",
+      "change": "added",
+      "entry": "agent-memory-commit-on-success"
     },
     {
       "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",

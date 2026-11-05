@@ -85,6 +85,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     ...(appliedAgentHomeProjection === undefined ? {} : { appliedAgentHomeProjection }),
     ...(readerMemoryBaseline === undefined ? {} : { readerMemoryBaseline }),
     ...(residentMemoryStart === undefined ? {} : { residentMemoryStart }),
+    ...(payload.agentMemoryCommit === undefined ? {} : { agentMemoryCommit: true }),
     summaryParts: [],
     finalTextParts: [],
     batcher: new ProgressBatcher(

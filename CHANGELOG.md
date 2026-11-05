@@ -73,6 +73,20 @@
   `agentHomeMemoryChange`. Absence does not mean the file is within the limit.
   The hosted cloud advertises the flag and `TerminalResult` projects the field.
 
+- **Added (protocol, client; #1440)** — an Agent offer may carry
+  `agentMemoryCommit: 'on-success'`: `MEMORY.md` and `notes/` keep what a writer
+  Attempt did only when the task ends in `task.complete`. Any other end restores
+  them byte for byte, including what the runtime changed with its own file tools,
+  and removes what it added below `notes/`.
+  The device keeps a copy under `.byok/`, restores before it releases the home,
+  and settles a copy left by a crash on the next home lease, by the journal
+  terminal of that task. A `memory-reader` offer with the field fails schema
+  validation, and a device configured for durable Pi declines it. Host-side, submit
+  the field on the payload: a device without the new flag
+  `agent-memory-commit-on-success` is refused at submission. The device declares
+  the flag only on the proven strict backend of `agent-memory-intent.v1`, so
+  Windows does not. See `docs/protocol.md` §2.2.
+
 - **Fixed (client; #1437)** — `requestDeviceAssertion` and
   `requestTaskAssertion` wait up to 90 s for the daemon by default instead of
   the generic 10 s control timeout. Both handlers read the device record from

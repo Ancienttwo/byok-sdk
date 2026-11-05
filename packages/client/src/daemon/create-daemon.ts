@@ -20,6 +20,7 @@ import {
   type AgentHomeProjection,
 } from '../agent-home';
 import type { AgentRef } from '../agent-home';
+import { agentMemoryCommitStore } from './create-daemon/services';
 import {
   type LocalAgentReleaseIdentity,
 } from '../release-identity';
@@ -883,7 +884,10 @@ function buildDaemon(
   const {
     logMember, operationalHealth, ownedProcessLedger, cursorStore, agentHomeManager,
     agentSessionHandoffs, agentContentReadPolicies, initialAgentEgress,
-  } = composeDaemonWorkspaces({ storeDir, config, egressPolicy });
+  } = composeDaemonWorkspaces({
+    storeDir, config, egressPolicy,
+    settleAgentMemoryCommit: home => agentMemoryCommitStore(daemonScope).settle(home),
+  });
 
   const retentionRegistry = createRetentionRegistry({
     storeDir, scratch: scratchRoot, config: storageConfig, clock: retentionClock,

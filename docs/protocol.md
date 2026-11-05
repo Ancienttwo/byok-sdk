@@ -222,6 +222,7 @@ field or value row on `task.offer`:
 | `agentMemory` | `agent-memory-selection` |
 | `agentMemory: 'read-if-admitted'` | `agent-memory-read-if-admitted` |
 | `agentMemory: 'read-write-if-admitted'` | `agent-memory-read-write-if-admitted` |
+| `agentMemoryCommit` | `agent-memory-commit-on-success` |
 | `egressPolicy` | `agent-egress-policy` and `agent-egress-reliable-ack` |
 | `messageEgress` | `agent-message-egress` |
 | `session.mode: 'fresh'` | `agent-egress-fresh-session` |
@@ -466,6 +467,13 @@ advertises both `agent-memory-selection` and the new capability flag
 otherwise before task creation or mailbox append. The other values do not
 change.
 
+**Landed additive minor: `agentMemoryCommit`.** The ordinary, egress, execution
+and prepared forms of `task.offer`, and their sealed forms, accept
+`agentMemoryCommit: 'on-success'` (§2.2). A host sends it only to a device that
+durably advertises `agent-memory-commit-on-success`; server and hosted cloud
+refuse it otherwise before task creation or mailbox append. An older daemon's
+strict offer schema refuses the field, so the gate is required.
+
 **Agent message drafts (additive v3).** `agent.message.draft` is gated on the
 server's `agent-message-draft` flag. Its payload is strict. It has no reliable
 ack or spool entry. `RuntimeCapabilities.messageDraft` is optional strip-safe
@@ -629,7 +637,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
 | `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `harnesses?`, `runtimeUnavailable?` (additive — §11.4.1), `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
-| `task.offer` | S→D | **required** | **required** | `agentRef`, `session` (§1.3), `instruction` (absent on a prepared offer; may move into `sealed`, §2.5), `preparation?` (§2.0), `agentMemory?` (§2.2), `homeAccess?` (§2.2), `requiredToolsets?`, `runtime?`, `harnessId?`, `dispatchSelection?` (see below), `terminalProjection?`, `limits?`, `egressPolicy?` (§2.1), `messageEgress?`; sealed branch also `sealing`, `sealed?`, `routineRef?` (§2.5) | An Agent dispatch, execution or prepared Execution targets a device that advertises every flag its fields need (Freeze rule) |
+| `task.offer` | S→D | **required** | **required** | `agentRef`, `session` (§1.3), `instruction` (absent on a prepared offer; may move into `sealed`, §2.5), `preparation?` (§2.0), `agentMemory?` (§2.2), `agentMemoryCommit?` (§2.2), `homeAccess?` (§2.2), `requiredToolsets?`, `runtime?`, `harnessId?`, `dispatchSelection?` (see below), `terminalProjection?`, `limits?`, `egressPolicy?` (§2.1), `messageEgress?`; sealed branch also `sealing`, `sealed?`, `routineRef?` (§2.5) | An Agent dispatch, execution or prepared Execution targets a device that advertises every flag its fields need (Freeze rule) |
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
@@ -1034,6 +1042,70 @@ one answer. The terminal does not report which mode ran. A daemon advertises
 `agent-memory-selection`, `agent-memory-read-if-admitted` and
 `agent-memory-read-write-if-admitted` whenever it has an Agent home, whatever
 its memory admission.
+
+**`agentMemoryCommit: 'on-success'` keeps a writer's memory writes only when its
+task succeeds.** Without the field, writes take effect at once and stay. With
+it, the device copies `MEMORY.md` and the `notes/` memory files under `.byok/`
+before the runtime starts. `task.complete` in the device journal keeps every
+write, including the ones the runtime made with its own file tools, and drops
+the copy. `task.fail`, `task.cancelled` and a timeout restore those files byte
+for byte, whatever size or encoding the runtime left: a changed or deleted file
+is written back, and `notes/` itself and a removed parent directory are created
+again. The copy also records every entry the start walk saw in `notes/`, with its
+type. Anything below `notes/` outside that record is removed without following a
+link: a new file of any kind, a symlink, or a directory with its contents. An
+entry whose type changed counts as new. A file that was there at the start and is
+not a memory file stays, with whatever content it has at the end. So does what the
+start walk left out, such as case pairs, multi-link files and directories it did
+not enter: their content is not in the copy, so it is not restored. An empty
+directory the runtime removed is not created again. The field combines with every
+`agentMemory` value, because file tools can change memory under `none` and `read`
+too.
+
+- `homeAccess: 'memory-reader'` with this field fails schema validation. A reader
+  reads the live files, so it can see a writer's writes before they are kept or
+  restored, and its terminal reports a restore as an `unattributed` change.
+- A device configured for durable Pi declines an offer with this field without
+  retry (`agent_memory_commit_unavailable`), before the claim. The lane is device
+  configuration, so no offer field names it and a Host learns this rule only from
+  the decline. A durable Attempt runs on after a daemon restart, and the crash
+  recovery below would roll it back while it is alive.
+- The Attempt fails without retry before the runtime starts when the copy is
+  refused: more than 1 MiB or 128 files, a start record over its 1 MiB manifest,
+  or a symlink in `notes/`. An I/O failure is retryable. The reason starts with
+  `agent_memory_commit_unavailable`.
+- The restore runs after the terminal goes out and before the device releases
+  the home, so the next writer, intent, export and projection see the restored
+  files. `residentMemoryOverLimit` still reports what the runtime left, measured
+  before any restore. The projection shows the restored files. When the restore
+  fails, the device skips the projection, keeps the copy and releases the home;
+  the over-limit restore of `MEMORY.md` still runs by its own condition.
+- The terminal in the device journal decides, and the device does not wait for
+  the server to accept it. When the server refuses a `task.complete`, the writes
+  stay and the projection goes out as usual. The exception is a sealed result sent
+  by `ciphertextRef`: the device replaces the refused terminal with `task.fail`,
+  and the journal's `local_state` becomes `terminal:fail`. If that refusal comes
+  before the task's end reads the journal, or refuses a resend after a crash,
+  memory is restored, which matches the `task.fail` the Host sees. `abandonTask`
+  does not tell the device, so its runtime runs on and its `task.complete` is
+  refused with
+  `task_settled_by_cloud`: `abandonTask` does not roll memory back. To roll back,
+  use `cancelTask`, which stops the runtime and ends in `task.cancelled`.
+- After a crash, the next home lease reads the journal: `task.complete` drops the
+  copy, and any other terminal or no row restores the files. When that fails, the
+  lease fails with the caller's existing unavailable result and the next one
+  tries again. What can fail is I/O, a home beyond what the helper finishes in one
+  request, another volume mounted in `notes/`, and a copy that no longer matches
+  its manifest. That last one means `.byok/` was changed or damaged, and it stays
+  until someone fixes it on the device.
+
+A daemon advertises `agent-memory-commit-on-success` only on the proven strict
+backend `agent-memory-intent.v1` needs, without the Host transport: Linux native
+with a strict directory sync, or macOS with the verified helper. Windows does not
+advertise it, because it has no power-loss proof. A helper that fails verification
+fails the start of a daemon configured with `agentMemoryIntents`; any other daemon
+starts without the flag and logs why. A daemon that lost the backend declines the
+field without retry.
 
 ### 2.3 Task-free sealed provider provisioning notice
 

@@ -7,6 +7,7 @@ import { SqliteLocalTaskJournal, JournalHandleCleanupError } from '../journal/sq
 import { type AgentMemoryIntentBackend, NATIVE_AGENT_MEMORY_INTENT_BACKEND, helperAgentMemoryIntentBackend } from '../agent-memory-intent';
 import { isAgentMemorySecureFilesystemAvailable, probeAgentMemoryStrictDirectorySync } from '../agent-memory';
 import { promises as fs } from 'node:fs';
+import { createAgentMemoryCommitStore, type AgentMemoryCommitStore } from '../agent-memory-commit';
 import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper';
 import type { DaemonScope } from './scope';
 
@@ -76,22 +77,31 @@ export function initializeOwnedHostedStorage(daemonScope: DaemonScope): LocalTas
 }
 
 /**
- * The one memory backend Host-approved Agent memory intents may use, or
- * `undefined` (the capability stays unadvertised and every notice fails
- * closed). All of: a Host transport, an Agent home, the secure memory
- * filesystem on this platform, a backend whose ledger write is a proven
- * durable barrier, and — for the native backend — runtime evidence that the
- * Agent-home filesystem honors directory fsync (the strict barrier would
- * otherwise fail every write).
+ * The one memory backend whose writes are proven durable, or `undefined`. All
+ * of: an Agent home, the secure memory filesystem on this platform, a backend
+ * whose ledger write is a proven durable barrier, and — for the native backend
+ * — runtime evidence that the Agent-home filesystem honors directory fsync (the
+ * strict barrier would otherwise fail every write). Host-approved intents and
+ * commit on success both need it; without it neither capability is advertised.
  */
-export async function provenAgentMemoryIntentBackend(daemonScope: DaemonScope): Promise<AgentMemoryIntentBackend | undefined> {
+export async function provenAgentMemoryBackend(daemonScope: DaemonScope): Promise<AgentMemoryIntentBackend | undefined> {
   const { config, agentHomeManager, resolveAgentMemoryFilesystemHelperBin } = daemonScope;
-  if (config.agentMemoryIntents === undefined || config.agentHome === undefined || agentHomeManager === undefined) return undefined;
-  const helperBin = resolveAgentMemoryFilesystemHelperBin?.();
-  if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) return undefined;
-  const backend = helperBin === undefined
-    ? NATIVE_AGENT_MEMORY_INTENT_BACKEND
-    : helperAgentMemoryIntentBackend(helperBin, config.agentMemoryHelperAssetRoot);
+  if (config.agentHome === undefined || agentHomeManager === undefined) return undefined;
+  let helperBin: string | undefined;
+  let backend: AgentMemoryIntentBackend;
+  try {
+    helperBin = resolveAgentMemoryFilesystemHelperBin?.();
+    if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) return undefined;
+    backend = helperBin === undefined
+      ? NATIVE_AGENT_MEMORY_INTENT_BACKEND
+      : helperAgentMemoryIntentBackend(helperBin, config.agentMemoryHelperAssetRoot);
+  } catch (error) {
+    // Intents need this helper. Commit on success is asked of every Agent-home
+    // daemon, and only its capability depends on the proof.
+    if (config.agentMemoryIntents !== undefined) throw error;
+    console.error(`[byok/client] agent memory commit on success is off: the memory helper failed verification: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
   if (!backend.strictLedgerBarrier) return undefined;
   if (helperBin !== undefined) {
     // Probe the actual branded volume before advertising. The helper open
@@ -101,7 +111,8 @@ export async function provenAgentMemoryIntentBackend(daemonScope: DaemonScope): 
       const stat = await fs.stat(canonicalHome, { bigint: true });
       const probe = await openAgentMemoryFilesystemHelper({ helperBin, assetRoot: config.agentMemoryHelperAssetRoot, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } });
       await probe.close();
-    } catch {
+    } catch (error) {
+      console.error(`[byok/client] agent memory intents and commit on success are off: the memory helper failed its volume probe: ${error instanceof Error ? error.message : String(error)}`);
       return undefined;
     }
   }
@@ -109,4 +120,25 @@ export async function provenAgentMemoryIntentBackend(daemonScope: DaemonScope): 
     return undefined;
   }
   return backend;
+}
+
+/**
+ * The commit store of this daemon. `backend` defaults to a fresh proof: the
+ * lease hook runs from before a start has proved anything, and only a home with
+ * a leftover copy gets that far. The journal answers for the task; before a
+ * start opened it, a leftover copy fails its acquire.
+ */
+export function agentMemoryCommitStore(
+  daemonScope: DaemonScope,
+  backend: () => Promise<AgentMemoryIntentBackend | undefined> = () => provenAgentMemoryBackend(daemonScope),
+): AgentMemoryCommitStore {
+  const { daemonState } = daemonScope;
+  return createAgentMemoryCommitStore({
+    backend,
+    taskCompleted: async (taskId) => {
+      const { journal, retentionIdentity } = daemonState;
+      if (journal === undefined || retentionIdentity === undefined) throw new Error('the task journal is not open');
+      return (await journal.readTask(taskId, retentionIdentity))?.localState === 'terminal:complete';
+    },
+  });
 }

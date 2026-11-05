@@ -62,6 +62,15 @@ async function mailboxTypes(harness: CloudHarness, deviceId: string): Promise<st
 }
 
 describe('hosted per-task Agent memory selection (#614)', () => {
+  it('refuses agentMemoryCommit to a device without agent-memory-commit-on-success (#1440)', async () => {
+    const { harness, deviceId } = await deviceWith(BASE_CAPABILITIES);
+    await expect(harness.cloud.submitAgentExecution(TENANT_A, { deviceId, taskId: 'commit-refused', payload: {
+      instruction: 'plan only', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: POLICY,
+      agentMemoryCommit: 'on-success',
+    } })).rejects.toMatchObject({ code: 'agent_capability_missing', message: expect.stringContaining('agent-memory-commit-on-success') });
+    expect(await mailboxTypes(harness, deviceId)).toEqual([]);
+  });
+
   it.each(memoryOffers)('%s refuses agentMemory to a device without agent-memory-selection before task or mailbox state', async (_name, enqueue) => {
     const { harness, deviceId } = await deviceWith(BASE_CAPABILITIES);
 

@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
 import { appendAgentMemoryHomeAudit, compareAndSwapAgentMemoryHomeFile, isAgentMemorySecureFilesystemAvailable, observeAgentMemoryHomeFile, snapshotAndProjectAgentMemory, type AgentMemoryTaskContext } from '../agent-memory';
+import type { AgentMemoryCommitHome } from '../agent-memory-commit';
 import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper';
 import type { ActiveTask } from './support';
 import { errorMessage, taskFinalizing } from './support';
@@ -74,6 +75,10 @@ export async function quiesceAndSnapshotAgentMemory(this: TaskRunner, active: Ac
   this['memoryClosingTasks'].add(active.taskId);
   try {
     await Promise.allSettled([...this['memoryInFlightByTask'].get(active.taskId) ?? []]);
+    // A failure skips the projection, so a failed task's writes never reach the
+    // Host. The lease still goes, and the next one settles the copy.
+    const settled = active.agentMemoryCommit !== true
+      || await settleAgentMemoryCommitCopy.call(this, active.taskId, active.agentBinding.lease);
     const context = await this['bindAgentMemoryFilesystem']({
       taskId: active.taskId,
       tenantId: this['deps'].tenantId,
@@ -86,7 +91,7 @@ export async function quiesceAndSnapshotAgentMemory(this: TaskRunner, active: Ac
       homeIdentity: active.agentBinding.lease.homeIdentity,
     });
     await restoreResidentMemory(context, active.residentMemoryStart);
-    await snapshotAndProjectAgentMemory(context, this['deps'].agentMemoryHostedProjection, this['deps'].sealedTasks);
+    if (settled) await snapshotAndProjectAgentMemory(context, this['deps'].agentMemoryHostedProjection, this['deps'].sealedTasks);
   } catch (error) {
     // Projection never becomes a second task-terminal authority. A failed
     // snapshot/upload is observable locally and preserves the raw home plus
@@ -125,6 +130,20 @@ async function restoreResidentMemory(context: AgentMemoryTaskContext, start: Act
     return;
   }
   await record({ outcome: 'restored', revision: start.revision });
+}
+
+/**
+ * Settles before a lease release, which must still happen: it never throws. It
+ * answers whether the copy is gone; one that remains waits for the next lease.
+ */
+export async function settleAgentMemoryCommitCopy(this: TaskRunner, taskId: string, home: AgentMemoryCommitHome): Promise<boolean> {
+  try {
+    await this['deps'].agentMemoryCommit!.settle(home);
+    return true;
+  } catch (error) {
+    console.error(`[byok/client] Agent memory commit copy of ${taskId} was not settled: ${errorMessage(error)}`);
+    return false;
+  }
 }
 
 export async function bindAgentMemoryFilesystem(this: TaskRunner, context: AgentMemoryTaskContext): Promise<AgentMemoryTaskContext> {
