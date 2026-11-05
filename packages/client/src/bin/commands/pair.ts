@@ -5,8 +5,8 @@ import { resolveStoreDir } from '../config';
 
 /**
  * The control request timeout for `enrollment.pair`. The handler runs many
- * serial OS credential operations, and on Windows each one first compiles the
- * credential bridge under a 60 s deadline, so the generic 10 s cannot cover it.
+ * serial OS credential operations, each under its own 15 s deadline, so the
+ * generic 10 s cannot cover it.
  */
 export const ENROLLMENT_PAIR_REQUEST_TIMEOUT_MS = 600_000;
 

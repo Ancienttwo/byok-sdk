@@ -36,7 +36,7 @@ export interface RequestDeviceAssertionOptions {
   storeDir?: string;
   /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
   audience: string;
-  /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
+  /** Bound on the control-socket round trip, ms. Default 90s, which covers the 15s deadline of the OS credential read. */
   timeoutMs?: number;
 }
 
@@ -71,9 +71,8 @@ export type RequestDeviceAssertionResult =
 /**
  * The default control request timeout for `assertion.issue` and
  * `task_assertion.issue`. Both handlers read the device record from the OS
- * credential store on every call, and on Windows one read can take the
- * credential bridge's 60 s compile deadline plus its 15 s command deadline, so
- * the generic 10 s cannot cover it.
+ * credential store on every call, and one read can take its full 15 s
+ * deadline, so the generic 10 s cannot cover it.
  */
 const ASSERTION_REQUEST_TIMEOUT_MS = 90_000;
 
@@ -155,7 +154,7 @@ export interface RequestTaskAssertionOptions {
   contextToken: string;
   /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
   audience: string;
-  /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
+  /** Bound on the control-socket round trip, ms. Default 90s, which covers the 15s deadline of the OS credential read. */
   timeoutMs?: number;
 }
 

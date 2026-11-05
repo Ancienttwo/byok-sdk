@@ -329,6 +329,8 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\/(?:pi-provider-launcher-core\.ts|pi-projection-windows\.test\.ts|fixtures\/acl-evidence-budget\.ts)$/,
     // #385: the keys launch sequence against the built pi-rpc host.
     /^packages\/client\/src\/__tests__\/pi-rpc-key-custody\.test\.ts$/,
+    // #1445: real Credential Manager under the standard-user token.
+    /^packages\/client\/src\/__tests__\/device-credential-store\.native\.test\.ts$/,
   ],
 });
 // #649 and #702: release script paths that the owner reviewed for 0.28.2.
@@ -580,6 +582,12 @@ export function selectImpact(paths, context = {}) {
     if (path === 'scripts/testing/device-credentials.mjs') {
       dirs.add('packages/client');
       families.add('adapter-lifecycle-smoke'); families.add('packageability-smoke');
+      continue;
+    }
+    // #1445: the asset root of the two test Hosts that bundle the SDK on Windows.
+    if (path === 'scripts/testing/sdk-koffi-asset-root.mjs' || path === 'scripts/testing/sdk-koffi-asset-root.d.mts') {
+      dirs.add('packages/client');
+      families.add('execution-recovery-native'); families.add('service-upgrade-smoke');
       continue;
     }
     if (path === 'api-surface/entries.json') {

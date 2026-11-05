@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Changed (client; #1445)** — On Windows the device credential store now calls Credential Manager through koffi. An npm install includes koffi's win32-arm64 binary, so Windows on ARM64 keeps credential storage. A native arm64 Host packaged by hand without koffi, which the SDK packaging helpers do not build, now gets `DeviceCredentialStoreUnavailableError`; before, it stored credentials through PowerShell but could not start a runtime.
+  The enrollment and the three member entries keep their format, so a rollback
+  still reads them. Nothing compiles, spawns or writes a temporary file per
+  operation any more. Native credential calls run one at a time, and the wait
+  counts toward each call's 15 s deadline. A packaged Windows Host must pass its
+  `nativeAssetRoot` to the new option on `readDeviceEnrollmentStatus`,
+  `readDeviceEnrollmentIdentity` and `createStoredDeviceProofSigner`, or those
+  reads throw `DeviceCredentialStoreUnavailableError`. `@byok-sdk/client/packaging`
+  now exports `loadSdkKoffiAsset`.
+
 - **Fixed (client; #1437)** — `requestDeviceAssertion` and
   `requestTaskAssertion` wait up to 90 s for the daemon by default instead of
   the generic 10 s control timeout. Both handlers read the device record from

@@ -90,7 +90,7 @@ export async function repairDeviceEnrollmentMetadata(
     // is the mutation gate, including when control is unreachable on a live daemon.
     const owner = await acquireDaemonOwner(storeDir, 'doctor');
     try {
-      const store = new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials: config.deviceCredentials }));
+      const store = new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials: config.deviceCredentials, nativeAssetRoot: config.nativeAssetRoot }));
       failureCode = 'projection-unavailable';
       await store.load();
       failureCode = 'authority-unavailable';

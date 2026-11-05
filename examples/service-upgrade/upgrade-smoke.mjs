@@ -28,8 +28,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import { sdkNativeAssetTargets } from '@byok-sdk/client';
 import { byokSdkPackaging } from '@byok-sdk/client/packaging';
 import { createByokServer, listenLoopback } from '@byok-sdk/server';
+import { writeKoffiAssetRoot } from '../../scripts/testing/sdk-koffi-asset-root.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const agentCli = path.resolve(here, '../../packages/client/dist/bin/byok-agent.js');
@@ -146,8 +148,10 @@ async function smoke(owner, server, payloads) {
     winswDir: path.join(work, `${owner}-winsw`),
   };
   await fs.mkdir(storeDir, { recursive: true });
+  // The Windows service is a single-file bundle, so its credential store loads koffi from an asset root.
+  const nativeAssetRoot = isWindows ? await writeKoffiAssetRoot(path.join(work, `${owner}-native`), sdkNativeAssetTargets['win32-x64']) : undefined;
   await fs.writeFile(variant.config, JSON.stringify({
-    productName: 'Upgrade Smoke', productId: server.productId, serverUrl: server.url, storeDir, serviceEnrollment: { enabled: true },
+    productName: 'Upgrade Smoke', productId: server.productId, serverUrl: server.url, storeDir, serviceEnrollment: { enabled: true }, nativeAssetRoot,
   }, null, 2));
   const cmd = commands(variant);
   log(`${owner}: store ${storeDir} (${storeDir.length} chars)`);

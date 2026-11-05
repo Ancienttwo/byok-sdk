@@ -1338,6 +1338,12 @@ jobs:
             node scripts/release/pack-and-smoke.mjs --out-dir .ci-artifacts/release-pack
             if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'pack-and-smoke.mjs failed under the standard-user token' }
 
+            # The real Credential Manager through koffi, on the workspace
+            # pack-and-smoke.mjs just built, under this standard-user token.
+            $env:BYOK_NATIVE_WINDOWS_CREDENTIAL_SMOKE = '1'
+            bun run --filter @byok-sdk/client test -- src/__tests__/device-credential-store.native.test.ts
+            if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'native Windows credential tests failed under the standard-user token' }
+
             # #385 on Windows: the real keys launch sequence and the built pi-rpc
             # host, on the workspace pack-and-smoke.mjs just built. It runs under
             # this standard-user token because an elevated token's new directories
@@ -1912,7 +1918,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # windows-2022 is here for the native Credential Manager step: koffi's
+        # async last error and the time bounds need both Windows builds.
+        os: [ubuntu-latest, macos-latest, windows-latest, windows-2022]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

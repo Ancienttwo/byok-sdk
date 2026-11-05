@@ -263,11 +263,8 @@ export async function createPrivateTempDir(parent: string, prefix: string): Prom
 
 /**
  * A private scratch directory directly under the canonical OS temp root, for
- * a tool whose own path limit is shorter than the store's: the Windows
- * credential bridge is compiled with `Add-Type`/csc, which fails with CS2021
- * once the output name is too long, and the CS2021 limit is on the directory
- * it is handed (#1097). Its length therefore cannot depend on where the store
- * lives. The leaf is created by an exclusive mkdir under the real path of the
+ * a tool whose own path limit is shorter than the store's, so its length
+ * cannot depend on where the store lives. The leaf is created by an exclusive mkdir under the real path of the
  * temp root, so a pre-planted symlink or junction is never followed, and
  * {@link ensureSecureDir} applies the same owner-only restriction every other
  * scratch root gets. The caller removes it.

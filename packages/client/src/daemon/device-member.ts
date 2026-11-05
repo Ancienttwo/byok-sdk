@@ -201,10 +201,10 @@ async function poll<T>(options: ResumeDeviceMemberOptions, deadline: number, att
  * or removed from the chain. Every failure is fail closed and logged.
  */
 export async function resumeDeviceMember(options: ResumeDeviceMemberOptions): Promise<DeviceMemberSession | undefined> {
-  const { records, tenantId, deviceId, log } = options;
-  const state = await records.readState();
+  const { records, tenantId, deviceId, log, signal } = options;
+  const state = await records.readState(signal);
   if (state === undefined || state.tenantId !== tenantId || state.deviceId !== deviceId) return undefined;
-  const keys = await records.keys.load({ tenantId, deviceId });
+  const keys = await records.keys.load({ tenantId, deviceId }, signal);
   // A KEM rotation (E2d-5) moves the KEM key away from the registered bundle, so after pairing the chain names it (see `session`).
   if (keys === undefined || !samePublicKey(keys.signing.publicJwk, state.member.signingPublicJwk)
     || (state.anchor === undefined && !samePublicKey(keys.kem.publicJwk, state.member.kemPublicJwk))) {
@@ -219,7 +219,7 @@ const EXPIRED = 'the E2EE pairing verification secret expired before the client 
 async function completePairing(options: ResumeDeviceMemberOptions, state: DeviceMemberState, keys: MemberKeys): Promise<DeviceMemberSession | undefined> {
   const { records, client, tenantId, deviceId, log, signal } = options;
   const now = options.now ?? Date.now;
-  const pending = await records.readPending();
+  const pending = await records.readPending(signal);
   if (pending === undefined || pending.tenantId !== tenantId || pending.deviceId !== deviceId) return undefined;
   const { member } = state;
   const { pv, deadline } = pending;
@@ -281,7 +281,7 @@ async function rewalk(options: ResumeDeviceMemberOptions, state: DeviceMemberSta
   const now = options.now ?? Date.now;
   const { member, anchor, head } = state as Required<DeviceMemberState>;
   // Pairing stored the anchor before it deleted `pv`; a failed delete there leaves `pv`, and no later start pairs again.
-  await records.deletePending();
+  await records.deletePending(signal);
   const entries = await poll(options, now() + MEMBER_REWALK_TIMEOUT_MS, (attempt) => client.readChainFrom(0, attempt));
   if (entries === undefined) {
     if (!signal.aborted) log(`the member chain could not be read within ${MEMBER_REWALK_TIMEOUT_MS / 60_000} minutes of start; E2EE stays off until the next start`);
