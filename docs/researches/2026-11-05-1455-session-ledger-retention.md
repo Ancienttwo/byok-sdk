@@ -32,12 +32,17 @@ for both TTLs. This intentionally retains some actual terminal evidence longer;
 it neither parses contents nor changes the disk format. The new cases cover
 successful handoff lookup before the session window expires, deletion at the
 exact boundary, the opposite TTL ordering, and terminal runtime prefixes of
-59/60 characters on either side of the ambiguity boundary.
+59/60 characters on either side of the ambiguity boundary. A review follow-up
+also creates a real ordinary `pi` session with session TTL 0 and terminal TTL
+30 days: lookup succeeds before the sweep, then the very first sweep deletes
+the ledger without advancing time and lookup fails. The ambiguity guard thus
+does not lengthen an unambiguous session's configured retention window.
 
-- New regression: baseline RED, fixed GREEN. All five new cases pass.
-- Full affected files: `retention.test.ts` 62 passed; `agent-home-contract.test.ts`
-  and `agent-home-readers.test.ts` 73 passed together. Total 135 distinct passing
-  cases, not a single all-135 run.
+- New regression: baseline RED, fixed GREEN. All six new cases pass.
+- Full affected files: `retention.test.ts` 63 passed after the review follow-up;
+  `agent-home-contract.test.ts` and `agent-home-readers.test.ts` 73 passed together
+  before that test-only addition. Total 136 distinct passing cases, not a single
+  all-136 run. Client typecheck also passed after the addition.
 - Root `bun run build`, `bun run typecheck`, `bun run check:version-authority`
   passed. Cloudflare build was `--dry-run`, not a deployment.
 - API declarations are unchanged (nine goldens). The new runtime logic adds

@@ -450,6 +450,19 @@ it('keeps a custom-task resume authority until the session-ledger TTL despite ze
  f.advance(1);await f.sweeper.runPass('periodic');expect(await exists(file)).toBe(false);
  await expect(handoffs.requireMatch(match)).rejects.toThrow('does not exist on this device');
 });
+it('expires an unambiguous pi session ledger immediately with zero session TTL despite longer terminal TTL',async()=>{
+ const {home,binding,directory}=await idleHome(),handoffs=new AgentSessionHandoffStore();
+ const match={agentRef:{agentId:'agent',profileRevision:'1'},runtimeId:'pi',sessionRef:'ordinary-session',cwd:directory};
+ await handoffs.record({...match,taskId:'recorded-task',leaseId:binding.lease.leaseId});
+ await binding.lease.release();
+ const root=path.join(directory,'.byok','runtime-sessions'),[name]=await fs.readdir(root),file=path.join(root,name!);
+ const f=await fixture({home,ttlMs:{'session-ledger':0,'terminal-evidence':30*DAY}});
+ await fs.utimes(file,f.clock(),f.clock());
+ await expect(handoffs.requireMatch(match)).resolves.toMatchObject({sessionRef:match.sessionRef});
+ const report=await f.sweeper.runPass('periodic');
+ expect(report.deleted).toBe(1);expect(await exists(file)).toBe(false);expect(f.failures).toEqual([]);
+ await expect(handoffs.requireMatch(match)).rejects.toThrow('does not exist on this device');
+});
 it.each([
  {runtimeId:'pi',sessionTtlMs:30*DAY,terminalTtlMs:0,expiresAfter:30*DAY},
  {runtimeId:'pi',sessionTtlMs:0,terminalTtlMs:30*DAY,expiresAfter:30*DAY},
