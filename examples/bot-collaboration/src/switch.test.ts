@@ -24,7 +24,7 @@ afterEach(async () => {
 });
 const schedule = { minute: 0, hour: (new Date().getUTCHours() + 12) % 24, tz: 'UTC' };
 const options = (): BotOptions => ({ botId: 'main', execution: template(fixture!.deviceId), connector: async () => null, now,
-  hostIntents: { research: () => {} }, contextTurnLimit: 1 });
+  hostIntents: { research: () => {} }, contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } });
 const device = () => fixture!.deviceId;
 let bot: BotCollaboration;
 async function setup(): Promise<BotCollaboration> {

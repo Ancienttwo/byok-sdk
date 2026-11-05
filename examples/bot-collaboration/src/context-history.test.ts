@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
+import { buildHandoffPack, type HandoffPackBudgets, type HandoffTurn } from '@byok-sdk/protocol';
 import { stateOf } from './model';
 import * as rules from './rules/context';
 
@@ -17,4 +19,18 @@ it('freezes the same instruction from the device ledger as from the same Bot his
   const { turns: _turns, cards: _cards, questions: _questions, rejected: _rejected, ...authority } = state;
   const injected: rules.ContextHistory = { turns: [state.turns.m1!, state.turns.m2!, state.turns.m3!], cards: [], questions: [], rejected: [state.rejected[0]!] };
   expect(rules.botTurnInstruction(state, state.turns.m3!, limits)).toEqual(rules.turnInstruction(authority, injected, state.turns.m3!, limits));
+});
+
+it('#1446: the history of a frozen Turn is byte for byte the handoff pack of its rows', () => {
+  const vectors = JSON.parse(readFileSync(new URL('../../../packages/protocol/src/__tests__/golden/handoff-pack.vectors.json', import.meta.url), 'utf8')) as
+    Array<{ turns: HandoffTurn[]; budgets: HandoffPackBudgets }>;
+  for (const { turns, budgets } of vectors) {
+    const rows = turns.map((row, n): rules.ContextTurn => ({ id: `t${n}`, root: `t${n}`, source: 'user', request: row.lines[0]!.text, hop: 0, status: 'succeeded',
+      outcomeSummary: [], ...(row.lines[1] ? { reply: row.lines[1].text } : {}) }));
+    const packed = rows.map(({ id, root, request, reply }) => ({ lines: [{ speaker: 'user', text: request }, ...(reply === undefined ? [] : [{ speaker: 'bot', text: reply }])],
+      meta: { id, root, hop: 0, status: 'succeeded', outcomeSummary: [] } }));
+    const now: rules.ContextTurn = { id: 'now', root: 'now', source: 'user', request: 'Now', hop: 0, status: 'queued', outcomeSummary: [] };
+    const { history } = rules.contextPack({ turns: [...rows, now], cards: [], questions: [], rejected: [] }, 12, 'now', undefined, true, {}, {}, [], budgets);
+    expect(JSON.stringify(history)).toBe(JSON.stringify(buildHandoffPack(packed, budgets)));
+  }
 });

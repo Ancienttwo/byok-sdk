@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ownReadOnlyToolsets } from './toolset-policy';
 import { admitBotToolsets, inactive } from './rules/team';
-import type { UpdateRoutineAction } from '@byok-sdk/protocol';
+import { buildHandoffPack, type HandoffPackBudgets, type UpdateRoutineAction } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOptions, type Intent, type IntentInput, type OutcomeTransaction,
   type MessageTransaction } from '@byok-sdk/server/execution-core';
@@ -9,7 +9,7 @@ import type { HostJobHandler, Routine } from '@byok-sdk/server/execution-core';
 import { HostLedger, type Conclusion } from '@byok-sdk/server/execution-core';
 import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
 import { json, stateOf, type CollaborationState, type Turn, type Verdict } from './model';
-import { contextTurns, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
+import { contextTurns, DEFAULT_HANDOFF_BUDGETS, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { cancellable, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
 import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, expireCards, replyCheckDue, reportCardDecisions,
@@ -62,6 +62,11 @@ export interface BotOptions {
   connectorTimeoutMs?: number;
   contextMaxBytes?: number;
   contextTurnLimit?: number;
+  /**
+   * Bytes of the Bot history in a ContextPack. Default: `DEFAULT_HANDOFF_BUDGETS`. Construction checks it against an empty
+   * pack only, so a `totalBytes` that cannot hold the digits of the turn count throws `RangeError` at sync.
+   */
+  handoff?: HandoffPackBudgets;
   /** UTF-8 bound of a whole bot_request or bot_reply instruction. Construction refuses a value below the proven minimum. */
   instructionMaxBytes?: number;
   /** A cancel with no terminal after this time shows `uncertain` (§8.3). */
@@ -286,6 +291,7 @@ export class BotCollaboration {
   private readonly historyTimeoutMs: number;
   private readonly contextMaxBytes: number;
   private readonly contextTurnLimit: number;
+  private readonly handoff: HandoffPackBudgets;
   private readonly instructionMaxBytes: number;
   private readonly deviceConcurrency: number;
   private readonly timers: DelegationTimers;
@@ -366,6 +372,8 @@ export class BotCollaboration {
     this.contextMaxBytes = time(options.contextMaxBytes ?? HISTORY_MAX_BYTES);
     this.contextTurnLimit = time(options.contextTurnLimit ?? HISTORY_MAX_ITEMS);
     if (this.contextMaxBytes < 1 || this.contextTurnLimit < 1) throw new Error('Invalid ContextPack limits');
+    this.handoff = options.handoff ?? DEFAULT_HANDOFF_BUDGETS;
+    buildHandoffPack([], this.handoff);
     if (options.coalesce) this.coalesce = coalescePolicy(options.coalesce, this.contextMaxBytes);
     this.offer = outcomeOffer(options.outcome ?? {});
     // Compose once, so a Host draft outside the protocol limits fails here and not at each Turn.
@@ -1101,7 +1109,7 @@ export class BotCollaboration {
    * A root that is still in use throws `RetentionRefused`, and nothing changes. Never runs on its own.
    */
   retain(input: RetentionInput): Promise<RetentionResult> {
-    return this.exclusive(async () => retainInLedger(this.ledger, input, { contextTurnLimit: this.contextTurnLimit }));
+    return this.exclusive(async () => retainInLedger(this.ledger, input, { contextTurnLimit: this.contextTurnLimit, handoff: this.handoff }));
   }
   recover(): Promise<void> {
     return this.exclusive(async () => {
@@ -1126,7 +1134,7 @@ export class BotCollaboration {
     // Refresh passive state before any new offer freezes its ContextPack.
     expireCards(state, this.now());
     const routines = botRoutines(Object.values(s.routines));
-    const limits = { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes, instructionMaxBytes: this.instructionMaxBytes };
+    const limits = { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes, instructionMaxBytes: this.instructionMaxBytes, handoff: this.handoff };
     const materialized = advanceRoomsAndTurns(s, state, this.now(), turn => syncTurnInLedger(this.ledger, s, rows, turn, { now: this.now(),
       models: Object.keys(this.models()), readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history,
       history: injected?.turns.get(turn.id), roomHistoryMode: !!this.options.roomHistory, roomHistory: injected?.rooms.get(turn.id), routines,

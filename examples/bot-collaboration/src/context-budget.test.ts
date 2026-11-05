@@ -41,11 +41,10 @@ it('selects a declared recent window, summarizes outcomes and includes only curr
   const routine = routineRow(createDefinition([], 'main', 'seed', 0, { localId: 'new_routine_1', schedule: { minute: 0, hour: 9, tz: 'UTC' }, prompt: 'old-definition' }, 'bot'));
   routine.definition = updateDefinition([routine], 'main', { routineId: routine.definition.id, prompt: 'current-definition' });
   const context = contextPack(state, 3, undefined, undefined, undefined, undefined, undefined, botRoutines([routine]));
-  expect(context.historyWindow).toEqual({ turnLimit: 3, omittedTurns: 17,
+  expect(context.historyWindow).toEqual({ turnLimit: 3,
     omittedCards: 0, omittedQuestions: 0, omittedPendingCards: 0, omittedPendingQuestions: 0,
-    maxBytes: 32768, omittedMessages: 0, omittedRejections: 0, currentRequestBytes: 0, metadataOverBudget: false, notice: 'Earlier history was omitted.' });
-  expect(context.turns.map(t => t.id)).toEqual(['turn-17', 'turn-18', 'turn-19']);
-  expect(context.turns.every(t => t.outcomeSummary.includes('delegate'))).toBe(true);
+    maxBytes: 32768, omittedMessages: 0, omittedRejections: 0, currentRequestBytes: 0, metadataOverBudget: false, notice: null });
+  expect(context.history.recent.map(row => row.meta)).toEqual(Array.from({ length: 20 }, (_, n) => expect.objectContaining({ id: `turn-${n}`, outcomeSummary: ['delegate'] })));
   expect(JSON.stringify(context)).not.toContain('full-document-must-stay-out');
   expect(context.rejectedActions.map(r => r.reason)).toEqual(['unseen']);
   expect(context.routines[0]!.definition!.prompt).toBe('current-definition');
@@ -102,17 +101,34 @@ it('reduces older history with an explicit notice when the current request fits'
   const state = stateOf({});
   for (let n = 0; n < 2; n++) state.turns[`large-${n}`] = { id: `large-${n}`, root: 'root', botId: 'main', source: 'user',
     request: 'x'.repeat(18_000), hop: 0, status: 'succeeded' };
-  const context = contextPack(state, 12);
+  const handoff = { recentBytes: 20_000, earlyBytes: 0, totalBytes: 24_000 };
+  const context = contextPack(state, 12, undefined, undefined, undefined, undefined, undefined, undefined, handoff);
   expect(Buffer.byteLength(JSON.stringify(context))).toBeLessThanOrEqual(32 * 1024);
-  expect(context.historyWindow.omittedTurns).toBe(1);
-  expect(context.turns.map(turn => turn.id)).toEqual(['large-1']);
+  expect(context.history.omittedTurns).toBe(1);
+  expect(context.historyWindow.notice).toBe('Earlier history was omitted.');
+  expect(context.history.recent.map(row => row.meta)).toEqual([expect.objectContaining({ id: 'large-1' })]);
+  // #1446: the notice that `history` adds stays inside the budget, or the window reports that it does not.
+  const old = contextTurns(Array.from({ length: 30 }, (_, n) => ({ id: `old-${n}`, root: 'root', source: 'user', request: 'x'.repeat(100), hop: 0, status: 'succeeded', outcomeSummary: [] })));
+  for (let size = 3700; size < 3830; size++) {
+    const current = { id: 'now', root: 'now', source: 'user' as const, request: 'x'.repeat(size), hop: 0, status: 'queued' as const, outcomeSummary: [] };
+    const { history, ...rest } = historyPack({ turns: [...old, current], cards: [], questions: [], rejected: [{ botId: 'main', taskId: 'task', action: 'delegate', reason: 'hop_limit' }] },
+      12, 'now', 4096, true, {}, {}, [], { recentBytes: 1024, earlyBytes: 0, totalBytes: 2048 });
+    expect(history.omittedTurns).toBeGreaterThan(0);
+    expect(rest.historyWindow.notice).toContain('Earlier history was omitted.');
+    expect(Buffer.byteLength(JSON.stringify(rest)) + size <= 4096 || rest.historyWindow.metadataOverBudget).toBe(true);
+  }
   // #1318: an injected reply counts in the same budget. The oldest whole row goes; no reply is cut.
   const rows = contextTurns(['r0', 'r1'].map(id => ({ id, root: id, source: 'user', request: 'short', hop: 0, status: 'succeeded', outcomeSummary: [],
     reply: 'y'.repeat(18_000) })));
-  const injected = historyPack({ turns: rows, cards: [], questions: [], rejected: [] }, 12);
+  const injected = historyPack({ turns: rows, cards: [], questions: [], rejected: [] }, 12, undefined, undefined, undefined, undefined, undefined, undefined, handoff);
   expect(Buffer.byteLength(JSON.stringify(injected))).toBeLessThanOrEqual(32 * 1024);
-  expect(injected.historyWindow.omittedTurns).toBe(1);
-  expect(injected.turns).toEqual([rows[1]]);
+  expect(injected.history.omittedTurns).toBe(1);
+  expect(injected.history.recent).toEqual([{ lines: [{ speaker: 'user', text: 'short' }, { speaker: 'bot', text: rows[1]!.reply }],
+    meta: { id: 'r1', root: 'r1', hop: 0, status: 'succeeded', outcomeSummary: [] } }]);
+});
+
+it('#1446: refuses a handoff budget at construction', async () => {
+  await expect(setup({ handoff: { recentBytes: -1, earlyBytes: 0, totalBytes: 1024 } })).rejects.toThrow(RangeError);
 });
 
 it('admits a new turn after large settled cards and questions fill the history', async () => {
@@ -137,7 +153,6 @@ it('admits a new turn after large settled cards and questions fill the history',
   const task = bot!.core.intent(id)!.taskId;
   const instruction = String(ledger!.snapshot().executions[task]!.input.payload.instruction);
   const context = JSON.parse(instruction.split('\n\nContextPack:\n')[1]!);
-  expect(Buffer.byteLength(JSON.stringify(context))).toBeLessThanOrEqual(32 * 1024);
   expect(context.cards.length).toBeLessThanOrEqual(12);
   expect(context.questions.length).toBeLessThanOrEqual(12);
   expect(context.cards).toContainEqual(expect.objectContaining({ id: 'pending' }));
@@ -148,8 +163,9 @@ it('admits a new turn after large settled cards and questions fill the history',
   expect(context.historyWindow.omittedCards).toBe(41 - context.cards.length);
   expect(context.historyWindow.omittedQuestions).toBe(41 - context.questions.length);
   expect(instruction.split('\n\nContextPack:\n')[0]).toContain('Request:\nnew request');
-  expect(context.turns.some((turn: { id: string }) => turn.id === id)).toBe(false);
-  expect(Buffer.byteLength(JSON.stringify(context)) + context.historyWindow.currentRequestBytes).toBeLessThanOrEqual(32 * 1024);
+  const { history, ...rest } = context;
+  expect(history.recent.some((turn: { meta: { id: string } }) => turn.meta.id === id)).toBe(false);
+  expect(Buffer.byteLength(JSON.stringify(rest)) + context.historyWindow.currentRequestBytes).toBeLessThanOrEqual(32 * 1024);
   expect(Object.keys(bot!.snapshot().cards)).toHaveLength(41);
   expect(Object.keys(bot!.snapshot().questions)).toHaveLength(41);
 });
@@ -164,8 +180,9 @@ it('bounds pending context too and counts pending omissions without hiding the c
     state.questions[id] = { id, turnId: 'old', value: { question: 'x'.repeat(1000), answerKind: 'text' } };
   }
   const context = contextPack(state, 12, 'current', 4096);
-  expect(Buffer.byteLength(JSON.stringify(context))).toBeLessThanOrEqual(4096);
-  expect(context.turns[0]!.request).toBe('small request');
+  const { history, ...rest } = context;
+  expect(Buffer.byteLength(JSON.stringify(rest))).toBeLessThanOrEqual(4096);
+  expect(history.recent.at(-1)!.lines[0]!.text).toBe('small request');
   expect(context.historyWindow).toMatchObject({ omittedCards: 20 - context.cards.length,
     omittedQuestions: 20 - context.questions.length, omittedPendingCards: 20 - context.cards.length,
     omittedPendingQuestions: 20 - context.questions.length });

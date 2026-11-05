@@ -19,7 +19,8 @@ export interface RetentionSubject extends CommitSubject {
   archived(namespace: string, id: string): Json | undefined | Promise<Json | undefined>;
 }
 export const RETENTION_NOW = 10_000;
-const LIMITS: RetentionLimits = { contextTurnLimit: 1 };
+/** The pack of these vectors holds one turn: two `settledRoot` Turns are over `recentBytes`. */
+const LIMITS: RetentionLimits = { contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } };
 const input = (key: string): Extract<Command, { kind: 'input' }> => ({ kind: 'input', botId: 'main', key, request: 'Hello', sender: 'owner' });
 /** A settled Turn `id` of Bot `main` that is its own root, with an answered question and a reported card. */
 function settledRoot(state: CollaborationState, id: string): void {
@@ -128,7 +129,9 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
         }, 'An inbound reply route of the root is live'],
         ['the newest card', state => { state.cards['r1:c2'] = { ...state.cards['r1:c']!, id: 'r1:c2' }; }, 'The root is in the ContextPack window of its Bot'],
         ['the newest question', state => { state.questions['r1:q2'] = { ...state.questions['r1:q']!, id: 'r1:q2' }; }, 'The root is in the ContextPack window of its Bot'],
-        ['the ContextPack window', () => {}, 'The root is in the ContextPack window of its Bot', { contextTurnLimit: 2 }],
+        ['the ContextPack window', () => {}, 'The root is in the ContextPack window of its Bot', { ...LIMITS, contextTurnLimit: 2 }],
+        ['a Turn older than the Turn limit but still in the pack', () => {}, 'The root is in the ContextPack window of its Bot',
+          { contextTurnLimit: 1, handoff: { recentBytes: 4096, earlyBytes: 0, totalBytes: 8192 } }],
       ];
       for (const [label, edit, reason, limits] of cases) {
         const subject = await opened();
@@ -162,7 +165,7 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
     });
 
     it('moves the room messages of archived roots outside the window, and keeps what each member sees', async () => {
-      const limits = { contextTurnLimit: 2 };
+      const limits = { ...LIMITS, contextTurnLimit: 2 };
       const message = (id: string): RoomMessage => ({ id, from: 'main', text: id, late: false });
       const subject = await opened();
       await subject.change(state => {
@@ -211,12 +214,12 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       await refused(subject, () => settle(() => subject.commit(request(subject, 'i1', input('k1')))), error => expect(error).toBeInstanceOf(RetiredIdentityError));
     });
 
-    it('keeps the Turns that an unfrozen Turn will read, and not more', async () => {
+    it('keeps the pack without the Turns that can still freeze, and not more', async () => {
       const queued = (status: 'queued' | 'blocked' | 'processing') => (state: CollaborationState) => {
         state.cards = {}; state.questions = {};
         state.turns.q = { id: 'q', root: 'q', botId: 'main', source: 'user', request: 'later', hop: 0, status, authority: 'owner' };
       };
-      // q freezes later with the last `contextTurnLimit` other Turns of its Bot, which includes r2.
+      // q can still freeze, so the pack leaves it out and holds r2, which q will read.
       for (const status of ['queued', 'blocked'] as const) {
         const subject = await opened();
         await subject.change(queued(status));
@@ -228,6 +231,23 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       const subject = await opened();
       await subject.change(queued('processing'));
       expect(await retain(subject, ['r2'])).toMatchObject({ archivedRoots: 1 });
+    });
+
+    it('protects what a queued Turn reads when totalBytes is under recentBytes + earlyBytes', async () => {
+      const handoff = { recentBytes: 1000, earlyBytes: 1000, totalBytes: 1100 };
+      const subject = await opened();
+      await subject.change(state => {
+        state.cards = {}; state.questions = {};
+        for (const [id, size] of [...Array.from({ length: 10 }, (_, n) => [`a${n}`, 100] as const), ['big', 3000] as const]) {
+          settledRoot(state, id);
+          state.cards = {}; state.questions = {};
+          state.turns[id]!.request = 'x'.repeat(size);
+        }
+        for (const id of ['q1', 'q2']) state.turns[id] = { id, root: id, botId: 'main', source: 'user', request: 'later', hop: 0, status: 'queued', authority: 'owner' };
+      });
+      await refused(subject, () => retain(subject, ['a9'], {}, { contextTurnLimit: 1, handoff }), error => expect((error as Error).message)
+        .toBe('Retention refused: The root is in the ContextPack window of its Bot'));
+      expect(await retain(subject, ['a0'], {}, { contextTurnLimit: 1, handoff })).toMatchObject({ archivedRoots: 1 });
     });
 
     it('refuses the id of a retired batch member when it returns as a Turn', async () => {

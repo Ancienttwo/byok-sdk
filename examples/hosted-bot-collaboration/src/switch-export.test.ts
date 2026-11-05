@@ -91,7 +91,7 @@ async function populated(): Promise<{ scope: string; routineId: string }> {
     [storedKey(scope), storedKey('h1')]);
   // The routine Turn is the Bot's newest, so t1 leaves the ContextPack window and retention moves it.
   await store().seed(scope, state => { delete state.questions.q1; delete state.cards.c1; });
-  expect(await store().retain(scope, { acknowledgedRoots: ['t1'], now: slot, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1 }))
+  expect(await store().retain(scope, { acknowledgedRoots: ['t1'], now: slot, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } }))
     .toMatchObject({ archivedRoots: 1 });
   expect(await store().compactIntents(scope, { acknowledgedTurnIds: ['t1'] })).toMatchObject({ compactedIntents: 1 });
   await pendingHome(scope);
@@ -176,7 +176,7 @@ const entries: Array<[string, (scope: string, digest: string) => Promise<unknown
   ['the routine upkeep', scope => store().planRoutines(scope, NOW, 'pass'), 'exported'],
   ['a Host job routine', scope => store().addHostJobRoutine(scope, { id: 'job-1', version: 1, timeZone: 'UTC', rule: schedule, waitMs: 60_000,
     lateAfterMs: 60_000, hostJob: { type: 'job', input: {} } } as never, NOW), 'exported'],
-  ['retention', scope => store().retain(scope, { acknowledgedRoots: [], now: NOW, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1 }), 'exported'],
+  ['retention', scope => store().retain(scope, { acknowledgedRoots: [], now: NOW, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } }), 'exported'],
   ['intent compaction', scope => store().compactIntents(scope, { acknowledgedTurnIds: ['h1'] }), 'exported'],
   ['a device observation', scope => store().observeDevices(scope, new Map([['device', true]]), clock), 'exported'],
   ['a reply check', scope => store().settleReplyCheck(scope, 'none', { nextCheckAt: 0 }, { kind: 'none' } as never, clock), 'exported'],
