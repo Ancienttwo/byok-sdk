@@ -176,13 +176,15 @@ SDK resolves installed packages from it, so a CJS bundle beside `node_modules`
 finds them as ESM does (#724). Three bundled third-party modules keep an empty
 `import.meta`:
 - koffi's loader reads `import.meta.dirname`. On Windows the SDK loads koffi
-  for process ownership and for the Hermes gateway pipe. A CJS or SEA product
-  must pass `nativeAssetRoot` (see `copySdkNativeAssets` below) to
-  `createDaemon` or to each adapter it constructs. The SDK then loads the addon
-  itself and never runs koffi's loader. Without it, koffi's loader runs with an
-  empty `import.meta.dirname`. That is not supported. A koffi load failure
-  makes process ownership fail closed and the Hermes gateway identification
-  reject.
+  for process ownership, for the Hermes gateway pipe and for the device
+  credential store. A CJS or SEA product must pass `nativeAssetRoot` (see
+  `copySdkNativeAssets` below) to `createDaemon`, to each adapter it constructs,
+  and to `readDeviceEnrollmentStatus`, `readDeviceEnrollmentIdentity` and
+  `createStoredDeviceProofSigner`. The SDK then loads the addon itself and never
+  runs koffi's loader. Without it, koffi's loader runs with an empty
+  `import.meta.dirname`. That is not supported. A koffi load failure makes
+  process ownership fail closed, the Hermes gateway identification reject and
+  the credential store throw `DeviceCredentialStoreUnavailableError`.
 - Pi's extension loader reads `import.meta.resolve` only without
   `PI_BUNDLED_NODE`, which `runSdkReservedHelperCommand()` sets.
 - unpdf, used by the Pi web extension, reads `import.meta.resolve` inside
@@ -1156,7 +1158,10 @@ integrity and addon digest. The build requires the installed matching Koffi pack
 for its MIT notice; it resolves files without loading the current-platform addon.
 This works on a macOS build host. Ship the returned files
 beside the product and pass the absolute directory as `nativeAssetRoot` to
-`createDaemon` or each explicitly constructed adapter. Custom adapters own their
+`createDaemon` or each explicitly constructed adapter, and to the cold
+enrollment reads and `createStoredDeviceProofSigner`. A packaged Host that gives
+its own package a Credential Manager store can load the same addon with
+`loadSdkKoffiAsset` from `@byok-sdk/client/packaging`. Custom adapters own their
 own process-spawn configuration. No process-global setter or runtime download is used.
 An explicit root fails closed if missing or modified; it never falls back to the
 installed optional dependency. Omission retains package-installed behavior.

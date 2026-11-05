@@ -788,6 +788,7 @@ export type { ExecutionScratch } from '../daemon/retention/scratch';
 // ==== @byok-sdk/client dist/adapters/packaging.d.ts ====
 import { type SdkPackagingFormat } from '../sdk-native-assets';
 export type { SdkPackagingFormat } from '../sdk-native-assets';
+export { loadSdkKoffiAsset } from '../sdk-native-assets-runtime';
 /** The part of an esbuild build that this plugin reads and sets. Declared here so esbuild is not an SDK dependency. */
 export interface SdkPackagingBuild {
     readonly initialOptions: {
@@ -3352,7 +3353,7 @@ export interface RequestDeviceAssertionOptions {
     storeDir?: string;
     /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
     audience: string;
-    /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
+    /** Bound on the control-socket round trip, ms. Default 90s, which covers the 15s deadline of the OS credential read. */
     timeoutMs?: number;
 }
 /**
@@ -3424,7 +3425,7 @@ export interface RequestTaskAssertionOptions {
     contextToken: string;
     /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
     audience: string;
-    /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
+    /** Bound on the control-socket round trip, ms. Default 90s, which covers the 15s deadline of the OS credential read. */
     timeoutMs?: number;
 }
 /**
@@ -6338,6 +6339,7 @@ export interface FleetJitter {
 }
 export declare function createFleetJitter(productId: string, deviceId: string): FleetJitter;
 // ==== @byok-sdk/client dist/daemon/device-credential-store.d.ts ====
+import { type Win32CredentialBindings } from './win32-credential-api';
 /** Secret fields inside the internal complete enrollment authority. */
 export interface DeviceCredentials {
     readonly accessToken: string;
@@ -6398,8 +6400,9 @@ export declare class DeviceCredentialInteractionRequiredError extends DeviceCred
 }
 /**
  * A provider command ended before it answered: it exceeded its deadline, or
- * the caller cancelled it (daemon shutdown). The child process was killed.
- * Nothing was learned about the entry, so the caller keeps its prior state.
+ * the caller cancelled it (daemon shutdown). A child process was killed; a
+ * Windows native call runs on to its own return. Either way the outcome is
+ * unknown, so the caller keeps its prior state and does not replay the write.
  */
 export declare class DeviceCredentialCommandAbortedError extends DeviceCredentialStoreError {
     readonly reason: 'deadline' | 'cancelled';
@@ -6432,6 +6435,10 @@ export interface OsCredentialEntryOptions extends DeviceCredentialConfig {
     readonly commandRunner?: DeviceCommandRunner;
     /** Internal test seam for the per-command deadline; production uses the fixed bound. */
     readonly commandDeadlineMs?: number;
+    /** Absolute SDK native asset directory of a packaged Windows Host (`DaemonConfig.nativeAssetRoot`). */
+    readonly nativeAssetRoot?: string;
+    /** Internal test seam; production binds advapi32 through koffi on first use. */
+    readonly windowsCredentialBindings?: Win32CredentialBindings;
 }
 /**
  * One named entry of this product's OS credential provider: the macOS
@@ -6537,6 +6544,8 @@ export interface CreateStoredDeviceProofSignerOptions {
     readonly deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
     /** Same store directory the daemon uses; omitted resolves the product default. */
     readonly storeDir?: string;
+    /** `DaemonConfig.nativeAssetRoot` of a packaged Windows Host, which has no installed koffi. */
+    readonly nativeAssetRoot?: string;
     /**
      * The exact enrollment identity the host read with
      * `readDeviceEnrollmentIdentity`. Every signature re-reads the enrollment and
@@ -8516,6 +8525,8 @@ export interface DeviceEnrollmentStatusOptions {
     productId: string;
     storeDir?: string;
     deviceCredentials?: DeviceCredentialConfig;
+    /** `DaemonConfig.nativeAssetRoot` of a packaged Windows Host, which has no installed koffi. */
+    nativeAssetRoot?: string;
 }
 /** Credential-blind cold read model for host setup and diagnostics. */
 export type DeviceEnrollmentStatus = {
@@ -9434,6 +9445,53 @@ export declare class TruthMemoryClient {
     writeSnapshot(input: TruthSnapshotWriteInput): Promise<TruthWriteResult>;
     writeTerminal(input: TruthTerminalWriteInput): Promise<TruthWriteResult>;
 }
+// ==== @byok-sdk/client dist/daemon/win32-credential-api.d.ts ====
+/** `CREDENTIALW` as written; the unnamed fields are NULL or zero. */
+export interface Win32CredentialWrite {
+    readonly Type: number;
+    readonly TargetName: string;
+    readonly CredentialBlobSize: number;
+    readonly CredentialBlob: Buffer;
+    readonly Persist: number;
+    readonly UserName: string;
+}
+/** Completion of one worker-thread call: `succeeded` is the Win32 `BOOL`. */
+export type Win32CredentialCallback = (error: unknown, succeeded: number) => void;
+/**
+ * The advapi32 calls this module needs. An interface, so a test can hold a
+ * call open from POSIX and observe what a late return does.
+ */
+export interface Win32CredentialBindings {
+    /** `BOOL CredReadW(LPCWSTR, DWORD, DWORD, PCREDENTIALW *)`, on a worker thread. */
+    credRead(target: string, type: number, flags: number, credential: [bigint | null], done: Win32CredentialCallback): void;
+    /** `BOOL CredWriteW(PCREDENTIALW, DWORD)`, on a worker thread. */
+    credWrite(credential: Win32CredentialWrite, flags: number, done: Win32CredentialCallback): void;
+    /** `BOOL CredDeleteW(LPCWSTR, DWORD, DWORD)`, on a worker thread. */
+    credDelete(target: string, type: number, flags: number, done: Win32CredentialCallback): void;
+    /** `void CredFree(PVOID)`. */
+    credFree(credential: bigint): void;
+    /** `DWORD GetLastError()`. Only valid inside a completion callback, where koffi restores the worker's value. */
+    getLastError(): number;
+    /** A copy of the credential's blob bytes. */
+    readBlob(credential: bigint): Buffer;
+}
+/** The bindings of the koffi at `nativeAssetRoot`, or of the installed optional dependency. koffi loads on first use. */
+export declare function loadWin32CredentialBindings(nativeAssetRoot: string | undefined): Promise<Win32CredentialBindings>;
+/**
+ * Run one native credential call after every earlier one has really returned.
+ * `signal` starts counting before the wait, so the wait spends the caller's own
+ * deadline. A caller that aborts is released at once: its call is skipped if it
+ * has not started, and otherwise holds its place until the native return.
+ */
+export declare function enqueueWin32CredentialCall<T>(call: () => Promise<T>, signal: AbortSignal): Promise<T>;
+/** The entry's blob, or the Win32 error. The native buffer is freed even when nobody waits for the result. */
+export declare function readWin32Credential(bindings: Win32CredentialBindings, target: string): Promise<{
+    readonly code: number;
+    readonly value?: string;
+}>;
+/** Write the entry, and clear `value`'s bytes once the native call has returned. */
+export declare function writeWin32Credential(bindings: Win32CredentialBindings, target: string, userName: string, value: string): Promise<number>;
+export declare function deleteWin32Credential(bindings: Win32CredentialBindings, target: string): Promise<number>;
 // ==== @byok-sdk/client dist/diagnostics/device-doctor.d.ts ====
 import type { DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
@@ -14777,11 +14835,8 @@ export declare function ensureSecureFile(filePath: string, opts?: EnsureSecureDi
 export declare function createPrivateTempDir(parent: string, prefix: string): Promise<string>;
 /**
  * A private scratch directory directly under the canonical OS temp root, for
- * a tool whose own path limit is shorter than the store's: the Windows
- * credential bridge is compiled with `Add-Type`/csc, which fails with CS2021
- * once the output name is too long, and the CS2021 limit is on the directory
- * it is handed (#1097). Its length therefore cannot depend on where the store
- * lives. The leaf is created by an exclusive mkdir under the real path of the
+ * a tool whose own path limit is shorter than the store's, so its length
+ * cannot depend on where the store lives. The leaf is created by an exclusive mkdir under the real path of the
  * temp root, so a pre-planted symlink or junction is never followed, and
  * {@link ensureSecureDir} applies the same owner-only restriction every other
  * scratch root gets. The caller removes it.

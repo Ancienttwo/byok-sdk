@@ -35,11 +35,14 @@ import { DeviceCredentialStoreError, OS_CREDENTIAL_ENTRY_MAX_BYTES, OsCredential
 
 export type DeviceMemberEntry = 'member-keys' | 'pairing-verification' | 'member-state';
 
-/** Raw custody of the three member entries. An injected implementation owns their storage. */
+/**
+ * Raw custody of the three member entries. An injected implementation owns
+ * their storage. `signal` cancels the operation, as on the enrollment backend.
+ */
 export interface DeviceMemberCustodyBackend {
-  read(entry: DeviceMemberEntry): Promise<string | undefined>;
-  replace(entry: DeviceMemberEntry, value: string): Promise<void>;
-  delete(entry: DeviceMemberEntry): Promise<void>;
+  read(entry: DeviceMemberEntry, signal?: AbortSignal): Promise<string | undefined>;
+  replace(entry: DeviceMemberEntry, value: string, signal?: AbortSignal): Promise<void>;
+  delete(entry: DeviceMemberEntry, signal?: AbortSignal): Promise<void>;
 }
 
 /** A member entry that cannot be used. The message names the entry, never its content. */
@@ -67,8 +70,8 @@ export class OsDeviceMemberCustody implements DeviceMemberCustodyBackend {
     this.#entries = { 'member-keys': entry('member-keys'), 'pairing-verification': entry('pairing-verification'), 'member-state': entry('member-state') };
   }
 
-  async read(name: DeviceMemberEntry): Promise<string | undefined> {
-    const stored = await this.#entries[name].read();
+  async read(name: DeviceMemberEntry, signal?: AbortSignal): Promise<string | undefined> {
+    const stored = await this.#entries[name].read(signal);
     if (stored === undefined) return undefined;
     const { prefix } = ENTRIES[name];
     const encoded = stored.startsWith(prefix) ? stored.slice(prefix.length) : '';
@@ -79,16 +82,16 @@ export class OsDeviceMemberCustody implements DeviceMemberCustodyBackend {
     return bytes.toString('utf8');
   }
 
-  async replace(name: DeviceMemberEntry, value: string): Promise<void> {
+  async replace(name: DeviceMemberEntry, value: string, signal?: AbortSignal): Promise<void> {
     const encoded = `${ENTRIES[name].prefix}${Buffer.from(value, 'utf8').toString('base64')}`;
     if (Buffer.byteLength(encoded, 'utf8') > OS_CREDENTIAL_ENTRY_MAX_BYTES) {
       throw new DeviceCredentialStoreError(`${ENTRIES[name].label} exceed the OS credential entry bound`);
     }
-    await this.#entries[name].replace(encoded);
+    await this.#entries[name].replace(encoded, signal);
   }
 
-  async delete(name: DeviceMemberEntry): Promise<void> {
-    await this.#entries[name].delete();
+  async delete(name: DeviceMemberEntry, signal?: AbortSignal): Promise<void> {
+    await this.#entries[name].delete(signal);
   }
 }
 
@@ -106,8 +109,8 @@ function sameBinding(left: MemberKeyBinding, right: MemberKeyBinding): boolean {
 export class DeviceMemberKeyStore implements MemberKeyStore {
   constructor(private readonly custody: DeviceMemberCustodyBackend) {}
 
-  async load(binding: MemberKeyBinding): Promise<MemberKeys | undefined> {
-    const text = await this.custody.read('member-keys');
+  async load(binding: MemberKeyBinding, signal?: AbortSignal): Promise<MemberKeys | undefined> {
+    const text = await this.custody.read('member-keys', signal);
     if (text === undefined) return undefined;
     const keys = await openMemberKeyRecord(text);
     if (keys === undefined) {
@@ -255,8 +258,8 @@ export class DeviceMemberRecords {
     this.keys = new DeviceMemberKeyStore(custody);
   }
 
-  async readState(): Promise<DeviceMemberState | undefined> {
-    const text = await this.custody.read('member-state');
+  async readState(signal?: AbortSignal): Promise<DeviceMemberState | undefined> {
+    const text = await this.custody.read('member-state', signal);
     if (text === undefined) return undefined;
     const state = await parseState(text);
     if (state === undefined) throw new DeviceMemberCustodyError('the stored device member state is malformed; re-pair the device');
@@ -273,8 +276,8 @@ export class DeviceMemberRecords {
     }));
   }
 
-  async readPending(): Promise<PendingPairingVerification | undefined> {
-    const text = await this.custody.read('pairing-verification');
+  async readPending(signal?: AbortSignal): Promise<PendingPairingVerification | undefined> {
+    const text = await this.custody.read('pairing-verification', signal);
     if (text === undefined) return undefined;
     const pending = parsePending(text);
     if (pending === undefined) throw new DeviceMemberCustodyError('the stored pairing verification secret is malformed; re-pair the device');
@@ -287,8 +290,8 @@ export class DeviceMemberRecords {
     }));
   }
 
-  async deletePending(): Promise<void> {
-    await this.#delete('pairing-verification');
+  async deletePending(signal?: AbortSignal): Promise<void> {
+    await this.#delete('pairing-verification', signal);
   }
 
   /** Forget the member: a new enrollment or an unpair. */
@@ -299,9 +302,9 @@ export class DeviceMemberRecords {
   }
 
   /** Delete and read back, as the enrollment clear does: a provider that reports a deletion it did not make throws. */
-  async #delete(name: DeviceMemberEntry): Promise<void> {
-    await this.custody.delete(name);
-    if ((await this.custody.read(name)) !== undefined) {
+  async #delete(name: DeviceMemberEntry, signal?: AbortSignal): Promise<void> {
+    await this.custody.delete(name, signal);
+    if ((await this.custody.read(name, signal)) !== undefined) {
       throw new DeviceMemberCustodyError(`the OS credential provider reported deleting the member entry ${name}, but it remains`);
     }
   }

@@ -4,6 +4,7 @@ import { copyPiRuntimeAssets } from './pi/runtime-assets';
 import { copySdkNativeAssets, sdkPackagingAssetLayout, sdkPackagingFormats, type SdkPackagingFormat } from '../sdk-native-assets';
 
 export type { SdkPackagingFormat } from '../sdk-native-assets';
+export { loadSdkKoffiAsset } from '../sdk-native-assets-runtime';
 
 /** The part of an esbuild build that this plugin reads and sets. Declared here so esbuild is not an SDK dependency. */
 export interface SdkPackagingBuild {

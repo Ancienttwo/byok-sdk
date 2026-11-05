@@ -1,5 +1,4 @@
 import { testScratchRoot } from './fixtures/execution-scratch';
-import { existsSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -10,11 +9,12 @@ import {
   DeviceCredentialStoreError,
   DeviceCredentialStoreUnavailableError,
   OS_CREDENTIAL_ENTRY_MAX_BYTES,
-  type DeviceCommandResult,
+  OsCredentialEntry,
   type DeviceCommandRunner,
   type FirstPairingAttempt,
   runDeviceCommand,
 } from '../daemon/device-credential-store';
+import type { Win32CredentialBindings, Win32CredentialCallback, Win32CredentialWrite } from '../daemon/win32-credential-api';
 
 const credentials = {
   deviceId: 'device-credential-test',
@@ -28,10 +28,47 @@ const credentials = {
 const nativeTemporaryRoot = os.tmpdir();
 let suiteTemporaryRoot = '';
 
-function windowsRunner(result: DeviceCommandResult): DeviceCommandRunner {
-  return async (executable) => path.win32.basename(executable).toLowerCase() === 'powershell.exe'
-    ? { exitCode: 0, stdout: '', stderr: '' }
-    : result;
+/** advapi32 for a POSIX host. While `hold` is set, a call waits in `held` for the test to return it. */
+function fakeCredentialApi() {
+  const entries = new Map<string, string>();
+  const written: Win32CredentialWrite[] = [];
+  const landed: string[] = [];
+  const freed: bigint[] = [];
+  const held: Array<() => void> = [];
+  const state = { hold: false, nativeCalls: 0, lastError: 0, failWith: 0, blob: '' };
+  const call = (run: () => number, done: Win32CredentialCallback): void => {
+    state.nativeCalls += 1;
+    const finish = (): void => {
+      const code = state.failWith || run();
+      state.lastError = code;
+      done(null, code === 0 ? 1 : 0);
+    };
+    if (state.hold) held.push(finish);
+    else setImmediate(finish);
+  };
+  const bindings: Win32CredentialBindings = {
+    credRead: (target, _type, _flags, credential, done) => call(() => {
+      const value = entries.get(target);
+      if (value === undefined) return 1168;
+      state.blob = value;
+      credential[0] = 1n;
+      return 0;
+    }, done),
+    credWrite: (credential, _flags, done) => {
+      written.push(credential);
+      call(() => {
+        const value = credential.CredentialBlob.toString('utf8');
+        entries.set(credential.TargetName, value);
+        landed.push(value);
+        return 0;
+      }, done);
+    },
+    credDelete: (target, _type, _flags, done) => call(() => (entries.delete(target) ? 0 : 1168), done),
+    credFree: (credential) => { freed.push(credential); },
+    getLastError: () => state.lastError,
+    readBlob: () => Buffer.from(state.blob, 'utf8'),
+  };
+  return { bindings, entries, written, landed, freed, held, state };
 }
 
 describe('DeviceCredentialStore', () => {
@@ -54,18 +91,18 @@ describe('DeviceCredentialStore', () => {
     await fs.rm(suiteTemporaryRoot, { recursive: true, force: true });
   });
 
-  it.each(['darwin', 'linux', 'win32'] as const)('uses only the %s OS provider and never a path fallback', async (platform) => {
+  it.each(['darwin', 'linux'] as const)('uses only the %s OS provider and never a path fallback', async (platform) => {
     const calls: Array<{ executable: string; args: readonly string[]; stdin?: string }> = [];
     const run: DeviceCommandRunner = async (executable, args, stdin) => {
       calls.push({ executable, args, stdin });
-      if (args[0] === 'find-generic-password' || args[0] === 'lookup' || stdin?.startsWith('read\n')) {
+      if (args[0] === 'find-generic-password' || args[0] === 'lookup') {
         return { exitCode: 44, stdout: '', stderr: '' };
       }
       return { exitCode: 0, stdout: '', stderr: '' };
     };
     const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform, commandRunner: run });
     await store.replace(credentials);
-    expect(calls).toHaveLength(platform === 'win32' ? 4 : 2);
+    expect(calls).toHaveLength(2);
     expect(calls.flatMap((call) => call.args).join(' ')).not.toMatch(/device\.json|tmp|cache/i);
     expect(JSON.stringify(calls)).not.toContain(credentials.accessToken);
     expect(JSON.stringify(calls)).not.toContain(credentials.devicePrivateKeyPem);
@@ -78,121 +115,6 @@ describe('DeviceCredentialStore', () => {
     await expect(store.replace(credentials)).rejects.toBeInstanceOf(DeviceCredentialStoreUnavailableError);
   });
 
-  it('round-trips the Windows Credential Manager UTF-8 blob without a second base64 layer', async () => {
-    let stored: string | undefined;
-    const run: DeviceCommandRunner = async (executable, _args, stdin) => {
-      if (path.win32.basename(executable).toLowerCase() === 'powershell.exe') return { exitCode: 0, stdout: '', stderr: '' };
-      const [operation, _target, _username, secretBase64] = (stdin ?? '').split('\n');
-      if (operation === 'replace') {
-        stored = Buffer.from(secretBase64 ?? '', 'base64').toString('utf8');
-        return { exitCode: 0, stdout: '', stderr: '' };
-      }
-      if (operation === 'read') {
-        return stored === undefined
-          ? { exitCode: 44, stdout: '', stderr: '' }
-          : { exitCode: 0, stdout: stored, stderr: '' };
-      }
-      return { exitCode: 0, stdout: '', stderr: '' };
-    };
-    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
-    await store.replace(credentials);
-    await expect(store.read()).resolves.toEqual(credentials);
-  });
-
-  it('keeps Windows return-code ownership inside the native bridge process', async () => {
-    let script = '';
-    let compiledExecutable = '';
-    let invokedExecutable = '';
-    const run: DeviceCommandRunner = async (executable, args, stdin) => {
-      if (path.win32.basename(executable).toLowerCase() === 'powershell.exe') {
-        script = Buffer.from(args.at(-1) ?? '', 'base64').toString('utf16le');
-        compiledExecutable = stdin ?? '';
-        expect(executable).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-        return { exitCode: 0, stdout: '', stderr: '' };
-      }
-      invokedExecutable = executable;
-      return { exitCode: 44, stdout: '', stderr: '' };
-    };
-    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
-
-    await expect(store.read()).resolves.toBeUndefined();
-    expect(script).toContain('-OutputType ConsoleApplication');
-    expect(script).toContain('public static int Main()');
-    expect(script).toContain('System.Runtime.InteropServices.ComTypes.FILETIME LastWritten');
-    expect(script).not.toContain('using System.Runtime.InteropServices.ComTypes');
-    expect(script).toContain('TargetObject.ErrorNumber');
-    expect(script).not.toMatch(/ErrorText|Exception\.Message|Out-String/u);
-    expect(script).not.toMatch(/Environment\.Exit|::Execute|if\(\$code/u);
-    expect(invokedExecutable).toBe(compiledExecutable);
-    expect(path.basename(invokedExecutable)).toBe('credential-bridge.exe');
-    expect(existsSync(path.dirname(invokedExecutable))).toBe(false);
-  });
-
-  it('reads the Windows compiler request from stdin as UTF-8, not the console code page', async () => {
-    let script = '';
-    const run: DeviceCommandRunner = async (executable, args) => {
-      if (path.win32.basename(executable).toLowerCase() === 'powershell.exe') {
-        script = Buffer.from(args.at(-1) ?? '', 'base64').toString('utf16le');
-        return { exitCode: 0, stdout: '', stderr: '' };
-      }
-      return { exitCode: 44, stdout: '', stderr: '' };
-    };
-    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
-
-    await expect(store.read()).resolves.toBeUndefined();
-    expect(script).toContain(
-      '$assembly=[System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()',
-    );
-    expect(script).not.toContain('[Console]::In');
-  });
-
-  it('compiles the Windows credential bridge outside a long store path', async () => {
-    // 309 characters: Add-Type/csc fail with CS2021 before the bridge can run
-    // when the compiler output sits under this store (#1097).
-    const longStore = path.join(suiteTemporaryRoot, ...Array.from({ length: 4 }, () => 'a'.repeat(60)), 'store');
-    expect(longStore.length).toBeGreaterThan(300);
-    let compiledExecutable = '';
-    const run: DeviceCommandRunner = async (executable, _args, stdin) => {
-      if (path.win32.basename(executable).toLowerCase() === 'powershell.exe') {
-        compiledExecutable = stdin ?? '';
-        return { exitCode: 0, stdout: '', stderr: '' };
-      }
-      expect(executable).toBe(compiledExecutable);
-      return { exitCode: 44, stdout: '', stderr: '' };
-    };
-    const store = new DeviceCredentialStore({ storeDir: longStore, productId: 'credential-store-test', platform: 'win32', commandRunner: run });
-
-    await expect(store.read()).resolves.toBeUndefined();
-    expect(compiledExecutable.endsWith(`credential-bridge.exe`)).toBe(true);
-    expect(compiledExecutable.length).toBeLessThan(200);
-    expect(compiledExecutable.startsWith(longStore)).toBe(false);
-  });
-
-  it('leaves legacy OS temp cleanup to the explicit doctor migration', async () => {
-    const staleDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-device-credential-'));
-    const symlinkTarget = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-device-credential-symlink-target-'));
-    const symlinkPath = path.join(os.tmpdir(), `byok-device-credential-symlink-${process.pid}-${Date.now()}`);
-    const old = new Date(Date.now() - 25 * 60 * 60 * 1_000);
-    await fs.utimes(staleDirectory, old, old);
-    await fs.symlink(symlinkTarget, symlinkPath, 'dir');
-
-    try {
-      const store = new DeviceCredentialStore({ storeDir: testScratchRoot(),
-        productId: 'credential-store-test',
-        platform: 'win32',
-        commandRunner: windowsRunner({ exitCode: 44, stdout: '', stderr: '' }),
-      });
-      await expect(store.read()).resolves.toBeUndefined();
-      expect(existsSync(staleDirectory)).toBe(true);
-      expect(existsSync(symlinkPath)).toBe(true);
-      expect(existsSync(symlinkTarget)).toBe(true);
-    } finally {
-      await fs.rm(symlinkPath, { force: true });
-      await fs.rm(symlinkTarget, { recursive: true, force: true });
-      await fs.rm(staleDirectory, { recursive: true, force: true });
-    }
-  });
-
   it('does not classify a Linux provider error as a missing credential', async () => {
     const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
       exitCode: 1,
@@ -203,51 +125,13 @@ describe('DeviceCredentialStore', () => {
     await expect(store.read()).rejects.toBeInstanceOf(DeviceCredentialStoreError);
   });
 
-  it('surfaces only a bounded Windows native code from provider stderr', async () => {
-    const run = vi.fn<DeviceCommandRunner>().mockImplementation(windowsRunner({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'credential operation failed (win32=1312)',
-    }));
-    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
-    await expect(store.read()).rejects.toThrow(
-      'operating-system credential provider could not read device credentials (win32=1312)',
-    );
-  });
-
-  it('surfaces only a bounded Windows HRESULT when no native code is available', async () => {
-    const run = vi.fn<DeviceCommandRunner>().mockImplementation(windowsRunner({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'PowerShell prefix that must not escape\ncredential operation failed (hresult=-2146233087)\nunowned suffix',
-    }));
-    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
-    await expect(store.read()).rejects.toThrow(
-      'operating-system credential provider could not read device credentials (hresult=-2146233087)',
-    );
-    await expect(store.read()).rejects.not.toThrow(/PowerShell prefix|unowned suffix/u);
-  });
-
-  it('surfaces only bounded numeric bridge stage diagnostics', async () => {
-    const run = vi.fn<DeviceCommandRunner>().mockImplementation(windowsRunner({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'unowned prefix\ncredential operation failed (stage=4,kind=2,hresult=-2146233087)\nunowned suffix',
-    }));
-    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
-    await expect(store.read()).rejects.toThrow(
-      'operating-system credential provider could not read device credentials (stage=4,kind=2,hresult=-2146233087)',
-    );
-    await expect(store.read()).rejects.not.toThrow(/unowned prefix|unowned suffix/u);
-  });
-
   it('does not echo unowned provider stderr into the error', async () => {
-    const run = vi.fn<DeviceCommandRunner>().mockImplementation(windowsRunner({
+    const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
       exitCode: 1,
       stdout: '',
       stderr: 'credential operation failed: secret-bearing unexpected output',
-    }));
-    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'linux', commandRunner: run });
     await expect(store.read()).rejects.toThrow(
       'operating-system credential provider could not read device credentials',
     );
@@ -383,5 +267,99 @@ describe('#1117 provider command deadline', () => {
 
     await expect(store.replace(credentials, controller.signal)).rejects.toMatchObject({ name: 'DeviceCredentialCommandAbortedError', reason: 'cancelled' });
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe('Windows Credential Manager through the native API', () => {
+  const options = { storeDir: 'unused', productId: 'credential-store-test', platform: 'win32' } as const;
+  const entry = (api: ReturnType<typeof fakeCredentialApi>, commandDeadlineMs?: number): OsCredentialEntry => new OsCredentialEntry({
+    ...options, windowsCredentialBindings: api.bindings, account: 'test-entry', label: 'test', subject: 'test values',
+    ...(commandDeadlineMs === undefined ? {} : { commandDeadlineMs }),
+  });
+
+  it('round-trips the unchanged entry format, frees each read and clears each written buffer', async () => {
+    const api = fakeCredentialApi();
+    const store = new DeviceCredentialStore({ ...options, windowsCredentialBindings: api.bindings });
+
+    await expect(store.read()).resolves.toBeUndefined();
+    await store.replace(credentials);
+    await expect(store.read()).resolves.toEqual(credentials);
+    await expect(store.clear()).resolves.toBe(true);
+
+    expect(api.written).toHaveLength(1);
+    expect(api.written[0]).toMatchObject({
+      Type: 1, Persist: 2, UserName: 'device-enrollment',
+      TargetName: expect.stringMatching(/^com\.byok\.client\.device\.[0-9a-f]{64}$/u),
+      CredentialBlobSize: api.written[0]!.CredentialBlob.length,
+    });
+    expect(api.written[0]!.CredentialBlob.every((byte) => byte === 0)).toBe(true);
+    expect(api.freed).toHaveLength(2);
+  });
+
+  it('maps a missing entry to absent on read and delete, and any other code to its bounded diagnostic', async () => {
+    const api = fakeCredentialApi();
+    await expect(entry(api).read()).resolves.toBeUndefined();
+    await expect(entry(api).delete()).resolves.toBeUndefined();
+
+    api.state.failWith = 1312;
+    await expect(entry(api).read()).rejects.toThrow('could not read test values (win32=1312)');
+    api.state.failWith = 1168;
+    await expect(entry(api).replace('value')).rejects.toThrow('could not replace test values (win32=1168)');
+  });
+
+  it('ends a native call past its deadline, and still clears and frees on its late return', async () => {
+    const api = fakeCredentialApi();
+    api.state.hold = true;
+    await expect(entry(api, 20).replace('secret')).rejects.toMatchObject({ reason: 'deadline' });
+    const write = api.written[0]!;
+    expect(write.CredentialBlob.toString('utf8')).toBe('secret');
+    api.held.shift()!();
+    await vi.waitFor(() => expect(write.CredentialBlob.every((byte) => byte === 0)).toBe(true));
+
+    const target = write.TargetName;
+    await expect(entry(api, 20).read()).rejects.toMatchObject({ reason: 'deadline' });
+    await vi.waitFor(() => expect(api.held).toHaveLength(1));
+    expect(api.entries.get(target)).toBe('secret');
+    api.held.shift()!();
+    await vi.waitFor(() => expect(api.freed).toEqual([1n]));
+  });
+
+  it('cancels before and during a native call', async () => {
+    const api = fakeCredentialApi();
+    const before = new AbortController();
+    before.abort();
+    await expect(entry(api).read(before.signal)).rejects.toMatchObject({ reason: 'cancelled' });
+    expect(api.state.nativeCalls).toBe(0);
+
+    api.state.hold = true;
+    const during = new AbortController();
+    const read = entry(api).read(during.signal);
+    await vi.waitFor(() => expect(api.held).toHaveLength(1));
+    during.abort();
+    await expect(read).rejects.toMatchObject({ reason: 'cancelled' });
+    api.held.shift()!();
+  });
+
+  it('never lands a late old write after a newer one, and the wait spends the caller deadline', async () => {
+    const api = fakeCredentialApi();
+    api.state.hold = true;
+    await expect(entry(api, 20).replace('old')).rejects.toMatchObject({ reason: 'deadline' });
+
+    await expect(entry(api, 20).read()).rejects.toMatchObject({ reason: 'deadline' });
+    const newer = entry(api).replace('new');
+    await new Promise((resolve) => { setTimeout(resolve, 20); });
+    expect(api.state.nativeCalls).toBe(1);
+
+    api.state.hold = false;
+    api.held.shift()!();
+    await newer;
+
+    expect(api.landed).toEqual(['old', 'new']);
+    expect(api.state.nativeCalls).toBe(2);
+  });
+
+  it('reports invalid SDK native assets as an unavailable provider', async () => {
+    const store = new DeviceCredentialStore({ ...options, nativeAssetRoot: path.join(os.tmpdir(), 'byok-no-native-assets') });
+    await expect(store.read()).rejects.toBeInstanceOf(DeviceCredentialStoreUnavailableError);
   });
 });

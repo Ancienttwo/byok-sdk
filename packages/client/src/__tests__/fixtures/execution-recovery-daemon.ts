@@ -26,6 +26,8 @@ import {
 
 interface Config {
   readonly deviceCredentials?: { readonly macosKeychainPath: string };
+  /** Windows: the compiled daemon loads koffi from this asset root. */
+  readonly nativeAssetRoot?: string;
   readonly scratchRoot: string;
   readonly productId: string;
   readonly serverUrl: string;
@@ -255,6 +257,7 @@ const daemon = createDaemonWithAdapters(
     serverUrl: config.serverUrl,
     storage: { scratchRoot: config.scratchRoot }, storeDir: config.storeDir,
     deviceCredentials: config.deviceCredentials,
+    nativeAssetRoot: config.nativeAssetRoot,
     sdkHelperHost: { mode: 'self-executable' },
     ...(config.agentHome === true ? { agentHome: { hostStorageRoot: path.join(config.storeDir, 'agent-home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } } : {}),
   },

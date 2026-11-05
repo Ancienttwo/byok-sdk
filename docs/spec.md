@@ -3176,7 +3176,11 @@ complete paired enrollment: authenticated device/tenant/public-key metadata,
 access token, expiry, and device private key. It uses macOS Keychain, Windows
 Credential Manager, or Linux Secret Service; provider unavailability is typed
 and fail-closed, and there is no file or `@byok-sdk/keys`
-fallback. `<storeDir>/device.json` is only a bounded non-secret projection
+fallback. On Windows the client calls advapi32 through koffi inside the daemon
+process, on a worker thread. Every native credential call joins one FIFO: it
+starts only after the previous call really returned, and the wait counts toward
+its own 15 s deadline. A call past its deadline has an unknown outcome and is
+never replayed. `<storeDir>/device.json` is only a bounded non-secret projection
 `{deviceId, tenantId, devicePublicKey}`. A legacy secret-bearing JSON record is
 never imported, parsed as a JWT, or dual-read: normal load/start/status reports
 `re_pair_required`, and explicit re-pair is the default recovery.
@@ -4130,8 +4134,11 @@ and integrity-verified official Koffi addon; it never downloads in a runtime.
 `sdkDistributionManifest` describes Pi pin, reserved helper kinds and native target
 files. `reservedHelperKinds` is exactly the set that
 `runSdkReservedHelperCommand` accepts. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
-`DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
-to that adapter's owned process trees and fails closed on missing or modified
+`DaemonConfig`, or to each custom adapter constructor. The daemon's Windows
+credential store uses the same `DaemonConfig` value. `readDeviceEnrollmentStatus`,
+`readDeviceEnrollmentIdentity` and `createStoredDeviceProofSigner` run without a
+daemon, so they take it as an option. An explicit root is scoped
+to that adapter's owned process trees and that credential read, and fails closed on missing or modified
 bytes without searching installed dependencies. Omission keeps installed behavior.
 For Darwin the copier delegates to the existing memory-helper release copier.
 For Windows x64 it also copies the Windows memory helper and its manifest into

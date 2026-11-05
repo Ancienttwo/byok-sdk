@@ -6,6 +6,7 @@ interface CredentialProviderOptions {
   productId: string;
   storeDir: string;
   deviceCredentials?: DeviceCredentialConfig;
+  nativeAssetRoot?: string;
 }
 
 function macosKeychainPathOf(options: CredentialProviderOptions): string | undefined {
@@ -25,6 +26,7 @@ export function createDeviceCredentialStore(options: CredentialProviderOptions):
     productId: options.productId,
     storeDir: options.storeDir,
     macosKeychainPath: macosKeychainPathOf(options),
+    nativeAssetRoot: options.nativeAssetRoot,
   });
 }
 
@@ -34,5 +36,6 @@ export function createDeviceMemberCustody(options: CredentialProviderOptions): D
     productId: options.productId,
     storeDir: options.storeDir,
     macosKeychainPath: macosKeychainPathOf(options),
+    nativeAssetRoot: options.nativeAssetRoot,
   });
 }

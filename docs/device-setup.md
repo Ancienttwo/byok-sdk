@@ -567,8 +567,9 @@ may be transient and is distinct from a halt. Either way the run has already
 ended its active tasks and takes no new ones, whether or not the Host has
 called `stop()` yet; their failures are reported by the next `start()`.
 
-**Keychain locked.** Every OS credential command has a deadline (15 s; 60 s for
-the Windows bridge compile). A keychain that is locked, or waiting on an unlock
+**Keychain locked.** Every OS credential command has a 15 s deadline. On Windows
+native credential calls run one at a time, and the wait counts toward that
+deadline. A keychain that is locked, or waiting on an unlock
 prompt that a service (LaunchAgent, systemd user unit) cannot show, ends the
 command with `DeviceCredentialCommandAbortedError` (`reason: 'deadline'`): the
 keychain may be locked or waiting for a prompt. Authentication fails until it

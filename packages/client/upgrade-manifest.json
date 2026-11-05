@@ -99,6 +99,17 @@
         "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
         "export:@byok-sdk/protocol/constants#AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY"
       ]
+    },
+    {
+      "id": "windows-credential-koffi",
+      "impact": "breaking",
+      "summary": "On Windows the device credential store calls Credential Manager through koffi in the daemon process (#1445). Entry names and bytes do not change, so a rollback still reads them. Breaking for a CJS or SEA Windows Host: readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity and createStoredDeviceProofSigner run outside the daemon, so pass them the new nativeAssetRoot option with the same value as DaemonConfig.nativeAssetRoot; without it they fail with DeviceCredentialStoreUnavailableError because koffi cannot load. A packaged Windows Host daemon without DaemonConfig.nativeAssetRoot cannot pair or authenticate; this includes a bun --compile Host, not only CJS and SEA cold reads. An npm install needs no change. @byok-sdk/client/packaging now exports loadSdkKoffiAsset for a packaged Host to give its validated koffi to @byok-sdk/keys.",
+      "migration": "docs/spec.md#product-native-asset-deployment",
+      "items": [
+        "export:@byok-sdk/client#CreateStoredDeviceProofSignerOptions",
+        "export:@byok-sdk/client#DeviceEnrollmentStatusOptions",
+        "export:@byok-sdk/client/packaging#loadSdkKoffiAsset"
+      ]
     }
   ],
   "changes": [
@@ -113,6 +124,16 @@
       "item": "export:@byok-sdk/client#AgentHomeLeaseManager",
       "change": "changed",
       "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/client#CreateStoredDeviceProofSignerOptions",
+      "change": "changed",
+      "entry": "windows-credential-koffi"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentStatusOptions",
+      "change": "changed",
+      "entry": "windows-credential-koffi"
     },
     {
       "item": "export:@byok-sdk/client/agent-memory#AgentMemoryFileObservation",
@@ -148,6 +169,11 @@
       "item": "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntryKind",
       "change": "added",
       "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#loadSdkKoffiAsset",
+      "change": "added",
+      "entry": "windows-credential-koffi"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",

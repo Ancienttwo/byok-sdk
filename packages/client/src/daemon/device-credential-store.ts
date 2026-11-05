@@ -1,10 +1,16 @@
-import { createPrivateSystemTempDir } from '../util/secure-dir';
 import { systemExecutable } from '../util/system-tool';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
+import {
+  deleteWin32Credential,
+  enqueueWin32CredentialCall,
+  loadWin32CredentialBindings,
+  readWin32Credential,
+  writeWin32Credential,
+  type Win32CredentialBindings,
+} from './win32-credential-api';
 
 /** Secret fields inside the internal complete enrollment authority. */
 export interface DeviceCredentials {
@@ -75,34 +81,23 @@ const ENCODED_PREFIX = 'byok-device-credential-v1:';
 /** The Windows generic-credential blob bound, kept on every OS entry of this product. */
 export const OS_CREDENTIAL_ENTRY_MAX_BYTES = 2_400;
 const NOT_FOUND = 44;
+const WIN32_ERROR_NOT_FOUND = 1168;
 /**
  * Deadline for one provider command. A locked keychain, a provider dialog
  * that a LaunchAgent cannot show, or a waiting gnome-keyring otherwise hangs
  * the command, and with it every auth caller and daemon shutdown (#1117).
  */
 const OS_CREDENTIAL_COMMAND_DEADLINE_MS = 15_000;
-/**
- * The Windows bridge compile (PowerShell 5.1 `Add-Type`) is the one slow
- * command: the native probe measured median 3.6 s, max 9 s, and two runs
- * past 20 s on a cold job (device-credential-store.native.test.ts).
- */
-const WINDOWS_CREDENTIAL_COMPILE_DEADLINE_MS = 60_000;
 
 function providerDiagnostic(stderr: string): string {
-  const match = /credential operation failed \((win32=\d{1,10}|hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},hresult=-?\d{1,11})\)/u.exec(stderr);
+  const match = /credential operation failed \((win32=\d{1,10})\)/u.exec(stderr);
   return match === null ? '' : ` (${match[1]})`;
 }
 
-function isNodeError(error: unknown, code: string): boolean {
-  return error instanceof Error && 'code' in error && error.code === code;
-}
-
-function windowsPowerShellExecutable(): string {
-  const systemRoot = process.env.SystemRoot;
-  if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot)) {
-    throw new DeviceCredentialStoreError('Windows system root is unavailable');
-  }
-  return path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+function windowsResult(code: number, stdout: string, missingIsAbsent: boolean): DeviceCommandResult {
+  if (code === 0) return { exitCode: 0, stdout, stderr: '' };
+  if (missingIsAbsent && code === WIN32_ERROR_NOT_FOUND) return { exitCode: NOT_FOUND, stdout: '', stderr: '' };
+  return { exitCode: 1, stdout: '', stderr: `credential operation failed (win32=${code})` };
 }
 
 /** Typed unavailability; callers must surface re-pair/operational failure, never write a file fallback. */
@@ -130,8 +125,9 @@ export class DeviceCredentialInteractionRequiredError extends DeviceCredentialSt
 
 /**
  * A provider command ended before it answered: it exceeded its deadline, or
- * the caller cancelled it (daemon shutdown). The child process was killed.
- * Nothing was learned about the entry, so the caller keeps its prior state.
+ * the caller cancelled it (daemon shutdown). A child process was killed; a
+ * Windows native call runs on to its own return. Either way the outcome is
+ * unknown, so the caller keeps its prior state and does not replay the write.
  */
 export class DeviceCredentialCommandAbortedError extends DeviceCredentialStoreError {
   constructor(readonly reason: 'deadline' | 'cancelled') {
@@ -319,6 +315,10 @@ export interface OsCredentialEntryOptions extends DeviceCredentialConfig {
   readonly commandRunner?: DeviceCommandRunner;
   /** Internal test seam for the per-command deadline; production uses the fixed bound. */
   readonly commandDeadlineMs?: number;
+  /** Absolute SDK native asset directory of a packaged Windows Host (`DaemonConfig.nativeAssetRoot`). */
+  readonly nativeAssetRoot?: string;
+  /** Internal test seam; production binds advapi32 through koffi on first use. */
+  readonly windowsCredentialBindings?: Win32CredentialBindings;
 }
 
 /**
@@ -339,6 +339,8 @@ export class OsCredentialEntry {
   readonly #run: DeviceCommandRunner;
   readonly #commandDeadlineMs: number;
   readonly #macosKeychainPath: string | undefined;
+  readonly #nativeAssetRoot: string | undefined;
+  readonly #windowsBindings: Win32CredentialBindings | undefined;
 
   constructor(options: OsCredentialEntryOptions & { readonly account: string; readonly label: string; readonly subject: string }) {
     this.#service = serviceFor(options.productId);
@@ -360,6 +362,8 @@ export class OsCredentialEntry {
     this.#macosKeychainPath = keychainPath;
     this.#run = options.commandRunner ?? runDeviceCommand;
     this.#commandDeadlineMs = options.commandDeadlineMs ?? OS_CREDENTIAL_COMMAND_DEADLINE_MS;
+    this.#nativeAssetRoot = options.nativeAssetRoot;
+    this.#windowsBindings = options.windowsCredentialBindings;
   }
 
   /** The stored value, or `undefined` when the entry is absent. */
@@ -417,23 +421,21 @@ export class OsCredentialEntry {
     return result.exitCode === NOT_FOUND || (this.#platform === 'linux' && result.exitCode === 1 && result.stderr.trim().length === 0);
   }
 
-  /** Every provider command runs here, under its deadline and the caller's cancellation. */
-  async #command(
-    executable: string,
-    args: readonly string[],
-    stdin: string | undefined,
-    signal: AbortSignal | undefined,
-    deadlineMs = this.#commandDeadlineMs,
-  ): Promise<DeviceCommandResult> {
-    const deadline = AbortSignal.timeout(deadlineMs);
+  /** Every provider operation runs here, under its deadline and the caller's cancellation. */
+  async #bounded(signal: AbortSignal | undefined, operation: (bounded: AbortSignal) => Promise<DeviceCommandResult>): Promise<DeviceCommandResult> {
+    const deadline = AbortSignal.timeout(this.#commandDeadlineMs);
     const bounded = signal === undefined ? deadline : AbortSignal.any([deadline, signal]);
     if (bounded.aborted) throw new DeviceCredentialCommandAbortedError(deadline.aborted ? 'deadline' : 'cancelled');
     try {
-      return await this.#run(executable, args, stdin, bounded);
+      return await operation(bounded);
     } catch (error) {
       if (bounded.aborted) throw new DeviceCredentialCommandAbortedError(deadline.aborted ? 'deadline' : 'cancelled');
       throw error;
     }
+  }
+
+  #command(executable: string, args: readonly string[], stdin: string | undefined, signal: AbortSignal | undefined): Promise<DeviceCommandResult> {
+    return this.#bounded(signal, (bounded) => this.#run(executable, args, stdin, bounded));
   }
 
   #checkInteraction(result: DeviceCommandResult): void {
@@ -460,46 +462,27 @@ export class OsCredentialEntry {
     return this.#command('secret-tool', ['store', `--label=${this.#label}`, ...attrs], encoded, signal);
   }
 
-  async #windows(operation: 'read' | 'replace' | 'clear', encoded: string | undefined, signal: AbortSignal | undefined): Promise<DeviceCommandResult> {
-    // Not under the store: the compiler's own path limit is shorter than a
-    // long store path, so the bridge lives directly under the OS temp root.
-    const directory = await createPrivateSystemTempDir('byok-credential-');
-    const executable = path.join(directory, 'credential-bridge.exe');
-    const request = [
-      operation,
-      Buffer.from(this.#windowsTarget, 'utf8').toString('base64'),
-      Buffer.from(this.#account, 'utf8').toString('base64'),
-      encoded === undefined ? '' : Buffer.from(encoded, 'utf8').toString('base64'),
-    ].join('\n');
-    let result: DeviceCommandResult | undefined;
-    let cleanupFailed = false;
-
-    try {
-      const compiler = await this.#command(
-        windowsPowerShellExecutable(),
-        ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', WINDOWS_CREDENTIAL_COMPILER_SCRIPT],
-        executable,
-        signal,
-        WINDOWS_CREDENTIAL_COMPILE_DEADLINE_MS,
-      );
-      result = compiler.exitCode === 0
-        ? await this.#command(executable, [], request, signal)
-        : { exitCode: compiler.exitCode, stdout: '', stderr: compiler.stderr };
-    } finally {
-      try {
-        await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-      } catch {
-        cleanupFailed = true;
+  #windows(operation: 'read' | 'replace' | 'clear', encoded: string | undefined, signal: AbortSignal | undefined): Promise<DeviceCommandResult> {
+    return this.#bounded(signal, (bounded) => enqueueWin32CredentialCall(async () => {
+      const bindings = await this.#windowsCredentialBindings();
+      if (operation === 'read') {
+        const { code, value } = await readWin32Credential(bindings, this.#windowsTarget);
+        return windowsResult(code, value ?? '', true);
       }
-    }
+      if (operation === 'clear') return windowsResult(await deleteWin32Credential(bindings, this.#windowsTarget), '', true);
+      return windowsResult(await writeWin32Credential(bindings, this.#windowsTarget, this.#account, encoded!), '', false);
+    }, bounded));
+  }
 
-    if (cleanupFailed) {
-      throw new DeviceCredentialStoreError('temporary Windows credential bridge cleanup failed');
+  async #windowsCredentialBindings(): Promise<Win32CredentialBindings> {
+    if (this.#windowsBindings !== undefined) return this.#windowsBindings;
+    try {
+      return await loadWin32CredentialBindings(this.#nativeAssetRoot);
+    } catch {
+      throw new DeviceCredentialStoreUnavailableError(this.#nativeAssetRoot === undefined
+        ? 'Windows Credential Manager requires the koffi optional dependency, which could not be loaded'
+        : 'Windows Credential Manager requires valid SDK native assets at the configured root');
     }
-    if (result === undefined) {
-      throw new DeviceCredentialStoreError('Windows credential bridge did not produce a result');
-    }
-    return result;
   }
 }
 
@@ -611,41 +594,3 @@ export async function runDeviceCommand(
     child.stdin.end(stdin);
   });
 }
-
-// PowerShell only compiles this static, non-secret console executable. The
-// executable itself owns Credential Manager result bytes and process exit. The
-// output path arrives on stdin and is decoded as UTF-8 explicitly, independent
-// of the console code page, so a non-ASCII temp directory reaches Add-Type
-// unchanged.
-const WINDOWS_CREDENTIAL_COMPILER_SCRIPT = Buffer.from(String.raw`
-$assembly=[System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()
-try {
-Add-Type -OutputAssembly $assembly -OutputType ConsoleApplication -ErrorAction Stop -TypeDefinition @"
-using System; using System.Runtime.InteropServices; using System.Text;
-public static class ByokDeviceCredential {
- [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] private struct C { public UInt32 Flags; public UInt32 Type; [MarshalAs(UnmanagedType.LPWStr)] public string TargetName; [MarshalAs(UnmanagedType.LPWStr)] public string Comment; public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten; public UInt32 CredentialBlobSize; public IntPtr CredentialBlob; public UInt32 Persist; public UInt32 AttributeCount; public IntPtr Attributes; [MarshalAs(UnmanagedType.LPWStr)] public string TargetAlias; [MarshalAs(UnmanagedType.LPWStr)] public string UserName; }
- [DllImport("Advapi32.dll", EntryPoint="CredWriteW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool W(ref C c, UInt32 f);
- [DllImport("Advapi32.dll", EntryPoint="CredReadW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool R(string t, UInt32 ty, UInt32 f, out IntPtr p);
- [DllImport("Advapi32.dll", EntryPoint="CredDeleteW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool D(string t, UInt32 ty, UInt32 f);
- [DllImport("Advapi32.dll")] private static extern void CredFree(IntPtr p);
- private static int Set(string t,string u,byte[] b) { IntPtr p=IntPtr.Zero; try { p=Marshal.AllocHGlobal(b.Length); Marshal.Copy(b,0,p,b.Length); C c=new C { Type=1,TargetName=t,CredentialBlobSize=(UInt32)b.Length,CredentialBlob=p,Persist=2,UserName=u}; if(!W(ref c,0)) return Marshal.GetLastWin32Error(); return 0; } finally { if(p!=IntPtr.Zero) { Marshal.Copy(new byte[b.Length],0,p,b.Length); Marshal.FreeHGlobal(p); } } }
- private static int Kind(Exception e) { if(e is DllNotFoundException)return 1;if(e is EntryPointNotFoundException)return 2;if(e is BadImageFormatException)return 3;if(e is MarshalDirectiveException)return 4;if(e is SEHException)return 5;if(e is AccessViolationException)return 6;if(e is TypeInitializationException)return 7;if(e is TypeLoadException)return 8;if(e is InvalidCastException)return 9;if(e is ArgumentException)return 10;if(e is InvalidOperationException)return 11;if(e.GetType()==typeof(SystemException))return 12;if(e is SystemException)return 13;return 99; }
- private static int Failure(int stage,Exception e) { Console.Error.Write("credential operation failed (stage="+stage+",kind="+Kind(e)+",hresult="+e.HResult+")"); return -1; }
- private static int InputFailure(int kind) { Console.Error.Write("credential operation failed (stage=0,kind="+kind+",hresult=0)"); return 2; }
- private static int Get(string t) { IntPtr p=IntPtr.Zero; bool found; try { found=R(t,1,0,out p); } catch(Exception e) { return Failure(1,e); } if(!found) return Marshal.GetLastWin32Error(); int code=0; try { C c=(C)Marshal.PtrToStructure(p,typeof(C)); byte[] b=new byte[c.CredentialBlobSize]; if(b.Length>0) { Marshal.Copy(c.CredentialBlob,b,0,b.Length); using(var output=Console.OpenStandardOutput()) { output.Write(b,0,b.Length); output.Flush(); } } } catch(Exception e) { code=Failure(2,e); } try { CredFree(p); } catch(Exception e) { return Failure(3,e); } return code; }
- private static int Delete(string t) { if(D(t,1,0)) return 0; return Marshal.GetLastWin32Error(); }
- private static int ExitFor(int code,bool missingIsAbsent) { if(code==0)return 0;if(missingIsAbsent&&code==1168)return 44;if(code<0)return 1;Console.Error.Write("credential operation failed (win32="+code+")");return 1; }
- private static string Decode(string value) { return Encoding.UTF8.GetString(Convert.FromBase64String(value)); }
- public static int Main() { int stage=1;byte[] secret=null;try { string[] fields=Console.In.ReadToEnd().Split(new[]{'\n'},StringSplitOptions.None);if(fields.Length!=4)return InputFailure(fields.Length<100?fields.Length:99);string operation=fields[0];string target=Decode(fields[1]);string username=Decode(fields[2]);if(target.Length==0||username.Length==0)return InputFailure(20);if(operation=="replace") { stage=2;secret=Convert.FromBase64String(fields[3]);stage=3;return ExitFor(Set(target,username,secret),false); } if(operation=="read") { stage=4;return ExitFor(Get(target),true); } if(operation=="clear") { stage=6;return ExitFor(Delete(target),true); } return InputFailure(21); } catch(Exception e) { Failure(stage,e);return 1; } finally { if(secret!=null)Array.Clear(secret,0,secret.Length); } }
-}
-"@
-if(Test-Path -LiteralPath $assembly -PathType Leaf){exit 0}
-[Console]::Error.Write("credential operation failed (stage=8,kind=2,hresult=0)")
-} catch {
-$compilerCode=99
-$errorNumber=[string]$_.TargetObject.ErrorNumber
-if($errorNumber -match '\ACS([0-9]{4})\z'){$compilerCode=[Convert]::ToInt32($Matches[1])}
-[Console]::Error.Write("credential operation failed (stage=8,kind=3,hresult="+$compilerCode+")")
-}
-exit 1
-`, 'utf16le').toString('base64');
