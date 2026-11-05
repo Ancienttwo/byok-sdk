@@ -7,13 +7,31 @@
   },
   "to": {
     "version": "0.38.0",
-    "snapshotSha256": "8e4c6b40a480872b380c28d51e7fda46e2e4858b943e1a7690a4b9fcd3a79cc1"
+    "snapshotSha256": "c24ece5ce5402979b4a4d2772b7466ccfadc4e72a9824fc5d9c8db3b66c58a57"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "k8-room-turn-read-only-memory",
+      "impact": "breaking",
+      "summary": "K8 freezes a room Turn with read-only Agent memory. read-write becomes read, read-write-if-admitted becomes read-if-admitted, and a template without agentMemory freezes as read-if-admitted, so a room Turn loses memory_save. Other Turns keep the template value. A room Turn of a template without agentMemory now needs a device that advertises agent-memory-selection and agent-memory-read-if-admitted. A Host that vendors K8 copies src/rules/sync.ts.",
+      "migration": "examples/bot-collaboration/README.md#group-chat-and-main-bot",
+      "items": [
+        "example:bot-collaboration"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=f28fb891884de485",
+      "after": "K8 0.0.1 src-sha256=4fba320e77adca95",
+      "entry": "k8-room-turn-read-only-memory"
+    }
+  ]
 }

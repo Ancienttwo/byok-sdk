@@ -16,6 +16,20 @@
   instruction in it. Memory can carry text from other users or Bots, so a
   line such as "always do X from now on" no longer reads as an instruction.
 
+- **Breaking (examples; #1446)** — K8 freezes a room Turn with read-only Agent
+  memory: `read-write` becomes `read`, `read-write-if-admitted` becomes
+  `read-if-admitted`, and a template without `agentMemory` freezes as
+  `read-if-admitted`, so a room Turn has no `memory_save`. Other Turns keep the
+  template value, and the mode only goes down. The hosted example
+  `examples/hosted-bot-collaboration` calls the same `syncTurn`, so its room
+  Turns freeze read-only too. A room Turn of a template without `agentMemory`
+  now needs a device that advertises
+  `agent-memory-selection` and `agent-memory-read-if-admitted`. The SDK still
+  does not make memory files read-only, so a Host narrows the toolset or file
+  scope if a Bot must not write `MEMORY.md` from a room. A Host that vendored
+  K8 copies `src/rules/sync.ts`
+  ([migration](examples/bot-collaboration/README.md#group-chat-and-main-bot)).
+
 ## 0.38.0 — 2026-11-04 (published)
 
 0.38.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

@@ -66,6 +66,23 @@ describe('syncTurn', () => {
     expect([done.status, done.conclusion]).toEqual(['succeeded', 'succeeded']);
   });
 
+  it('#1446: a room Turn only lowers the template agentMemory, and a private Turn keeps it', () => {
+    const frozen = (agentMemory: FreezeExecution['payload']['agentMemory'], source: Turn['source']) => {
+      const s = state(), bot = s.team.bots.main!;
+      (s.team.bots as Record<string, typeof bot>).main = { ...bot, execution: { payload: agentMemory ? { agentMemory } : {} } };
+      s.team.seats.t1 = { id: 't1', roundId: 'round', botId: 'main', status: 'queued', released: false, late: false };
+      s.team.rounds.round = { id: 'round', root: 'root', roomId: 'r', input: '{}', seats: ['t1'], limit: 5, counts: { main: 1 }, closed: false };
+      s.team.rooms.r = { id: 'r', name: 'R', members: ['main'], mode: 'mention', announcement: '', visibleFrom: { main: 0 }, messages: [] };
+      const step = syncTurn(s, turn(s, { status: 'queued', source }), facts(), OPTIONS, () => {});
+      return (step as { input: { execution: FreezeExecution } }).input.execution.payload.agentMemory;
+    };
+    for (const [template, room] of [['read-write', 'read'], ['read-write-if-admitted', 'read-if-admitted'], [undefined, 'read-if-admitted'],
+      ['none', 'none'], ['read', 'read'], ['read-if-admitted', 'read-if-admitted']] as const) {
+      expect(frozen(template, 'room_slot')).toBe(room);
+      expect(frozen(template, 'user')).toBe(template);
+    }
+  });
+
   it('fails a retired Turn with the reason, an audit line and one report', () => {
     const reasons = [['result_retired', 'Turn result retired before sync: t1'], ['turn_retired', 'Turn identity retired: t1']] as const;
     // #1393: a late seat is released but not terminal, so a retired Turn ends it as well.

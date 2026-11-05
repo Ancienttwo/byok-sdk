@@ -1044,6 +1044,24 @@ A delayed post appended after joining is visible. Already frozen offers keep
 their selected window. A room without an earlier offset starts at the next
 user input; its older history is not disclosed.
 
+A room Turn never gets `memory_save` (#1446): other users' and Bots' text
+reaches it, and what a Turn saves comes back in every later Turn of that Bot.
+`syncTurn` freezes a `room_slot` Turn with a lower `payload.agentMemory`:
+`read-write` becomes `read`, `read-write-if-admitted` becomes
+`read-if-admitted`, and a template without the field freezes as
+`read-if-admitted`. `none`, `read` and `read-if-admitted` stay. The mode only
+goes down. Every other source keeps the template value, a sealed routine Turn
+too, and the frozen execution stores the mode that the offer carries, so replay
+does not change. `read-if-admitted` needs a device that advertises
+`agent-memory-selection` and `agent-memory-read-if-admitted`; a daemon with an
+Agent home advertises both.
+
+Read-only here means no `memory_save` and no memory-writing guidance. The SDK
+does not make memory files read-only ([protocol](../../docs/protocol.md)
+§2.2): a Bot whose toolset can write files can still change `MEMORY.md` from a
+room Turn. A Host that needs to stop that narrows the toolset or the file scope
+of the Bot's template.
+
 `src/group-chat.test.ts` uses a real embedded SDK, daemon, HTTP transport,
 SQLite reopen, persona writes, and submit_result helper. `src/rooms.test.ts`
 checks budgets, authority, atomic refusal, and context limits as state rules.
