@@ -43,6 +43,10 @@ export {
  * runs on that canonical path with byte comparison. A volume mount point
  * presents as a directory and canonicalizes onto its own volume, so it is
  * `outside_scope`, or `cross_device` by dev when that volume has no letter.
+ * A lstat or `realpath.native` failure names its reason only for a path
+ * confirmed inside a root; any other path is `outside_scope`. A drive root
+ * (`D:\`) is a root like `/`, and a root whose canonical path is a `\\` share
+ * (a mapped network drive) is refused.
  * The Windows evidence is #1423 (PR-2a, run 41808217164).
  */
 
@@ -229,14 +233,20 @@ async function resolveRoot(
   } catch (error) {
     throw ioFailure('io_error', error, root.id, root.access);
   }
-  // A root is the final component of its canonical parent. Anything else means
+  // A root that canonicalizes onto a network share (a mapped drive) is refused
+  // like a `\\` root at step 1: file identity over SMB is not established.
+  if (platform === 'win32' && canonical.startsWith('\\\\')) throw fail('path_syntax');
+  // A root is the final component of its canonical parent, and a filesystem
+  // root (`/`, `D:\`) canonicalizes to a filesystem root. Anything else means
   // the path was replaced or resolved through a component the guard did not
   // see as a real directory. On win32 the final name may be an 8.3 alias or
   // differ in case, so only the parent is compared; a volume mount point
   // canonicalizes to another volume's root and still fails.
-  const childOfParent = platform === 'win32'
-    ? path.win32.dirname(canonical) === canonicalParent && canonical !== canonicalParent
-    : canonical === path.join(canonicalParent, path.basename(lexicalPath));
+  const childOfParent = platform !== 'win32'
+    ? canonical === path.join(canonicalParent, path.basename(lexicalPath))
+    : path.win32.dirname(lexicalPath) === lexicalPath
+      ? path.win32.dirname(canonical) === canonical
+      : path.win32.dirname(canonical) === canonicalParent && canonical !== canonicalParent;
   if (!childOfParent) throw fail('root_identity_changed');
   let canonicalStat;
   try {
@@ -390,12 +400,13 @@ function expandHome(value: string, osHome: string): string {
  * the first ENOENT, refusing any symlink (junctions and AppExecLinks report as
  * one), then canonicalize the deepest existing prefix with `realpath.native`
  * and append the missing segments. `resolved` already passed
- * {@link win32FileScopePath}.
+ * {@link win32FileScopePath}. A failure goes to `refuse` with the deepest
+ * prefix the walk verified.
  */
 async function win32CanonicalPath(
   resolved: string,
   io: FileScopeIo,
-  fail: (reason: FileScopeGuardReason) => FileScopeGuardError,
+  refuse: (reason: FileScopeGuardReason, verified: string, cause?: unknown) => Promise<FileScopeGuardError>,
 ): Promise<string> {
   const segments = resolved.slice(3).split('\\').filter((segment) => segment !== '');
   let existing = resolved.slice(0, 3);
@@ -407,10 +418,9 @@ async function win32CanonicalPath(
       value = await io.lstat(next);
     } catch (error) {
       if (isErrno(error, 'ENOENT')) break;
-      if (isErrno(error, 'ENOTDIR')) throw fail('not_regular_file');
-      throw new FileScopeGuardError('file_scope_unavailable', 'io_error', { cause: error });
+      throw await refuse(isErrno(error, 'ENOTDIR') ? 'not_regular_file' : 'io_error', existing, error);
     }
-    if (value.kind === 'symlink') throw fail('symlink');
+    if (value.kind === 'symlink') throw await refuse('symlink', existing);
     existing = next;
     existingCount += 1;
   }
@@ -418,7 +428,7 @@ async function win32CanonicalPath(
   try {
     canonical = await io.realpath(existing);
   } catch (error) {
-    throw new FileScopeGuardError('file_scope_unavailable', 'io_error', { cause: error });
+    throw await refuse('io_error', existing, error);
   }
   return path.win32.join(canonical, ...segments.slice(existingCount));
 }
@@ -503,17 +513,39 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
     const expanded = raw === '~' ? osHome : raw.startsWith('~\\') ? path.win32.join(osHome, raw.slice(2)) : raw;
     const resolved = win32FileScopePath(expanded, cwd);
     if (resolved === undefined) throw fail('path_syntax');
-    // A segment denial happens before root matching; the root the path names
-    // lexically labels it, as the shared walk does on darwin/linux.
+    // A step 4/5 failure keeps its own reason only for a path confirmed inside
+    // a root: one that names the root lexically, or whose deepest verified
+    // prefix canonicalizes into it. Any other path is outside the scope, and
+    // its denial says nothing more about the filesystem there.
+    const refuseUnconfirmed = (lexicalOwner: FileScopeRootGrant | undefined, outside: FileScopeGuardReason) =>
+      async (reason: FileScopeGuardReason, verified: string, cause?: unknown): Promise<FileScopeGuardError> => {
+        let confirmed = lexicalOwner;
+        if (confirmed === undefined) {
+          try {
+            confirmed = matchRoot(allRoots, await io.realpath(verified))?.root;
+          } catch {
+            // An uncanonicalizable prefix is not confirmed inside any root.
+          }
+        }
+        if (confirmed === undefined) return fail(outside);
+        return reason === 'io_error'
+          ? new FileScopeGuardError('file_scope_unavailable', 'io_error', { rootId: confirmed.id, access: confirmed.access, cause })
+          : fail(reason, confirmed.id, input.access);
+      };
+    // A relative target from a cwd outside every root is refused before its
+    // walk, whose outcome would otherwise describe the disk outside the scope.
+    if (!/^[A-Za-z]:\\/u.test(expanded)) {
+      relativeCwd = await win32CanonicalPath(cwd, io, refuseUnconfirmed(matchRoot(allRoots, cwd)?.root, 'cwd_outside_scope'));
+      if (matchRoot(allRoots, relativeCwd) === undefined) throw fail('cwd_outside_scope');
+    }
     const owner = matchRoot(allRoots, resolved)?.root;
-    absolute = await win32CanonicalPath(resolved, io, (reason) => fail(reason, owner?.id, owner === undefined ? undefined : input.access));
+    absolute = await win32CanonicalPath(resolved, io, refuseUnconfirmed(owner, 'outside_scope'));
     lexical = resolved;
     // `run` owns the canonical path only when the path names `run` exactly,
     // as on darwin/linux. Any other spelling that canonicalizes into the run
     // directory (a case variant, an 8.3 name, a path through home) is an alias
     // of home's `.byok` and stays internal.
     runOwnsCanonical = owner === run;
-    if (!/^[A-Za-z]:\\/u.test(expanded)) relativeCwd = await win32CanonicalPath(cwd, io, fail);
   } else {
     if (!path.isAbsolute(input.cwd)) throw fail('path_syntax');
     const expanded = expandHome(input.path, osHome);
