@@ -17,7 +17,7 @@ import { authorityBudget, classBudget } from './runtime-accounting';
 import { TreeCleanup } from './tree-cleanup';
 import { selectReaderRuns } from '../../agent-home-reader-retention';
 import { RuntimeCleanup } from './runtime-cleanup';
-import { isAgentSessionLedgerName, isAgentTaskTerminalName, isPiSessionFileName, piSessionRefFromFileName, pruneByLastWrite } from './session-ledgers';
+import { agentSessionFileTtlMs, isAgentSessionLedgerName, isAgentTaskTerminalName, isPiSessionFileName, piSessionRefFromFileName, pruneByLastWrite } from './session-ledgers';
 import { existingDirectory, measureTree, removeOwnedPath } from './usage';
 import { acquirePiSessionDiscovery, acquirePiSessionRetention, acquirePiSessionWriter, acquirePiSessionRebinding } from '../../util/pi-session-retention';
 
@@ -261,7 +261,8 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
           const ledgers = path.join(home, '.byok', 'runtime-sessions');
           await pruneByLastWrite({ directory: ledgers, entries: entries(id, ledgers, homeBudget),
             match: id === 'session-ledger' ? isAgentSessionLedgerName : isAgentTaskTerminalName,
-            nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs[id],
+            nowMs: budget.now.getTime(),
+            maxAgeMs: name => agentSessionFileTtlMs(name, config.ttlMs['session-ledger'], config.ttlMs['terminal-evidence']),
             remove: async file => { if (!homeBudget.available()) return false; await remove(home, file, budget); return true; },
           });
         } else {

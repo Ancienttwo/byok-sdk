@@ -2611,9 +2611,14 @@ removes an expired ledger. After that, a resume of that session is a
 non-retryable decline that says the handoff does not exist on this device,
 `agent.content.read` with that sessionRef is denied as `identity-mismatch`,
 and `Daemon.publishReliableAgentEgress` for that session fails with the same
-does-not-exist error. With `ttlMs['session-ledger']: 0`, every sweep of an
-idle home removes all of its session ledgers, so none of those sessions can
-be resumed. Within one daemon process, a canonical Agent home runs at most
+does-not-exist error. A filename that can represent either a session ledger
+or terminal evidence (for example `custom-task-<hash>.jsonl`) is counted as
+terminal evidence but retained until the longer of the two configured TTLs
+has elapsed. Cleanup does not parse file contents to disambiguate them; real
+terminal evidence with such a name may consequently remain longer. With
+`ttlMs['session-ledger']: 0`, every sweep of an idle home removes unambiguous
+session ledgers immediately; ambiguous names also require the terminal-evidence
+TTL to expire. Within one daemon process, a canonical Agent home runs at most
 one writer Attempt and at most `maxConcurrentReaderAttemptsPerAgentHome`
 reader Attempts (default four), counted apart, across every lane and every
 session. An Agent offer without `homeAccess` is the writer and runs in the
