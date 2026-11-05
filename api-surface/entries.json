@@ -1698,7 +1698,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 237834,
+      "budgetBytes": 235911,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1723,7 +1723,9 @@
         "path",
         "zod"
       ],
-      "lazyImports": [],
+      "lazyImports": [
+        "koffi"
+      ],
       "thirdParty": [
         "zod"
       ],
@@ -1814,7 +1816,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1553,
+      "budgetBytes": 1607,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2663,7 +2665,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 177812,
+      "budgetBytes": 175886,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2684,7 +2686,9 @@
         "path",
         "zod"
       ],
-      "lazyImports": [],
+      "lazyImports": [
+        "koffi"
+      ],
       "thirdParty": [
         "zod"
       ],

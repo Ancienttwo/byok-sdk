@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Breaking (keys; #1445)** — `WindowsCredentialManagerSecretStore` calls
+  Credential Manager in process through koffi instead of starting PowerShell
+  and compiling a bridge on every operation. `commandRunner` and `systemRoot`
+  are gone from `WindowsCredentialManagerSecretStoreOptions`. The new optional
+  `koffi` takes the module to use, and defaults to `import('koffi')`; a
+  packaged Host passes the one it loaded with `loadSdkKoffiAsset`. koffi is an
+  optional dependency pinned to the version `@byok-sdk/client` pins, and
+  `check:release-graph` keeps the two equal. Every native call now has a 15 s
+  deadline and runs in one FIFO, and the wait counts toward that deadline. A
+  write or delete that passes its deadline has an unknown outcome and is not
+  replayed. Failure messages carry the Win32 code. The entry format is
+  unchanged, so existing entries stay readable and a rollback reads new ones.
+
 - **Fixed (client; #1437)** — `requestDeviceAssertion` and
   `requestTaskAssertion` wait up to 90 s for the daemon by default instead of
   the generic 10 s control timeout. Both handlers read the device record from

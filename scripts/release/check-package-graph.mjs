@@ -64,7 +64,7 @@ const errors = [];
 // it, and POSIX never loads the module. A second native optional entry gets none of this silently
 // -- it fails the gate until someone writes it into the allowlist with its own justification.
 const OPTIONAL_NATIVE_ALLOWLIST = {
-  koffi: 'win32 kill-on-close job object; per-platform prebuilt from @koromix/koffi-* makes the install script a no-op, bun never runs it, and POSIX never loads the module',
+  koffi: 'win32 kill-on-close job object and Credential Manager; per-platform prebuilt from @koromix/koffi-* makes the install script a no-op, bun never runs it, and POSIX never loads the module',
 };
 const installScriptFields = ['preinstall', 'install', 'postinstall'];
 
@@ -365,6 +365,19 @@ for (const dependency of Object.keys(OPTIONAL_NATIVE_ALLOWLIST)) {
       `scripts/release/check-package-graph.mjs: OPTIONAL_NATIVE_ALLOWLIST carves out ${dependency}, which is no longer an optionalDependency of packages/client — remove the dead carve-out`,
     );
   }
+}
+
+// keys calls Credential Manager through the koffi that client pins and audits above. A packaged Host
+// injects one koffi into both, so a second version is a mismatch rather than a choice. Hence no
+// audit of its own here, and no other optional dependency in keys.
+if (keysManifest?.optionalDependencies?.koffi !== clientManifest?.optionalDependencies?.koffi) {
+  errors.push(`packages/keys/package.json: optional dependency koffi must pin ${clientManifest?.optionalDependencies?.koffi} exactly as packages/client does, got ${keysManifest?.optionalDependencies?.koffi}`);
+}
+if (keysManifest?.dependencies?.koffi !== undefined) {
+  errors.push('packages/keys/package.json: koffi is an optionalDependency; POSIX must never need it');
+}
+for (const dependency of Object.keys(keysManifest?.optionalDependencies ?? {})) {
+  if (dependency !== 'koffi') errors.push(`packages/keys/package.json: optional dependency ${dependency} is not allowed; koffi is the only one`);
 }
 
 for (const dependency of Object.keys(clientManifest?.dependencies ?? {})) {

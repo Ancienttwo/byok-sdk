@@ -6,6 +6,8 @@ export default defineConfig({
   target: 'es2022',
   platform: 'node',
   dts: false,
+  // Optional, so tsup would inline it; it has to resolve at runtime beside its platform addon.
+  external: ['koffi'],
   sourcemap: true,
   clean: true,
   splitting: false,
