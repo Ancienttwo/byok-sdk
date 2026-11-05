@@ -1006,10 +1006,12 @@ reader terminal, a claimed failure before the Attempt became active, a failed
 measurement, a server without the flag and an older daemon all leave it absent.
 The check the device makes at the start of a fresh task is the gate: on a daemon
 that admits the memory MCP, an over-limit `MEMORY.md` fails that task before the
-runtime starts. A daemon that does not admit it cannot write memory, so its fresh
-task keeps the reading guidance, carries no data and does not fail on the size.
-The hosted cloud advertises the flag, and `readTaskResult` projects the field
-verbatim.
+runtime starts. A `MEMORY.md` with more than one hard link fails it the same way,
+with `agent_memory_resident_unreadable: multiple links`, because another link can
+name a file outside the home. A daemon that does not admit the memory MCP cannot
+write memory, so its fresh task keeps the reading guidance, carries no data and
+does not fail on the size. The hosted cloud advertises the flag, and
+`readTaskResult` projects the field verbatim.
 
 Known limit: the restore compares raw bytes, so it handles a `MEMORY.md` of any
 size, but its start copy is in memory. When the daemon crashes before the
