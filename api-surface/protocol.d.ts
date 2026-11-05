@@ -2507,6 +2507,20 @@ export declare class EnvelopeValidationError extends ProtocolError {
  */
 /** Maximum UTF-8 bytes of a `task.fail` `reason` after normalization, truncation marker included. */
 export declare const TASK_FAIL_REASON_MAX_BYTES = 2048;
+export interface TruncateOptions {
+    /** Size of a text, additive over its code points. Default: its UTF-8 bytes. */
+    readonly measure?: (text: string) => number;
+    /** Keep the end of the text too, with the marker in the middle. Default: the head only. */
+    readonly keepTail?: boolean;
+}
+/**
+ * The single text cut of the protocol: `text` as it is when it measures at
+ * most `maxBytes`, else the kept code points and a `…[truncated N bytes]`
+ * marker, where N counts the dropped measured bytes. The kept text is
+ * re-encoded, so a lone surrogate in it becomes U+FFFD. A `maxBytes` that
+ * cannot hold the marker gives the marker alone, which is then over `maxBytes`.
+ */
+export declare function truncateUtf8(text: string, maxBytes: number, options?: TruncateOptions): string;
 /**
  * Redact credentials from a failure reason, then cap it at
  * {@link TASK_FAIL_REASON_MAX_BYTES} UTF-8 bytes on a code-point boundary
@@ -2514,6 +2528,50 @@ export declare const TASK_FAIL_REASON_MAX_BYTES = 2048;
  * bytes.
  */
 export declare function boundFailureReason(reason: string): string;
+// ==== @byok-sdk/protocol dist/handoff-pack.d.ts ====
+/** Maximum bytes of a line in `earlier`, truncation marker included. */
+export declare const HANDOFF_EXCERPT_LINE_MAX_BYTES = 512;
+/** JSON data that a turn carries through the pack unchanged. */
+export type HandoffJson = null | boolean | number | string | readonly HandoffJson[] | {
+    readonly [key: string]: HandoffJson;
+};
+export interface HandoffLine {
+    readonly speaker: string;
+    readonly text: string;
+}
+export interface HandoffTurn {
+    readonly lines: readonly HandoffLine[];
+    /** Kept as it is and never truncated. A turn whose `meta` does not fit is left out. */
+    readonly meta?: HandoffJson;
+}
+/** Non-negative safe integers. */
+export interface HandoffPackBudgets {
+    /** Bytes of the turns in `recent`. */
+    readonly recentBytes: number;
+    /** Bytes of the turns in `earlier`. */
+    readonly earlyBytes: number;
+    /** Bytes of the whole pack. It must hold the pack frame, in which `omittedTurns` has the count of `turns`. */
+    readonly totalBytes: number;
+}
+export interface HandoffPack {
+    /** How many of the input turns are in neither list. */
+    readonly omittedTurns: number;
+    /** Excerpts of the turns before `recent`, oldest first. */
+    readonly earlier: readonly HandoffTurn[];
+    /** Whole turns up to the newest one, oldest first. The newest turn may be cut; with turns in the input, the list is empty only when that turn does not fit. */
+    readonly recent: readonly HandoffTurn[];
+}
+/**
+ * Builds the pack of `turns`, oldest first. `recent` holds the newest whole
+ * turns that fit `min(recentBytes, totalBytes - frame)`; only a newest turn
+ * that is over by itself is cut, to one limit shared by its lines.
+ * `earlier` holds excerpts of the turns before `recent`, as far back as they
+ * fit `earlyBytes` and the rest of `totalBytes`.
+ *
+ * @throws RangeError when a budget is not a non-negative safe integer, or
+ * `totalBytes` does not hold the pack frame.
+ */
+export declare function buildHandoffPack(turns: readonly HandoffTurn[], budgets: HandoffPackBudgets): HandoffPack;
 // ==== @byok-sdk/protocol dist/http-api.d.ts ====
 import { z } from 'zod';
 /**
@@ -3463,6 +3521,7 @@ export type { E2eeClientPairingMac, E2eeKeyPackageAvailablePayload, E2eeMemberCh
 export * from './bot-turn-outcome';
 export * from './routine-schedule';
 export { resultOutcomeMaxBytes } from './result-schema';
+export * from './handoff-pack';
 // ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
 import { z } from 'zod';
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */

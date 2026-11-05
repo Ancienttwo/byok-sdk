@@ -164,6 +164,14 @@
   K8 copies `src/rules/sync.ts`
   ([migration](examples/bot-collaboration/README.md#group-chat-and-main-bot)).
 
+- **Added (protocol; #1441)** — `buildHandoffPack(turns, budgets)` builds a
+  bounded conversation handoff from turns that a Host holds. It is a pure
+  function: `recent` keeps the newest whole turns, `earlier` keeps excerpts of
+  older turns at `HANDOFF_EXCERPT_LINE_MAX_BYTES` a line, and `omittedTurns`
+  counts the rest. Sizes are UTF-8 bytes of the JSON form, and the pack never
+  exceeds `totalBytes`. `truncateUtf8` is the text cut that it shares with
+  `boundFailureReason`, whose output does not change.
+
 ## 0.38.0 — 2026-11-04 (published)
 
 0.38.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
