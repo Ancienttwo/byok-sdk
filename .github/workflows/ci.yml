@@ -1001,6 +1001,17 @@ jobs:
       - name: Run the Hermes custody launcher tests on Windows
         run: bun run --filter @byok-sdk/keys test -- src/__tests__/hermes-provider-launcher.test.ts
 
+      # #1423: the file-scope guard, policy, launch and real Pi scoped tools on
+      # NTFS (8.3 names on C:, a second volume on D:, junctions, mountvol).
+      - name: Run file-scope guard and scoped Pi tool tests on Windows
+        run: |
+          bun run --filter @byok-sdk/client test -- `
+            src/__tests__/file-scope-guard.test.ts `
+            src/__tests__/file-scope-policy.test.ts `
+            src/__tests__/file-scope-launch.test.ts `
+            src/__tests__/pi-scoped-file-tools.test.ts `
+            src/__tests__/file-scope-tool-approval.test.ts
+
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) while
   # runtime CLIs remain external subprocesses. A single-file bundle without

@@ -5015,9 +5015,13 @@ export interface DaemonConfig {
      * the home read+write; a memory-reader task gets it read-only plus its own
      * run directory (`<home>/.byok/runs/<name>`, its cwd) read+write. It
      * applies only to `auto` tasks, requires `agentHome`, and is never selected
-     * by the wire or the model. It is enforced on the Pi rpc, prepared and
-     * durable lanes on darwin/linux; Windows and every non-Pi runtime decline
-     * before claim with `file_scope_unsupported`. After admission every configured
+     * by the wire or the model. It is enforced on the Pi rpc and prepared
+     * lanes on darwin, linux and win32 and on the durable lane on darwin/linux;
+     * every other platform and every non-Pi runtime declines before claim with
+     * `file_scope_unsupported`. On win32 a root is an absolute drive path
+     * (`X:\…`); a `\\`-prefixed (UNC, `\\?\`, `\\.\`) or drive- or
+     * root-relative path, a stream (`:`), a reserved device name, or a segment
+     * ending in a dot or space is refused. After admission every configured
      * root is revalidated once before the runtime starts; a missing, symlinked,
      * replaced or otherwise unresolvable root fails the claimed task with a
      * typed `file_scope_unavailable` reason instead of starting unscoped. The
@@ -13429,7 +13433,11 @@ export declare const TOOL_FILE_ACCESS: readonly ToolFileAccess[];
 export interface ToolFileScopeRoot {
     /** Unique, nonempty local label; never emitted on the wire. `home` and `run` are reserved. */
     readonly id: string;
-    /** Absolute local path; canonicalized and identity-checked at admission, not here. */
+    /**
+     * Absolute local path; canonicalized and identity-checked at admission, not
+     * here. On win32 an absolute drive path (`X:\…`) without a `\\` prefix,
+     * stream, reserved device name, or trailing dot or space.
+     */
     readonly path: string;
     /** `write` implies `read`. */
     readonly access: ToolFileAccess;
@@ -13497,7 +13505,7 @@ export interface ToolAuthorizationPolicy {
      * preserves the existing behavior exactly. Only legal when the offer's
      * effective mode is `auto`; an `all` runtime with a scope is rejected
      * before claim. An unsupported lane/adapter/platform is declined as
-     * `file_scope_unsupported` before claim; on the admitted POSIX path every
+     * `file_scope_unsupported` before claim; on an admitted platform every
      * root is revalidated after claim, before runtime start, and again before
      * the Pi session exists, and an unresolvable root fails the claimed task as
      * `file_scope_unavailable`. A configured scope is never silently dropped.
@@ -13529,6 +13537,18 @@ export declare class FileScopePolicyError extends TypeError {
     readonly code: 'invalid_file_scope';
     constructor(message: string);
 }
+/**
+ * The pure win32 path syntax of a file scope (#1423, steps 1-3), shared by the
+ * policy parser and the file-scope guard. `/` becomes `\`; a path that starts with `\`
+ * (`\\?\`, `\\.\`, UNC, root-relative) or is drive-relative (`C:foo`) is
+ * refused; the rest resolves against `cwd` with `path.win32` and must be
+ * `X:\…`. Each segment is then refused when it holds `:` (an alternate data
+ * stream), ends in `.` or a space, or is a reserved device name: Node creates
+ * those names literally while Win32 programs read them as a device or strip the
+ * trailing characters, and a stream "create" writes into an existing file.
+ * Returns the resolved path, or undefined when the syntax is refused.
+ */
+export declare function win32FileScopePath(value: string, cwd?: string): string | undefined;
 /** The admission boundary: one copied, frozen policy for every source. */
 export declare function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy;
 /** One native tool call, before execution. `input` is the runtime's own argument object. */

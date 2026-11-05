@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 async function tmpDir(prefix: string): Promise<string> {
-  const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
+  const dir = realpathSync.native(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
   dirs.push(dir);
   return dir;
 }
@@ -107,18 +107,18 @@ describe('Pi file-scope launch serialization (#1061 slice 3)', () => {
     expect(await verifyFailure(serialized)).toMatchObject({ code: 'file_scope_unavailable', reason: 'root_missing', rootId: 'run' });
   });
 
-  it('fails closed for Windows and unknown platforms', async () => {
+  it('verifies on darwin, linux and win32 and fails closed for unknown platforms', async () => {
     const grant = await grantFixture();
     const serialized = serializeFileScopeGrant(grant);
-    for (const platform of ['win32', 'freebsd'] as const) {
-      try {
-        await verifySerializedFileScopeGrant(serialized, { platform });
-        throw new Error('expected unsupported platform');
-      } catch (error) {
-        expect(error).toBeInstanceOf(FileScopeGuardError);
-        expect((error as FileScopeGuardError).code).toBe('file_scope_unsupported');
-        expect((error as FileScopeGuardError).reason).toBe('unsupported_platform');
-      }
+    // The Windows CI job runs this file, so win32 verifies a real grant here.
+    expect((await verifySerializedFileScopeGrant(serialized, { platform: process.platform })).digest).toBe(grant.digest);
+    try {
+      await verifySerializedFileScopeGrant(serialized, { platform: 'freebsd' });
+      throw new Error('expected unsupported platform');
+    } catch (error) {
+      expect(error).toBeInstanceOf(FileScopeGuardError);
+      expect((error as FileScopeGuardError).code).toBe('file_scope_unsupported');
+      expect((error as FileScopeGuardError).reason).toBe('unsupported_platform');
     }
   });
 });

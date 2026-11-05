@@ -4,7 +4,10 @@ import { lstat, open, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolFileAccess, ToolFileScope } from './tool-authorization';
+import {
+  win32FileScopePath,
+  type ToolAuthorizationHomeAccess, type ToolAuthorizationLane, type ToolFileAccess, type ToolFileScope,
+} from './tool-authorization';
 import {
   FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS,
   type FileScopeGuardCode, type FileScopeGuardReason,
@@ -15,11 +18,14 @@ export {
 } from './file-scope-types';
 
 /**
- * The internal POSIX path guard of the explicit file-scope policy (#1061
- * slice 2, D14). It deliberately uses only Node built-ins: `lstat`,
- * `realpath.native`, `stat` dev+ino identity and `open` with `O_NOFOLLOW`.
- * There is no native dependency, no descriptor-relative/openat helper and no
- * /proc/self/fd use.
+ * The internal path guard of the explicit file-scope policy (#1061 slice 2,
+ * D14) on darwin, linux and win32. It deliberately uses only Node built-ins:
+ * `lstat`, `realpath.native`, `stat` dev+ino identity and `open` with
+ * `O_NOFOLLOW`. There is no native dependency, no descriptor-relative/openat
+ * helper and no /proc/self/fd use. On win32 `O_NOFOLLOW` is undefined, so an
+ * open follows a final symlink; the post-open fstat identity check still
+ * refuses it, and a scoped write opens without `O_TRUNC` (or with
+ * `O_CREAT | O_EXCL`) and truncates only after that check.
  *
  * This module is not a file-isolation boundary and does not sandbox
  * bash/shell, MCP servers, user extensions or subagents. The six SDK-owned
@@ -29,10 +35,15 @@ export {
  * the same name rather than leaving an unscoped path tool as a bypass. The
  * check-then-open path is still not race-free against same-UID processes.
  *
- * Windows is refused outright as `file_scope_unsupported`: without native
- * code this guard cannot classify 8.3 short names, junctions/reparse points,
- * case folding or alternate data streams, and guessing is worse than failing
- * closed.
+ * On win32 (#1423) a target is checked in a fixed order before the shared
+ * checks: the win32 path syntax ({@link win32FileScopePath}), an lstat of every
+ * existing segment from the drive root (a symlink, junction or AppExecLink is
+ * `symlink`), then `realpath.native` of the deepest existing prefix, which
+ * expands 8.3 short names and returns the on-disk case. Every shared check then
+ * runs on that canonical path with byte comparison. A volume mount point
+ * presents as a directory and canonicalizes onto its own volume, so it is
+ * `outside_scope`, or `cross_device` by dev when that volume has no letter.
+ * The Windows evidence is #1423 (PR-2a, run 41808217164).
  */
 
 /** A filesystem identity captured once and rechecked before use. */
@@ -96,8 +107,8 @@ export interface FileScopeGrant {
 /**
  * A typed file-scope failure. Root problems are `file_scope_unavailable`
  * (authority could not be established), target violations are
- * `file_scope_denied`, and Windows/unknown platforms are
- * `file_scope_unsupported`. Messages name the root id, never a raw path.
+ * `file_scope_denied`, and unknown platforms are `file_scope_unsupported`.
+ * Messages name the root id, never a raw path.
  */
 export class FileScopeGuardError extends Error {
   readonly code: FileScopeGuardCode;
@@ -152,36 +163,36 @@ export const nodeFileScopeIo: FileScopeIo = Object.freeze({
   },
 });
 
-function isWithin(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+// Both sides are normalized absolute paths, so containment is a byte prefix
+// test. `path.relative` would case-fold on win32, where the canonical paths
+// already carry the on-disk case.
+function relativeInside(root: string, candidate: string): string | undefined {
+  if (candidate === root) return '';
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+  return candidate.startsWith(prefix) ? candidate.slice(prefix.length) : undefined;
 }
 
-function relativeInside(root: string, candidate: string): string | undefined {
-  const relative = path.relative(root, candidate);
-  if (relative === '') return '';
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined;
-  return relative;
+function isWithin(root: string, candidate: string): boolean {
+  return relativeInside(root, candidate) !== undefined;
 }
 
 function assertPlatform(platform: NodeJS.Platform): void {
-  if (platform !== 'darwin' && platform !== 'linux') {
+  if (platform !== 'darwin' && platform !== 'linux' && platform !== 'win32') {
     throw new FileScopeGuardError('file_scope_unsupported', 'unsupported_platform');
   }
 }
 
-function assertPathSyntax(value: unknown, code: FileScopeGuardCode, rootId?: string): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 4_096 || /[\u0000\r\n]/u.test(value)) {
-    throw new FileScopeGuardError(code, 'path_syntax', { ...(rootId === undefined ? {} : { rootId }) });
+function assertPathSyntax(value: unknown, code: FileScopeGuardCode, platform: NodeJS.Platform, rootId?: string): string {
+  const refuse = () => new FileScopeGuardError(code, 'path_syntax', { ...(rootId === undefined ? {} : { rootId }) });
+  if (typeof value !== 'string' || value.length === 0 || value.length > 4_096 || /[\u0000\r\n]/u.test(value)) throw refuse();
+  if (value.split(/[\\/]/u).some((segment) => segment === '.' || segment === '..')) throw refuse();
+  if (platform === 'win32') {
+    const resolved = win32FileScopePath(value);
+    if (resolved === undefined) throw refuse();
+    return resolved;
   }
-  if (!path.isAbsolute(value)) {
-    throw new FileScopeGuardError(code, 'path_syntax', { ...(rootId === undefined ? {} : { rootId }) });
-  }
-  const resolved = path.resolve(value);
-  if (value.split(/[\\/]/u).some((segment) => segment === '.' || segment === '..')) {
-    throw new FileScopeGuardError(code, 'path_syntax', { ...(rootId === undefined ? {} : { rootId }) });
-  }
-  return resolved;
+  if (!path.isAbsolute(value)) throw refuse();
+  return path.resolve(value);
 }
 
 function ioFailure(reason: FileScopeGuardReason, error: unknown, rootId?: string, access?: ToolFileAccess): FileScopeGuardError {
@@ -195,9 +206,10 @@ function ioFailure(reason: FileScopeGuardReason, error: unknown, rootId?: string
 async function resolveRoot(
   root: { readonly id: string; readonly path: string; readonly access: ToolFileAccess },
   io: FileScopeIo,
+  platform: NodeJS.Platform,
   expected?: FileScopeIdentity,
 ): Promise<FileScopeRootGrant> {
-  const lexicalPath = assertPathSyntax(root.path, 'file_scope_unavailable', root.id);
+  const lexicalPath = assertPathSyntax(root.path, 'file_scope_unavailable', platform, root.id);
   const fail = (reason: FileScopeGuardReason, cause?: unknown) =>
     new FileScopeGuardError('file_scope_unavailable', reason, { rootId: root.id, access: root.access, ...(cause === undefined ? {} : { cause }) });
   let lexical;
@@ -219,8 +231,13 @@ async function resolveRoot(
   }
   // A root is the final component of its canonical parent. Anything else means
   // the path was replaced or resolved through a component the guard did not
-  // see as a real directory.
-  if (canonical !== path.join(canonicalParent, path.basename(lexicalPath))) throw fail('root_identity_changed');
+  // see as a real directory. On win32 the final name may be an 8.3 alias or
+  // differ in case, so only the parent is compared; a volume mount point
+  // canonicalizes to another volume's root and still fails.
+  const childOfParent = platform === 'win32'
+    ? path.win32.dirname(canonical) === canonicalParent && canonical !== canonicalParent
+    : canonical === path.join(canonicalParent, path.basename(lexicalPath));
+  if (!childOfParent) throw fail('root_identity_changed');
   let canonicalStat;
   try {
     canonicalStat = await io.stat(canonical);
@@ -306,14 +323,15 @@ export async function resolveFileScopeGrant(input: ResolveFileScopeGrantInput): 
   const home = await resolveRoot(
     { id: 'home', path: input.home.path, access: attempt.homeAccess === 'memory-reader' ? 'read' : 'write' },
     io,
+    platform,
     input.home.identity,
   );
   const run = attempt.homeAccess === 'memory-reader'
-    ? await resolveRoot({ id: 'run', path: attempt.cwd, access: 'write' }, io)
+    ? await resolveRoot({ id: 'run', path: attempt.cwd, access: 'write' }, io, platform)
     : undefined;
   const roots: FileScopeRootGrant[] = [];
   for (const root of input.fileScope.roots ?? []) {
-    roots.push(await resolveRoot(root, io));
+    roots.push(await resolveRoot(root, io, platform));
   }
   const frozenRoots = Object.freeze(roots);
   return Object.freeze({
@@ -365,6 +383,44 @@ function expandHome(value: string, osHome: string): string {
   if (value === '~') return osHome;
   if (value.startsWith('~/')) return path.join(osHome, value.slice(2));
   return value;
+}
+
+/**
+ * Win32 steps 4 and 5: lstat every existing segment from the drive root until
+ * the first ENOENT, refusing any symlink (junctions and AppExecLinks report as
+ * one), then canonicalize the deepest existing prefix with `realpath.native`
+ * and append the missing segments. `resolved` already passed
+ * {@link win32FileScopePath}.
+ */
+async function win32CanonicalPath(
+  resolved: string,
+  io: FileScopeIo,
+  fail: (reason: FileScopeGuardReason) => FileScopeGuardError,
+): Promise<string> {
+  const segments = resolved.slice(3).split('\\').filter((segment) => segment !== '');
+  let existing = resolved.slice(0, 3);
+  let existingCount = 0;
+  for (const segment of segments) {
+    const next = path.win32.join(existing, segment);
+    let value: FileScopeStat;
+    try {
+      value = await io.lstat(next);
+    } catch (error) {
+      if (isErrno(error, 'ENOENT')) break;
+      if (isErrno(error, 'ENOTDIR')) throw fail('not_regular_file');
+      throw new FileScopeGuardError('file_scope_unavailable', 'io_error', { cause: error });
+    }
+    if (value.kind === 'symlink') throw fail('symlink');
+    existing = next;
+    existingCount += 1;
+  }
+  let canonical: string;
+  try {
+    canonical = await io.realpath(existing);
+  } catch (error) {
+    throw new FileScopeGuardError('file_scope_unavailable', 'io_error', { cause: error });
+  }
+  return path.win32.join(canonical, ...segments.slice(existingCount));
 }
 
 function matchRoot(roots: readonly FileScopeRootGrant[], absolute: string): { root: FileScopeRootGrant; path: string } | undefined {
@@ -433,19 +489,47 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
   if (typeof input.path !== 'string' || input.path.length === 0 || input.path.length > 4_096 || /[\u0000\r\n]/u.test(input.path)) {
     throw fail('path_syntax');
   }
-  if (input.cwd.length === 0 || !path.isAbsolute(input.cwd) || /[\u0000\r\n]/u.test(input.cwd)) throw fail('path_syntax');
-  const expanded = expandHome(input.path, osHome);
-  const absolute = path.resolve(input.cwd, expanded);
+  if (input.cwd.length === 0 || /[\u0000\r\n]/u.test(input.cwd)) throw fail('path_syntax');
   const run = input.grant.run;
   const allRoots = Object.freeze([input.grant.home, ...(run === undefined ? [] : [run]), ...input.grant.roots]);
-  // Before matching, a path inside `run` is handed to `run`: matchRoot picks
-  // the longest root, and `run` is nested in home.
-  if (internalPath(allRoots, absolute, run)) throw fail('internal_path');
-
-  if (!path.isAbsolute(expanded)) {
-    const cwdRoot = matchRoot(allRoots, path.resolve(input.cwd));
-    if (cwdRoot === undefined) throw fail('cwd_outside_scope');
+  let absolute: string;
+  let lexical: string | undefined;
+  let runOwnsCanonical = true;
+  let relativeCwd: string | undefined;
+  if (platform === 'win32') {
+    const cwd = win32FileScopePath(input.cwd);
+    if (cwd === undefined) throw fail('path_syntax');
+    const raw = input.path.replaceAll('/', '\\');
+    const expanded = raw === '~' ? osHome : raw.startsWith('~\\') ? path.win32.join(osHome, raw.slice(2)) : raw;
+    const resolved = win32FileScopePath(expanded, cwd);
+    if (resolved === undefined) throw fail('path_syntax');
+    // A segment denial happens before root matching; the root the path names
+    // lexically labels it, as the shared walk does on darwin/linux.
+    const owner = matchRoot(allRoots, resolved)?.root;
+    absolute = await win32CanonicalPath(resolved, io, (reason) => fail(reason, owner?.id, owner === undefined ? undefined : input.access));
+    lexical = resolved;
+    // `run` owns the canonical path only when the path names `run` exactly,
+    // as on darwin/linux. Any other spelling that canonicalizes into the run
+    // directory (a case variant, an 8.3 name, a path through home) is an alias
+    // of home's `.byok` and stays internal.
+    runOwnsCanonical = owner === run;
+    if (!/^[A-Za-z]:\\/u.test(expanded)) relativeCwd = await win32CanonicalPath(cwd, io, fail);
+  } else {
+    if (!path.isAbsolute(input.cwd)) throw fail('path_syntax');
+    const expanded = expandHome(input.path, osHome);
+    absolute = path.resolve(input.cwd, expanded);
+    if (!path.isAbsolute(expanded)) relativeCwd = path.resolve(input.cwd);
   }
+  // Before matching, a path inside `run` is handed to `run`: matchRoot picks
+  // the longest root, and `run` is nested in home. On win32 the lexical path is
+  // checked too, so `.BYOK\runs\<run>` stays internal although it
+  // canonicalizes into the run root, as it does on darwin/linux.
+  if (internalPath(allRoots, absolute, runOwnsCanonical ? run : undefined)
+    || (lexical !== undefined && internalPath(allRoots, lexical, run))) {
+    throw fail('internal_path');
+  }
+
+  if (relativeCwd !== undefined && matchRoot(allRoots, relativeCwd) === undefined) throw fail('cwd_outside_scope');
   const matched = matchRoot(allRoots, absolute);
   if (matched === undefined) throw fail('outside_scope');
   const { root } = matched;

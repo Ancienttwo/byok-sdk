@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -16,7 +16,7 @@ afterEach(async () => {
 });
 
 async function tmpDir(prefix: string): Promise<string> {
-  const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
+  const dir = realpathSync.native(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
   dirs.push(dir);
   return dir;
 }
@@ -96,6 +96,10 @@ describe('scoped tools in a real Pi 1.5.0 session (#1061 slice 3)', () => {
         .toBe('notes.txt');
       expect((await run(grep)('grep-1', { pattern: 'gamma', path: home }, undefined, undefined, ctx)).content.map((part) => part.text).join(''))
         .toBe('notes.txt:2: gamma');
+      // Without a path the discovery tools default to "." and resolve it against the cwd.
+      expect((await run(find)('find-2', { pattern: '*.txt' }, undefined, undefined, ctx)).content.map((part) => part.text).join('')).toBe('notes.txt');
+      expect((await run(list)('ls-2', {}, undefined, undefined, ctx)).content.map((part) => part.text).join('')).toBe('notes.txt');
+      expect((await run(grep)('grep-2', { pattern: 'gamma' }, undefined, undefined, ctx)).content.map((part) => part.text).join('')).toBe('notes.txt:2: gamma');
 
       await expect((read.execute as never as (id: string, p: unknown, s: undefined, u: undefined, c: never) => Promise<unknown>)(
         'read-outside', { path: outsideFile }, undefined, undefined, ctx,
