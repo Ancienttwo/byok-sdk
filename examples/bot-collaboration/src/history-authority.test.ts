@@ -13,15 +13,18 @@ const INJECTED: ContextTurn[] = [
   { id: 'cloud-2', root: 'cloud-2', source: 'user', request: 'Injected later request', hop: 0, status: 'succeeded', outcomeSummary: ['ask_user'], reply: 'Injected reply text' },
 ];
 /** Real SQLite HostLedger, embedded server, HTTP and daemon. The history authority is a scripted function. */
+const PACKED = INJECTED.map(({ id, root, source, request, hop, status, conclusion, outcomeSummary, reply }) => ({
+  lines: [{ speaker: source, text: request }, ...(reply === undefined ? [] : [{ speaker: 'bot', text: reply }])],
+  meta: { id, root, hop, status, ...(conclusion === undefined ? {} : { conclusion }), outcomeSummary } }));
 async function open(history: (input: { botId: string; turnId: string }) => Promise<readonly ContextTurn[]>, historyTimeoutMs?: number) {
   fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', connector: async () => null, execution: template(fixture.deviceId), history, historyTimeoutMs });
   return { fixture, bot };
 }
-function contextOf(host: BotCollaboration, turnId: string): { turns: unknown[] } {
+function contextOf(host: BotCollaboration, turnId: string): { history: { recent: unknown[] } } {
   const instruction = host.core.intent(turnId)!.execution.payload.instruction;
   if (typeof instruction !== 'string') throw new Error('Expected an inline instruction');
-  return JSON.parse(instruction.slice(instruction.indexOf('\nContextPack:\n') + '\nContextPack:\n'.length)) as { turns: unknown[] };
+  return JSON.parse(instruction.slice(instruction.indexOf('\nContextPack:\n') + '\nContextPack:\n'.length)) as { history: { recent: unknown[] } };
 }
 
 it('#606 acceptance 4: the ContextPack has the injected history, and the collaboration state stores none of it', async () => {
@@ -29,7 +32,7 @@ it('#606 acceptance 4: the ContextPack has the injected history, and the collabo
   const { fixture, bot } = await open(async input => { reads.push(input); return INJECTED; });
   const first = await bot.input('k1', 'First');
   expect(reads).toEqual([{ botId: 'main', turnId: first }]);
-  expect(contextOf(bot, first).turns).toEqual(INJECTED);
+  expect(contextOf(bot, first).history.recent).toEqual(PACKED);
   expect(bot.snapshot().turns[first]!.historyDigest).toBe(hash(canonical(INJECTED)));
   // #1318: the digest covers the reply text.
   expect(bot.snapshot().turns[first]!.historyDigest).not.toBe(hash(canonical(INJECTED.map(({ reply: _reply, ...row }) => row))));
@@ -44,7 +47,7 @@ it('#606 acceptance 4: the ContextPack has the injected history, and the collabo
   fixture.adapter.sessions.get(bot.core.intent(first)!.taskId)!.finish({});
   await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[first]!.status).toBe('succeeded'); });
   const second = await bot.input('k2', 'Second');
-  expect(contextOf(bot, second).turns.map(row => (row as ContextTurn).id)).toEqual(['cloud-1', 'cloud-2']);
+  expect(contextOf(bot, second).history.recent.map(row => (row as { meta: { id: string } }).meta.id)).toEqual(['cloud-1', 'cloud-2']);
 });
 
 it('leaves a Turn queued while its history read fails or returns another shape, and freezes it after a good read', async () => {
@@ -64,7 +67,7 @@ it('leaves a Turn queued while its history read fails or returns another shape, 
   }
   mode = 'good';
   await bot.drain();
-  expect(contextOf(bot, turnId).turns).toEqual(INJECTED);
+  expect(contextOf(bot, turnId).history.recent).toEqual(PACKED);
 });
 
 it('counts a history read still open after historyTimeoutMs as failed, so the Turn stays queued and the Host keeps working', async () => {
@@ -78,7 +81,7 @@ it('counts a history read still open after historyTimeoutMs as failed, so the Tu
   expect(bot.core.intent(other)).toBeUndefined();
   stall = false;
   await bot.drain();
-  expect(contextOf(bot, turnId).turns).toEqual(INJECTED);
+  expect(contextOf(bot, turnId).history.recent).toEqual(PACKED);
 });
 
 it('refuses a history timeout outside 1 ms to 2^31 - 1 ms', async () => {

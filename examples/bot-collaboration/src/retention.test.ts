@@ -29,7 +29,7 @@ it('archives a settled root out of the window, replays its input, and refuses a 
   let now = 1_000_000;
   const root = mkdtempSync(join(tmpdir(), 'k8-retain-')); roots.push(root);
   const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto });
-  const bot = new BotCollaboration(server as never, ledger, { botId: 'main', execution: template, now: () => now, contextTurnLimit: 1, connector: async () => ({}) });
+  const bot = new BotCollaboration(server as never, ledger, { botId: 'main', execution: template, now: () => now, contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 }, connector: async () => ({}) });
   closers.push(() => ledger.close(), () => bot.close());
   const first = await bot.input('k1', 'hello');
   await bot.core.cancel(first);
@@ -93,7 +93,7 @@ it('L: refuses a Turn that still has its K4 intent and is not reported, and a ro
     (s.intents as Record<string, unknown>)[hash('a')] = { id: hash('a'), key: 'a' };
     (s.occurrences as Record<string, unknown>)[occurrenceKey] = { key: occurrenceKey };
   });
-  const retain = (roots: string[]) => retainInLedger(ledger, { acknowledgedRoots: roots, now: 10_000, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1 });
+  const retain = (roots: string[]) => retainInLedger(ledger, { acknowledgedRoots: roots, now: 10_000, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } });
   const before = ledger.snapshot();
   expect(() => retain(['a'])).toThrow('Retention refused: A Turn of the root is not reported');
   expect(() => retain([routineTurn])).toThrow('Retention refused: A routine occurrence of the root is open');

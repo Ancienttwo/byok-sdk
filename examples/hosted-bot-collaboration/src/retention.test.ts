@@ -35,7 +35,7 @@ async function hosted(): Promise<RetentionSubject> {
   };
 }
 const retention = (now = RETENTION_NOW, acknowledgedRoots: string[] = []) => ({ acknowledgedRoots, now, retentionMs: MIN_TOMBSTONE_RETENTION_MS });
-const LIMITS = { contextTurnLimit: 1 };
+const LIMITS = { contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } };
 const commands = async (scope: string) => (await opened!.pool.query<{ key: string }>(
   `SELECT key FROM ${table('command')} WHERE scope = $1 ORDER BY key`, [storedKey(scope)])).rows.map(row => JSON.parse(row.key) as string);
 

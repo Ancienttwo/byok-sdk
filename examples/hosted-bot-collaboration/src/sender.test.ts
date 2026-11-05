@@ -236,7 +236,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
     // A seed writes no outbox row, so these tests add the delivery index row by hand.
     const indexRow = (scope: string, id: string, settledAt: number | null) => query(`INSERT INTO ${table('outbox')} (scope, key, ordinal, kind, settled_at)
       SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'delivery', $3 FROM ${table('outbox')} WHERE scope = $1`, [storedKey(scope), storedKey(id), settledAt]);
-    const retain = (scope: string) => store().retain(scope, { acknowledgedRoots: ['t1'], now: NOW, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1 });
+    const retain = (scope: string) => store().retain(scope, { acknowledgedRoots: ['t1'], now: NOW, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } });
 
     it('refuses to retain a root while a delivery outbox row of it is unsettled (E7), and moves it once the row settled', async () => {
       const scope = `tenant:${randomUUID()}`;

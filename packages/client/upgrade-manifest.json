@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.38.0",
-    "snapshotSha256": "c645074310a0e878f3586d5dde8c0ac7df90aa9c458861ab27e46d421f173e9d"
+    "snapshotSha256": "bea997c1b773625f450898425b5619e690248885e21df16cca6264d7f07255d5"
   },
   "configFields": {
     "status": "tracked",
@@ -18,7 +18,7 @@
     {
       "id": "k8-room-turn-read-only-memory",
       "impact": "breaking",
-      "summary": "K8 freezes a room Turn with read-only Agent memory. read-write becomes read, read-write-if-admitted becomes read-if-admitted, and a template without agentMemory freezes as read-if-admitted, so a room Turn loses memory_save. Other Turns keep the template value. A room Turn of a template without agentMemory now needs a device that advertises agent-memory-selection and agent-memory-read-if-admitted. A Host that vendors K8 copies src/rules/sync.ts.",
+      "summary": "K8 freezes a room Turn with read-only Agent memory. read-write becomes read, read-write-if-admitted becomes read-if-admitted, and a template without agentMemory freezes as read-if-admitted, so a room Turn loses memory_save. Other Turns keep the template value. A room Turn of a template without agentMemory now needs a device that advertises agent-memory-selection and agent-memory-read-if-admitted. A Host that vendors K8 copies src/rules/sync.ts. K8 also carries the Bot history of a ContextPack in history, a buildHandoffPack result, in place of turns and historyWindow.omittedTurns; a room seat ContextPack does not change. BotOptions.handoff sets the budgets, contextMaxBytes no longer covers Bot history, and contextTurnLimit no longer selects it. retain protects every Turn from the oldest turn of a Bot's handoff pack to its newest, so a root stays protected longer, and RetentionLimits gains a required handoff, which a caller sets to the budgets it freezes with. A Host that reads a frozen ContextPack reads history.recent, history.earlier and history.omittedTurns, and a Host that vendors K8 also copies src/rules/context.ts, src/rules/history.ts, src/retention.ts, src/host.ts, src/schema.ts and src/index.ts.",
       "migration": "examples/bot-collaboration/README.md#group-chat-and-main-bot",
       "items": [
         "example:bot-collaboration"
@@ -49,7 +49,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=f28fb891884de485",
-      "after": "K8 0.0.1 src-sha256=4fba320e77adca95",
+      "after": "K8 0.0.1 src-sha256=a864ae38b5ba890a",
       "entry": "k8-room-turn-read-only-memory"
     },
     {

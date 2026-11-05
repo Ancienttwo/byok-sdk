@@ -1,5 +1,6 @@
+import { buildHandoffPack, type HandoffPackBudgets } from '@byok-sdk/protocol';
 import { hash, MIN_TOMBSTONE_RETENTION_MS, time, type Json } from '@byok-sdk/server/execution-core';
-import { DEFAULT_CONTEXT_TURN_LIMIT } from './rules/context';
+import { DEFAULT_CONTEXT_TURN_LIMIT, handoffFrameBytes, handoffTurn } from './rules/context';
 import type { CollaborationState, Turn } from './model';
 
 /**
@@ -18,8 +19,12 @@ export interface RetentionInput {
   /** At least seven days: the replay window of the moved command records. */
   retentionMs: number;
 }
-/** The ContextPack Turn limit of the Host. Rows in the window of a Bot stay in the state. */
-export interface RetentionLimits { contextTurnLimit: number }
+/** The ContextPack limits of the Host. Rows in the window of a Bot stay in the state. */
+export interface RetentionLimits {
+  contextTurnLimit: number;
+  /** The budgets of the Bot history: the ones the Host freezes with, so its Turns read only what stays. */
+  handoff: HandoffPackBudgets;
+}
 /** K4 facts by Turn id. */
 export interface RetentionFacts {
   /** The Turn still has its K4 intent. */
@@ -54,28 +59,30 @@ const values = <T>(rows: Record<string, T> | undefined): T[] => Object.values(ro
 const own = <T>(rows: Record<string, T> | undefined, id: string): T | undefined => rows && Object.hasOwn(rows, id) ? rows[id] : undefined;
 
 /**
- * The ids that a Bot's next ContextPacks can still read: its last Turns, cards and questions.
- * A Turn that has not frozen yet reads the last `limit` other Turns of its Bot (`earlier.slice(-limit)`), which can reach
- * one Turn further back than the window of a new Turn. So a Bot with an unfrozen Turn keeps `limit + 1` Turns.
+ * The ids that a Bot's next ContextPacks can still read: the turns of its handoff pack, up to its newest, and its last
+ * cards and questions. The pack leaves out the Turns that can still freeze, and its total always gives `earlier` all of
+ * `earlyBytes`. A freeze has no more than that, a Cross-Bot Turn often less, and its extra Turns only start `earlier` at a
+ * newer turn. So no freeze reads a turn older than this pack.
  */
-function contextWindow(state: CollaborationState, limit: number): Set<string> {
-  const kept = new Set<string>(), byBot = new Map<string, { turns: string[]; cards: string[]; questions: string[]; unfrozen: boolean }>();
+function contextWindow(state: CollaborationState, limit: number, handoff: HandoffPackBudgets): Set<string> {
+  const kept = new Set<string>(), byBot = new Map<string, { turns: Turn[]; cards: string[]; questions: string[] }>();
   const of = (botId: string) => {
     let rows = byBot.get(botId);
-    if (!rows) byBot.set(botId, rows = { turns: [], cards: [], questions: [], unfrozen: false });
+    if (!rows) byBot.set(botId, rows = { turns: [], cards: [], questions: [] });
     return rows;
   };
-  for (const turn of values(state.turns)) {
-    const rows = of(turn.botId);
-    rows.turns.push(turn.id);
-    // A frozen Turn is `processing` (its offer is in K4) or concluded. Queued and blocked Turns can still freeze.
-    if (!turn.conclusion && turn.status !== 'processing') rows.unfrozen = true;
-  }
+  // A frozen Turn is `processing` (its offer is in K4) or concluded. Queued and blocked Turns can still freeze.
+  for (const turn of values(state.turns)) if (turn.conclusion || turn.status === 'processing') of(turn.botId).turns.push(turn);
   for (const card of values(state.cards)) { const turn = own(state.turns, card.turnId); if (turn) of(turn.botId).cards.push(card.turnId); }
   for (const question of values(state.questions)) { const turn = own(state.turns, question.turnId); if (turn) of(turn.botId).questions.push(question.turnId); }
   const rows = Math.min(limit, DEFAULT_CONTEXT_TURN_LIMIT);
   for (const bot of byBot.values()) {
-    for (const id of [...bot.turns.slice(-(limit + (bot.unfrozen ? 1 : 0))), ...bot.cards.slice(-rows), ...bot.questions.slice(-rows)]) kept.add(id);
+    const totalBytes = Math.max(handoff.totalBytes, handoff.recentBytes + handoff.earlyBytes + handoffFrameBytes(bot.turns.length));
+    const pack = buildHandoffPack(bot.turns.map(handoffTurn), { ...handoff, totalBytes });
+    // `omittedTurns` counts the older turns, and a newest turn that did not fit, which an empty `recent` shows.
+    const oldest = pack.omittedTurns - (pack.recent.length ? 0 : 1);
+    for (const turn of bot.turns.slice(oldest)) kept.add(turn.id);
+    for (const id of [...bot.cards.slice(-rows), ...bot.questions.slice(-rows)]) kept.add(id);
   }
   return kept;
 }
@@ -155,7 +162,7 @@ export function retainRoots(state: CollaborationState, input: RetentionInput, li
   const result: RetentionResult = { archivedRoots: 0, alreadyArchivedRoots: 0, archivedRows: 0, archivedCommands: 0,
     expiredCommands: store.expire('commands', now), beforeBytes: bytes(state), afterBytes: 0 };
   // Decide every root on the state before this call, then move. A refusal throws before any move.
-  const window = contextWindow(state, limits.contextTurnLimit), selected: Members[] = [];
+  const window = contextWindow(state, limits.contextTurnLimit, limits.handoff), selected: Members[] = [];
   for (const root of roots) {
     const seat = own(state.team.seats, root);
     if (seat) {

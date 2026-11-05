@@ -139,3 +139,21 @@ it('bounds a Main Bot reply Turn that lists 24 worst-case open delegations, with
   expect(bytes(JSON.stringify(context.openDelegations!.items[0]))).toBeLessThanOrEqual(OPEN_DELEGATION_ENTRY_MAX_BYTES);
   expect(bytes(`"openDelegations":${JSON.stringify(context.openDelegations)}`)).toBeLessThanOrEqual(OPEN_DELEGATIONS_MAX_BYTES);
 });
+
+it('#1446: a Cross-Bot Turn gives its history only the bytes left in instructionMaxBytes', () => {
+  const { state, turns: [, botRequest], routines } = worstCase(worst(1000));
+  for (let n = 0; n < 40; n++) {
+    state.turns[`old-${n}`] = { id: `old-${n}`, root: `old-${n}`, botId: botRequest!.botId, source: 'user', request: 'x'.repeat(4000), hop: 0, status: 'succeeded' };
+  }
+  const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
+  const frozen = (instructionMaxBytes: number) => {
+    const { instruction, context } = botTurnInstruction(state, botRequest!, { turnLimit: 100, contextMaxBytes: 32_768, instructionMaxBytes }, routines);
+    expect(bytes(instruction)).toBeLessThanOrEqual(instructionMaxBytes);
+    expect(context.historyWindow.metadataOverBudget).toBe(false);
+    if (!('history' in context)) throw new Error('Expected a Bot Turn context');
+    return context.history;
+  };
+  expect(frozen(minimum).omittedTurns).toBeGreaterThan(0);
+  // History takes what the rest leaves, up to the handoff budget.
+  expect(frozen(500_000).recent.length).toBeGreaterThan(frozen(minimum).recent.length);
+});

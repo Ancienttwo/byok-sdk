@@ -56,7 +56,8 @@ it('#739 Q4c: runs with an external team and an external history, and keeps no l
   await vi.waitFor(async () => { await host.drain(); expect(host.core.intent(turnId)).toBeDefined(); }, { timeout: 5000 });
   const instruction = host.core.intent(turnId)!.execution.payload.instruction;
   if (typeof instruction !== 'string') throw new Error('Expected an inline instruction');
-  expect((JSON.parse(instruction.split('\nContextPack:\n')[1]!) as { turns: unknown[] }).turns).toEqual(INJECTED);
+  expect((JSON.parse(instruction.split('\nContextPack:\n')[1]!) as { history: { recent: unknown[] } }).history.recent).toEqual(INJECTED.map(({ id, root, source, request, hop, status, conclusion, outcomeSummary }) => ({
+    lines: [{ speaker: source, text: request }], meta: { id, root, hop, status, conclusion, outcomeSummary } })));
   // T3: the owner Main Bot schema keeps rooms and notes, and offers no Bot management.
   const schema = JSON.stringify(host.snapshot().schemas[turnId]);
   expect(schema).toContain('"create_room"');

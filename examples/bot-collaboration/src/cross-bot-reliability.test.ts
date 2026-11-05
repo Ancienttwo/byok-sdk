@@ -178,7 +178,8 @@ it('spent 11: the refusal report starts with the last unit; free balance 0: the 
   expect(t.host().snapshot().budgets[full]).toMatchObject({ delegation: 12, reserved: 0 });
   const next = await t.host().input('after-delivery', 'What happened?', a);
   await t.running(next);
-  expect(t.context(next).turns).toContainEqual(expect.objectContaining({ id: delivered.id, status: 'delivered', request: expect.stringContaining('budget_exhausted') }));
+  expect(t.context(next).history.recent).toContainEqual(expect.objectContaining({ meta: expect.objectContaining({ id: delivered.id, status: 'delivered' }),
+    lines: [expect.objectContaining({ text: expect.stringContaining('budget_exhausted') })] }));
 });
 
 it('keeps spent + reserved <= 12 inside every ledger transaction of a delegation flow with recovery', async () => {

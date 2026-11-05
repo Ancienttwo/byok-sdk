@@ -30,6 +30,26 @@
   K8 copies `src/rules/sync.ts`
   ([migration](examples/bot-collaboration/README.md#group-chat-and-main-bot)).
 
+- **Breaking (examples; #1446)** — K8 carries the Bot history of a ContextPack
+  in `history`, a `buildHandoffPack` result, in place of `turns` and
+  `historyWindow.omittedTurns`, in a frozen Turn and in a snapshot view. A room
+  seat ContextPack does not change. The new `BotOptions.handoff` sets the
+  budgets, by default 40 KiB, 6 KiB and 46 KiB. `contextMaxBytes` now covers
+  only the Request and the rest of the ContextPack, and `contextTurnLimit` no
+  longer selects Bot history. A Cross-Bot Turn gives `history` the bytes left
+  in `instructionMaxBytes` after its background. `retain` now protects every
+  Turn from the oldest turn of a Bot's handoff pack to its newest, so a root
+  stays protected longer. That pack leaves out the Turns that can still freeze
+  and always gives `earlier` all of `earlyBytes`, so no freeze reads an older
+  turn. `RetentionLimits` gains a required `handoff`, which a caller sets to
+  the budgets it freezes with; cards, questions, room messages and rejections
+  still go by `contextTurnLimit`. A
+  Host that reads a frozen ContextPack reads `history.recent`,
+  `history.earlier` and `history.omittedTurns`, and a Host that vendored K8
+  copies `src/rules/context.ts`, `src/rules/history.ts`, `src/retention.ts`,
+  `src/host.ts`, `src/schema.ts` and `src/index.ts`
+  ([migration](examples/bot-collaboration/README.md#group-chat-and-main-bot)).
+
 - **Added (protocol; #1441)** — `buildHandoffPack(turns, budgets)` builds a
   bounded conversation handoff from turns that a Host holds. It is a pure
   function: `recent` keeps the newest whole turns, `earlier` keeps excerpts of

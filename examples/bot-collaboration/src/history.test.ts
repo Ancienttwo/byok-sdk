@@ -4,7 +4,7 @@ import type { LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf, type Turn } from './model';
 import { applyManagement, roomFields } from './team';
 import { roomInput, advanceRooms, applySpeech } from './rooms';
-import { turnContext } from './schema';
+import { DEFAULT_HANDOFF_BUDGETS, turnContext } from './schema';
 import { HISTORY_MAX_BYTES } from './history';
 /** These cases do not read the room projections. */
 const noPublish = (): void => {};
@@ -53,15 +53,16 @@ it('windows only this Bot private history and leaves the current request for the
   state.turns[turn.id] = turn;
   state.turns.private = { ...turn, id: 'other', botId: 'b0', request: 'Other Bot secret' };
   const context = turnContext(state, turn);
-  if (!('turns' in context)) throw new Error('Expected private context');
-  expect(context.turns.length).toBeGreaterThan(0);
-  expect(context.turns.length).toBeLessThanOrEqual(100);
-  expect(context.turns.at(-1)!.id).toBe('old-149');
-  expect(context.turns.some(t => t.id === turn.id)).toBe(false);
-  expect(context.historyWindow.omittedTurns).toBe(150 - context.turns.length);
+  if (!('history' in context)) throw new Error('Expected private context');
+  const { history, ...rest } = context, ids = history.recent.map(row => (row.meta as { id: string }).id);
+  expect(ids.length).toBeGreaterThan(0);
+  expect(ids.at(-1)).toBe('old-149');
+  expect(ids).not.toContain(turn.id);
+  expect(history.omittedTurns).toBe(150 - ids.length - history.earlier.length);
   expect(context.historyWindow.notice).toContain('Earlier history was omitted');
   expect(context.historyWindow.currentRequestBytes).toBe(Buffer.byteLength(turn.request, 'utf8'));
-  expect(Buffer.byteLength(JSON.stringify(context), 'utf8') + context.historyWindow.currentRequestBytes).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
+  expect(Buffer.byteLength(JSON.stringify(rest), 'utf8') + context.historyWindow.currentRequestBytes).toBeLessThanOrEqual(HISTORY_MAX_BYTES);
+  expect(Buffer.byteLength(JSON.stringify(history), 'utf8')).toBeLessThanOrEqual(DEFAULT_HANDOFF_BUDGETS.totalBytes);
   expect(JSON.stringify(context)).not.toContain('Other Bot secret');
   expect(state.turns[turn.id]!.request).toBe('CURRENT-' + '😀'.repeat(4096));
   expect(Object.keys(state.turns)).toHaveLength(152);
@@ -128,17 +129,17 @@ it('reports required metadata overflow without pruning authority or hard blockin
   expect(context.teamNotes).toEqual(state.team.notes);
 });
 
-it('keeps exactly the newest 100 small private turns independently of the byte limit', () => {
+it('takes small private turns by bytes, past the turn limit', () => {
   const { state } = setup();
   for (let i = 0; i < 150; i++) state.turns[`old-${i}`] = { id: `old-${i}`, root: `old-${i}`, botId: 'b1',
     source: 'user', request: 'Small', hop: 0, status: 'succeeded' };
   const turn: Turn = { id: 'current', root: 'current', botId: 'b1', source: 'user', request: 'Current', hop: 0, status: 'queued' };
   const context = turnContext(state, turn);
-  if (!('turns' in context)) throw new Error('Expected private context');
-  expect(context.turns).toHaveLength(100);
-  expect(context.turns[0]!.id).toBe('old-50');
-  expect(context.turns.at(-1)!.id).toBe('old-149');
-  expect(context.historyWindow.omittedTurns).toBe(50);
+  if (!('history' in context)) throw new Error('Expected private context');
+  expect(context.history.recent).toHaveLength(150);
+  expect(context.history.recent[0]!.meta).toMatchObject({ id: 'old-0' });
+  expect(context.history.recent.at(-1)!.meta).toMatchObject({ id: 'old-149' });
+  expect(context.history.omittedTurns).toBe(0);
 });
 
 it('does not claim an invisible pre-join request is present when a pass calls a later member', () => {
