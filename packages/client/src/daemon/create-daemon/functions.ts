@@ -1,4 +1,4 @@
-import { initializeInputPreparation, runInputPreparation, initializeOwnedHostedStorage, provenAgentMemoryIntentBackend } from './services';
+import { initializeInputPreparation, runInputPreparation, initializeOwnedHostedStorage, provenAgentMemoryBackend } from './services';
 import { memberClient, startDeviceMember } from './member';
 import { checkServerUrl, pair, pairUnderLease, unpair, unpairUnderLease } from './pairing';
 import { runLifecycleMutation, replaceControlServer, setLifecycle, halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown } from './lifecycle';
@@ -12,7 +12,7 @@ import type { DaemonScope } from './scope';
 
 const daemonFunctions = {
   initializeInputPreparation, runInputPreparation, initializeOwnedHostedStorage,
-  provenAgentMemoryIntentBackend, memberClient, startDeviceMember, checkServerUrl, pair,
+  provenAgentMemoryBackend, memberClient, startDeviceMember, checkServerUrl, pair,
   pairUnderLease, unpair, unpairUnderLease, runLifecycleMutation, replaceControlServer, setLifecycle,
   halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown,
   runStartUnderLease, taskContextCapabilityAvailable, applyCapabilityDeclaration, setHelloCapability,
@@ -41,7 +41,7 @@ export function bindDaemonFunctions(scope: () => DaemonScope): DaemonFunctions {
     initializeInputPreparation: (...args) => initializeInputPreparation(scope(), ...args),
     runInputPreparation: (...args) => runInputPreparation(scope(), ...args),
     initializeOwnedHostedStorage: (...args) => initializeOwnedHostedStorage(scope(), ...args),
-    provenAgentMemoryIntentBackend: (...args) => provenAgentMemoryIntentBackend(scope(), ...args),
+    provenAgentMemoryBackend: (...args) => provenAgentMemoryBackend(scope(), ...args),
     memberClient: (...args) => memberClient(scope(), ...args),
     startDeviceMember: (...args) => startDeviceMember(scope(), ...args),
     checkServerUrl: (...args) => checkServerUrl(scope(), ...args),

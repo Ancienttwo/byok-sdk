@@ -141,6 +141,8 @@ export interface ActiveTask {
    * for a reader and when the file could not be read; nothing is restored then.
    */
   residentMemoryStart?: { readonly content: string; readonly revision: string };
+  /** The offer chose `agentMemoryCommit`, so `.byok/` holds this Attempt's start copy (#1440). */
+  agentMemoryCommit?: boolean;
   terminalCause?: AgentTerminalCause;
   terminalReason?: string;
   agentTerminalPersisted?: boolean;

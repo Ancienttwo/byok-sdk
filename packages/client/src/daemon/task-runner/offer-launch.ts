@@ -19,6 +19,8 @@ import { isRuntimeStartupDisposalFailure, projectRuntimeBoundaryFailure } from '
 import { toRuntimeInfoCapabilities } from '../runtime-capabilities';
 import { prependAgentMemoryModeGuidance } from '../memory-guidance';
 import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
+import { agentMemoryCommitFailureRetryable } from '../agent-memory-commit';
+import { settleAgentMemoryCommitCopy } from './agent-memory';
 import type { PreparedExecutionObservation, ActiveTask, OfferPhaseContext } from './support';
 import { isKnownRuntimeId, offeredInstruction, errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
@@ -508,6 +510,22 @@ async function startAndActivateRuntime(
       return;
     }
   }
+  // #1440: a copy this writer finds was left by an earlier Attempt. A lease that
+  // joined a reader's group took no base lease, so nothing has settled it yet.
+  // It goes first: the read below must see the restored file.
+  const commitStore = this['deps'].agentMemoryCommit;
+  const failCommitCopy = (error: unknown): Promise<boolean> => this['failClaimedAgent'](
+    taskId, `agent_memory_commit_unavailable: ${outboundErrorMessage(error)}`, agentMemoryCommitFailureRetryable(error),
+    { binding: agentBinding, runtimeId: pick.descriptor.id },
+  );
+  if (!readerAttempt && commitStore !== undefined) {
+    try {
+      await commitStore.settle(agentBinding.lease);
+    } catch (error) {
+      await failCommitCopy(error);
+      return;
+    }
+  }
   // #1439: a fresh instruction task that binds the memory MCP carries MEMORY.md,
   // and fails before the runtime starts when it cannot. Without the MCP the SDK
   // could not repair the file, so that task reads it itself. A writer Attempt keeps
@@ -609,6 +627,17 @@ async function startAndActivateRuntime(
     // `task.await_approval` and local `Daemon.approve`/`reject` resolve it.
     ...(toolAuthorizationGate === undefined ? {} : { toolAuthorization: toolAuthorizationGate }),
   };
+  // #1440: last before the runtime, so no earlier refusal has a copy to settle.
+  // Set before the write: a failure after the manifest's rename can leave it.
+  if (activation.payload.agentMemoryCommit !== undefined) {
+    held.agentMemoryCommitCopy = true;
+    try {
+      await commitStore!.copy(agentBinding.lease, taskId);
+    } catch (error) {
+      await failCommitCopy(error);
+      return;
+    }
+  }
   let session: Session;
   let sessionMembers: DeclaredSessionMembers;
   try {
@@ -648,6 +677,7 @@ async function startAndActivateRuntime(
           this['addFinishedTaskId'](taskId);
         } } : {}),
         release: async () => {
+          if (held.agentMemoryCommitCopy === true) await settleAgentMemoryCommitCopy.call(this, taskId, agentBinding.lease);
           await agentBinding.lease.release();
           await this['releasePreparationPin'](taskId);
         },
@@ -711,6 +741,7 @@ async function startAndActivateRuntime(
     runtimeId: pick.descriptor.id,
     dispose: async () => { await session.close(); await scratch.release(); },
     release: async () => {
+      if (held.agentMemoryCommitCopy === true) await settleAgentMemoryCommitCopy.call(this, taskId, agentBinding.lease);
       await agentBinding.lease.release();
       await this['releasePreparationPin'](taskId);
     },

@@ -803,6 +803,13 @@ export async function replaceAgentMemoryHomeInternalFileStrict(binding: AgentMem
   return exclusiveAgentMemoryHome(home.canonicalHome, () => replaceInternalFile(home, name, expectedRevision, content, 'strict'));
 }
 
+/** Removes one SDK-internal state file under `.byok`, with the barrier of {@link replaceAgentMemoryHomeInternalFileStrict}. */
+export async function deleteAgentMemoryHomeInternalFileStrict(binding: AgentMemoryHomeBinding, fileName: string, expectedRevision: string): Promise<void> {
+  const home = agentMemoryHomeBinding(binding);
+  const relativePath = `${AGENT_HOME_INTERNAL_DIRECTORY}/${internalFileName(fileName)}`;
+  await exclusiveAgentMemoryHome(home.canonicalHome, () => remove(home, relativePath, expectedRevision, 'strict'));
+}
+
 /**
  * Append one metadata-only line to the Agent memory audit tail. Audit is
  * observation, never replay authority; the entry must carry no memory content.

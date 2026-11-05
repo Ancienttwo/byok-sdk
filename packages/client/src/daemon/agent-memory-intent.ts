@@ -133,7 +133,7 @@ export class AgentMemoryIntentNoticeError extends Error {
  */
 export interface AgentMemoryIntentBackend {
   /** Omitted for the native Linux descriptor backend. */
-  readonly openFilesystem?: (lease: AgentHomeLease) => Promise<AgentMemoryFilesystem>;
+  readonly openFilesystem?: (lease: Pick<AgentHomeLease, 'canonicalHome' | 'homeIdentity'>) => Promise<AgentMemoryFilesystem>;
   /** A thrown `AgentMemoryRevisionConflictError` proves this attempt renamed nothing. */
   readonly conflictProvesNoRename: boolean;
   /**
@@ -163,8 +163,8 @@ export const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend = Obje
  */
 export function helperAgentMemoryIntentBackend(helperBin: string, assetRoot?: string): AgentMemoryIntentBackend {
   const verifiedBin = verifyAgentMemoryFilesystemHelper(helperBin, assetRoot);
-  return Object.freeze({
-    openFilesystem: (lease: AgentHomeLease) => openAgentMemoryFilesystemHelper({
+  return Object.freeze<AgentMemoryIntentBackend>({
+    openFilesystem: (lease) => openAgentMemoryFilesystemHelper({
       helperBin: verifiedBin,
       assetRoot,
       canonicalHome: lease.canonicalHome,

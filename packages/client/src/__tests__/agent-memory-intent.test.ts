@@ -19,7 +19,7 @@ import {
   type AgentRef,
 } from '@byok-sdk/protocol';
 
-import { AgentHomeManager, type AgentHomeLease } from '../agent-home';
+import { AgentHomeManager } from '../agent-home';
 import {
   AGENT_MEMORY_AUDIT_FILENAME,
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
@@ -130,7 +130,7 @@ class FakeBackend {
 
   descriptor(): AgentMemoryIntentBackend {
     return {
-      openFilesystem: async (lease: AgentHomeLease) => this.bind(lease.canonicalHome),
+      openFilesystem: async (lease) => this.bind(lease.canonicalHome),
       conflictProvesNoRename: this.proof.conflictProvesNoRename,
       strictLedgerBarrier: this.proof.strictLedgerBarrier,
     };

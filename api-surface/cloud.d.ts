@@ -307,6 +307,7 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             "read-write": "read-write";
             "read-write-if-admitted": "read-write-if-admitted";
         }>>;
+        agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
@@ -428,6 +429,7 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             "read-write": "read-write";
             "read-write-if-admitted": "read-write-if-admitted";
         }>>;
+        agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{

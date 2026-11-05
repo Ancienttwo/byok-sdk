@@ -77,6 +77,14 @@ export class AgentHomeReaderRunMissingError extends AgentHomeError {
 }
 
 /** A malformed persisted lease is integrity failure, never retryable contention. */
+/** A leftover memory commit copy could not be settled. The next acquire tries again. */
+export class AgentHomeCommitCopyError extends AgentHomeError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AgentHomeCommitCopyError';
+  }
+}
+
 export class AgentHomeLeaseCorruptError extends AgentHomeResolutionError {
   constructor(message: string) {
     super(message);
@@ -382,7 +390,7 @@ async function materializeDirectory(inputPath: string): Promise<string> {
   return realized;
 }
 
-async function ensureDirectoryNoSymlink(root: string, target: string): Promise<string> {
+export async function ensureDirectoryNoSymlink(root: string, target: string): Promise<string> {
   if (!isWithin(root, target)) throw new AgentHomeResolutionError('Agent home is outside hostStorageRoot');
   const relative = path.relative(root, target);
   const components = relative === '' ? [] : relative.split(path.sep);
@@ -580,6 +588,17 @@ export class AgentHomeLayout {
   }
 }
 
+export interface AgentHomeLeaseManagerOptions {
+  ownerId?: string;
+  /**
+   * Runs after each base lease is taken and before the caller gets it. The
+   * execution lease group takes one base lease, and intent, export, projection
+   * and maintenance take one each, so every path into a home passes here. A
+   * failure releases the lease and fails this acquire.
+   */
+  settleAgentMemoryCommit?: (home: Pick<AgentHomeLease, 'canonicalHome' | 'homeIdentity'>) => Promise<void>;
+}
+
 interface StoredLeaseMarker {
   readonly version: 1;
   readonly ownerId: string;
@@ -632,9 +651,19 @@ function parseLeaseMarker(value: string, lockPath: string): StoredLeaseMarker {
 export class AgentHomeLeaseManager {
   private static readonly held = new Map<string, string>();
   private readonly ownerId: string;
+  private readonly settleAgentMemoryCommit: AgentHomeLeaseManagerOptions['settleAgentMemoryCommit'];
 
-  constructor(options: { ownerId?: string } = {}) {
+  constructor(options: AgentHomeLeaseManagerOptions = {}) {
     this.ownerId = options.ownerId ?? `process:${randomUUID()}`;
+    this.settleAgentMemoryCommit = options.settleAgentMemoryCommit;
+  }
+
+  private async settleLeftoverCommitCopy(canonicalHome: string, homeIdentity: AgentHomeLease['homeIdentity']): Promise<void> {
+    try {
+      await this.settleAgentMemoryCommit?.({ canonicalHome, homeIdentity });
+    } catch (error) {
+      throw new AgentHomeCommitCopyError(`Agent home ${canonicalHome} has a memory commit copy that could not be settled: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   async acquire(resolution: AgentHomeResolution): Promise<AgentHomeLease> {
@@ -709,7 +738,7 @@ export class AgentHomeLeaseManager {
     if (homeIdentity === undefined) throw new AgentHomeError('Agent home lease identity was not established');
     let released = false;
     let releaseAttempt: Promise<void> | undefined;
-    return {
+    const lease: AgentHomeLease = {
       leaseId,
       agentRef,
       canonicalHome,
@@ -756,6 +785,13 @@ export class AgentHomeLeaseManager {
         return releaseAttempt;
       },
     };
+    try {
+      await this.settleLeftoverCommitCopy(canonicalHome, homeIdentity);
+    } catch (error) {
+      await lease.release().catch(() => {});
+      throw error;
+    }
+    return lease;
   }
 
   /** No AgentRef is minted: this lease owns filesystem mutation, not a product profile. */
@@ -768,7 +804,7 @@ export class AgentHomeLeaseManager {
       gate = await acquirePathMutationGate({ scope: 'agent-home-root', targetPath: agentsRoot });
       await assertRealDirectoryIfPresent(agentsRoot);
       await assertRealDirectoryIfPresent(canonicalHome);
-      const stat = await fs.lstat(canonicalHome);
+      const stat = await fs.lstat(canonicalHome, { bigint: true });
       if (!stat.isDirectory() || await fs.realpath(canonicalHome) !== canonicalHome || path.dirname(canonicalHome) !== agentsRoot) throw new AgentHomeResolutionError('invalid maintenance home');
       await assertRealDirectoryIfPresent(path.join(canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY));
       const marker = path.join(canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY, 'agent-home.lease');
@@ -779,6 +815,7 @@ export class AgentHomeLeaseManager {
         if (prior.ownerId !== this.ownerId || prior.canonicalHome !== canonicalHome || prior.agentRef.agentId !== path.basename(canonicalHome)) throw new AgentHomeBusyError('Agent home belongs to another writer');
         // Same-owner crash residue is retained. The daemon already reconciled its processes.
       }
+      await this.settleLeftoverCommitCopy(canonicalHome, { dev: stat.dev, ino: stat.ino });
     } catch (error) {
       try { await gate?.release(); }
       finally { if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) AgentHomeLeaseManager.held.delete(canonicalHome); }
@@ -1315,7 +1352,7 @@ export class AgentHomeManager {
     const home = path.join(agentsRoot, agentId);
     let lease: { release(): Promise<void> };
     try { lease = await this.leaseManager.acquireMaintenance(agentsRoot, home); }
-    catch (error) { if (error instanceof AgentHomeBusyError) return false; throw error; }
+    catch (error) { if (error instanceof AgentHomeBusyError || error instanceof AgentHomeCommitCopyError) return false; throw error; }
     try { await work(home); return true; }
     finally { await lease.release(); }
   }

@@ -62,6 +62,12 @@ export const AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY = 'agent-memory-read-if-ad
 /** Device capability required before an ordinary Agent offer may carry `agentMemory: 'read-write-if-admitted'`. */
 export const AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY = 'agent-memory-read-write-if-admitted' as const;
 
+/**
+ * Device capability required before an Agent offer may carry `agentMemoryCommit`.
+ * A device declares it only with a proven strict memory backend (#1440).
+ */
+export const AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY = 'agent-memory-commit-on-success' as const;
+
 /** Exact capability of the single input-preparation wire authority. */
 export const AGENT_INPUT_PREPARATION_CAPABILITY =
   `agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}` as const;

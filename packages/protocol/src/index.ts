@@ -350,6 +350,7 @@ export {
   ConnHelloPayloadSchema,
   AgentHomeAccessSchema,
   AgentMemorySelectionSchema,
+  AgentMemoryCommitSchema,
   SessionSelectionSchema,
   TaskOfferPayloadSchema,
   TaskOfferPlainPayloadSchema,
@@ -471,6 +472,7 @@ export type {
   TerminalResidentMemoryOverLimit,
   AgentHomeAccess,
   AgentMemorySelection,
+  AgentMemoryCommit,
 } from './messages';
 
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';

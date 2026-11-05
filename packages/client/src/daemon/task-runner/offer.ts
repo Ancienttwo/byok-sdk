@@ -4,6 +4,7 @@ import type { ExecutionScratch } from '../retention/scratch';
 import { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home';
 import type { OfferPhaseContext } from './support';
+import { settleAgentMemoryCommitCopy } from './agent-memory';
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable';
 import { offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
@@ -18,6 +19,8 @@ import type { OfferFactsV1 } from './state';
 export interface OfferHeld {
   owner: 'offer' | 'startup' | 'active';
   agentBinding?: AgentHomeExecutionBinding;
+  /** This Attempt began a memory commit copy, so its lease release settles it first. */
+  agentMemoryCommitCopy?: boolean;
 }
 export type OfferRequest = NonNullable<ReturnType<typeof readOfferRequest>>;
 export type OfferLimits = NonNullable<ReturnType<TaskRunner['admitOfferLimits']>>;
@@ -384,6 +387,9 @@ export async function handleOffer(
         this['revokeAgentResultContext'](taskId);
         this['revokeAgentMemoryContext'](taskId);
         this['deleteHostToolsetContexts'](taskId);
+        if (held.agentMemoryCommitCopy === true && held.agentBinding !== undefined) {
+          await settleAgentMemoryCommitCopy.call(this, taskId, held.agentBinding.lease);
+        }
         await held.agentBinding?.lease.release().catch(() => {});
         await this['releasePreparationPin'](taskId);
       }
@@ -442,6 +448,10 @@ function readOfferRequest(
   // else. Absent for every ordinary offer, so every branch below that does
   // not mention it behaves exactly as it did before this lane existed.
   const preparation = offeredPreparation(payload);
+  if (payload.agentMemoryCommit !== undefined && this['deps'].agentMemoryCommit === undefined) {
+    decline('agent_memory_commit_unavailable: this daemon has no proven strict memory backend', false);
+    return;
+  }
   const offeredMemory = payload.agentMemory;
   if (preparation !== undefined && !PreparedAgentMemoryModeSchema.safeParse(offeredMemory).success) {
     decline('agent_memory_selection_invalid: prepared offers require an explicit memory selection', false);

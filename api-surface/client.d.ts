@@ -1436,6 +1436,10 @@ export declare class AgentHomeReaderRunMissingError extends AgentHomeError {
     constructor(message: string);
 }
 /** A malformed persisted lease is integrity failure, never retryable contention. */
+/** A leftover memory commit copy could not be settled. The next acquire tries again. */
+export declare class AgentHomeCommitCopyError extends AgentHomeError {
+    constructor(message: string);
+}
 export declare class AgentHomeLeaseCorruptError extends AgentHomeResolutionError {
     constructor(message: string);
 }
@@ -1548,6 +1552,7 @@ export interface AgentHomeExecutionBinding {
     readonly lease: AgentHomeExecutionLease;
 }
 export declare function validateAgentRef(value: unknown): AgentRef;
+export declare function ensureDirectoryNoSymlink(root: string, target: string): Promise<string>;
 /**
  * SDK-owned deterministic Agent-home layout. The downstream supplies exactly
  * one absolute branded storage root; there is deliberately no host path
@@ -1598,15 +1603,25 @@ export declare class AgentHomeLayout {
     private resolveRoot;
     private acquireRootMutationGate;
 }
+export interface AgentHomeLeaseManagerOptions {
+    ownerId?: string;
+    /**
+     * Runs after each base lease is taken and before the caller gets it. The
+     * execution lease group takes one base lease, and intent, export, projection
+     * and maintenance take one each, so every path into a home passes here. A
+     * failure releases the lease and fails this acquire.
+     */
+    settleAgentMemoryCommit?: (home: Pick<AgentHomeLease, 'canonicalHome' | 'homeIdentity'>) => Promise<void>;
+}
 /** `storeDir` must come from `DeviceStore.resolveDir`, so every alias of a store yields one owner. */
 export declare function stableAgentHomeOwnerId(storeDir: string, productId: string): string;
 /** One-writer lease backed by both a process registry and an exclusive marker. */
 export declare class AgentHomeLeaseManager {
     private static readonly held;
     private readonly ownerId;
-    constructor(options?: {
-        ownerId?: string;
-    });
+    private readonly settleAgentMemoryCommit;
+    constructor(options?: AgentHomeLeaseManagerOptions);
+    private settleLeftoverCommitCopy;
     acquire(resolution: AgentHomeResolution): Promise<AgentHomeLease>;
     /** No AgentRef is minted: this lease owns filesystem mutation, not a product profile. */
     acquireMaintenance(agentsRoot: string, canonicalHome: string): Promise<{
@@ -2677,7 +2692,7 @@ export declare class AgentMemoryIntentNoticeError extends Error {
  */
 export interface AgentMemoryIntentBackend {
     /** Omitted for the native Linux descriptor backend. */
-    readonly openFilesystem?: (lease: AgentHomeLease) => Promise<AgentMemoryFilesystem>;
+    readonly openFilesystem?: (lease: Pick<AgentHomeLease, 'canonicalHome' | 'homeIdentity'>) => Promise<AgentMemoryFilesystem>;
     /** A thrown `AgentMemoryRevisionConflictError` proves this attempt renamed nothing. */
     readonly conflictProvesNoRename: boolean;
     /**
@@ -3009,6 +3024,8 @@ export declare function readAgentMemoryHomeInternalFile(binding: AgentMemoryHome
  * durability is exactly that backend's guarantee.
  */
 export declare function replaceAgentMemoryHomeInternalFileStrict(binding: AgentMemoryHomeBinding, fileName: string, expectedRevision: string, content: string): Promise<AgentMemoryFilesystemFileState>;
+/** Removes one SDK-internal state file under `.byok`, with the barrier of {@link replaceAgentMemoryHomeInternalFileStrict}. */
+export declare function deleteAgentMemoryHomeInternalFileStrict(binding: AgentMemoryHomeBinding, fileName: string, expectedRevision: string): Promise<void>;
 /**
  * Append one metadata-only line to the Agent memory audit tail. Audit is
  * observation, never replay authority; the entry must carry no memory content.
