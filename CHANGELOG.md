@@ -32,6 +32,16 @@
   `outside_scope`. The durable Pi lane stays darwin/linux only, and other
   platforms still decline.
 
+- **Added (examples; #1449)** — K8 `room-seat:` projection values carry the
+  optional `triggerMessageId` of a seat that a `room_call` opened: the message
+  the seat answers, which is the caller's post or, when the caller passed, the
+  message the caller answered. A mentioned seat never has it, so a Host tells
+  a mentioned seat from a `room_call` seat in the same round without deriving
+  it from the seat id. Seats opened before the upgrade are not backfilled. A
+  Host that validates the value with a closed schema allows the field first;
+  a Host that vendored K8 copies `src/rules/rooms.ts`
+  ([room seat projections](examples/bot-collaboration/README.md#room-seat-projections)).
+
 ## 0.38.0 — 2026-11-04 (published)
 
 0.38.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

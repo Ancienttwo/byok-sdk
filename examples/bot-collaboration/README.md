@@ -1060,12 +1060,17 @@ not store them; each is published once, in the transaction that makes it
 true.
 
 - `room-seat:<roomId>:<seatId>` with `{ roomId, root, roundId, seatId, botId,
-  status, late, reason? }`, when the seat becomes terminal: `post`, `pass`,
+  status, late, reason?, triggerMessageId? }`, when the seat becomes terminal: `post`, `pass`,
   `failed`, `busy`, `removed` or `blocked`. `late` is not terminal; a late
   seat is published when its Turn ends. `reason` is the conclusion or block
   reason that the seat stores. A seat with no admitted Turn, such as a
   waiting seat whose Bot left the room, is published too, though it has no
-  `bot-turn:` projection.
+  `bot-turn:` projection. Only a seat that a `room_call` opened has
+  `triggerMessageId`, the message the seat answers: the caller's post (its
+  seat id), or, when the caller passed, the message the caller answered (its
+  own `triggerMessageId`, else the root). A Host tells a mentioned seat from a
+  `room_call` seat by this field and does not derive it from the seat id. A
+  seat opened before the release that added the field is not backfilled.
 - `room-root:<roomId>:<root>` with `{ roomId, root, seats }`, when every seat
   of every round of the root is terminal, the seats that a `room_call` added
   included. `seats` lists their ids in reservation order; each has its

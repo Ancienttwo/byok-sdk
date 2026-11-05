@@ -7,13 +7,31 @@
   },
   "to": {
     "version": "0.38.0",
-    "snapshotSha256": "8e4c6b40a480872b380c28d51e7fda46e2e4858b943e1a7690a4b9fcd3a79cc1"
+    "snapshotSha256": "ccd5c68eba8688a05744f62b1c89bffadddcbdf7886af0ab208c5e634ad3172a"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "k8-room-seat-trigger-message",
+      "impact": "additive",
+      "summary": "K8 room-seat: projection values gain the optional triggerMessageId (#1449). Only a seat that a room_call opened has it: the message the seat answers, which is the caller's post (its seat id) or, when the caller passed, the message the caller answered (its own triggerMessageId, else the root). A mentioned seat never has it, so a Host tells the two apart by this field and does not derive it from the seat id. A Host that validates the value with a closed schema allows the field before it upgrades; a Host that vendored K8 copies src/rules/rooms.ts. Seats opened before the upgrade are not backfilled.",
+      "migration": "examples/bot-collaboration/README.md#room-seat-projections",
+      "items": [
+        "example:bot-collaboration"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=f28fb891884de485",
+      "after": "K8 0.0.1 src-sha256=41a6f6ff4a006d30",
+      "entry": "k8-room-seat-trigger-message"
+    }
+  ]
 }
