@@ -44,6 +44,8 @@ export interface DeviceEnrollmentStatusOptions {
   productId: string;
   storeDir?: string;
   deviceCredentials?: DeviceCredentialConfig;
+  /** `DaemonConfig.nativeAssetRoot` of a packaged Windows Host, which has no installed koffi. */
+  nativeAssetRoot?: string;
 }
 
 /** Credential-blind cold read model for host setup and diagnostics. */
@@ -376,10 +378,10 @@ export class DeviceStore {
 export async function readEnrollmentAuthority(
   options: DeviceEnrollmentStatusOptions,
 ): Promise<EnrollmentAuthorityRead> {
-  const { productId, storeDir: configuredStoreDir, deviceCredentials } = readEnrollmentOptions(options);
+  const { productId, storeDir: configuredStoreDir, deviceCredentials, nativeAssetRoot } = readEnrollmentOptions(options);
   const storeDir = DeviceStore.resolveDir(productId, configuredStoreDir);
   try {
-    const store = new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials }));
+    const store = new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials, nativeAssetRoot }));
     // Inspect the bounded projection even when the OS authority exists. A
     // legacy secret-bearing or otherwise invalid file is an explicit
     // re-pair-required state; steady-state reads must never hide or repair it.
@@ -409,17 +411,18 @@ export async function readEnrollmentAuthority(
  * read. An accessor, Proxy, non-plain prototype or wrong type is a
  * `TypeError` with no cause, before any filesystem or credential access.
  */
-function readEnrollmentOptions(options: unknown): { productId: string; storeDir: string | undefined; deviceCredentials: DeviceCredentialConfig | undefined } {
+function readEnrollmentOptions(options: unknown): { productId: string; storeDir: string | undefined; deviceCredentials: DeviceCredentialConfig | undefined; nativeAssetRoot: string | undefined } {
   const invalid = (): TypeError =>
-    new TypeError('device enrollment reads require a non-empty productId and an optional storeDir string, as plain data properties');
-  let picked: Record<'productId' | 'storeDir' | 'deviceCredentials', unknown>;
+    new TypeError('device enrollment reads require a non-empty productId and optional storeDir and nativeAssetRoot strings, as plain data properties');
+  let picked: Record<'productId' | 'storeDir' | 'deviceCredentials' | 'nativeAssetRoot', unknown>;
   try {
-    picked = pickPlainDataProperties(options, ['productId', 'storeDir', 'deviceCredentials'], { maxDepth: 1, allowUndefined: true });
+    picked = pickPlainDataProperties(options, ['productId', 'storeDir', 'deviceCredentials', 'nativeAssetRoot'], { maxDepth: 1, allowUndefined: true });
   } catch {
     throw invalid();
   }
-  const { productId, storeDir } = picked;
-  if (typeof productId !== 'string' || productId.length === 0 || (storeDir !== undefined && typeof storeDir !== 'string')) {
+  const { productId, storeDir, nativeAssetRoot } = picked;
+  if (typeof productId !== 'string' || productId.length === 0 || (storeDir !== undefined && typeof storeDir !== 'string')
+    || (nativeAssetRoot !== undefined && typeof nativeAssetRoot !== 'string')) {
     throw invalid();
   }
   let deviceCredentials: DeviceCredentialConfig | undefined;
@@ -430,7 +433,7 @@ function readEnrollmentOptions(options: unknown): { productId: string; storeDir:
     if (config.macosKeychainPath !== undefined && typeof config.macosKeychainPath !== 'string') throw invalid();
     deviceCredentials = { macosKeychainPath: config.macosKeychainPath };
   }
-  return { productId, storeDir, deviceCredentials };
+  return { productId, storeDir, deviceCredentials, nativeAssetRoot };
 }
 
 /** The public non-secret identity projection of one enrollment record. */

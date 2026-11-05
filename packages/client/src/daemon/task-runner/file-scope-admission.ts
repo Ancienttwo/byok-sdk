@@ -7,7 +7,9 @@ import type { RuntimeAdapterDescriptor } from '../../types';
  * it can enforce a scope on (`RuntimeAdapterDescriptor.fileScope`), and every
  * other combination declines before claim with `file_scope_unsupported`
  * instead of running the task without the scope. Only Pi declares lanes
- * (ordinary RPC, prepared and durable), and only darwin/linux can carry one.
+ * (ordinary RPC, prepared and durable), and only darwin, linux and win32 can
+ * carry one; the durable lane itself runs only on darwin/linux (its
+ * descriptor), so it never reaches this check on win32.
  * Writer and memory-reader offers are admitted alike: the resolved grant, not
  * admission, makes a reader's home read-only and adds its run root. The
  * durable lane refuses a reader on its own, independent of any scope.
@@ -19,7 +21,7 @@ import type { RuntimeAdapterDescriptor } from '../../types';
 export interface FileScopeAdmissionFacts {
   readonly descriptor: Pick<RuntimeAdapterDescriptor, 'id' | 'fileScope'>;
   readonly lane: ToolAuthorizationLane;
-  /** Defaults to `process.platform`; injectable so tests can prove the Windows refusal. */
+  /** Defaults to `process.platform`; injectable so tests can prove the unknown-platform refusal. */
   readonly platform?: NodeJS.Platform;
 }
 
@@ -43,7 +45,7 @@ export function fileScopeAdmission(facts: FileScopeAdmissionFacts): FileScopeAdm
   if (!facts.descriptor.fileScope.lanes.includes(facts.lane)) {
     return { supported: false, reason: UNDECLARED_LANE_REASONS[facts.lane] };
   }
-  if (platform !== 'darwin' && platform !== 'linux') {
+  if (platform !== 'darwin' && platform !== 'linux' && platform !== 'win32') {
     return { supported: false, reason: `file-scope policies are not supported on ${platform}` };
   }
   return { supported: true };

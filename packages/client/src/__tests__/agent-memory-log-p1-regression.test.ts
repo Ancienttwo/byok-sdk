@@ -16,7 +16,7 @@ import {
   snapshotAndProjectAgentMemory,
   type AgentMemoryTaskContext,
 } from '../daemon/agent-memory';
-import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
+import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryWalk } from '../daemon/agent-memory-filesystem';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 
 const MAX_LOCAL_LOG_BYTES = AGENT_MEMORY_MAX_LOCAL_LOG_BYTES;
@@ -55,6 +55,8 @@ class BoundedFilesystem implements AgentMemoryFilesystem {
     this.files.delete(filePath);
   }
 
+  async observe(): Promise<never> { throw new Error('not_used'); }
+  async cleanupForRestore(): Promise<never> { throw new Error('not_used'); }
   async append(filePath: string, content: string, maxBytes: number): Promise<void> {
     const prior = this.files.get(filePath) ?? '';
     if (Buffer.byteLength(prior, 'utf8') + Buffer.byteLength(content, 'utf8') > maxBytes) {
@@ -63,7 +65,7 @@ class BoundedFilesystem implements AgentMemoryFilesystem {
     this.files.set(filePath, prior + content);
   }
 
-  async walk(): Promise<readonly string[]> { return Object.freeze([]); }
+  async walk(): Promise<AgentMemoryWalk> { return { paths: [], entries: [] }; }
   async close(): Promise<void> {}
 }
 

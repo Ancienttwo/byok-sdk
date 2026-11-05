@@ -249,6 +249,9 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/adapters\/hermes\//,
     /^packages\/client\/src\/__tests__\/(?:hermes-(?:adapter|custody|gateway-control|home)\.test\.ts|fixtures\/fake-hermes(?:\.mjs|-command\.ts))$/,
     /^packages\/keys\/src\/(?:hermes-provider-launcher\.ts|__tests__\/hermes-provider-launcher\.test\.ts)$/,
+    // #1423: the file-scope guard on win32, the code it qualifies and the suites the job runs.
+    /^packages\/client\/src\/(?:file-scope-[^/]+\.ts|tool-authorization\.ts|daemon\/task-runner\/file-scope-admission\.ts)$/,
+    /^packages\/client\/src\/__tests__\/(?:file-scope-(?:guard|policy|launch|tool-approval|discovery-tools)|pi-scoped-file-tools)\.test\.ts$/,
     // #1317: the win32 runtime environment base and the suite that reads the real registry.
     /^packages\/client\/src\/(?:runtime\/environment\.ts|__tests__\/environment\.test\.ts)$/,
   ],
@@ -329,6 +332,8 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\/(?:pi-provider-launcher-core\.ts|pi-projection-windows\.test\.ts|fixtures\/acl-evidence-budget\.ts)$/,
     // #385: the keys launch sequence against the built pi-rpc host.
     /^packages\/client\/src\/__tests__\/pi-rpc-key-custody\.test\.ts$/,
+    // #1445: real Credential Manager under the standard-user token.
+    /^packages\/client\/src\/__tests__\/device-credential-store\.native\.test\.ts$/,
   ],
 });
 // #649 and #702: release script paths that the owner reviewed for 0.28.2.
@@ -580,6 +585,12 @@ export function selectImpact(paths, context = {}) {
     if (path === 'scripts/testing/device-credentials.mjs') {
       dirs.add('packages/client');
       families.add('adapter-lifecycle-smoke'); families.add('packageability-smoke');
+      continue;
+    }
+    // #1445: the asset root of the two test Hosts that bundle the SDK on Windows.
+    if (path === 'scripts/testing/sdk-koffi-asset-root.mjs' || path === 'scripts/testing/sdk-koffi-asset-root.d.mts') {
+      dirs.add('packages/client');
+      families.add('execution-recovery-native'); families.add('service-upgrade-smoke');
       continue;
     }
     if (path === 'api-surface/entries.json') {

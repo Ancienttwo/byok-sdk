@@ -297,6 +297,13 @@ test('keys pi-catalog subpath and its generator admit exact additions only', t =
     const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
     assert.throws(() => selectImpact(['packages/keys/package.json'], context), /more than/);
   }
+  // #1445: the one optional dependency, at exactly the pin packages/client owns.
+  mkdirSync(join(cwd, 'packages/client'));
+  writeFileSync(join(cwd, 'packages/client/package.json'), JSON.stringify({ optionalDependencies: { koffi: '9.9.9' } }));
+  write({ ...candidate, optionalDependencies: { koffi: '9.9.9' } });
+  assert.ok(selectImpact(['packages/keys/package.json'], context).families.includes('npm-release-pack'));
+  write({ ...candidate, optionalDependencies: { koffi: '9.9.8' } });
+  assert.throws(() => selectImpact(['packages/keys/package.json'], context), /more than/);
   const entry = selectImpact(['packages/keys/tsup.config.ts']);
   assert.ok(entry.dirs.includes('packages/keys'));
   assert.ok(entry.families.includes('npm-release-pack'));

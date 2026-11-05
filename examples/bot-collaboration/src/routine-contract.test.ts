@@ -43,6 +43,7 @@ async function ledgerSubject(): Promise<RoutineSubject> {
       }, { timeout: 10_000 });
     },
     finish: async (turnId, document) => {
+      await vi.waitFor(() => expect(fixture.adapter.sessions.has(intentOf(turnId)!.taskId)).toBe(true), { timeout: 10_000 });
       fixture.adapter.sessions.get(intentOf(turnId)!.taskId)!.finish(document);
       await vi.waitFor(async () => { await host.drain(); expect(intentOf(turnId)!.conclusion).toBeDefined(); }, { timeout: 10_000 });
     },

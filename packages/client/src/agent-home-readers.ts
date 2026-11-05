@@ -5,6 +5,7 @@ import {
   AGENT_HOME_MEMORY_DIGEST_MAX_BYTES,
   AGENT_HOME_MEMORY_DIGEST_MAX_FILES,
   AGENT_HOME_MEMORY_PATH_MAX_LENGTH,
+  RESIDENT_MEMORY_MAX_BYTES,
   type TerminalAgentHomeMemoryChange,
 } from '@byok-sdk/protocol';
 
@@ -119,6 +120,58 @@ async function fingerprintRegularFile(
     return { hash: `sha256:${hash.digest('hex')}`, bytes: total };
   } finally {
     await handle.close();
+  }
+}
+
+/** One read of the resident `MEMORY.md`; see {@link readResidentMemory}. */
+export type ResidentMemoryRead =
+  | { readonly kind: 'read'; readonly content: string; readonly revision: string; readonly byteCount: number }
+  | { readonly kind: 'over-limit'; readonly byteCount: number }
+  | { readonly kind: 'unreadable'; readonly reason: string };
+
+/**
+ * Reads the resident `MEMORY.md` of a leased home (#1439) with one
+ * implementation on every platform, at most the limit plus one byte, as strict
+ * UTF-8. The `lstat` covers a platform without `O_NOFOLLOW`. The revision is
+ * the one `memory_save` compares. A file problem is a result, never a throw.
+ */
+export async function readResidentMemory(
+  home: string,
+  homeIdentity: Readonly<{ dev: bigint; ino: bigint }>,
+): Promise<ResidentMemoryRead> {
+  const absolute = path.join(home, 'MEMORY.md');
+  try {
+    if (!(await fs.lstat(absolute)).isFile()) return { kind: 'unreadable', reason: 'not a regular file' };
+    const handle = await fs.open(absolute, DIGEST_OPEN_FLAGS);
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) return { kind: 'unreadable', reason: 'not a regular file' };
+      // Another hard link can name a file outside the home.
+      if (stat.nlink !== 1) return { kind: 'unreadable', reason: 'multiple links' };
+      const current = await fs.stat(home, { bigint: true });
+      if (current.dev !== homeIdentity.dev || current.ino !== homeIdentity.ino) return { kind: 'unreadable', reason: 'home identity changed' };
+      const bytes = Buffer.alloc(RESIDENT_MEMORY_MAX_BYTES + 1);
+      let total = 0;
+      while (total < bytes.length) {
+        const { bytesRead } = await handle.read(bytes, total, bytes.length - total, null);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+      }
+      if (total > RESIDENT_MEMORY_MAX_BYTES) return { kind: 'over-limit', byteCount: Math.max(stat.size, total) };
+      const body = bytes.subarray(0, total);
+      return {
+        kind: 'read',
+        content: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(body),
+        revision: `sha256:${createHash('sha256').update(body).digest('hex')}`,
+        byteCount: total,
+      };
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    if (error instanceof TypeError) return { kind: 'unreadable', reason: 'not valid UTF-8' };
+    const code = (error as NodeJS.ErrnoException).code;
+    return { kind: 'unreadable', reason: code === 'ENOENT' ? 'missing' : code === 'ELOOP' ? 'not a regular file' : code ?? 'read failed' };
   }
 }
 

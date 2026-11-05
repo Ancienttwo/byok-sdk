@@ -157,10 +157,10 @@ describe('scoped file tools (#1061 slice 3)', () => {
     expect(message).toContain('outside_scope');
   });
 
-  it('fails closed on Windows unsupported before touching a file', async () => {
+  it('fails closed on an unknown platform before touching a file', async () => {
     const { root, grant } = await fixture();
-    const tools = createScopedFileTools({ grant, platform: 'win32' });
-    const message = await failureOf(toolByName(tools, 'read')('call-win', { path: path.join(root, 'x.txt') }, root));
+    const tools = createScopedFileTools({ grant, platform: 'freebsd' });
+    const message = await failureOf(toolByName(tools, 'read')('call-freebsd', { path: path.join(root, 'x.txt') }, root));
     expect(message).toContain('file_scope_unsupported');
     expect(message).toContain('unsupported_platform');
   });

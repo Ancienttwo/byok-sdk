@@ -6,7 +6,7 @@ import { runCommand } from './command-runner';
  * `runCommand` is the only place in this package that actually spawns a
  * process, so it is exercised against `process.execPath` — present on every
  * platform CI runs — rather than a shell builtin. No OS credential store is
- * touched here; the two backends receive an injected {@link CommandRunner}.
+ * touched here; the macOS backend receives an injected {@link CommandRunner}.
  */
 describe('runCommand', () => {
   it('captures stdout and a zero exit code', async () => {
@@ -27,7 +27,7 @@ describe('runCommand', () => {
     expect(result.stdout).toBe('');
   });
 
-  it('preserves exit code 44, which both backends read as "not found"', async () => {
+  it('preserves exit code 44, which the macOS backend reads as "not found"', async () => {
     const result = await runCommand(process.execPath, [
       '-e',
       'process.exit(44)',

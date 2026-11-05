@@ -88,7 +88,8 @@ export function publishSettled(team: Pick<RoomsState, 'rounds' | 'seats'>, seatI
   for (const seatId of seatIds) {
     const seat = team.seats[seatId]!, round = team.rounds[seat.roundId]!;
     publish(roomSeatProjection(round.roomId, seat.id), { roomId: round.roomId, root: round.root, roundId: round.id, seatId: seat.id,
-      botId: seat.botId, status: seat.status, late: seat.late, ...(seat.reason ? { reason: seat.reason } : {}) });
+      botId: seat.botId, status: seat.status, late: seat.late, ...(seat.reason ? { reason: seat.reason } : {}),
+      ...(seat.triggerMessageId ? { triggerMessageId: seat.triggerMessageId } : {}) });
     roots.set(round.root, round.roomId);
   }
   for (const [root, roomId] of roots) publishRoot(team, roomId, root, publish);
@@ -256,7 +257,7 @@ export function applySpeech(team: RoomsState, seatId: string, document: Pick<Bot
     const members = [...document.room_call!.members];
     // A batch is atomic. Refusal must not consume any seat or round budget.
     const copy = structuredClone(team);
-    const triggerMessageId = document.speech?.kind === 'post' ? seat.id : seat.triggerMessageId;
+    const triggerMessageId = document.speech?.kind === 'post' ? seat.id : (seat.triggerMessageId ?? round.root);
     if (round.closed) {
       if (copy.roots[round.root]!.autonomous >= 3) throw new Error('Autonomous round budget is 3');
       // newRound skips a suspended member, so a room_call that names one is refused here, as `reserve` refuses it.

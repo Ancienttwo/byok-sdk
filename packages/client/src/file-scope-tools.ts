@@ -55,7 +55,7 @@ export interface ScopedFileToolOptions extends ScopedFileToolHooks {
   readonly grant: FileScopeGrant;
   /** Injectable for the cross-device fixture; production uses Node built-ins. */
   readonly io?: FileScopeIo;
-  /** Injectable platform for the Windows fail-closed fixture. */
+  /** Injectable platform for the unknown-platform fail-closed fixture. */
   readonly platform?: NodeJS.Platform;
   /** Overrides os.homedir() for the tilde fixture. */
   readonly osHome?: string;

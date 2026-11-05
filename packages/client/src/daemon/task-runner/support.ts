@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import { RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalProjectionSelection, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
+import { RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TerminalProjectionSelection, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../types';
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable';
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home';
@@ -134,6 +134,15 @@ export interface ActiveTask {
   readerMemoryBaseline?: { readonly digest: AgentHomeMemoryDigest | undefined };
   /** Measured once, at the first terminal decision; see `TerminalAgentHomeMemoryChangeSchema`. */
   agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
+  /** A writer's over-limit `MEMORY.md`, measured at each terminal decision; see `TerminalResidentMemoryOverLimitSchema`. */
+  residentMemoryOverLimit?: TerminalResidentMemoryOverLimit;
+  /**
+   * A writer Attempt's `MEMORY.md` at start, held in memory only (#1439). Absent
+   * for a reader and when the file could not be read; nothing is restored then.
+   */
+  residentMemoryStart?: { readonly content: string; readonly revision: string };
+  /** The offer chose `agentMemoryCommit`, so `.byok/` holds this Attempt's start copy (#1440). */
+  agentMemoryCommit?: boolean;
   terminalCause?: AgentTerminalCause;
   terminalReason?: string;
   agentTerminalPersisted?: boolean;

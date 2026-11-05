@@ -1,4 +1,4 @@
-import { mkdtemp, cp, rm, rename } from 'node:fs/promises';
+import { mkdtemp, cp, readFile, rm, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -22,6 +22,8 @@ try {
     execFileSync('bash', ['templates/packaging/sea/build.sh', 'examples/packaging/native-assets-fixture.ts', build], { stdio: 'inherit' });
     const executable = path.join(root, 'host.exe');
     await cp(path.join(build, 'launcher-sea.exe'), executable);
+    const credentials = assetRoot => JSON.parse(execFileSync(executable, ['--credentials', assetRoot, root], { cwd: root, encoding: 'utf8', env: { SystemRoot: process.env.SystemRoot, PATH: process.env.PATH } }));
+    assert.deepEqual(credentials(assets), { status: 'unpaired', roundTrip: true, cleared: true });
     let output = '', errors = '';
     host = spawn(executable, ['--host', assets], { cwd: root, env: { SystemRoot: process.env.SystemRoot, PATH: process.env.PATH, TEMP: root, TMP: root } });
     host.stdout.on('data', chunk => { output += chunk; });
@@ -43,6 +45,12 @@ try {
     const failure = JSON.parse(rejected.trim());
     assert.equal(failure.alive, false);
     assert.match(failure.failed, /native assets/);
-    console.log('Windows x64 relocated SEA ownership and missing-assets refusal passed');
+    assert.deepEqual(credentials(assets), { failed: 'DeviceCredentialStoreUnavailableError' });
+    await rm(assets, { recursive: true });
+    await cp(`${assets}-missing`, assets, { recursive: true });
+    const manifest = path.join(assets, 'manifest.json');
+    await writeFile(manifest, JSON.stringify({ ...JSON.parse(await readFile(manifest, 'utf8')), sha256: '0'.repeat(64) }));
+    assert.deepEqual(credentials(assets), { failed: 'DeviceCredentialStoreUnavailableError' });
+    console.log('Windows x64 relocated SEA ownership, credential round trip and missing or modified assets refusal passed');
   }
 } finally { host?.kill('SIGKILL'); await rm(root, { recursive: true, force: true }); }

@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2181928,
+      "budgetBytes": 2209346,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -110,7 +110,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 427061,
+      "budgetBytes": 428028,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -169,7 +169,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 65697,
+      "budgetBytes": 71306,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -379,7 +379,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Single-file Host build: esbuild packaging plugin and SDK asset copy",
-      "budgetBytes": 25653,
+      "budgetBytes": 26734,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -425,7 +425,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 406803,
+      "budgetBytes": 407770,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -592,7 +592,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 524780,
+      "budgetBytes": 533096,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -866,7 +866,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 483150,
+      "budgetBytes": 491466,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1173,7 +1173,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 546901,
+      "budgetBytes": 552067,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1231,7 +1231,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 791949,
+      "budgetBytes": 797115,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1361,7 +1361,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 753690,
+      "budgetBytes": 758856,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1698,7 +1698,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 237834,
+      "budgetBytes": 235911,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1723,7 +1723,9 @@
         "path",
         "zod"
       ],
-      "lazyImports": [],
+      "lazyImports": [
+        "koffi"
+      ],
       "thirdParty": [
         "zod"
       ],
@@ -1814,7 +1816,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1553,
+      "budgetBytes": 1607,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1894,7 +1896,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 142991,
+      "budgetBytes": 147342,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1980,7 +1982,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Schema-free protocol values",
-      "budgetBytes": 7443,
+      "budgetBytes": 8410,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2040,7 +2042,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 705536,
+      "budgetBytes": 710702,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2116,7 +2118,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 407235,
+      "budgetBytes": 412090,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2248,7 +2250,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 571632,
+      "budgetBytes": 576798,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2335,7 +2337,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2141594,
+      "budgetBytes": 2168695,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2439,7 +2441,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 44063,
+      "budgetBytes": 45030,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2480,7 +2482,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 44067,
+      "budgetBytes": 45034,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2521,7 +2523,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 44063,
+      "budgetBytes": 45030,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2562,7 +2564,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 44055,
+      "budgetBytes": 45022,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2663,7 +2665,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 177812,
+      "budgetBytes": 175886,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2684,7 +2686,9 @@
         "path",
         "zod"
       ],
-      "lazyImports": [],
+      "lazyImports": [
+        "koffi"
+      ],
       "thirdParty": [
         "zod"
       ],

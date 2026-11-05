@@ -193,12 +193,17 @@ interface ToolAuthorizationTask {
 | 悬空 symlink | 拒绝 symlink | 不能把「不存在」当成新写入目标；父段悬空同样拒绝 |
 | 目标 hard link（nlink > 1） | 读/写都拒绝 | fstat 可检查 nlink；代价是合法 hard link 被拒。不需要 native code |
 | root 内挂载点/跨设备 | 显式目标 dev 不同 → 拒绝 cross_device；递归遍历跳过并审计 | stat dev 可判定；防止通过 mount 把范围扩到另一文件系统 |
-| 网络卷/UNC root | Windows UNC 因 v1 整体 unsupported 而拒绝；POSIX 网络挂载在契约上不支持，但 D14 的 Node 原语不能可靠分类，Host 不应配置 | 这是 D14 的直接代价；是否增加 POSIX 检测属于 open item（§7） |
-| Windows reparse point/junction | v1 整体 file_scope_unsupported，不做逐项检测 | 无 native code 时不能可靠处理短名/junction；fail closed 优于字符串猜测 |
-| Windows 8.3 短名 | 同上，v1 不支持 | 不把 handle/fileId 检测伪装成已实现 |
-| Windows 大小写/尾点/尾空格/保留设备名/ADS | 同上，v1 不支持 | 任何 Windows 文件范围请求在 claim 前失败 |
+| 网络卷/UNC root | Windows：`\\` 开头的根和目标（UNC、`\\?\`、`\\.\`、`\\?\GLOBALROOT\`、`\\?\UNC\`）在任何 lstat 之前报 path_syntax，根报 invalid_file_scope；配置的根经 `realpath.native` 规范化后以 `\\` 开头（映射的网络盘）时，admission 以 file_scope_unavailable/path_syntax 拒绝，SMB 上的 file ID 和 nlink 没有验证，不支持；POSIX 网络挂载在契约上不支持，但 D14 的 Node 原语不能可靠分类，Host 不应配置 | `\\?\C:\…` 经 `realpath.native` 会得到普通盘符路径，包含判断会通过，所以必须在语法这一步拒绝；POSIX 检测属于 open item（§7） |
+| Windows symlink/junction/AppExecLink | 从盘符根开始逐段 lstat，`isSymbolicLink()` 一律报 symlink。逐段 lstat 和 `realpath.native` 的失败只对已确认落在某个根里的路径报具体原因（symlink、not_regular_file、io_error）：路径字面命中某个根，或者走到的最深现存前缀经 `realpath.native` 落进某个根；其他路径一律报 outside_scope，拒绝原因不透露 scope 外的文件系统 | PR-2a 实测 Node 和 Bun 的 lstat 都把这三种报成 symlink |
+| 文件系统根当根 | POSIX 的 `/` 和 Windows 的盘符根（`D:\`）按同一条规则：根是其规范父目录的最后一段，文件系统根则必须规范化成文件系统根；两者都能当根 | `/` 一直能当根；盘符根原来因为“规范路径不能等于规范父目录”误报 root_identity_changed |
+| Windows ReFS / FAT | 不保证 identity：ReFS 的 128 位 file ID 在 Node 的 `stat` 里只剩 64 位，FAT 没有稳定的 file ID，dev+ino 比较在这两种文件系统上不能证明是同一个对象 | 只改文档；PR-2a 只在 NTFS 上取证 |
+| Windows 卷挂载点和其他 reparse point | 不另做分类：卷挂载点 lstat 报目录，`realpath.native` 落到它自己的卷，报 outside_scope；没有盘符的卷靠 dev 比较报 cross_device，所以 Windows 上的 dev 比较是真防线。WOF、云占位、dedup 当成它呈现的文件或目录 | 实测卷挂载点 tag 与 junction 相同，但 lstat 不报 symlink，规范化后的路径能拦住它 |
+| Windows 8.3 短名和大小写 | `realpath.native` 把最深的现存前缀展开成长名和磁盘上的大小写，之后所有检查（internal_path、根匹配、包含、identity）都在规范路径上逐字节比较，不另做大小写折叠；`.byok` 的短名和大小写变体因此报 internal_path。只有逐字节写出 run.path 或 run 的 lexicalPath 的路径才归 run；盘符或前缀的大小写不同、用 8.3 短名的写法，都算 home 下 `.byok` 的别名，报 internal_path。没有长名的 `~N` 名字按字面新建，不加额外规则 | 实测同一路径两次解析逐字节相同；已有长名的别名命中同一个文件（wx 报 EEXIST） |
+| Windows 尾点/尾空格/保留设备名/ADS | 解析后逐段检查：段里有 `:`、以点或空格结尾、保留设备名（CON、PRN、AUX、NUL、COM0–9、LPT0–9、上标 ¹²³ 变体、CONIN$、CONOUT$，不分大小写，带不带扩展名）都报 path_syntax；盘符相对和根相对路径也在这一步之前拒绝 | 实测 Node 按字面建这些文件，Win32 程序把它们当成设备或去掉尾部字符，两边理解不一致；ADS 的“新建”写进已有文件的流，绕过对已有文件的检查 |
 | macOS 大小写/Unicode 规范化/Data 别名 | realpath.native + dev/ino identity + lstat；不做字符串 case-fold 保证 | APFS 大小写/Unicode 语义交由文件系统与 identity；仍有 check-then-open 残余 |
 | 其他平台（无 Node 内建语义 / 未知平台） | file_scope_unsupported | 不退回未校验的普通 fs 路径操作 |
+
+Windows 各行是 v3 修订（#1423）：Windows 在 rpc、prepared lane 上支持文件范围，durable lane 仍只在 POSIX。仍然不用 native code，依据是 [PR-2a 在 GitHub Windows runner 上的证据](https://github.com/Ancienttwo/byok-sdk/issues/1423#issuecomment-6627573396)和 [t4 裁定](https://github.com/Ancienttwo/byok-sdk/issues/1423#issuecomment-6627696885)：上表每一类都能用 Node 内建的 lstat、realpath.native、stat dev+ino 判定。win32 上的检查顺序固定为语法、逐段 lstat、realpath.native，然后在规范路径上跑共用检查。Windows 上 `O_NOFOLLOW` 是 undefined，打开会跟随末段 symlink；打开后的 fstat identity 比对和写入流程（先不带 O_TRUNC 打开，比对通过才 truncate）在写入前拒绝它。本文其他地方“Windows v1 不支持”的说法指 v1/v2，以本节为准。
 
 ### 3.3 TOCTOU 的明确立场
 
@@ -352,7 +357,7 @@ v1 时两条 lane 在 claim 前 decline file_scope_unsupported。#1239 的逐次
 
 - **prepared**：prepared session 仍只注册 counted MCP tools，不加 scoped file tools，因为 counted tool manifest 只含 MCP 工具，加工具会改变预先计数的请求。grant 不写进 prepared launch；daemon 照常在 claim 后重新校验 root，并把 grant 绑定到这个任务的 gate。gate 经 v7 prepared launch 交给 host，用与 ordinary lane 相同的 Pi tool_call hook。scope floor 让每个 counted tool 调用逐次审批（allowWithoutAsking 规则除外），所以没有任何工具能不经审批碰到文件。prepared 不 resume，也没有 subagent。
 - **durable Pi**：v3 durable launch 带 gate 配置和序列化 grant。worker 每次启动（首次和每次 respawn）都在任何工具存在前重新解析 root，root 被替换或缺失就启动失败。scoped 时 harness 的原生 read/write/edit 被换成六个 SDK scoped 工具，bash 保留并逐次审批。gate 在父进程记下 tool intent 之后、工具执行之前询问；等待审批的调用算 in-flight tool，worker 在等待中崩溃时，按 slice 1 规则结束执行，不重放。一个 gate IPC 服务同一执行的所有 worker。durable lane 没有 subagent。replica store 的结构化路径拒绝保持不变。
-- **Windows ordinary RPC**：v1 即使 lane 正确也不支持；在 claim 前返回 file_scope_unsupported，不 spawn、不创建 session。不要尝试短名/junction 检测后继续。
+- **Windows ordinary RPC 与 prepared**：v3（#1423）起按 §3.2 的 Windows 规则支持；durable Pi 在 Windows 上仍由 runtime selection 以 platform_unsupported 拒绝。
 - 以上 lane/平台的拒绝必须发生在 adapter 启动前；prepare() 返回值/daemon decline 的错误码要能让 Host 区分「这个任务需要 fileScope，但该 lane/平台不支持」。
 
 ### 5.4 Claude / Codex / Grok / Hermes 的跨 adapter 边界

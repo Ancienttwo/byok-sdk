@@ -788,6 +788,7 @@ export type { ExecutionScratch } from '../daemon/retention/scratch';
 // ==== @byok-sdk/client dist/adapters/packaging.d.ts ====
 import { type SdkPackagingFormat } from '../sdk-native-assets';
 export type { SdkPackagingFormat } from '../sdk-native-assets';
+export { loadSdkKoffiAsset } from '../sdk-native-assets-runtime';
 /** The part of an esbuild build that this plugin reads and sets. Declared here so esbuild is not an SDK dependency. */
 export interface SdkPackagingBuild {
     readonly initialOptions: {
@@ -1376,6 +1377,29 @@ export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
  * read fails; the caller then reports `unmeasured`.
  */
 export declare function digestAgentHomeMemory(home: string): Promise<AgentHomeMemoryDigest | undefined>;
+/** One read of the resident `MEMORY.md`; see {@link readResidentMemory}. */
+export type ResidentMemoryRead = {
+    readonly kind: 'read';
+    readonly content: string;
+    readonly revision: string;
+    readonly byteCount: number;
+} | {
+    readonly kind: 'over-limit';
+    readonly byteCount: number;
+} | {
+    readonly kind: 'unreadable';
+    readonly reason: string;
+};
+/**
+ * Reads the resident `MEMORY.md` of a leased home (#1439) with one
+ * implementation on every platform, at most the limit plus one byte, as strict
+ * UTF-8. The `lstat` covers a platform without `O_NOFOLLOW`. The revision is
+ * the one `memory_save` compares. A file problem is a result, never a throw.
+ */
+export declare function readResidentMemory(home: string, homeIdentity: Readonly<{
+    dev: bigint;
+    ino: bigint;
+}>): Promise<ResidentMemoryRead>;
 /**
  * Compares the reader's start and terminal digests. `writerOverlapped` is
  * true when a writer Attempt of the same home was active at any time
@@ -1413,6 +1437,10 @@ export declare class AgentHomeReaderRunMissingError extends AgentHomeError {
     constructor(message: string);
 }
 /** A malformed persisted lease is integrity failure, never retryable contention. */
+/** A leftover memory commit copy could not be settled. The next acquire tries again. */
+export declare class AgentHomeCommitCopyError extends AgentHomeError {
+    constructor(message: string);
+}
 export declare class AgentHomeLeaseCorruptError extends AgentHomeResolutionError {
     constructor(message: string);
 }
@@ -1525,6 +1553,7 @@ export interface AgentHomeExecutionBinding {
     readonly lease: AgentHomeExecutionLease;
 }
 export declare function validateAgentRef(value: unknown): AgentRef;
+export declare function ensureDirectoryNoSymlink(root: string, target: string): Promise<string>;
 /**
  * SDK-owned deterministic Agent-home layout. The downstream supplies exactly
  * one absolute branded storage root; there is deliberately no host path
@@ -1575,15 +1604,25 @@ export declare class AgentHomeLayout {
     private resolveRoot;
     private acquireRootMutationGate;
 }
+export interface AgentHomeLeaseManagerOptions {
+    ownerId?: string;
+    /**
+     * Runs after each base lease is taken and before the caller gets it. The
+     * execution lease group takes one base lease, and intent, export, projection
+     * and maintenance take one each, so every path into a home passes here. A
+     * failure releases the lease and fails this acquire.
+     */
+    settleAgentMemoryCommit?: (home: Pick<AgentHomeLease, 'canonicalHome' | 'homeIdentity'>) => Promise<void>;
+}
 /** `storeDir` must come from `DeviceStore.resolveDir`, so every alias of a store yields one owner. */
 export declare function stableAgentHomeOwnerId(storeDir: string, productId: string): string;
 /** One-writer lease backed by both a process registry and an exclusive marker. */
 export declare class AgentHomeLeaseManager {
     private static readonly held;
     private readonly ownerId;
-    constructor(options?: {
-        ownerId?: string;
-    });
+    private readonly settleAgentMemoryCommit;
+    constructor(options?: AgentHomeLeaseManagerOptions);
+    private settleLeftoverCommitCopy;
     acquire(resolution: AgentHomeResolution): Promise<AgentHomeLease>;
     /** No AgentRef is minted: this lease owns filesystem mutation, not a product profile. */
     acquireMaintenance(agentsRoot: string, canonicalHome: string): Promise<{
@@ -1843,6 +1882,8 @@ export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helpe
 export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem';
 /** One file's state as reported by that filesystem authority. */
 export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
+/** Types of the observe, walk and restore cleanup methods of `AgentMemoryFilesystem`. */
+export type { AgentMemoryFileObservation, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry, AgentMemoryWalkEntryKind, } from '../daemon/agent-memory-filesystem';
 /** Serves `memory_recall`/`memory_save` as a stdio MCP server over host-provided streams. */
 export { serveAgentMemoryMcpOverStdio } from './mcp-server';
 /** MCP tool name a host must allowlist for reads. */
@@ -2522,8 +2563,12 @@ export interface AgentMemoryFilesystem {
     read(path: string, maxBytes: number): Promise<AgentMemoryFilesystemFileState>;
     replace(path: string, expectedRevision: string, content: string, maxBytes: number): Promise<AgentMemoryFilesystemFileState>;
     delete(path: string, expectedRevision: string): Promise<void>;
+    /** The revision of the file's raw bytes, with no size limit and no UTF-8 requirement. */
+    observe(path: string): Promise<AgentMemoryFileObservation>;
+    /** Restore-only (#1440): see `cleanupAgentMemoryHomeForRestore`. */
+    cleanupForRestore(record: AgentMemoryRestoreRecord): Promise<AgentMemoryRestoreCleanup>;
     append(path: string, content: string, maxBytes: number): Promise<void>;
-    walk(path: string, maxEntries: number): Promise<readonly string[]>;
+    walk(path: string, maxEntries: number): Promise<AgentMemoryWalk>;
     close(): Promise<void>;
 }
 export interface AgentMemoryFilesystemFileState {
@@ -2532,13 +2577,45 @@ export interface AgentMemoryFilesystemFileState {
     readonly revision: string;
     readonly byteCount: number;
 }
+/** One observation of a memory file: existence and the sha256 of its exact bytes. */
+export interface AgentMemoryFileObservation {
+    readonly exists: boolean;
+    readonly revision: string;
+}
+/**
+ * `directory` was entered, so its contents are in the record too.
+ * `opaque-directory` was seen and not entered, so only the directory itself is.
+ */
+export type AgentMemoryWalkEntryKind = 'file' | 'directory' | 'opaque-directory' | 'other';
+/** One entry a walk saw, listed or not. The path is only ever compared with another walk's. */
+export interface AgentMemoryWalkEntry {
+    readonly path: string;
+    readonly kind: AgentMemoryWalkEntryKind;
+}
+export interface AgentMemoryWalk {
+    /** Regular files with one link that the walk lists; a caller filters them to memory paths. */
+    readonly paths: readonly string[];
+    /** Everything the walk saw, including what it left out of `paths`. */
+    readonly entries: readonly AgentMemoryWalkEntry[];
+}
+/** What an Attempt started with, as a restore needs it. */
+export interface AgentMemoryRestoreRecord {
+    /** The paths of the start copy, including `MEMORY.md`. */
+    readonly files: readonly string[];
+    /** The `entries` of the walk at the start. */
+    readonly entries: readonly AgentMemoryWalkEntry[];
+}
+/** Entries a restore cleanup removed. A directory removed with its contents counts once. */
+export interface AgentMemoryRestoreCleanup {
+    readonly deleted: number;
+}
 // ==== @byok-sdk/client dist/daemon/agent-memory-fs-helper.d.ts ====
 import type { AgentHomeLease } from '../agent-home';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
-export declare const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 2;
-export declare const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = "2";
+export declare const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 3;
+export declare const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = "3";
 export declare function isAgentMemoryFilesystemHelperSupported(): boolean;
-/** Private protocol 2 identity. Decimal strings keep all 64 bits. */
+/** Private helper protocol identity. Decimal strings keep all 64 bits. */
 export type AgentMemoryHelperIdentity = Readonly<{
     kind: 'unix';
     dev: string;
@@ -2616,7 +2693,7 @@ export declare class AgentMemoryIntentNoticeError extends Error {
  */
 export interface AgentMemoryIntentBackend {
     /** Omitted for the native Linux descriptor backend. */
-    readonly openFilesystem?: (lease: AgentHomeLease) => Promise<AgentMemoryFilesystem>;
+    readonly openFilesystem?: (lease: Pick<AgentHomeLease, 'canonicalHome' | 'homeIdentity'>) => Promise<AgentMemoryFilesystem>;
     /** A thrown `AgentMemoryRevisionConflictError` proves this attempt renamed nothing. */
     readonly conflictProvesNoRename: boolean;
     /**
@@ -2716,7 +2793,7 @@ export declare function createAgentMemoryIntentProcessor(options: AgentMemoryInt
 // ==== @byok-sdk/client dist/daemon/agent-memory.d.ts ====
 import { AGENT_MEMORY_PROJECTION_CAPABILITY, type AgentMemoryProjectionMutation, type AgentMemoryProjectionSealedMutation } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentRef } from '../agent-home';
-import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
+import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalkEntry } from './agent-memory-filesystem';
 import { AgentMemoryError, AgentMemoryValidationError, type AgentMemoryProjectionPort, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
 export declare const AGENT_MEMORY_AUDIT_FILENAME = "agent-memory-audit-v1.jsonl";
 /** v2 is one atomically replaced state file, never an append-only log. */
@@ -2863,11 +2940,6 @@ export interface AgentMemorySaveResult {
 }
 /** Validate and freeze a task-free home binding built from a live writer lease. */
 export declare function agentMemoryHomeBinding(input: AgentMemoryHomeBinding): AgentMemoryHomeBinding;
-/** One observation of a memory file: existence and the sha256 of its exact bytes. */
-export interface AgentMemoryFileObservation {
-    readonly exists: boolean;
-    readonly revision: string;
-}
 /**
  * Observe one allowed memory path (`MEMORY.md` or `notes/**.md`) through the
  * pinned home, for evidence only (never for recall or save).
@@ -2883,8 +2955,8 @@ export interface AgentMemoryFileObservation {
  * symlink or non-regular leaf, or a leaf with more than one hard link; a
  * name below notes that differs only in letter case from another; any other
  * open/read/stat I/O error; and a file that changed while it was hashed
- * (transient). With an external `filesystem` backend the observation is that
- * backend's bounded UTF-8 `read`.
+ * (transient). The native backend and an external `filesystem` backend give the
+ * same observation of the same file.
  */
 export declare function observeAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, relativePath: string): Promise<AgentMemoryFileObservation>;
 export interface AgentMemoryHomeCompareAndSwap {
@@ -2903,6 +2975,12 @@ export interface AgentMemoryHomeCompareAndSwap {
  * {@link AgentMemoryValidationError} for a refused input, and
  * {@link AgentMemoryIoError} (or a backend error) otherwise.
  *
+ * The live revision is streamed over the file's raw bytes with no size limit
+ * and no UTF-8 requirement, so an oversized or non-UTF-8 file can be replaced
+ * or deleted with its correct revision. The file must still be a regular file
+ * with one link, unchanged while it is hashed. New content stays bounded: 256
+ * KiB, and the caller limits `MEMORY.md` to 8 KiB.
+ *
  * Native backend: every conflict is thrown before the rename that would
  * install new bytes (replace compares before the temp file, before its write
  * and after it; delete compares twice before its tombstone rename), so a
@@ -2911,6 +2989,27 @@ export interface AgentMemoryHomeCompareAndSwap {
  * disk, and an `EINVAL`/`EPERM` refusal after it throws {@link AgentMemoryIoError}.
  */
 export declare function compareAndSwapAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, input: AgentMemoryHomeCompareAndSwap): Promise<AgentMemoryFilesystemFileState>;
+/**
+ * The cleanup step of a restore after a failed commit-on-success Attempt
+ * (#1440). The caller holds the writer lease and the runtime has stopped.
+ *
+ * It compares paths and types with the start record, and knows no memory-path
+ * rule. Below `notes` it walks the directories the start walk entered and
+ * deletes, without following a link, every entry outside the record, including
+ * one whose path is in it with another type, and a directory with its contents.
+ * A path of the start copy that is no longer a regular file with one link goes
+ * too; other links to that file do not change. Entries in the record stay. In
+ * the home root it takes only the exact names: `MEMORY.md` when it is not a
+ * regular file with one link, and `notes` when it is not a directory. The
+ * caller writes those back. A case variant in the root stays, because no rule
+ * refuses one at the start.
+ *
+ * There is no compare and no entry limit: the lease is exclusive. A delete
+ * refuses to cross onto another volume, so the restore fails and is retried.
+ * The helper backend refuses this on Windows, which declares no commit on
+ * success. Not a public export.
+ */
+export declare function cleanupAgentMemoryHomeForRestore(binding: AgentMemoryHomeBinding, record: AgentMemoryRestoreRecord): Promise<AgentMemoryRestoreCleanup>;
 /** Read one SDK-internal state file under `.byok` through the pinned home. */
 export declare function readAgentMemoryHomeInternalFile(binding: AgentMemoryHomeBinding, fileName: string): Promise<AgentMemoryFilesystemFileState>;
 /**
@@ -2926,6 +3025,8 @@ export declare function readAgentMemoryHomeInternalFile(binding: AgentMemoryHome
  * durability is exactly that backend's guarantee.
  */
 export declare function replaceAgentMemoryHomeInternalFileStrict(binding: AgentMemoryHomeBinding, fileName: string, expectedRevision: string, content: string): Promise<AgentMemoryFilesystemFileState>;
+/** Removes one SDK-internal state file under `.byok`, with the barrier of {@link replaceAgentMemoryHomeInternalFileStrict}. */
+export declare function deleteAgentMemoryHomeInternalFileStrict(binding: AgentMemoryHomeBinding, fileName: string, expectedRevision: string): Promise<void>;
 /**
  * Append one metadata-only line to the Agent memory audit tail. Audit is
  * observation, never replay authority; the entry must carry no memory content.
@@ -2937,6 +3038,13 @@ export declare function appendAgentMemoryHomeAudit(binding: AgentMemoryHomeBindi
  * decline to promise a durable barrier the filesystem cannot give.
  */
 export declare function probeAgentMemoryStrictDirectorySync(directory: string): Promise<boolean>;
+/**
+ * The one size check of the resident `MEMORY.md` (#1439), shared by
+ * `memory_save` and Host intents: new content over `RESIDENT_MEMORY_MAX_BYTES`
+ * is refused. Only the new content is checked, so an over-limit file can be
+ * replaced by a smaller one. A `notes/` file keeps `AGENT_MEMORY_MAX_FILE_BYTES`.
+ */
+export declare function assertResidentMemoryWithinLimit(relativePath: string, content: string): void;
 export declare class AgentMemoryService {
     private readonly input;
     constructor(input: AgentMemoryTaskContext);
@@ -2951,6 +3059,11 @@ export declare class AgentMemoryService {
         readonly content?: unknown;
     }): Promise<Readonly<AgentMemorySaveResult>>;
 }
+/**
+ * The start record of a commit-on-success Attempt (#1440): each entry the walk
+ * saw in `notes`, with its type. The caller must hold the exclusive home lease.
+ */
+export declare function recordAgentMemoryHomeEntries(input: AgentMemoryHomeBinding): Promise<readonly AgentMemoryWalkEntry[]>;
 /** Internal bounded capture; the caller must hold the exclusive home lease throughout. */
 export declare function captureAgentMemoryHomeSnapshot(input: AgentMemoryHomeBinding, signal?: AbortSignal): Promise<AgentMemorySnapshot>;
 /** Bounded stable snapshot, called after Session.close() while the Agent lease still exists. */
@@ -3240,7 +3353,7 @@ export interface RequestDeviceAssertionOptions {
     storeDir?: string;
     /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
     audience: string;
-    /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
+    /** Bound on the control-socket round trip, ms. Default 90s, which covers the 15s deadline of the OS credential read. */
     timeoutMs?: number;
 }
 /**
@@ -3312,7 +3425,7 @@ export interface RequestTaskAssertionOptions {
     contextToken: string;
     /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
     audience: string;
-    /** Bound on the control-socket round trip, ms. Default 90s, which covers one cold Windows credential-store read (60s bridge compile plus 15s command). */
+    /** Bound on the control-socket round trip, ms. Default 90s, which covers the 15s deadline of the OS credential read. */
     timeoutMs?: number;
 }
 /**
@@ -5015,9 +5128,13 @@ export interface DaemonConfig {
      * the home read+write; a memory-reader task gets it read-only plus its own
      * run directory (`<home>/.byok/runs/<name>`, its cwd) read+write. It
      * applies only to `auto` tasks, requires `agentHome`, and is never selected
-     * by the wire or the model. It is enforced on the Pi rpc, prepared and
-     * durable lanes on darwin/linux; Windows and every non-Pi runtime decline
-     * before claim with `file_scope_unsupported`. After admission every configured
+     * by the wire or the model. It is enforced on the Pi rpc and prepared
+     * lanes on darwin, linux and win32 and on the durable lane on darwin/linux;
+     * every other platform and every non-Pi runtime declines before claim with
+     * `file_scope_unsupported`. On win32 a root is an absolute drive path
+     * (`X:\…`); a `\\`-prefixed (UNC, `\\?\`, `\\.\`) or drive- or
+     * root-relative path, a stream (`:`), a reserved device name, or a segment
+     * ending in a dot or space is refused. After admission every configured
      * root is revalidated once before the runtime starts; a missing, symlinked,
      * replaced or otherwise unresolvable root fails the claimed task with a
      * typed `file_scope_unavailable` reason instead of starting unscoped. The
@@ -6222,6 +6339,7 @@ export interface FleetJitter {
 }
 export declare function createFleetJitter(productId: string, deviceId: string): FleetJitter;
 // ==== @byok-sdk/client dist/daemon/device-credential-store.d.ts ====
+import { type Win32CredentialBindings } from './win32-credential-api';
 /** Secret fields inside the internal complete enrollment authority. */
 export interface DeviceCredentials {
     readonly accessToken: string;
@@ -6282,8 +6400,9 @@ export declare class DeviceCredentialInteractionRequiredError extends DeviceCred
 }
 /**
  * A provider command ended before it answered: it exceeded its deadline, or
- * the caller cancelled it (daemon shutdown). The child process was killed.
- * Nothing was learned about the entry, so the caller keeps its prior state.
+ * the caller cancelled it (daemon shutdown). A child process was killed; a
+ * Windows native call runs on to its own return. Either way the outcome is
+ * unknown, so the caller keeps its prior state and does not replay the write.
  */
 export declare class DeviceCredentialCommandAbortedError extends DeviceCredentialStoreError {
     readonly reason: 'deadline' | 'cancelled';
@@ -6316,6 +6435,10 @@ export interface OsCredentialEntryOptions extends DeviceCredentialConfig {
     readonly commandRunner?: DeviceCommandRunner;
     /** Internal test seam for the per-command deadline; production uses the fixed bound. */
     readonly commandDeadlineMs?: number;
+    /** Absolute SDK native asset directory of a packaged Windows Host (`DaemonConfig.nativeAssetRoot`). */
+    readonly nativeAssetRoot?: string;
+    /** Internal test seam; production binds advapi32 through koffi on first use. */
+    readonly windowsCredentialBindings?: Win32CredentialBindings;
 }
 /**
  * One named entry of this product's OS credential provider: the macOS
@@ -6421,6 +6544,8 @@ export interface CreateStoredDeviceProofSignerOptions {
     readonly deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
     /** Same store directory the daemon uses; omitted resolves the product default. */
     readonly storeDir?: string;
+    /** `DaemonConfig.nativeAssetRoot` of a packaged Windows Host, which has no installed koffi. */
+    readonly nativeAssetRoot?: string;
     /**
      * The exact enrollment identity the host read with
      * `readDeviceEnrollmentIdentity`. Every signature re-reads the enrollment and
@@ -7116,8 +7241,16 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
 /**
  * Runtime-neutral instructions for an Agent's model-authored local memory.
  *
- * This is deliberately prompt guidance only: the SDK does not read memory
- * content, infer durable values, or auto-inject files into the operation.
+ * The SDK reads one file, the bounded `MEMORY.md`. At the start of a fresh task
+ * whose memory mode reads memory, on a daemon that admits the memory MCP, it
+ * puts that file before the instruction verbatim, as data. It does not interpret, select, summarize or truncate it,
+ * and it does not read `notes/` for the model. The SDK writes memory itself in
+ * one case only: at the end of a writer Attempt that left `MEMORY.md` over the
+ * limit, it restores that file to its content at the start of the Attempt.
+ *
+ * This constant is the guidance without the data: a resumed session, a fresh
+ * task on a daemon that does not admit the memory MCP, and an embedded Host
+ * that prepends it to its own instruction, read the file themselves.
  */
 export declare const AGENT_MEMORY_GUIDANCE: string;
 /**
@@ -7136,13 +7269,20 @@ export declare function prependAgentMemoryReaderGuidance(instruction: string): s
  * lines, only the run-directory result guidance.
  */
 export declare function prependAgentReaderResultGuidance(instruction: string): string;
+/** The bounded `MEMORY.md` a fresh task carries. */
+export interface ResidentMemoryData {
+    readonly content: string;
+    readonly revision: string;
+    readonly byteCount: number;
+}
 /**
  * The guidance for the effective memory mode of an ordinary Agent task (#614).
  * `none` gets no memory lines; a reader keeps its result line. `read` gets
  * read-only guidance. `read-write` gets the writer guidance; a reader never
- * gets this mode.
+ * gets this mode. With `resident`, a fresh task that carries `MEMORY.md`
+ * (#1439), the order is fixed: guidance, data block, instruction.
  */
-export declare function prependAgentMemoryModeGuidance(instruction: string, mode: 'none' | 'read' | 'read-write', reader: boolean): string;
+export declare function prependAgentMemoryModeGuidance(instruction: string, mode: 'none' | 'read' | 'read-write', reader: boolean, resident?: ResidentMemoryData): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
 import type { ToolAuthorizationDecision, ToolFileAccess, ToolReminder } from '../tool-authorization';
@@ -8385,6 +8525,8 @@ export interface DeviceEnrollmentStatusOptions {
     productId: string;
     storeDir?: string;
     deviceCredentials?: DeviceCredentialConfig;
+    /** `DaemonConfig.nativeAssetRoot` of a packaged Windows Host, which has no installed koffi. */
+    nativeAssetRoot?: string;
 }
 /** Credential-blind cold read model for host setup and diagnostics. */
 export type DeviceEnrollmentStatus = {
@@ -9303,6 +9445,53 @@ export declare class TruthMemoryClient {
     writeSnapshot(input: TruthSnapshotWriteInput): Promise<TruthWriteResult>;
     writeTerminal(input: TruthTerminalWriteInput): Promise<TruthWriteResult>;
 }
+// ==== @byok-sdk/client dist/daemon/win32-credential-api.d.ts ====
+/** `CREDENTIALW` as written; the unnamed fields are NULL or zero. */
+export interface Win32CredentialWrite {
+    readonly Type: number;
+    readonly TargetName: string;
+    readonly CredentialBlobSize: number;
+    readonly CredentialBlob: Buffer;
+    readonly Persist: number;
+    readonly UserName: string;
+}
+/** Completion of one worker-thread call: `succeeded` is the Win32 `BOOL`. */
+export type Win32CredentialCallback = (error: unknown, succeeded: number) => void;
+/**
+ * The advapi32 calls this module needs. An interface, so a test can hold a
+ * call open from POSIX and observe what a late return does.
+ */
+export interface Win32CredentialBindings {
+    /** `BOOL CredReadW(LPCWSTR, DWORD, DWORD, PCREDENTIALW *)`, on a worker thread. */
+    credRead(target: string, type: number, flags: number, credential: [bigint | null], done: Win32CredentialCallback): void;
+    /** `BOOL CredWriteW(PCREDENTIALW, DWORD)`, on a worker thread. */
+    credWrite(credential: Win32CredentialWrite, flags: number, done: Win32CredentialCallback): void;
+    /** `BOOL CredDeleteW(LPCWSTR, DWORD, DWORD)`, on a worker thread. */
+    credDelete(target: string, type: number, flags: number, done: Win32CredentialCallback): void;
+    /** `void CredFree(PVOID)`. */
+    credFree(credential: bigint): void;
+    /** `DWORD GetLastError()`. Only valid inside a completion callback, where koffi restores the worker's value. */
+    getLastError(): number;
+    /** A copy of the credential's blob bytes. */
+    readBlob(credential: bigint): Buffer;
+}
+/** The bindings of the koffi at `nativeAssetRoot`, or of the installed optional dependency. koffi loads on first use. */
+export declare function loadWin32CredentialBindings(nativeAssetRoot: string | undefined): Promise<Win32CredentialBindings>;
+/**
+ * Run one native credential call after every earlier one has really returned.
+ * `signal` starts counting before the wait, so the wait spends the caller's own
+ * deadline. A caller that aborts is released at once: its call is skipped if it
+ * has not started, and otherwise holds its place until the native return.
+ */
+export declare function enqueueWin32CredentialCall<T>(call: () => Promise<T>, signal: AbortSignal): Promise<T>;
+/** The entry's blob, or the Win32 error. The native buffer is freed even when nobody waits for the result. */
+export declare function readWin32Credential(bindings: Win32CredentialBindings, target: string): Promise<{
+    readonly code: number;
+    readonly value?: string;
+}>;
+/** Write the entry, and clear `value`'s bytes once the native call has returned. */
+export declare function writeWin32Credential(bindings: Win32CredentialBindings, target: string, userName: string, value: string): Promise<number>;
+export declare function deleteWin32Credential(bindings: Win32CredentialBindings, target: string): Promise<number>;
 // ==== @byok-sdk/client dist/diagnostics/device-doctor.d.ts ====
 import type { DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
@@ -13429,7 +13618,11 @@ export declare const TOOL_FILE_ACCESS: readonly ToolFileAccess[];
 export interface ToolFileScopeRoot {
     /** Unique, nonempty local label; never emitted on the wire. `home` and `run` are reserved. */
     readonly id: string;
-    /** Absolute local path; canonicalized and identity-checked at admission, not here. */
+    /**
+     * Absolute local path; canonicalized and identity-checked at admission, not
+     * here. On win32 an absolute drive path (`X:\…`) without a `\\` prefix,
+     * stream, reserved device name, or trailing dot or space.
+     */
     readonly path: string;
     /** `write` implies `read`. */
     readonly access: ToolFileAccess;
@@ -13497,7 +13690,7 @@ export interface ToolAuthorizationPolicy {
      * preserves the existing behavior exactly. Only legal when the offer's
      * effective mode is `auto`; an `all` runtime with a scope is rejected
      * before claim. An unsupported lane/adapter/platform is declined as
-     * `file_scope_unsupported` before claim; on the admitted POSIX path every
+     * `file_scope_unsupported` before claim; on an admitted platform every
      * root is revalidated after claim, before runtime start, and again before
      * the Pi session exists, and an unresolvable root fails the claimed task as
      * `file_scope_unavailable`. A configured scope is never silently dropped.
@@ -13529,6 +13722,18 @@ export declare class FileScopePolicyError extends TypeError {
     readonly code: 'invalid_file_scope';
     constructor(message: string);
 }
+/**
+ * The pure win32 path syntax of a file scope (#1423, steps 1-3), shared by the
+ * policy parser and the file-scope guard. `/` becomes `\`; a path that starts with `\`
+ * (`\\?\`, `\\.\`, UNC, root-relative) or is drive-relative (`C:foo`) is
+ * refused; the rest resolves against `cwd` with `path.win32` and must be
+ * `X:\…`. Each segment is then refused when it holds `:` (an alternate data
+ * stream), ends in `.` or a space, or is a reserved device name: Node creates
+ * those names literally while Win32 programs read them as a device or strip the
+ * trailing characters, and a stream "create" writes into an existing file.
+ * Returns the resolved path, or undefined when the syntax is refused.
+ */
+export declare function win32FileScopePath(value: string, cwd?: string): string | undefined;
 /** The admission boundary: one copied, frozen policy for every source. */
 export declare function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy;
 /** One native tool call, before execution. `input` is the runtime's own argument object. */
@@ -14630,11 +14835,8 @@ export declare function ensureSecureFile(filePath: string, opts?: EnsureSecureDi
 export declare function createPrivateTempDir(parent: string, prefix: string): Promise<string>;
 /**
  * A private scratch directory directly under the canonical OS temp root, for
- * a tool whose own path limit is shorter than the store's: the Windows
- * credential bridge is compiled with `Add-Type`/csc, which fails with CS2021
- * once the output name is too long, and the CS2021 limit is on the directory
- * it is handed (#1097). Its length therefore cannot depend on where the store
- * lives. The leaf is created by an exclusive mkdir under the real path of the
+ * a tool whose own path limit is shorter than the store's, so its length
+ * cannot depend on where the store lives. The leaf is created by an exclusive mkdir under the real path of the
  * temp root, so a pre-planted symlink or junction is never followed, and
  * {@link ensureSecureDir} applies the same owner-only restriction every other
  * scratch root gets. The caller removes it.

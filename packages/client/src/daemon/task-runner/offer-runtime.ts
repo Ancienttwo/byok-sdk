@@ -49,6 +49,12 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     decline('durable Pi runs only in the canonical Agent home; it does not run memory-reader Attempts', false);
     return undefined;
   }
+  if (payload.agentMemoryCommit !== undefined && pick.descriptor.capabilities.durableLane === true) {
+    // A durable Attempt runs on after a daemon restart, where the crash
+    // recovery of the copy would roll it back while it is alive.
+    decline('agent_memory_commit_unavailable: agentMemoryCommit does not run on the durable lane', false);
+    return undefined;
+  }
   if (!isKnownRuntimeId(pick.descriptor.id) && !(this['deps'].getServerCapabilities?.() ?? []).includes('custom-harness')) {
     decline('server does not support the selected custom harness identity', false);
     return undefined;

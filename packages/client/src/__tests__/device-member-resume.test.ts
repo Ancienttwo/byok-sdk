@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AuthManager } from '../daemon/auth-manager';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { DeviceMemberRecords } from '../daemon/device-member-custody';
@@ -231,6 +231,14 @@ describe('device member resume (E2d-1)', () => {
     expect(await records.keys.load({ tenantId: state.tenantId, deviceId })).toBeUndefined();
     expect(await resume()).toBeUndefined();
     expect(logs.join('\n')).toContain('re-pair the device');
+  });
+
+  it('gives its cancellation to the custody reads', async () => {
+    const { resume, custody, abort } = await device();
+    const read = vi.spyOn(custody, 'read');
+    abort.abort();
+    expect(await resume()).toBeUndefined();
+    for (const entry of ['member-state', 'member-keys', 'pairing-verification']) expect(read).toHaveBeenCalledWith(entry, abort.signal);
   });
 
   describe('restart re-walk (E2d-e7)', () => {

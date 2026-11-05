@@ -15,6 +15,7 @@ import {
   OsDeviceMemberCustody,
   type DeviceMemberEntry,
 } from '../daemon/device-member-custody';
+import type { Win32CredentialBindings, Win32CredentialCallback } from '../daemon/win32-credential-api';
 import { InMemoryDeviceMemberCustody } from './fixtures/credential-backend';
 
 const DEVICE = { tenantId: 'tenant-a', deviceId: 'device-1' };
@@ -56,6 +57,15 @@ describe('OsDeviceMemberCustody', () => {
     expect(await custody.read('member-state')).toBeUndefined();
   });
 
+  it('cancels each operation with the caller signal', async () => {
+    const { custody } = linuxProvider();
+    const cancelled = AbortSignal.abort();
+    const reason = { name: 'DeviceCredentialCommandAbortedError', reason: 'cancelled' };
+    await expect(custody.read('member-keys', cancelled)).rejects.toMatchObject(reason);
+    await expect(custody.replace('member-keys', 'value', cancelled)).rejects.toMatchObject(reason);
+    await expect(custody.delete('member-keys', cancelled)).rejects.toMatchObject(reason);
+  });
+
   it('deletes an absent Linux entry, and still reports a provider failure', async () => {
     const run = (stderr: string): DeviceCommandRunner => async () => ({ exitCode: 1, stdout: '', stderr });
     const custody = (stderr: string) => new OsDeviceMemberCustody({ storeDir: testScratchRoot(), productId: 'member-custody-test', platform: 'linux', commandRunner: run(stderr) });
@@ -64,14 +74,17 @@ describe('OsDeviceMemberCustody', () => {
   });
 
   it('gives each Windows entry its own target, apart from the enrollment target', async () => {
-    vi.stubEnv('SystemRoot', 'C:\\Windows');
     const targets: string[] = [];
-    const run: DeviceCommandRunner = async (executable, _args, stdin) => {
-      if (path.win32.basename(executable).toLowerCase() === 'powershell.exe') return { exitCode: 0, stdout: '', stderr: '' };
-      targets.push(Buffer.from((stdin ?? '').split('\n')[1]!, 'base64').toString('utf8'));
-      return { exitCode: 44, stdout: '', stderr: '' };
+    const missing = (target: string, done: Win32CredentialCallback): void => {
+      targets.push(target);
+      done(null, 0);
     };
-    const options = { storeDir: testScratchRoot(), productId: 'member-custody-test', platform: 'win32' as const, commandRunner: run };
+    const windowsCredentialBindings = {
+      credRead: (target, _type, _flags, _credential, done) => missing(target, done),
+      credDelete: (target, _type, _flags, done) => missing(target, done),
+      getLastError: () => 1168,
+    } as Partial<Win32CredentialBindings> as Win32CredentialBindings;
+    const options = { storeDir: testScratchRoot(), productId: 'member-custody-test', platform: 'win32' as const, windowsCredentialBindings };
     await new DeviceCredentialStore(options).read();
     const custody = new OsDeviceMemberCustody(options);
     for (const name of ['member-keys', 'pairing-verification', 'member-state'] as const) await custody.delete(name);

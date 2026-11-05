@@ -17,6 +17,7 @@ import {
   type TerminalPreparedObservation,
   type TerminalAgentHomeProjection,
   type TerminalAgentHomeMemoryChange,
+  type TerminalResidentMemoryOverLimit,
   type TerminalProjectionSelection,
   type TaskDeclinePayload,
   type TaskFailure,
@@ -82,6 +83,7 @@ import {
   type AgentMemoryHostedProjection,
   type AgentMemoryTaskContext,
 } from './agent-memory';
+import type { AgentMemoryCommitStore } from './agent-memory-commit';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
 import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry } from './task-runner/support';
 import { offerSettlements, trackOffer, taskTearingDown } from './task-runner/support';
@@ -442,6 +444,8 @@ export interface TaskRunnerDeps {
   /** Resolve the verified SDK helper only when memory needs filesystem authority. */
   resolveAgentMemoryFilesystemHelperBin?: () => string;
   agentMemoryHelperAssetRoot?: string;
+  /** Present only with a proven strict backend: `agent-memory-commit-on-success` is declared exactly then. */
+  agentMemoryCommit?: AgentMemoryCommitStore;
   /** Optional local-to-hosted redacted projection port. Omission is zero-network. */
   agentMemoryHostedProjection?: AgentMemoryHostedProjection;
 }
@@ -1609,6 +1613,7 @@ export class TaskRunner {
     harnessId?: string;
     agentHomeProjection?: TerminalAgentHomeProjection;
     agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
+    residentMemoryOverLimit?: TerminalResidentMemoryOverLimit;
   } {
     return agentTerminalPayload.call(this, active);
   }

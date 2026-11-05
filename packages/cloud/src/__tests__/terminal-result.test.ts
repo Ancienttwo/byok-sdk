@@ -195,26 +195,32 @@ describe('readTaskResult', () => {
     expect(bare && Object.hasOwn(bare, 'agentHomeProjection')).toBe(false);
   });
 
-  it('projects reader memory-change evidence verbatim from complete, fail and cancelled terminals', async () => {
+  it('projects memory evidence verbatim from complete, fail and cancelled terminals (#1439 residentMemoryOverLimit)', async () => {
     const attributed = { outcome: 'reader-attributed' as const, paths: ['MEMORY.md', 'notes/plan.md'] };
+    const residentMemoryOverLimit = { byteCount: 12288 };
     const completed = await readyTask();
     await handleInboundEnvelope(stores, deviceId, createEnvelope('task.complete', {
-      agentRef: TEST_AGENT_REF, summary: 's', sessionRef: 'reader-session', agentHomeMemoryChange: attributed,
+      agentRef: TEST_AGENT_REF, summary: 's', sessionRef: 'reader-session', agentHomeMemoryChange: attributed, residentMemoryOverLimit,
     }, { taskId: completed })).then((result) => result.outcome);
-    expect((await harness.cloud.readTaskResult(TENANT_A, completed))?.agentHomeMemoryChange).toEqual(attributed);
+    const completedResult = await harness.cloud.readTaskResult(TENANT_A, completed);
+    expect(completedResult?.agentHomeMemoryChange).toEqual(attributed);
+    expect(completedResult?.residentMemoryOverLimit).toEqual(residentMemoryOverLimit);
 
     const failed = await readyTask();
     await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', {
-      agentRef: TEST_AGENT_REF, reason: 'runtime crashed', retryable: false, agentHomeMemoryChange: { outcome: 'unmeasured' },
+      agentRef: TEST_AGENT_REF, reason: 'runtime crashed', retryable: false, agentHomeMemoryChange: { outcome: 'unmeasured' }, residentMemoryOverLimit,
     }, { taskId: failed })).then((result) => result.outcome);
-    expect((await harness.cloud.readTaskResult(TENANT_A, failed))?.agentHomeMemoryChange).toEqual({ outcome: 'unmeasured' });
+    const failedResult = await harness.cloud.readTaskResult(TENANT_A, failed);
+    expect(failedResult?.agentHomeMemoryChange).toEqual({ outcome: 'unmeasured' });
+    expect(failedResult?.residentMemoryOverLimit).toEqual(residentMemoryOverLimit);
 
     const cancelled = await readyTask();
     await handleInboundEnvelope(stores, deviceId, createEnvelope('task.cancelled', {
-      agentRef: TEST_AGENT_REF, agentHomeMemoryChange: { outcome: 'unattributed', paths: ['notes/a.md'] },
+      agentRef: TEST_AGENT_REF, agentHomeMemoryChange: { outcome: 'unattributed', paths: ['notes/a.md'] }, residentMemoryOverLimit,
     }, { taskId: cancelled })).then((result) => result.outcome);
-    expect((await harness.cloud.readTaskResult(TENANT_A, cancelled))?.agentHomeMemoryChange)
-      .toEqual({ outcome: 'unattributed', paths: ['notes/a.md'] });
+    const cancelledResult = await harness.cloud.readTaskResult(TENANT_A, cancelled);
+    expect(cancelledResult?.agentHomeMemoryChange).toEqual({ outcome: 'unattributed', paths: ['notes/a.md'] });
+    expect(cancelledResult?.residentMemoryOverLimit).toEqual(residentMemoryOverLimit);
   });
 
   it('leaves document ABSENT — not null, not synthesized — for a legacy completed terminal', async () => {
@@ -232,6 +238,7 @@ describe('readTaskResult', () => {
     expect(result && Object.hasOwn(result, 'finalMessage')).toBe(false);
     expect(result && Object.hasOwn(result, 'agentHomeProjection')).toBe(false);
     expect(result && Object.hasOwn(result, 'agentHomeMemoryChange')).toBe(false);
+    expect(result && Object.hasOwn(result, 'residentMemoryOverLimit')).toBe(false);
     expect(result && Object.hasOwn(result, 'usage')).toBe(false);
   });
 

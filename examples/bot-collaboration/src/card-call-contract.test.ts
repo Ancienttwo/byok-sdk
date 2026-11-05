@@ -109,7 +109,7 @@ it('#975: a ledger with an uncommitted switch import refuses the card call befor
   expect(() => subject.commit({ scope: subject.scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: 't1' } })).toThrow(refusal);
   expect(() => subject.sync(VECTOR_NOW)).toThrow(refusal);
   expect(() => retainInLedger(subject.ledger, { acknowledgedRoots: [], now: VECTOR_NOW, retentionMs: MIN_TOMBSTONE_RETENTION_MS },
-    { contextTurnLimit: 1 })).toThrow(refusal);
+    { contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } })).toThrow(refusal);
   expect(subject.stored()).toBe(before);
 });
 
@@ -124,7 +124,7 @@ it('#975: an exported ledger refuses the card call before the connector runs, a 
     .toThrow(SwitchExportedError);
   expect(() => subject.sync(VECTOR_NOW)).toThrow(SwitchExportedError);
   expect(() => retainInLedger(subject.ledger, { acknowledgedRoots: [], now: VECTOR_NOW, retentionMs: MIN_TOMBSTONE_RETENTION_MS },
-    { contextTurnLimit: 1 })).toThrow(SwitchExportedError);
+    { contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } })).toThrow(SwitchExportedError);
   expect(subject.stored()).toBe(before);
 });
 

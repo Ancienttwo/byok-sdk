@@ -4,6 +4,7 @@ import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host';
 import { preflightAgentResultMcp } from '../agent-result-mcp-preflight';
 import { resolveAgentMessageMcpBin } from '../resolve-agent-message-mcp-bin';
 import { preflightAgentMessageMcp } from '../agent-message-mcp-preflight';
+import { agentMemoryCommitStore } from './services';
 import type { DaemonScope } from './scope';
 import type { StartRun } from './start-run';
 import type { StartLanes } from './start-lanes';
@@ -13,7 +14,7 @@ import type { StartTerminals } from './start-terminals';
  * The fourth stage of `runStartUnderLease` (#926), synchronous: builds the
  * `TaskRunnerDeps` for this start.
  */
-export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals, 'record' | 'sendEnvelope' | 'withReplyTransition' | 'activeJournal' | 'journalIdentity' | 'recordReplyState' | 'blobClient' | 'opened' | 'activePressureEngine'>) {
+export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals, 'record' | 'sendEnvelope' | 'withReplyTransition' | 'activeJournal' | 'journalIdentity' | 'recordReplyState' | 'blobClient' | 'opened' | 'activePressureEngine' | 'agentMemoryBackend'>) {
   const {
     adapters, config, agentHomeManager, agentHomeReaderLimit, scratchRoot, agentSessionHandoffs,
     toolsetRegistry, daemonState, inputPreparationLimits, egressBatcherOptions, egressPolicy,
@@ -110,6 +111,9 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     shutdownInterruptTimeoutMs: overrides.shutdown?.taskInterruptTimeoutMs,
     // M5 batch-3 (workstream 2): see DaemonConfig.maxTaskOutputBytes's own doc comment — already validated above.
     awaitTerminalCommit: taskId => terminalCommits.receipt(taskId),
+    ...(run.agentMemoryBackend === undefined ? {} : {
+      agentMemoryCommit: agentMemoryCommitStore(daemonScope, () => Promise.resolve(run.agentMemoryBackend)),
+    }),
     maxTaskOutputBytes: config.maxTaskOutputBytes,
     artifactLimits: config.artifactLimits,
     startupTimeoutMs: config.startupTimeoutMs,

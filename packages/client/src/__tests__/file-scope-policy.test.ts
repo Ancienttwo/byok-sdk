@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import {
@@ -87,8 +87,12 @@ async function tmpDir(prefix: string): Promise<string> {
 }
 
 async function canonicalTmpDir(prefix: string): Promise<string> {
-  return fs.realpath(await tmpDir(prefix));
+  return realpathSync.native(await tmpDir(prefix));
 }
+
+// A root fixture that is absolute on the platform running the suite.
+const WORKSPACE = process.platform === 'win32' ? 'C:\\workspace' : '/workspace';
+const ws = (name: string) => path.join(WORKSPACE, name);
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -128,7 +132,7 @@ describe('parseToolAuthorizationPolicy fileScope (#1061 slice 1)', () => {
         mode: 'workspaces' as const,
         roots: [
           { id: 'repo', path: path.join(os.tmpdir(), 'repo'), access: 'write' as const },
-          { id: 'docs', path: '/workspace/docs', access: 'read' as const },
+          { id: 'docs', path: ws('docs'), access: 'read' as const },
         ],
       },
     };
@@ -137,7 +141,7 @@ describe('parseToolAuthorizationPolicy fileScope (#1061 slice 1)', () => {
       mode: 'workspaces',
       roots: [
         { id: 'repo', path: path.join(os.tmpdir(), 'repo'), access: 'write' },
-        { id: 'docs', path: '/workspace/docs', access: 'read' },
+        { id: 'docs', path: ws('docs'), access: 'read' },
       ],
     });
     expect(Object.isFrozen(parsed.fileScope?.roots)).toBe(true);
@@ -151,11 +155,11 @@ describe('parseToolAuthorizationPolicy fileScope (#1061 slice 1)', () => {
     const parsed = parseToolAuthorizationPolicy({
       default: 'auto',
       fileScope: { mode: 'workspaces', roots: [
-        { id: 'repo-read', path: '/workspace/repo', access: 'read' },
-        { id: 'repo-write', path: '/workspace/repo/', access: 'write' },
+        { id: 'repo-read', path: ws('repo'), access: 'read' },
+        { id: 'repo-write', path: ws('repo') + path.sep, access: 'write' },
       ] },
     });
-    expect(parsed.fileScope?.roots).toEqual([{ id: 'repo-read', path: '/workspace/repo', access: 'write' }]);
+    expect(parsed.fileScope?.roots).toEqual([{ id: 'repo-read', path: ws('repo'), access: 'write' }]);
   });
 
   it.each([
@@ -163,22 +167,30 @@ describe('parseToolAuthorizationPolicy fileScope (#1061 slice 1)', () => {
     ['an array', []],
     ['an unknown field', { mode: 'home', extra: true }],
     ['an unknown mode', { mode: 'everywhere' }],
-    ['home with roots', { mode: 'home', roots: [{ id: 'repo', path: '/workspace/repo', access: 'write' }] }],
+    ['home with roots', { mode: 'home', roots: [{ id: 'repo', path: ws('repo'), access: 'write' }] }],
     ['workspaces without roots', { mode: 'workspaces' }],
     ['workspaces with empty roots', { mode: 'workspaces', roots: [] }],
     ['a root with a relative path', { mode: 'workspaces', roots: [{ id: 'repo', path: 'repo', access: 'write' }] }],
     ['a root with a tilde path', { mode: 'workspaces', roots: [{ id: 'repo', path: '~/repo', access: 'write' }] }],
-    ['a root with a dot-dot segment', { mode: 'workspaces', roots: [{ id: 'repo', path: '/workspace/../etc', access: 'write' }] }],
-    ['a root with NUL', { mode: 'workspaces', roots: [{ id: 'repo', path: '/workspace/repo\0x', access: 'write' }] }],
-    ['a root with an unknown field', { mode: 'workspaces', roots: [{ id: 'repo', path: '/workspace/repo', access: 'write', x: 1 }] }],
-    ['a root with a bad access', { mode: 'workspaces', roots: [{ id: 'repo', path: '/workspace/repo', access: 'admin' }] }],
-    ['a root with an empty id', { mode: 'workspaces', roots: [{ id: '', path: '/workspace/repo', access: 'write' }] }],
+    ['a root with a dot-dot segment', { mode: 'workspaces', roots: [{ id: 'repo', path: `${WORKSPACE}${path.sep}..${path.sep}etc`, access: 'write' }] }],
+    ['a root with NUL', { mode: 'workspaces', roots: [{ id: 'repo', path: ws('repo') + '\0x', access: 'write' }] }],
+    // The win32 drive-path syntax; each is also not absolute on darwin/linux.
+    ['a UNC root', { mode: 'workspaces', roots: [{ id: 'repo', path: '\\\\server\\share', access: 'write' }] }],
+    ['a verbatim root', { mode: 'workspaces', roots: [{ id: 'repo', path: '\\\\?\\C:\\repo', access: 'write' }] }],
+    ['a drive-relative root', { mode: 'workspaces', roots: [{ id: 'repo', path: 'C:repo', access: 'write' }] }],
+    ['a root-relative root', { mode: 'workspaces', roots: [{ id: 'repo', path: '\\repo', access: 'write' }] }],
+    ['a root with a stream', { mode: 'workspaces', roots: [{ id: 'repo', path: 'C:\\repo:s', access: 'write' }] }],
+    ['a root with a reserved device name', { mode: 'workspaces', roots: [{ id: 'repo', path: 'C:\\repo\\CON.txt', access: 'write' }] }],
+    ['a root with a trailing dot', { mode: 'workspaces', roots: [{ id: 'repo', path: 'C:\\repo.', access: 'write' }] }],
+    ['a root with an unknown field', { mode: 'workspaces', roots: [{ id: 'repo', path: ws('repo'), access: 'write', x: 1 }] }],
+    ['a root with a bad access', { mode: 'workspaces', roots: [{ id: 'repo', path: ws('repo'), access: 'admin' }] }],
+    ['a root with an empty id', { mode: 'workspaces', roots: [{ id: '', path: ws('repo'), access: 'write' }] }],
     ['duplicate root ids', { mode: 'workspaces', roots: [
-      { id: 'repo', path: '/workspace/repo', access: 'write' },
-      { id: 'repo', path: '/workspace/other', access: 'read' },
+      { id: 'repo', path: ws('repo'), access: 'write' },
+      { id: 'repo', path: ws('other'), access: 'read' },
     ] }],
-    ['the reserved home root id', { mode: 'workspaces', roots: [{ id: 'home', path: '/workspace/repo', access: 'write' }] }],
-    ['the reserved run root id', { mode: 'workspaces', roots: [{ id: 'run', path: '/workspace/repo', access: 'write' }] }],
+    ['the reserved home root id', { mode: 'workspaces', roots: [{ id: 'home', path: ws('repo'), access: 'write' }] }],
+    ['the reserved run root id', { mode: 'workspaces', roots: [{ id: 'run', path: ws('repo'), access: 'write' }] }],
   ])('rejects %s with the typed file-scope error', (_label, fileScope) => {
     expect(() => parseToolAuthorizationPolicy({ default: 'auto', fileScope }))
       .toThrow(FileScopePolicyError);
@@ -205,11 +217,11 @@ describe('fileScope static validation and effective report', () => {
     expect(home.ok).toBe(true);
     expect(home.effective?.toolAuthorization.fileScope).toEqual({ mode: 'home' });
     const workspaces = await validate({ toolAuthorization: { default: 'auto', fileScope: {
-      mode: 'workspaces', roots: [{ id: 'repo', path: '/workspace/repo', access: 'write' }],
+      mode: 'workspaces', roots: [{ id: 'repo', path: ws('repo'), access: 'write' }],
     } } });
     expect(workspaces.ok).toBe(true);
     expect(workspaces.effective?.toolAuthorization.fileScope).toEqual({
-      mode: 'workspaces', roots: [{ id: 'repo', path: '/workspace/repo', access: 'write' }],
+      mode: 'workspaces', roots: [{ id: 'repo', path: ws('repo'), access: 'write' }],
     });
   });
 
@@ -270,8 +282,8 @@ describe('fileScope static validation and effective report', () => {
   it('reports the normalized scope through describeEffectiveDaemonConfig', async () => {
     const config = await configWith({ toolAuthorization: { default: 'auto', fileScope: {
       mode: 'workspaces', roots: [
-        { id: 'repo-read', path: '/workspace/repo', access: 'read' },
-        { id: 'repo-write', path: '/workspace/repo/', access: 'write' },
+        { id: 'repo-read', path: ws('repo'), access: 'read' },
+        { id: 'repo-write', path: ws('repo') + path.sep, access: 'write' },
       ],
     } } });
     const effective = describeEffectiveDaemonConfig({
@@ -281,7 +293,7 @@ describe('fileScope static validation and effective report', () => {
     });
     expect(effective.toolAuthorization).toEqual({
       mode: 'static', byRuntime: { pi: 'auto' }, localToolApproval: 'host-only',
-      fileScope: { mode: 'workspaces', roots: [{ id: 'repo-read', path: '/workspace/repo', access: 'write' }] },
+      fileScope: { mode: 'workspaces', roots: [{ id: 'repo-read', path: ws('repo'), access: 'write' }] },
     });
   });
 });
@@ -296,6 +308,8 @@ describe('fileScope admission support matrix (#1061)', () => {
     ['the Pi prepared lane', { descriptor: pi, lane: 'prepared' as const, platform: 'darwin' as NodeJS.Platform }],
     ['the durable Pi worker', { descriptor: durablePi, lane: 'durable' as const, platform: 'linux' as NodeJS.Platform }],
     ['any runtime that declares the lane', { descriptor: { id: 'acme', fileScope: { lanes: ['rpc' as const] } }, lane: 'rpc' as const, platform: 'linux' as NodeJS.Platform }],
+    ['ordinary Pi RPC on win32', { descriptor: pi, lane: 'rpc' as const, platform: 'win32' as NodeJS.Platform }],
+    ['the Pi prepared lane on win32', { descriptor: pi, lane: 'prepared' as const, platform: 'win32' as NodeJS.Platform }],
   ])('admits %s', (_label, facts) => {
     expect(fileScopeAdmission(facts)).toEqual({ supported: true });
   });
@@ -304,7 +318,7 @@ describe('fileScope admission support matrix (#1061)', () => {
     ['another runtime', { descriptor: claude, lane: 'rpc' as const, platform: 'darwin' as NodeJS.Platform }, /runtime claude/],
     ['a runtime named pi that declares no scope', { descriptor: { id: 'pi' }, lane: 'rpc' as const, platform: 'darwin' as NodeJS.Platform }, /runtime pi cannot enforce/],
     ['a lane the adapter does not declare', { descriptor: pi, lane: 'durable' as const, platform: 'linux' as NodeJS.Platform }, /durable lane of this runtime/],
-    ['Windows', { descriptor: pi, lane: 'rpc' as const, platform: 'win32' as NodeJS.Platform }, /not supported on win32/],
+    ['an unknown platform', { descriptor: pi, lane: 'rpc' as const, platform: 'freebsd' as NodeJS.Platform }, /not supported on freebsd/],
   ])('refuses %s', (_label, facts, reason) => {
     const admission = fileScopeAdmission(facts);
     expect(admission.supported).toBe(false);

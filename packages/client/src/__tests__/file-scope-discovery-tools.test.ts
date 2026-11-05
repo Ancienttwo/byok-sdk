@@ -127,11 +127,11 @@ describe('scoped find/grep/ls tools (#1061 slice 5)', () => {
     const grep = toolByName(tools, 'grep');
 
     for (const [name, run] of [
-      ['find', find('find-out', { pattern: '*', path: outside }, root)],
-      ['ls', list('ls-out', { path: outside }, root)],
-      ['grep', grep('grep-out', { pattern: 'secret', path: path.join(outside, 'secret.txt') }, root)],
+      ['find', () => find('find-out', { pattern: '*', path: outside }, root)],
+      ['ls', () => list('ls-out', { path: outside }, root)],
+      ['grep', () => grep('grep-out', { pattern: 'secret', path: path.join(outside, 'secret.txt') }, root)],
     ] as const) {
-      const message = await failureOf(run);
+      const message = await failureOf(run());
       expect(message, name).toContain('file_scope_denied');
       expect(message, name).toContain('outside_scope');
     }
@@ -188,11 +188,11 @@ describe('scoped find/grep/ls tools (#1061 slice 5)', () => {
     const osHome = await tmpDir('byok-discovery-oshome-');
     const tools = createScopedFileTools({ grant, osHome });
     for (const run of [
-      toolByName(tools, 'find')('find-cwd', { pattern: '*' }, outsideCwd),
-      toolByName(tools, 'ls')('ls-cwd', {}, outsideCwd),
-      toolByName(tools, 'grep')('grep-cwd', { pattern: 'x' }, outsideCwd),
+      () => toolByName(tools, 'find')('find-cwd', { pattern: '*' }, outsideCwd),
+      () => toolByName(tools, 'ls')('ls-cwd', {}, outsideCwd),
+      () => toolByName(tools, 'grep')('grep-cwd', { pattern: 'x' }, outsideCwd),
     ]) {
-      expect(await failureOf(run)).toContain('cwd_outside_scope');
+      expect(await failureOf(run())).toContain('cwd_outside_scope');
     }
     await fs.mkdir(path.join(osHome, 'home-dir'));
     expect(await failureOf(toolByName(tools, 'find')('find-tilde', { pattern: '*', path: '~/home-dir' }, root)))
@@ -201,15 +201,15 @@ describe('scoped find/grep/ls tools (#1061 slice 5)', () => {
       .toContain('outside_scope');
   });
 
-  it('fails closed on Windows before touching a path', async () => {
+  it('fails closed on an unknown platform before touching a path', async () => {
     const { root, grant } = await fixture();
-    const tools = createScopedFileTools({ grant, platform: 'win32' });
+    const tools = createScopedFileTools({ grant, platform: 'freebsd' });
     for (const run of [
-      toolByName(tools, 'find')('find-win', { pattern: '*', path: root }, root),
-      toolByName(tools, 'ls')('ls-win', { path: root }, root),
-      toolByName(tools, 'grep')('grep-win', { pattern: 'alpha', path: root }, root),
+      () => toolByName(tools, 'find')('find-win', { pattern: '*', path: root }, root),
+      () => toolByName(tools, 'ls')('ls-win', { path: root }, root),
+      () => toolByName(tools, 'grep')('grep-win', { pattern: 'alpha', path: root }, root),
     ]) {
-      const message = await failureOf(run);
+      const message = await failureOf(run());
       expect(message).toContain('file_scope_unsupported');
       expect(message).toContain('unsupported_platform');
     }

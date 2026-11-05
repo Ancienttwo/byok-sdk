@@ -159,7 +159,7 @@ describe.skipIf(process.platform !== 'linux').each(['cloud', 'embedded'] as cons
     expect(forbidden.readback!.completion).toMatchObject({ outcome: 'rejected', code: 'memory_md_not_deletable' });
   });
 
-  it('projects only redacted resident text after task close and blocks oversized text after replace', async () => {
+  it('projects only redacted resident text after task close and refuses an oversized Host replace', async () => {
     await host.project();
     const binding = { deviceId: host.deviceId, agentRef: host.agentRef };
     const first = host.page.contextPack(binding);
@@ -167,10 +167,10 @@ describe.skipIf(process.platform !== 'linux').each(['cloud', 'embedded'] as cons
     expect(JSON.stringify(first)).not.toContain('private-value');
     const replacement = 'é'.repeat(4096) + 'x';
     const row = await host.command({ baseRevision: memoryRevision('original private-value\n'), content: replacement });
-    expect(row.readback!.completion.outcome).toBe('applied');
+    expect(row.readback!.completion).toMatchObject({ outcome: 'rejected', code: 'content_invalid' });
     expect(host.page.contextPack(binding)).toEqual(first); // Intent results do not forge a fresh projection.
-    await host.project();
-    expect(() => host.page.contextPack(binding)).toThrow('exceeds 8 KiB');
+    await host.project(); // A new projection has its own mutationId and projectedAt; the refused content never reaches it.
+    expect(host.page.contextPack(binding).residentMemory!.text).toBe(first.residentMemory!.text);
   });
 });
 
@@ -200,22 +200,25 @@ describe.skipIf(process.platform !== 'linux').each(['cloud', 'embedded'] as cons
     expect(host.page.contextPack({ deviceId: host.deviceId, agentRef: host.agentRef }).residentMemory?.text).toBe('');
   });
 
-  it('refreshes an oversized projection after a verified small replace, including Host restart', async () => {
+  it('fails a fresh task on an over-limit MEMORY.md, and a verified small replace repairs the next one, including Host restart', async () => {
     const oversized = 'x'.repeat(8193);
     await writeFile(path.join(host.home, 'MEMORY.md'), oversized);
-    await host.project(); // Bootstrap is allowed; its real task-close projection discovers the size.
-    const input = host.input('blocked-until-user-fix');
-    const blocked = await host.core.enqueue(input);
-    expect(blocked).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
+    const refused = host.input('refused-until-user-fix');
+    const { taskId: refusedTask } = await host.core.enqueue(refused);
+    await vi.waitFor(async () => {
+      await host.core.drain();
+      expect(host.core.intent(refused.key)).toMatchObject({ conclusion: 'failed', attempts: 1 });
+    }, { timeout: 10_000 });
+    expect(host.adapter.sessions.has(refusedTask)).toBe(false);
     await host.restartLedger();
-    expect(host.core.intent(input.key)).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
     const result = await host.command({ baseRevision: memoryRevision(oversized), content: 'small private-value\n' });
     expect(result.readback?.completion.outcome).toBe('applied');
-    expect(host.page.contextPack({ deviceId: host.deviceId, agentRef: host.agentRef })).toEqual({});
-    await vi.waitFor(() => expect(host.adapter.sessions.has(blocked.taskId)).toBe(true), { timeout: 10_000 });
-    const offer = await host.offer(blocked.taskId);
+    const input = host.input('after-the-fix');
+    const repaired = await host.core.enqueue(input);
+    await vi.waitFor(() => expect(host.adapter.sessions.has(repaired.taskId)).toBe(true), { timeout: 10_000 });
+    const offer = await host.offer(repaired.taskId);
     expect(offer?.payload).toHaveProperty('instruction', input.execution.payload.instruction);
-    const session = host.adapter.sessions.get(blocked.taskId)!;
+    const session = host.adapter.sessions.get(repaired.taskId)!;
     session.finish({ text: 'refreshed' });
     await waitForTaskCleanup(host.daemon, session);
     await host.core.drain();

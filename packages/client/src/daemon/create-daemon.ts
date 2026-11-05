@@ -20,6 +20,7 @@ import {
   type AgentHomeProjection,
 } from '../agent-home';
 import type { AgentRef } from '../agent-home';
+import { agentMemoryCommitStore } from './create-daemon/services';
 import {
   type LocalAgentReleaseIdentity,
 } from '../release-identity';
@@ -127,9 +128,13 @@ export interface DaemonConfig {
    * the home read+write; a memory-reader task gets it read-only plus its own
    * run directory (`<home>/.byok/runs/<name>`, its cwd) read+write. It
    * applies only to `auto` tasks, requires `agentHome`, and is never selected
-   * by the wire or the model. It is enforced on the Pi rpc, prepared and
-   * durable lanes on darwin/linux; Windows and every non-Pi runtime decline
-   * before claim with `file_scope_unsupported`. After admission every configured
+   * by the wire or the model. It is enforced on the Pi rpc and prepared
+   * lanes on darwin, linux and win32 and on the durable lane on darwin/linux;
+   * every other platform and every non-Pi runtime declines before claim with
+   * `file_scope_unsupported`. On win32 a root is an absolute drive path
+   * (`X:\…`); a `\\`-prefixed (UNC, `\\?\`, `\\.\`) or drive- or
+   * root-relative path, a stream (`:`), a reserved device name, or a segment
+   * ending in a dot or space is refused. After admission every configured
    * root is revalidated once before the runtime starts; a missing, symlinked,
    * replaced or otherwise unresolvable root fails the claimed task with a
    * typed `file_scope_unavailable` reason instead of starting unscoped. The
@@ -879,7 +884,10 @@ function buildDaemon(
   const {
     logMember, operationalHealth, ownedProcessLedger, cursorStore, agentHomeManager,
     agentSessionHandoffs, agentContentReadPolicies, initialAgentEgress,
-  } = composeDaemonWorkspaces({ storeDir, config, egressPolicy });
+  } = composeDaemonWorkspaces({
+    storeDir, config, egressPolicy,
+    settleAgentMemoryCommit: home => agentMemoryCommitStore(daemonScope).settle(home),
+  });
 
   const retentionRegistry = createRetentionRegistry({
     storeDir, scratch: scratchRoot, config: storageConfig, clock: retentionClock,

@@ -1,5 +1,6 @@
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { createTestKeychain, type TestKeychain } from '../../../../scripts/testing/macos-keychain.mjs';
+import { writeKoffiAssetRoot } from '../../../../scripts/testing/sdk-koffi-asset-root.mjs';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
@@ -10,9 +11,11 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BYOK_CAPABILITIES_PATH, decodeEnvelope } from '@byok-sdk/protocol';
 import { AgentHomeBusyError, AgentHomeManager } from '../agent-home';
+import { sdkNativeAssetTargets } from '../sdk-native-assets';
 
 interface ChildConfig {
   readonly deviceCredentials?: { readonly macosKeychainPath: string };
+  readonly nativeAssetRoot?: string;
   readonly scratchRoot: string;
   readonly productId: string;
   readonly serverUrl: string;
@@ -122,6 +125,7 @@ let suiteRoot: string;
 let daemonBin: string;
 let cloudBin: string;
 let keychain: TestKeychain | undefined;
+let nativeAssetRoot: string | undefined;
 let current: {
   root: string;
   productId: string;
@@ -311,6 +315,7 @@ beforeAll(async () => {
   cloudBin = path.join(suiteRoot, `execution-recovery-cloud${exe}`);
   await run('bun', ['build', 'packages/client/src/__tests__/fixtures/execution-recovery-daemon.ts', '--compile', '--outfile', daemonBin]);
   await run('bun', ['build', 'packages/client/src/__tests__/fixtures/execution-recovery-cloud.ts', '--compile', '--outfile', cloudBin]);
+  if (process.platform === 'win32') nativeAssetRoot = await writeKoffiAssetRoot(path.join(suiteRoot, 'native'), sdkNativeAssetTargets['win32-x64']);
 }, 120_000);
 
 beforeEach(async () => {
@@ -341,6 +346,7 @@ beforeEach(async () => {
     cloudConfig,
     daemonBase: { scratchRoot: testScratchRoot(),
       ...(keychain === undefined ? {} : { deviceCredentials: { macosKeychainPath: keychain.path } }),
+      nativeAssetRoot,
       productId,
       serverUrl: `http://127.0.0.1:${port}`,
       storeDir: path.join(root, 'daemon-store'),

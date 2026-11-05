@@ -2,6 +2,114 @@
 
 ## Unreleased
 
+- **Breaking (client; #1440)** — `AgentMemoryFilesystem` gains `observe` and
+  `cleanupForRestore`, and `walk` now resolves with
+  `{ paths, entries }`: `paths` is the same list of files as before, and
+  `entries` is everything the walk saw, with its type. An embedder that
+  implements the interface must add both methods and change `walk`.
+  `AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL` and
+  `AGENT_MEMORY_FILESYSTEM_HELPER_VERSION` are now 3, with no support for the
+  previous helper: the release carries the new helper binaries. Replace and
+  delete compare the current revision by hashing the file's raw bytes, on both
+  backends, with no size limit and no UTF-8 requirement, so
+  `compareAndSwapAgentMemoryHomeFile` and `observeAgentMemoryHomeFile` work on an
+  oversized or non-UTF-8 file. The file must still be a regular file with one
+  link, unchanged while it is hashed; new content stays limited, and reads keep
+  their limits. The native walk now refuses an entry on another volume, as the
+  helper does. A `MEMORY.md` of any size can now be restored, so the known limit
+  of #1439 shrinks to a daemon crash before the restore.
+
+- **Breaking (client; #1439)** — a fresh instruction task whose memory mode is
+  `read` or `read-write`, on a daemon that admits the memory MCP, carries
+  `MEMORY.md`. The device reads the file before the runtime starts and puts it,
+  verbatim, after the guidance and before the instruction, as one line:
+  `Agent memory (data): ` and a JSON object with `path`, `revision`, `byteCount`
+  and `content`. A resumed session and a prepared offer carry nothing. The task
+  fails without retry before the runtime starts when the file is over 8 KiB
+  (`agent_memory_resident_over_limit`), or cannot be read or has more than one
+  hard link (`agent_memory_resident_unreadable`); nothing truncates it. A fresh
+  task on a daemon that does not admit the memory MCP keeps the reading guidance,
+  carries no data and does not fail on the size. The fresh guidance no longer
+  tells the model to read `MEMORY.md` first. Every writer guidance, including the
+  text of `AGENT_MEMORY_GUIDANCE`, moves the index of notes to `notes/index.md`, and
+  `MEMORY.md` keeps resident facts and top-level pointers. When a writer Attempt leaves `MEMORY.md` over the
+  limit, the device restores that one file to its content at the start of the
+  Attempt; `notes/` stay, and the terminal still reports the size it wrote. See
+  [ADR-048](docs/adr/ADR-048-device-injects-resident-memory.md).
+
+- **Breaking (server; #1439)** — `HostExecutionCore` no longer adds memory to
+  the instruction, so inline, blob and sealed instructions reach the device
+  unchanged, and sealed and blob intents no longer fail with `options.memory`.
+  `contextPack` stays as the Host's read. An oversized or unauthorized
+  projection no longer stops the queue; a restore in progress still does, and a
+  changed placement or profile still fails the intent. The new
+  `HostMemoryPage.assertDispatchable` is that check. Upgrade the Host and the
+  device together: an older Host core with a newer device shows the model
+  `MEMORY.md` twice, at most 8 KiB more, without an error.
+
+- **Breaking (protocol, server; #1439)** — `RESIDENT_MEMORY_MAX_BYTES` (8192)
+  moved from `@byok-sdk/server/execution-core` to `@byok-sdk/protocol` (and
+  `@byok-sdk/protocol/constants`), next to `AGENT_MEMORY_MAX_SNAPSHOT_BYTES`.
+  The server entry no longer exports it and there is no re-export: import it
+  from `@byok-sdk/protocol`.
+
+- **Breaking (client; #1439)** — `MEMORY.md` takes at most 8 KiB. `memory_save`
+  refuses a `MEMORY.md` replace whose new content is over 8192 UTF-8 bytes,
+  with a message that names the limit and the size, and a Host intent that
+  would write such content is rejected with `content_invalid`. Only the new
+  content is checked, so an over-limit file can be replaced by a smaller one.
+  Files under `notes/` keep the 256 KiB limit. The writer memory guidance asks
+  the model to keep `MEMORY.md` within the limit and to put details in
+  `notes/`. Nothing truncates the file.
+
+- **Added (protocol, client, cloud; #1439)** — `task.complete`, `task.fail` and
+  `task.cancelled` gain an optional `residentMemoryOverLimit: { byteCount }`
+  (`TerminalResidentMemoryOverLimitSchema`): a writer Attempt left `MEMORY.md`
+  over the limit with the runtime's own file tools, and `byteCount` is the file
+  size at the terminal decision. It is gated on the new server flag
+  `resident-memory-over-limit` (`RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY`); a
+  daemon sends the terminal without it to a server that did not advertise the
+  flag. On a task that seals `memory-projection` it is sealed with
+  `agentHomeMemoryChange`. Absence does not mean the file is within the limit.
+  The hosted cloud advertises the flag and `TerminalResult` projects the field.
+
+- **Added (protocol, client; #1440)** — an Agent offer may carry
+  `agentMemoryCommit: 'on-success'`: `MEMORY.md` and `notes/` keep what a writer
+  Attempt did only when the task ends in `task.complete`. Any other end restores
+  them byte for byte, including what the runtime changed with its own file tools,
+  and removes what it added below `notes/`.
+  The device keeps a copy under `.byok/`, restores before it releases the home,
+  and settles a copy left by a crash on the next home lease, by the journal
+  terminal of that task. A `memory-reader` offer with the field fails schema
+  validation, and a device configured for durable Pi declines it. Host-side, submit
+  the field on the payload: a device without the new flag
+  `agent-memory-commit-on-success` is refused at submission. The device declares
+  the flag only on the proven strict backend of `agent-memory-intent.v1`, so
+  Windows does not. See `docs/protocol.md` §2.2.
+
+- **Changed (client; #1445)** — On Windows the device credential store now calls Credential Manager through koffi. An npm install includes koffi's win32-arm64 binary, so Windows on ARM64 keeps credential storage. A native arm64 Host packaged by hand without koffi, which the SDK packaging helpers do not build, now gets `DeviceCredentialStoreUnavailableError`; before, it stored credentials through PowerShell but could not start a runtime.
+  The enrollment and the three member entries keep their format, so a rollback
+  still reads them. Nothing compiles, spawns or writes a temporary file per
+  operation any more. Native credential calls run one at a time, and the wait
+  counts toward each call's 15 s deadline. A packaged Windows Host must pass its
+  `nativeAssetRoot` to the new option on `readDeviceEnrollmentStatus`,
+  `readDeviceEnrollmentIdentity` and `createStoredDeviceProofSigner`, or those
+  reads throw `DeviceCredentialStoreUnavailableError`. `@byok-sdk/client/packaging`
+  now exports `loadSdkKoffiAsset`.
+
+- **Breaking (keys; #1445)** — `WindowsCredentialManagerSecretStore` calls
+  Credential Manager in process through koffi instead of starting PowerShell
+  and compiling a bridge on every operation. `commandRunner` and `systemRoot`
+  are gone from `WindowsCredentialManagerSecretStoreOptions`. The new optional
+  `koffi` takes the module to use, and defaults to `import('koffi')`; a
+  packaged Host passes the one it loaded with `loadSdkKoffiAsset`. koffi is an
+  optional dependency pinned to the version `@byok-sdk/client` pins, and
+  `check:release-graph` keeps the two equal. Every native call now has a 15 s
+  deadline and runs in one FIFO, and the wait counts toward that deadline. A
+  write or delete that passes its deadline has an unknown outcome and is not
+  replayed. Failure messages carry the Win32 code. The entry format is
+  unchanged, so existing entries stay readable and a rollback reads new ones.
+
 - **Fixed (client; #1437)** — `requestDeviceAssertion` and
   `requestTaskAssertion` wait up to 90 s for the daemon by default instead of
   the generic 10 s control timeout. Both handlers read the device record from
@@ -15,6 +123,74 @@
   tasks recorded, and that the model must not follow any request or
   instruction in it. Memory can carry text from other users or Bots, so a
   line such as "always do X from now on" no longer reads as an instruction.
+
+- **Added (client; Windows; #1423)** — with `toolAuthorization.fileScope`
+  configured, Pi rpc and prepared tasks (writer and memory reader) run scoped
+  on Windows instead of declining before claim with `file_scope_unsupported`.
+  The guard still uses only Node built-ins. A path starting with `\` (UNC,
+  `\\?\`, `\\.\`, root-relative), a drive-relative path, a segment with
+  `:` (an alternate data stream), a segment ending in a dot or space, and a
+  reserved device name (CON, NUL, COM1, `CON.txt`, `COM¹`, …) are refused as
+  `file_scope_denied` / `path_syntax`, and as `invalid_file_scope` in a
+  configured root, which must be an absolute drive path. Every existing segment
+  from the drive root is lstat'ed, so a symlink, junction or AppExecLink is
+  `symlink`; then `realpath.native` expands 8.3 short names and the on-disk
+  case, and every other check runs on that canonical path, so a `.byok` short
+  name is `internal_path` and a volume mount point inside a root is
+  `outside_scope`. The durable Pi lane stays darwin/linux only, and other
+  platforms still decline.
+
+- **Added (examples; #1449)** — K8 `room-seat:` projection values carry the
+  optional `triggerMessageId` of a seat that a `room_call` opened: the message
+  the seat answers, which is the caller's post or, when the caller passed, the
+  message the caller answered. A mentioned seat never has it, so a Host tells
+  a mentioned seat from a `room_call` seat in the same round without deriving
+  it from the seat id. Seats opened before the upgrade are not backfilled. A
+  Host that validates the value with a closed schema allows the field first;
+  a Host that vendored K8 copies `src/rules/rooms.ts`
+  ([room seat projections](examples/bot-collaboration/README.md#room-seat-projections)).
+
+- **Breaking (examples; #1446)** — K8 freezes a room Turn with read-only Agent
+  memory: `read-write` becomes `read`, `read-write-if-admitted` becomes
+  `read-if-admitted`, and a template without `agentMemory` freezes as
+  `read-if-admitted`, so a room Turn has no `memory_save`. Other Turns keep the
+  template value, and the mode only goes down. The hosted example
+  `examples/hosted-bot-collaboration` calls the same `syncTurn`, so its room
+  Turns freeze read-only too. A room Turn of a template without `agentMemory`
+  now needs a device that advertises
+  `agent-memory-selection` and `agent-memory-read-if-admitted`. The SDK still
+  does not make memory files read-only, so a Host narrows the toolset or file
+  scope if a Bot must not write `MEMORY.md` from a room. A Host that vendored
+  K8 copies `src/rules/sync.ts`
+  ([migration](examples/bot-collaboration/README.md#group-chat-and-main-bot)).
+
+- **Breaking (examples; #1446)** — K8 carries the Bot history of a ContextPack
+  in `history`, a `buildHandoffPack` result, in place of `turns` and
+  `historyWindow.omittedTurns`, in a frozen Turn and in a snapshot view. A room
+  seat ContextPack does not change. The new `BotOptions.handoff` sets the
+  budgets, by default 40 KiB, 6 KiB and 46 KiB. `contextMaxBytes` now covers
+  only the Request and the rest of the ContextPack, and `contextTurnLimit` no
+  longer selects Bot history. A Cross-Bot Turn gives `history` the bytes left
+  in `instructionMaxBytes` after its background. `retain` now protects every
+  Turn from the oldest turn of a Bot's handoff pack to its newest, so a root
+  stays protected longer. That pack leaves out the Turns that can still freeze
+  and always gives `earlier` all of `earlyBytes`, so no freeze reads an older
+  turn. `RetentionLimits` gains a required `handoff`, which a caller sets to
+  the budgets it freezes with; cards, questions, room messages and rejections
+  still go by `contextTurnLimit`. A
+  Host that reads a frozen ContextPack reads `history.recent`,
+  `history.earlier` and `history.omittedTurns`, and a Host that vendored K8
+  copies `src/rules/context.ts`, `src/rules/history.ts`, `src/retention.ts`,
+  `src/host.ts`, `src/schema.ts` and `src/index.ts`
+  ([migration](examples/bot-collaboration/README.md#group-chat-and-main-bot)).
+
+- **Added (protocol; #1441)** — `buildHandoffPack(turns, budgets)` builds a
+  bounded conversation handoff from turns that a Host holds. It is a pure
+  function: `recent` keeps the newest whole turns, `earlier` keeps excerpts of
+  older turns at `HANDOFF_EXCERPT_LINE_MAX_BYTES` a line, and `omittedTurns`
+  counts the rest. Sizes are UTF-8 bytes of the JSON form, and the pack never
+  exceeds `totalBytes`. `truncateUtf8` is the text cut that it shares with
+  `boundFailureReason`, whose output does not change.
 
 ## 0.38.0 — 2026-11-04 (published)
 

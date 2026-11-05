@@ -321,6 +321,9 @@
         "@byok-sdk/core": "workspace:*",
         "zod": "^4.6.6",
       },
+      "optionalDependencies": {
+        "koffi": "3.2.0",
+      },
     },
     "packages/protocol": {
       "name": "@byok-sdk/protocol",

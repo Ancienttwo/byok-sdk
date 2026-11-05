@@ -373,13 +373,18 @@ describe('sealed payload v2 on the device (#1045 S2)', () => {
   it('moves the memory evidence of a memory-projection task into the sealed terminal, and drops it from the closed plaintext form', async () => {
     const keyring = new GatedKeyring();
     const { tasks } = await openTask(keyring, 'memory');
-    const change = { outcome: 'reader-attributed', paths: ['notes/plan.md'] } as const;
-    const fail = createEnvelope('task.fail', { reason: 'sealed_key_unavailable', retryable: false, agentHomeMemoryChange: change } as never, { taskId: 'memory' });
+    const evidence = { agentHomeMemoryChange: { outcome: 'reader-attributed', paths: ['notes/plan.md'] }, residentMemoryOverLimit: { byteCount: 12288 } } as const;
+    const fail = createEnvelope('task.fail', { reason: 'sealed_key_unavailable', retryable: false, ...evidence } as never, { taskId: 'memory' });
     const sealed = (await tasks.sealOutbound(fail))!;
     expect(sealed.payload).toHaveProperty('sealed');
     expect(sealed.payload).not.toHaveProperty('agentHomeMemoryChange');
+    expect(sealed.payload).not.toHaveProperty('residentMemoryOverLimit');
     expect(tasks.unsealable(fail, MESSAGE.categories)!.payload).not.toHaveProperty('agentHomeMemoryChange');
-    expect(tasks.unsealable(fail, ['task-output'])!.payload).toMatchObject({ agentHomeMemoryChange: change });
+    expect(tasks.unsealable(fail, MESSAGE.categories)!.payload).not.toHaveProperty('residentMemoryOverLimit');
+    expect(tasks.unsealable(fail, ['task-output'])!.payload).toMatchObject(evidence);
+    const cancelled = createEnvelope('task.cancelled', { reason: 'operator', ...evidence } as never, { taskId: 'memory' });
+    expect(tasks.unsealable(cancelled, MESSAGE.categories)!.payload).toEqual({});
+    expect(tasks.unsealable(cancelled, ['task-output'])!.payload).toEqual(evidence);
   });
 
   it.each([

@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import type { HandoffPack } from '@byok-sdk/protocol';
 import { hash, canonical } from '@byok-sdk/server/execution-core/canonical';
 import { contextPack, contextTurns, historyRowFromTurn, turnInstruction, type ContextHistory } from './context';
 import type { ContextState } from './schema';
@@ -32,9 +33,9 @@ it('#606 acceptance 4: freezes the ContextPack from injected history, and reads 
   };
   const injected = structuredClone(history);
   const { context, instruction } = turnInstruction(authority(), history, current, limits);
-  if (!('turns' in context)) throw new Error('Expected a Bot Turn context');
-  expect(context.turns).toEqual(injected.turns.slice(0, 2).map(row => ({ id: row.id, root: row.root, source: row.source, request: row.request,
-    hop: row.hop, status: row.status, conclusion: row.conclusion, outcomeSummary: [] })));
+  if (!('history' in context)) throw new Error('Expected a Bot Turn context');
+  expect(context.history.recent).toEqual(injected.turns.slice(0, 2).map(row => ({ lines: [{ speaker: row.source, text: row.request }],
+    meta: { id: row.id, root: row.root, hop: row.hop, status: row.status, conclusion: row.conclusion, outcomeSummary: [] } })));
   expect(context.cards).toEqual(injected.cards);
   expect(context.questions).toEqual(injected.questions);
   expect(context.rejectedActions).toEqual(injected.rejected);
@@ -47,9 +48,15 @@ it('selects the current Turn by id and keeps it out of the history rows', () => 
   const rows = [turn('t1', 'First'), turn('t2', 'Now', 'queued'), turn('t3', 'Later', 'queued')];
   const history: ContextHistory = { turns: rows, cards: [], questions: [], rejected: [] };
   const { context } = turnInstruction(authority(), history, rows[1]!, limits);
-  if (!('turns' in context)) throw new Error('Expected a Bot Turn context');
-  expect(context.turns.map(row => row.id)).toEqual(['t1', 't3']);
-  expect(contextPack(history, 2).turns.map(row => row.id)).toEqual(['t2', 't3']);
+  if (!('history' in context)) throw new Error('Expected a Bot Turn context');
+  const ids = (pack: HandoffPack) => pack.recent.map(row => (row.meta as { id: string }).id);
+  expect(ids(context.history)).toEqual(['t1', 't3']);
+  // The turn limit selects no history, and the candidate of a snapshot view is the newest turn of `recent`.
+  expect(ids(contextPack(history, 2).history)).toEqual(['t1', 't2', 't3']);
+  expect(ids(contextPack(history, 2, 't2').history)).toEqual(['t1', 't3', 't2']);
+  // A candidate that does not fit leaves `recent` empty: it never reads as the last turn of `earlier`.
+  const budgets = { recentBytes: 10, earlyBytes: 4096, totalBytes: 8192 };
+  expect(contextPack(history, 2, undefined, undefined, undefined, undefined, undefined, undefined, budgets).history).toMatchObject({ recent: [], omittedTurns: 1 });
   expect(() => contextPack(history, 2, 'missing')).toThrow('Missing ContextPack candidate');
 });
 
@@ -58,8 +65,9 @@ it('takes injected rows in the ContextPack row shape, and refuses any other shap
   const current = turn('t1', 'Now', 'queued');
   const history: ContextHistory = { turns: [...injected, current], cards: [], questions: [], rejected: [] };
   const { context } = turnInstruction(authority(), history, current, limits);
-  if (!('turns' in context)) throw new Error('Expected a Bot Turn context');
-  expect(context.turns).toEqual(injected);
+  if (!('history' in context)) throw new Error('Expected a Bot Turn context');
+  expect(context.history.recent).toEqual([{ lines: [{ speaker: 'user', text: 'Cloud' }, { speaker: 'bot', text: 'Seen' }],
+    meta: { id: 'c1', root: 'c1', hop: 0, status: 'succeeded', outcomeSummary: ['ask_user'] } }]);
   for (const bad of [null, {}, [null], [{ ...injected[0], source: 'other' }], [{ ...injected[0], hop: -1 }], [{ ...injected[0], outcomeSummary: [1] }],
     [{ ...injected[0], conclusion: 3 }], [{ ...injected[0], reply: 3 }]]) expect(() => contextTurns(bad)).toThrow('Invalid injected history');
 });

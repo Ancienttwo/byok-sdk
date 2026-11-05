@@ -160,6 +160,8 @@ export interface CreateStoredDeviceProofSignerOptions {
   readonly deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
   /** Same store directory the daemon uses; omitted resolves the product default. */
   readonly storeDir?: string;
+  /** `DaemonConfig.nativeAssetRoot` of a packaged Windows Host, which has no installed koffi. */
+  readonly nativeAssetRoot?: string;
   /**
    * The exact enrollment identity the host read with
    * `readDeviceEnrollmentIdentity`. Every signature re-reads the enrollment and
@@ -207,7 +209,7 @@ export function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSi
   } catch {
     throw new DeviceProofSignerError('invalid_options');
   }
-  const { productId, storeDir, deviceCredentials, expected, operations, clock } = config;
+  const { productId, storeDir, deviceCredentials, nativeAssetRoot, expected, operations, clock } = config;
   const allowed = new Set<string>(operations);
 
   const sign = async (request: DeviceProofRequest): Promise<DeviceProofEnvelopeV1> => {
@@ -247,7 +249,7 @@ export function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSi
 
     let read: Awaited<ReturnType<typeof readEnrollmentAuthority>>;
     try {
-      read = await readEnrollmentAuthority({ productId, storeDir, deviceCredentials });
+      read = await readEnrollmentAuthority({ productId, storeDir, deviceCredentials, nativeAssetRoot });
     } catch {
       throw new DeviceProofSignerError('enrollment_unavailable');
     }
@@ -278,6 +280,7 @@ interface SignerConfig {
   readonly productId: string;
   readonly deviceCredentials: import('./device-credential-store').DeviceCredentialConfig | undefined;
   readonly storeDir: string | undefined;
+  readonly nativeAssetRoot: string | undefined;
   readonly expected: Readonly<{ tenantId: string; deviceId: string; proofKeyId: string; proofKeyEpoch: number }>;
   readonly operations: readonly string[];
   readonly clock: () => unknown;
@@ -289,6 +292,7 @@ function parseSignerOptions(value: unknown): SignerConfig {
   const identity = options.identity as Record<string, unknown> | undefined;
   const listed = options.operations;
   const storeDir = options.storeDir;
+  const nativeAssetRoot = options.nativeAssetRoot;
   const clock = options.clock;
   const custody = options.deviceCredentials as Record<string, unknown> | undefined;
   if (
@@ -301,6 +305,7 @@ function parseSignerOptions(value: unknown): SignerConfig {
     !Array.isArray(listed) || listed.length === 0 ||
     listed.some((operation) => typeof operation !== 'string' || operation.length === 0) ||
     (storeDir !== undefined && typeof storeDir !== 'string') ||
+    (nativeAssetRoot !== undefined && typeof nativeAssetRoot !== 'string') ||
     (clock !== undefined && typeof clock !== 'function') ||
     (custody !== undefined && (typeof custody !== 'object' || custody === null || Array.isArray(custody) ||
       (custody.macosKeychainPath !== undefined && typeof custody.macosKeychainPath !== 'string')))
@@ -311,6 +316,7 @@ function parseSignerOptions(value: unknown): SignerConfig {
     productId: options.productId,
     deviceCredentials: custody === undefined ? undefined : { macosKeychainPath: custody.macosKeychainPath as string | undefined },
     storeDir,
+    nativeAssetRoot,
     expected: Object.freeze({
       tenantId: identity.tenantId,
       deviceId: identity.deviceId,

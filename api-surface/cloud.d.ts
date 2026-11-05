@@ -307,6 +307,7 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             "read-write": "read-write";
             "read-write-if-admitted": "read-write-if-admitted";
         }>>;
+        agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
@@ -428,6 +429,7 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             "read-write": "read-write";
             "read-write-if-admitted": "read-write-if-admitted";
         }>>;
+        agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
@@ -5607,7 +5609,7 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TaskFailPayload, type TaskFailureReading, type TaskDeclineCodeReading } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TaskFailPayload, type TaskFailureReading, type TaskDeclineCodeReading } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
 declare const DEVICE_TERMINAL_TYPES: readonly ['task.complete', 'task.fail', 'task.decline', 'task.cancelled'];
 /**
@@ -5650,6 +5652,13 @@ export interface TerminalResult {
      * before the Attempt became active, and for an older daemon.
      */
     readonly agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
+    /**
+     * A writer Attempt left `MEMORY.md` larger than `RESIDENT_MEMORY_MAX_BYTES`,
+     * verbatim from the winning terminal (#1439). Absence does not mean the file
+     * is within the limit: a reader, a claimed failure before the Attempt became
+     * active, a failed measurement and an older daemon all leave it absent.
+     */
+    readonly residentMemoryOverLimit?: TerminalResidentMemoryOverLimit;
     readonly summary?: string;
     /**
      * The runtime's closing reply, verbatim `task.complete.finalMessage`. Absent

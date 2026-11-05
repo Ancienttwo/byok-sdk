@@ -71,14 +71,14 @@ export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope
 
   const teamWorkspaces = new LocalTeamWorkspace(storeDir);
   const store = new DeviceStore(storeDir, overrides.deviceCredentials === undefined ? createDeviceCredentialStore({
-    productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials,
+    productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials, nativeAssetRoot: config.nativeAssetRoot,
   }) : overrides.deviceCredentials);
   // #654 E2d-1: the member entries live in the same OS custody as the
   // enrollment. An injected enrollment backend has no member custody, so such
   // a daemon refuses an E2EE pairing rather than split one device's secrets
   // across two custodians.
   const memberRecords = overrides.deviceCredentials === undefined
-    ? new DeviceMemberRecords(createDeviceMemberCustody({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials }))
+    ? new DeviceMemberRecords(createDeviceMemberCustody({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials, nativeAssetRoot: config.nativeAssetRoot }))
     : undefined;
   const sealIdentityOf = (record: DeviceRecord, member: DeviceMemberKeyring | undefined): string | undefined => {
     const memberId = member?.session?.member.memberId;

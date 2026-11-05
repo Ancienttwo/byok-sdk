@@ -19,7 +19,7 @@ import {
   type AgentRef,
 } from '@byok-sdk/protocol';
 
-import { AgentHomeManager, type AgentHomeLease } from '../agent-home';
+import { AgentHomeManager } from '../agent-home';
 import {
   AGENT_MEMORY_AUDIT_FILENAME,
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
@@ -130,7 +130,7 @@ class FakeBackend {
 
   descriptor(): AgentMemoryIntentBackend {
     return {
-      openFilesystem: async (lease: AgentHomeLease) => this.bind(lease.canonicalHome),
+      openFilesystem: async (lease) => this.bind(lease.canonicalHome),
       conflictProvesNoRename: this.proof.conflictProvesNoRename,
       strictLedgerBarrier: this.proof.strictLedgerBarrier,
     };
@@ -199,8 +199,13 @@ class FakeBackend {
         await fs.rm(file);
         this.durable.set(file, undefined);
       },
+      observe: async (relative) => {
+        const current = fileState(await readOptional(resolve(relative)));
+        return { exists: current.exists, revision: current.revision };
+      },
+      cleanupForRestore: async () => { throw new Error('cleanup is not an intent operation'); },
       append: async () => { throw new Error('append is not an intent operation'); },
-      walk: async () => Object.freeze([]),
+      walk: async () => ({ paths: [], entries: [] }),
       close: async () => {},
     };
   }
@@ -653,6 +658,11 @@ describe('WP2I-S2 typed rejections (zero memory writes, no applying)', () => {
 
   it('content over 256 KiB -> content_invalid (typed, not fetch_invalid)', async () => {
     const { code } = await rejected({ path: 'notes/host-a.md', operation: 'replace', base: EMPTY, content: 'a'.repeat(262_145) });
+    expect(code).toBe('content_invalid');
+  });
+
+  it('MEMORY.md content over the 8 KiB resident limit -> content_invalid (#1439)', async () => {
+    const { code } = await rejected({ path: 'MEMORY.md', operation: 'replace', base: EMPTY, content: 'm'.repeat(8193) });
     expect(code).toBe('content_invalid');
   });
 

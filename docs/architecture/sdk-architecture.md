@@ -1530,7 +1530,9 @@ production migration、secret change 或 Agent-home deletion。
 Agent 长期 working memory 的唯一 authoring authority 是 canonical Agent home
 内的 `MEMORY.md` 与 `notes/**/*.md`；路径只按 `agentId` 持久，
 `profileRevision` 参与每次 task 授权精确匹配但不切换 home。SDK 不
-摘要、merge、semantic-rank 或 auto-inject 这些文件；startup
+摘要、merge 或 semantic-rank 这些文件。SDK 只在 fresh task 开头把有上限的
+`MEMORY.md` 原样作为数据放在 instruction 前面，不读 `notes/`
+（[ADR-048](../adr/ADR-048-device-injects-resident-memory.md)）；startup
 guidance 只约束 runtime 自行 recall/save，不成为第二份内容权威。
 
 Strict Agent task 可获得 SDK-owned reserved stdio MCP：

@@ -502,6 +502,12 @@ describe('compat v5: corpus coverage and WIRE_ADDITIONS', () => {
     }
   });
 
+  it('refuses agentMemoryCommit on a memory-reader offer (#1440)', () => {
+    const line = v5Corpus.find((candidate) => candidate.type === 'task.offer' && candidate.payload.agentMemoryCommit !== undefined)!;
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(line.payload).success).toBe(true);
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({ ...line.payload, homeAccess: 'memory-reader' }).success).toBe(false);
+  });
+
   it('every entry is exercised by a v5 corpus line', () => {
     const unused = WIRE_ADDITIONS.filter((entry) => entry.kind === 'envelope'
       ? !v5Corpus.some((line) => carries(line, entry))
@@ -545,6 +551,19 @@ describe('compat v5: corpus coverage and WIRE_ADDITIONS', () => {
     }
     // The prepared offer keeps the three prepared modes.
     expect(preparedWithMemory('read-write-if-admitted')).toBe(false);
+  });
+
+  it('gates residentMemoryOverLimit on the server flag on every terminal type; the schema does not compare byteCount with the limit (#1439)', () => {
+    const residentMemoryOverLimit = { byteCount: 12288 };
+    for (const type of ['task.complete', 'task.fail', 'task.cancelled'] as const) {
+      expect(requiredReceiverCapabilities(type, { residentMemoryOverLimit }), type).toEqual(['resident-memory-over-limit']);
+      expect(requiredReceiverCapabilities(type, {}), type).not.toContain('resident-memory-over-limit');
+    }
+    const schema = currentModule.TerminalResidentMemoryOverLimitSchema;
+    expect(schema.safeParse({ byteCount: 0 }).success).toBe(true);
+    for (const bad of [{}, { byteCount: -1 }, { byteCount: 1.5 }, { byteCount: 12288, path: 'MEMORY.md' }]) {
+      expect(schema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
   });
 
   it('requiredReceiverCapabilities derives field and value gates from the table; document and the v2 strip-safe fields need none', () => {

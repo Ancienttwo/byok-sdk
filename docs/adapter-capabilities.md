@@ -1043,7 +1043,8 @@ built-in runtime name does not inherit them.
   adapter enforces an explicit `ToolAuthorizationPolicy.fileScope` (#1061).
   A scoped offer on any other lane, or on an adapter without the declaration,
   declines before claim with `file_scope_unsupported`. Platforms other than
-  darwin and linux still decline. Writer and memory-reader offers are admitted
+  darwin, linux and win32 still decline; the durable lane itself runs only on
+  darwin/linux. Writer and memory-reader offers are admitted
   alike; a reader's grant makes the home read-only and adds its run directory
   as a writable `run` root. `PiAdapter`
   declares `['rpc', 'prepared']`, and `['durable']` with `durableLane: true`.

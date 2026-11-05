@@ -278,8 +278,12 @@ and a static tool-authorization policy in `toolAuthorization`:
   `runtimeAllowlist`.
 - `toolAuthorization.fileScope` applies only to `auto` tasks and requires
   `agentHome`; the wire and the model never select it. It is enforced on the
-  Pi rpc, prepared and durable lanes on darwin/linux. Windows and every
-  non-Pi runtime decline before claim with `file_scope_unsupported`. A
+  Pi rpc and prepared lanes on darwin, linux and Windows, and on the durable
+  lane on darwin/linux. Every other platform and every non-Pi runtime declines
+  before claim with `file_scope_unsupported`. On Windows write each root as an
+  absolute drive path (`C:\Users\me\repo`); UNC, `\\?\`, drive- or
+  root-relative paths, streams, reserved device names and names ending in a
+  dot or space are refused with `invalid_file_scope`. A
   memory-reader task gets the Agent home read-only and its own run directory
   (`<home>/.byok/runs/<name>`, its cwd) read+write; the rest of `.byok` stays
   internal. Root ids `home` and `run` are reserved and refused with
@@ -563,8 +567,9 @@ may be transient and is distinct from a halt. Either way the run has already
 ended its active tasks and takes no new ones, whether or not the Host has
 called `stop()` yet; their failures are reported by the next `start()`.
 
-**Keychain locked.** Every OS credential command has a deadline (15 s; 60 s for
-the Windows bridge compile). A keychain that is locked, or waiting on an unlock
+**Keychain locked.** Every OS credential command has a 15 s deadline. On Windows
+native credential calls run one at a time, and the wait counts toward that
+deadline. A keychain that is locked, or waiting on an unlock
 prompt that a service (LaunchAgent, systemd user unit) cannot show, ends the
 command with `DeviceCredentialCommandAbortedError` (`reason: 'deadline'`): the
 keychain may be locked or waiting for a prompt. Authentication fails until it
@@ -837,7 +842,7 @@ still need correction. Codes do not replace the reported field/path or cause.
 | `embedded_only` | no | Assemble this value in embedded code; omit it from CLI JSON. | [guide](#embedded-path) |
 | `handshake_rejected` | no | Check productId and SDK compatibility with the server, or pair again. | [guide](#troubleshooting) |
 | `host_layout_input_invalid` | no | Fix the named HostLayoutOptions field, then call resolveHostLayout again. | [guide](#directory-ownership) |
-| `invalid_file_scope` | no | Fix DaemonConfig.toolAuthorization.fileScope: use mode home or workspaces, absolute existing root paths without ~ or .. segments, unique root ids, and configure it only when the effective mode is auto and agentHome is set. | [guide](#configuration) |
+| `invalid_file_scope` | no | Fix DaemonConfig.toolAuthorization.fileScope: use mode home or workspaces, absolute existing root paths without ~ or .. segments (on Windows an X:\ drive path, not UNC or \\?\), unique root ids, and configure it only when the effective mode is auto and agentHome is set. | [guide](#configuration) |
 | `invalid_type` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `invalid_value` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `invalid_version_policy` | no | Fix the reported runtime version policy field: use exact/prefix specs, end a prefix with ".", remove duplicates, and configure block only from the Host. | [guide](#configuration) |

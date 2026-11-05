@@ -74,6 +74,15 @@ export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helpe
 export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem';
 /** One file's state as reported by that filesystem authority. */
 export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
+/** Types of the observe, walk and restore cleanup methods of `AgentMemoryFilesystem`. */
+export type {
+  AgentMemoryFileObservation,
+  AgentMemoryRestoreCleanup,
+  AgentMemoryRestoreRecord,
+  AgentMemoryWalk,
+  AgentMemoryWalkEntry,
+  AgentMemoryWalkEntryKind,
+} from '../daemon/agent-memory-filesystem';
 
 /** Serves `memory_recall`/`memory_save` as a stdio MCP server over host-provided streams. */
 export { serveAgentMemoryMcpOverStdio } from './mcp-server';

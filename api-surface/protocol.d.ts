@@ -1984,6 +1984,11 @@ export declare const AGENT_MEMORY_SELECTION_CAPABILITY: 'agent-memory-selection'
 export declare const AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY: 'agent-memory-read-if-admitted';
 /** Device capability required before an ordinary Agent offer may carry `agentMemory: 'read-write-if-admitted'`. */
 export declare const AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY: 'agent-memory-read-write-if-admitted';
+/**
+ * Device capability required before an Agent offer may carry `agentMemoryCommit`.
+ * A device declares it only with a proven strict memory backend (#1440).
+ */
+export declare const AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY: 'agent-memory-commit-on-success';
 /** Exact capability of the single input-preparation wire authority. */
 export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v9";
 /**
@@ -2013,6 +2018,11 @@ export declare const SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY: 'sealed-output-cip
 export declare const RUNTIME_FAILURE_CLASS_CAPABILITY: 'runtime-failure-class';
 /** A server advertises it before a device may send `task.fail.failure.scope` (#1271). */
 export declare const RUNTIME_QUOTA_SCOPE_CAPABILITY: 'runtime-quota-scope';
+/**
+ * A server advertises it before a device may send `residentMemoryOverLimit`
+ * on `task.complete`, `task.fail` or `task.cancelled` (#1439).
+ */
+export declare const RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY: 'resident-memory-over-limit';
 /**
  * The connection understands the typed pre-claim runtime-unavailable cause
  * (#1103 D8): `task.decline.runtimeUnavailable`, `conn.hello.runtimeUnavailable`
@@ -2205,6 +2215,13 @@ export * from './failure-reason';
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
 /** Maximum memory files in one local Host export, including MEMORY.md. */
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
+/**
+ * Maximum UTF-8 bytes of the resident Agent-memory file, `MEMORY.md` (#1439).
+ * The device refuses a larger `memory_save` or Host intent, and a writer
+ * terminal reports a larger file a runtime left with its own file tools
+ * (`residentMemoryOverLimit`). Nothing truncates it.
+ */
+export declare const RESIDENT_MEMORY_MAX_BYTES: number;
 /** The frozen wire runtime ids. Any other adapter id is a custom harness (`harnessId`). */
 export declare const RUNTIME_IDS: readonly ["pi", "claude", "codex"];
 /**
@@ -2490,6 +2507,20 @@ export declare class EnvelopeValidationError extends ProtocolError {
  */
 /** Maximum UTF-8 bytes of a `task.fail` `reason` after normalization, truncation marker included. */
 export declare const TASK_FAIL_REASON_MAX_BYTES = 2048;
+export interface TruncateOptions {
+    /** Size of a text, additive over its code points. Default: its UTF-8 bytes. */
+    readonly measure?: (text: string) => number;
+    /** Keep the end of the text too, with the marker in the middle. Default: the head only. */
+    readonly keepTail?: boolean;
+}
+/**
+ * The single text cut of the protocol: `text` as it is when it measures at
+ * most `maxBytes`, else the kept code points and a `…[truncated N bytes]`
+ * marker, where N counts the dropped measured bytes. The kept text is
+ * re-encoded, so a lone surrogate in it becomes U+FFFD. A `maxBytes` that
+ * cannot hold the marker gives the marker alone, which is then over `maxBytes`.
+ */
+export declare function truncateUtf8(text: string, maxBytes: number, options?: TruncateOptions): string;
 /**
  * Redact credentials from a failure reason, then cap it at
  * {@link TASK_FAIL_REASON_MAX_BYTES} UTF-8 bytes on a code-point boundary
@@ -2497,6 +2528,50 @@ export declare const TASK_FAIL_REASON_MAX_BYTES = 2048;
  * bytes.
  */
 export declare function boundFailureReason(reason: string): string;
+// ==== @byok-sdk/protocol dist/handoff-pack.d.ts ====
+/** Maximum bytes of a line in `earlier`, truncation marker included. */
+export declare const HANDOFF_EXCERPT_LINE_MAX_BYTES = 512;
+/** JSON data that a turn carries through the pack unchanged. */
+export type HandoffJson = null | boolean | number | string | readonly HandoffJson[] | {
+    readonly [key: string]: HandoffJson;
+};
+export interface HandoffLine {
+    readonly speaker: string;
+    readonly text: string;
+}
+export interface HandoffTurn {
+    readonly lines: readonly HandoffLine[];
+    /** Kept as it is and never truncated. A turn whose `meta` does not fit is left out. */
+    readonly meta?: HandoffJson;
+}
+/** Non-negative safe integers. */
+export interface HandoffPackBudgets {
+    /** Bytes of the turns in `recent`. */
+    readonly recentBytes: number;
+    /** Bytes of the turns in `earlier`. */
+    readonly earlyBytes: number;
+    /** Bytes of the whole pack. It must hold the pack frame, in which `omittedTurns` has the count of `turns`. */
+    readonly totalBytes: number;
+}
+export interface HandoffPack {
+    /** How many of the input turns are in neither list. */
+    readonly omittedTurns: number;
+    /** Excerpts of the turns before `recent`, oldest first. */
+    readonly earlier: readonly HandoffTurn[];
+    /** Whole turns up to the newest one, oldest first. The newest turn may be cut; with turns in the input, the list is empty only when that turn does not fit. */
+    readonly recent: readonly HandoffTurn[];
+}
+/**
+ * Builds the pack of `turns`, oldest first. `recent` holds the newest whole
+ * turns that fit `min(recentBytes, totalBytes - frame)`; only a newest turn
+ * that is over by itself is cut, to one limit shared by its lines.
+ * `earlier` holds excerpts of the turns before `recent`, as far back as they
+ * fit `earlyBytes` and the rest of `totalBytes`.
+ *
+ * @throws RangeError when a budget is not a non-negative safe integer, or
+ * `totalBytes` does not hold the pack frame.
+ */
+export declare function buildHandoffPack(turns: readonly HandoffTurn[], budgets: HandoffPackBudgets): HandoffPack;
 // ==== @byok-sdk/protocol dist/http-api.d.ts ====
 import { z } from 'zod';
 /**
@@ -3429,8 +3504,8 @@ export { RESULT_SCHEMA_MAX_BYTES, RESULT_OUTCOME_MAX_BYTES, RESULT_SCHEMA_MAX_DE
 export type { ResultSchema, ResultSchemaKeyword, ResultSchemaInstanceType, ResultIssue, ResultDocumentFailureReason, ResultSchemaCheck, ResultOutcomeCheck, } from './result-schema';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, RuntimeVersionPolicyProjectionSchema, RuntimeUnavailableEntrySchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessagePublishPlainPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentMessageDispositionPlainPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TaskClaimPayloadSchema, OfferAdmissionTimingsSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, readRuntimeUnavailableCause, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, RuntimeVersionPolicyProjection, RuntimeUnavailableEntry, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessagePublishPlainPayload, AgentMessagePublishSealedPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentMessageDispositionPlainPayload, AgentMessageDispositionSealedPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, RuntimeUnavailableCauseReading, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, RuntimeQuotaScope, TaskFailure, TaskFailureReading, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
+export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, RuntimeVersionPolicyProjectionSchema, RuntimeUnavailableEntrySchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, AgentMemoryCommitSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessagePublishPlainPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentMessageDispositionPlainPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TaskClaimPayloadSchema, OfferAdmissionTimingsSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, readRuntimeUnavailableCause, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, TerminalResidentMemoryOverLimitSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, RuntimeVersionPolicyProjection, RuntimeUnavailableEntry, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessagePublishPlainPayload, AgentMessagePublishSealedPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentMessageDispositionPlainPayload, AgentMessageDispositionSealedPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, RuntimeUnavailableCauseReading, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, RuntimeQuotaScope, TaskFailure, TaskFailureReading, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, TerminalResidentMemoryOverLimit, AgentHomeAccess, AgentMemorySelection, AgentMemoryCommit, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -3446,6 +3521,7 @@ export type { E2eeClientPairingMac, E2eeKeyPackageAvailablePayload, E2eeMemberCh
 export * from './bot-turn-outcome';
 export * from './routine-schedule';
 export { resultOutcomeMaxBytes } from './result-schema';
+export * from './handoff-pack';
 // ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
 import { z } from 'zod';
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
@@ -4646,6 +4722,14 @@ export declare const AgentMemorySelectionSchema: z.ZodEnum<{
 }>;
 export type AgentMemorySelection = z.infer<typeof AgentMemorySelectionSchema>;
 /**
+ * `on-success` keeps what a writer Attempt did to `MEMORY.md` and `notes/` only
+ * when the task ends in `task.complete`; any other end restores the files as
+ * they were at the start of the Attempt (#1440). Absent, writes take effect at
+ * once and stay.
+ */
+export declare const AgentMemoryCommitSchema: z.ZodLiteral<"on-success">;
+export type AgentMemoryCommit = z.infer<typeof AgentMemoryCommitSchema>;
+/**
  * How a `task.offer` starts its runtime session. `resume` continues the named
  * session; `fresh` lets the selected runtime mint one after start. It is
  * required, so an offer without a resume reference is never read as fresh.
@@ -4683,6 +4767,7 @@ export declare const TaskOfferPlainPayloadSchema: z.ZodObject<{
         "read-write": "read-write";
         "read-write-if-admitted": "read-write-if-admitted";
     }>>;
+    agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -4795,6 +4880,7 @@ export declare const TaskOfferSealedPayloadSchema: z.ZodObject<{
         "read-write": "read-write";
         "read-write-if-admitted": "read-write-if-admitted";
     }>>;
+    agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -4961,6 +5047,7 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
         "read-write": "read-write";
         "read-write-if-admitted": "read-write-if-admitted";
     }>>;
+    agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -5070,6 +5157,7 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
         "read-write": "read-write";
         "read-write-if-admitted": "read-write-if-admitted";
     }>>;
+    agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -6127,6 +6215,20 @@ export declare const TerminalAgentHomeMemoryChangeSchema: z.ZodDiscriminatedUnio
     outcome: z.ZodLiteral<"unmeasured">;
 }, z.core.$strict>], "outcome">;
 export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemoryChangeSchema>;
+/**
+ * A writer terminal's resident `MEMORY.md` that a runtime left larger than
+ * `RESIDENT_MEMORY_MAX_BYTES` with its own file tools (#1439): `byteCount` is
+ * the file size at the terminal decision. The device reports it only for a
+ * writer Attempt that became active, only when the file is a regular file over
+ * the limit, and only to a server that advertises `resident-memory-over-limit`.
+ * Absence does not mean the file is within the limit. The schema does not
+ * compare `byteCount` with the limit, so lowering the limit later cannot make
+ * an older receiver refuse the terminal. Nothing truncates the file.
+ */
+export declare const TerminalResidentMemoryOverLimitSchema: z.ZodObject<{
+    byteCount: z.ZodNumber;
+}, z.core.$strict>;
+export type TerminalResidentMemoryOverLimit = z.infer<typeof TerminalResidentMemoryOverLimitSchema>;
 /** A runtime failure class this version knows (#869). `unknown` means the runtime gave no structured evidence. */
 export declare const RuntimeFailureClassSchema: z.ZodEnum<{
     auth: "auth";
@@ -6310,6 +6412,9 @@ export declare const TaskCompleteSealedPayloadSchema: z.ZodObject<{
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
+    residentMemoryOverLimit: z.ZodOptional<z.ZodObject<{
+        byteCount: z.ZodNumber;
+    }, z.core.$strict>>;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
         suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -6405,6 +6510,9 @@ export declare const TaskFailSealedPayloadSchema: z.ZodObject<{
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
+    residentMemoryOverLimit: z.ZodOptional<z.ZodObject<{
+        byteCount: z.ZodNumber;
+    }, z.core.$strict>>;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
         suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -6539,6 +6647,9 @@ export declare const TaskCancelledSealedPayloadSchema: z.ZodObject<{
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
+    residentMemoryOverLimit: z.ZodOptional<z.ZodObject<{
+        byteCount: z.ZodNumber;
+    }, z.core.$strict>>;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
         suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -7061,6 +7172,9 @@ export declare const TaskCompletePayloadSchema: z.ZodUnion<readonly [z.ZodObject
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
+    residentMemoryOverLimit: z.ZodOptional<z.ZodObject<{
+        byteCount: z.ZodNumber;
+    }, z.core.$strict>>;
 }, z.core.$strip>, z.ZodObject<{
     sealing: z.ZodOptional<z.ZodNever>;
     harnessId: z.ZodOptional<z.ZodString>;
@@ -7098,6 +7212,9 @@ export declare const TaskCompletePayloadSchema: z.ZodUnion<readonly [z.ZodObject
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
+    residentMemoryOverLimit: z.ZodOptional<z.ZodObject<{
+        byteCount: z.ZodNumber;
+    }, z.core.$strict>>;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
         suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -7199,6 +7316,9 @@ export declare const TaskFailPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
+    residentMemoryOverLimit: z.ZodOptional<z.ZodObject<{
+        byteCount: z.ZodNumber;
+    }, z.core.$strict>>;
 }, z.core.$strip>, z.ZodObject<{
     sealing: z.ZodOptional<z.ZodNever>;
     recovery: z.ZodOptional<z.ZodObject<{
@@ -7265,6 +7385,9 @@ export declare const TaskFailPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
+    residentMemoryOverLimit: z.ZodOptional<z.ZodObject<{
+        byteCount: z.ZodNumber;
+    }, z.core.$strict>>;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
         suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -7331,6 +7454,9 @@ export declare const TaskCancelledPayloadSchema: z.ZodUnion<readonly [z.ZodObjec
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
+    residentMemoryOverLimit: z.ZodOptional<z.ZodObject<{
+        byteCount: z.ZodNumber;
+    }, z.core.$strict>>;
 }, z.core.$strip>, z.ZodObject<{
     sealing: z.ZodOptional<z.ZodNever>;
     harnessId: z.ZodOptional<z.ZodString>;
@@ -7367,6 +7493,9 @@ export declare const TaskCancelledPayloadSchema: z.ZodUnion<readonly [z.ZodObjec
     }, z.core.$strict>, z.ZodObject<{
         outcome: z.ZodLiteral<"unmeasured">;
     }, z.core.$strict>], "outcome">>;
+    residentMemoryOverLimit: z.ZodOptional<z.ZodObject<{
+        byteCount: z.ZodNumber;
+    }, z.core.$strict>>;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
         suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -8406,9 +8535,10 @@ export interface SealedSplitEntry {
     /**
      * Top-level fields that also move into this ciphertext when the task's
      * frozen `sealing` names the category (#1045): on a task that seals
-     * `memory-projection`, a terminal seals its `agentHomeMemoryChange`. The
-     * sealed branch schema cannot see the task's sealing, so the Host and the
-     * device check these fields; read them with {@link sealedMovedFields}.
+     * `memory-projection`, a terminal seals its `agentHomeMemoryChange` and
+     * `residentMemoryOverLimit`. The sealed branch schema cannot see the task's
+     * sealing, so the Host and the device check these fields; read them with
+     * {@link sealedMovedFields}.
      */
     readonly movedWith?: {
         readonly [category in SealedPayloadCategory]?: readonly string[];
@@ -8484,7 +8614,7 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
         readonly identity: readonly [];
         readonly moved: readonly ["summary", "finalMessage", "document"];
         readonly movedWith: {
-            readonly 'memory-projection': readonly ['agentHomeMemoryChange'];
+            readonly 'memory-projection': readonly ['agentHomeMemoryChange', 'residentMemoryOverLimit'];
         };
         readonly forbidden: readonly ["artifactRefs", "preparedObservation"];
         readonly digests: {
@@ -8501,7 +8631,7 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
         readonly identity: readonly [];
         readonly moved: readonly ["reason"];
         readonly movedWith: {
-            readonly 'memory-projection': readonly ['agentHomeMemoryChange'];
+            readonly 'memory-projection': readonly ['agentHomeMemoryChange', 'residentMemoryOverLimit'];
         };
         readonly forbidden: readonly ["preparedObservation"];
         readonly digests: {
@@ -8527,7 +8657,7 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
         readonly identity: readonly [];
         readonly moved: readonly ["reason"];
         readonly movedWith: {
-            readonly 'memory-projection': readonly ['agentHomeMemoryChange'];
+            readonly 'memory-projection': readonly ['agentHomeMemoryChange', 'residentMemoryOverLimit'];
         };
         readonly forbidden: readonly [];
         readonly digests: {
@@ -8722,7 +8852,7 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * MCP configuration.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-home-projection-host-revision", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-payload-v2", "sealed-output-ciphertext-ref", "runtime-failure-class", "runtime-quota-scope", "runtime-unavailable-cause"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-home-projection-host-revision", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", "agent-memory-commit-on-success", 'agent-message-draft', "sealed-payload-v1", "sealed-payload-v2", "sealed-output-ciphertext-ref", "runtime-failure-class", "runtime-quota-scope", "resident-memory-over-limit", "runtime-unavailable-cause"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**

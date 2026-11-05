@@ -64,7 +64,7 @@ describe('#1119 a halted daemon ends its active tasks', () => {
     server.send(createEnvelope('task.offer', {
       instruction: 'long work', agentRef: { agentId: 'halt-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
     }, { taskId, seq: server.nextSeq() }));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === taskId);
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === taskId);
     expect(adapter.sessions).toHaveLength(1);
     return record;
   }

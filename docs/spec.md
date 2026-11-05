@@ -2907,6 +2907,51 @@ and both refuse `read-write` and `read-write-if-admitted` for a
 `AGENT_MEMORY_MCP_SERVER_NAME` from `@byok-sdk/client` is the reserved name of
 the SDK memory MCP server, so Host tests and diagnostics need no literal name.
 
+A writer Agent offer can also bind its memory writes to the task result with the
+OPTIONAL `agentMemoryCommit: 'on-success'`. `task.complete` keeps what the Attempt
+did to `MEMORY.md` and `notes/`, including writes from the runtime's own file
+tools. Any other end restores those files to how they were at the start of the
+Attempt. The device must advertise `agent-memory-commit-on-success`, and cloud
+refuses the field to a device without it. A `memory-reader` Attempt and durable Pi
+do not support it. See [the protocol](protocol.md#22-task-free-agent-home-projection).
+
+A fresh instruction task whose effective mode is `read` or `read-write`, on a
+daemon that admits the memory MCP, carries `MEMORY.md`
+([ADR-048](adr/ADR-048-device-injects-resident-memory.md), #1439), for a writer
+and a `memory-reader`. An `auto` daemon without a helper, which runs a writer as
+`read-write` with no memory MCP, cannot write memory and so could not repair the
+file. That task keeps the reading guidance like a resumed session, carries no
+data and does not fail on an over-limit file. A `*-if-admitted` selection that
+runs as `none` carries nothing. A resumed session keeps the reading guidance,
+and a prepared offer keeps its frozen bytes. Before the
+runtime starts, the device reads the file once, at most the limit plus one byte,
+as strict UTF-8, and puts it after the guidance and before the instruction, as
+one line: `Agent memory (data): ` and a JSON object with `path`, `revision`,
+`byteCount` and `content`. The line is the same while the file is. It goes into
+the first user message, never the system prompt, after blob and sealed
+instructions are opened. The task fails without retry and without truncation
+before the runtime starts when the file is over the limit
+(`agent_memory_resident_over_limit: <bytes>/<limit>`), or when it is missing,
+not a regular file or not valid UTF-8, has more than one hard link, or the home
+identity changed (`agent_memory_resident_unreadable: <reason>`). These prefixes
+are reason text, not wire values.
+
+Every writer Attempt keeps that read in memory as its start copy when the file
+was valid. When the Attempt ends, the runtime has stopped and `MEMORY.md` is a
+regular file over the limit, the device swaps it back to the start copy with
+one compare-and-swap, before the task-close snapshot and the lease release, and
+audits the task, the size it found and the revision it restored, without the
+content. `notes/` stay as they are, and the terminal still reports the size the
+Attempt wrote. A reader never restores, because it runs beside a writer. Nothing
+is restored without a start copy or without the memory filesystem (a native
+Linux descriptor backend or the release helper). A failed compare-and-swap is
+audited and not retried, and a crash before the restore loses the copy. On a
+daemon that carries the file, the next fresh task then fails until a Host intent
+replaces it. The compare hashes raw bytes, with no size limit and no UTF-8
+requirement, so the restore handles a file of any size, on both backends. See
+[protocol.md §2.2](protocol.md#22-task-free-agent-home-projection) for the repair
+after a crash.
+
 The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary
 `agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build
@@ -3131,7 +3176,11 @@ complete paired enrollment: authenticated device/tenant/public-key metadata,
 access token, expiry, and device private key. It uses macOS Keychain, Windows
 Credential Manager, or Linux Secret Service; provider unavailability is typed
 and fail-closed, and there is no file or `@byok-sdk/keys`
-fallback. `<storeDir>/device.json` is only a bounded non-secret projection
+fallback. On Windows the client calls advapi32 through koffi inside the daemon
+process, on a worker thread. Every native credential call joins one FIFO: it
+starts only after the previous call really returned, and the wait counts toward
+its own 15 s deadline. A call past its deadline has an unknown outcome and is
+never replayed. `<storeDir>/device.json` is only a bounded non-secret projection
 `{deviceId, tenantId, devicePublicKey}`. A legacy secret-bearing JSON record is
 never imported, parsed as a JWT, or dual-read: normal load/start/status reports
 `re_pair_required`, and explicit re-pair is the default recovery.
@@ -3695,7 +3744,7 @@ complete ContextPack/Summary, native-runtime, migration or production acceptance
 
 Pi custody consumes the client-decided runtime launch: `--pi-bin`, optional `--pi-entry`, optional `--pi-fixed-args`, `--pi-cwd`, `--pi-projection-dir` and `--pi-config-digest`. Keys validates these fields and the projection directory before it reads credentials. The SDK-owned RPC entry receives explicit session cwd in its configuration. The installed SDK package, or the single-file product through `sdkHelperHost`, supplies the interpreter and entry. Version detection retains its existing timeout and error classification. No shell, argv0 fallback or inference from an executable suffix selects the runtime.
 
-The bundled launcher executable reads the platform OS store with its default storage options. `@byok-sdk/keys` also exports `runPiProviderLauncher(options, { createSecretStore })`, the same launcher with a host-built `SecretStore`, so a host with its own storage options supplies one launcher executable without a second store definition. Both apply the same exact profile, binding, runtime-entry and custody checks. The provider projection keeps the profile URL convention of the direct clients: for the `anthropic` adapter it projects the keys endpoint `modelApiUrl(base_url, 'messages')` without its `/v1/messages` suffix, because Pi appends that suffix, and it refuses an endpoint without that suffix with `PROVIDER_URL_INVALID`. For `auth_mode: 'none'` the `pi-rpc` projection sets the fixed non-secret `apiKey` `byok-sdk-auth-none`, because Pi refuses a request without a key; the `pi-prepared` and `pi-durable` entries require a launcher-delivered key and refuse a keyless profile with `PROVIDER_PROFILE_INVALID` at admission.
+The bundled launcher executable reads the platform OS store with its default storage options. `@byok-sdk/keys` also exports `runPiProviderLauncher(options, { createSecretStore })`, the same launcher with a host-built `SecretStore`, so a host with its own storage options supplies one launcher executable without a second store definition. On Windows the default store calls Credential Manager in process through the installed `koffi`; a packaged Host has no installed module, so it builds the store with `koffi: loadSdkKoffiAsset(nativeAssetRoot)`. Both apply the same exact profile, binding, runtime-entry and custody checks. The provider projection keeps the profile URL convention of the direct clients: for the `anthropic` adapter it projects the keys endpoint `modelApiUrl(base_url, 'messages')` without its `/v1/messages` suffix, because Pi appends that suffix, and it refuses an endpoint without that suffix with `PROVIDER_URL_INVALID`. For `auth_mode: 'none'` the `pi-rpc` projection sets the fixed non-secret `apiKey` `byok-sdk-auth-none`, because Pi refuses a request without a key; the `pi-prepared` and `pi-durable` entries require a launcher-delivered key and refuse a keyless profile with `PROVIDER_PROFILE_INVALID` at admission.
 
 The ordinary `byok-pi-rpc` host launched under `credentialSource: keys-profile` receives its key the same way as the durable worker below (#385): over the launcher's private one-shot JSON IPC channel bound to the config digest, never in its environment, argv or stdio RPC. Its digest-bound launch config (`byok.pi.rpc-launch` version 11) states `credentialSource` and the optional resolved file scope; under `keys-profile` the host refuses a launch environment that carries a provider key, disconnects IPC before any extension, tool or session exists, and registers the key only in Pi's in-memory runtime credential overlay (`ModelRuntime.setRuntimeApiKey`). Its projection carries the non-secret `apiKey` marker `byok:rpc-ipc`; under `pi-auth-store` the host refuses an IPC channel it was not configured for. Conformance tests require no key in the output of Pi's real built-in bash tool running `env` and none in the host's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). Pi subagents are unavailable in this lane: a pi-subagents child session opens its own model runtime from the projection, whose `apiKey` is the `byok:rpc-ipc` marker, and never sees the key held in the parent's memory, so the host does not load pi-subagents under `keys-profile`. No `subagent` tool is offered and the marker is never sent as a key. Only `byok-pi-prepared`, which registers MCP tools only, receives the key as `PI_PROVIDER_API_KEY` in its environment.
 
@@ -4085,8 +4134,11 @@ and integrity-verified official Koffi addon; it never downloads in a runtime.
 `sdkDistributionManifest` describes Pi pin, reserved helper kinds and native target
 files. `reservedHelperKinds` is exactly the set that
 `runSdkReservedHelperCommand` accepts. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
-`DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
-to that adapter's owned process trees and fails closed on missing or modified
+`DaemonConfig`, or to each custom adapter constructor. The daemon's Windows
+credential store uses the same `DaemonConfig` value. `readDeviceEnrollmentStatus`,
+`readDeviceEnrollmentIdentity` and `createStoredDeviceProofSigner` run without a
+daemon, so they take it as an option. An explicit root is scoped
+to that adapter's owned process trees and that credential read, and fails closed on missing or modified
 bytes without searching installed dependencies. Omission keeps installed behavior.
 For Darwin the copier delegates to the existing memory-helper release copier.
 For Windows x64 it also copies the Windows memory helper and its manifest into
@@ -4330,7 +4382,8 @@ encoded payloads, aliases) are not recognized. It is a tool gate, not an
 execution sandbox and not a file-scope boundary: an allowed shell command can
 still reach any file, network or local resource the OS user can. The optional
 `toolAuthorization.fileScope` policy (#1061) is enforced on the ordinary Pi
-RPC and durable lanes on darwin/linux by six SDK-owned scoped tools: `read`,
+RPC lane on darwin, linux and win32 and on the durable lane on darwin/linux by
+six SDK-owned scoped tools: `read`,
 `write`, `edit`, `find`, `grep` and `ls`. They shadow the native Pi tools of
 the same names (on the durable lane they replace the harness `read`, `write`
 and `edit`, and every worker spawn, the first and each respawn, re-verifies the
@@ -4344,7 +4397,7 @@ claim and before the runtime starts. The session never falls back to an
 unscoped or native file tool. The prepared lane has no native file tools and
 gets no scoped ones, because its counted tool manifest is MCP-only; a scoped
 prepared task gets the same gate and scope floor, so every counted tool call
-asks. Windows and other adapters decline before claim. A memory-reader offer
+asks. Other adapters and other platforms decline before claim. A memory-reader offer
 runs scoped on the ordinary RPC and prepared lanes (the durable lane refuses
 readers on its own, scope or not): the Agent home is read-only, and its run
 directory, the reader lease's cwd `<home>/.byok/runs/<name>` (on resume, the
@@ -4367,6 +4420,30 @@ command/path and trusted MCP server/tool. This is a file-tool boundary for
 those six tools, not an OS sandbox: `bash`, MCP servers and user extensions
 are not covered, the guard is canonical check-then-open using Node built-ins,
 and it is not race-free against same-user processes.
+
+On win32 (#1423) the guard uses no native code and checks a path in a fixed
+order. First the syntax: `/` becomes `\`; a path starting with `\` (UNC,
+`\\?\`, `\\.\`, root-relative) or a drive-relative `C:foo` is refused;
+the rest resolves with `path.win32` against the cwd and must be `X:\…`; a
+segment holding `:` (an alternate data stream), ending in `.` or a space, or
+naming a reserved device (CON, PRN, AUX, NUL, COM0–COM9, LPT0–LPT9 with the
+superscript ¹²³ variants, CONIN$, CONOUT$; any case, any extension) is
+refused as `path_syntax`, because Node creates those names literally while
+Win32 programs read them as a device or strip the trailing characters, and a
+stream "create" writes into an existing file. Configured roots follow the same
+syntax and are refused with `invalid_file_scope`. Then every existing segment
+from the drive root is lstat'ed and a symlink, junction or AppExecLink is
+`symlink`; then `realpath.native` of the deepest existing prefix expands 8.3
+short names and returns the on-disk case. Every check above runs on that
+canonical path, comparing bytes without case folding, so a `.byok` case
+variant or 8.3 name is `internal_path`, and an 8.3 or case variant of a root
+matches it. A volume mount point inside a root presents as a directory and
+canonicalizes onto its own volume, so it is `outside_scope`, or
+`cross_device` by dev for a volume without a drive letter. Other reparse
+points (WOF compression, cloud placeholders, deduplication) are the file or
+directory they present. An 8.3-form name with no long owner is an ordinary
+new name. `O_NOFOLLOW` is undefined on win32; the post-open fstat check and a
+write that truncates only after it refuse a replaced final segment.
 
 A scoped session may offer native pi-subagents children only with the same
 boundary. The host writes the serialized grant and digest into the child gate

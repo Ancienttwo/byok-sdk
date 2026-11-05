@@ -50,19 +50,19 @@ const fields = {
   offer: { taskId: true, deviceId: true, messageId: true, type: true, payload: true, recordedAt: true, delivered: true },
   offerPayload: {
     sealed: false, sealing: false, routineRef: false, instruction: false, agentRef: true,
-    session: true, preparation: false, agentMemory: false, homeAccess: false, requiredToolsets: false,
+    session: true, preparation: false, agentMemory: false, agentMemoryCommit: false, homeAccess: false, requiredToolsets: false,
     runtime: false, harnessId: false, dispatchSelection: false, terminalProjection: false,
     limits: false, egressPolicy: false, messageEgress: false,
   },
   'task.complete': {
     sealed: false, sealing: false, harnessId: false, summary: true, finalMessage: false,
     sessionRef: true, artifactRefs: false, document: false, usage: false, preparedObservation: false,
-    agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false,
+    agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false, residentMemoryOverLimit: false,
   },
   'task.fail': {
     sealed: false, sealing: false, recovery: false, harnessId: false, reason: true,
     retryable: false, failure: false, usage: false, preparedObservation: false,
-    agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false,
+    agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false, residentMemoryOverLimit: false,
   },
   'task.decline': {
     sealed: false, sealing: false, reason: true, retryable: false, agentRef: false, code: false,
@@ -70,7 +70,7 @@ const fields = {
   },
   'task.cancelled': {
     sealed: false, sealing: false, harnessId: false, reason: false, usage: false,
-    agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false,
+    agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false, residentMemoryOverLimit: false,
   },
   message: {
     sealed: false, sealing: false, agentRef: true, sessionRef: true, contract: true, messageId: true, cursor: true,
@@ -123,7 +123,7 @@ function resultFields(payload: object): object {
   type Snapshot = NonNullable<Awaited<ReturnType<ByokServer['tasks']['get']>>>;
   const evidenceOnly = {
     agentRef: true, harnessId: true, recovery: true, agentHomeProjection: true,
-    agentHomeMemoryChange: true, usage: true, preparedObservation: true,
+    agentHomeMemoryChange: true, residentMemoryOverLimit: true, usage: true, preparedObservation: true,
     sealed: true, sealing: true, runtimeUnavailable: true, admission: true,
   } satisfies Record<Exclude<Keys<Terminal['envelope']['payload']>, keyof NonNullable<Snapshot['result']>>, true>;
   return Object.fromEntries(Object.entries(payload).filter(([key]) => !Object.hasOwn(evidenceOnly, key)));

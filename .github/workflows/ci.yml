@@ -578,7 +578,7 @@ jobs:
       - name: Run SDK helper, intent and capability contracts
         timeout-minutes: 10
         run: |
-          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-mcp-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts src/__tests__/agent-memory-helper-identity.test.ts src/__tests__/agent-memory-windows-gate.test.ts
+          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-commit.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-mcp-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts src/__tests__/agent-memory-helper-identity.test.ts src/__tests__/agent-memory-windows-gate.test.ts
 
       # The W5 power-cut harness (#605) kills and restarts device processes.
       # Its own time limit ends a hang with the log so far; the sampler and
@@ -720,6 +720,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # This leg runs only the Credential Manager step below.
+        include:
+          - os: windows-2022
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -742,6 +745,7 @@ jobs:
         run: bun run build
 
       - name: Run built adapter lifecycle smoke
+        if: matrix.os != 'windows-2022'
         run: bun run --filter @byok-sdk/client smoke:adapters
 
       # The Host suites run the embedded server, daemon journal and Host ledger
@@ -774,7 +778,7 @@ jobs:
       # Manager, as the runner's own user (the daemon and the launcher share
       # one user). The flag makes the suite hard-fail rather than skip.
       - name: Sealed provisioning on the real Windows Credential Manager
-        if: matrix.os == 'windows-latest'
+        if: startsWith(matrix.os, 'windows-')
         env:
           BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER: '1'
         run: bun run --filter @byok-sdk/keys test -- src/windows-credential-custody.integration.test.ts
@@ -1000,6 +1004,18 @@ jobs:
 
       - name: Run the Hermes custody launcher tests on Windows
         run: bun run --filter @byok-sdk/keys test -- src/__tests__/hermes-provider-launcher.test.ts
+
+      # #1423: the file-scope guard, policy, launch, discovery and real Pi scoped tools on
+      # NTFS (8.3 names on C:, a second volume on D:, junctions, mountvol).
+      - name: Run file-scope guard and scoped Pi tool tests on Windows
+        run: |
+          bun run --filter @byok-sdk/client test -- `
+            src/__tests__/file-scope-guard.test.ts `
+            src/__tests__/file-scope-policy.test.ts `
+            src/__tests__/file-scope-launch.test.ts `
+            src/__tests__/pi-scoped-file-tools.test.ts `
+            src/__tests__/file-scope-tool-approval.test.ts `
+            src/__tests__/file-scope-discovery-tools.test.ts
 
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) while
@@ -1337,6 +1353,12 @@ jobs:
             #    step adds no acceptance of either.
             node scripts/release/pack-and-smoke.mjs --out-dir .ci-artifacts/release-pack
             if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'pack-and-smoke.mjs failed under the standard-user token' }
+
+            # The real Credential Manager through koffi, on the workspace
+            # pack-and-smoke.mjs just built, under this standard-user token.
+            $env:BYOK_NATIVE_WINDOWS_CREDENTIAL_SMOKE = '1'
+            bun run --filter @byok-sdk/client test -- src/__tests__/device-credential-store.native.test.ts
+            if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'native Windows credential tests failed under the standard-user token' }
 
             # #385 on Windows: the real keys launch sequence and the built pi-rpc
             # host, on the workspace pack-and-smoke.mjs just built. It runs under
@@ -1912,7 +1934,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # windows-2022 is here for the native Credential Manager step: koffi's
+        # async last error and the time bounds need both Windows builds.
+        os: [ubuntu-latest, macos-latest, windows-latest, windows-2022]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -174,7 +174,7 @@ export declare class HostExecutionCore {
     private delivered;
     private admits;
     private submit;
-    private memoryInstruction;
+    private assertMemoryDispatchable;
     private resumeMemory;
     private memoryFailure;
     private begin;
@@ -192,7 +192,7 @@ export { nextIntervalOccurrence } from './schedule';
 export type { NextOccurrence } from './schedule';
 export { DEFAULT_RETRY, frozenInput, isOccurrenceIntentKey, occurrenceIntentKey, occurrenceOfIntentKey, taskId, validateRetry } from './model';
 export type { IntentInput, LedgerIntentInput, Intent, ExecutionTemplate, SealedExecutionTemplate, IntentExecution, SealedAgentExecutionInput, FrozenExecutionInput, RetryPolicy, AgentRoutineDefinition, HostJobRoutineDefinition, HostJobSpec, HostJobRun, HostJobResult, HostJobHandler, HostOccurrenceRoutineDefinition, HostOccurrenceRun, RoutineDefinition, Routine, Occurrence, Conclusion, Json } from './model';
-export { HostMemoryPage, MemoryBlockedError, memoryRevision, EMPTY_MEMORY_REVISION, RESIDENT_MEMORY_MAX_BYTES } from './memory';
+export { HostMemoryPage, MemoryBlockedError, memoryRevision, EMPTY_MEMORY_REVISION } from './memory';
 export type { MemoryApproval, MemoryBinding, MemoryOptions, MemoryContextPack } from './memory';
 export { hash, canonical, isSealed, project, time, validateJson } from './model';
 export type { LedgerState, IgnoredWakeAudit } from './model';
@@ -409,7 +409,6 @@ import { type MemoryRestoreInput, type MemoryRestoreResult, type MemoryRestoreRo
 import type { AgentMemoryExport, AgentMemoryIntentTransport, AgentMemoryProjectionPort } from '@byok-sdk/protocol/agent-memory';
 export declare class MemoryBlockedError extends Error {
 }
-export declare const RESIDENT_MEMORY_MAX_BYTES: number;
 export declare function memoryRevision(text: string): string;
 export declare const EMPTY_MEMORY_REVISION: string;
 type AgentRef = AgentMemoryIntentV1['agentRef'];
@@ -507,6 +506,9 @@ export declare class HostMemoryPage {
     private record;
     /** Host-owned opaque profile: {residentMemory: policyApprovedText | null}. It conveys no edit proof. */
     projectionPort(deviceId: string): AgentMemoryProjectionPort;
+    /** What an Agent's queue waits for: a current placement and no restore in progress. */
+    assertDispatchable(binding: MemoryBinding): void;
+    /** The Host's read of the projected resident text. The device, not this read, puts `MEMORY.md` into a task. */
     contextPack(binding: MemoryBinding): MemoryContextPack;
 }
 export {};

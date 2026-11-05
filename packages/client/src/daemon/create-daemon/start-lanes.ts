@@ -14,12 +14,12 @@ import type { StartRun } from './start-run';
  * hello capabilities and builds the notice processors, the input-preparation
  * lane, the sealed upload client and this start's sealed-task lane.
  */
-export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 'agentMemoryIntentBackend' | 'record' | 'blobClient' | 'sealedRun'>) {
+export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 'agentMemoryBackend' | 'agentMemoryIntentBackend' | 'record' | 'blobClient' | 'sealedRun'>) {
   const {
     adapters, config, agentHomeManager, agentContentReadPolicies, daemonState, observer,
     inputPreparationLimits, sealIdentityOf,
   } = daemonScope;
-  const { agentMemoryIntentBackend, record, blobClient, sealedRun } = run;
+  const { agentMemoryBackend, agentMemoryIntentBackend, record, blobClient, sealedRun } = run;
   const capabilities = computeCapabilities(
     adapters,
     config.agentHome !== undefined,
@@ -30,6 +30,7 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
     daemonState.inputPreparationService !== undefined,
     config.providerProvisioning !== undefined,
     agentMemoryIntentBackend !== undefined,
+    agentMemoryBackend !== undefined,
   );
   const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true
     ? new AgentHomeProjectionCompletionClient({

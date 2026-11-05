@@ -1,4 +1,4 @@
-import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
+import { daemonMemoryInstruction, freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { spawn as realSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -17,7 +17,6 @@ import { observationOf } from './fixtures/mcp-observation';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
-import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
 
@@ -242,7 +241,7 @@ describe('daemon admission', () => {
     await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'task-no-policy');
     expect(server.received.some((envelope) => envelope.type === 'task.decline')).toBe(false);
     expect(adapter.startCalls).toHaveLength(1);
-    expect(adapter.startCalls[0]?.task.instruction).toBe(prependAgentMemoryGuidance('no policy'));
+    expect(adapter.startCalls[0]?.task.instruction).toBe(daemonMemoryInstruction('no policy'));
     expect(adapter.startCalls[0]?.task).not.toHaveProperty('policy');
   });
 });

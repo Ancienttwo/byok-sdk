@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { lstatSync, realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path';
 import type { AgentRef } from './agent-home';
 
 /**
@@ -26,7 +26,11 @@ export const TOOL_FILE_ACCESS: readonly ToolFileAccess[] = Object.freeze(['read'
 export interface ToolFileScopeRoot {
   /** Unique, nonempty local label; never emitted on the wire. `home` and `run` are reserved. */
   readonly id: string;
-  /** Absolute local path; canonicalized and identity-checked at admission, not here. */
+  /**
+   * Absolute local path; canonicalized and identity-checked at admission, not
+   * here. On win32 an absolute drive path (`X:\…`) without a `\\` prefix,
+   * stream, reserved device name, or trailing dot or space.
+   */
   readonly path: string;
   /** `write` implies `read`. */
   readonly access: ToolFileAccess;
@@ -99,7 +103,7 @@ export interface ToolAuthorizationPolicy {
    * preserves the existing behavior exactly. Only legal when the offer's
    * effective mode is `auto`; an `all` runtime with a scope is rejected
    * before claim. An unsupported lane/adapter/platform is declined as
-   * `file_scope_unsupported` before claim; on the admitted POSIX path every
+   * `file_scope_unsupported` before claim; on an admitted platform every
    * root is revalidated after claim, before runtime start, and again before
    * the Pi session exists, and an unresolvable root fails the claimed task as
    * `file_scope_unavailable`. A configured scope is never silently dropped.
@@ -278,6 +282,34 @@ function fileScopeRecord(value: unknown, keys: readonly string[], label: string)
   }
 }
 
+// Win32 device names, including the superscript-digit COM/LPT variants Win32
+// also maps, with or without an extension.
+const WIN32_RESERVED_NAME = /^(?:CON|PRN|AUX|NUL|COM[0-9\u00b9\u00b2\u00b3]|LPT[0-9\u00b9\u00b2\u00b3]|CONIN\$|CONOUT\$)(?: *\..*)?$/iu;
+
+/**
+ * The pure win32 path syntax of a file scope (#1423, steps 1-3), shared by the
+ * policy parser and the file-scope guard. `/` becomes `\`; a path that starts with `\`
+ * (`\\?\`, `\\.\`, UNC, root-relative) or is drive-relative (`C:foo`) is
+ * refused; the rest resolves against `cwd` with `path.win32` and must be
+ * `X:\…`. Each segment is then refused when it holds `:` (an alternate data
+ * stream), ends in `.` or a space, or is a reserved device name: Node creates
+ * those names literally while Win32 programs read them as a device or strip the
+ * trailing characters, and a stream "create" writes into an existing file.
+ * Returns the resolved path, or undefined when the syntax is refused.
+ */
+export function win32FileScopePath(value: string, cwd?: string): string | undefined {
+  const raw = value.replaceAll('/', '\\');
+  if (raw.startsWith('\\') || /^[A-Za-z]:(?!\\)/u.test(raw)) return undefined;
+  if (cwd === undefined && !/^[A-Za-z]:\\/u.test(raw)) return undefined;
+  const resolved = cwd === undefined ? win32.resolve(raw) : win32.resolve(cwd, raw);
+  if (!/^[A-Za-z]:\\/u.test(resolved)) return undefined;
+  for (const segment of resolved.slice(3).split('\\')) {
+    if (segment === '') continue;
+    if (segment.includes(':') || segment.endsWith('.') || segment.endsWith(' ') || WIN32_RESERVED_NAME.test(segment)) return undefined;
+  }
+  return resolved;
+}
+
 function fileScopeRootPath(value: unknown): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > MAX_FILE_SCOPE_PATH_CHARS
     || value.includes('\0') || value.includes('\n') || value.includes('\r')) {
@@ -288,7 +320,7 @@ function fileScopeRootPath(value: unknown): string {
   if (value === '~' || value.startsWith('~/') || value.startsWith('~\\')) {
     throw new FileScopePolicyError('tool authorization fileScope root path must not start with "~"; write the absolute path');
   }
-  if (!isAbsolute(value)) {
+  if (process.platform !== 'win32' && !isAbsolute(value)) {
     throw new FileScopePolicyError('tool authorization fileScope root path must be absolute');
   }
   if (value.split(/[\\/]/).some(segment => segment === '.' || segment === '..')) {
@@ -296,6 +328,15 @@ function fileScopeRootPath(value: unknown): string {
   }
   // Pure lexical normalization; existence and identity are admission checks
   // that read the filesystem, which this parser must never do.
+  if (process.platform === 'win32') {
+    const resolved = win32FileScopePath(value);
+    if (resolved === undefined) {
+      throw new FileScopePolicyError(
+        'tool authorization fileScope root path must be an absolute drive path (X:\\…) with no \\\\ prefix, stream, reserved device name, or trailing dot or space',
+      );
+    }
+    return resolved;
+  }
   return resolve(value);
 }
 

@@ -26,7 +26,7 @@
   },
   "invalid_file_scope": {
     "retryable": false,
-    "nextStep": "Fix DaemonConfig.toolAuthorization.fileScope: use mode home or workspaces, absolute existing root paths without ~ or .. segments, unique root ids, and configure it only when the effective mode is auto and agentHome is set.",
+    "nextStep": "Fix DaemonConfig.toolAuthorization.fileScope: use mode home or workspaces, absolute existing root paths without ~ or .. segments (on Windows an X:\\ drive path, not UNC or \\\\?\\), unique root ids, and configure it only when the effective mode is auto and agentHome is set.",
     "anchor": "#configuration"
   },
   "daemon_config_invalid": {

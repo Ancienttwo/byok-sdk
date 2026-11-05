@@ -1,6 +1,7 @@
+import { execFileSync, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   FileScopeGuardError,
@@ -21,12 +22,21 @@ async function tmpDir(prefix: string): Promise<string> {
 }
 
 async function canonicalTmpDir(prefix: string): Promise<string> {
-  return fs.realpath(await tmpDir(prefix));
+  return realpathSync.native(await tmpDir(prefix));
 }
 
 afterEach(async () => {
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 });
+
+/** The full 8.3 spelling of an existing win32 path, from cmd's `%~sI`. */
+function shortPath(filePath: string): string {
+  const result = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `for %I in ("${filePath}") do @echo %~sI`], {
+    encoding: 'utf8', windowsVerbatimArguments: true,
+  });
+  if (result.status !== 0) throw new Error(`short name lookup failed: ${result.stderr}`);
+  return result.stdout.trim();
+}
 
 async function identityOf(filePath: string): Promise<FileScopeIdentity> {
   const value = await fs.stat(filePath, { bigint: true });
@@ -93,11 +103,14 @@ describe('file-scope guard root resolution (#1061 slice 2)', () => {
     }))).toMatchObject({ code: 'file_scope_unavailable', reason: 'root_identity_changed', rootId: 'home' });
   });
 
-  it('refuses Windows and unknown platforms without touching the filesystem', async () => {
+  it('admits a filesystem root (/ or a drive root) as a root', async () => {
+    const root = path.parse(await canonicalTmpDir('byok-guard-fsroot-')).root;
+    const grant = await grantWith(root);
+    expect(grant.roots).toMatchObject([{ id: 'repo', path: root, lexicalPath: root }]);
+  });
+
+  it('refuses unknown platforms without touching the filesystem', async () => {
     const { home, identity } = await fixture();
-    expect(await guardReason(() => resolveFileScopeGrant({
-      fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: home, identity }, platform: 'win32',
-    }))).toMatchObject({ code: 'file_scope_unsupported', reason: 'unsupported_platform' });
     expect(await guardReason(() => resolveFileScopeGrant({
       fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: home, identity }, platform: 'freebsd',
     }))).toMatchObject({ code: 'file_scope_unsupported', reason: 'unsupported_platform' });
@@ -249,6 +262,12 @@ describe('file-scope guard target checks (#1061 slice 2)', () => {
     for (const target of [
       path.join(home, '.byok', 'runs', 'other', 'x.txt'), path.join(home, '.byok', 'agent-home.lease'),
       path.join(run, '.byok', 'x.txt'), path.join(home, '.BYOK', 'runs', 'reader-1', 'x.txt'),
+      // win32: a case-variant home prefix, an 8.3 profile prefix and the 8.3 name of .byok.
+      ...(process.platform === 'win32' ? [
+        path.join(home.toUpperCase(), '.byok', 'runs', 'reader-1', 'x.txt'),
+        path.join(shortPath(home), '.byok', 'runs', 'reader-1', 'x.txt'),
+        path.join(home, 'BYOK~1', 'runs', 'reader-1', 'x.txt'),
+      ] : []),
     ]) {
       expect(await guardReason(() => resolveFileScopeTarget({ grant, path: target, access: 'read', cwd: run })))
         .toMatchObject({ code: 'file_scope_denied', reason: 'internal_path' });
@@ -280,11 +299,146 @@ describe('file-scope guard target checks (#1061 slice 2)', () => {
     }))).toMatchObject({ reason: 'outside_scope' });
   });
 
-  it('refuses Windows before target resolution', async () => {
-    const root = await canonicalTmpDir('byok-guard-win-');
+  it('refuses the win32 path syntax before any filesystem access', async () => {
+    const grant = await grantWith(await canonicalTmpDir('byok-guard-win-'));
+    const untouched = async (): Promise<never> => { throw new Error('unexpected filesystem access'); };
+    const io: FileScopeIo = { lstat: untouched, stat: untouched, realpath: untouched, open: untouched };
+    for (const target of [
+      'a.txt:x', 'a.txt::$DATA', 'NUL', 'nul.txt', 'CON.txt', 'COM\u00b9', 'lpt0', 'CONIN$', 'trail.', 'space ', 'dir.\\x.txt',
+      '\\\\server\\share\\x', '\\\\?\\C:\\work\\x', '//?/C:/work/x', '\\\\.\\C:\\work\\x', 'C:x', '\\x', '/x',
+    ]) {
+      expect(await guardReason(() => resolveFileScopeTarget({
+        grant, path: target, access: 'write', cwd: 'C:\\work', platform: 'win32', io,
+      })), target).toMatchObject({ code: 'file_scope_denied', reason: 'path_syntax' });
+    }
+  });
+});
+
+// Real NTFS behaviour (#1423 PR-2a evidence): 8.3 names exist on the runner's C:.
+describe.runIf(process.platform === 'win32')('file-scope guard on win32 (#1423)', () => {
+  async function homeGrant(): Promise<{ home: string; grant: FileScopeGrant }> {
+    const { home, identity } = await fixture();
+    return { home, grant: await resolveFileScopeGrant({ fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: home, identity } }) };
+  }
+
+  it('canonicalizes 8.3 and case variants of a home path onto the long names', async () => {
+    const { home, grant } = await homeGrant();
+    const dir = path.join(home, 'Long Directory Alpha');
+    await fs.mkdir(dir);
+    const file = path.join(dir, 'Long File Name Alpha.txt');
+    await fs.writeFile(file, 'alpha');
+    // The runner's C: keeps 8.3 names, so the home has a distinct short spelling (C:\Users\RUNNER~1\…).
+    const shortHome = shortPath(home);
+    expect(shortHome).not.toBe(home);
+    for (const variant of [
+      path.join(home, 'LONGDI~1', 'LONGFI~1.TXT'), path.join(shortHome, 'Long Directory Alpha', 'Long File Name Alpha.txt'),
+      file.toUpperCase(), file[0]!.toLowerCase() + file.slice(1),
+    ]) {
+      await expect(resolveFileScopeTarget({ grant, path: variant, access: 'write', cwd: home }), variant)
+        .resolves.toMatchObject({ path: file, exists: true, root: { id: 'home' } });
+    }
+    await expect(resolveFileScopeTarget({ grant, path: path.join(shortHome, 'LONGDI~1', 'new.txt'), access: 'write', cwd: home }))
+      .resolves.toMatchObject({ path: path.join(dir, 'new.txt'), exists: false });
+    // An 8.3-form name with no long owner is an ordinary new name.
+    await expect(resolveFileScopeTarget({ grant, path: 'LONGFI~7.TXT', access: 'write', cwd: home }))
+      .resolves.toMatchObject({ path: path.join(home, 'LONGFI~7.TXT'), exists: false });
+    await expect(resolveFileScopeTarget({ grant, path: '.', access: 'read', cwd: home, kind: 'directory' }))
+      .resolves.toMatchObject({ path: home, exists: true });
+  });
+
+  it('refuses a junction escape, an 8.3 alias outside the root and the 8.3 name of .byok', async () => {
+    const { home, grant } = await homeGrant();
+    const outside = await canonicalTmpDir('byok-guard-win-outside-');
+    await fs.symlink(outside, path.join(home, 'jn'), 'junction');
+    expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join(home, 'jn', 'new.txt'), access: 'write', cwd: home })))
+      .toMatchObject({ code: 'file_scope_denied', reason: 'symlink' });
+    await expect(fs.access(path.join(outside, 'new.txt'))).rejects.toThrow();
+    const parent = await canonicalTmpDir('byok-guard-win-alias-');
+    const root = path.join(parent, 'root');
+    await fs.mkdir(root);
+    await fs.mkdir(path.join(parent, 'Outside Directory Name'));
+    const rootGrant = await grantWith(root);
+    expect(await guardReason(() => resolveFileScopeTarget({ grant: rootGrant, path: root + '\\..\\OUTSID~1\\x.txt', access: 'read', cwd: root })))
+      .toMatchObject({ code: 'file_scope_denied', reason: 'outside_scope' });
+    await fs.mkdir(path.join(home, '.byok'));
+    for (const target of [path.join(home, 'BYOK~1', 'x.txt'), path.join(home, '.BYOK', 'x.txt')]) {
+      expect(await guardReason(() => resolveFileScopeTarget({ grant, path: target, access: 'read', cwd: home })), target)
+        .toMatchObject({ code: 'file_scope_denied', reason: 'internal_path' });
+    }
+  });
+
+  it('reads and writes under a drive root', async () => {
+    const dir = await canonicalTmpDir('byok-guard-win-drive-');
+    const grant = await grantWith(path.parse(dir).root);
+    await fs.writeFile(path.join(dir, 'a.txt'), 'a');
+    await expect(resolveFileScopeTarget({ grant, path: path.join(dir, 'a.txt'), access: 'read', cwd: dir }))
+      .resolves.toMatchObject({ path: path.join(dir, 'a.txt'), exists: true, root: { id: 'repo' } });
+    await expect(resolveFileScopeTarget({ grant, path: 'new.txt', access: 'write', cwd: dir }))
+      .resolves.toMatchObject({ path: path.join(dir, 'new.txt'), exists: false, root: { id: 'repo' } });
+  });
+
+  it('names a junction only for a path confirmed inside a root', async () => {
+    const parent = await canonicalTmpDir('byok-guard-win-confirm-');
+    const root = path.join(parent, 'Long Root Directory');
+    const outside = path.join(parent, 'Long Outside Directory');
+    await fs.mkdir(root);
+    await fs.mkdir(outside);
+    const target = await canonicalTmpDir('byok-guard-win-target-');
+    await fs.symlink(target, path.join(root, 'jn'), 'junction');
+    await fs.symlink(target, path.join(outside, 'jn'), 'junction');
     const grant = await grantWith(root);
-    expect(await guardReason(() => resolveFileScopeTarget({
-      grant, path: path.join(root, 'x'), access: 'read', cwd: grant.home.path, platform: 'win32',
-    }))).toMatchObject({ code: 'file_scope_unsupported', reason: 'unsupported_platform' });
+    expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join(outside, 'jn', 'x.txt'), access: 'write', cwd: root })))
+      .toMatchObject({ code: 'file_scope_denied', reason: 'outside_scope' });
+    // From a cwd outside every root, a relative target is refused before its walk reaches the junction.
+    expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join('jn', 'x.txt'), access: 'write', cwd: outside })))
+      .toMatchObject({ code: 'file_scope_denied', reason: 'cwd_outside_scope' });
+    // The 8.3 spelling misses the root lexically; its verified prefix canonicalizes into it.
+    const shortRoot = shortPath(root);
+    expect(shortRoot).not.toBe(root);
+    expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join(shortRoot, 'jn', 'x.txt'), access: 'write', cwd: root })))
+      .toMatchObject({ code: 'file_scope_denied', reason: 'symlink', rootId: 'repo' });
+    await expect(fs.access(path.join(target, 'x.txt'))).rejects.toThrow();
+  });
+
+  it('refuses a root that canonicalizes onto a network share (injected)', async () => {
+    const root = await canonicalTmpDir('byok-guard-win-share-');
+    const io: FileScopeIo = {
+      ...nodeFileScopeIo,
+      realpath: async (candidate) => candidate === root ? '\\\\server\\share\\ws' : nodeFileScopeIo.realpath(candidate),
+    };
+    const { home, identity } = await fixture();
+    expect(await guardReason(() => resolveFileScopeGrant({
+      fileScope: { mode: 'workspaces', roots: [{ id: 'repo', path: root, access: 'write' }] },
+      attempt: { homeAccess: 'writer' }, home: { path: home, identity }, io,
+    }))).toMatchObject({ code: 'file_scope_unavailable', reason: 'path_syntax', rootId: 'repo' });
+  });
+
+  // A second volume and mountvol exist on the GitHub Windows runner (D:, administrator).
+  it.runIf(process.env.GITHUB_ACTIONS === 'true')('refuses another volume, a junction to it and a volume mount point', async () => {
+    const { home, grant } = await homeGrant();
+    const other = realpathSync.native(await fs.mkdtemp(path.join(process.env.RUNNER_TEMP!, 'byok-guard-d-')));
+    dirs.push(other);
+    expect(path.parse(other).root).not.toBe(path.parse(home).root);
+    await fs.writeFile(path.join(other, 'd.txt'), 'd');
+    await fs.symlink(other, path.join(home, 'to-d'), 'junction');
+    const mountvol = path.join(process.env.SystemRoot!, 'System32', 'mountvol.exe');
+    const mount = path.join(home, 'mnt');
+    await fs.mkdir(mount);
+    // A recursive rm of the home must never walk into the mounted volume.
+    dirs.splice(dirs.indexOf(home), 1);
+    execFileSync(mountvol, [mount + '\\', execFileSync(mountvol, [path.parse(other).root, '/L'], { encoding: 'utf8' }).trim()]);
+    try {
+      expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join(other, 'd.txt'), access: 'read', cwd: home })))
+        .toMatchObject({ code: 'file_scope_denied', reason: 'outside_scope' });
+      expect(await guardReason(() => resolveFileScopeTarget({ grant, path: path.join(home, 'to-d', 'd.txt'), access: 'read', cwd: home })))
+        .toMatchObject({ code: 'file_scope_denied', reason: 'symlink' });
+      const throughMount = path.join(mount, path.relative(path.parse(other).root, other), 'new.txt');
+      expect(await guardReason(() => resolveFileScopeTarget({ grant, path: throughMount, access: 'write', cwd: home })))
+        .toMatchObject({ code: 'file_scope_denied', reason: 'outside_scope' });
+      await expect(fs.access(path.join(other, 'new.txt'))).rejects.toThrow();
+    } finally {
+      execFileSync(mountvol, [mount + '\\', '/D']);
+    }
+    dirs.push(home);
   });
 });

@@ -29,6 +29,7 @@ import {
   serveAgentMemoryMcpOverStdio,
   type AgentMemoryFilesystem,
   type AgentMemoryFilesystemFileState,
+  type AgentMemoryWalk,
   type AgentMemoryMcpDeps,
   type AgentMemoryTaskContext,
 } from '../agent-memory/index';
@@ -73,12 +74,14 @@ class InMemoryAgentHome implements AgentMemoryFilesystem {
     this.files.delete(filePath);
   }
 
+  async observe(): Promise<never> { throw new Error('not_used'); }
+  async cleanupForRestore(): Promise<never> { throw new Error('not_used'); }
   async append(filePath: string, content: string): Promise<void> {
     this.files.set(filePath, `${this.files.get(filePath) ?? ''}${content}`);
   }
 
-  async walk(prefix: string): Promise<readonly string[]> {
-    return [...this.files.keys()].filter((key) => key.startsWith(`${prefix}/`));
+  async walk(prefix: string): Promise<AgentMemoryWalk> {
+    return { paths: [...this.files.keys()].filter((key) => key.startsWith(`${prefix}/`)), entries: [] };
   }
 
   async close(): Promise<void> {

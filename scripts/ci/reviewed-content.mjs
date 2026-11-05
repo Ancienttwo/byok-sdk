@@ -416,6 +416,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       // The browser-safe headless model-route subpath.
       const route = { types: './dist/model-route.d.ts', import: './dist/model-route.js' };
       if (before.exports?.['./model-route'] === undefined && isDeepStrictEqual(after.exports?.['./model-route'], route)) delete after.exports['./model-route'];
+      // #1445 adds one optional dependency: koffi at the pin packages/client owns.
+      if (before.optionalDependencies === undefined && after.optionalDependencies !== undefined) {
+        const client = JSON.parse(readFileSync(resolve(cwd, 'packages/client/package.json'), 'utf8'));
+        if (isDeepStrictEqual(after.optionalDependencies, { koffi: client.optionalDependencies?.koffi })) delete after.optionalDependencies;
+      }
     }
     if (path === 'packages/core/package.json') {
       // #654 adds one subpath for sealed payload v1, so the root bundle does not grow.

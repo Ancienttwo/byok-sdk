@@ -35,12 +35,12 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
   if (run === undefined) return;
   const {
     record, activeJournal, activePressureEngine, journalIdentity, resultReplyRecoveryTasks,
-    sealedRun, recordRecoveryFailure, runtimes, harnesses, runtimeUnavailable, blobClient, agentMemoryIntentBackend,
+    sealedRun, recordRecoveryFailure, runtimes, harnesses, runtimeUnavailable, blobClient, agentMemoryBackend, agentMemoryIntentBackend,
   } = run;
   const {
     capabilities, agentHomeProjectionCompletion, processProviderProvisioningNotice,
     processAgentMemoryIntentNotice, handleRemoteInputPreparation, opened,
-  } = composeStartLanes(daemonScope, { agentMemoryIntentBackend, record, blobClient, sealedRun });
+  } = composeStartLanes(daemonScope, { agentMemoryBackend, agentMemoryIntentBackend, record, blobClient, sealedRun });
 
   const {
     sendEnvelope, replaceRefusedTerminal, refuseOverBoundEnvelope, withReplyTransition,
@@ -48,7 +48,7 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
   } = composeStartTerminals(daemonScope, { sealedRun, activeJournal, journalIdentity, opened, record });
   const { deps } = composeStartRunnerDeps(daemonScope, {
     record, sendEnvelope, withReplyTransition, activeJournal, journalIdentity, recordReplyState,
-    blobClient, opened, activePressureEngine,
+    blobClient, opened, activePressureEngine, agentMemoryBackend,
   });
   daemonState.runner = new TaskRunner(deps);
   if (config.agentHome !== undefined && config.agentEgress !== undefined) {

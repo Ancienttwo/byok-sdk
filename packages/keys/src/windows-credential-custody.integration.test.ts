@@ -1,19 +1,21 @@
 /**
  * SDK Windows v1 gate (plan A11): sealed provisioning against the REAL
- * Windows Credential Manager, run by the CI `windows-latest` leg as the
- * runner's own user (same-user convention: the daemon that applies a
- * provisioning request and the launcher that reads the key run as one user).
+ * Windows Credential Manager, run by the CI `windows-latest` and
+ * `windows-2022` legs as the runner's own user (same-user convention: the
+ * daemon that applies a provisioning request and the launcher that reads the
+ * key run as one user).
  *
  * Enabled only with `BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER=1`; setting the flag
  * off win32 is a hard failure, never a skip. Every entry is written under a
  * unique service prefix and removed afterwards.
  */
+import { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
 import { DEVICE, NOW, PROFILE_REF, TENANT, configureRequest, deleteRequest, placedIdentity, replaceSecretRequest } from './fixtures/provisioning-requests';
@@ -25,38 +27,9 @@ import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { runCommand } from './command-runner';
 import { WindowsCredentialManagerSecretStore } from './windows-credential-manager';
 
-/**
- * Backend evidence for a failure: exit code plus the bridge's bounded,
- * secret-free stderr classification line. stdout (which carries a read secret)
- * is never recorded, and any stderr that is not the exact classification
- * grammar is reduced to its length.
- */
-const backendEvidence: string[] = [];
-// PowerShell may wrap stderr in CLIXML, so the classification is located
-// inside stderr and only the matched line is reported.
-const CLASSIFICATION = /credential operation failed \((?:stage=compile,cs=\d+|stage=operation,win32=-?\d+,hresult=-?\d+)\)/u;
-async function recordingRunner(executable: string, args: string[], stdin?: string) {
-  const result = await runCommand(executable, args, stdin);
-  if (result.exitCode !== 0) {
-    const stderr = result.stderr.trim();
-    const operation = stdin === undefined ? 'probe' : String((JSON.parse(stdin) as { operation?: unknown }).operation);
-    const classified = CLASSIFICATION.exec(stderr)?.[0];
-    backendEvidence.push(`${operation}: exit=${result.exitCode} stderr=${classified ?? `<${stderr.length} chars, unclassified>`}`);
-  }
-  return result;
-}
-function withEvidence(error: unknown): Error {
-  const message = error instanceof Error ? `${(error as { code?: string }).code ?? error.name}: ${error.message}` : String(error);
-  return new Error(`${message}\nbackend evidence:\n${backendEvidence.join('\n') || '<none>'}`);
-}
-
 const ENABLED = process.env.BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER === '1';
-/**
- * Every Credential Manager operation starts PowerShell and compiles the bridge
- * type (about 1-2 s on the hosted runner), and the round trip performs a few
- * dozen of them, so vitest's 5 s default is not a meaningful bound here.
- */
-const REAL_BACKEND_TIMEOUT_MS = 180_000;
+/** The independent probes below start PowerShell and compile; the store itself takes milliseconds. */
+const REAL_BACKEND_TIMEOUT_MS = 60_000;
 if (ENABLED && process.platform !== 'win32') {
   throw new Error('BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER=1 requires win32; refusing to skip');
 }
@@ -65,120 +38,152 @@ const prefix = `com.byok.keys.ci-${randomUUID().replaceAll('-', '').slice(0, 16)
 const directory = ENABLED ? mkdtempSync(join(tmpdir(), 'byok-keys-wincred-')) : '';
 
 describe.skipIf(!ENABLED)('sealed provisioning on Windows Credential Manager', () => {
-  const secrets = new WindowsCredentialManagerSecretStore({ servicePrefix: prefix, commandRunner: recordingRunner });
+  const secrets = new WindowsCredentialManagerSecretStore({ servicePrefix: prefix });
 
   afterAll(async () => {
     try {
       await secrets.delete(DEVICE_SEALING_SECRET_NAME);
       await secrets.delete(modelProviderSecretName(PROFILE_REF));
-    } catch (error) {
-      throw withEvidence(error);
     } finally {
       rmSync(directory, { force: true, recursive: true });
     }
   }, REAL_BACKEND_TIMEOUT_MS);
 
-  it('root-cause evidence: the pre-fix bridge type definition does not compile on this runner (CS0104)', async () => {
-    // The exact struct shape the bridge shipped before the fix: both
-    // InteropServices namespaces imported, FILETIME unqualified.
-    const script = String.raw`
-try {
-Add-Type -ErrorAction Stop -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
-namespace ByokPreFixProbe {
-  public static class Probe {
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    public struct Credential { public UInt32 Flags; public FILETIME LastWritten; }
-  }
-}
-"@
-  [Console]::Out.Write("compiled")
-} catch {
-  $compilerCode = 99
-  $errorNumber = [string]$_.TargetObject.ErrorNumber
-  if ($errorNumber -match '\ACS([0-9]{4})\z') { $compilerCode = [Convert]::ToInt32($Matches[1]) }
-  [Console]::Out.Write("cs=" + $compilerCode)
-}
-`;
-    const result = await runCommand('powershell.exe', [
-      '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64'),
-    ]);
-    process.stdout.write(`[windows-credential-root-cause] pre-fix bridge compile: ${result.stdout.trim()}\n`);
-    expect(result.stdout.trim()).toBe('cs=104');
+  it('reports an absent credential as absent (read) and as false (delete)', async () => {
+    await expect(secrets.get('model-absent-probe-api-key')).resolves.toBeUndefined();
+    await expect(secrets.delete('model-absent-probe-api-key')).resolves.toBe(false);
   }, REAL_BACKEND_TIMEOUT_MS);
 
-  it('reports an absent credential as absent (read) and as false (delete)', async () => {
-    try {
-      await expect(secrets.get('model-absent-probe-api-key')).resolves.toBeUndefined();
-      await expect(secrets.delete('model-absent-probe-api-key')).resolves.toBe(false);
-    } catch (error) {
-      throw withEvidence(error);
-    }
+  it('reads the Win32 error of a failed call from the async callback', async () => {
+    const tooLong = new WindowsCredentialManagerSecretStore({ servicePrefix: `${prefix}-${'a'.repeat(33_000)}` });
+    // Both calls fail in the RPC to lsass with RPC_S_INVALID_BOUND.
+    await expect(tooLong.get('model-absent-probe-api-key')).rejects.toThrow('win32=1734');
+    await expect(tooLong.set('model-absent-probe-api-key', 'sk-wincred-too-long')).rejects.toThrow('win32=1734');
   }, REAL_BACKEND_TIMEOUT_MS);
 
   /**
-   * Whether Credential Manager holds a generic credential under exactly this
-   * target string. Independent of the store under test: the script (and the
-   * target inside it) travels as UTF-16LE base64 on the command line, so the
-   * stdin code-page decoding the store depends on is not involved.
+   * The entry format every earlier release wrote, through the C# bridge those
+   * releases used. Independent of the store under test: the script (and the
+   * target inside it) travels as UTF-16LE base64 on the command line.
    */
-  async function credentialExists(target: string): Promise<boolean> {
-    expect(target).not.toContain("'");
+  async function independentEntry(operation: string): Promise<string> {
     const script = String.raw`
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
-namespace ByokUnicodeTargetProbe {
+using System.Text;
+namespace ByokEntryProbe {
   public static class Native {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct Credential {
+      public UInt32 Flags;
+      public UInt32 Type;
+      [MarshalAs(UnmanagedType.LPWStr)] public string TargetName;
+      [MarshalAs(UnmanagedType.LPWStr)] public string Comment;
+      public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+      public UInt32 CredentialBlobSize;
+      public IntPtr CredentialBlob;
+      public UInt32 Persist;
+      public UInt32 AttributeCount;
+      public IntPtr Attributes;
+      [MarshalAs(UnmanagedType.LPWStr)] public string TargetAlias;
+      [MarshalAs(UnmanagedType.LPWStr)] public string UserName;
+    }
     [DllImport("Advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool CredRead(string target, UInt32 type, UInt32 flags, out IntPtr credential);
-    [DllImport("Advapi32.dll", SetLastError = true)]
+    [DllImport("Advapi32.dll", EntryPoint = "CredWriteW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool CredWrite([In] ref Credential credential, UInt32 flags);
+    [DllImport("Advapi32.dll", SetLastError = false)]
     private static extern void CredFree(IntPtr buffer);
-    public static int Probe(string target) {
+    public static string Read(string target) {
       IntPtr pointer;
-      if (!CredRead(target, 1, 0, out pointer)) return Marshal.GetLastWin32Error();
-      CredFree(pointer);
-      return 0;
+      if (!CredRead(target, 1, 0, out pointer)) return "win32=" + Marshal.GetLastWin32Error();
+      try {
+        Credential entry = (Credential)Marshal.PtrToStructure(pointer, typeof(Credential));
+        byte[] blob = new byte[entry.CredentialBlobSize];
+        if (blob.Length > 0) Marshal.Copy(entry.CredentialBlob, blob, 0, blob.Length);
+        return String.Join("|", entry.Flags, entry.Type, entry.Persist, entry.AttributeCount, entry.Comment, entry.TargetAlias, Convert.ToBase64String(Encoding.UTF8.GetBytes(entry.UserName)), Convert.ToBase64String(blob));
+      } finally {
+        CredFree(pointer);
+      }
+    }
+    public static string Write(string target, string username, string secret) {
+      byte[] bytes = Encoding.UTF8.GetBytes(secret);
+      IntPtr blob = Marshal.AllocHGlobal(bytes.Length);
+      try {
+        Marshal.Copy(bytes, 0, blob, bytes.Length);
+        Credential entry = new Credential {
+          Type = 1, TargetName = target, CredentialBlobSize = (UInt32)bytes.Length,
+          CredentialBlob = blob, Persist = 2, UserName = username
+        };
+        return CredWrite(ref entry, 0) ? "written" : "win32=" + Marshal.GetLastWin32Error();
+      } finally {
+        Marshal.FreeHGlobal(blob);
+      }
     }
   }
 }
 "@
-[Console]::Out.Write([ByokUnicodeTargetProbe.Native]::Probe('${target}'))
+[Console]::Out.Write([ByokEntryProbe.Native]::${operation})
 `;
     const result = await runCommand('powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64'),
     ]);
     expect(result.exitCode, result.stderr).toBe(0);
-    const outcome = result.stdout.trim();
-    // 0 = found, 1168 = ERROR_NOT_FOUND; anything else is a probe failure.
-    expect(outcome === '0' || outcome === '1168', outcome).toBe(true);
-    return outcome === '0';
+    return result.stdout.trim();
   }
 
-  it('keeps non-ASCII request fields distinct across the stdin boundary', async () => {
-    // Decoded with the console code page the stdin bytes become garbled but
-    // still distinct strings (cp437: U+8D26 -> three symbol characters), so a
-    // set/get round trip through the same store passes on the old code too.
-    // The proof is therefore the target as Credential Manager holds it: read
-    // back without stdin, it must exist under the real Unicode string.
+  const base64 = (text: string) => Buffer.from(text, 'utf8').toString('base64');
+  const readIndependently = (target: string) => {
+    expect(target).not.toContain("'");
+    return independentEntry(`Read('${target}')`);
+  };
+
+  it('writes and reads the same entry bytes as every earlier release', async () => {
+    const name = 'model-format-probe-api-key';
+    const secret = 'sk-wincred-format-余额';
+    const target = `${prefix}.${name}`;
+    try {
+      await secrets.set(name, secret);
+      await expect(readIndependently(target)).resolves.toBe(
+        `0|1|2|0|||${base64('local-device')}|${base64(secret)}`,
+      );
+      await secrets.delete(name);
+      await expect(independentEntry(`Write('${target}', 'local-device', 'sk-wincred-format-earlier')`)).resolves.toBe('written');
+      await expect(secrets.get(name)).resolves.toBe('sk-wincred-format-earlier');
+    } finally {
+      await secrets.delete(name);
+    }
+  }, REAL_BACKEND_TIMEOUT_MS);
+
+  it('applies concurrent writes in call order', async () => {
+    const name = 'model-queue-probe-api-key';
+    try {
+      await Promise.all(Array.from({ length: 8 }, (_, index) => secrets.set(name, `sk-wincred-queue-${index}`)));
+      await expect(secrets.get(name)).resolves.toBe('sk-wincred-queue-7');
+    } finally {
+      await secrets.delete(name);
+    }
+  }, REAL_BACKEND_TIMEOUT_MS);
+
+  it('keeps non-ASCII targets and accounts distinct', async () => {
+    // A set/get round trip through one store would pass even with garbled but
+    // distinct strings, so the proof is the target as Credential Manager holds
+    // it: read back independently, it must exist under the real Unicode string.
     const name = 'model-unicode-probe-api-key';
     const firstPrefix = `${prefix}-账`;
     const secondPrefix = `${prefix}-户`;
-    const first = new WindowsCredentialManagerSecretStore({ servicePrefix: firstPrefix, account: 'local-账', commandRunner: recordingRunner });
-    const second = new WindowsCredentialManagerSecretStore({ servicePrefix: secondPrefix, account: 'local-户', commandRunner: recordingRunner });
+    const first = new WindowsCredentialManagerSecretStore({ servicePrefix: firstPrefix, account: 'local-账' });
+    const second = new WindowsCredentialManagerSecretStore({ servicePrefix: secondPrefix, account: 'local-户' });
     try {
       await first.set(name, 'sk-wincred-unicode-first');
-      await expect(credentialExists(`${firstPrefix}.${name}`)).resolves.toBe(true);
-      await expect(credentialExists(`${secondPrefix}.${name}`)).resolves.toBe(false);
+      await expect(readIndependently(`${firstPrefix}.${name}`)).resolves.toContain(`|${base64('local-账')}|`);
+      await expect(readIndependently(`${secondPrefix}.${name}`)).resolves.toBe('win32=1168');
       await second.set(name, 'sk-wincred-unicode-second');
-      await expect(credentialExists(`${secondPrefix}.${name}`)).resolves.toBe(true);
+      await expect(readIndependently(`${secondPrefix}.${name}`)).resolves.toContain(`|${base64('local-户')}|`);
       await expect(first.get(name)).resolves.toBe('sk-wincred-unicode-first');
       await expect(second.get(name)).resolves.toBe('sk-wincred-unicode-second');
-    } catch (error) {
-      throw withEvidence(error);
     } finally {
       await first.delete(name).catch(() => false);
       await second.delete(name).catch(() => false);
@@ -186,14 +191,6 @@ namespace ByokUnicodeTargetProbe {
   }, REAL_BACKEND_TIMEOUT_MS);
 
   it('creates the sealing key, applies configure/replace/delete, and the launcher reads only consistent pairs', async () => {
-    try {
-      await roundTrip();
-    } catch (error) {
-      throw withEvidence(error);
-    }
-  }, REAL_BACKEND_TIMEOUT_MS);
-
-  async function roundTrip(): Promise<void> {
     await expect(secrets.available()).resolves.toBe(true);
     const enrollment = { tenantId: TENANT, deviceId: DEVICE };
     const sealingKey = await new DeviceSealingKeyStore({ secretStore: secrets }).loadOrCreate(enrollment);
@@ -213,8 +210,13 @@ namespace ByokUnicodeTargetProbe {
     expect(await apply(await configureRequest(sealingKey, 'sk-wincred-canary-first', { requestId: 'w1', generation: 1 })))
       .toMatchObject({ outcome: 'applied', secretConfigured: true });
     const profile = (await profileStore.get(PROFILE_REF))!;
+    const spawned = vi.spyOn(ChildProcess.prototype as unknown as { spawn(): void }, 'spawn');
     await expect(readProviderCustodySnapshot({ profiles: profileStore, profile, createSecretStore: () => secrets }))
       .resolves.toBe('sk-wincred-canary-first');
+    expect(spawned).not.toHaveBeenCalled();
+    await runCommand(process.execPath, ['-e', '']);
+    expect(spawned).toHaveBeenCalledTimes(1);
+    spawned.mockRestore();
 
     expect(await apply(await replaceSecretRequest(sealingKey, 'sk-wincred-canary-second', { requestId: 'w2', generation: 2, expected: await expected() })))
       .toMatchObject({ outcome: 'applied' });
@@ -225,5 +227,5 @@ namespace ByokUnicodeTargetProbe {
       .toMatchObject({ outcome: 'applied', secretConfigured: false });
     await expect(secrets.has(modelProviderSecretName(PROFILE_REF))).resolves.toBe(false);
     await profileStore.close();
-  }
+  }, REAL_BACKEND_TIMEOUT_MS);
 });

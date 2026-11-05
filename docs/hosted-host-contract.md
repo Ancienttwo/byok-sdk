@@ -420,9 +420,8 @@ What the kept rows hold:
 | `agent_message_admission` row | The full publish payload, with the message `body`, in `payload_body` (`NOT NULL`). The payload again in `terminal_body`, with the disposition. | `deploy/sql/0017_agent_message_admission.sql:16-17`, `packages/cloud/src/inbound.ts:262-268`, `packages/cloud/src/inbound.ts:289-296`, `packages/protocol/src/messages.ts:488-499` |
 | `task` row | Status, owner, claim snapshot and cancel marker | `packages/cloud-dataplane/src/stores/task-attempts.ts:53` |
 
-- The SDK has no ContextPack field. The K4 execution core (`@byok-sdk/server/execution-core`) adds its ContextPack to the inline instruction
-  (`packages/server/src/execution-core/core.ts:655-663`).
-  So the cloud keeps that ContextPack, with its resident memory text, as long as it keeps the offer receipt.
+- The SDK has no ContextPack field, and the K4 execution core (`@byok-sdk/server/execution-core`) adds no memory to the instruction.
+  So the offer receipt holds resident memory text only when a Host wrote it into the instruction itself. The device adds `MEMORY.md` after it receives the offer.
 - An `agent_message_admission` row goes only when its `task` row goes (`deploy/sql/0017_agent_message_admission.sql:20-22`).
 - The `tasks` maintenance step archives a terminal task once its `archive_after` is older than `terminalTaskArchiveMs`
   (default 90 days) (#1120). Every body in the table above becomes a body-free tombstone (hash, byte length, envelope type),

@@ -345,9 +345,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
       delete state.questions.q1; delete state.cards.c1;
     });
     const retention = { acknowledgedRoots: [turn], now: FIRST, retentionMs: MIN_TOMBSTONE_RETENTION_MS };
-    await expect(store().retain(scope, retention, { contextTurnLimit: 1 })).rejects.toThrow('A routine occurrence of the root is open');
+    await expect(store().retain(scope, retention, { contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } })).rejects.toThrow('A routine occurrence of the root is open');
     await store().sync(scope, { ...SYNC, now: FIRST });
-    expect(await store().retain(scope, retention, { contextTurnLimit: 1 })).toMatchObject({ archivedRoots: 1 });
+    expect(await store().retain(scope, retention, { contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } })).toMatchObject({ archivedRoots: 1 });
   });
 
   it('maps an occurrence key to its intent key and back in SQL as the K4 functions do', async () => {

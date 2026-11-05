@@ -47,14 +47,16 @@ describe('isSealedTaskPlainOutput (#654 12d)', () => {
     expect(isSealedTaskPlainOutput(type, payload, ['task-output'])).toBe(false);
   });
 
-  it.each(['task.fail', 'task.cancelled'])('keeps %s memory evidence plaintext only when the task does not seal memory-projection (#1045)', (type) => {
-    const payload = {
-      ...(type === 'task.fail' ? { reason: 'sealed_key_unavailable', retryable: false } : {}),
-      agentHomeMemoryChange: { outcome: 'reader-attributed', paths: ['notes/plan.md'] },
-    };
+  it.each([
+    ['task.fail', { agentHomeMemoryChange: { outcome: 'reader-attributed', paths: ['notes/plan.md'] } }],
+    ['task.cancelled', { agentHomeMemoryChange: { outcome: 'reader-attributed', paths: ['notes/plan.md'] } }],
+    ['task.fail', { residentMemoryOverLimit: { byteCount: 12288 } }],
+    ['task.cancelled', { residentMemoryOverLimit: { byteCount: 12288 } }],
+  ])('keeps %s memory evidence %j plaintext only when the task does not seal memory-projection (#1045, #1439)', (type, evidence) => {
+    const plain = type === 'task.fail' ? { reason: 'sealed_key_unavailable', retryable: false } : {};
+    const payload = { ...plain, ...evidence };
     expect(isSealedTaskPlainOutput(type, payload, ['task-output'])).toBe(true);
     expect(isSealedTaskPlainOutput(type, payload, ['task-output', 'memory-projection'])).toBe(false);
-    const { agentHomeMemoryChange: _evidence, ...without } = payload;
-    expect(isSealedTaskPlainOutput(type, without, ['task-output', 'memory-projection'])).toBe(true);
+    expect(isSealedTaskPlainOutput(type, plain, ['task-output', 'memory-projection'])).toBe(true);
   });
 });

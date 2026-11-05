@@ -490,7 +490,8 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
   batch or a reserved unit; an open card or question; an open input batch; an
   open round or seat; an open delivery or a live reply route; an open routine
   occurrence; or a Turn, card or question in the ContextPack window of its
-  Bot (the last `contextTurnLimit` Turns, the last 12 cards and questions).
+  Bot (the Turns from the oldest turn of its handoff pack to its newest, and
+  the last 12 cards and questions, bounded by `contextTurnLimit`).
   Unconsumed rejections stay in the state.
 - An unknown root throws. A root that is already archived counts as
   `alreadyArchivedRoots`.
@@ -505,9 +506,15 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
   id and an input id are one identity space (`retiredIdentity`): an input
   that does not coalesce becomes a Turn with its own id, and the coalescing
   policy can change between retention and a retry.
-- The ContextPack window of a Bot with a Turn that has not frozen yet (queued
-  or blocked) is its last `contextTurnLimit + 1` Turns, because that Turn
-  reads the last `contextTurnLimit` other Turns.
+- The handoff pack of the window leaves out the Bot's Turns that can still
+  freeze (queued or blocked), and its total is at least `recentBytes +
+  earlyBytes` plus the pack frame, so `earlier` always gets all of `earlyBytes`.
+  A freeze has no more than that, a Cross-Bot Turn often less, and the Turns it
+  adds only start `earlier` at a newer turn, so no freeze reads a turn older
+  than the window. `Host.retain` uses the `handoff` budgets of a freeze, and
+  `RetentionLimits.handoff` is required, so a store that calls `retainRoots`
+  passes the budgets it freezes with. Room messages and rejections still go by
+  `contextTurnLimit`.
 - Each call moves the audit lines, revoked push routes that no delivery uses,
   and settled persona deliveries: applied ones except the newest of each Bot,
   and failures of an older profile revision. These archived rows stay.
@@ -520,7 +527,7 @@ does that on the Host's explicit acknowledgement. It never runs on its own.
   in the kept list, so each member sees the same kept messages as before. The
   state, and so a snapshot, no longer holds the whole room history.
   `historyWindow.omittedMessages` and `notice` of a seat ContextPack count only
-  messages still in the state, as `omittedTurns` does; a count over moved
+  messages still in the state, as `history.omittedTurns` does; a count over moved
   messages would need a stored count for each Bot.
 
 After retention, a late message for an archived Turn gets `binding_mismatch`,
@@ -714,9 +721,9 @@ transaction freezes only a Turn that still has no offer.
   itself. `contextTurns` checks rows in this shape and returns them as
   `ContextTurn[]`. The K8 entry exports both and the `ContextTurn` type
   (#1356).
-- A row's `reply` counts in `contextMaxBytes` with the rest of the row. When
-  the rows do not fit, whole rows go oldest first and `historyWindow` counts
-  them; a reply is never cut.
+- A row's `request` and `reply` become the lines of its turn in `history`, and
+  the handoff budgets bound them as for stored Turns (see
+  [Group chat and Main Bot](#group-chat-and-main-bot)).
 - The rows replace the stored Turns in that ContextPack. The current Turn
   always comes from this ledger.
 - The collaboration state does not store the rows. The Turn keeps their hash
@@ -1016,15 +1023,32 @@ The ledger retains its full audit history. No Summary is generated. Authority
 enums and required control metadata are not silently truncated. If non-history
 metadata plus the accepted Request exceeds the budget after history is removed,
 the notice reports that separate condition. That condition does not block.
-Private turns use the same history window. They select at most 100 old turns.
+A Bot Turn outside a room carries its history in `history`, the
+`@byok-sdk/protocol` `buildHandoffPack` result (#1446). A row becomes a turn:
+`lines` is `{ speaker: source, text: request }`, then
+`{ speaker: 'bot', text: reply }` when the row has a reply, and `meta` is
+`{ id, root, hop, status, conclusion?, outcomeSummary }`. `history.recent`
+holds the newest whole turns, `history.earlier` holds excerpts of the turns
+before them, and `history.omittedTurns` counts the rest. The `handoff` option
+sets `recentBytes`, `earlyBytes` and `totalBytes`, by default 40 KiB, 6 KiB and
+46 KiB (`DEFAULT_HANDOFF_BUDGETS`), and construction refuses a value that
+`buildHandoffPack` refuses. A snapshot view from `contextPack` has the
+candidate as the newest turn of `recent`, which may be cut; an empty `recent`
+with turns in the input means the candidate did not fit, and the last turn of
+`earlier` is not the candidate. `contextMaxBytes` covers the Request and the
+ContextPack without `history`. `contextTurnLimit` selects no history; it still
+bounds refusals, cards, questions and the room messages that retention keeps.
+A room seat keeps `room.messages`, as above.
+
 Cards and questions each retain at most 12 items. Pending work takes priority.
 The Host removes old refusals, settled items, old messages, then pending items.
-`historyWindow.turnLimit` names the message or turn count limit. Both room and
-private context also report `omittedTurns`, `omittedMessages`, `omittedCards`,
+`historyWindow.turnLimit` names the message or item count limit. Both room and
+private context also report `omittedMessages`, `omittedCards`,
 `omittedQuestions`, `omittedPendingCards`, `omittedPendingQuestions`, and
-`omittedRejections`. Zero counts remain explicit. The same byte accounting
-includes the Request and all selected context. Full outcomes stay in the
-ledger. Context includes action names and the current routine definition.
+`omittedRejections`, and a room seat reports `omittedTurns`. Zero counts remain
+explicit. `historyWindow.notice` also reports turns that `history` omits. Full
+outcomes stay in the ledger. Context includes action names and the current
+routine definition.
 
 Rejected feedback is private to its Bot. The next frozen input reserves it.
 An execution that fails before it starts releases that reservation.
@@ -1044,6 +1068,24 @@ A delayed post appended after joining is visible. Already frozen offers keep
 their selected window. A room without an earlier offset starts at the next
 user input; its older history is not disclosed.
 
+A room Turn never gets `memory_save` (#1446): other users' and Bots' text
+reaches it, and what a Turn saves comes back in every later Turn of that Bot.
+`syncTurn` freezes a `room_slot` Turn with a lower `payload.agentMemory`:
+`read-write` becomes `read`, `read-write-if-admitted` becomes
+`read-if-admitted`, and a template without the field freezes as
+`read-if-admitted`. `none`, `read` and `read-if-admitted` stay. The mode only
+goes down. Every other source keeps the template value, a sealed routine Turn
+too, and the frozen execution stores the mode that the offer carries, so replay
+does not change. `read-if-admitted` needs a device that advertises
+`agent-memory-selection` and `agent-memory-read-if-admitted`; a daemon with an
+Agent home advertises both.
+
+Read-only here means no `memory_save` and no memory-writing guidance. The SDK
+does not make memory files read-only ([protocol](../../docs/protocol.md)
+§2.2): a Bot whose toolset can write files can still change `MEMORY.md` from a
+room Turn. A Host that needs to stop that narrows the toolset or the file scope
+of the Bot's template.
+
 `src/group-chat.test.ts` uses a real embedded SDK, daemon, HTTP transport,
 SQLite reopen, persona writes, and submit_result helper. `src/rooms.test.ts`
 checks budgets, authority, atomic refusal, and context limits as state rules.
@@ -1060,12 +1102,17 @@ not store them; each is published once, in the transaction that makes it
 true.
 
 - `room-seat:<roomId>:<seatId>` with `{ roomId, root, roundId, seatId, botId,
-  status, late, reason? }`, when the seat becomes terminal: `post`, `pass`,
+  status, late, reason?, triggerMessageId? }`, when the seat becomes terminal: `post`, `pass`,
   `failed`, `busy`, `removed` or `blocked`. `late` is not terminal; a late
   seat is published when its Turn ends. `reason` is the conclusion or block
   reason that the seat stores. A seat with no admitted Turn, such as a
   waiting seat whose Bot left the room, is published too, though it has no
-  `bot-turn:` projection.
+  `bot-turn:` projection. Only a seat that a `room_call` opened has
+  `triggerMessageId`, the message the seat answers: the caller's post (its
+  seat id), or, when the caller passed, the message the caller answered (its
+  own `triggerMessageId`, else the root). A Host tells a mentioned seat from a
+  `room_call` seat by this field and does not derive it from the seat id. A
+  seat opened before the release that added the field is not backfilled.
 - `room-root:<roomId>:<root>` with `{ roomId, root, seats }`, when every seat
   of every round of the root is terminal, the seats that a `room_call` added
   included. `seats` lists their ids in reservation order; each has its
@@ -1231,9 +1278,12 @@ ContextPack. A unit is spent at the first observed claim and released when it
 can no longer be needed. `spent + reserved <= 12` holds after each transaction.
 
 A `bot_request` or `bot_reply` instruction puts request text and reply bodies
-once, as raw UTF-8 in length-framed blocks. History, team notes, rooms, and
-routines are trimmed oldest first. `instructionMaxBytes` (default 65 536)
-bounds the whole instruction. Construction refuses a value below
+once, as raw UTF-8 in length-framed blocks. Team notes, rooms, and routines
+are trimmed oldest first, and background has priority: `history` gets only the
+bytes left after it, up to `handoff.totalBytes`. A larger
+`instructionMaxBytes` can therefore leave less history, because more background
+stays. `instructionMaxBytes` (default 65 536) bounds the whole instruction.
+Construction refuses a value below
 `minimumInstructionBytes(SYSTEM_PROMPT)`. The minimum includes the
 `openDelegations` block of a Main Bot reply Turn.
 

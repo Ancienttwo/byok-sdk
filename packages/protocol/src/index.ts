@@ -350,6 +350,7 @@ export {
   ConnHelloPayloadSchema,
   AgentHomeAccessSchema,
   AgentMemorySelectionSchema,
+  AgentMemoryCommitSchema,
   SessionSelectionSchema,
   TaskOfferPayloadSchema,
   TaskOfferPlainPayloadSchema,
@@ -394,6 +395,7 @@ export {
   TerminalPreparedObservationSchema,
   TerminalAgentHomeProjectionSchema,
   TerminalAgentHomeMemoryChangeSchema,
+  TerminalResidentMemoryOverLimitSchema,
   AGENT_HOME_MEMORY_DIGEST_MAX_FILES,
   AGENT_HOME_MEMORY_DIGEST_MAX_BYTES,
   AGENT_HOME_MEMORY_PATH_MAX_LENGTH,
@@ -467,8 +469,10 @@ export type {
   TerminalPreparedObservation,
   TerminalAgentHomeProjection,
   TerminalAgentHomeMemoryChange,
+  TerminalResidentMemoryOverLimit,
   AgentHomeAccess,
   AgentMemorySelection,
+  AgentMemoryCommit,
 } from './messages';
 
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
@@ -624,3 +628,4 @@ export type {
 export * from './bot-turn-outcome';
 export * from './routine-schedule';
 export { resultOutcomeMaxBytes } from './result-schema';
+export * from './handoff-pack';

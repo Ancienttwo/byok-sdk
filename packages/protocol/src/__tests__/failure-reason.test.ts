@@ -6,6 +6,7 @@ import {
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
+  truncateUtf8,
 } from '../index';
 import { boundFailureReason as constantsEntryBound } from '../constants';
 
@@ -127,6 +128,11 @@ describe('task.fail reason on the wire (#1124)', () => {
     expect(reason).not.toContain(FAKE.openai);
     expect(reason).toMatch(/^exit 1; stderr: OPENAI_API_KEY=\[redacted\] e+\u2026\[truncated \d+ bytes\]$/u);
     expect(bytes(reason)).toBeLessThanOrEqual(TASK_FAIL_REASON_MAX_BYTES);
+  });
+
+  it.each([false, true])('truncateUtf8 reserves the marker by the given measure, keepTail %s', keepTail => {
+    const measure = (text: string) => text.length * 2;
+    expect(measure(truncateUtf8('a'.repeat(200), 100, { measure, keepTail }))).toBeLessThanOrEqual(100);
   });
 
   it('round-trips a bounded envelope byte-for-byte', () => {

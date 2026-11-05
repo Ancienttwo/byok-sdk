@@ -1,7 +1,7 @@
 import { OperationalHealthTracker } from '../operational-health';
 import { OwnedProcessLedger } from '../owned-process-ledger';
 import { CursorStore } from '../cursor-store';
-import { AgentHomeManager, AgentHomeLeaseManager, stableAgentHomeOwnerId } from '../../agent-home';
+import { AgentHomeManager, AgentHomeLeaseManager, stableAgentHomeOwnerId, type AgentHomeLeaseManagerOptions } from '../../agent-home';
 import { AgentSessionHandoffStore } from '../agent-session-handoff-store';
 import { resolveContentReadPolicies } from './support';
 import { AgentEgressController } from '../agent-egress-controller';
@@ -14,8 +14,10 @@ import type { DaemonStoreScope } from './stores';
  * cursors), the Agent home manager and session handoffs, the content-read
  * policies, and the egress controller used until enrollment is loaded.
  */
-export function composeDaemonWorkspaces(input: Pick<DaemonInputs & DaemonStoreScope, 'storeDir' | 'config' | 'egressPolicy'>) {
-  const { storeDir, config, egressPolicy } = input;
+export function composeDaemonWorkspaces(
+  input: Pick<DaemonInputs & DaemonStoreScope, 'storeDir' | 'config' | 'egressPolicy'> & Required<Pick<AgentHomeLeaseManagerOptions, 'settleAgentMemoryCommit'>>,
+) {
+  const { storeDir, config, egressPolicy, settleAgentMemoryCommit } = input;
   const logMember = (message: string): void => console.warn(`[byok/client] ${message}`);
   const operationalHealth = new OperationalHealthTracker(storeDir);
   const ownedProcessLedger = new OwnedProcessLedger(storeDir);
@@ -28,6 +30,7 @@ export function composeDaemonWorkspaces(input: Pick<DaemonInputs & DaemonStoreSc
         ...(config.agentHome.projection === undefined ? {} : { projection: config.agentHome.projection }),
         leaseManager: new AgentHomeLeaseManager({
           ownerId: stableAgentHomeOwnerId(storeDir, config.productId),
+          settleAgentMemoryCommit,
         }),
       });
   const agentSessionHandoffs = config.agentHome === undefined ? undefined : new AgentSessionHandoffStore();

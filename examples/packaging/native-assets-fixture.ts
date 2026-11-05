@@ -1,6 +1,22 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { runSdkReservedHelperCommand } from '@byok-sdk/client';
+import { readDeviceEnrollmentStatus, runSdkReservedHelperCommand } from '@byok-sdk/client';
+import { DeviceCredentialStore } from '../../packages/client/src/daemon/device-credential-store';
 import { createOwnedLineProcessSpawn } from '../../packages/client/src/runtime/owned-line-process';
+
+/** One Credential Manager round trip of the packaged Host, through its own native asset root. */
+async function credentialRoundTrip(nativeAssetRoot: string, storeDir: string): Promise<void> {
+  const productId = `native-assets-sea-${process.pid}-${Date.now()}`;
+  const record = { deviceId: 'device-sea', tenantId: 'tenant-sea', devicePublicKey: 'public', accessToken: 'token', expiresAt: '2030-01-01T00:00:00.000Z', devicePrivateKeyPem: 'private' };
+  const store = new DeviceCredentialStore({ productId, storeDir, nativeAssetRoot });
+  try {
+    const status = await readDeviceEnrollmentStatus({ productId, storeDir, nativeAssetRoot });
+    await store.replace(record);
+    const stored = await new DeviceCredentialStore({ productId, storeDir, nativeAssetRoot }).read();
+    process.stdout.write(`${JSON.stringify({ status: status.state, roundTrip: stored?.accessToken === record.accessToken, cleared: await store.clear() })}\n`);
+  } catch (error) {
+    process.stdout.write(`${JSON.stringify({ failed: error instanceof Error ? error.name : String(error) })}\n`);
+  }
+}
 
 async function main() {
   if (await runSdkReservedHelperCommand(process.argv.slice(2))) return;
@@ -12,6 +28,7 @@ async function main() {
     setInterval(() => {}, 1000); return;
   }
   const nativeAssetRoot = process.argv[3]!;
+  if (mode === '--credentials') { await credentialRoundTrip(nativeAssetRoot, process.argv[4]!); return; }
   let child: ChildProcess | undefined;
   const owned = createOwnedLineProcessSpawn({ nativeAssetRoot,
     spawnFn: (command, args, options) => { child = spawn(command, args, options); return child; },

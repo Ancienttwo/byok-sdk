@@ -31,7 +31,7 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
     ownedProcessLedger, scratchRoot, storeDir, daemonState, initializeInputPreparation, config,
     retentionSweeper, replaceControlServer, setLifecycle, initializeOwnedHostedStorage,
     storagePressure, egressPolicy, agentHomeManager, cursorStore, terminalCommits, operationalHealth,
-    observer, adapters, provenAgentMemoryIntentBackend,
+    observer, adapters, provenAgentMemoryBackend,
   } = daemonScope;
   // #384 item 3 / #393: on POSIX a SIGKILLed or OOM-killed daemon leaves its
   // owned runtime groups running, and a tool process in one could still be
@@ -237,10 +237,11 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
   observer.noteRuntimesDetected(daemonState.runtimeObservations.map(observation => ({ ...observation })));
   daemonState.detectedRuntimeFacts = runtimes;
   daemonState.detectedRuntimeUnavailable = runtimeUnavailable;
-  const agentMemoryIntentBackend = await provenAgentMemoryIntentBackend();
+  const agentMemoryBackend = await provenAgentMemoryBackend();
+  const agentMemoryIntentBackend = config.agentMemoryIntents === undefined ? undefined : agentMemoryBackend;
   return {
     record, activeJournal, activePressureEngine, journalIdentity, resultReplyRecoveryTasks,
-    sealedRun, recordRecoveryFailure, runtimes, harnesses, runtimeUnavailable, blobClient, agentMemoryIntentBackend,
+    sealedRun, recordRecoveryFailure, runtimes, harnesses, runtimeUnavailable, blobClient, agentMemoryBackend, agentMemoryIntentBackend,
   };
 }
 

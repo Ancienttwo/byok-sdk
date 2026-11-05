@@ -19,6 +19,7 @@ import { SealedTasks } from '../daemon/sealed-task';
 import type {
   AgentMemoryFilesystem,
   AgentMemoryFilesystemFileState,
+  AgentMemoryWalk,
 } from '../daemon/agent-memory-filesystem';
 
 const encoder = new TextEncoder();
@@ -49,14 +50,16 @@ class InMemoryFilesystem implements AgentMemoryFilesystem {
     this.files.delete(filePath);
   }
 
+  async observe(): Promise<never> { throw new Error('not_used'); }
+  async cleanupForRestore(): Promise<never> { throw new Error('not_used'); }
   async append(filePath: string, content: string, maxBytes: number): Promise<void> {
     const next = `${this.files.get(filePath) ?? ''}${content}`;
     if (encoder.encode(next).byteLength > maxBytes) throw new Error('size_limit');
     this.files.set(filePath, next);
   }
 
-  async walk(): Promise<readonly string[]> {
-    return [];
+  async walk(): Promise<AgentMemoryWalk> {
+    return { paths: [], entries: [] };
   }
 
   async close(): Promise<void> {}

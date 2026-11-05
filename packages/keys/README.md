@@ -524,8 +524,8 @@ whatever `index.ts` re-exports; nothing here is reachable by deep import.
 | `secret-name.ts` | Runtime validation of secret entry names and namespaces, including the dot exclusion that stops one scope from spelling out another's storage key |
 | `secret-scope.ts` | `SecretScope` and the envelope-scoped store that partitions a credential store by account and workspace |
 | `macos-keychain.ts` | `SecretStore` backed by the macOS Keychain via the `security` CLI |
-| `windows-credential-manager.ts` | `SecretStore` backed by the Win32 credential API via a PowerShell bridge |
-| `command-runner.ts` | The `CommandRunner` injection seam both OS backends are written against, so no unit test touches a real credential store |
+| `windows-credential-manager.ts` | `SecretStore` backed by the Win32 credential API, called in process through koffi (the optional dependency pinned with `@byok-sdk/client`); every native call goes through one FIFO with a 15 s deadline that includes the wait |
+| `command-runner.ts` | The `CommandRunner` injection seam the macOS backend is written against, so no unit test touches a real credential store |
 | `profile-store.ts` | The `ProviderProfileStore` persistence contract, plus the in-memory implementation |
 | `sqlite-profile-store.ts` | `SqliteProviderProfileStore` — on-disk profile persistence on `node:sqlite` |
 | `truth-profile-store.ts` | `TruthStoreProviderProfileStore` — tenant-bound deterministic registry snapshot with CAS and integrity validation |

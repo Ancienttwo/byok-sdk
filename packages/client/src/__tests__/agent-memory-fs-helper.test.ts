@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
-import { expectAgentMemoryNameRules } from './fixtures/agent-memory-name-rules';
+import { expectAgentMemoryNameRules, expectAgentMemoryRawByteCompare, expectAgentMemoryRestoreCleanup } from './fixtures/agent-memory-name-rules';
 import { AgentHomeManager } from '../agent-home';
 import { AgentMemoryService, captureAgentMemorySnapshot, type AgentMemoryTaskContext } from '../daemon/agent-memory';
 import {
@@ -62,6 +62,14 @@ describe('Agent memory external filesystem helper', () => {
       expect(saved.deleted).toBe(false);
       expect((await service.recall({ path: 'MEMORY.md' })).content).toBe('local durable value');
 
+      // #1439: MEMORY.md takes at most 8192 bytes; a note keeps the file limit.
+      const atLimit = await service.save({ op: 'replace', path: 'MEMORY.md', expectedRevision: saved.revision!, content: 'x'.repeat(8192) });
+      await expect(service.save({ op: 'replace', path: 'MEMORY.md', expectedRevision: atLimit.revision!, content: 'x'.repeat(8193) }))
+        .rejects.toThrow(/MEMORY\.md takes at most 8192 UTF-8 bytes, but this content has 8193/);
+      expect((await service.recall({ path: 'MEMORY.md' })).revision).toBe(atLimit.revision);
+      await service.save({ op: 'replace', path: 'notes/topic.md', expectedRevision: initial.revision, content: 'y'.repeat(9 * 1024) });
+      await service.save({ op: 'replace', path: 'MEMORY.md', expectedRevision: atLimit.revision!, content: 'local durable value' });
+
       await fs.writeFile(path.join(binding.resolution.canonicalHome, 'notes', 'topic.md'), 'snapshot note', 'utf8');
       const snapshot = await captureAgentMemorySnapshot(context);
       expect(snapshot.files.map((file) => file.path)).toEqual(['MEMORY.md', 'notes/topic.md']);
@@ -97,6 +105,25 @@ describe('Agent memory external filesystem helper', () => {
         taskId: 'names-task', tenantId: 'names-tenant', deviceId: 'names-device', agentRef: binding.resolution.agentRef, sessionRef: 'names-session', runtimeId: 'codex',
         canonicalHome: binding.resolution.canonicalHome, leaseId: binding.lease.leaseId, homeIdentity: binding.lease.homeIdentity, filesystem,
       }, outside, { caseAlias: 'unsafe_path', hardLink: 'unsafe_path' });
+    } finally {
+      await filesystem.close();
+      await binding.lease.release();
+    }
+  });
+
+  itWithHelper.each([
+    ['compares raw bytes', expectAgentMemoryRawByteCompare],
+    ['cleans a home for a restore', expectAgentMemoryRestoreCleanup],
+  ])('%s through the helper (#1440)', async (_label, expectation) => {
+    const hostStorageRoot = await temporaryRoot('byok-agent-memory-helper-raw-');
+    const outside = await temporaryRoot('byok-agent-memory-helper-raw-outside-');
+    const binding = await new AgentHomeManager({ hostStorageRoot }).prepare({ agentId: 'raw-agent', profileRevision: 'p1' });
+    const filesystem = await openAgentMemoryFilesystemHelper({ helperBin: helperBin!, canonicalHome: binding.resolution.canonicalHome, homeIdentity: binding.lease.homeIdentity });
+    try {
+      await expectation({
+        taskId: 'raw-task', tenantId: 'raw-tenant', deviceId: 'raw-device', agentRef: binding.resolution.agentRef, sessionRef: 'raw-session', runtimeId: 'codex',
+        canonicalHome: binding.resolution.canonicalHome, leaseId: binding.lease.leaseId, homeIdentity: binding.lease.homeIdentity, filesystem,
+      }, outside);
     } finally {
       await filesystem.close();
       await binding.lease.release();
