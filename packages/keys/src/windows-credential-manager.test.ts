@@ -1,49 +1,93 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { CommandResult } from './command-runner';
 import { DEFAULT_SECRET_SERVICE_PREFIX } from './secret-store';
 import { WindowsCredentialManagerSecretStore } from './windows-credential-manager';
 
 const CANARY = 'sk-canary-windows-0001';
-const POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const NUL = String.fromCodePoint(0);
+const TARGET = `${DEFAULT_SECRET_SERVICE_PREFIX}.model-openai-api-key`;
+const CRED_READ_NOT_FOUND = { win32: 1168 };
 
-interface Invocation {
-  args: string[];
-  executable: string;
-  stdin: string | undefined;
+interface Response {
+  blob?: Buffer;
+  hold?: boolean;
+  win32?: number;
+}
+type Callback = (error: unknown, succeeded: number) => void;
+
+interface FakeCall {
+  args: unknown[];
+  /** The write buffer as the OS would have read it, before it was zeroed. */
+  blobAtCall?: string;
+  complete(response: Response): void;
+  name: string;
 }
 
-class FakeCommandRunner {
-  readonly invocations: Invocation[] = [];
-  #results: CommandResult[] = [];
+/**
+ * A scripted koffi. The last error exists only for the length of an async
+ * callback, as it does on a real worker thread.
+ */
+class FakeKoffi {
+  readonly calls: FakeCall[] = [];
+  readonly freed: unknown[] = [];
+  #lastError = 0;
+  #responses: Response[] = [];
 
-  queue(...results: Partial<CommandResult>[]): this {
-    for (const result of results) {
-      this.#results.push({ exitCode: 0, stderr: '', stdout: '', ...result });
-    }
+  queue(...responses: Response[]): this {
+    this.#responses.push(...responses);
     return this;
   }
 
-  readonly run = async (
-    executable: string,
-    args: string[],
-    stdin?: string,
-  ): Promise<CommandResult> => {
-    this.invocations.push({ args, executable, stdin });
-    const result = this.#results.shift();
-    if (!result) throw new Error('FakeCommandRunner: no queued result');
-    return result;
-  };
+  decode(value: { blob: Buffer }, type: unknown): unknown {
+    if (type === 'uint8_t') return Uint8Array.from(value.blob);
+    return { CredentialBlob: value, CredentialBlobSize: value.blob.length };
+  }
+
+  load(): { func(convention: string, name: string): unknown } {
+    return { func: (_convention, name) => this.#function(name) };
+  }
+
+  out(type: unknown): unknown {
+    return type;
+  }
+
+  pointer(type: unknown): unknown {
+    return type;
+  }
+
+  struct(definition: Record<string, unknown>): unknown {
+    return definition;
+  }
+
+  #function(name: string): unknown {
+    if (name === 'GetLastError') return () => this.#lastError;
+    if (name === 'CredFree') return (pointer: unknown) => void this.freed.push(pointer);
+    return Object.assign(() => undefined, {
+      async: (...args: unknown[]) => {
+        const callback = args.pop() as Callback;
+        const entry = args[0] as { CredentialBlob?: Buffer };
+        const call: FakeCall = {
+          args,
+          blobAtCall: entry.CredentialBlob?.toString('utf8'),
+          complete: (response) => {
+            const pointer = args[3] as [unknown] | undefined;
+            if (response.blob !== undefined && pointer !== undefined) pointer[0] = { blob: response.blob };
+            this.#lastError = response.win32 ?? 0;
+            callback(null, response.win32 === undefined ? 1 : 0);
+            this.#lastError = 0;
+          },
+          name,
+        };
+        this.calls.push(call);
+        const response = this.#responses.shift();
+        if (response === undefined) throw new Error('FakeKoffi: no queued response');
+        if (response.hold !== true) queueMicrotask(() => call.complete(response));
+      },
+    });
+  }
 }
 
-const base64 = (secret: string) =>
-  Buffer.from(secret, 'utf8').toString('base64');
-
-const request = (invocation: Invocation | undefined) =>
-  JSON.parse(invocation?.stdin ?? '{}') as Record<string, unknown>;
-
-let runner: FakeCommandRunner;
+let koffi: FakeKoffi;
 
 const store = (
   options: ConstructorParameters<
@@ -51,172 +95,107 @@ const store = (
   >[0] = {},
 ) =>
   new WindowsCredentialManagerSecretStore({
-    commandRunner: runner.run,
+    koffi,
     platform: 'win32',
     ...options,
   });
 
 beforeEach(() => {
-  runner = new FakeCommandRunner();
-  vi.stubEnv('SystemRoot', 'C:\\Windows');
-});
-
-afterEach(() => {
-  vi.unstubAllEnvs();
+  koffi = new FakeKoffi();
 });
 
 describe('WindowsCredentialManagerSecretStore.available', () => {
-  it('returns false on a non-win32 platform without spawning anything', async () => {
+  it('returns false on a non-win32 platform without touching koffi', async () => {
+    const load = vi.spyOn(koffi, 'load');
     await expect(store({ platform: 'darwin' }).available()).resolves.toBe(false);
-    expect(runner.invocations).toHaveLength(0);
+    expect(load).not.toHaveBeenCalled();
   });
 
-  it('probes the PowerShell version on win32', async () => {
-    runner.queue({ exitCode: 0 });
+  it('returns true when the credential API binds', async () => {
     await expect(store().available()).resolves.toBe(true);
-    expect(runner.invocations[0]).toEqual({
-      executable: POWERSHELL,
-      args: [
-        '-NoLogo',
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        '$PSVersionTable.PSVersion.Major',
-      ],
-      stdin: undefined,
-    });
   });
 
-  it('returns false when the probe fails', async () => {
-    runner.queue({ exitCode: 1 });
-    await expect(store().available()).resolves.toBe(false);
-  });
-
-  it('never takes PowerShell from PATH: a relative SystemRoot is unavailable, unspawned (#1304)', async () => {
-    vi.stubEnv('SystemRoot', 'Windows');
-    await expect(store().available()).resolves.toBe(false);
-    await expect(store().get('model-openai-api-key')).rejects.toMatchObject({ code: 'CREDENTIAL_MANAGER_UNAVAILABLE' });
-    expect(runner.invocations).toHaveLength(0);
+  it('fails closed when koffi cannot bind the credential API', async () => {
+    const unusable = { load: () => { throw new Error('no advapi32'); }, out: () => 0, pointer: () => 0, struct: () => 0 };
+    const subject = store({ koffi: unusable });
+    await expect(subject.available()).resolves.toBe(false);
+    await expect(subject.get('model-openai-api-key')).rejects.toMatchObject({ code: 'CREDENTIAL_MANAGER_UNAVAILABLE' });
   });
 });
 
 describe('WindowsCredentialManagerSecretStore.get', () => {
-  it('invokes the encoded script and passes the request on stdin', async () => {
-    runner.queue({ exitCode: 0, stdout: base64(CANARY) });
+  it('reads the generic credential at the target and frees the OS allocation', async () => {
+    koffi.queue({ blob: Buffer.from(CANARY) });
     await expect(store().get('model-openai-api-key')).resolves.toBe(CANARY);
-    const invocation = runner.invocations[0];
-    expect(invocation?.executable).toBe(POWERSHELL);
-    expect(invocation?.args.slice(0, 4)).toEqual([
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-EncodedCommand',
-    ]);
-    expect(invocation?.args).toHaveLength(5);
-    expect(request(invocation)).toEqual({
-      operation: 'get',
-      target: `${DEFAULT_SECRET_SERVICE_PREFIX}.model-openai-api-key`,
-      username: 'local-device',
-    });
+    expect(koffi.calls[0]?.name).toBe('CredReadW');
+    expect(koffi.calls[0]?.args.slice(0, 3)).toEqual([TARGET, 1, 0]);
+    expect(koffi.freed).toHaveLength(1);
   });
 
-  it('ships a UTF-16LE base64 script that declares the Byok credential namespace', () => {
-    runner.queue({ exitCode: 44 });
-    void store().get('model-openai-api-key');
-    const script = Buffer.from(
-      runner.invocations[0]?.args[4] ?? '',
-      'base64',
-    ).toString('utf16le');
-    expect(script).toContain('namespace Byok');
-    expect(script).toContain('[Byok.CredentialManager]::Read');
-    expect(script).not.toMatch(/aiphabee/iu);
-    // CS0104 guard: FILETIME exists in both InteropServices and its ComTypes child.
-    expect(script).toContain('public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;');
-    expect(script).not.toContain('using System.Runtime.InteropServices.ComTypes');
-    // Failures carry a bounded, secret-free classification only.
-    expect(script).toContain('stage=compile,cs=');
-    expect(script).toContain('stage=operation,win32=');
-    expect(script).not.toMatch(/Exception\.Message|Out-String|ErrorText/u);
-  });
-
-  it('reads the request from stdin as UTF-8, not the console code page', () => {
-    runner.queue({ exitCode: 44 });
-    void store().get('model-openai-api-key');
-    const script = Buffer.from(
-      runner.invocations[0]?.args[4] ?? '',
-      'base64',
-    ).toString('utf16le');
-    expect(script).toContain(
-      '$request = ([System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd() | ConvertFrom-Json)',
-    );
-    expect(script).not.toContain('[Console]::In');
-  });
-
-  it('treats exit code 44 as an absent secret', async () => {
-    runner.queue({ exitCode: 44 });
+  it('treats ERROR_NOT_FOUND from the callback as an absent secret', async () => {
+    koffi.queue(CRED_READ_NOT_FOUND);
     await expect(store().get('model-openai-api-key')).resolves.toBeUndefined();
+    expect(koffi.freed).toHaveLength(0);
   });
 
-  it('maps any other non-zero exit to CREDENTIAL_MANAGER_READ_FAILED', async () => {
-    runner.queue({ exitCode: 1 });
-    await expect(store().get('model-openai-api-key')).rejects.toThrowError(
-      expect.objectContaining({ code: 'CREDENTIAL_MANAGER_READ_FAILED' }),
-    );
+  it('maps any other Win32 error to CREDENTIAL_MANAGER_READ_FAILED with its code', async () => {
+    koffi.queue({ win32: 87 });
+    await expect(store().get('model-openai-api-key')).rejects.toMatchObject({
+      code: 'CREDENTIAL_MANAGER_READ_FAILED',
+      message: expect.stringContaining('win32=87') as string,
+    });
   });
 
   it('round-trips multi-byte utf-8', async () => {
     const secret = 'sk-余额-éà';
-    runner.queue({ exitCode: 0, stdout: `${base64(secret)}\n` });
+    koffi.queue({ blob: Buffer.from(secret) });
     await expect(store().get('model-openai-api-key')).resolves.toBe(secret);
   });
 
-  it('fails closed when the script returns a non-base64 payload', async () => {
-    runner.queue({ exitCode: 0, stdout: 'not!base64!' });
+  it.each([
+    ['not valid utf-8', Buffer.from([0xff, 0xfe])],
+    ['empty', Buffer.alloc(0)],
+  ])('fails closed when the blob is %s, and still frees it', async (_label, blob) => {
+    koffi.queue({ blob });
     await expect(store().get('model-openai-api-key')).rejects.toThrowError(
       expect.objectContaining({ code: 'CREDENTIAL_MANAGER_READ_FAILED' }),
     );
-  });
-
-  it('fails closed when the payload is not valid utf-8', async () => {
-    runner.queue({
-      exitCode: 0,
-      stdout: Buffer.from([0xff, 0xfe]).toString('base64'),
-    });
-    await expect(store().get('model-openai-api-key')).rejects.toThrowError(
-      expect.objectContaining({ code: 'CREDENTIAL_MANAGER_READ_FAILED' }),
-    );
-  });
-
-  it('fails closed when the payload decodes to an empty secret', async () => {
-    runner.queue({ exitCode: 0, stdout: '' });
-    await expect(store().get('model-openai-api-key')).rejects.toThrowError(
-      expect.objectContaining({ code: 'CREDENTIAL_MANAGER_READ_FAILED' }),
-    );
+    expect(koffi.freed).toHaveLength(1);
   });
 });
 
 describe('WindowsCredentialManagerSecretStore.set', () => {
-  it('sends the secret base64-encoded on stdin, never in argv', async () => {
-    runner.queue({ exitCode: 0 });
+  it('writes the entry format of every earlier release, then zeroes the buffer', async () => {
+    koffi.queue({});
     await store().set('model-openai-api-key', CANARY);
-    const invocation = runner.invocations[0];
-    expect(JSON.stringify(invocation?.args)).not.toContain(CANARY);
-    expect(invocation?.stdin).not.toContain(CANARY);
-    expect(request(invocation)).toEqual({
-      operation: 'set',
-      secret_base64: base64(CANARY),
-      target: `${DEFAULT_SECRET_SERVICE_PREFIX}.model-openai-api-key`,
-      username: 'local-device',
+    const call = koffi.calls[0];
+    const entry = call?.args[0] as Record<string, unknown> & { CredentialBlob: Buffer };
+    expect(call?.name).toBe('CredWriteW');
+    expect(call?.args[1]).toBe(0);
+    expect(call?.blobAtCall).toBe(CANARY);
+    expect(entry).toMatchObject({
+      Flags: 0,
+      Type: 1,
+      TargetName: TARGET,
+      Comment: null,
+      CredentialBlobSize: Buffer.byteLength(CANARY),
+      Persist: 2,
+      AttributeCount: 0,
+      Attributes: null,
+      TargetAlias: null,
+      UserName: 'local-device',
     });
+    expect(entry.CredentialBlob.every((byte) => byte === 0)).toBe(true);
   });
 
-  it('maps a non-zero exit to CREDENTIAL_MANAGER_WRITE_FAILED', async () => {
-    runner.queue({ exitCode: 1 });
+  it('maps a failed write to CREDENTIAL_MANAGER_WRITE_FAILED', async () => {
+    koffi.queue({ win32: 1312 });
     await expect(
       store().set('model-openai-api-key', CANARY),
-    ).rejects.toThrowError(
-      expect.objectContaining({ code: 'CREDENTIAL_MANAGER_WRITE_FAILED' }),
-    );
+    ).rejects.toMatchObject({
+      code: 'CREDENTIAL_MANAGER_WRITE_FAILED',
+      message: expect.stringContaining('win32=1312') as string,
+    });
   });
 
   it.each([
@@ -226,24 +205,24 @@ describe('WindowsCredentialManagerSecretStore.set', () => {
     ['null byte', `sk-a${NUL}b`],
     ['over 2560 utf-8 bytes', 'a'.repeat(2_561)],
     ['over 2560 utf-8 bytes via multi-byte characters', '余'.repeat(854)],
-  ])('rejects a %s secret before spawning anything', async (_label, secret) => {
+  ])('rejects a %s secret before any native call', async (_label, secret) => {
     await expect(
       store().set('model-openai-api-key', secret),
     ).rejects.toThrowError(
       expect.objectContaining({ code: 'CREDENTIAL_MANAGER_SECRET_INVALID' }),
     );
-    expect(runner.invocations).toHaveLength(0);
+    expect(koffi.calls).toHaveLength(0);
   });
 
   it('accepts a secret of exactly 2560 utf-8 bytes', async () => {
-    runner.queue({ exitCode: 0 });
+    koffi.queue({});
     await expect(
       store().set('model-openai-api-key', 'a'.repeat(2_560)),
     ).resolves.toBeUndefined();
   });
 
   it('measures the ceiling in bytes, not characters', async () => {
-    runner.queue({ exitCode: 0 });
+    koffi.queue({});
     // 853 three-byte characters is 2559 bytes but only 853 characters.
     await expect(
       store().set('model-openai-api-key', '余'.repeat(853)),
@@ -253,37 +232,34 @@ describe('WindowsCredentialManagerSecretStore.set', () => {
 
 describe('WindowsCredentialManagerSecretStore.delete', () => {
   it('deletes and then verifies the entry is gone', async () => {
-    runner.queue({ exitCode: 0 }, { exitCode: 44 });
+    koffi.queue({}, CRED_READ_NOT_FOUND);
     await expect(store().delete('model-openai-api-key')).resolves.toBe(true);
-    expect(runner.invocations).toHaveLength(2);
-    expect(request(runner.invocations[0])).toMatchObject({
-      operation: 'delete',
-    });
-    expect(request(runner.invocations[1])).toMatchObject({ operation: 'get' });
+    expect(koffi.calls.map((call) => call.name)).toEqual(['CredDeleteW', 'CredReadW']);
+    expect(koffi.calls[0]?.args).toEqual([TARGET, 1, 0]);
   });
 
   it('returns false when the entry was already absent, without verifying', async () => {
-    runner.queue({ exitCode: 44 });
+    koffi.queue(CRED_READ_NOT_FOUND);
     await expect(store().delete('model-openai-api-key')).resolves.toBe(false);
-    expect(runner.invocations).toHaveLength(1);
+    expect(koffi.calls).toHaveLength(1);
   });
 
   it('maps a failed delete to CREDENTIAL_MANAGER_DELETE_FAILED', async () => {
-    runner.queue({ exitCode: 1 });
+    koffi.queue({ win32: 5 });
     await expect(store().delete('model-openai-api-key')).rejects.toThrowError(
       expect.objectContaining({ code: 'CREDENTIAL_MANAGER_DELETE_FAILED' }),
     );
   });
 
   it('fails closed when the verification read itself fails', async () => {
-    runner.queue({ exitCode: 0 }, { exitCode: 1 });
+    koffi.queue({}, { win32: 5 });
     await expect(store().delete('model-openai-api-key')).rejects.toThrowError(
       expect.objectContaining({ code: 'CREDENTIAL_MANAGER_DELETE_FAILED' }),
     );
   });
 
   it('fails closed when the secret survives a reportedly successful delete', async () => {
-    runner.queue({ exitCode: 0 }, { exitCode: 0, stdout: base64(CANARY) });
+    koffi.queue({}, { blob: Buffer.from(CANARY) });
     let thrown: unknown;
     try {
       await store().delete('model-openai-api-key');
@@ -311,23 +287,23 @@ describe('WindowsCredentialManagerSecretStore platform and scope', () => {
       await expect(call).rejects.toThrowError(
         expect.objectContaining({ code: 'CREDENTIAL_MANAGER_UNAVAILABLE' }),
       );
-      expect(runner.invocations).toHaveLength(0);
+      expect(koffi.calls).toHaveLength(0);
     },
   );
 
-  it('validates the secret name before spawning', async () => {
+  it('validates the secret name before any native call', async () => {
     await expect(store().get('bad name')).rejects.toThrowError(
       expect.objectContaining({ code: 'SECRET_NAME_INVALID' }),
     );
-    expect(runner.invocations).toHaveLength(0);
+    expect(koffi.calls).toHaveLength(0);
   });
 
   it('namespaces a scoped store under .scope.<namespace>', async () => {
-    runner.queue({ exitCode: 44 });
+    koffi.queue(CRED_READ_NOT_FOUND);
     await store().scope('acct_00000000').get('model-openai-api-key');
-    expect(request(runner.invocations[0])).toMatchObject({
-      target: `${DEFAULT_SECRET_SERVICE_PREFIX}.scope.acct_00000000.model-openai-api-key`,
-    });
+    expect(koffi.calls[0]?.args[0]).toBe(
+      `${DEFAULT_SECRET_SERVICE_PREFIX}.scope.acct_00000000.model-openai-api-key`,
+    );
   });
 
   it('rejects an illegal namespace', () => {
@@ -337,13 +313,11 @@ describe('WindowsCredentialManagerSecretStore platform and scope', () => {
   });
 
   it('carries every option into the scoped store', async () => {
-    runner.queue({ exitCode: 44 });
+    koffi.queue({});
     await store({ account: 'other-account' })
       .scope('acct_00000000')
-      .get('model-openai-api-key');
-    expect(request(runner.invocations[0])).toMatchObject({
-      username: 'other-account',
-    });
+      .set('model-openai-api-key', CANARY);
+    expect(koffi.calls[0]?.args[0]).toMatchObject({ UserName: 'other-account' });
   });
 
   it('labels itself as the Windows Credential Manager', () => {
@@ -351,25 +325,77 @@ describe('WindowsCredentialManagerSecretStore platform and scope', () => {
   });
 });
 
-describe('WindowsCredentialManagerSecretStore systemRoot injection', () => {
-  it('starts PowerShell from the injected systemRoot without reading process.env', async () => {
-    vi.stubEnv('SystemRoot', undefined);
-    runner.queue({ exitCode: 0 });
-    await store({ systemRoot: 'C:\\Windows' }).set('model-openai-api-key', CANARY);
-    expect(runner.invocations[0]?.executable).toBe(POWERSHELL);
+describe('WindowsCredentialManagerSecretStore native queue', () => {
+  const DEADLINE_MS = 15_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
   });
 
-  it('never falls back to process.env when the injected systemRoot is not absolute', async () => {
-    const subject = store({ systemRoot: 'Windows' });
-    await expect(subject.available()).resolves.toBe(false);
-    await expect(subject.get('model-openai-api-key')).rejects.toMatchObject({ code: 'CREDENTIAL_MANAGER_UNAVAILABLE' });
-    expect(runner.invocations).toHaveLength(0);
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it('carries the injected systemRoot into the scoped store', async () => {
-    vi.stubEnv('SystemRoot', undefined);
-    runner.queue({ exitCode: 44 });
-    await store({ systemRoot: 'C:\\Windows' }).scope('acct_00000000').get('model-openai-api-key');
-    expect(runner.invocations[0]?.executable).toBe(POWERSHELL);
+  /** Lets queued work reach koffi without advancing any deadline. */
+  const settled = () => vi.advanceTimersByTimeAsync(0);
+
+  it('reports a read that never returns at the deadline, and frees it when it returns late', async () => {
+    koffi.queue({ hold: true });
+    const read = store().get('model-openai-api-key');
+    const outcome = expect(read).rejects.toMatchObject({
+      code: 'CREDENTIAL_MANAGER_READ_FAILED',
+      message: expect.stringContaining('deadline') as string,
+    });
+    await vi.advanceTimersByTimeAsync(DEADLINE_MS);
+    await outcome;
+    expect(koffi.freed).toHaveLength(0);
+    koffi.calls[0]?.complete({ blob: Buffer.from(CANARY) });
+    expect(koffi.freed).toHaveLength(1);
+  });
+
+  it('zeroes the write buffer when the write returns after its deadline', async () => {
+    koffi.queue({ hold: true });
+    const write = store().set('model-openai-api-key', CANARY);
+    const outcome = expect(write).rejects.toMatchObject({ code: 'CREDENTIAL_MANAGER_WRITE_FAILED' });
+    await vi.advanceTimersByTimeAsync(DEADLINE_MS);
+    await outcome;
+    const entry = koffi.calls[0]?.args[0] as { CredentialBlob: Buffer };
+    expect(entry.CredentialBlob.toString('utf8')).toBe(CANARY);
+    koffi.calls[0]?.complete({});
+    expect(entry.CredentialBlob.every((byte) => byte === 0)).toBe(true);
+  });
+
+  it('keeps a newer write behind a late older one across stores, in arrival order', async () => {
+    koffi.queue({ hold: true }, {}, {});
+    const older = expect(store().set('model-openai-api-key', 'sk-older')).rejects.toMatchObject({
+      code: 'CREDENTIAL_MANAGER_WRITE_FAILED',
+    });
+    await vi.advanceTimersByTimeAsync(DEADLINE_MS);
+    await older;
+    const second = store().set('model-openai-api-key', 'sk-second');
+    const third = store({ account: 'other-account' }).scope('acct_00000000').set('model-openai-api-key', 'sk-third');
+    await settled();
+    expect(koffi.calls).toHaveLength(1);
+    koffi.calls[0]?.complete({});
+    await Promise.all([second, third]);
+    expect(koffi.calls.map((call) => call.blobAtCall)).toEqual(['sk-older', 'sk-second', 'sk-third']);
+  });
+
+  it('counts the wait toward the deadline, and an expired call never reaches the OS', async () => {
+    koffi.queue({ hold: true }, {});
+    const stuck = expect(store().set('model-openai-api-key', 'sk-stuck')).rejects.toMatchObject({
+      code: 'CREDENTIAL_MANAGER_WRITE_FAILED',
+    });
+    await vi.advanceTimersByTimeAsync(DEADLINE_MS - 1_000);
+    const waiting = expect(store().set('model-openai-api-key', 'sk-waiting')).rejects.toMatchObject({
+      message: expect.stringContaining('deadline') as string,
+    });
+    await vi.advanceTimersByTimeAsync(DEADLINE_MS);
+    await Promise.all([stuck, waiting]);
+    koffi.calls[0]?.complete({});
+    await settled();
+    expect(koffi.calls).toHaveLength(1);
+    await store().set('model-openai-api-key', 'sk-next');
+    expect(koffi.calls[1]?.blobAtCall).toBe('sk-next');
   });
 });

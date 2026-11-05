@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import path from 'node:path';
 
 /** A finished child process, ported from `aip-main-open@c6a5385` `index.ts:284-288`. */
 export interface CommandResult {
@@ -9,7 +8,7 @@ export interface CommandResult {
 }
 
 /**
- * The injection seam both OS backends are written against. Unit tests supply a
+ * The injection seam the macOS backend is written against. Unit tests supply a
  * fake so no test ever reads or writes a real credential store; production code
  * gets {@link runCommand}.
  */
@@ -20,21 +19,12 @@ export type CommandRunner = (
 ) => Promise<CommandResult>;
 
 /**
- * Windows PowerShell from the system directory, never from `PATH` (#1304);
- * `undefined` when `systemRoot` is not an absolute path.
- */
-export function windowsPowerShellExecutable(systemRoot: string | undefined): string | undefined {
-  if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot) || /[\u0000\r\n]/u.test(systemRoot)) return undefined;
-  return path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-}
-
-/**
  * Spawn `executable`, feed it `stdin`, and collect its output
  * (`index.ts:2498-2527`).
  *
- * It never rejects: a missing executable resolves as exit code 127 so the
- * backends' `available()` probes can treat "no such binary" the same way they
- * treat "binary said no". Stdin is always closed, otherwise a child that reads
+ * It never rejects: a missing executable resolves as exit code 127 so an
+ * `available()` probe can treat "no such binary" the same way it treats "binary
+ * said no". Stdin is always closed, otherwise a child that reads
  * to EOF would hang forever.
  */
 export async function runCommand(

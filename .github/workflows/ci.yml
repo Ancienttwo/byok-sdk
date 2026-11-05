@@ -720,6 +720,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # This leg runs only the Credential Manager step below.
+        include:
+          - os: windows-2022
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -742,6 +745,7 @@ jobs:
         run: bun run build
 
       - name: Run built adapter lifecycle smoke
+        if: matrix.os != 'windows-2022'
         run: bun run --filter @byok-sdk/client smoke:adapters
 
       # The Host suites run the embedded server, daemon journal and Host ledger
@@ -774,7 +778,7 @@ jobs:
       # Manager, as the runner's own user (the daemon and the launcher share
       # one user). The flag makes the suite hard-fail rather than skip.
       - name: Sealed provisioning on the real Windows Credential Manager
-        if: matrix.os == 'windows-latest'
+        if: startsWith(matrix.os, 'windows-')
         env:
           BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER: '1'
         run: bun run --filter @byok-sdk/keys test -- src/windows-credential-custody.integration.test.ts

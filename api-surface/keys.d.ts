@@ -44,23 +44,18 @@ export interface CommandResult {
     stdout: string;
 }
 /**
- * The injection seam both OS backends are written against. Unit tests supply a
+ * The injection seam the macOS backend is written against. Unit tests supply a
  * fake so no test ever reads or writes a real credential store; production code
  * gets {@link runCommand}.
  */
 export type CommandRunner = (executable: string, args: string[], stdin?: string) => Promise<CommandResult>;
 /**
- * Windows PowerShell from the system directory, never from `PATH` (#1304);
- * `undefined` when `systemRoot` is not an absolute path.
- */
-export declare function windowsPowerShellExecutable(systemRoot: string | undefined): string | undefined;
-/**
  * Spawn `executable`, feed it `stdin`, and collect its output
  * (`index.ts:2498-2527`).
  *
- * It never rejects: a missing executable resolves as exit code 127 so the
- * backends' `available()` probes can treat "no such binary" the same way they
- * treat "binary said no". Stdin is always closed, otherwise a child that reads
+ * It never rejects: a missing executable resolves as exit code 127 so an
+ * `available()` probe can treat "no such binary" the same way it treats "binary
+ * said no". Stdin is always closed, otherwise a child that reads
  * to EOF would hang forever.
  */
 export declare function runCommand(executable: string, args: string[], stdin?: string): Promise<CommandResult>;
@@ -2587,23 +2582,22 @@ export declare function isLoopbackHost(hostname: string): boolean;
  */
 export declare function isPrivateNetworkLiteral(hostname: string): boolean;
 // ==== @byok-sdk/keys dist/windows-credential-manager.d.ts ====
-import { type CommandRunner } from './command-runner';
 import { type SecretStore } from './secret-store';
 export interface WindowsCredentialManagerSecretStoreOptions {
     account?: string;
-    commandRunner?: CommandRunner;
+    /**
+     * The koffi module to call Credential Manager through, for a packaged Host
+     * that loads it with `loadSdkKoffiAsset` from `@byok-sdk/client/packaging`.
+     * Defaults to `import('koffi')`.
+     */
+    koffi?: unknown;
     platform?: NodeJS.Platform;
     servicePrefix?: string;
-    /**
-     * Absolute Windows system directory that PowerShell is started from. Defaults
-     * to `process.env.SystemRoot`, read once at construction. An injected value
-     * that is not an absolute path makes the store unavailable; it never falls
-     * back to the process environment.
-     */
-    systemRoot?: string;
 }
 /**
- * Windows Credential Manager backend (`index.ts:568-712`).
+ * Windows Credential Manager backend (`index.ts:568-712`), called in process
+ * through koffi. Entries are generic credentials with `Persist` 2 and the secret
+ * as UTF-8 bytes.
  *
  * As on macOS there is no plaintext fallback — off win32 every operation throws
  * `CREDENTIAL_MANAGER_UNAVAILABLE`.
@@ -2615,7 +2609,7 @@ export declare class WindowsCredentialManagerSecretStore<TName extends string = 
     available(): Promise<boolean>;
     /**
      * Delete, then read back. The source verifies rather than trusting the
-     * delete's exit code (`index.ts:651-679`): a credential that survives a
+     * delete's result (`index.ts:651-679`): a credential that survives a
      * "successful" delete is a security failure, so it is reported as one instead
      * of being returned as `true`.
      */

@@ -1,184 +1,218 @@
-import { type CommandResult, type CommandRunner, runCommand, windowsPowerShellExecutable } from './command-runner';
 import { ByokKeysError } from './errors';
 import { assertSecretName, assertSecretNamespace } from './secret-name';
-import {
-  DEFAULT_SECRET_SERVICE_PREFIX,
-  type SecretStore,
-  decodeStrictBase64Utf8,
-} from './secret-store';
+import { DEFAULT_SECRET_SERVICE_PREFIX, type SecretStore } from './secret-store';
+
+const CRED_TYPE_GENERIC = 1;
+const CRED_PERSIST_LOCAL_MACHINE = 2;
+const ERROR_NOT_FOUND = 1168;
+const NATIVE_CALL_DEADLINE_MS = 15_000;
+
+type NativeOutcome<T> =
+  | { kind: 'ok'; value: T }
+  | { kind: 'absent'; detail: string }
+  | { kind: 'failed'; detail: string };
+
+/** Begins one native call; `finish` runs when the OS call has returned, however late. */
+type NativeCall<T> = (finish: (outcome: NativeOutcome<T>) => void) => void;
+
+type NativeCallback = (error: unknown, succeeded: number) => void;
+interface NativeFunction {
+  (...args: unknown[]): unknown;
+  async(...args: unknown[]): void;
+}
+/** Structural view of koffi, satisfied by the npm module and by the SDK native asset. */
+interface KoffiModule {
+  decode(value: unknown, type: unknown, length?: number): unknown;
+  load(path: string): { func(convention: string, name: string, result: unknown, args: unknown[]): NativeFunction };
+  out(type: unknown): unknown;
+  pointer(type: unknown): unknown;
+  struct(definition: Record<string, unknown>): unknown;
+}
+
+interface CredentialBindings {
+  credDelete: NativeFunction;
+  credFree: NativeFunction;
+  credRead: NativeFunction;
+  credWrite: NativeFunction;
+  credential: unknown;
+  koffi: KoffiModule;
+  lastError: NativeFunction;
+}
+
+const cachedBindings = new WeakMap<object, CredentialBindings>();
+
+function credentialBindings(koffi: KoffiModule): CredentialBindings {
+  let bindings = cachedBindings.get(koffi);
+  if (bindings === undefined) {
+    // Anonymous on purpose: koffi names are global to the module, and a process
+    // that also runs @byok-sdk/client binds this struct on the same module.
+    const credential = koffi.struct({
+      Flags: 'uint32_t',
+      Type: 'uint32_t',
+      TargetName: 'str16',
+      Comment: 'str16',
+      LastWritten: koffi.struct({ dwLowDateTime: 'uint32_t', dwHighDateTime: 'uint32_t' }),
+      CredentialBlobSize: 'uint32_t',
+      CredentialBlob: 'void *',
+      Persist: 'uint32_t',
+      AttributeCount: 'uint32_t',
+      Attributes: 'void *',
+      TargetAlias: 'str16',
+      UserName: 'str16',
+    });
+    const advapi32 = koffi.load('advapi32.dll');
+    const kernel32 = koffi.load('kernel32.dll');
+    bindings = {
+      credDelete: advapi32.func('__stdcall', 'CredDeleteW', 'int', ['str16', 'uint32_t', 'uint32_t']),
+      credFree: advapi32.func('__stdcall', 'CredFree', 'void', ['void *']),
+      credRead: advapi32.func('__stdcall', 'CredReadW', 'int', ['str16', 'uint32_t', 'uint32_t', koffi.out(koffi.pointer('void *'))]),
+      credWrite: advapi32.func('__stdcall', 'CredWriteW', 'int', [koffi.pointer(credential), 'uint32_t']),
+      credential,
+      koffi,
+      lastError: kernel32.func('__stdcall', 'GetLastError', 'uint32_t', []),
+    };
+    cachedBindings.set(koffi, bindings);
+  }
+  return bindings;
+}
 
 /**
- * The script exits 44 for "no such credential" (Win32 ERROR_NOT_FOUND 1168),
- * matching `security`'s code. Any other failure exits 1 and writes one bounded,
- * secret-free classification line to stderr — `stage=compile,cs=<CS error>` or
- * `stage=operation,win32=<code>,hresult=<hresult>` — so a real-backend failure
- * can be diagnosed without exposing the request (which travels on stdin).
+ * koffi restores a worker thread's last error only while that call's async
+ * callback runs, so this must be called from inside the callback.
  */
-const CREDENTIAL_NOT_FOUND = 44;
+function callOutcome(bindings: CredentialBindings, error: unknown, succeeded: number): NativeOutcome<true> {
+  if (error !== null && error !== undefined) return { kind: 'failed', detail: 'native call failed' };
+  if (succeeded !== 0) return { kind: 'ok', value: true };
+  const win32 = bindings.lastError() as number;
+  return { kind: win32 === ERROR_NOT_FOUND ? 'absent' : 'failed', detail: `win32=${win32}` };
+}
+
+/** `undefined` for an empty blob or one that is not valid UTF-8. */
+function secretOfEntry({ credential, koffi }: CredentialBindings, pointer: unknown): string | undefined {
+  const entry = koffi.decode(pointer, credential) as { CredentialBlob: unknown; CredentialBlobSize: number };
+  if (entry.CredentialBlobSize === 0) return undefined;
+  const copy = koffi.decode(entry.CredentialBlob, 'uint8_t', entry.CredentialBlobSize) as Uint8Array;
+  const bytes = Buffer.from(copy.buffer, copy.byteOffset, copy.byteLength);
+  const text = bytes.toString('utf8');
+  const valid = Buffer.from(text, 'utf8').equals(bytes);
+  bytes.fill(0);
+  return valid ? text : undefined;
+}
+
+function readCredential(bindings: CredentialBindings, target: string): NativeCall<string | undefined> {
+  return (finish) => {
+    const pointer: [unknown] = [null];
+    const callback: NativeCallback = (error, succeeded) => {
+      const outcome = callOutcome(bindings, error, succeeded);
+      if (outcome.kind !== 'ok') {
+        finish(outcome);
+        return;
+      }
+      let read: NativeOutcome<string | undefined>;
+      try {
+        read = { kind: 'ok', value: secretOfEntry(bindings, pointer[0]) };
+      } catch {
+        read = { kind: 'failed', detail: 'entry decode failed' };
+      } finally {
+        bindings.credFree(pointer[0]);
+      }
+      finish(read);
+    };
+    bindings.credRead.async(target, CRED_TYPE_GENERIC, 0, pointer, callback);
+  };
+}
+
+/** The buffer is made here so a call that expires in the queue never holds the secret. */
+function writeCredential(bindings: CredentialBindings, target: string, username: string, secret: string): NativeCall<true> {
+  return (finish) => {
+    const blob = Buffer.from(secret, 'utf8');
+    const callback: NativeCallback = (error, succeeded) => {
+      const outcome = callOutcome(bindings, error, succeeded);
+      blob.fill(0);
+      finish(outcome);
+    };
+    try {
+      bindings.credWrite.async({
+        Flags: 0,
+        Type: CRED_TYPE_GENERIC,
+        TargetName: target,
+        Comment: null,
+        LastWritten: { dwLowDateTime: 0, dwHighDateTime: 0 },
+        CredentialBlobSize: blob.length,
+        CredentialBlob: blob,
+        Persist: CRED_PERSIST_LOCAL_MACHINE,
+        AttributeCount: 0,
+        Attributes: null,
+        TargetAlias: null,
+        UserName: username,
+      }, 0, callback);
+    } catch (error) {
+      blob.fill(0);
+      throw error;
+    }
+  };
+}
+
+function deleteCredential(bindings: CredentialBindings, target: string): NativeCall<true> {
+  return (finish) => {
+    const callback: NativeCallback = (error, succeeded) => finish(callOutcome(bindings, error, succeeded));
+    bindings.credDelete.async(target, CRED_TYPE_GENERIC, 0, callback);
+  };
+}
+
+let nativeQueue: Promise<void> = Promise.resolve();
 
 /**
- * PowerShell bridge to the Win32 credential API, ported from
- * `aip-main-open@c6a5385` `apps/local-agent/src/index.ts:294-408`.
- *
- * It is passed as `-EncodedCommand` (UTF-16LE base64) so no part of it can be
- * mangled by shell quoting, and the request — including the secret — travels on
- * stdin rather than argv, keeping credentials out of process listings. The
- * generated C# type lives in namespace `Byok`; the source used its own vendor
- * name, and the identifier has no wire or storage surface, so renaming it costs
- * nothing at K4.
- *
- * `FILETIME` is fully qualified and the `ComTypes` namespace is not imported:
- * with both `System.Runtime.InteropServices` and its `ComTypes` child in scope
- * the unqualified name is ambiguous (CS0104), `Add-Type` fails, and every
- * operation — including a read of an absent credential — exits 1. That was the
- * failure the first real Credential Manager CI run surfaced; the unit suites
- * mock the command runner and could not see it.
+ * One native call at a time, in arrival order, across every store in this
+ * module. A native call cannot be cancelled, so a caller that hits its deadline
+ * leaves the call running: the queue stays held until the OS returns, which
+ * keeps a late write from landing after a newer one and bounds stuck calls to
+ * one thread. Time spent waiting counts toward the caller's own deadline, and a
+ * call that expires while waiting never reaches the OS. After a deadline the
+ * outcome of a write or delete is unknown; it is reported, never replayed.
  */
-const WINDOWS_CREDENTIAL_MANAGER_SCRIPT_BASE64 = Buffer.from(
-  String.raw`
-try {
-Add-Type -ErrorAction Stop -TypeDefinition @"
-using System;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-
-namespace Byok {
-  public static class CredentialManager {
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct Credential {
-      public UInt32 Flags;
-      public UInt32 Type;
-      [MarshalAs(UnmanagedType.LPWStr)] public string TargetName;
-      [MarshalAs(UnmanagedType.LPWStr)] public string Comment;
-      public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
-      public UInt32 CredentialBlobSize;
-      public IntPtr CredentialBlob;
-      public UInt32 Persist;
-      public UInt32 AttributeCount;
-      public IntPtr Attributes;
-      [MarshalAs(UnmanagedType.LPWStr)] public string TargetAlias;
-      [MarshalAs(UnmanagedType.LPWStr)] public string UserName;
-    }
-
-    [DllImport("Advapi32.dll", EntryPoint = "CredWriteW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool CredWrite([In] ref Credential credential, UInt32 flags);
-
-    [DllImport("Advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool CredRead(string target, UInt32 type, UInt32 flags, out IntPtr credential);
-
-    [DllImport("Advapi32.dll", EntryPoint = "CredDeleteW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool CredDelete(string target, UInt32 type, UInt32 flags);
-
-    [DllImport("Advapi32.dll", SetLastError = false)]
-    private static extern void CredFree(IntPtr buffer);
-
-    public static void Write(string target, string username, byte[] secret) {
-      IntPtr blob = IntPtr.Zero;
+async function runNativeCall<T>(call: NativeCall<T>): Promise<NativeOutcome<T>> {
+  return new Promise((resolve) => {
+    let expired = false;
+    const deadline = setTimeout(() => {
+      expired = true;
+      resolve({ kind: 'failed', detail: `deadline=${NATIVE_CALL_DEADLINE_MS}ms` });
+    }, NATIVE_CALL_DEADLINE_MS);
+    nativeQueue = nativeQueue.then(() => new Promise<void>((release) => {
+      if (expired) {
+        release();
+        return;
+      }
+      const finish = (outcome: NativeOutcome<T>) => {
+        clearTimeout(deadline);
+        release();
+        resolve(outcome);
+      };
       try {
-        blob = Marshal.AllocHGlobal(secret.Length);
-        Marshal.Copy(secret, 0, blob, secret.Length);
-        Credential credential = new Credential {
-          Type = 1,
-          TargetName = target,
-          CredentialBlobSize = (UInt32)secret.Length,
-          CredentialBlob = blob,
-          Persist = 2,
-          UserName = username
-        };
-        if (!CredWrite(ref credential, 0)) {
-          throw new Win32Exception(Marshal.GetLastWin32Error());
-        }
-      } finally {
-        if (blob != IntPtr.Zero) {
-          Marshal.Copy(new byte[secret.Length], 0, blob, secret.Length);
-          Marshal.FreeHGlobal(blob);
-        }
+        call(finish);
+      } catch {
+        finish({ kind: 'failed', detail: 'native call failed' });
       }
-    }
-
-    public static byte[] Read(string target) {
-      IntPtr pointer;
-      if (!CredRead(target, 1, 0, out pointer)) {
-        int error = Marshal.GetLastWin32Error();
-        if (error == 1168) return null;
-        throw new Win32Exception(error);
-      }
-      try {
-        Credential credential = (Credential)Marshal.PtrToStructure(pointer, typeof(Credential));
-        byte[] secret = new byte[credential.CredentialBlobSize];
-        if (secret.Length > 0) Marshal.Copy(credential.CredentialBlob, secret, 0, secret.Length);
-        return secret;
-      } finally {
-        CredFree(pointer);
-      }
-    }
-
-    public static bool Delete(string target) {
-      if (CredDelete(target, 1, 0)) return true;
-      int error = Marshal.GetLastWin32Error();
-      if (error == 1168) return false;
-      throw new Win32Exception(error);
-    }
-  }
+    }));
+  });
 }
-"@
-} catch {
-  $compilerCode = 99
-  $errorNumber = [string]$_.TargetObject.ErrorNumber
-  if ($errorNumber -match '\ACS([0-9]{4})\z') { $compilerCode = [Convert]::ToInt32($Matches[1]) }
-  [Console]::Error.Write("credential operation failed (stage=compile,cs=" + $compilerCode + ")")
-  exit 1
-}
-
-try {
-  $request = ([System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd() | ConvertFrom-Json)
-  if ($request.operation -eq "set") {
-    [Byok.CredentialManager]::Write(
-      [string]$request.target,
-      [string]$request.username,
-      [Convert]::FromBase64String([string]$request.secret_base64)
-    )
-    exit 0
-  }
-  if ($request.operation -eq "get") {
-    $secret = [Byok.CredentialManager]::Read([string]$request.target)
-    if ($null -eq $secret) { exit 44 }
-    [Console]::Out.Write([Convert]::ToBase64String($secret))
-    exit 0
-  }
-  if ($request.operation -eq "delete") {
-    if ([Byok.CredentialManager]::Delete([string]$request.target)) { exit 0 }
-    exit 44
-  }
-  exit 2
-} catch {
-  $failure = $_.Exception
-  while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }
-  $win32 = 0
-  if ($failure -is [System.ComponentModel.Win32Exception]) { $win32 = $failure.NativeErrorCode }
-  [Console]::Error.Write("credential operation failed (stage=operation,win32=" + $win32 + ",hresult=" + $failure.HResult + ")")
-  exit 1
-}
-`,
-  'utf16le',
-).toString('base64');
 
 export interface WindowsCredentialManagerSecretStoreOptions {
   account?: string;
-  commandRunner?: CommandRunner;
+  /**
+   * The koffi module to call Credential Manager through, for a packaged Host
+   * that loads it with `loadSdkKoffiAsset` from `@byok-sdk/client/packaging`.
+   * Defaults to `import('koffi')`.
+   */
+  koffi?: unknown;
   platform?: NodeJS.Platform;
   servicePrefix?: string;
-  /**
-   * Absolute Windows system directory that PowerShell is started from. Defaults
-   * to `process.env.SystemRoot`, read once at construction. An injected value
-   * that is not an absolute path makes the store unavailable; it never falls
-   * back to the process environment.
-   */
-  systemRoot?: string;
 }
 
 /**
- * Windows Credential Manager backend (`index.ts:568-712`).
+ * Windows Credential Manager backend (`index.ts:568-712`), called in process
+ * through koffi. Entries are generic credentials with `Persist` 2 and the secret
+ * as UTF-8 bytes.
  *
  * As on macOS there is no plaintext fallback — off win32 every operation throws
  * `CREDENTIAL_MANAGER_UNAVAILABLE`.
@@ -188,64 +222,51 @@ export class WindowsCredentialManagerSecretStore<TName extends string = string>
 {
   readonly providerLabel = 'Windows Credential Manager';
   readonly #account: string;
-  readonly #commandRunner: CommandRunner;
+  readonly #koffi: unknown;
   readonly #platform: NodeJS.Platform;
   readonly #servicePrefix: string;
-  readonly #systemRoot: string | undefined;
 
   constructor(options: WindowsCredentialManagerSecretStoreOptions = {}) {
     this.#account = options.account ?? 'local-device';
-    this.#commandRunner = options.commandRunner ?? runCommand;
+    this.#koffi = options.koffi;
     this.#platform = options.platform ?? process.platform;
     this.#servicePrefix = options.servicePrefix ?? DEFAULT_SECRET_SERVICE_PREFIX;
-    this.#systemRoot = options.systemRoot ?? process.env.SystemRoot;
   }
 
   async available(): Promise<boolean> {
     if (this.#platform !== 'win32') return false;
-    const powershell = windowsPowerShellExecutable(this.#systemRoot);
-    if (powershell === undefined) return false;
-    const result = await this.#commandRunner(powershell, [
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      '$PSVersionTable.PSVersion.Major',
-    ]);
-    return result.exitCode === 0;
+    try {
+      await this.#bindings();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
    * Delete, then read back. The source verifies rather than trusting the
-   * delete's exit code (`index.ts:651-679`): a credential that survives a
+   * delete's result (`index.ts:651-679`): a credential that survives a
    * "successful" delete is a security failure, so it is reported as one instead
    * of being returned as `true`.
    */
   async delete(name: TName): Promise<boolean> {
     const target = this.#service(name);
     this.#assertWindows();
-    const result = await this.#invoke({
-      operation: 'delete',
-      target,
-      username: this.#account,
-    });
-    if (result.exitCode === CREDENTIAL_NOT_FOUND) return false;
-    if (result.exitCode !== 0) {
+    const bindings = await this.#bindings();
+    const result = await runNativeCall(deleteCredential(bindings, target));
+    if (result.kind === 'absent') return false;
+    if (result.kind === 'failed') {
       throw new ByokKeysError(
         'CREDENTIAL_MANAGER_DELETE_FAILED',
-        'Windows Credential Manager could not delete the requested secret',
+        `Windows Credential Manager could not delete the requested secret (${result.detail})`,
       );
     }
-    const verification = await this.#invoke({
-      operation: 'get',
-      target,
-      username: this.#account,
-    });
-    if (verification.exitCode === CREDENTIAL_NOT_FOUND) return true;
-    if (verification.exitCode !== 0) {
+    const verification = await runNativeCall(readCredential(bindings, target));
+    if (verification.kind === 'absent') return true;
+    if (verification.kind === 'failed') {
       throw new ByokKeysError(
         'CREDENTIAL_MANAGER_DELETE_FAILED',
-        'Windows Credential Manager could not verify secret deletion',
+        `Windows Credential Manager could not verify secret deletion (${verification.detail})`,
       );
     }
     throw new ByokKeysError(
@@ -257,29 +278,21 @@ export class WindowsCredentialManagerSecretStore<TName extends string = string>
   async get(name: TName): Promise<string | undefined> {
     const target = this.#service(name);
     this.#assertWindows();
-    const result = await this.#invoke({
-      operation: 'get',
-      target,
-      username: this.#account,
-    });
-    if (result.exitCode === CREDENTIAL_NOT_FOUND) return undefined;
-    if (result.exitCode !== 0) {
+    const result = await runNativeCall(readCredential(await this.#bindings(), target));
+    if (result.kind === 'absent') return undefined;
+    if (result.kind === 'failed') {
       throw new ByokKeysError(
         'CREDENTIAL_MANAGER_READ_FAILED',
-        'Windows Credential Manager could not read the requested secret',
+        `Windows Credential Manager could not read the requested secret (${result.detail})`,
       );
     }
-    // The source wrapped this decode in try/catch, but `Buffer.from` never
-    // throws on bad input -- it silently drops the offending characters, so
-    // that branch was unreachable. The strict decoder makes it real.
-    const secret = decodeStrictBase64Utf8(result.stdout.trim());
-    if (secret === undefined || secret.length === 0) {
+    if (result.value === undefined) {
       throw new ByokKeysError(
         'CREDENTIAL_MANAGER_READ_FAILED',
         'Windows Credential Manager returned an invalid secret',
       );
     }
-    return secret;
+    return result.value;
   }
 
   async has(name: TName): Promise<boolean> {
@@ -289,10 +302,9 @@ export class WindowsCredentialManagerSecretStore<TName extends string = string>
   scope(namespace: string): SecretStore<TName> {
     return new WindowsCredentialManagerSecretStore<TName>({
       account: this.#account,
-      commandRunner: this.#commandRunner,
+      koffi: this.#koffi,
       platform: this.#platform,
       servicePrefix: `${this.#servicePrefix}.scope.${assertSecretNamespace(namespace)}`,
-      systemRoot: this.#systemRoot,
     });
   }
 
@@ -300,16 +312,11 @@ export class WindowsCredentialManagerSecretStore<TName extends string = string>
     const target = this.#service(name);
     this.#assertWindows();
     assertWindowsCredentialSecret(secret);
-    const result = await this.#invoke({
-      operation: 'set',
-      secret_base64: Buffer.from(secret, 'utf8').toString('base64'),
-      target,
-      username: this.#account,
-    });
-    if (result.exitCode !== 0) {
+    const result = await runNativeCall(writeCredential(await this.#bindings(), target, this.#account, secret));
+    if (result.kind !== 'ok') {
       throw new ByokKeysError(
         'CREDENTIAL_MANAGER_WRITE_FAILED',
-        'Windows Credential Manager could not store the requested secret',
+        `Windows Credential Manager could not store the requested secret (${result.detail})`,
       );
     }
   }
@@ -323,27 +330,17 @@ export class WindowsCredentialManagerSecretStore<TName extends string = string>
     }
   }
 
-  async #invoke(request: {
-    operation: 'delete' | 'get' | 'set';
-    secret_base64?: string;
-    target: string;
-    username: string;
-  }): Promise<CommandResult> {
-    const powershell = windowsPowerShellExecutable(this.#systemRoot);
-    if (powershell === undefined) {
-      throw new ByokKeysError('CREDENTIAL_MANAGER_UNAVAILABLE', 'Windows SystemRoot must be an absolute path; PowerShell is never taken from PATH');
+  async #bindings(): Promise<CredentialBindings> {
+    try {
+      const koffi = this.#koffi ?? (await import('koffi')).default;
+      return credentialBindings(koffi as KoffiModule);
+    } catch (cause) {
+      throw new ByokKeysError(
+        'CREDENTIAL_MANAGER_UNAVAILABLE',
+        'Windows Credential Manager could not be loaded; plaintext fallback is disabled',
+        { cause },
+      );
     }
-    return this.#commandRunner(
-      powershell,
-      [
-        '-NoLogo',
-        '-NoProfile',
-        '-NonInteractive',
-        '-EncodedCommand',
-        WINDOWS_CREDENTIAL_MANAGER_SCRIPT_BASE64,
-      ],
-      JSON.stringify(request),
-    );
   }
 
   #service(name: TName): string {

@@ -110,6 +110,15 @@
         "export:@byok-sdk/client#DeviceEnrollmentStatusOptions",
         "export:@byok-sdk/client/packaging#loadSdkKoffiAsset"
       ]
+    },
+    {
+      "id": "keys-windows-credential-manager-koffi",
+      "impact": "breaking",
+      "summary": "WindowsCredentialManagerSecretStoreOptions loses commandRunner and systemRoot and gains optional koffi: the store calls Credential Manager in process and starts no PowerShell. A Host that passed commandRunner or systemRoot removes them. A packaged Host, which has no installed koffi, passes koffi: loadSdkKoffiAsset(nativeAssetRoot). The byok-pi-provider-launcher bin uses the default store options, so a single-file bundled Windows Host that runs it gets CREDENTIAL_MANAGER_UNAVAILABLE; that Host calls runPiProviderLauncher instead, with a createSecretStore that injects koffi. The entry format is unchanged.",
+      "migration": "docs/spec.md#pi-credential-launcher-executable-contract",
+      "items": [
+        "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions"
+      ]
     }
   ],
   "changes": [
@@ -189,6 +198,11 @@
       "item": "export:@byok-sdk/cloud#TerminalResult",
       "change": "changed",
       "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions",
+      "change": "changed",
+      "entry": "keys-windows-credential-manager-koffi"
     },
     {
       "item": "export:@byok-sdk/protocol#AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY",
