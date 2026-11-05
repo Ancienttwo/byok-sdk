@@ -71,7 +71,7 @@ describe('terminal evidence of the applied Agent-home projection (#318)', () => 
     const adapter = await start(hostStorageRoot);
 
     offer('newer-offer', 'persona-agent', '4');
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'newer-offer');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'newer-offer');
     adapter.sessions[0]!.emit({ type: 'progress', text: 'done' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
 
@@ -88,7 +88,7 @@ describe('terminal evidence of the applied Agent-home projection (#318)', () => 
     const adapter = await start(hostStorageRoot);
 
     offer('failing-offer', 'persona-agent', '3');
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'failing-offer');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'failing-offer');
     adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
       phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'runtime ended with failure',
     }));
@@ -118,7 +118,7 @@ describe('terminal evidence of the applied Agent-home projection (#318)', () => 
     const adapter = await start(hostStorageRoot);
 
     offer('corrupt-record', 'persona-agent', '3');
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'corrupt-record');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'corrupt-record');
     adapter.sessions[0]!.emit({ type: 'turn_end' });
 
     const complete = await server.waitFor((entry) => entry.type === 'task.complete' && entry.task_id === 'corrupt-record');
@@ -129,7 +129,7 @@ describe('terminal evidence of the applied Agent-home projection (#318)', () => 
     const adapter = await start(await temp('byok-projection-terminal-home-'));
 
     offer('no-projection', 'fresh-agent', '1');
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'no-projection');
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'no-projection');
     adapter.sessions[0]!.emit({ type: 'turn_end' });
 
     const complete = await server.waitFor((entry) => entry.type === 'task.complete' && entry.task_id === 'no-projection');

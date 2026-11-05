@@ -2907,6 +2907,41 @@ and both refuse `read-write` and `read-write-if-admitted` for a
 `AGENT_MEMORY_MCP_SERVER_NAME` from `@byok-sdk/client` is the reserved name of
 the SDK memory MCP server, so Host tests and diagnostics need no literal name.
 
+A fresh instruction task whose effective mode is `read` or `read-write`, on a
+daemon that admits the memory MCP, carries `MEMORY.md`
+([ADR-048](adr/ADR-048-device-injects-resident-memory.md), #1439), for a writer
+and a `memory-reader`. An `auto` daemon without a helper, which runs a writer as
+`read-write` with no memory MCP, cannot write memory and so could not repair the
+file. That task keeps the reading guidance like a resumed session, carries no
+data and does not fail on an over-limit file. A `*-if-admitted` selection that
+runs as `none` carries nothing. A resumed session keeps the reading guidance,
+and a prepared offer keeps its frozen bytes. Before the
+runtime starts, the device reads the file once, at most the limit plus one byte,
+as strict UTF-8, and puts it after the guidance and before the instruction, as
+one line: `Agent memory (data): ` and a JSON object with `path`, `revision`,
+`byteCount` and `content`. The line is the same while the file is. It goes into
+the first user message, never the system prompt, after blob and sealed
+instructions are opened. The task fails without retry and without truncation
+before the runtime starts when the file is over the limit
+(`agent_memory_resident_over_limit: <bytes>/<limit>`), or when it is missing,
+not a regular file or not valid UTF-8, or the home identity changed
+(`agent_memory_resident_unreadable: <reason>`). These prefixes are reason text,
+not wire values.
+
+Every writer Attempt keeps that read in memory as its start copy when the file
+was valid. When the Attempt ends, the runtime has stopped and `MEMORY.md` is a
+regular file over the limit, the device swaps it back to the start copy with
+one compare-and-swap, before the task-close snapshot and the lease release, and
+audits the task, the size it found and the revision it restored, without the
+content. `notes/` stay as they are, and the terminal still reports the size the
+Attempt wrote. A reader never restores, because it runs beside a writer. Nothing
+is restored without a start copy or without the memory filesystem (a native
+Linux descriptor backend or the release helper). A failed compare-and-swap is
+audited and not retried, and a crash before the restore loses the copy. On a
+daemon that carries the file, the next fresh task then fails until a Host intent
+replaces it. See [protocol.md §2.2](protocol.md#22-task-free-agent-home-projection)
+for a file over 256 KiB.
+
 The client release carries Darwin arm64 and x64 helpers. The SDK resolves its
 own path and checks the build manifest before each helper open. Arbitrary
 `agentMemoryFilesystem.helperBin` configuration is removed. The ordinary build

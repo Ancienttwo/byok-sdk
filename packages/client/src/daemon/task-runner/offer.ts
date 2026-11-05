@@ -355,7 +355,7 @@ export async function handleOffer(
 
     stage('start');
     await startOfferRuntime.call(this, phase, held, {
-      agentBinding, sessionLease, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
+      agentBinding, sessionLease, ordinaryMemoryMode, ordinaryMemoryMcp, readerAttempt, sessionRef, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
       preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
     }, {
       agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation, toolAuthorization,

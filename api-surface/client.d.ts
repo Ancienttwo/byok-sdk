@@ -1376,6 +1376,29 @@ export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
  * read fails; the caller then reports `unmeasured`.
  */
 export declare function digestAgentHomeMemory(home: string): Promise<AgentHomeMemoryDigest | undefined>;
+/** One read of the resident `MEMORY.md`; see {@link readResidentMemory}. */
+export type ResidentMemoryRead = {
+    readonly kind: 'read';
+    readonly content: string;
+    readonly revision: string;
+    readonly byteCount: number;
+} | {
+    readonly kind: 'over-limit';
+    readonly byteCount: number;
+} | {
+    readonly kind: 'unreadable';
+    readonly reason: string;
+};
+/**
+ * Reads the resident `MEMORY.md` of a leased home (#1439) with one
+ * implementation on every platform, at most the limit plus one byte, as strict
+ * UTF-8. The `lstat` covers a platform without `O_NOFOLLOW`. The revision is
+ * the one `memory_save` compares. A file problem is a result, never a throw.
+ */
+export declare function readResidentMemory(home: string, homeIdentity: Readonly<{
+    dev: bigint;
+    ino: bigint;
+}>): Promise<ResidentMemoryRead>;
 /**
  * Compares the reader's start and terminal digests. `writerOverlapped` is
  * true when a writer Attempt of the same home was active at any time
@@ -7127,8 +7150,16 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
 /**
  * Runtime-neutral instructions for an Agent's model-authored local memory.
  *
- * This is deliberately prompt guidance only: the SDK does not read memory
- * content, infer durable values, or auto-inject files into the operation.
+ * The SDK reads one file, the bounded `MEMORY.md`. At the start of a fresh task
+ * whose memory mode reads memory, on a daemon that admits the memory MCP, it
+ * puts that file before the instruction verbatim, as data. It does not interpret, select, summarize or truncate it,
+ * and it does not read `notes/` for the model. The SDK writes memory itself in
+ * one case only: at the end of a writer Attempt that left `MEMORY.md` over the
+ * limit, it restores that file to its content at the start of the Attempt.
+ *
+ * This constant is the guidance without the data: a resumed session, a fresh
+ * task on a daemon that does not admit the memory MCP, and an embedded Host
+ * that prepends it to its own instruction, read the file themselves.
  */
 export declare const AGENT_MEMORY_GUIDANCE: string;
 /**
@@ -7147,13 +7178,20 @@ export declare function prependAgentMemoryReaderGuidance(instruction: string): s
  * lines, only the run-directory result guidance.
  */
 export declare function prependAgentReaderResultGuidance(instruction: string): string;
+/** The bounded `MEMORY.md` a fresh task carries. */
+export interface ResidentMemoryData {
+    readonly content: string;
+    readonly revision: string;
+    readonly byteCount: number;
+}
 /**
  * The guidance for the effective memory mode of an ordinary Agent task (#614).
  * `none` gets no memory lines; a reader keeps its result line. `read` gets
  * read-only guidance. `read-write` gets the writer guidance; a reader never
- * gets this mode.
+ * gets this mode. With `resident`, a fresh task that carries `MEMORY.md`
+ * (#1439), the order is fixed: guidance, data block, instruction.
  */
-export declare function prependAgentMemoryModeGuidance(instruction: string, mode: 'none' | 'read' | 'read-write', reader: boolean): string;
+export declare function prependAgentMemoryModeGuidance(instruction: string, mode: 'none' | 'read' | 'read-write', reader: boolean, resident?: ResidentMemoryData): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
 import type { ToolAuthorizationDecision, ToolFileAccess, ToolReminder } from '../tool-authorization';

@@ -17,12 +17,15 @@ import {
   AGENT_HOME_READER_RUN_MAX_AGE_MS,
   compareAgentHomeMemory,
   digestAgentHomeMemory,
+  readResidentMemory,
 } from '../agent-home-readers';
 import { selectReaderRuns } from '../agent-home-reader-retention';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
+import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
+import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
@@ -41,6 +44,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 async function temp(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
+
+const itWithMemoryFilesystem = isAgentMemorySecureFilesystemAvailable(builtAgentMemoryFilesystemHelperBin() !== undefined) ? it : it.skip;
 
 function payloadOf(envelope: Envelope): Record<string, unknown> {
   return envelope.payload as Record<string, unknown>;
@@ -96,12 +101,13 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     };
   }
 
-  function offer(taskId: string, agentId: string, options: { reader?: boolean; sessionRef?: string } = {}): void {
+  function offer(taskId: string, agentId: string, options: { reader?: boolean; sessionRef?: string; agentMemory?: 'none' } = {}): void {
     server.send(createEnvelope('task.offer', {
       instruction: `work for ${agentId}`,
       agentRef: { agentId, profileRevision: 'r1' },
       runtime: 'pi',
       ...(options.reader === true ? { homeAccess: 'memory-reader' as const } : {}),
+      ...(options.agentMemory === undefined ? {} : { agentMemory: options.agentMemory }),
       ...(options.sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef: options.sessionRef } }),
     }, { taskId, seq: server.nextSeq() }));
   }
@@ -220,8 +226,8 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     });
 
     // The reader prompt points at the home's memory, not at its own cwd.
-    expect(harness.pi.startCalls[1]!.task.instruction).toContain('../../../MEMORY.md');
-    expect(harness.pi.startCalls[0]!.task.instruction).not.toContain('../../../MEMORY.md');
+    expect(harness.pi.startCalls[1]!.task.instruction).toContain('../../../notes/');
+    expect(harness.pi.startCalls[0]!.task.instruction).not.toContain('../../../notes/');
   });
 
   it('applies a configured reader limit and keeps the writer limit at one', async () => {
@@ -245,6 +251,27 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     expect(decline.reason).toMatch(/one plain path segment/);
     expect(harness.pi.startCalls).toHaveLength(0);
     await expect(fs.stat(await harness.home('naming'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('reads the bounded MEMORY.md, and names a file it cannot use without blocking on it (#1439)', async () => {
+    const home = await temp('byok-resident-read-');
+    const stat = await fs.stat(home, { bigint: true });
+    const identity = { dev: stat.dev, ino: stat.ino };
+    const file = path.join(home, 'MEMORY.md');
+    expect(await readResidentMemory(home, identity)).toEqual({ kind: 'unreadable', reason: 'missing' });
+    await fs.writeFile(file, 'é');
+    expect(await readResidentMemory(home, identity)).toEqual({
+      kind: 'read', content: 'é', byteCount: 2, revision: `sha256:${createHash('sha256').update('é').digest('hex')}`,
+    });
+    expect(await readResidentMemory(home, { ...identity, ino: identity.ino + 1n })).toEqual({ kind: 'unreadable', reason: 'home identity changed' });
+    await fs.writeFile(file, 'x'.repeat(9000));
+    expect(await readResidentMemory(home, identity)).toEqual({ kind: 'over-limit', byteCount: 9000 });
+    await fs.rm(file);
+    await fs.symlink(path.join(home, 'elsewhere'), file);
+    expect(await readResidentMemory(home, identity)).toEqual({ kind: 'unreadable', reason: 'not a regular file' });
+    await fs.rm(file);
+    execFileSync('mkfifo', [file]);
+    expect(await readResidentMemory(home, identity)).toEqual({ kind: 'unreadable', reason: 'not a regular file' });
   });
 
   it('reports unchanged memory, and a writer terminal carries no memory evidence', async () => {
@@ -275,6 +302,50 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     await fs.writeFile(path.join(home, 'MEMORY.md'), 'x'.repeat(size));
     expect(payloadOf(await complete(harness, 1, 'resident-writer')).residentMemoryOverLimit).toEqual(expected);
     expect(Object.hasOwn(payloadOf(await complete(harness, 0, 'resident-reader')), 'residentMemoryOverLimit')).toBe(false);
+  });
+
+  itWithMemoryFilesystem('restores only MEMORY.md after a writer overran it, and reports the size it wrote (#1439)', async () => {
+    server.setAckCapabilities(['resident-memory-over-limit']);
+    const harness = await start();
+    const home = await harness.home('restored');
+    offer('restored-setup', 'restored');
+    await claimed('restored-setup');
+    await complete(harness, 0, 'restored-setup');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the setup task to release');
+    await fs.writeFile(path.join(home, 'MEMORY.md'), 'as it started\n');
+
+    offer('restored-writer', 'restored');
+    await claimed('restored-writer');
+    await fs.writeFile(path.join(home, 'MEMORY.md'), 'overrun '.repeat(1536));
+    await fs.writeFile(path.join(home, 'notes', 'kept.md'), 'kept note\n');
+    const terminal = await complete(harness, 1, 'restored-writer');
+    expect(payloadOf(terminal).residentMemoryOverLimit).toEqual({ byteCount: 12288 });
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the writer to release');
+
+    expect(await fs.readFile(path.join(home, 'MEMORY.md'), 'utf8')).toBe('as it started\n');
+    expect(await fs.readFile(path.join(home, 'notes', 'kept.md'), 'utf8')).toBe('kept note\n');
+    const audit = await fs.readFile(path.join(home, '.byok', 'agent-memory-audit-v1.jsonl'), 'utf8');
+    expect(audit).toContain('"kind":"resident_memory_restore"');
+    expect(audit).toContain('"taskId":"restored-writer"');
+    expect(audit).toContain('"byteCount":12288,"outcome":"restored"');
+    expect(audit).not.toContain('overrun');
+  });
+
+  itWithMemoryFilesystem.each([
+    ['a writer with no start copy', { agentMemory: 'none' as const }, Buffer.from([0xff, 0xfe])],
+    ['a reader, which runs beside a writer', { reader: true }, Buffer.from('as it started\n')],
+  ])('does not restore for %s (#1439)', async (_label, options, content) => {
+    const harness = await start();
+    const home = await harness.home('unrestored');
+    const memory = path.join(home, 'MEMORY.md');
+    await fs.mkdir(path.join(home, 'notes'), { recursive: true });
+    await fs.writeFile(memory, content);
+    offer('unrestored', 'unrestored', options);
+    await claimed('unrestored');
+    await fs.writeFile(memory, 'x'.repeat(12288));
+    await complete(harness, 0, 'unrestored');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the Attempt to release');
+    expect((await fs.stat(memory)).size).toBe(12288);
   });
 
   it('attributes a memory change to readers when no writer overlapped', async () => {
@@ -373,6 +444,9 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     await claimed('resume-second');
     expect(harness.pi.startCalls[1]!.ctx.workspaceDir).toBe(path.join(home, '.byok', 'runs', 'resume-first'));
     expect(harness.pi.startCalls[1]!.task.sessionRef).toBe(sessionRef);
+    // A resumed session keeps the reading guidance and carries no data block (#1439).
+    expect(harness.pi.startCalls[1]!.task.instruction).toContain('first read `MEMORY.md`');
+    expect(harness.pi.startCalls[1]!.task.instruction).not.toContain('Agent memory (data)');
     await expect(fs.stat(path.join(home, '.byok', 'runs', 'resume-second'))).rejects.toMatchObject({ code: 'ENOENT' });
     // The handoff ledger stays in the home, not in the run directory.
     await expect(fs.stat(path.join(home, '.byok', 'runs', 'resume-first', '.byok'))).rejects.toMatchObject({ code: 'ENOENT' });

@@ -1,4 +1,4 @@
-import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
+import { daemonMemoryInstruction, freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs, symlinkSync, unlinkSync } from 'node:fs';
@@ -12,7 +12,6 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
-import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
@@ -73,7 +72,7 @@ describe('blob client (protocol §7)', () => {
 
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
-    expect(adapter.startCalls[0]?.task.instruction).toBe(prependAgentMemoryGuidance(bigInstruction));
+    expect(adapter.startCalls[0]?.task.instruction).toBe(daemonMemoryInstruction(bigInstruction));
   });
 
   it('admits a blobRef through a bundled prepared adapter, resolves it after claim, and starts with the resolved string', async () => {
@@ -111,7 +110,7 @@ describe('blob client (protocol §7)', () => {
     // progress batch away, so the terminal summary, which records the whole run's text, carries the echo.
     const completed = await server.waitFor((event) => event.type === 'task.complete' && event.task_id === taskId);
     if (completed.type !== 'task.complete' || completed.payload.sealed !== undefined) throw new Error('expected a plaintext task.complete');
-    expect(completed.payload.summary).toContain(`reply-1:${prependAgentMemoryGuidance(resolvedInstruction)}`);
+    expect(completed.payload.summary).toContain(`reply-1:${daemonMemoryInstruction(resolvedInstruction)}`);
     expect(server.httpRequests.some((request) => request.method === 'GET' && request.pathname === '/byok/blobs/instr-blob-bundled-prepared/url')).toBe(true);
   });
 

@@ -27,6 +27,7 @@ export interface OfferActivationInput
   readonly sessionMembers: DeclaredSessionMembers;
   readonly messageRequirement: ActiveTask['messageRequirement'];
   readonly terminalProjection: ActiveTask['terminalProjection'];
+  readonly residentMemoryStart: ActiveTask['residentMemoryStart'];
 }
 
 /**
@@ -38,7 +39,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   const { taskId } = phase;
   const {
     agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
-    workspaceDir, blobAbort, payload, session, sessionMembers, messageRequirement, terminalProjection, toolAuthorization,
+    workspaceDir, blobAbort, payload, session, sessionMembers, messageRequirement, terminalProjection, toolAuthorization, residentMemoryStart,
   } = input;
   try {
   try {
@@ -83,6 +84,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     },
     ...(appliedAgentHomeProjection === undefined ? {} : { appliedAgentHomeProjection }),
     ...(readerMemoryBaseline === undefined ? {} : { readerMemoryBaseline }),
+    ...(residentMemoryStart === undefined ? {} : { residentMemoryStart }),
     summaryParts: [],
     finalTextParts: [],
     batcher: new ProgressBatcher(

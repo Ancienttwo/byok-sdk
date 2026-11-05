@@ -38,7 +38,7 @@
     {
       "id": "resident-memory-over-limit",
       "impact": "additive",
-      "summary": "task.complete, task.fail and task.cancelled gain an optional residentMemoryOverLimit: { byteCount } (TerminalResidentMemoryOverLimitSchema, #1439): the terminal of a writer Attempt that became active reports a MEMORY.md that the runtime left over RESIDENT_MEMORY_MAX_BYTES with its own file tools, byteCount being the file size at the terminal decision. The device does not truncate or repair the file. The field is gated on the new server flag resident-memory-over-limit (RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY, in CAPABILITY_FLAGS), because the sealed terminal branches are strict; a daemon talking to a server without the flag sends the terminal without it. SEALED_SPLIT_TABLE moves it into the terminal ciphertext with agentHomeMemoryChange when the task seals memory-projection. Absence does not mean the file is within the limit: a reader terminal, an early failure, a failed measurement, a server without the flag and an older daemon all leave it absent. The hosted cloud advertises the flag and TerminalResult projects the field verbatim. A Host on its own server parses the field with the protocol schemas and advertises the flag only when it accepts it. Separately, the device refuses a memory_save of MEMORY.md over the limit and rejects such a Host intent with content_invalid.",
+      "summary": "task.complete, task.fail and task.cancelled gain an optional residentMemoryOverLimit: { byteCount } (TerminalResidentMemoryOverLimitSchema, #1439): the terminal of a writer Attempt that became active reports a MEMORY.md that the runtime left over RESIDENT_MEMORY_MAX_BYTES with its own file tools, byteCount being the file size at the terminal decision. The device never truncates the file. It reports the size before it restores the file at the end of the Attempt, so the terminal gives the size the Attempt wrote. The field is gated on the new server flag resident-memory-over-limit (RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY, in CAPABILITY_FLAGS), because the sealed terminal branches are strict; a daemon talking to a server without the flag sends the terminal without it. SEALED_SPLIT_TABLE moves it into the terminal ciphertext with agentHomeMemoryChange when the task seals memory-projection. Absence does not mean the file is within the limit: a reader terminal, an early failure, a failed measurement, a server without the flag and an older daemon all leave it absent. The hosted cloud advertises the flag and TerminalResult projects the field verbatim. A Host on its own server parses the field with the protocol schemas and advertises the flag only when it accepts it. Separately, the device refuses a memory_save of MEMORY.md over the limit and rejects such a Host intent with content_invalid.",
       "migration": "docs/protocol.md#22-task-free-agent-home-projection",
       "items": [
         "export:@byok-sdk/cloud#TerminalResult",
@@ -55,6 +55,16 @@
         "export:@byok-sdk/protocol#TerminalResidentMemoryOverLimitSchema",
         "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
         "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY"
+      ]
+    },
+    {
+      "id": "device-injects-resident-memory",
+      "impact": "breaking",
+      "summary": "HostExecutionCore no longer adds memory to the instruction (#1439, ADR-048). The device reads MEMORY.md at the start of a fresh instruction task whose memory mode is read or read-write, on a daemon that admits the memory MCP, and puts it, as one data line, after the guidance and before the instruction; a resumed session and a prepared offer carry nothing, and a fresh task on a daemon that does not admit the memory MCP keeps the reading guidance, carries no data and does not fail on the size. A fresh task fails without retry before the runtime starts when the file is over 8 KiB or cannot be read (agent_memory_resident_over_limit, agent_memory_resident_unreadable). Sealed and blob intents no longer fail with options.memory. contextPack stays as the Host's read, and an oversized or unauthorized projection no longer stops the queue; a restore in progress still parks the head, and a changed placement or profile still fails the intent, through the new HostMemoryPage.assertDispatchable. Every writer guidance, including the text of AGENT_MEMORY_GUIDANCE that an embedded Host prepends, now keeps resident facts and top-level pointers in MEMORY.md and moves the index of notes to notes/index.md, and a writer Attempt that leaves MEMORY.md over the limit has that one file restored to its start content. Upgrade the Host and the device together: an older Host core with a newer device shows the model MEMORY.md twice, at most 8 KiB more, without an error. A Host that built its own instruction from contextPack stops doing so.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/server/execution-core#HostExecutionCore",
+        "export:@byok-sdk/server/execution-core#HostMemoryPage"
       ]
     }
   ],
@@ -145,6 +155,16 @@
       "item": "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
       "change": "added",
       "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
+      "change": "changed",
+      "entry": "device-injects-resident-memory"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostMemoryPage",
+      "change": "changed",
+      "entry": "device-injects-resident-memory"
     },
     {
       "item": "export:@byok-sdk/server/execution-core#RESIDENT_MEMORY_MAX_BYTES",

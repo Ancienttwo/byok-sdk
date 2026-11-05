@@ -174,7 +174,7 @@ export declare class HostExecutionCore {
     private delivered;
     private admits;
     private submit;
-    private memoryInstruction;
+    private assertMemoryDispatchable;
     private resumeMemory;
     private memoryFailure;
     private begin;
@@ -506,6 +506,9 @@ export declare class HostMemoryPage {
     private record;
     /** Host-owned opaque profile: {residentMemory: policyApprovedText | null}. It conveys no edit proof. */
     projectionPort(deviceId: string): AgentMemoryProjectionPort;
+    /** What an Agent's queue waits for: a current placement and no restore in progress. */
+    assertDispatchable(binding: MemoryBinding): void;
+    /** The Host's read of the projected resident text. The device, not this read, puts `MEMORY.md` into a task. */
     contextPack(binding: MemoryBinding): MemoryContextPack;
 }
 export {};

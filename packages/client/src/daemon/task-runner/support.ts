@@ -136,6 +136,11 @@ export interface ActiveTask {
   agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
   /** A writer's over-limit `MEMORY.md`, measured at each terminal decision; see `TerminalResidentMemoryOverLimitSchema`. */
   residentMemoryOverLimit?: TerminalResidentMemoryOverLimit;
+  /**
+   * A writer Attempt's `MEMORY.md` at start, held in memory only (#1439). Absent
+   * for a reader and when the file could not be read; nothing is restored then.
+   */
+  residentMemoryStart?: { readonly content: string; readonly revision: string };
   terminalCause?: AgentTerminalCause;
   terminalReason?: string;
   agentTerminalPersisted?: boolean;

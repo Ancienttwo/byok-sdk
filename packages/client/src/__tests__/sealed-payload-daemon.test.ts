@@ -1,4 +1,4 @@
-import { testAgentHomeConfig } from './fixtures/test-agent';
+import { daemonMemoryInstruction, testAgentHomeConfig } from './fixtures/test-agent';
 /**
  * #654 E3c, E2d-3, E2d-4: a daemon that is a verified E2EE member opens a sealed
  * task's input and seals its output with the keys of its member keyring.
@@ -52,7 +52,6 @@ import { E2eeWebClient } from './fixtures/e2ee-web-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { resetTestDeviceCredentials } from './fixtures/credential-backend';
-import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 
 const BUDGET_MS = 4_000;
@@ -329,7 +328,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     expect(server.e2ee.packageReads).toBe(1);
-    expect(adapter.startCalls[0]!.task.instruction).toBe(prependAgentMemoryGuidance(instruction));
+    expect(adapter.startCalls[0]!.task.instruction).toBe(daemonMemoryInstruction(instruction));
     adapter.sessions[0]!.emit({ type: 'progress', text: 'secret progress' });
     // The Agent egress lane of a fresh offer forwards the last event of a batch, so the turn ends only after the progress envelope under test was sent.
     await server.waitFor((envelope) => wireForm(envelope) === 'task.progress_sealed' && envelope.task_id === 'sealed-task');
@@ -525,7 +524,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'sealed-input');
     server.send(await sealedOffer(member, 'output-only-steer', server.nextSeq(), deviceId, 'run output-only-steer', OUTPUT_ONLY));
     await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'output-only-steer');
-    const sessionOf = (taskId: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === prependAgentMemoryGuidance(`run ${taskId}`))]!;
+    const sessionOf = (taskId: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === daemonMemoryInstruction(`run ${taskId}`))]!;
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       server.send(createEnvelope('task.steer', { text: 'host injected' }, { taskId: 'sealed-input', seq: server.nextSeq() }));
@@ -943,7 +942,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
     server.send(await offerOf('blob-offer', false));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    expect(adapter.startCalls[0]!.task.instruction).toBe(prependAgentMemoryGuidance(instruction));
+    expect(adapter.startCalls[0]!.task.instruction).toBe(daemonMemoryInstruction(instruction));
   });
 
   it('declines an over-bound sealed offer with sealed_open_failed', async () => {
@@ -1279,7 +1278,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     server.send(await sealedOffer(member, 'held-upload', server.nextSeq(), deviceId, 'run the large task'));
     server.send(await sealedOffer(member, 'small-terminal', server.nextSeq(), deviceId, 'run the small task'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
-    const session = (instruction: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === prependAgentMemoryGuidance(instruction))]!;
+    const session = (instruction: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === daemonMemoryInstruction(instruction))]!;
     const held = session('run the large task');
     const small = session('run the small task');
     const release = server.holdBlobUploads();

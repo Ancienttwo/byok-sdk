@@ -40,6 +40,7 @@ async function running(key: string) {
   await vi.waitFor(async () => {
     await bot.drain();
     expect(bot.ledger.snapshot().executions[bot.core.intent(key)!.taskId]?.started).toBe(true);
+    expect(fixture!.adapter.sessions.has(bot.core.intent(key)!.taskId)).toBe(true);
   }, { timeout: 5000 });
   return fixture!.adapter.sessions.get(bot.core.intent(key)!.taskId)!;
 }

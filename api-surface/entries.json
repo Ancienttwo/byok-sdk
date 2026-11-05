@@ -169,7 +169,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 66646,
+      "budgetBytes": 66886,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2116,7 +2116,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 408209,
+      "budgetBytes": 407783,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
