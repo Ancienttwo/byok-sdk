@@ -92,7 +92,7 @@ test('invalid or partial evidence fails before a GitHub API request', () => {
   assert.doesNotThrow(() => validateReleaseRequest(request));
 });
 
-test('downloader verifies live metadata then returns only authenticated CI bytes and evidence', () => {
+test('downloader verifies live metadata then returns only authenticated CI bytes', () => {
   const f = fixture();
   const calls = [];
   const api = endpoint => {
@@ -105,14 +105,10 @@ test('downloader verifies live metadata then returns only authenticated CI bytes
   const verified = fetchReleaseArtifact(f.request, api);
   assert.deepEqual(calls, ['actions/workflows/ci.yml', 'actions/runs/456', 'actions/artifacts/789', 'actions/artifacts/789/zip']);
   assert.deepEqual(verified.files.get('core.tgz'), f.bytes);
-  assert.equal(verified.evidence.repository, releaseRepository);
-  assert.equal(verified.evidence.sourceSha, sha);
-  assert.equal(verified.evidence.artifactDigest, f.request.artifactDigest);
-  assert.equal(verified.evidence.manifestSha256, hash('sha256', verified.files.get('release-manifest.json')));
-  assert.equal(verified.evidence.runAttempt, 2);
+  assert.equal(verified.manifestSha256, hash('sha256', verified.files.get('release-manifest.json')));
   // A forged local receipt is neither an API response nor a valid archive.
   assert.throws(() => fetchReleaseArtifact(f.request, endpoint => endpoint.endsWith('/zip')
-    ? Buffer.from(JSON.stringify(verified.evidence)) : api(endpoint)), /archive digest/);
+    ? Buffer.from(JSON.stringify(f.request)) : api(endpoint)), /archive digest/);
   assert.throws(() => fetchReleaseArtifact(f.request, endpoint => {
     if (endpoint.endsWith('/zip')) assert.fail('invalid run downloaded');
     return endpoint === 'actions/runs/456' ? JSON.stringify({ ...run, event: 'push' }) : api(endpoint);

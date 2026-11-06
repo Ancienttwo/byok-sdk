@@ -320,7 +320,7 @@ export function verifyFrozenArtifacts({ artifactsDir, headSha, trainVersion, pub
 }
 
 /**
- * The registry-side half of the runbook's "provenance/2FA policy" item, made executable:
+ * The registry-side half of the runbook's "local npm session/2FA policy" item, made executable:
  * the session must be authenticated, and the account must require a second factor on
  * writes, not only on login. There is no override flag — the policy is the gate.
  */
