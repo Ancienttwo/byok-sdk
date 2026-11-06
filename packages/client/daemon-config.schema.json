@@ -765,7 +765,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = the three wire runtimes —\npi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildRuntimeAdapters`; the `grok` custom harness is\nbuilt only when listed), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
+      "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = the three wire runtimes —\npi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildRuntimeAdapters`; the `grok` and `dsh` custom\nharnesses are built only when listed), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
     },
     "runtimes": {
       "type": "object",
@@ -1384,6 +1384,190 @@
             }
           },
           "description": "Applies only when `runtimeAllowlist` lists `grok`."
+        },
+        "dsh": {
+          "type": "object",
+          "properties": {
+            "home": {
+              "type": "string",
+              "description": "`DshAdapterOptions.home`: the absolute `DSH_HOME` the SDK owns. It must persist across executions, because dsh keeps its sessions there, and must not be `~/.dsh`."
+            },
+            "model": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "description": "`deepseek` routes through dsh's own DeepSeek API plugin\n(`deepseek-official`). `custom` is an OpenAI-compatible endpoint at\n`baseUrl`. Any other value is a pi-ai catalog provider id dsh ships, for\nexample `openai`, `anthropic` or `openrouter`."
+                },
+                "model": {
+                  "type": "string"
+                },
+                "baseUrl": {
+                  "type": "string",
+                  "description": "Endpoint for `custom` (required) or a catalog provider (optional). Not allowed for `deepseek`. It must not carry credentials."
+                },
+                "keyEnv": {
+                  "type": "string",
+                  "description": "The environment variable that holds the provider key. Its name must\ncontain `KEY`, `TOKEN`, `SECRET` or `PASSWORD`: dsh removes such names\nfrom every tool process it starts, so the key never reaches the model's\nshell. It must not be `DEEPSEEK_API_KEY`, which dsh's `web_search` tool\nalso reads, nor start with `BYOK_` (the runtime environment drops those)\nor `DSH_` (the adapter owns them)."
+                }
+              },
+              "required": [
+                "provider",
+                "model",
+                "keyEnv"
+              ],
+              "description": "`DshAdapterOptions.model`: provider, model, `baseUrl` and the name of the variable that holds the key."
+            },
+            "sandbox": {
+              "enum": [
+                "danger-full-access",
+                "read-only",
+                "workspace-write"
+              ],
+              "description": "`DshAdapterOptions.sandbox`: dsh's sandbox for every session. Default `danger-full-access`."
+            },
+            "versionPolicy": {
+              "type": "object",
+              "properties": {
+                "qualifiedVersion": {
+                  "type": "string",
+                  "description": "The normalized token this SDK was qualified against, for example `0.160.0`."
+                },
+                "unqualified": {
+                  "enum": [
+                    "allow",
+                    "block",
+                    "warn"
+                  ],
+                  "description": "What an unmatched token means. A descriptor default may not use `block`; only a Host layer may."
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Explicitly known-good versions outside the qualified range."
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions that must stay a warning even where `unqualified` is `allow`."
+                },
+                "block": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions this Host refuses before claim. Host layer only."
+                }
+              },
+              "required": [
+                "qualifiedVersion",
+                "unqualified"
+              ],
+              "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
+            }
+          },
+          "required": [
+            "home",
+            "model"
+          ],
+          "description": "Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only."
         }
       },
       "description": "Isolation options of the runtime adapters `createDaemon` builds (#1094),\npassed to each adapter's constructor; an unset option keeps the\nadapter's default, under which a runtime keeps the user's own context,\nsessions and MCP servers. Which runtimes are built stays\n`runtimeAllowlist`, and the Codex sandbox stays `codexSandbox`.\n`createDaemonWithAdapters` rejects this key, even when undefined:\nconfigure each injected adapter directly."

@@ -3,7 +3,7 @@
 // reads no credential. Frame shapes follow the dsh 0.2.1-rc.5 ACP server as
 // probed in docs/researches/2026-11-01-dsh-adapter.md §2.
 //
-// argv: `--version` prints FAKE_DSH_VERSION (default 0.2.1-rc.5).
+// argv: `--version` prints FAKE_DSH_VERSION (default 0.2.2-rc.1).
 // `--profile acp --help` writes $DSH_HOME/profiles/acp and exits 0
 // (FAKE_DSH_NO_ACP=1: exits 2). `--profile acp --patch <file>` serves ACP.
 // The prompt text selects the scenario (see `prompt` below).
@@ -18,7 +18,7 @@ const log = (fact) => { if (process.env.FAKE_DSH_LOG) appendFileSync(process.env
 const home = process.env.DSH_HOME;
 
 if (args[0] === '--version') {
-  process.stdout.write(`${process.env.FAKE_DSH_VERSION ?? '0.2.1-rc.5'}\n`);
+  process.stdout.write(`${process.env.FAKE_DSH_VERSION ?? '0.2.2-rc.1'}\n`);
   process.exit(0);
 }
 if (args[0] !== '--profile' || args[1] !== 'acp') { process.stderr.write(`unexpected argv ${JSON.stringify(args)}\n`); process.exit(64); }

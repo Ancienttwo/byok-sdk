@@ -258,8 +258,8 @@ export interface DaemonConfig {
    * places that must stay consistent: `createDaemon` (this file) builds its
    * bundled adapter set FROM this list (unset = the three wire runtimes —
    * pi, claude, codex; set = exactly the listed runtime ids, unknown ids
-   * ignored — see `buildRuntimeAdapters`; the `grok` custom harness is
-   * built only when listed), and `TaskRunner.pickAdapter`
+   * ignored — see `buildRuntimeAdapters`; the `grok` and `dsh` custom
+   * harnesses are built only when listed), and `TaskRunner.pickAdapter`
    * (`task-runner.ts`) separately fail-closed-rejects any `task.offer`
    * naming a runtime outside this list regardless of which adapters were
    * constructed. `createDaemonWithAdapters` callers supply their own

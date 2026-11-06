@@ -259,7 +259,12 @@ and a static tool-authorization policy in `toolAuthorization`:
   stays `runtimeAllowlist`; the Codex sandbox stays `codexSandbox`. Grok is a
   custom harness, so `createDaemon` builds it only when `runtimeAllowlist`
   lists `grok`; it runs on darwin and linux and reports `platform_unsupported`
-  elsewhere.
+  elsewhere. dsh is a custom harness too: `createDaemon` builds it only when
+  `runtimeAllowlist` lists `dsh`, which then requires `runtimes.dsh` with
+  `home` (an absolute `DSH_HOME` the SDK owns, not `~/.dsh`) and `model`
+  (`provider`, `model`, `keyEnv` and, for `custom`, `baseUrl`). `sandbox`
+  defaults to `danger-full-access`. It runs on the same two platforms. The key
+  stays in the runtime environment under `keyEnv`.
   `createDaemonWithAdapters` rejects `runtimes`: configure injected adapters
   directly.
 - A `fileScope` is only legal when every runtime of the daemon resolves to
@@ -777,6 +782,20 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.grok.versionPolicy.allow` | advanced | array |
 | `runtimes.grok.versionPolicy.warn` | advanced | array |
 | `runtimes.grok.versionPolicy.block` | advanced | array |
+| `runtimes.dsh` | advanced | object |
+| `runtimes.dsh.home` | required when parent is set | string |
+| `runtimes.dsh.model` | required when parent is set | object |
+| `runtimes.dsh.model.provider` | required when parent is set | string |
+| `runtimes.dsh.model.model` | required when parent is set | string |
+| `runtimes.dsh.model.baseUrl` | advanced | string |
+| `runtimes.dsh.model.keyEnv` | required when parent is set | string |
+| `runtimes.dsh.sandbox` | advanced | "danger-full-access" / "read-only" / "workspace-write" |
+| `runtimes.dsh.versionPolicy` | advanced | object |
+| `runtimes.dsh.versionPolicy.qualifiedVersion` | required when parent is set | string |
+| `runtimes.dsh.versionPolicy.unqualified` | required when parent is set | "allow" / "block" / "warn" |
+| `runtimes.dsh.versionPolicy.allow` | advanced | array |
+| `runtimes.dsh.versionPolicy.warn` | advanced | array |
+| `runtimes.dsh.versionPolicy.block` | advanced | array |
 | `runtimeEnvironment` | advanced | union |
 | `piByokLauncher` | advanced | object |
 | `piByokLauncher.command` | required when parent is set | string |
@@ -898,6 +917,7 @@ Manifest transition: **0.38.0 → 0.38.0**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
+| daemon-config-runtimes-dsh | additive | createDaemon and createRuntimeAdapters build DshAdapter when runtimeAllowlist lists dsh, from the new DaemonConfig.runtimes.dsh (home, model, sandbox, versionPolicy). home and model are required, and listing dsh without runtimes.dsh is a config error. A config that does not list dsh is unaffected, and a Host that constructs DshAdapter itself changes nothing. The qualified dsh version moves to 0.2.2-rc.1. [Migration](../docs/adapter-capabilities.md#dsh-adapter-custom-harness) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

@@ -165,6 +165,10 @@ function sdkBuiltIsolation(id: string, config: DaemonConfig): Readonly<Record<st
       compatInstructions: runtimes?.grok?.compatInstructions ?? 'inherit',
       agentUserMcpServers: runtimes?.grok?.agentUserMcpServers ?? 'inherit',
     };
+    case 'dsh': return runtimes?.dsh === undefined ? undefined : {
+      home: runtimes.dsh.home,
+      sandbox: runtimes.dsh.sandbox ?? 'danger-full-access',
+    };
     default: return undefined;
   }
 }

@@ -1225,6 +1225,7 @@ import { type PiAdapterOptions, type PiByokLauncherConfig } from './pi/pi-adapte
 import { type ClaudeAdapterOptions } from './claude/claude-adapter';
 import { type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter';
 import { type GrokAdapterOptions } from './grok/grok-adapter';
+import { type DshAdapterOptions } from './dsh/dsh-adapter';
 /** `RuntimeAdaptersConfig.runtimes.pi`: the Pi options a Host can configure. */
 export interface PiRuntimeConfig {
     /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
@@ -1271,6 +1272,17 @@ export interface RuntimeAdaptersRuntimes {
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
     };
+    /** Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only. */
+    dsh?: {
+        /** `DshAdapterOptions.home`: the absolute `DSH_HOME` the SDK owns. It must persist across executions, because dsh keeps its sessions there, and must not be `~/.dsh`. */
+        home: DshAdapterOptions['home'];
+        /** `DshAdapterOptions.model`: provider, model, `baseUrl` and the name of the variable that holds the key. */
+        model: DshAdapterOptions['model'];
+        /** `DshAdapterOptions.sandbox`: dsh's sandbox for every session. Default `danger-full-access`. */
+        sandbox?: DshAdapterOptions['sandbox'];
+        /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+        versionPolicy?: RuntimeVersionPolicy;
+    };
 }
 /**
  * The input of {@link createRuntimeAdapters}: the `DaemonConfig` keys that
@@ -1283,7 +1295,7 @@ export interface RuntimeAdaptersConfig {
     nativeAssetRoot?: string;
     /** Re-enter the product's single-file/SEA executable for SDK helpers and every Pi launch. */
     sdkHelperHost?: SdkHelperHostConfig;
-    /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok` is built only when listed. */
+    /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok` and `dsh` are built only when listed. */
     runtimeAllowlist?: string[];
     runtimes?: RuntimeAdaptersRuntimes;
     /** The environment every built runtime gives its children (#1095); `pass` must not name `PI_PACKAGE_DIR`. */
@@ -5259,8 +5271,8 @@ export interface DaemonConfig {
      * places that must stay consistent: `createDaemon` (this file) builds its
      * bundled adapter set FROM this list (unset = the three wire runtimes —
      * pi, claude, codex; set = exactly the listed runtime ids, unknown ids
-     * ignored — see `buildRuntimeAdapters`; the `grok` custom harness is
-     * built only when listed), and `TaskRunner.pickAdapter`
+     * ignored — see `buildRuntimeAdapters`; the `grok` and `dsh` custom
+     * harnesses are built only when listed), and `TaskRunner.pickAdapter`
      * (`task-runner.ts`) separately fail-closed-rejects any `task.offer`
      * naming a runtime outside this list regardless of which adapters were
      * constructed. `createDaemonWithAdapters` callers supply their own
