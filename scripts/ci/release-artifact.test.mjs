@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { deflateRawSync } from 'node:zlib';
 import { fetchReleaseArtifact, readReleaseZip, releaseRepository, validateReleaseRequest, verifyReleaseArchive, verifyReleaseIdentity } from './release-artifact.mjs';
 
@@ -93,7 +92,7 @@ test('invalid or partial evidence fails before a GitHub API request', () => {
   assert.doesNotThrow(() => validateReleaseRequest(request));
 });
 
-test('downloader verifies live metadata then returns only authenticated CI bytes and evidence', () => {
+test('downloader verifies live metadata then returns only authenticated CI bytes', () => {
   const f = fixture();
   const calls = [];
   const api = endpoint => {
@@ -106,14 +105,10 @@ test('downloader verifies live metadata then returns only authenticated CI bytes
   const verified = fetchReleaseArtifact(f.request, api);
   assert.deepEqual(calls, ['actions/workflows/ci.yml', 'actions/runs/456', 'actions/artifacts/789', 'actions/artifacts/789/zip']);
   assert.deepEqual(verified.files.get('core.tgz'), f.bytes);
-  assert.equal(verified.evidence.repository, releaseRepository);
-  assert.equal(verified.evidence.sourceSha, sha);
-  assert.equal(verified.evidence.artifactDigest, f.request.artifactDigest);
-  assert.equal(verified.evidence.manifestSha256, hash('sha256', verified.files.get('release-manifest.json')));
-  assert.equal(verified.evidence.runAttempt, 2);
+  assert.equal(verified.manifestSha256, hash('sha256', verified.files.get('release-manifest.json')));
   // A forged local receipt is neither an API response nor a valid archive.
   assert.throws(() => fetchReleaseArtifact(f.request, endpoint => endpoint.endsWith('/zip')
-    ? Buffer.from(JSON.stringify(verified.evidence)) : api(endpoint)), /archive digest/);
+    ? Buffer.from(JSON.stringify(f.request)) : api(endpoint)), /archive digest/);
   assert.throws(() => fetchReleaseArtifact(f.request, endpoint => {
     if (endpoint.endsWith('/zip')) assert.fail('invalid run downloaded');
     return endpoint === 'actions/runs/456' ? JSON.stringify({ ...run, event: 'push' }) : api(endpoint);
@@ -160,17 +155,4 @@ test('ZIP reader rejects paths, links, duplicate entries, inconsistent headers a
   inconsistent[30] = 'x'.charCodeAt(0);
   assert.throws(() => readReleaseZip(inconsistent), /truncated/);
   assert.throws(() => readReleaseZip(valid.subarray(0, -1)), /directory/);
-});
-
-test('release workflow keeps protected hosted OIDC and explicit CI identity with pinned actions', () => {
-  const workflowSource = readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
-  assert.match(workflowSource, /environment: npm-release/);
-  assert.match(workflowSource, /if: github.ref == 'refs\/heads\/main'/);
-  assert.match(workflowSource, /runs-on: ubuntu-latest/);
-  assert.match(workflowSource, /id-token: write/);
-  assert.match(workflowSource, /actions: read/);
-  assert.match(workflowSource, /if \[ "\$GITHUB_SHA" != "\$APPROVED_SHA" \]/);
-  assert.match(workflowSource, /--trusted-publishing --ci-run-id "\$CI_RUN_ID" --ci-artifact-id "\$CI_ARTIFACT_ID" --ci-artifact-digest "\$CI_ARTIFACT_DIGEST"/);
-  assert.doesNotMatch(workflowSource, /source-sha|accepted-release|GITHUB_SHA:|export GITHUB_SHA|bun run build|--artifacts/);
-  for (const action of workflowSource.matchAll(/uses: ([^\n]+)/g)) assert.match(action[1], /@[a-f0-9]{40}(?: |$)/);
 });

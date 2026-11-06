@@ -71,8 +71,6 @@ test('workflow separates targeted, nightly and approved release validation', () 
   assert.match(aggregate, /^          CI_NEEDS: \$\{\{ toJSON\(needs\) \}\}$/m);
   assert.match(aggregate, /^        run: node scripts\/ci\/require-ci-plan.mjs$/m);
   assert.match(workflow, /if: matrix.os == 'ubuntu-latest' && needs.select.outputs.release == 'true'\n        uses: actions\/upload-artifact/);
-  const release = readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
-  assert.match(release, /--ci-run-id "\$CI_RUN_ID" --ci-artifact-id "\$CI_ARTIFACT_ID" --ci-artifact-digest "\$CI_ARTIFACT_DIGEST"/);
   const verifier = readFileSync(new URL('./release-artifact.mjs', import.meta.url), 'utf8');
   assert.match(verifier, /run.event !== 'workflow_dispatch'/);
   assert.match(verifier, /run.head_sha !== request.sourceSha/);

@@ -53,7 +53,6 @@ test('dry-run artifact inputs remain separate from verified CI execution', () =>
     outDir: undefined,
     artifacts: 'ci-pack',
     tag: undefined,
-    trustedPublishing: false,
   });
   assert.deepEqual(parseArguments(['--execute', '--otp', '123456', ...ciFlags]), {
     execute: true,
@@ -61,7 +60,6 @@ test('dry-run artifact inputs remain separate from verified CI execution', () =>
     outDir: undefined,
     artifacts: undefined,
     tag: undefined,
-    trustedPublishing: false,
     ciRunId: '123',
     ciArtifactId: '456',
     ciArtifactDigest: `sha256:${'a'.repeat(64)}`,
@@ -81,7 +79,7 @@ test('dry-run artifact inputs remain separate from verified CI execution', () =>
 });
 
 test('all execute authentication modes require complete live CI evidence and refuse local artifacts', () => {
-  for (const auth of [[], ['--otp', '123456'], ['--trusted-publishing']]) {
+  for (const auth of [[], ['--otp', '123456']]) {
     for (const input of [[], ['--artifacts', 'forged-receipt-dir'], ['--out-dir', 'local-rebuild']]) {
       assert.throws(() => parseArguments(['--execute', ...auth, ...input]),
         error => error.code === 'RELEASE_CI_EVIDENCE_REQUIRED');

@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 
 import {
   assertPublishedMatchFrozen,
-  assertTrustedPublishingEnvironment,
   describeReleasePlan,
   parseArguments,
   publishLandedDelaysMs,
@@ -67,23 +66,18 @@ function recorder() {
 
 const plan = ['@byok-sdk/core', '@byok-sdk/protocol', '@byok-sdk/cloud', '@byok-sdk/server'].map((name) => planEntry(name));
 
-test('--dry-run, --execute and --trusted-publishing parse into one explicit mode', () => {
+test('--dry-run and --execute parse into one explicit mode', () => {
   assert.deepEqual(parseArguments(['--dry-run', '--artifacts', 'ci-pack']), {
-    execute: false, otp: undefined, outDir: undefined, artifacts: 'ci-pack', tag: undefined, trustedPublishing: false,
+    execute: false, otp: undefined, outDir: undefined, artifacts: 'ci-pack', tag: undefined,
   });
-  assert.deepEqual(parseArguments(['--execute', '--trusted-publishing', '--ci-run-id', '123',
+  assert.deepEqual(parseArguments(['--execute', '--ci-run-id', '123',
     '--ci-artifact-id', '456', '--ci-artifact-digest', `sha256:${'a'.repeat(64)}`, '--tag', 'rc']), {
-    execute: true, otp: undefined, outDir: undefined, artifacts: undefined, tag: 'rc', trustedPublishing: true,
+    execute: true, otp: undefined, outDir: undefined, artifacts: undefined, tag: 'rc',
     ciRunId: '123', ciArtifactId: '456', ciArtifactDigest: `sha256:${'a'.repeat(64)}`,
   });
   assert.throws(() => parseArguments(['--dry-run', '--execute']), /--dry-run and --execute are mutually exclusive/);
   assert.throws(() => parseArguments(['--execute', '--dry-run']), /--dry-run and --execute are mutually exclusive/);
   assert.throws(() => parseArguments(['--dry-run', '--dry-run']), /--dry-run may be provided only once/);
-  assert.throws(() => parseArguments(['--trusted-publishing', '--trusted-publishing']), /--trusted-publishing may be provided only once/);
-  assert.throws(
-    () => parseArguments(['--execute', '--trusted-publishing', '--otp', '123456']),
-    /--otp has no meaning with --trusted-publishing/,
-  );
 });
 
 test('a failed prerelease upload says it cannot resume, and a failed follow-up read keeps the npm error', async () => {
@@ -110,16 +104,14 @@ test('a failed prerelease upload says it cannot resume, and a failed follow-up r
   );
 });
 
-test('the trusted-publishing gate and the empty-plan branch both sit before the first publish', () => {
+test('the empty-plan branch sits before the first publish', () => {
   const source = readFileSync(fileURLToPath(new URL('./publish.mjs', import.meta.url)), 'utf8');
   const main = source.indexOf('async function main()');
-  const trustedGate = source.indexOf('assertTrustedPublishingEnvironment({\n', main);
   const emptyPlanGate = source.indexOf('registry auth gate skipped', main);
   const firstPublish = source.indexOf("'publish',", main);
   const readback = source.indexOf("'scripts/release/registry-readback.mjs'", main);
   const createTag = source.indexOf("['tag', '-a'", main);
-  assert.ok(main > 0 && trustedGate > main && emptyPlanGate > main, 'main() calls the trusted-publishing gate and names the empty-plan branch');
-  assert.ok(trustedGate < firstPublish, 'the trusted-publishing gate must precede the first publish');
+  assert.ok(main > 0 && emptyPlanGate > main, 'main() names the empty-plan branch');
   assert.ok(emptyPlanGate < firstPublish, 'the empty-plan branch is decided before the first publish');
   assert.ok(firstPublish < readback && readback < createTag, 'an empty plan still reaches the tag only through the readback');
 });
@@ -288,7 +280,7 @@ test('the dry-run plan names every package, the auth mode, provenance, dist-tag,
   const entries = [...plan, keys];
   const registryState = new Map(entries.map((entry) => [entry.name, entry === keys]));
   const lines = describeReleasePlan({
-    entries, plan, registryState, tag: 'v0.14.0', distTag: undefined, trustedPublishing: true, provenance: true,
+    entries, plan, registryState, tag: 'v0.14.0', distTag: undefined,
   });
   assert.deepEqual(lines, [
     'publish 4 package(s) in this order:',
@@ -298,8 +290,8 @@ test('the dry-run plan names every package, the auth mode, provenance, dist-tag,
     `  4. @byok-sdk/server@0.14.0  byok-sdk-server-0.14.0.tgz  sha256:${'a'.repeat(64)}`,
     'skip 1 package(s) already on the registry:',
     '  - @byok-sdk/keys@0.4.0',
-    'auth: npm trusted publishing (GitHub Actions OIDC); no token, no OTP',
-    'provenance: attached (--provenance)',
+    'auth: the local npm session; tfa.mode auth-and-writes is required',
+    'provenance: not attached (not a GitHub Actions run)',
     'dist-tag: latest (npm default)',
     'readback: wait up to 195s for all 5 exact versions, then the full readback with up to 4 retries',
     'tag: annotated v0.14.0 at HEAD, created only after the readback passes',
@@ -311,39 +303,9 @@ test('the dry-run plan names every package, the auth mode, provenance, dist-tag,
     registryState: new Map(entries.map((entry) => [entry.name, true])),
     tag: 'v0.14.0-rc.1',
     distTag: 'rc',
-    trustedPublishing: false,
-    provenance: false,
   });
   assert.equal(resume[0], 'nothing to publish: every package is already on the registry; this run resumes with the readback and tag v0.14.0-rc.1');
   assert.ok(resume.includes('auth: the local npm session; tfa.mode auth-and-writes is required'));
   assert.ok(resume.includes('provenance: not attached (not a GitHub Actions run)'));
   assert.ok(resume.includes('dist-tag: rc'));
-});
-
-test('trusted publishing accepts only a GitHub-hosted OIDC job with a new enough npm and no token', () => {
-  const hosted = {
-    GITHUB_ACTIONS: 'true',
-    RUNNER_ENVIRONMENT: 'github-hosted',
-    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://example.invalid/token',
-    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'request-token',
-  };
-  for (const npmVersion of ['11.5.1', '11.19.0\n', '12.0.0']) {
-    assert.doesNotThrow(() => assertTrustedPublishingEnvironment({ env: hosted, npmVersion }), npmVersion);
-  }
-  const refusals = [
-    [{ ...hosted, GITHUB_ACTIONS: undefined }, '11.19.0', /needs a GitHub Actions run/],
-    [{ ...hosted, RUNNER_ENVIRONMENT: 'self-hosted' }, '11.19.0', /needs a GitHub-hosted runner, this runner reports RUNNER_ENVIRONMENT="self-hosted"; npm does not accept OIDC publishing from self-hosted runners/],
-    [{ ...hosted, RUNNER_ENVIRONMENT: undefined }, '11.19.0', /RUNNER_ENVIRONMENT=null/],
-    [{ ...hosted, ACTIONS_ID_TOKEN_REQUEST_URL: undefined }, '11.19.0', /needs `permissions: id-token: write`/],
-    [{ ...hosted, ACTIONS_ID_TOKEN_REQUEST_TOKEN: '' }, '11.19.0', /needs `permissions: id-token: write`/],
-    [{ ...hosted, NODE_AUTH_TOKEN: 'npm_long_lived' }, '11.19.0', /refuses a long-lived npm token in the environment \(NODE_AUTH_TOKEN\)/],
-    [{ ...hosted, NPM_TOKEN: 'npm_long_lived' }, '11.19.0', /\(NPM_TOKEN\)/],
-    [hosted, '11.5.0', /needs npm 11\.5\.1 or later, found "11\.5\.0"/],
-    [hosted, '10.9.2', /needs npm 11\.5\.1 or later, found "10\.9\.2"/],
-    [hosted, 'not-a-version', /needs npm 11\.5\.1 or later/],
-    [hosted, undefined, /found null/],
-  ];
-  for (const [env, npmVersion, message] of refusals) {
-    assert.throws(() => assertTrustedPublishingEnvironment({ env, npmVersion }), message);
-  }
 });

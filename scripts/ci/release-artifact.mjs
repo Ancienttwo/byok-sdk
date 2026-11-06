@@ -132,12 +132,5 @@ export function fetchReleaseArtifact(request, api = githubApi) {
   const run = JSON.parse(api(`actions/runs/${request.runId}`));
   const artifact = JSON.parse(api(`actions/artifacts/${request.artifactId}`));
   verifyReleaseIdentity(run, workflow, artifact, request);
-  const verified = verifyReleaseArchive(api(`actions/artifacts/${request.artifactId}/zip`), request);
-  return {
-    ...verified,
-    evidence: { repository: releaseRepository, sourceSha: request.sourceSha, runId: request.runId,
-      runAttempt: run.run_attempt, branch: run.head_branch, event: run.event, workflow: run.path,
-      conclusion: run.conclusion, artifactId: request.artifactId, artifactDigest: request.artifactDigest,
-      manifestSha256: verified.manifestSha256 },
-  };
+  return verifyReleaseArchive(api(`actions/artifacts/${request.artifactId}/zip`), request);
 }

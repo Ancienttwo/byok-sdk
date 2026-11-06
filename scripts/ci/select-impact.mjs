@@ -492,10 +492,11 @@ const archContextFiles = new Set(['.archcontext/manifest.yaml', '.archcontext/pr
   'docs/architecture/requests/.gitkeep']);
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'packages/AGENTS.md', 'packages/CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 // #605 W5: w5-runner-probe.yml is workflow_dispatch only and reads no repo
-// file, so like release.yml it selects only the CI script checks.
+// file, so it selects only the CI script checks.
 // #1103: runtime-contract-nightly.yml runs on a schedule against the latest CLIs; it never gates a PR.
 // #1105: client-retention-soak.yml is a schedule/workflow_dispatch artifact
 // producer, not a PR gate; it selects only the CI script checks too.
+// release.yml is deleted; its entry remains because deleted paths are selector inputs.
 const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml', '.github/workflows/w5-runner-probe.yml', '.github/workflows/security-advisories.yml',
   '.github/workflows/runtime-contract-nightly.yml', '.github/workflows/client-retention-soak.yml']);
 const sorted = values => [...values].sort();
