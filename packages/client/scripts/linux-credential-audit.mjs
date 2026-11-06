@@ -9,6 +9,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  AGY_AUDIT_KEY,
   canonicalCanaryPaths,
   normalizeTraceEvidence,
   normalSmokeVerdict,
@@ -70,7 +71,7 @@ async function ensureCanaries(home) {
 function parsePositiveOutput(stdout) {
   try {
     const parsed = JSON.parse(stdout.trim());
-    return Array.isArray(parsed.opened) && JSON.stringify([...parsed.opened].sort()) === JSON.stringify(['claude', 'codex', 'pi']);
+    return Array.isArray(parsed.opened) && JSON.stringify([...parsed.opened].sort()) === JSON.stringify(['agy', 'claude', 'codex', 'pi']);
   } catch {
     return false;
   }
@@ -152,6 +153,7 @@ try {
   const smokeTraceFiles = await readTraceFiles(smokeDir);
   smokeEvidence = normalizeTraceEvidence(smokeTraceFiles, canonicalPaths);
   smokeVerdict = normalSmokeVerdict(smokeEvidence);
+  if (`${smokeRun.stdout}${smokeRun.stderr}`.includes(AGY_AUDIT_KEY)) throw new Error('the agy key appeared in the smoke output');
   if (smokeRun.code !== 0) throw new Error(`adapter smoke failed under strace (exit=${smokeRun.code}, signal=${smokeRun.signal ?? 'none'})`);
   if (!smokeVerdict.pass) {
     if (smokeVerdict.unresolvedProcesses.length > 0) {

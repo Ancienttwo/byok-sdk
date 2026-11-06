@@ -7,7 +7,6 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { DshAdapter } from '../adapters/dsh/dsh-adapter';
 import { AgyAdapter } from '../adapters/antigravity/agy-adapter';
-import { agyAdapterWithEndpoint } from '../adapters/antigravity/agy-endpoint';
 import { QUALIFIED_AGY_VERSION } from '../adapters/antigravity/agy-version';
 import { resolveAgyBin } from '../adapters/antigravity/resolve-bin';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
@@ -51,7 +50,7 @@ const CASES: readonly Case[] = [
     id: 'agy', envName: 'BYOK_AGY_BIN', fixture: fixture('fake-acp-agent.mjs'),
     create: async () => {
       vi.stubEnv('FAKE_ACP_VERSION', QUALIFIED_AGY_VERSION);
-      return agyAdapterWithEndpoint(new AgyAdapter({ home: await tempDir('ba-'), runtimeEnvironment: { ...allowlist, pass: ['FAKE_ACP_*'] } }), 'http://127.0.0.1:9');
+      return new AgyAdapter({ home: await tempDir('ba-'), runtimeEnvironment: { ...allowlist, pass: ['FAKE_ACP_*'] } });
     },
   },
   {

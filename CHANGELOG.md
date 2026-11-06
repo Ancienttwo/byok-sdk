@@ -69,8 +69,12 @@
   custom harness on darwin, linux and win32. `createRuntimeAdapters` and
   `createDaemon` build it when `runtimeAllowlist` lists `agy`, from
   `DaemonConfig.runtimes.agy` (`home`, `model`, `versionPolicy`); `home` is
-  required, and listing `agy` without `runtimes.agy` is a config error. Until
-  its credential path lands, `detect()` refuses and every agy task is rejected.
+  required, and listing `agy` without `runtimes.agy` is a config error. The
+  Gemini API key comes from `GEMINI_API_KEY` in the runtime environment and stays
+  in the daemon: agy reaches Gemini through a per-process loopback proxy with a
+  session token, so tools it starts can spend quota through the proxy during a
+  session but cannot take the key. The proxy honors `HTTP_PROXY`, `HTTPS_PROXY`
+  and `NO_PROXY` from the runtime environment only.
   agy rejects Host toolset entries carrying `env` or `headers`; a Host that
   configures env for its own server cannot run it under agy. A new retention
   class, `agy-session-store`, expires what agy keeps in that home after 31 days.

@@ -272,6 +272,7 @@ export async function writeSubmitResultServer(dir: string, receipt: string, tool
   await fs.writeFile(file, `import readline from 'node:readline';
 import { appendFileSync } from 'node:fs';
 appendFileSync(${JSON.stringify(`${receipt}.spawn`)}, process.pid + '\\n');
+appendFileSync(${JSON.stringify(`${receipt}.env`)}, JSON.stringify(process.env) + '\\n');
 const send = frame => process.stdout.write(JSON.stringify(frame) + '\\n');
 readline.createInterface({ input: process.stdin }).on('line', line => {
   let frame; try { frame = JSON.parse(line); } catch { return; }

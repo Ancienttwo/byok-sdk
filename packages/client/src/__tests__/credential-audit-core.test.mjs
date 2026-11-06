@@ -100,7 +100,7 @@ describe('credential audit trace parser', () => {
       ],
       paths,
     );
-    expect(positiveControlVerdict(evidence, paths)).toMatchObject({ pass: true, capturedOpens: 3 });
+    expect(positiveControlVerdict(evidence, paths)).toMatchObject({ pass: true, capturedOpens: 4 });
   });
 
   it('rejects an incomplete positive control', () => {
@@ -110,7 +110,7 @@ describe('credential audit trace parser', () => {
     );
     expect(positiveControlVerdict(evidence, paths)).toMatchObject({
       pass: false,
-      missingRuntimes: ['codex', 'pi'],
+      missingRuntimes: ['agy', 'codex', 'pi'],
     });
   });
 

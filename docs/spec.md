@@ -1128,10 +1128,22 @@ removes `antigravity/credential-user-scope` in the user config directory.
 `DBUS_SESSION_BUS_ADDRESS` names a socket in that home that does not exist, so
 agy's look for the session bus fails as on a host with no bus. agy passes its whole
 environment to `run_command` and stdio MCP children, so no real key may enter
-it. agy holds a placeholder `GEMINI_API_KEY` and calls the endpoint in
-`GOOGLE_GEMINI_BASE_URL`. No public option names that endpoint. Until the
-credential path lands, `detect()` refuses with `acp_unavailable` and `prepare`
-rejects with `agy has no credential path yet`.
+it. The key comes from `GEMINI_API_KEY` in the runtime environment and stays in
+the daemon process; a task without it fails as non-retryable authority.
+
+Each agy process gets one proxy, started before agy on an ephemeral `127.0.0.1`
+port and closed when agy exits. If it cannot start, the task fails before agy
+starts, and the failure is retryable. agy gets the proxy address in
+`GOOGLE_GEMINI_BASE_URL` and a random per-session token in `GEMINI_API_KEY`. No
+public option names that address. The proxy refuses a request without the token
+in `x-goog-api-key` or `?key=`, strips both forms, injects the real key and
+forwards to `https://generativelanguage.googleapis.com`, which no request can
+change. It allows every path, streams without buffering, returns the upstream
+status and error body unchanged, and logs no body. During a session, commands and
+MCP servers agy starts can spend the user's quota through the proxy, but they
+cannot take the key. The upstream connection honors `HTTP_PROXY`, `HTTPS_PROXY`
+and `NO_PROXY` from the runtime environment only, and no proxy URL appears in an
+error.
 
 An Attempt is one prompt on one process. agy's subagents and schedules run in
 the background and report no ACP frame, so on `end_turn` the session closes agy

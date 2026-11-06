@@ -267,9 +267,10 @@ and a static tool-authorization policy in `toolAuthorization`:
   stays in the runtime environment under `keyEnv`. agy is a custom harness as
   well: `createDaemon` builds it only when `runtimeAllowlist` lists `agy`, which
   then requires `runtimes.agy` with `home` (an absolute home the SDK owns, not
-  your home or `~/.gemini`). It runs on darwin, linux and win32. agy rejects
-  Host toolset entries carrying `env` or `headers`; a Host that configures env
-  for its own server cannot run it under agy.
+  your home or `~/.gemini`). It runs on darwin, linux and win32. The key stays
+  in the runtime environment as `GEMINI_API_KEY`. agy rejects Host toolset
+  entries carrying `env` or `headers`; a Host that configures env for its own
+  server cannot run it under agy.
   `createDaemonWithAdapters` rejects `runtimes`: configure injected adapters
   directly.
 - A `fileScope` is only legal when every runtime of the daemon resolves to
@@ -933,7 +934,7 @@ Manifest transition: **0.38.0 → 0.38.0**. Versions and entries below come from
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
 | daemon-config-runtimes-dsh | additive | createDaemon and createRuntimeAdapters build DshAdapter when runtimeAllowlist lists dsh, from the new DaemonConfig.runtimes.dsh (home, model, sandbox, versionPolicy). home and model are required, and listing dsh without runtimes.dsh is a config error. A config that does not list dsh is unaffected, and a Host that constructs DshAdapter itself changes nothing. The qualified dsh version moves to 0.2.2-rc.1. [Migration](../docs/adapter-capabilities.md#dsh-adapter-custom-harness) |
-| daemon-config-runtimes-agy | additive | AgyAdapter runs the Antigravity CLI as a custom harness. createDaemon and createRuntimeAdapters build it when runtimeAllowlist lists agy, from the new DaemonConfig.runtimes.agy (home, model, versionPolicy). home is required, and listing agy without runtimes.agy is a config error. Until its credential path lands, detect() refuses and every agy task is rejected. agy rejects Host toolset entries carrying env or headers; a Host that configures env for its own server cannot run it under agy. The new retention class agy-session-store expires what agy keeps in that home after 31 days, and its TTL must be at least retention.ttlMs['session-ledger'] plus one day. [Migration](../docs/adapter-capabilities.md#agy-adapter-custom-harness) |
+| daemon-config-runtimes-agy | additive | AgyAdapter runs the Antigravity CLI as a custom harness. createDaemon and createRuntimeAdapters build it when runtimeAllowlist lists agy, from the new DaemonConfig.runtimes.agy (home, model, versionPolicy). home is required, and listing agy without runtimes.agy is a config error. The Gemini API key comes from GEMINI_API_KEY in the runtime environment and stays in the daemon behind a per-process loopback proxy; tools agy starts can spend quota through it during a session but cannot take the key. agy rejects Host toolset entries carrying env or headers; a Host that configures env for its own server cannot run it under agy. The new retention class agy-session-store expires what agy keeps in that home after 31 days, and its TTL must be at least retention.ttlMs['session-ledger'] plus one day. [Migration](../docs/adapter-capabilities.md#agy-adapter-custom-harness) |
 <!-- generated:migrations:end -->
 
 ## Removed fields
