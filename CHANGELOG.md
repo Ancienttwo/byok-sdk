@@ -2,63 +2,32 @@
 
 ## Unreleased
 
-- **Fixed (client)** — an agy session whose process-table read fails at the stop
-  now still sends `session/close` and disposes its process tree and proxy, the
-  read error still fails the session, and a failed stop no longer stays
-  remembered, so a later `close()` disposes again.
+## 0.39.0 — source candidate
 
-- **Fixed (client)** — all-mode tool reminders now fire for Grok and dsh. They
-  never did before: every call reached the classifier with an empty input, so a
-  destructive command or a write outside the workspace ran with no reminder.
-  Hosts see `tool_use.input` on these two runtimes change from OAR's JSON text,
-  capped at 10,000 characters, to the whole native object. On Grok that is the
-  opening frame's `rawInput`, and a `rawInput` that is not an object leaves
-  `input` out. On dsh it is parsed from the bridge's native `tool/call`
-  `arguments`, and arguments that are not a JSON object fail the session.
-  Grok's `target_file` now counts as a path and `search_replace` as a mutating
-  tool, for every runtime. Grok's `grep`, `list_dir`, `monitor` and `use_tool`
-  are unprobed, so their paths and commands may still go unclassified.
-
-- **Fixed (client)** — Hosts no longer get an `error` event each time Codex
-  reconnects. A native `error` frame with `willRetry: true` now produces no
-  event, because the turn continues. An `error` frame without `willRetry: true`
-  and a failed `turn/completed` still report the failure.
-
-- **Fixed (client; #1474)** — an `agentMemoryCommit: 'on-success'` task can no
-  longer end with `task.complete` and leave a home that every later on-success
-  task refuses. The device checks the home when the runtime ends its turn, the
-  same way it does at the start. A home that would be refused turns the terminal
-  into `task.fail` with `retryable: false`, a reason that starts with
-  `agent_memory_commit_refused`, and the usual rollback. `memory_save` refuses a
-  replace that would pass `AGENT_MEMORY_MAX_SNAPSHOT_FILES` or
-  `AGENT_MEMORY_MAX_SNAPSHOT_BYTES` and tells the Agent to merge or delete notes
-  first. On a home that is already refused, the start reason now names the
-  repair: a write task with `agentMemory: 'none'` and no `agentMemoryCommit`,
-  which `docs/protocol.md` describes for both this case and an over-limit
-  `MEMORY.md`, and `agent_memory_resident_over_limit` now names it too. A
-  helper `io_failure` or `file_changed`, a helper timeout and a helper that exits
-  unexpectedly now count as I/O failures, so they are retryable at the start, as
-  `docs/protocol.md` already said. Host memory intents get no new check.
-
-- **Fixed (client)** — a Grok task no longer completes when Grok stops on a
-  permission request. A user's own shell `ask` rule or `ask` hook makes Grok
-  ask even under `--always-approve`; the SDK answers `cancelled`, and Grok 1.0.52
-  ends the turn without calling the model again. The task now fails as semantic
-  and non-retryable. A cancel the SDK asked for still ends the turn normally.
-- **Fixed (client)** — Hermes permission requests are refused with `reject_once`
-  instead of `cancelled`. The result is still a denial; the tool no longer waits
-  out Hermes's 300 s approval timeout first.
-
-- **Fixed (client)** — all-mode tool reminders now fire for Hermes. They never
-  did before, because the classifier got a display title and no arguments for
-  every Hermes call. Hosts see Hermes `tool_use` and `tool_result` events
-  change: `tool` goes from a title such as `write_file: inside.txt` to the name
-  `write_file`, and `tool_use.input` goes from the ACP content array to
-  `{ path }` or `{ command }`. `write_file` and `patch` now count as mutating
-  tools, so a write outside the workspace raises a reminder, and the command
-  and sensitive-path rules apply. Calls with neither a path nor a command keep
-  their content array. A V4A `patch` names no path until its result, so a V4A
-  write outside the workspace raises no reminder.
+0.39.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+The upgrade manifest that `@byok-sdk/client` ships
+(`packages/client/upgrade-manifest.json`, 0.38.0 to 0.39.0) lists the
+Host-visible changes since 0.38.0 that change an API, config or example item:
+8 breaking entries and 5 additive entries, each with a migration link. The wire
+stays v5 (`PROTOCOL_VERSION = 5`); `agentMemoryCommit` on an offer is a gated
+addition behind the new device flag `agent-memory-commit-on-success`,
+`residentMemoryOverLimit` on a terminal is a gated addition behind the new
+server flag `resident-memory-over-limit`, and the v5 corpus gains eight
+envelope lines. There is no new Postgres migration and no SQLite schema change,
+and the Pi closure stays at 1.5.0. See the
+[0.39.0 candidate notes](docs/releases/v0.39.0.md) and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.39.0.md). The breaking
+changes: the device injects a `MEMORY.md` of at most 8 KiB into a fresh task
+and `HostExecutionCore` no longer adds memory (#1439); `AgentMemoryFilesystem`
+gains methods (#1440); Windows credential storage runs in process through koffi,
+so a packaged Windows Host must pass its `nativeAssetRoot` (#1445); K8 freezes a
+room Turn with read-only memory, carries Bot history in a handoff pack (#1446)
+and dreams by default (#1475); dsh runs on the vendored OAR dsh runtime and
+refuses `followUp` and any MCP entry with `env`, `headers` or HTTP; and a Host
+toolset server gets its context through a file path argument instead of env
+(#1469). The release adds the Antigravity CLI as the `agy` runtime and
+Pi rpc and prepared file scope on Windows (#1423). It is not published, and it
+does not say that 0.39.0, or a Host on it, is ready for production.
 
 - **Breaking (client; #1469)** — dsh now runs on the vendored OAR dsh runtime, a
   private plugin inside `dsh --profile acp`, not over ACP. A Host MCP entry for
@@ -75,6 +44,7 @@
   now one prompt on one process: `followUp` is refused and a later turn resumes
   the session in a new process. dsh is closed at the root turn end, so background
   subagents and jobs stop there and their unfinished work is lost.
+
 - **Breaking (client; #1469)** — a Host toolset server no longer receives
   `BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR` or `BYOK_PRODUCT_ID`, and its MCP
   entry carries no `env`. In a task run the daemon appends one path as the
@@ -86,51 +56,6 @@
   `context_token_invalid`. The admission `tools/list` probe starts the server
   without the argument. See
   [Daemon-free assertion requests](packages/client/README.md#daemon-free-assertion-requests).
-
-- **Added (client; #1469)** — `AgyAdapter` runs the Antigravity CLI (`agy`) as a
-  custom harness on darwin, linux and win32. `createRuntimeAdapters` and
-  `createDaemon` build it when `runtimeAllowlist` lists `agy`, from
-  `DaemonConfig.runtimes.agy` (`home`, `model`, `versionPolicy`); `home` is
-  required, and listing `agy` without `runtimes.agy` is a config error. The
-  Gemini API key comes from `GEMINI_API_KEY` in the runtime environment and stays
-  in the daemon: agy reaches Gemini through a per-process loopback proxy with a
-  session token, so tools it starts can spend quota through the proxy during a
-  session but cannot take the key. The proxy honors `HTTP_PROXY`, `HTTPS_PROXY`
-  and `NO_PROXY` from the runtime environment only.
-  agy rejects Host toolset entries carrying `env` or `headers`; a Host that
-  configures env for its own server cannot run it under agy. A new retention
-  class, `agy-session-store`, expires what agy keeps in that home after 31 days.
-
-- **Added (client; #1469)** — `createRuntimeAdapters` and `createDaemon` build
-  `DshAdapter` when `runtimeAllowlist` lists `dsh`. `DaemonConfig.runtimes.dsh`
-  takes `home`, `model`, `sandbox` and `versionPolicy`; `home` and `model` are
-  required, and listing `dsh` without `runtimes.dsh` is a config error. dsh
-  stays on darwin and linux.
-- **Internal (client)** — the `byokagentmessage`, `byokagentresult` and
-  `byokagentmemory` MCP entries carry no `env`. Their token, store directory,
-  product id and memory settings live in a mode `0600` file in the Execution's
-  SDK scratch directory, and the entry's last argument is that file's path. A
-  runtime that stores MCP entries in plain text keeps only the path. The file
-  goes when the scratch is released at task end, and a helper refuses a missing
-  or unreadable file. `byokagentteam` is unchanged.
-
-- **Internal (client)** — the SDK-owned OAR source moves from 0.88.0 to
-  0.91.0 (`vendor/oar/0e92470/`, upstream commit `0e924701`). A failed Codex
-  turn with the native `unauthorized` error now reports `failure.class: 'auth'`
-  instead of `unknown`. Grok task events and single-task stop enter the fork, and
-  the SDK uses neither. All sixteen BYOK deltas are preserved and the API surface
-  is unchanged. Upstream's OOM-score forwarding to ACP reverse terminals is not
-  taken, because it needs the npm package `which`: on Linux, when a Host starts a
-  CLI through an OOM wrapper, reverse-terminal commands keep the daemon's score.
-
-- **Internal (client)** — the SDK-owned OAR source moves from 0.86.0 to
-  0.88.0 (`vendor/oar/be46fb3/`, upstream commit `be46fb36`). The shared ACP
-  stack takes upstream's adapter-held queue, manual compaction and config-option
-  confirmation, none of which the SDK bridge exposes. A failed Codex start on a
-  missing working directory now says the directory does not exist. All sixteen
-  BYOK deltas are preserved and the API surface is unchanged. Upstream's
-  ending of an aborted turn's processes is not taken; the SDK still kills them
-  at session dispose.
 
 - **Breaking (client; #1440)** — `AgentMemoryFilesystem` gains `observe` and
   `cleanupForRestore`, and `walk` now resolves with
@@ -192,32 +117,7 @@
   the model to keep `MEMORY.md` within the limit and to put details in
   `notes/`. Nothing truncates the file.
 
-- **Added (protocol, client, cloud; #1439)** — `task.complete`, `task.fail` and
-  `task.cancelled` gain an optional `residentMemoryOverLimit: { byteCount }`
-  (`TerminalResidentMemoryOverLimitSchema`): a writer Attempt left `MEMORY.md`
-  over the limit with the runtime's own file tools, and `byteCount` is the file
-  size at the terminal decision. It is gated on the new server flag
-  `resident-memory-over-limit` (`RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY`); a
-  daemon sends the terminal without it to a server that did not advertise the
-  flag. On a task that seals `memory-projection` it is sealed with
-  `agentHomeMemoryChange`. Absence does not mean the file is within the limit.
-  The hosted cloud advertises the flag and `TerminalResult` projects the field.
-
-- **Added (protocol, client; #1440)** — an Agent offer may carry
-  `agentMemoryCommit: 'on-success'`: `MEMORY.md` and `notes/` keep what a writer
-  Attempt did only when the task ends in `task.complete`. Any other end restores
-  them byte for byte, including what the runtime changed with its own file tools,
-  and removes what it added below `notes/`.
-  The device keeps a copy under `.byok/`, restores before it releases the home,
-  and settles a copy left by a crash on the next home lease, by the journal
-  terminal of that task. A `memory-reader` offer with the field fails schema
-  validation, and a device configured for durable Pi declines it. Host-side, submit
-  the field on the payload: a device without the new flag
-  `agent-memory-commit-on-success` is refused at submission. The device declares
-  the flag only on the proven strict backend of `agent-memory-intent.v1`, so
-  Windows does not. See `docs/protocol.md` §2.2.
-
-- **Changed (client; #1445)** — On Windows the device credential store now calls Credential Manager through koffi. An npm install includes koffi's win32-arm64 binary, so Windows on ARM64 keeps credential storage. A native arm64 Host packaged by hand without koffi, which the SDK packaging helpers do not build, now gets `DeviceCredentialStoreUnavailableError`; before, it stored credentials through PowerShell but could not start a runtime.
+- **Breaking (client; #1445)** — On Windows the device credential store now calls Credential Manager through koffi. An npm install includes koffi's win32-arm64 binary, so Windows on ARM64 keeps credential storage. A native arm64 Host packaged by hand without koffi, which the SDK packaging helpers do not build, now gets `DeviceCredentialStoreUnavailableError`; before, it stored credentials through PowerShell but could not start a runtime.
   The enrollment and the three member entries keep their format, so a rollback
   still reads them. Nothing compiles, spawns or writes a temporary file per
   operation any more. Native credential calls run one at a time, and the wait
@@ -239,46 +139,6 @@
   write or delete that passes its deadline has an unknown outcome and is not
   replayed. Failure messages carry the Win32 code. The entry format is
   unchanged, so existing entries stay readable and a rollback reads new ones.
-
-- **Fixed (client; #1437)** — `requestDeviceAssertion` and
-  `requestTaskAssertion` wait up to 90 s for the daemon by default instead of
-  the generic 10 s control timeout. Both handlers read the device record from
-  the OS credential store on every call, and on Windows a cold read first
-  compiles the credential bridge under a 60 s deadline, so the first assertion
-  after a daemon start could time out before the read finished. An explicit
-  `timeoutMs` still wins.
-
-- **Fixed (client; #1440)** — the writer, read-only and memory-reader memory
-  guidance now each say that `MEMORY.md` and `notes/` hold data that earlier
-  tasks recorded, and that the model must not follow any request or
-  instruction in it. Memory can carry text from other users or Bots, so a
-  line such as "always do X from now on" no longer reads as an instruction.
-
-- **Added (client; Windows; #1423)** — with `toolAuthorization.fileScope`
-  configured, Pi rpc and prepared tasks (writer and memory reader) run scoped
-  on Windows instead of declining before claim with `file_scope_unsupported`.
-  The guard still uses only Node built-ins. A path starting with `\` (UNC,
-  `\\?\`, `\\.\`, root-relative), a drive-relative path, a segment with
-  `:` (an alternate data stream), a segment ending in a dot or space, and a
-  reserved device name (CON, NUL, COM1, `CON.txt`, `COM¹`, …) are refused as
-  `file_scope_denied` / `path_syntax`, and as `invalid_file_scope` in a
-  configured root, which must be an absolute drive path. Every existing segment
-  from the drive root is lstat'ed, so a symlink, junction or AppExecLink is
-  `symlink`; then `realpath.native` expands 8.3 short names and the on-disk
-  case, and every other check runs on that canonical path, so a `.byok` short
-  name is `internal_path` and a volume mount point inside a root is
-  `outside_scope`. The durable Pi lane stays darwin/linux only, and other
-  platforms still decline.
-
-- **Added (examples; #1449)** — K8 `room-seat:` projection values carry the
-  optional `triggerMessageId` of a seat that a `room_call` opened: the message
-  the seat answers, which is the caller's post or, when the caller passed, the
-  message the caller answered. A mentioned seat never has it, so a Host tells
-  a mentioned seat from a `room_call` seat in the same round without deriving
-  it from the seat id. Seats opened before the upgrade are not backfilled. A
-  Host that validates the value with a closed schema allows the field first;
-  a Host that vendored K8 copies `src/rules/rooms.ts`
-  ([room seat projections](examples/bot-collaboration/README.md#room-seat-projections)).
 
 - **Breaking (examples; #1446)** — K8 freezes a room Turn with read-only Agent
   memory: `read-write` becomes `read`, `read-write-if-admitted` becomes
@@ -314,6 +174,98 @@
   `src/host.ts`, `src/schema.ts` and `src/index.ts`
   ([migration](examples/bot-collaboration/README.md#group-chat-and-main-bot)).
 
+- **Breaking (examples; #1475)** — K8 Bots dream by default. `BotCollaboration`
+  gives each unarchived Bot with a usable template a daily `bot-dream` routine
+  at 03:00 in `dreaming.timeZone`, or the process's local zone when the routine is
+  created. It runs when the Bot completed a Turn since its last successful dream,
+  on the first of `dreaming.models` on the Bot's device, else the Bot's own
+  template, and `snapshot().dreams` records the result. That is one run per Bot
+  per day with new Turns, so a vendored Host should set cheap templates, or pass
+  `dreaming: false`. Default-on needs `wake.consume` routed to `bot.consume` even
+  with no Bot routines, and a Host clock outside the years 2000 to 2200 now throws
+  in sync unless `dreaming: false`. The Host's `enqueueHostIntent` refuses
+  `occurrence:<key>`,
+  and only K8's own hooks promote an occurrence. With dreaming on, the
+  constructor throws on an invalid time zone and on an `instructionMaxBytes` that
+  leaves a dream under 1 KiB of history. H concludes `bot-dream` occurrences with
+  no task
+  ([migration](examples/bot-collaboration/README.md#dreaming-1475)).
+
+- **Added (client; #1469)** — `AgyAdapter` runs the Antigravity CLI (`agy`) as a
+  custom harness on darwin, linux and win32. `createRuntimeAdapters` and
+  `createDaemon` build it when `runtimeAllowlist` lists `agy`, from
+  `DaemonConfig.runtimes.agy` (`home`, `model`, `versionPolicy`); `home` is
+  required, and listing `agy` without `runtimes.agy` is a config error. The
+  Gemini API key comes from `GEMINI_API_KEY` in the runtime environment and stays
+  in the daemon: agy reaches Gemini through a per-process loopback proxy with a
+  session token, so tools it starts can spend quota through the proxy during a
+  session but cannot take the key. The proxy honors `HTTP_PROXY`, `HTTPS_PROXY`
+  and `NO_PROXY` from the runtime environment only.
+  agy rejects Host toolset entries carrying `env` or `headers`; a Host that
+  configures env for its own server cannot run it under agy. `followUp` is
+  refused and a later turn resumes the session in a new process, `steer` is
+  unsupported, and subagents and schedules stop at the turn end, so their
+  unfinished work is lost. A new retention class, `agy-session-store`, expires
+  what agy keeps in that home after 31 days. When adding agy with `session-ledger`
+  above 30 days, set `agy-session-store` to at least the ledger plus one day.
+
+- **Added (client; #1469)** — `createRuntimeAdapters` and `createDaemon` build
+  `DshAdapter` when `runtimeAllowlist` lists `dsh`. `DaemonConfig.runtimes.dsh`
+  takes `home`, `model`, `sandbox` and `versionPolicy`; `home` and `model` are
+  required, and listing `dsh` without `runtimes.dsh` is a config error. dsh
+  stays on darwin and linux.
+
+- **Added (protocol, client, cloud; #1439)** — `task.complete`, `task.fail` and
+  `task.cancelled` gain an optional `residentMemoryOverLimit: { byteCount }`
+  (`TerminalResidentMemoryOverLimitSchema`): a writer Attempt left `MEMORY.md`
+  over the limit with the runtime's own file tools, and `byteCount` is the file
+  size at the terminal decision. It is gated on the new server flag
+  `resident-memory-over-limit` (`RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY`); a
+  daemon sends the terminal without it to a server that did not advertise the
+  flag. On a task that seals `memory-projection` it is sealed with
+  `agentHomeMemoryChange`. Absence does not mean the file is within the limit.
+  The hosted cloud advertises the flag and `TerminalResult` projects the field.
+
+- **Added (protocol, client; #1440)** — an Agent offer may carry
+  `agentMemoryCommit: 'on-success'`: `MEMORY.md` and `notes/` keep what a writer
+  Attempt did only when the task ends in `task.complete`. Any other end restores
+  them byte for byte, including what the runtime changed with its own file tools,
+  and removes what it added below `notes/`.
+  The device keeps a copy under `.byok/`, restores before it releases the home,
+  and settles a copy left by a crash on the next home lease, by the journal
+  terminal of that task. A `memory-reader` offer with the field fails schema
+  validation, and a device configured for durable Pi declines it. Host-side, submit
+  the field on the payload: a device without the new flag
+  `agent-memory-commit-on-success` is refused at submission. The device declares
+  the flag only on the proven strict backend of `agent-memory-intent.v1`, so
+  Windows does not. See `docs/protocol.md` §2.2.
+
+- **Added (client; Windows; #1423)** — with `toolAuthorization.fileScope`
+  configured, Pi rpc and prepared tasks (writer and memory reader) run scoped
+  on Windows instead of declining before claim with `file_scope_unsupported`.
+  The guard still uses only Node built-ins. A path starting with `\` (UNC,
+  `\\?\`, `\\.\`, root-relative), a drive-relative path, a segment with
+  `:` (an alternate data stream), a segment ending in a dot or space, and a
+  reserved device name (CON, NUL, COM1, `CON.txt`, `COM¹`, …) are refused as
+  `file_scope_denied` / `path_syntax`, and as `invalid_file_scope` in a
+  configured root, which must be an absolute drive path. Every existing segment
+  from the drive root is lstat'ed, so a symlink, junction or AppExecLink is
+  `symlink`; then `realpath.native` expands 8.3 short names and the on-disk
+  case, and every other check runs on that canonical path, so a `.byok` short
+  name is `internal_path` and a volume mount point inside a root is
+  `outside_scope`. The durable Pi lane stays darwin/linux only, and other
+  platforms still decline.
+
+- **Added (examples; #1449)** — K8 `room-seat:` projection values carry the
+  optional `triggerMessageId` of a seat that a `room_call` opened: the message
+  the seat answers, which is the caller's post or, when the caller passed, the
+  message the caller answered. A mentioned seat never has it, so a Host tells
+  a mentioned seat from a `room_call` seat in the same round without deriving
+  it from the seat id. Seats opened before the upgrade are not backfilled. A
+  Host that validates the value with a closed schema allows the field first;
+  a Host that vendored K8 copies `src/rules/rooms.ts`
+  ([room seat projections](examples/bot-collaboration/README.md#room-seat-projections)).
+
 - **Added (protocol; #1441)** — `buildHandoffPack(turns, budgets)` builds a
   bounded conversation handoff from turns that a Host holds. It is a pure
   function: `recent` keeps the newest whole turns, `earlier` keeps excerpts of
@@ -328,20 +280,107 @@
   It is a pure function and nothing calls it for a Host. A Host offers the text
   as a fresh task with `agentMemory: 'none'` and no `agentMemoryCommit`, so the
   instruction is written for no rollback.
-- **Breaking (examples; #1475)** — K8 Bots dream by default. `BotCollaboration`
-  gives each unarchived Bot with a usable template a daily `bot-dream` routine
-  at 03:00 in `dreaming.timeZone`, or the process's local zone when the routine is
-  created. It runs when the Bot completed a Turn since its last successful dream,
-  on the first of `dreaming.models` on the Bot's device, else the Bot's own
-  template, and `snapshot().dreams` records the result. That is one run per Bot
-  per day with new Turns, so a vendored Host should set cheap templates, or pass
-  `dreaming: false`. Default-on needs `wake.consume` routed to `bot.consume` even
-  with no Bot routines, and a Host clock outside the years 2000 to 2200 now throws
-  in sync unless `dreaming: false`. The Host's `enqueueHostIntent` refuses
-  `occurrence:<key>`,
-  and only K8's own hooks promote an occurrence. H concludes `bot-dream`
-  occurrences with no task
-  ([migration](examples/bot-collaboration/README.md#dreaming-1475)).
+
+- **Fixed (client)** — an agy session whose process-table read fails at the stop
+  now still sends `session/close` and disposes its process tree and proxy, the
+  read error still fails the session, and a failed stop no longer stays
+  remembered, so a later `close()` disposes again.
+
+- **Fixed (client)** — all-mode tool reminders now fire for Grok and dsh. They
+  never did before: every call reached the classifier with an empty input, so a
+  destructive command or a write outside the workspace ran with no reminder.
+  Hosts see `tool_use.input` on these two runtimes change from OAR's JSON text,
+  capped at 10,000 characters, to the whole native object. On Grok that is the
+  opening frame's `rawInput`, and a `rawInput` that is not an object leaves
+  `input` out. On dsh it is parsed from the bridge's native `tool/call`
+  `arguments`, and arguments that are not a JSON object fail the session.
+  Grok's `target_file` now counts as a path and `search_replace` as a mutating
+  tool, for every runtime. Grok's `grep`, `list_dir`, `monitor` and `use_tool`
+  are unprobed, so their paths and commands may still go unclassified.
+
+- **Fixed (client)** — Hosts no longer get an `error` event each time Codex
+  reconnects. A native `error` frame with `willRetry: true` now produces no
+  event, because the turn continues. An `error` frame without `willRetry: true`
+  and a failed `turn/completed` still report the failure.
+
+- **Fixed (client; #1474)** — an `agentMemoryCommit: 'on-success'` task can no
+  longer end with `task.complete` and leave a home that every later on-success
+  task refuses. The device checks the home when the runtime ends its turn, the
+  same way it does at the start. A home that would be refused turns the terminal
+  into `task.fail` with `retryable: false`, a reason that starts with
+  `agent_memory_commit_refused`, and the usual rollback. `memory_save` refuses a
+  replace that would pass `AGENT_MEMORY_MAX_SNAPSHOT_FILES` or
+  `AGENT_MEMORY_MAX_SNAPSHOT_BYTES` and tells the Agent to merge or delete notes
+  first. On a home that is already refused, the start reason now names the
+  repair: a write task with `agentMemory: 'none'` and no `agentMemoryCommit`,
+  which `docs/protocol.md` describes for both this case and an over-limit
+  `MEMORY.md`, and `agent_memory_resident_over_limit` now names it too. A
+  helper `io_failure` or `file_changed`, a helper timeout and a helper that exits
+  unexpectedly now count as I/O failures, so they are retryable at the start, as
+  `docs/protocol.md` already said. Host memory intents get no new check.
+
+- **Fixed (client)** — a Grok task no longer completes when Grok stops on a
+  permission request. A user's own shell `ask` rule or `ask` hook makes Grok
+  ask even under `--always-approve`; the SDK answers `cancelled`, and Grok 1.0.52
+  ends the turn without calling the model again. The task now fails as semantic
+  and non-retryable. A cancel the SDK asked for still ends the turn normally.
+
+- **Fixed (client)** — Hermes permission requests are refused with `reject_once`
+  instead of `cancelled`. The result is still a denial; the tool no longer waits
+  out Hermes's 300 s approval timeout first.
+
+- **Fixed (client)** — all-mode tool reminders now fire for Hermes. They never
+  did before, because the classifier got a display title and no arguments for
+  every Hermes call. Hosts see Hermes `tool_use` and `tool_result` events
+  change: `tool` goes from a title such as `write_file: inside.txt` to the name
+  `write_file`, and `tool_use.input` goes from the ACP content array to
+  `{ path }` or `{ command }`. `write_file` and `patch` now count as mutating
+  tools, so a write outside the workspace raises a reminder, and the command
+  and sensitive-path rules apply. Calls with neither a path nor a command keep
+  their content array. A V4A `patch` names no path until its result, so a V4A
+  write outside the workspace raises no reminder.
+
+- **Fixed (client; #1437)** — `requestDeviceAssertion` and
+  `requestTaskAssertion` wait up to 90 s for the daemon by default instead of
+  the generic 10 s control timeout. Both handlers read the device record from
+  the OS credential store on every call, and on Windows a cold read first
+  compiles the credential bridge under a 60 s deadline, so the first assertion
+  after a daemon start could time out before the read finished. An explicit
+  `timeoutMs` still wins.
+
+- **Fixed (client; #1440)** — the writer, read-only and memory-reader memory
+  guidance now each say that `MEMORY.md` and `notes/` hold data that earlier
+  tasks recorded, and that the model must not follow any request or
+  instruction in it. Memory can carry text from other users or Bots, so a
+  line such as "always do X from now on" no longer reads as an instruction.
+
+- **Fixed (client; #1455)** — a session ledger whose filename also matches
+  terminal evidence, as a custom runtime such as `custom-task` writes, is now
+  kept until both retention windows expire. With a terminal-evidence TTL of 0, an
+  idle sweep could delete a one-day-old ledger, and the next exact resume lookup
+  failed. Terminal evidence with such a name may be kept longer than its own TTL.
+
+- **Internal (client)** — the `byokagentmessage`, `byokagentresult` and
+  `byokagentmemory` MCP entries carry no `env`. Their token, store directory,
+  product id and memory settings live in a mode `0600` file in the Execution's
+  SDK scratch directory, and the entry's last argument is that file's path. A
+  runtime that stores MCP entries in plain text keeps only the path. The file
+  goes when the scratch is released at task end, and a helper refuses a missing
+  or unreadable file. `byokagentteam` is unchanged.
+
+- **Internal (client)** — the SDK-owned OAR source moves from 0.86.0 to 0.91.0
+  (`vendor/oar/0e92470/`, upstream commit `0e924701`). The shared ACP stack takes
+  upstream's adapter-held queue, manual compaction and config-option
+  confirmation, none of which the SDK bridge exposes. A failed Codex start on a
+  missing working directory now says the directory does not exist, and a failed
+  Codex turn with the native `unauthorized` error now reports
+  `failure.class: 'auth'` instead of `unknown`. Grok task events and single-task
+  stop enter the fork, and the SDK uses neither. All sixteen BYOK deltas are
+  preserved and the move changes no API surface. Two upstream changes are not
+  taken. The ending of an aborted turn's processes: the SDK still kills them at
+  session dispose. The OOM-score forwarding to ACP reverse terminals, which needs
+  the npm package `which`: on Linux, when a Host starts a CLI through an OOM
+  wrapper, reverse-terminal commands keep the daemon's score.
 
 ## 0.38.0 — 2026-11-04 (published)
 
