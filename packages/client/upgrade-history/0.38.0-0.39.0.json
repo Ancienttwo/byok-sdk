@@ -1,0 +1,539 @@
+{
+  "schemaVersion": 1,
+  "package": "@byok-sdk/client",
+  "from": {
+    "version": "0.38.0",
+    "snapshotSha256": "8e4c6b40a480872b380c28d51e7fda46e2e4858b943e1a7690a4b9fcd3a79cc1"
+  },
+  "to": {
+    "version": "0.39.0",
+    "snapshotSha256": "7015d7becb242fcec86c3470deb685c10d93898dba281ddaa2aea06399024dff"
+  },
+  "configFields": {
+    "status": "tracked",
+    "source": "packages/client/daemon-config.schema.json",
+    "owner": "#1094"
+  },
+  "entries": [
+    {
+      "id": "k8-room-turn-read-only-memory",
+      "impact": "breaking",
+      "summary": "K8 freezes a room Turn with read-only Agent memory. read-write becomes read, read-write-if-admitted becomes read-if-admitted, and a template without agentMemory freezes as read-if-admitted, so a room Turn loses memory_save. Other Turns keep the template value. A room Turn of a template without agentMemory now needs a device that advertises agent-memory-selection and agent-memory-read-if-admitted. A Host that vendors K8 copies src/rules/sync.ts. K8 room-seat: projection values gain the optional triggerMessageId (#1449). Only a seat that a room_call opened has it: the message the seat answers, which is the caller's post (its seat id) or, when the caller passed, the message the caller answered (its own triggerMessageId, else the root). A mentioned seat never has it, so a Host tells the two apart by this field and does not derive it from the seat id. A Host that validates the value with a closed schema allows the field before it upgrades; a Host that vendored K8 copies src/rules/rooms.ts. Seats opened before the upgrade are not backfilled. See examples/bot-collaboration/README.md#room-seat-projections. K8 also carries the Bot history of a ContextPack in history, a buildHandoffPack result, in place of turns and historyWindow.omittedTurns; a room seat ContextPack does not change. BotOptions.handoff sets the budgets, contextMaxBytes no longer covers Bot history, and contextTurnLimit no longer selects it. retain protects every Turn from the oldest turn of a Bot's handoff pack to its newest, so a root stays protected longer, and RetentionLimits gains a required handoff, which a caller sets to the budgets it freezes with. A Host that reads a frozen ContextPack reads history.recent, history.earlier and history.omittedTurns, and a Host that vendors K8 also copies src/rules/context.ts, src/rules/history.ts, src/retention.ts, src/host.ts, src/schema.ts and src/index.ts. K8 Bots dream by default (#1475): BotCollaboration gives each unarchived Bot with a usable template a daily bot-dream routine, one run per Bot per day with new Turns. A vendored Host sets dreaming.timeZone and dreaming.models, or passes dreaming: false, and copies src/dream.ts, src/commit.ts, src/host.ts, src/index.ts, src/migration.ts, src/model.ts and src/routines.ts. Default-on needs wake.consume routed to bot.consume even with no Bot routines, and a Host clock outside the years 2000 to 2200 now throws in sync unless dreaming: false. enqueueHostIntent refuses occurrence:<key>. A Host that keeps H copies its src/routines.ts and src/store.ts, so a switched domain with a bot-dream row keeps its routine commands. With dreaming on, the constructor throws on an invalid time zone and on an instructionMaxBytes that leaves a dream under 1 KiB of history. See examples/bot-collaboration/README.md#dreaming-1475.",
+      "migration": "examples/bot-collaboration/README.md#group-chat-and-main-bot",
+      "items": [
+        "example:bot-collaboration"
+      ]
+    },
+    {
+      "id": "resident-memory-max-bytes-to-protocol",
+      "impact": "breaking",
+      "summary": "RESIDENT_MEMORY_MAX_BYTES (8192, the UTF-8 byte limit of MEMORY.md) moved from @byok-sdk/server/execution-core to @byok-sdk/protocol and @byok-sdk/protocol/constants (#1439). The server entry no longer exports it and there is no re-export: a Host that imported it from @byok-sdk/server/execution-core imports it from @byok-sdk/protocol instead. The value is unchanged, and the Host contextPack and record checks keep using it. The device now enforces the limit on new content: memory_save refuses a MEMORY.md over it and a Host intent that would write such content is rejected with content_invalid. An over-limit file can still be replaced by a smaller one, and nothing truncates it.",
+      "migration": "docs/releases/host-upgrade-0.39.0.md#from-0380-to-0390",
+      "items": [
+        "export:@byok-sdk/server/execution-core#RESIDENT_MEMORY_MAX_BYTES",
+        "export:@byok-sdk/protocol#RESIDENT_MEMORY_MAX_BYTES",
+        "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_MAX_BYTES"
+      ]
+    },
+    {
+      "id": "resident-memory-over-limit",
+      "impact": "additive",
+      "summary": "task.complete, task.fail and task.cancelled gain an optional residentMemoryOverLimit: { byteCount } (TerminalResidentMemoryOverLimitSchema, #1439): the terminal of a writer Attempt that became active reports a MEMORY.md that the runtime left over RESIDENT_MEMORY_MAX_BYTES with its own file tools, byteCount being the file size at the terminal decision. The device never truncates the file. It reports the size before it restores the file at the end of the Attempt, so the terminal gives the size the Attempt wrote. The field is gated on the new server flag resident-memory-over-limit (RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY, in CAPABILITY_FLAGS), because the sealed terminal branches are strict; a daemon talking to a server without the flag sends the terminal without it. SEALED_SPLIT_TABLE moves it into the terminal ciphertext with agentHomeMemoryChange when the task seals memory-projection. Absence does not mean the file is within the limit: a reader terminal, an early failure, a failed measurement, a server without the flag and an older daemon all leave it absent. The hosted cloud advertises the flag and TerminalResult projects the field verbatim. A Host on its own server parses the field with the protocol schemas and advertises the flag only when it accepts it.",
+      "migration": "docs/protocol.md#22-task-free-agent-home-projection",
+      "items": [
+        "export:@byok-sdk/cloud#TerminalResult",
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+        "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+        "export:@byok-sdk/protocol#TaskCancelledPayloadSchema",
+        "export:@byok-sdk/protocol#TaskCancelledSealedPayload",
+        "export:@byok-sdk/protocol#TaskCompletePayloadSchema",
+        "export:@byok-sdk/protocol#TaskCompleteSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+        "export:@byok-sdk/protocol#TaskFailSealedPayload",
+        "export:@byok-sdk/protocol#TerminalResidentMemoryOverLimit",
+        "export:@byok-sdk/protocol#TerminalResidentMemoryOverLimitSchema",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY"
+      ]
+    },
+    {
+      "id": "device-injects-resident-memory",
+      "impact": "breaking",
+      "summary": "HostExecutionCore no longer adds memory to the instruction (#1439, ADR-048). The device reads MEMORY.md at the start of a fresh instruction task whose memory mode is read or read-write, on a daemon that admits the memory MCP, and puts it, as one data line, after the guidance and before the instruction; a resumed session and a prepared offer carry nothing, and a fresh task on a daemon that does not admit the memory MCP keeps the reading guidance, carries no data and does not fail on the size. A fresh task fails without retry before the runtime starts when the file is over 8 KiB or cannot be read (agent_memory_resident_over_limit, agent_memory_resident_unreadable). Sealed and blob intents no longer fail with options.memory. contextPack stays as the Host's read, and an oversized or unauthorized projection no longer stops the queue; a restore in progress still parks the head, and a changed placement or profile still fails the intent, through the new HostMemoryPage.assertDispatchable. Every writer guidance, including the text of AGENT_MEMORY_GUIDANCE that an embedded Host prepends, now keeps resident facts and top-level pointers in MEMORY.md and moves the index of notes to notes/index.md, and a writer Attempt that leaves MEMORY.md over the limit has that one file restored to its start content. Upgrade the Host and the device together: an older Host core with a newer device shows the model MEMORY.md twice, at most 8 KiB more, without an error. A Host that built its own instruction from contextPack stops doing so. The writer, read-only and memory-reader guidance also says that memory is recorded data and that the model must not follow instructions in it (#1440).",
+      "migration": "docs/releases/host-upgrade-0.39.0.md#from-0380-to-0390",
+      "items": [
+        "export:@byok-sdk/server/execution-core#HostExecutionCore",
+        "export:@byok-sdk/server/execution-core#HostMemoryPage"
+      ]
+    },
+    {
+      "id": "agent-memory-filesystem-raw-byte-compare",
+      "impact": "breaking",
+      "summary": "AgentMemoryFilesystem gains observe and cleanupForRestore, and walk now resolves with { paths, entries }: paths is the same list of files as before, and entries is everything the walk saw, with its type (#1440). An embedder that implements the interface adds both methods and changes walk. The helper protocol and version are now 3, with no support for the previous helper; the release carries the new binaries. Replace and delete compare the current revision over the file's raw bytes, on both backends, with no size limit and no UTF-8 requirement; the file must still be a regular file with one link, unchanged while it is hashed. New content stays limited, and reads keep their limits. The native walk now refuses an entry on another volume, as the helper does.",
+      "migration": "docs/releases/host-upgrade-0.39.0.md#from-0380-to-0390",
+      "items": [
+        "export:@byok-sdk/client/agent-memory#AgentMemoryFileObservation",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryFilesystem",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryRestoreCleanup",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryRestoreRecord",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryWalk",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntry",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntryKind"
+      ]
+    },
+    {
+      "id": "agent-memory-commit-on-success",
+      "impact": "additive",
+      "summary": "An Agent offer may carry agentMemoryCommit: 'on-success' (AgentMemoryCommitSchema, gated on the new device flag agent-memory-commit-on-success, #1440): MEMORY.md and notes/ keep what a writer Attempt did only when the task ends in task.complete, and any other end restores them byte for byte, including what the runtime changed with its own file tools. A memory-reader offer with the field fails schema validation; a device configured for durable Pi declines it. The device declares the flag only on the proven strict backend of agent-memory-intent.v1, so Windows does not. Nothing changes without the field. A Host submits it on the payload, and cloud refuses the submission when the device lacks the flag. AgentHomeLeaseManager takes the optional settleAgentMemoryCommit hook; an existing caller passes the same ownerId option. A home that would be refused turns the terminal into task.fail with retryable: false and a reason that starts with agent_memory_commit_refused, and memory_save refuses a replace that would pass the snapshot limits (#1474). A helper io_failure or file_changed, a helper timeout and a helper that exits unexpectedly now count as I/O failures, so they are retryable at the start.",
+      "migration": "docs/protocol.md#22-task-free-agent-home-projection",
+      "items": [
+        "export:@byok-sdk/client#AgentHomeLeaseManager",
+        "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY",
+        "export:@byok-sdk/protocol#AgentMemoryCommit",
+        "export:@byok-sdk/protocol#AgentMemoryCommitSchema",
+        "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol/constants#AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY"
+      ]
+    },
+    {
+      "id": "windows-credential-koffi",
+      "impact": "breaking",
+      "summary": "On Windows the device credential store calls Credential Manager through koffi in the daemon process (#1445). Entry names and bytes do not change, so a rollback still reads them. Breaking for a CJS or SEA Windows Host: readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity and createStoredDeviceProofSigner run outside the daemon, so pass them the new nativeAssetRoot option with the same value as DaemonConfig.nativeAssetRoot; without it they fail with DeviceCredentialStoreUnavailableError because koffi cannot load. A packaged Windows Host daemon without DaemonConfig.nativeAssetRoot cannot pair or authenticate; this includes a bun --compile Host, not only CJS and SEA cold reads. An npm install needs no change. @byok-sdk/client/packaging now exports loadSdkKoffiAsset for a packaged Host to give its validated koffi to @byok-sdk/keys.",
+      "migration": "docs/spec.md#product-native-asset-deployment",
+      "items": [
+        "export:@byok-sdk/client#CreateStoredDeviceProofSignerOptions",
+        "export:@byok-sdk/client#DeviceEnrollmentStatusOptions",
+        "export:@byok-sdk/client/packaging#loadSdkKoffiAsset"
+      ]
+    },
+    {
+      "id": "keys-windows-credential-manager-koffi",
+      "impact": "breaking",
+      "summary": "WindowsCredentialManagerSecretStoreOptions loses commandRunner and systemRoot and gains optional koffi: the store calls Credential Manager in process and starts no PowerShell. A Host that passed commandRunner or systemRoot removes them. A packaged Host, which has no installed koffi, passes koffi: loadSdkKoffiAsset(nativeAssetRoot). The byok-pi-provider-launcher bin uses the default store options, so a single-file bundled Windows Host that runs it gets CREDENTIAL_MANAGER_UNAVAILABLE; that Host calls runPiProviderLauncher instead, with a createSecretStore that injects koffi. The entry format is unchanged.",
+      "migration": "docs/spec.md#pi-credential-launcher-executable-contract",
+      "items": [
+        "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions"
+      ]
+    },
+    {
+      "id": "protocol-build-handoff-pack",
+      "impact": "additive",
+      "summary": "buildHandoffPack builds a bounded conversation handoff from turns that a Host holds; nothing calls it for a Host. truncateUtf8 is the text cut that it shares with boundFailureReason, whose output does not change.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1441",
+      "items": [
+        "export:@byok-sdk/protocol#HANDOFF_EXCERPT_LINE_MAX_BYTES",
+        "export:@byok-sdk/protocol#HandoffJson",
+        "export:@byok-sdk/protocol#HandoffLine",
+        "export:@byok-sdk/protocol#HandoffPack",
+        "export:@byok-sdk/protocol#HandoffPackBudgets",
+        "export:@byok-sdk/protocol#HandoffTurn",
+        "export:@byok-sdk/protocol#TruncateOptions",
+        "export:@byok-sdk/protocol#buildHandoffPack",
+        "export:@byok-sdk/protocol#truncateUtf8",
+        "export:@byok-sdk/protocol/constants#TruncateOptions",
+        "export:@byok-sdk/protocol/constants#truncateUtf8"
+      ]
+    },
+    {
+      "id": "daemon-config-runtimes-dsh",
+      "impact": "breaking",
+      "summary": "createDaemon and createRuntimeAdapters build DshAdapter when runtimeAllowlist lists dsh, from the new DaemonConfig.runtimes.dsh (home, model, sandbox, versionPolicy). home and model are required, and listing dsh without runtimes.dsh is a config error. A config that does not list dsh is unaffected, and a Host that constructs DshAdapter itself changes nothing. The qualified dsh version moves to 0.2.2-rc.1. dsh runs on the vendored OAR dsh runtime instead of ACP (#1469). A dsh MCP entry takes stdio command and args only: type http and non-empty env or headers are refused at start without a retry, where dsh used to receive env. A Host-owned server that needs env cannot run under dsh, and a token must not move into args. steer is supported, tool_use.input is the structured native object, usage adds billed tokens, and failed turns carry dsh's native class. followUp is refused: a later turn resumes the session in a new process. dsh is closed at the root turn end, so background subagents and jobs stop there and their unfinished work is lost. Tool arguments that are not a JSON object fail the session, and a resume of an unknown session or from another workspace is a typed authority failure.",
+      "migration": "docs/releases/host-upgrade-0.39.0.md#enabling-dsh-and-agy",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
+      ]
+    },
+    {
+      "id": "daemon-config-runtimes-agy",
+      "impact": "additive",
+      "summary": "AgyAdapter runs the Antigravity CLI as a custom harness. createDaemon and createRuntimeAdapters build it when runtimeAllowlist lists agy, from the new DaemonConfig.runtimes.agy (home, model, versionPolicy). home is required, and listing agy without runtimes.agy is a config error. The Gemini API key comes from GEMINI_API_KEY in the runtime environment and stays in the daemon behind a per-process loopback proxy; tools agy starts can spend quota through it during a session but cannot take the key. agy rejects Host toolset entries carrying env or headers; a Host that configures env for its own server cannot run it under agy. The new retention class agy-session-store expires what agy keeps in that home after 31 days. When adding agy with session-ledger above 30 days, set agy-session-store to at least the ledger plus one day. followUp is refused and a later turn resumes the session in a new process, steer is unsupported, and subagents and schedules stop at the turn end, so their unfinished work is lost.",
+      "migration": "docs/adapter-capabilities.md#agy-adapter-custom-harness",
+      "items": [
+        "config:storage",
+        "export:@byok-sdk/client#AgyAdapter",
+        "export:@byok-sdk/client#AgyAdapterOptions",
+        "export:@byok-sdk/client#ExpiringClassId",
+        "export:@byok-sdk/client#resolveStorageConfig",
+        "export:@byok-sdk/client/adapters#AgyAdapter",
+        "export:@byok-sdk/client/adapters#AgyAdapterOptions",
+        "export:@byok-sdk/client/testing#FakeRuntimeAdapterId"
+      ]
+    },
+    {
+      "id": "host-toolset-context-file",
+      "impact": "breaking",
+      "summary": "A Host toolset server no longer receives BYOK_HOST_TOOLSET_CONTEXT, BYOK_STORE_DIR or BYOK_PRODUCT_ID, and its MCP entry carries no env. In a task run the daemon appends one path as the server's last argument, so a server whose argument parser rejects extras must accept it. requestTaskAssertion takes { contextFile, audience, timeoutMs? }: pass that path as contextFile when you make the call and drop productId, storeDir and contextToken. Do not read the file at startup. The admission tools/list probe starts the server without the argument. requestDeviceAssertion and requestTaskAssertion wait up to 90 s by default instead of 10 s (#1437); an explicit timeoutMs still wins.",
+      "migration": "packages/client/README.md#daemon-free-assertion-requests",
+      "items": [
+        "export:@byok-sdk/client#RequestTaskAssertionOptions",
+        "export:@byok-sdk/client/assertion-client#RequestTaskAssertionOptions"
+      ]
+    },
+    {
+      "id": "protocol-build-dream-instruction",
+      "impact": "additive",
+      "summary": "buildDreamInstruction builds the instruction of a dream task from a buildHandoffPack history, a time window and a time budget; nothing calls it for a Host.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1475",
+      "items": [
+        "export:@byok-sdk/protocol#DreamBudget",
+        "export:@byok-sdk/protocol#DreamInstructionInput",
+        "export:@byok-sdk/protocol#DreamWindow",
+        "export:@byok-sdk/protocol#buildDreamInstruction"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=87a07d84a14860fe",
+      "after": "optional schema-sha256=f94f04553cc5444a",
+      "entry": "daemon-config-runtimes-dsh"
+    },
+    {
+      "item": "config:storage",
+      "change": "changed",
+      "before": "optional schema-sha256=072bdde0810d910b",
+      "after": "optional schema-sha256=26156d226d19d4c6",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=f28fb891884de485",
+      "after": "K8 0.0.1 src-sha256=84817467889ca31d",
+      "entry": "k8-room-turn-read-only-memory"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentHomeLeaseManager",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgyAdapter",
+      "change": "added",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgyAdapterOptions",
+      "change": "added",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
+      "item": "export:@byok-sdk/client#CreateStoredDeviceProofSignerOptions",
+      "change": "changed",
+      "entry": "windows-credential-koffi"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentStatusOptions",
+      "change": "changed",
+      "entry": "windows-credential-koffi"
+    },
+    {
+      "item": "export:@byok-sdk/client#ExpiringClassId",
+      "change": "changed",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RequestTaskAssertionOptions",
+      "change": "changed",
+      "entry": "host-toolset-context-file"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveStorageConfig",
+      "change": "changed",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapter",
+      "change": "added",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapterOptions",
+      "change": "added",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "daemon-config-runtimes-dsh"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryFileObservation",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryFilesystem",
+      "change": "changed",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryRestoreCleanup",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryRestoreRecord",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryWalk",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntry",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntryKind",
+      "change": "added",
+      "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/assertion-client#RequestTaskAssertionOptions",
+      "change": "changed",
+      "entry": "host-toolset-context-file"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#loadSdkKoffiAsset",
+      "change": "added",
+      "entry": "windows-credential-koffi"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterId",
+      "change": "changed",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TerminalResult",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions",
+      "change": "changed",
+      "entry": "keys-windows-credential-manager-koffi"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY",
+      "change": "added",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryCommit",
+      "change": "added",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryCommitSchema",
+      "change": "added",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamBudget",
+      "change": "added",
+      "entry": "protocol-build-dream-instruction"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamInstructionInput",
+      "change": "added",
+      "entry": "protocol-build-dream-instruction"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamWindow",
+      "change": "added",
+      "entry": "protocol-build-dream-instruction"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HANDOFF_EXCERPT_LINE_MAX_BYTES",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffJson",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffLine",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffPack",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffPackBudgets",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffTurn",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RESIDENT_MEMORY_MAX_BYTES",
+      "change": "added",
+      "entry": "resident-memory-max-bytes-to-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+      "change": "added",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelledPayloadSchema",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelledSealedPayload",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCompletePayloadSchema",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCompleteSealedPayload",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailSealedPayload",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TerminalResidentMemoryOverLimit",
+      "change": "added",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TerminalResidentMemoryOverLimitSchema",
+      "change": "added",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TruncateOptions",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#buildDreamInstruction",
+      "change": "added",
+      "entry": "protocol-build-dream-instruction"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#buildHandoffPack",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#truncateUtf8",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY",
+      "change": "added",
+      "entry": "agent-memory-commit-on-success"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_MAX_BYTES",
+      "change": "added",
+      "entry": "resident-memory-max-bytes-to-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+      "change": "added",
+      "entry": "resident-memory-over-limit"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#TruncateOptions",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#truncateUtf8",
+      "change": "added",
+      "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
+      "change": "changed",
+      "entry": "device-injects-resident-memory"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostMemoryPage",
+      "change": "changed",
+      "entry": "device-injects-resident-memory"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#RESIDENT_MEMORY_MAX_BYTES",
+      "change": "removed",
+      "entry": "resident-memory-max-bytes-to-protocol"
+    }
+  ]
+}
