@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.39.0 — source candidate
+## 0.39.0 — 2026-11-06 (published)
 
 0.39.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 The upgrade manifest that `@byok-sdk/client` ships
@@ -15,7 +15,7 @@ addition behind the new device flag `agent-memory-commit-on-success`,
 server flag `resident-memory-over-limit`, and the v5 corpus gains eight
 envelope lines. There is no new Postgres migration and no SQLite schema change,
 and the Pi closure stays at 1.5.0. See the
-[0.39.0 candidate notes](docs/releases/v0.39.0.md) and the
+[0.39.0 release notes](docs/releases/v0.39.0.md) and the
 [Host upgrade checklist](docs/releases/host-upgrade-0.39.0.md). The breaking
 changes: the device injects a `MEMORY.md` of at most 8 KiB into a fresh task
 and `HostExecutionCore` no longer adds memory (#1439); `AgentMemoryFilesystem`
@@ -26,8 +26,11 @@ and dreams by default (#1475); dsh runs on the vendored OAR dsh runtime and
 refuses `followUp` and any MCP entry with `env`, `headers` or HTTP; and a Host
 toolset server gets its context through a file path argument instead of env
 (#1469). The release adds the Antigravity CLI as the `agy` runtime and
-Pi rpc and prepared file scope on Windows (#1423). It is not published, and it
-does not say that 0.39.0, or a Host on it, is ready for production.
+Pi rpc and prepared file scope on Windows (#1423).
+The npm registry lists all nine public packages at 0.39.0 as `latest`,
+published on 2026-11-06 (UTC). The release commit is `bd437e861` on `main`,
+and the annotated tag `v0.39.0` and its GitHub Release point to it. This
+release does not say that 0.39.0, or a Host on it, is ready for production.
 
 - **Breaking (client; #1469)** — dsh now runs on the vendored OAR dsh runtime, a
   private plugin inside `dsh --profile acp`, not over ACP. A Host MCP entry for

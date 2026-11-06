@@ -328,7 +328,7 @@ on keys.
 0.39.0 is a MINOR under the general policy above, with no exception. It keeps
 wire v5. The upgrade manifest from 0.38.0 holds 8 breaking entries and 5
 additive entries. The release adds no Postgres migration and no SQLite schema
-change. See the [0.39.0 candidate notes](releases/v0.39.0.md).
+change. See the [0.39.0 release notes](releases/v0.39.0.md).
 
 0.38.0 is a MINOR under the general policy above, with no exception. It keeps
 wire v5. The upgrade manifest from 0.37.0 holds 1 breaking entry and 1
@@ -413,15 +413,17 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-The registry read of 2026-11-04 (UTC) reports `latest` 0.38.0 for all nine
-packages. The earlier published versions are 0.37.0, 0.36.0, 0.35.0, 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
+The registry read of 2026-11-06 (UTC) reports `latest` 0.39.0 for all nine
+packages. The earlier published versions are 0.38.0, 0.37.0, 0.36.0, 0.35.0, 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
 0.30.0, 0.29.0, 0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for
 0.28.0 / keys 0.13.0, 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22
 (UTC) for 0.28.2 and 0.28.3, 2026-10-23 (UTC) for 0.29.0, 2026-10-24 (UTC)
 for 0.30.0 and 0.30.1, 2026-10-26 (UTC) for 0.30.2, 2026-10-29 (UTC) for
 0.31.0, 2026-11-01 (UTC) for 0.32.0 and 0.33.0, and 2026-11-02 (UTC) for
-0.34.0 and 0.35.0, 2026-11-03 (UTC) for 0.36.0, and 2026-11-04 (UTC) for
-0.37.0 and 0.38.0. The tag `v0.38.0` and its GitHub Release point to
+0.34.0 and 0.35.0, 2026-11-03 (UTC) for 0.36.0, 2026-11-04 (UTC) for
+0.37.0 and 0.38.0, and 2026-11-06 (UTC) for 0.39.0. The tag `v0.39.0` and its
+GitHub Release point to `bd437e861`, the squash merge of #1494 on main. The
+tag `v0.38.0` and its GitHub Release point to
 `47a3ac47c`, the squash merge of #1438 on main. The tag `v0.37.0` and its GitHub Release point to `1ba3779fd`, the
 squash merge of #1411 on main. The tag `v0.36.0` and
 its GitHub Release point to `644cf95a2`, the merge of #1390 on main. The tag
@@ -434,16 +436,17 @@ merge of #1250 on main. The tag
 `v0.31.0` points to `982aa2d7`, the release commit on the branch
 `release/0.31`, which is not on main. The tag
 `v0.30.2` points to `b1469e5a`, the merge of #1006. The tag `v0.30.1` points
-to `142acbe2`, the merge of #916. The 0.28.0 to 0.38.0
+to `142acbe2`, the merge of #916. The 0.28.0 to 0.39.0
 source-candidate notes are preparation history. They are not publication
 records, except that the [0.31.0 notes](releases/v0.31.0.md), the
 [0.32.0 notes](releases/v0.32.0.md), the [0.33.0 notes](releases/v0.33.0.md),
 the [0.34.0 notes](releases/v0.34.0.md), the
 [0.35.0 notes](releases/v0.35.0.md), the
 [0.36.0 notes](releases/v0.36.0.md), the
-[0.37.0 notes](releases/v0.37.0.md) and the
-[0.38.0 notes](releases/v0.38.0.md) also hold the 0.31.0, 0.32.0, 0.33.0,
-0.34.0, 0.35.0, 0.36.0, 0.37.0 and 0.38.0 publication records. This read confirms registry
+[0.37.0 notes](releases/v0.37.0.md), the
+[0.38.0 notes](releases/v0.38.0.md) and the
+[0.39.0 notes](releases/v0.39.0.md) also hold the 0.31.0, 0.32.0, 0.33.0,
+0.34.0, 0.35.0, 0.36.0, 0.37.0, 0.38.0 and 0.39.0 publication records. This read confirms registry
 availability. It does not establish isolated-install qualification. A later
 release needs the accepted final-commit CI artifact and separate owner
 authorization.
