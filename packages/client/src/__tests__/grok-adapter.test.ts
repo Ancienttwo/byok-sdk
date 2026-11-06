@@ -590,6 +590,20 @@ describe('AgyAdapter', () => {
     await expect(fetch(start.env.GOOGLE_GEMINI_BASE_URL)).rejects.toThrow();
   });
 
+  it('still sends session/close and disposes the process and proxy when the process table cannot be read at the stop, and stops again on the close', async () => {
+    const home = await agyVersion('1.5.1');
+    const observe = vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
+    const resources = await agyCtx();
+    const s = await open(agy(home), { instruction: 'hello' }, resources);
+    expect(await failureOf(s)).toMatchObject({ category: 'infrastructure', message: 'Process table ps: timeout after 5000 ms' });
+    expect(facts(resources.log).some(fact => fact.kind === 'close')).toBe(true);
+    const start = facts(resources.log).find(fact => fact.kind === 'start')!;
+    expect(() => process.kill(start.pid, 0)).toThrow();
+    await expect(fetch(start.env.GOOGLE_GEMINI_BASE_URL)).rejects.toThrow();
+    await s.close();
+    expect(observe).toHaveBeenCalledTimes(2); // The failed stop is not remembered: the close stops again.
+  });
+
   it('leases a resumed session against the store sweep, and only that session', async () => {
     const adapter = agy(await agyVersion('1.5.1'));
     const store = agySessionStoreOf(adapter)!;
