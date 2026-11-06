@@ -9,6 +9,7 @@ import type { CommandRecord } from './rules/commit';
 import type { DeviceTopology } from './topology';
 import type { SwitchExportMark, SwitchImport } from './switch';
 import type { AutonomyState, WouldDo } from './rules/autonomy';
+import type { DreamState } from './dream';
 
 export type { Authority, InputBatch, SealReason, UserInput } from './rules/coalesce';
 export { addBatchTurns, addTurn, json } from './rules/turn';
@@ -60,6 +61,11 @@ export interface CollaborationState extends AutonomyState {
    * observed action, so an older ledger reads none. They are Host UI history, never part of the Bot's ContextPack or wire.
    */
   wouldDo?: Record<string, WouldDo>;
+  /**
+   * Dreaming (#1475), from `dream.ts`: the owner of each dream intent and the last result of each Bot. It appears at the first
+   * dream routine, so an older ledger reads none. Never in ContextPack or projections.
+   */
+  dreams?: DreamState;
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({

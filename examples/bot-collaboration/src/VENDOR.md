@@ -96,6 +96,7 @@ src/compaction.ts
 src/delegation.ts
 src/delivery-routing.ts
 src/delivery.ts
+src/dream.ts
 src/history.ts
 src/home-projections.ts
 src/host.ts
@@ -120,6 +121,11 @@ src/topology.ts
 @byok-sdk/server/execution-core/canonical: canonical hash
 node:crypto
 ```
+
+A Host that vendors K8 gets dreaming (`src/dream.ts`, #1475) on by default. A
+dream runs in the Bot's home as its cwd with `agentMemory: 'none'`, so `MEMORY.md`
+and `notes/` resolve from the cwd and the device injects no memory. See
+[Dreaming](../README.md#dreaming-1475) for the cost and `dreaming: false`.
 
 ## Layer 3: shared vectors
 

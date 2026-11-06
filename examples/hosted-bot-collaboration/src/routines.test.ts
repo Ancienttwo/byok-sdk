@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { hash, MIN_TOMBSTONE_RETENTION_MS, occurrenceIntentKey, occurrenceOfIntentKey, taskId, type FrozenSubmitPort, type Json, type RoutineDefinition } from '@byok-sdk/server/execution-core';
+import { createRoutine, hash, MIN_TOMBSTONE_RETENTION_MS, occurrenceIntentKey, occurrenceOfIntentKey, taskId, type FrozenSubmitPort, type Json, type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { createDefinition, ROUTINE_WAIT_MS, routineCalendar, routineTurn } from '@byok-sdk/example-bot-collaboration/routines';
+import { BOT_DREAM, createDefinition, DREAM_UNSUPPORTED_ON_H, ROUTINE_WAIT_MS, routineCalendar, routineTurn } from '@byok-sdk/example-bot-collaboration/routines';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent, HostedSubmitter } from './intents';
 import { storedKey } from './layout';
@@ -100,6 +100,24 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
     const instruction = ((await intentRow(scope, 'q1'))!.input as { payload: { instruction: string } }).payload.instruction;
     expect(instruction).toContain(id);
     expect(instruction).toContain(PROMPT);
+  });
+
+  it('fires an imported bot-dream row with no task, and the scope keeps its routine commands (#1475)', async () => {
+    const scope = await scoped(), id = await created(scope), dream = 'dream:main:1';
+    await locked(scope, async client => {
+      const slice = await loadSlice(client, storedKey(scope));
+      createRoutine(slice.state, { id: dream, version: 1, timeZone: 'UTC', rule: DAILY, waitMs: 3_600_000, lateAfterMs: 60_000,
+        hostOccurrence: { type: BOT_DREAM, input: { owner: 'main' } } }, NOW, routineCalendar);
+      await writeSlice(client, storedKey(scope), slice);
+    });
+    expect(await store().fire(scope, dream, FIRST)).toBe('fired');
+    const key = hash([dream, 1, { kind: 'scheduled', plannedAt: FIRST }]);
+    expect(await occurrenceRow(scope, key)).toEqual({ execution_superseded: false, conclusion: 'cancelled' });
+    expect(await intentRow(scope, occurrenceIntentKey(key))).toBeUndefined();
+    expect((await store().read(scope)).dreams?.bots.main?.last).toEqual({ occurrenceKey: key, at: FIRST, outcome: 'skipped', reason: DREAM_UNSUPPORTED_ON_H });
+    await store().updateRoutine(scope, 'main', { routineId: id, prompt: 'Version 2' }, NOW);
+    expect((await routineRow(scope, id))!.definition.version).toBe(2);
+    expect(await store().fire(scope, id, FIRST)).toBe('fired');
   });
 
   it('stages, switches, pauses, resumes and completes a routine through the Main Bot owner API, and refuses another Bot', async () => {

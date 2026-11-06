@@ -421,13 +421,85 @@ are not Bot routines. A Host job may return only a summary: L sets K4
 occurrence `failed` and promotes nothing, as H does, because no K8 Turn could
 settle that intent. K4 alone promotes it by default.
 
-K8 owns only Turn intents and Host intents (#882), so L also sets K4
-`executionRoutines: 'refuse'`; H refuses them too (#954). An `execution` routine
-is refused at creation, from `bot.core.addRoutine`, `bot.core.updateRoutine` or a
-Host intent handler's `tx.routines`, and no routine row is written. The
-constructor refuses a ledger that still holds one that is not completed. Host
-code that needs Agent work for an occurrence calls `enqueueHostIntent` itself,
-outside a Host job handler, with its own key and never `occurrence:<key>`.
+K8 owns only Turn intents, Host intents (#882) and dream intents (#1475), so L
+also sets K4 `executionRoutines: 'refuse'`; H refuses them too (#954). An
+`execution` routine is refused at creation, from `bot.core.addRoutine`,
+`bot.core.updateRoutine` or a Host intent handler's `tx.routines`, and no routine
+row is written. The constructor refuses a ledger that still holds one that is
+not completed. Only K8's own hooks promote an occurrence: the routine Turn and
+`bot-dream`. Host code that needs Agent work for an occurrence calls
+`enqueueHostIntent` itself, outside a Host job handler, with its own key.
+`enqueueHostIntent` refuses `occurrence:<key>`.
+
+### Dreaming (#1475)
+
+Each unarchived Bot with a usable model template has a dream routine: a daily
+task that checks and tidies its memory against the Host's history, built with
+`buildDreamInstruction`. Dreaming is on by default.
+
+**Cost.** The default is one run per Bot per day that had a new completed Turn,
+on the Bot's own model. Set `dreaming.models` to cheap templates, or pass
+`dreaming: false` to turn it off for the whole Host.
+
+```ts
+new BotCollaboration(server, ledger, { ...options,
+  dreaming: { timeZone: 'Asia/Hong_Kong', models: ['cheap', 'fast'], maxDurationMs: 900_000 } });
+```
+
+- **Lifecycle.** Every sync adds the routine of a new Bot, ends the routine of an
+  archived Bot, and with `dreaming: false` ends them all. `recover()` is a sync,
+  so it does both. A routine whose template goes away later stays and records
+  `model_unavailable`. `dreaming: false` ends routines for good, so turning it
+  back on creates a new routine id with the same record. Default-on needs
+  `wake.consume` routed to `bot.consume` even with no Bot routines, and a Host clock
+  outside the years 2000 to 2200 throws in sync unless `dreaming: false`.
+- **Time.** 03:00 daily, in `dreaming.timeZone`. Without it, the routine takes this
+  process's local zone when it is created and stores it in its definition, so a
+  later restart in another zone does not move it. A Host on a server should set
+  `dreaming.timeZone`: server clocks are usually UTC, and 03:00 UTC may be the
+  middle of the user's day.
+- **Model.** A dream always runs on the Bot's own device, because its memory home
+  is there. It takes the first name in `dreaming.models` that exists in the current
+  `models` and is on that device. Otherwise it falls back to the Bot's own template,
+  with or without a list. Only the list decides what is cheap: K8 infers nothing
+  from a runtime name.
+- **Task.** A fresh writer with `agentMemory: 'none'` and no `agentMemoryCommit`, on
+  every platform, and `terminalProjection: { mode: 'none' }`. The offer always sets
+  `agentMemory: 'none'`: with it unset, a daemon could attach the memory MCP, and a
+  `MEMORY.md` over its limit would then fail the dream before it starts, though the
+  dream is what repairs it. There is no rollback, so the instruction orders every
+  step to leave usable memory. It carries no message egress and no toolsets, and
+  drops the template's `homeAccess`, `preparation` and `agentMemoryCommit`.
+- **Memory paths.** The task is not `homeAccess`, so its cwd is the Bot's home. In
+  `none` mode the device injects no `MEMORY.md` and no memory guidance.
+  `MEMORY.md` and `notes/` in the instruction resolve from the cwd, and the runtime
+  uses its own file tools.
+- **Input.** The Bot's completed Turns after the last successful dream's mark, up
+  to the first Turn that is still queued or processing, so a Turn that user input
+  overtook is covered by a later dream. A blocked Turn does not stop the run; if it
+  later completes, no dream covers it. With `BotOptions.history`, K8 reads the rows
+  there with `turnId` set to the dream's intent key, but the mark comes from K8
+  state, so a history authority that lags can miss a Turn. A failed read skips that
+  day. An authority that returns no rows gives an empty
+  pack, so the dream only tidies memory. The pack fills what `instructionMaxBytes`
+  leaves after the fixed text.
+- **Queue.** A dream joins the Bot's FIFO behind the Turns of its sync, and user
+  input goes ahead of a dream that has not started (#1229). A running dream is not
+  interrupted, so user input waits for it, at most `maxDurationMs` (default 15
+  minutes). A queued dream waits at most an hour, and a newer slot supersedes it.
+- **Record.** `snapshot().dreams.bots[botId]` holds `since`, `throughTurn` and `last`:
+  the occurrence's outcome, its reason, the template and whether it was a fallback.
+  A dream that does not succeed leaves `since` and `throughTurn`, so the next one
+  covers the same Turns. A skip concludes its occurrence `cancelled`, with one of
+  `no_new_turns`, `model_unavailable`, `history_unavailable`, `bot_not_ready`,
+  `bot_archived`, `bot_suspended`, `device_unavailable`, `dreaming_off` or
+  `superseded` (concluded `superseded`).
+- **Owner.** `dreams.open` owns each dream intent, so its terminal never reaches a
+  Host intent handler. `cancelHostIntent` and `failStuckIntent` refuse it.
+- **On H.** H does not run dreams yet. An owner switch moves the routines and the
+  record, and H concludes each `bot-dream` occurrence `cancelled` with no task,
+  recording `H does not support dreaming yet`. A dream queued or running at export
+  blocks it like other open work, until it settles.
 
 ### Compaction
 
