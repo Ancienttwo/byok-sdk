@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acpSession, type AcpSessionHooks } from '../../vendor/oar/47c2c3f/shared/acp/session';
-import type { AcpSessionProfile } from '../../vendor/oar/47c2c3f/shared/acp/profile';
-import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/47c2c3f/contracts/session';
-import { grokFailureOutcome } from '../../vendor/oar/47c2c3f/runtimes/grok/failure';
+import { acpSession, type AcpSessionHooks } from '../../vendor/oar/be46fb3/shared/acp/session';
+import type { AcpSessionProfile } from '../../vendor/oar/be46fb3/shared/acp/profile';
+import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/be46fb3/contracts/session';
+import { grokFailureOutcome } from '../../vendor/oar/be46fb3/runtimes/grok/failure';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
@@ -152,6 +152,31 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
       expect(retry?.seq).toBeLessThan(failed!.seq);
       expect(failed!.body.events).toContainEqual({ kind: 'turn_ended', outcome: { kind: 'failed', reason: 'Internal error', failure: 'input_too_large' } });
     }
+  });
+
+  it('holds queued input until its adapter acceptance is recorded, then records the drain as a prompt that carries it', async () => {
+    const { dir, log } = workspace();
+    const records: RawEvent[] = [];
+    const session = await open({ PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log, FAKE_ACP_REPLY_GATE: dir }, dir, { onRecord: record => records.push(record) });
+    expect((await session.prompt('first')).response.body.kind).toBe('accepted');
+    expect((await session.queue('second', { inputId: 'queued-1' })).response.body).toMatchObject({ kind: 'accepted', queued: 'adapter' });
+    expect((await session.prompt('third')).response.body).toMatchObject({ kind: 'rejected', code: 'busy' });
+    const drained = new Promise<RequestRecord>(resolve => session.rawEvents(record => {
+      if (record.kind === 'request' && record.body.kind === 'prompt' && record.body.input === 'second') resolve(record);
+    }));
+    writeFileSync(path.join(dir, 'release'), '');
+    const request = await drained;
+    expect(request.body).toMatchObject({ kind: 'prompt', carries: ['queued-1'] });
+    await vi.waitFor(() => expect(records.some(record => record.kind === 'frame' && record.seq > request.seq && record.body.events.some(event => event.kind === 'turn_ended'))).toBe(true));
+    expect(records.some(record => record.kind === 'response' && record.requestId === request.id && record.body.kind === 'accepted')).toBe(true);
+  });
+
+  it('confirms a config option update from the session notification before the open settles', async () => {
+    const { dir, log } = workspace();
+    const startConfirming = acpSession({ ...profile, modelViaConfigOption: true, confirmConfigOptionUpdates: true });
+    const session = await startConfirming(spawnOwnedLineProcess, spawnOwnedTerminalProcess, { kind: 'available', via: 'executable', command: FAKE }, { cwd: dir, env: { PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log }, model: 'fake-model' });
+    live.push(session);
+    expect(facts(log).find(fact => fact.kind === 'config')?.params).toMatchObject({ configId: 'model', value: 'fake-model' });
   });
 
   it('delivers every record from seq 0 to the record consumer and swallows its errors', async () => {

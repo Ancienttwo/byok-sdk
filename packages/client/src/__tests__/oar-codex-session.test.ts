@@ -1,13 +1,13 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/47c2c3f/runtimes/codex/session';
-import * as projection from '../../vendor/oar/47c2c3f/runtimes/codex/projection';
-import * as rpc from '../../vendor/oar/47c2c3f/runtimes/codex/rpc-control';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/47c2c3f/runtimes/codex/app-server-client';
-import { SessionNotFoundError } from '../../vendor/oar/47c2c3f/contracts/session-not-found-error';
-import { SessionUnavailableError } from '../../vendor/oar/47c2c3f/contracts/session-unavailable-error';
-import { UnsupportedOptionError } from '../../vendor/oar/47c2c3f/contracts/errors';
-import { inputImagesRefusal } from '../../vendor/oar/47c2c3f/shared/input-images';
+import { codexSession } from '../../vendor/oar/be46fb3/runtimes/codex/session';
+import * as projection from '../../vendor/oar/be46fb3/runtimes/codex/projection';
+import * as rpc from '../../vendor/oar/be46fb3/runtimes/codex/rpc-control';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/be46fb3/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/be46fb3/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/be46fb3/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/be46fb3/contracts/errors';
+import { inputImagesRefusal } from '../../vendor/oar/be46fb3/shared/input-images';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -174,7 +174,7 @@ describe('unconnected OAR Codex adapter', () => {
   it.each([
     { method: 'turn/started', params: { turn: { id: 'turn-root' } }, derived: [{ kind: 'turn_active' }] },
     { method: 'item/commandExecution/outputDelta', params: { itemId: 'cmd-1', delta: 'out' }, derived: [{ kind: 'tool_call_progress', callId: 'cmd-1', outputDelta: 'out' }] },
-    { method: 'serverRequest/resolved', params: { requestId: 7 }, derived: [{ kind: 'app_request_cancelled', requestId: '7' }] },
+    { method: 'serverRequest/resolved', params: { requestId: 7 }, derived: [] },
   ])('keeps the native $method frame before the OAR 0.48 derived reading', async ({ method, params, derived }) => {
     const fake = fakeServer(); const session = await fake.open();
     await session.prompt('hello');
