@@ -628,4 +628,5 @@ export type {
 export * from './bot-turn-outcome';
 export * from './routine-schedule';
 export { resultOutcomeMaxBytes } from './result-schema';
+export * from './dream';
 export * from './handoff-pack';

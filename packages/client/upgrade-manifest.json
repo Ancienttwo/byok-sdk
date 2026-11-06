@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.38.0",
-    "snapshotSha256": "0fa1fb244f2fa76f8d0fda58c4f221b506241538b3a4da4223af8991b085dd93"
+    "snapshotSha256": "ca6b3eb799e5d44cb3d90e505600f7d39acd3143e531d92cfa76bab2dfaa3d39"
   },
   "configFields": {
     "status": "tracked",
@@ -138,6 +138,18 @@
         "export:@byok-sdk/protocol/constants#TruncateOptions",
         "export:@byok-sdk/protocol/constants#truncateUtf8"
       ]
+    },
+    {
+      "id": "protocol-build-dream-instruction",
+      "impact": "additive",
+      "summary": "buildDreamInstruction builds the instruction of a dream task from a buildHandoffPack history, a time window and a time budget; nothing calls it for a Host.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1475",
+      "items": [
+        "export:@byok-sdk/protocol#DreamBudget",
+        "export:@byok-sdk/protocol#DreamInstructionInput",
+        "export:@byok-sdk/protocol#DreamWindow",
+        "export:@byok-sdk/protocol#buildDreamInstruction"
+      ]
     }
   ],
   "changes": [
@@ -244,6 +256,21 @@
       "entry": "resident-memory-over-limit"
     },
     {
+      "item": "export:@byok-sdk/protocol#DreamBudget",
+      "change": "added",
+      "entry": "protocol-build-dream-instruction"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamInstructionInput",
+      "change": "added",
+      "entry": "protocol-build-dream-instruction"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamWindow",
+      "change": "added",
+      "entry": "protocol-build-dream-instruction"
+    },
+    {
       "item": "export:@byok-sdk/protocol#HANDOFF_EXCERPT_LINE_MAX_BYTES",
       "change": "added",
       "entry": "protocol-build-handoff-pack"
@@ -347,6 +374,11 @@
       "item": "export:@byok-sdk/protocol#TruncateOptions",
       "change": "added",
       "entry": "protocol-build-handoff-pack"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#buildDreamInstruction",
+      "change": "added",
+      "entry": "protocol-build-dream-instruction"
     },
     {
       "item": "export:@byok-sdk/protocol#buildHandoffPack",
