@@ -1,15 +1,15 @@
 // Check source types across the private JS/declaration boundary.
 // The bridge exposes a smaller surface than the full OAR adapter.
 import type * as Bridge from '../../packages/client/src/runtime/codex-session-runtime.js';
-import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/be46fb3/runtimes/codex/session.js';
-import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/be46fb3/contracts/session.js';
-import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/be46fb3/runtimes/codex/app-server-client.js';
+import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/0e92470/runtimes/codex/session.js';
+import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/0e92470/contracts/session.js';
+import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/0e92470/runtimes/codex/app-server-client.js';
 import type { spawnOwnedLineProcess } from '../../packages/client/src/runtime/owned-line-process.js';
 import type { buildRuntimeEnvironment } from '../../packages/client/src/runtime/environment.js';
 import type { CodexProjection, CodexRecord } from '../../packages/client/src/adapters/codex/projection.js';
-import type { SessionNotFoundError as VendorSessionNotFoundError } from '../../packages/client/vendor/oar/be46fb3/contracts/session-not-found-error.js';
+import type { SessionNotFoundError as VendorSessionNotFoundError } from '../../packages/client/vendor/oar/0e92470/contracts/session-not-found-error.js';
 import type * as TreeBridge from '../../packages/client/src/runtime/oar-process-tree.js';
-import type * as VendorTree from '../../packages/client/vendor/oar/be46fb3/shared/executable/process-tree.js';
+import type * as VendorTree from '../../packages/client/vendor/oar/0e92470/shared/executable/process-tree.js';
 
 type Assert<T extends true> = T;
 type Equal<A, B> =
@@ -84,7 +84,7 @@ export type CheckSession = Assert<Equal<Bridge.RawCodexSession, BridgeSession>>;
 // Name each intentional omission so new vendor members fail this check.
 // 'compact' (OAR 0.86 manual compaction) is omitted on purpose: exposing it is a separate product decision.
 export type CheckSessionMembers = Assert<Equal<
-  Exclude<keyof CodexAdapterSession, 'capabilities' | 'goal' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact'>,
+  Exclude<keyof CodexAdapterSession, 'capabilities' | 'goal' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
   keyof Bridge.RawCodexSession
 >>;
 export type CheckReturn = Assert<Equal<ReturnType<typeof Bridge.codexSession>, Promise<Bridge.RawCodexSession>>>;
@@ -127,15 +127,15 @@ export type CheckTreeKill = Assert<Equal<typeof TreeBridge.killEntries, typeof V
 // The ACP bridge: one start signature for every vendored ACP runtime, with
 // the SDK-owned agent process, terminal processes and explicit environment.
 import type * as AcpBridge from '../../packages/client/src/runtime/acp-session-runtime.js';
-import type { StartAcpSession as VendorStartAcp, AcpSessionOptions, AcpSessionHooks } from '../../packages/client/vendor/oar/be46fb3/shared/acp/session.js';
-import type { SpawnAcpLineProcess } from '../../packages/client/vendor/oar/be46fb3/shared/acp/process.js';
-import type { SpawnAcpTerminal } from '../../packages/client/vendor/oar/be46fb3/shared/acp/terminal.js';
-import type { AdapterSession } from '../../packages/client/vendor/oar/be46fb3/contracts/session.js';
-import type { RuntimeFailureError as VendorRuntimeFailureError } from '../../packages/client/vendor/oar/be46fb3/contracts/runtime-failure-error.js';
-import type { UnsupportedOptionError as VendorUnsupportedOptionError } from '../../packages/client/vendor/oar/be46fb3/contracts/errors.js';
+import type { StartAcpSession as VendorStartAcp, AcpSessionOptions, AcpSessionHooks } from '../../packages/client/vendor/oar/0e92470/shared/acp/session.js';
+import type { SpawnAcpLineProcess } from '../../packages/client/vendor/oar/0e92470/shared/acp/process.js';
+import type { SpawnAcpTerminal } from '../../packages/client/vendor/oar/0e92470/shared/acp/terminal.js';
+import type { AdapterSession } from '../../packages/client/vendor/oar/0e92470/contracts/session.js';
+import type { RuntimeFailureError as VendorRuntimeFailureError } from '../../packages/client/vendor/oar/0e92470/contracts/runtime-failure-error.js';
+import type { UnsupportedOptionError as VendorUnsupportedOptionError } from '../../packages/client/vendor/oar/0e92470/contracts/errors.js';
 import type { spawnOwnedTerminalProcess } from '../../packages/client/src/runtime/owned-terminal-process.js';
-import type { grokSession as vendorGrokSession } from '../../packages/client/vendor/oar/be46fb3/runtimes/grok/session.js';
-import type { antigravitySession as vendorAntigravitySession } from '../../packages/client/vendor/oar/be46fb3/runtimes/antigravity/session.js';
+import type { grokSession as vendorGrokSession } from '../../packages/client/vendor/oar/0e92470/runtimes/grok/session.js';
+import type { antigravitySession as vendorAntigravitySession } from '../../packages/client/vendor/oar/0e92470/runtimes/antigravity/session.js';
 
 type AcpBridgeArgs = Parameters<AcpBridge.StartAcpSession>;
 type AcpBridgeOptions = Mutable<
@@ -175,7 +175,7 @@ export type CheckAcpSession = Assert<Equal<AcpBridge.RawAcpSession, AcpBridgeSes
 // 'compact' (OAR 0.86 generic contract) is omitted on purpose, as for Codex.
 // 'steer' is omitted for every ACP runtime; agy has a native steer the SDK does not enable (#1469).
 export type CheckAcpSessionMembers = Assert<Equal<
-  Exclude<keyof AdapterSession, 'capabilities' | 'goal' | 'steer' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact'>,
+  Exclude<keyof AdapterSession, 'capabilities' | 'goal' | 'steer' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
   keyof AcpBridge.RawAcpSession
 >>;
 export type CheckAcpPermissionHook = Assert<Assignable<NonNullable<AcpBridgeHooks['onPermission']>, NonNullable<AcpSessionHooks['onPermission']>>>;
@@ -199,9 +199,9 @@ export type CheckAcpEnv = Assert<Equal<Readonly<Awaited<ReturnType<typeof buildR
 // The failure bridge (#869): the vendored OAR failure tables, typed with the
 // protocol's class. The protocol enum and OAR's `FailureClass` are one set.
 import type * as FailureBridge from '../../packages/client/src/runtime/oar-failure-runtime.js';
-import type { codexFailure as vendorCodexFailure } from '../../packages/client/vendor/oar/be46fb3/runtimes/codex/failure.js';
-import type { failureFromStatus as vendorFailureFromStatus } from '../../packages/client/vendor/oar/be46fb3/shared/failure-class.js';
-import type { FailureClass } from '../../packages/client/vendor/oar/be46fb3/contracts/failure.js';
+import type { codexFailure as vendorCodexFailure } from '../../packages/client/vendor/oar/0e92470/runtimes/codex/failure.js';
+import type { failureFromStatus as vendorFailureFromStatus } from '../../packages/client/vendor/oar/0e92470/shared/failure-class.js';
+import type { FailureClass } from '../../packages/client/vendor/oar/0e92470/contracts/failure.js';
 import type { RuntimeFailureClass } from '../../packages/protocol/src/messages.js';
 
 export type CheckRuntimeFailureClass = Assert<Equal<RuntimeFailureClass, FailureClass>>;
