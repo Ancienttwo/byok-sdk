@@ -1,4 +1,4 @@
-import { isReleaseRef, verifyPrPlan } from './plan-ci.mjs';
+import { isReleaseRef, isTrainFullRun, verifyPrPlan } from './plan-ci.mjs';
 import { knownFamilies, selectImpact } from './select-impact.mjs';
 import { requireCiSuccess } from './require-ci-success.mjs';
 
@@ -23,6 +23,6 @@ if (import.meta.main) {
   if (process.env.CI_EVENT === 'workflow_dispatch' && !isReleaseRef(process.env.CI_REF)) throw new Error('Release validation runs only on main or release/* refs');
   if (process.env.CI_EVENT === 'schedule' && process.env.CI_REF !== 'refs/heads/main') throw new Error('Nightly validation runs only on main');
   const base = verifyPrPlan(plan);
-  requireCiPlan(JSON.parse(process.env.CI_NEEDS ?? ''), plan, process.env.CI_EVENT, process.env.GITHUB_SHA, base);
+  requireCiPlan(JSON.parse(process.env.CI_NEEDS ?? ''), plan, isTrainFullRun() ? 'schedule' : process.env.CI_EVENT, process.env.GITHUB_SHA, base);
   console.log('Selected CI scope succeeded; full nightly and release modes require every family');
 }
