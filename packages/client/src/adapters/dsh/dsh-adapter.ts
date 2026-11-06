@@ -7,21 +7,18 @@ import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import {
   freezeRuntimeAdapterDescriptor,
   PolicyUnsupportedError,
-  SteerUnsupportedError,
   type RuntimeAdapter,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
   type RuntimeDetectResult,
   type RuntimeOperationStartInput,
-  type RuntimeTaskInput,
   type RuntimeVersionPolicy,
   type Session,
 } from '../../types';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime';
+import { dshSession, RuntimeFailureError, SessionNotFoundError, UnsupportedOptionError, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
-import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 import { AsyncQueue } from '../../util/async-queue';
 import { comparablePath } from '../../util/comparable-path';
@@ -61,7 +58,7 @@ export interface DshModelSelection {
   readonly keyEnv: string;
 }
 
-/** dsh's own sandbox modes (`DSH_PERMISSION_MODE`). `danger-full-access` also sets approval to `never`; the other two ask, and every ask is cancelled. */
+/** dsh's own sandbox modes (`DSH_PERMISSION_MODE`). `danger-full-access` also sets approval to `never`; the other two ask, but the bridge has no approval channel, so dsh refuses the request and returns it to the model as a tool error. */
 export type DshSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only';
 
 const VERSION_TIMEOUT_MS = 5_000;
@@ -85,8 +82,9 @@ export interface DshAdapterOptions {
   model: DshModelSelection;
   /**
    * dsh's sandbox for every session (`DSH_PERMISSION_MODE`). Default
-   * `danger-full-access`, as for Codex: no human answers a dsh approval, so
-   * every escalation the narrower modes ask for is cancelled.
+   * `danger-full-access`, as for Codex: the bridge has no approval channel, so
+   * dsh refuses every escalation the narrower modes ask for and returns it to
+   * the model as a tool error.
    */
   sandbox?: DshSandboxMode;
   /** Absolute product native asset directory; scoped to this adapter. */
@@ -109,11 +107,6 @@ const authority = (reason: string) =>
 const infrastructure = (reason: string, failure?: TaskFailure) =>
   new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason, failure });
 
-/** The JSON-RPC error code an ACP request was answered with, as the vendored stack rethrows it. */
-function rpcErrorCode(error: unknown): number | undefined {
-  return error instanceof Error && 'code' in error && typeof error.code === 'number' ? error.code : undefined;
-}
-
 /** `dsh --profile acp --help` exits 0 when the acp profile resolves; it also writes that profile into a new root. */
 function probeAcpProfile(command: string, root: string, env: Record<string, string>): Promise<boolean> {
   return new Promise((resolve) => {
@@ -127,14 +120,13 @@ function probeAcpProfile(command: string, root: string, env: Record<string, stri
 }
 
 /**
- * DeepSeek Harness over ACP (`dsh --profile acp`), through the SDK's dsh
- * profile on the vendored OAR ACP stack. Each session runs one dsh process
- * in an SDK-owned `DSH_HOME`, with a per-execution `--patch` overlay that
- * names the provider route, its key variable and the model. The process
- * starts in the execution scratch directory, not the workspace, so dsh does
- * not load a workspace `.env`; the workspace is the ACP session cwd. The SDK
- * owns the process, the environment, the record budget and the permission
- * policy (requests are cancelled).
+ * DeepSeek Harness through the vendored OAR dsh runtime: a private plugin
+ * loaded into `dsh --profile acp`, with the ACP protocol plugin off. Each
+ * session runs one dsh process in an SDK-owned `DSH_HOME`, with a per-execution
+ * `--patch` overlay that names the provider route and its key variable. The
+ * process starts in the execution scratch directory, not the workspace, so dsh
+ * does not load a workspace `.env`; the workspace is the session cwd. The SDK
+ * owns the process, the environment and the record budget.
  *
  * `dsh` is not a frozen wire runtime id, so a task reaches this adapter by the
  * custom-harness identity (`harnessId: 'dsh'`).
@@ -153,7 +145,7 @@ export class DshAdapter implements RuntimeAdapter {
       // dsh ships no win32 build of its native addon (docs/researches/2026-11-01-dsh-adapter.md §1.9).
       platforms: ['darwin', 'linux'],
       capabilities: DSH_RUNTIME_CAPABILITIES,
-      // Each `agent_message_chunk` is one committed assistant message.
+      // Each `progress` is one committed assistant message.
       progressMessageBoundary: 'event',
       ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
     });
@@ -240,15 +232,13 @@ export class DshAdapter implements RuntimeAdapter {
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('dsh manifest has no sealed cwd');
     const resume = input.manifest.sessionRef;
+    const model = `${dshRoute(this.options.model)}/${this.options.model.model}`;
     const session = new DshSession(
       input.scratch,
       this.options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS,
       this.options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES,
-      resume,
+      model,
     );
-    // The ACP stack and its protocol SDK load only when a dsh session starts.
-    const acp = await import('#byok-acp-runtime');
-    let opened = false;
     try {
       // dsh compares the canonical workspace on resume.
       const workspace = await fs.realpath(cwd);
@@ -258,21 +248,19 @@ export class DshAdapter implements RuntimeAdapter {
       const env = dshEnvironment({ ...input.env, ...input.scratch.env }, this.root, this.sandbox);
       const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
       const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'dsh acp' });
-      const raw = await acp.dshSession(
+      const raw = await dshSession(
         (bin, args, options) => {
-          // The process runs in the scratch directory, so dsh reads no workspace `.env`; the workspace stays the ACP cwd.
-          const child = spawnAgent(bin, args, { ...options, cwd: input.scratch.sdkDir });
+          const child = spawnAgent(bin, args, options);
           session.own(child);
           void child.exited.then(() => session.exited(), (error) => session.fail(error));
           return session.gate(child);
         },
-        // dsh implements no client terminal (dsh `packages/acp/acp/README.md`); the stack still requires the seam.
-        createOwnedTerminalSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn }),
         { kind: 'available', via: 'executable', command },
         {
           cwd: workspace,
-          env,
-          launchArgs: ['--patch', patch],
+          model,
+          // The process runs in the scratch directory, so dsh reads no workspace `.env`; the workspace stays the session cwd.
+          launch: { directory: input.scratch.sdkDir, patches: [patch], env },
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(resume === undefined ? {} : { resume }),
         },
@@ -282,11 +270,7 @@ export class DshAdapter implements RuntimeAdapter {
           onRecord: (record) => session.record(record),
         },
       );
-      opened = true;
       session.bind(raw);
-      // The patch is the only model authority: a session on any other route means the overlay did not apply.
-      if (session.openedModel !== JSON.stringify([dshRoute(this.options.model), this.options.model.model]))
-        throw authority('dsh session does not run the configured provider route and model');
       if (input.signal?.aborted) throw infrastructure('dsh start was aborted');
       await session.prompt(input.instruction);
       return session;
@@ -298,11 +282,11 @@ export class DshAdapter implements RuntimeAdapter {
       }
       // A failed record stream is the cause; the open or prompt error is its consequence.
       const error = session.halted ?? thrown;
-      // dsh refuses a resume with a JSON-RPC error that names no reason in its code (an unknown session and another
-      // workspace both answer -32602), so any refusal is authority. A failure without an answer is not a refusal.
-      if (resume !== undefined && !opened && rpcErrorCode(error) !== undefined)
-        throw authority(`dsh could not resume session ${resume}: ${error instanceof Error ? error.message : 'refused'}`);
-      if (error instanceof acp.RuntimeFailureError) throw authority(error.message);
+      // A refused option (an MCP entry with env or headers, another workspace on resume) or a missing session cannot succeed on retry.
+      if (error instanceof SessionNotFoundError || error instanceof UnsupportedOptionError) throw authority(error.message);
+      if (error instanceof RuntimeFailureError)
+        throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: error.message,
+          failure: { class: runtimeFailureClassOf(error.failure) } });
       throw new RuntimeExecutionFailure({
         phase: 'start',
         category: isRuntimeExecutionFailure(error) ? error.category : 'infrastructure',
@@ -316,8 +300,8 @@ export class DshAdapter implements RuntimeAdapter {
 
 class DshSession implements Session {
   sessionRef = '';
-  private raw?: RawAcpSession;
-  private child?: { dispose(): Promise<void>; kill(): void };
+  private raw?: RawDshSession;
+  private child?: { dispose(): Promise<void>; kill(): void; observeDescendants(): void };
   private exit?: { readonly exitedOnItsOwn: boolean };
   private projection?: DshProjection;
   private readonly queue = new AsyncQueue<AgentEvent>();
@@ -325,7 +309,9 @@ class DshSession implements Session {
   private active = false;
   private readonly interruptWaiters = new Set<() => void>();
   private stopping = false;
+  private stopAttempt?: Promise<void>;
   private closeAttempt?: Promise<void>;
+  private turnClosed = false;
   private retainedBytes = 0;
   /** Set when the record consumer failed: no later line reaches the ACP stream, so the kernel retains no more of them. */
   halted?: RuntimeExecutionFailure;
@@ -334,18 +320,15 @@ class DshSession implements Session {
     private readonly scratch: ExecutionScratch,
     private readonly interruptMs: number,
     private readonly maxRetainedBytes: number,
-    private readonly expectedSessionRef?: string,
+    private readonly model: string,
   ) {}
 
-  own(child: { dispose(): Promise<void>; kill(): void; readonly exitedOnItsOwn: boolean }): void {
+  own(child: { dispose(): Promise<void>; kill(): void; observeDescendants(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
     this.exit = child;
   }
   get exitedOnItsOwn(): boolean {
     return this.exit?.exitedOnItsOwn === true;
-  }
-  get openedModel(): string | undefined {
-    return this.projection?.openedModel;
   }
   /** The agent's lines stop at the transport once the record stream halted. */
   gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
@@ -357,15 +340,14 @@ class DshSession implements Session {
     };
   }
   ready(id: string): void {
-    if (this.expectedSessionRef !== undefined && id !== this.expectedSessionRef) throw authority('dsh resume returned a different session id');
     this.sessionRef = id;
-    this.projection = new DshProjection(id);
+    this.projection = new DshProjection(id, this.model);
   }
-  bind(raw: RawAcpSession): void {
+  bind(raw: RawDshSession): void {
     this.raw = raw;
   }
-  record(record: AcpRecord): void {
-    if (this.halted !== undefined) return;
+  record(record: DshRecord): void {
+    if (this.halted !== undefined || this.turnClosed) return;
     try {
       // The observer receives the redacted, retained record: measure what the kernel keeps.
       this.retainedBytes += Buffer.byteLength(JSON.stringify(record), 'utf8');
@@ -377,19 +359,53 @@ class DshSession implements Session {
       throw error;
     }
   }
+  /**
+   * dsh's subagents and background jobs outlive the turn, and when one finishes
+   * dsh opens a root turn with no prompt. Nothing of dsh's may outlive the turn:
+   * the tree goes before the terminal is decided and before the home lease is
+   * released, so a stopped subagent's unfinished work is lost. Resume reads what
+   * dsh flushed at dispose.
+   */
   private turnEnded(turn: DshTurnOutcome): void {
     this.active = false;
-    for (const resolve of this.interruptWaiters) resolve();
-    if (turn.kind === 'failed')
-      this.fail(new RuntimeExecutionFailure({
-        phase: 'run',
-        category: 'semantic',
-        // dsh fails a turn with text only; a class OAR took from that text is not structured evidence (#1258 O6),
-        // so it neither names the class nor makes the failure retryable.
-        retry: !turn.fromText && turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
-        reason: turn.reason,
-        failure: { class: turn.fromText ? 'unknown' : turn.failure },
-      }));
+    this.turnClosed = true;
+    void this.stopRuntime().then(() => {
+      if (turn.kind === 'failed') {
+        this.fail(new RuntimeExecutionFailure({
+          phase: 'run',
+          category: 'semantic',
+          retry: turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
+          reason: turn.reason,
+          failure: { class: turn.failure },
+        }));
+      } else {
+        this.queue.push({ type: 'turn_end' });
+      }
+    }, (error: unknown) => this.fail(error)).finally(() => {
+      for (const resolve of this.interruptWaiters) resolve();
+    });
+  }
+  /** OAR asks dsh to dispose its sessions and flush its log before it releases the process. */
+  private stopRuntime(): Promise<void> {
+    this.stopping = true;
+    this.stopAttempt ??= Promise.resolve().then(async () => {
+      try {
+        try {
+          // A background job that left its group has no parent to be found under once dsh ends.
+          this.child?.observeDescendants();
+        } finally {
+          await this.raw?.dispose();
+        }
+      } catch (error) {
+        if (!this.failure || isRuntimeDisposalFailure(error)) throw error;
+      } finally {
+        await this.child?.dispose();
+      }
+    }).catch((error: unknown) => {
+      this.stopAttempt = undefined;
+      throw error;
+    });
+    return this.stopAttempt;
   }
   fail(error: unknown): void {
     this.failure ??= isRuntimeExecutionFailure(error)
@@ -426,13 +442,12 @@ class DshSession implements Session {
       throw error;
     }
   }
-  async followUp(task: RuntimeTaskInput): Promise<void> {
-    if (typeof task.instruction !== 'string') throw new PolicyUnsupportedError('dsh requires a string instruction');
-    if (task.dispatchSelection !== undefined) throw new PolicyUnsupportedError('dsh persistent session runs the Host-configured model and takes no dispatch selection');
-    await this.prompt(task.instruction);
+  async followUp(): Promise<void> {
+    throw new PolicyUnsupportedError('dsh runs one turn per process; a later turn resumes the session');
   }
-  async steer(): Promise<void> {
-    throw new SteerUnsupportedError('dsh', 'dsh ACP has no steer');
+  async steer(text: string): Promise<void> {
+    const result = await this.raw?.steer(text);
+    if (result?.response.body.kind !== 'accepted') throw infrastructure(result?.response.body.reason ?? 'dsh steer refused');
   }
   async interrupt(): Promise<void> {
     if (!this.raw || !this.active) return;
@@ -442,7 +457,7 @@ class DshSession implements Session {
     this.interruptWaiters.add(resolveTurn);
     try {
       await Promise.race([
-        // session/cancel is a notification; the cancelled prompt answer carries the outcome.
+        // The accepted cancel only asks; the native turn end carries the outcome.
         this.raw.abort().then(async ({ response: { body } }) => {
           if (body.kind === 'accepted') await turnSettled;
           // A turn that already ended is a normal race. Any other refusal sent no cancel: fail as an unanswered cancel does.
@@ -466,16 +481,12 @@ class DshSession implements Session {
       const promise = Promise.resolve().then(async () => {
         try {
           try {
-            // OAR sends session/close, which dsh advertises, before it releases the process.
-            await this.raw?.dispose();
-          } catch (error) {
-            if (!this.failure || isRuntimeDisposalFailure(error)) throw error;
+            await this.stopRuntime();
           } finally {
-            await this.child?.dispose();
             await this.scratch.release();
           }
         } finally {
-          // The cancelled prompt answer can follow the cancel; end the consumer only after disposal drained stdout.
+          // The turn end can follow the cancel; end the consumer only after disposal drained stdout.
           this.flushPendingUsage();
           this.queue.end();
         }

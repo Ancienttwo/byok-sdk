@@ -352,6 +352,51 @@
       "vendoredSha256": "5e2f75ea7b5bd2a7bf3501fa914523b79ec594f4bc42b1a600a366ea38b0a8ad"
     },
     {
+      "path": "runtimes/dsh/bridge.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/bridge.ts",
+      "upstreamSha256": "26c51a5036ddeee961a8b7272b97bda59b9e9eb617b77744c5fd52d3bf4e7d62",
+      "vendoredSha256": "26c51a5036ddeee961a8b7272b97bda59b9e9eb617b77744c5fd52d3bf4e7d62"
+    },
+    {
+      "path": "runtimes/dsh/control.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/control.ts",
+      "upstreamSha256": "65e196a9da36884a3cb2f2d4b9f697c6db14e51e46df6f40fa70122682d616fd",
+      "vendoredSha256": "576a21dda0e89c298a3b7f3defb67ff621ea6b9e9c5960dec99e75eb3e148206",
+      "delta": "Use the codex LineProcess type and read stderr from the SDK process wrapper."
+    },
+    {
+      "path": "runtimes/dsh/launch.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/launch.ts",
+      "upstreamSha256": "85c6d373993e2e5d99c7f9992356c3f5b2934ce545fe54fc81df7a28a1126b29",
+      "vendoredSha256": "e3b5556faa94a81445bcab226d183804d9af726188525d7112dc5499c43bec99",
+      "delta": "Take an injected process, an explicit environment and a caller-owned directory; add the caller patches before the bridge overlay and drop the version floor."
+    },
+    {
+      "path": "runtimes/dsh/mcp.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/mcp.ts",
+      "upstreamSha256": "49e0682c6ecfd12ee5be3de28afd0cd0ef5b70b006ae7270ca967ddbec1dfa9d",
+      "vendoredSha256": "49e0682c6ecfd12ee5be3de28afd0cd0ef5b70b006ae7270ca967ddbec1dfa9d"
+    },
+    {
+      "path": "runtimes/dsh/options.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/options.ts",
+      "upstreamSha256": "8b58871899183e130694eef6c5d33e481fb6a407260468a6eac48d6f9b998cec",
+      "vendoredSha256": "8b58871899183e130694eef6c5d33e481fb6a407260468a6eac48d6f9b998cec"
+    },
+    {
+      "path": "runtimes/dsh/projection.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/projection.ts",
+      "upstreamSha256": "21725a146324c1c0f55cafda8ea7322e266e4b3ca0aff17baef1b26bbd82ddaa",
+      "vendoredSha256": "21725a146324c1c0f55cafda8ea7322e266e4b3ca0aff17baef1b26bbd82ddaa"
+    },
+    {
+      "path": "runtimes/dsh/session.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/session.ts",
+      "upstreamSha256": "c0076f4759706af1608063713c9c3fec041c2ea9f608e1d9874c2e40a482cf58",
+      "vendoredSha256": "ff81dcd3bc70e77588fb2f9a0f8db813b2fc5017618c9950f8545b7a8ee05e9c",
+      "delta": "Take an injected process and an explicit launch, redact through the SDK session kernel, read the process table before a native cancel, and refuse a dsh that does not offer steer as a typed invalid_request failure."
+    },
+    {
       "path": "runtimes/grok/compaction.ts",
       "sourcePath": "packages/oar/src/runtimes/grok/compaction.ts",
       "upstreamSha256": "db3a9e66caa8019e44dacd683768f735552271ade7365f7b50a34d2d31dd1938",

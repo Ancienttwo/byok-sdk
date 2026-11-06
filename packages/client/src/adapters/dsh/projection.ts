@@ -1,13 +1,14 @@
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
-import { runtimeFailureClassOf } from '../../runtime-failure';
-import type { AcpRecord } from '../../runtime/acp-session-runtime';
+import { RuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
+import type { DshRecord } from '../../runtime/dsh-session-runtime';
 
 type Usage = Extract<AgentEvent, { type: 'usage' }>;
-/** The turn end the vendored ACP turn machinery recorded, as `DshSession` reads it. */
+type Tokens = { input?: unknown; output?: unknown; reasoning?: unknown; cacheRead?: unknown };
+/** The turn end the vendored dsh projection recorded, as `DshSession` reads it. */
 export type DshTurnOutcome =
   | { readonly kind: 'completed' }
   | { readonly kind: 'aborted' }
-  | { readonly kind: 'failed'; readonly failure: RuntimeFailureClass; readonly reason: string; readonly fromText?: true };
+  | { readonly kind: 'failed'; readonly failure: RuntimeFailureClass; readonly reason: string };
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -15,42 +16,74 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
     : undefined;
 const count = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+const authority = (reason: string) =>
+  new RuntimeExecutionFailure({ phase: 'run', category: 'authority', retry: 'non-retryable', reason });
 
 /**
- * Root-session ACP records to `AgentEvent`s, from the runtime-neutral events
- * OAR derived beside each native frame. dsh sends each committed assistant
- * message as one `agent_message_chunk`, so each `text_delta` is one whole
- * message and one `progress`. `usage_update` carries context occupancy only;
- * dsh reports no billed tokens.
+ * The structured tool input: dsh's complete native `arguments` string, never the
+ * event's text. dsh replaces a model's malformed JSON with `{}` and refuses the
+ * call, so anything but an object means the wire changed. Tool authorization
+ * reads this object, so the session fails rather than run on an unseen input.
+ */
+function toolInput(native: unknown): Record<string, unknown> {
+  const text = record(record(native)?.data)?.arguments;
+  let parsed: unknown;
+  try {
+    parsed = typeof text === 'string' ? JSON.parse(text) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  const input = record(parsed);
+  if (input === undefined) throw authority('dsh tool call arguments are not a JSON object');
+  return input;
+}
+
+/** The text of one committed assistant message. */
+function messageText(native: unknown): string {
+  const content = record(record(record(native)?.data)?.message)?.content;
+  if (!Array.isArray(content)) return '';
+  return content.flatMap((block) => {
+    const part = record(block);
+    return part?.type === 'text' && typeof part.text === 'string' ? [part.text] : [];
+  }).join('');
+}
+
+/**
+ * Root-session records to `AgentEvent`s, from the events OAR derived beside each
+ * native frame. Text comes from the durable `assistant/message`: one `progress`
+ * per committed message, so a failed attempt's stream adds nothing. OAR reports
+ * this session's tokens cumulatively from open; each turn's usage is the
+ * difference.
  */
 export class DshProjection {
   private readonly tools = new Map<string, string>();
+  private billed: Required<Pick<Tokens, 'input' | 'output'>> & Tokens = { input: 0, output: 0 };
   private pending?: Usage;
-  /** The first model the session reported: the open answer's `configOptions`. */
-  openedModel?: string;
 
-  constructor(private readonly rootSessionId: string) {}
+  constructor(private readonly rootSessionId: string, private readonly model: string) {}
 
   /** Events for one record; `outcome` receives the root turn end, after its events. */
-  consume(input: AcpRecord, emit: (event: AgentEvent) => void, outcome: (turn: DshTurnOutcome) => void): void {
+  consume(input: DshRecord, emit: (event: AgentEvent) => void, outcome: (turn: DshTurnOutcome) => void): void {
     if (input.kind !== 'frame' || input.sessionId !== this.rootSessionId || input.agentPath.length > 0) return;
-    const events = record(input.body)?.events;
+    const body = record(input.body);
+    if (body?.type === 'session/event:assistant/message') {
+      const text = messageText(body.native);
+      if (text.length > 0) emit({ type: 'progress', text });
+    }
+    const events = body?.events;
     if (!Array.isArray(events)) return;
-    // The prompt answer's frame lists `turn_ended` before its `usage`: end the turn after every other event.
     let ended: Record<string, unknown> | undefined;
     for (const value of events) {
       const event = record(value);
       switch (event?.kind) {
         case 'model':
-          if (typeof event.model === 'string') this.openedModel ??= event.model;
-          break;
-        case 'text_delta':
-          if (typeof event.text === 'string' && event.text.length > 0) emit({ type: 'progress', text: event.text });
+          // The SDK patch and the open name this route; a request on another one means they did not apply.
+          if (event.model !== this.model) throw authority('dsh session does not run the configured provider route and model');
           break;
         case 'tool_call_started':
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
           this.tools.set(event.callId, event.tool);
-          emit({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, ...(event.input === undefined ? {} : { input: event.input }) });
+          emit({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, input: toolInput(body?.native) });
           break;
         case 'tool_call_ended': {
           if (typeof event.callId !== 'string') break;
@@ -58,13 +91,13 @@ export class DshProjection {
           this.tools.delete(event.callId);
           emit({
             type: 'tool_result', tool, toolCallId: event.callId,
-            output: { ...(event.content === undefined ? {} : { content: event.content }), ...(event.exitCode === undefined ? {} : { exitCode: event.exitCode }) },
+            output: { ...(event.content === undefined ? {} : { content: event.content }) },
             ...(event.result === 'failed' ? { isError: true } : {}),
           });
           break;
         }
         case 'usage':
-          this.usage(record(record(event.usage)?.context));
+          this.usage(record(event.usage));
           break;
         case 'turn_ended':
           ended = record(event.outcome) ?? {};
@@ -76,7 +109,7 @@ export class DshProjection {
     if (ended !== undefined) this.endTurn(ended, emit, outcome);
   }
 
-  /** A transport close cannot invent a turn outcome, but must keep the observed context usage. */
+  /** A transport close cannot invent a turn outcome, but must keep the observed usage. */
   takePendingUsage(): Usage | undefined {
     const usage = this.pending;
     this.pending = undefined;
@@ -91,26 +124,30 @@ export class DshProjection {
     const usage = this.takePendingUsage();
     if (usage !== undefined) emit(usage);
     if (turn.kind === 'failed') {
-      // The vendored OAR outcome owns the class and marks one a text rule chose; the SDK adds no rule of its own.
-      outcome({
-        kind: 'failed', reason: typeof turn.reason === 'string' ? turn.reason : 'dsh turn failed', failure: runtimeFailureClassOf(turn.failure),
-        ...(turn.fromText === true ? { fromText: true as const } : {}),
-      });
+      outcome({ kind: 'failed', reason: typeof turn.reason === 'string' ? turn.reason : 'dsh turn failed', failure: runtimeFailureClassOf(turn.failure) });
       return;
     }
-    emit({ type: 'turn_end' });
     outcome({ kind: turn.kind === 'aborted' ? 'aborted' : 'completed' });
   }
 
-  private usage(context: Record<string, unknown> | undefined): void {
+  private usage(report: Record<string, unknown> | undefined): void {
+    if (report === undefined) return;
+    const next: Usage = { ...(this.pending ?? { type: 'usage' }) };
+    const context = record(report.context);
     const contextTokens = count(context?.tokens);
     const contextWindow = count(context?.contextWindow);
-    if (contextTokens === undefined && (contextWindow === undefined || contextWindow === 0)) return;
-    this.pending = {
-      type: 'usage',
-      ...(contextTokens === undefined ? {} : { contextTokens }),
-      ...(contextWindow === undefined || contextWindow === 0 ? {} : { contextWindow }),
-      contextSource: 'provider',
-    };
+    if (contextTokens !== undefined) next.contextTokens = contextTokens;
+    if (contextWindow !== undefined && contextWindow > 0) next.contextWindow = contextWindow;
+    if (contextTokens !== undefined || next.contextWindow !== undefined) next.contextSource = 'provider';
+    const tokens = record(report.tokens) as Tokens | undefined;
+    if (tokens !== undefined && count(tokens.input) !== undefined && count(tokens.output) !== undefined) {
+      for (const [from, to] of [['input', 'inputTokens'], ['output', 'outputTokens'], ['cacheRead', 'cachedInputTokens'], ['reasoning', 'reasoningTokens']] as const) {
+        const value = count(tokens[from]);
+        const prior = count(this.billed[from]) ?? 0;
+        if (value !== undefined && value >= prior) next[to] = (next[to] ?? 0) + value - prior;
+      }
+      this.billed = tokens as typeof this.billed;
+    }
+    if (Object.keys(next).length > 1) this.pending = next;
   }
 }

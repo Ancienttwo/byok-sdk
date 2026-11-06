@@ -4,6 +4,7 @@ import path from 'node:path';
 import { beforeAll, expect } from 'vitest';
 import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../../adapters/dsh/dsh-adapter';
 import { OWNED_TREE_OBSERVE_MS } from '../../adapters/process-tree';
+import { classifyToolCall } from '../../tool-authorization';
 import { dshEnvironment } from '../../adapters/dsh/dsh-profile';
 import { QUALIFIED_DSH_VERSION } from '../../adapters/dsh/dsh-version';
 import { setLoginShellSnapshotSource } from '../../login-shell-environment';
@@ -24,6 +25,10 @@ const PROJECT_MARKER = 'BYOK-CONTRACT-DSH-PROJECT-4e19';
 const USER_MARKER = 'BYOK-CONTRACT-DSH-USER-a7c2';
 const SKILL_MARKER = 'BYOK-CONTRACT-DSH-SKILL-0b5d';
 const SKILL = 'byok-contract-user-skill';
+const STEER_MARKER = 'BYOK-CONTRACT-DSH-STEER-3c8e';
+const ROOT_MARKER = 'BYOK-CONTRACT-DSH-ROOT-6d1f';
+const CHILD_MARKER = 'BYOK-CONTRACT-DSH-CHILD-92ab';
+const RESUME_MARKER = 'BYOK-CONTRACT-DSH-RESUME-e07c';
 const SKILL_FILE = `---\nname: ${SKILL}\ndescription: ${SKILL_MARKER}\n---\n\nRuntime contract user skill.\n`;
 
 const loopbackModel = (baseUrl: string): DshModelSelection => ({ provider: 'custom', model: MODEL, baseUrl, keyEnv: KEY_ENV });
@@ -143,13 +148,14 @@ async function waitFor<T>(read: () => Promise<T | undefined>, ms: number, what: 
 
 /** `ps` rows of `pids`, for a failure message: which process group each survivor is in. */
 function processRows(pids: readonly number[]): string {
+  if (pids.length === 0) return 'none';
   try { return execFileSync('ps', ['-o', 'pid=,ppid=,pgid=,command=', '-p', pids.join(',')], { encoding: 'utf8' }).trim(); } catch { return 'none'; }
 }
 
 /**
  * A turn whose shell tool holds a foreground and a background `sleep`, then
- * ends one of two ways: `close` is the SDK's own shutdown (`session/close`,
- * then the owned process tree); `sigkill` is the dsh root killed from outside,
+ * ends one of two ways: `close` is the SDK's own shutdown (the native
+ * `dispose`, then the owned process tree); `sigkill` is the dsh root killed from outside,
  * after which dsh cannot cancel its own tools and the SDK alone must reap them.
  */
 async function toolTreeTurn(stop: 'close' | 'sigkill') {
@@ -192,7 +198,124 @@ async function toolTreeTurn(stop: 'close' | 'sigkill') {
   }
 }
 
+/**
+ * Real steer: a shell tool holds the turn open, the SDK steers, and the model's
+ * next request carries the steer text. The turn then ends normally.
+ */
+async function steerTurn() {
+  const box = await createSandbox('dsh-steer');
+  const recorder = await fileEgress();
+  const started = path.join(box.workspace, 'tool.started');
+  const script: ProviderScript = request => {
+    const tool = request.toolResults === 0 ? request.tools.find(candidate => candidate.name === 'bash') : undefined;
+    return tool === undefined ? { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS } : { kind: 'tool', tool, args: {
+      command: `touch ${JSON.stringify(started)}; sleep 3`, description: 'Hold the turn for the steer case',
+    } };
+  };
+  const provider = await startLoopbackProvider('openai-chat', script, MODEL);
+  try {
+    const runtime = await adapter(loopbackModel(provider.baseUrl));
+    const env = { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
+    const session = await startPreparedOperation(runtime, { instruction: 'Run the shell command.' }, { workspaceDir: box.workspace, env });
+    try {
+      await waitFor(async () => fs.access(started).then(() => true, () => undefined), 120_000, 'the shell tool');
+      await session.steer(STEER_MARKER);
+      const events = [];
+      for await (const event of session.events) {
+        events.push(event);
+        if (event.type === 'turn_end') break;
+      }
+      return { events, saw: provider.saw(STEER_MARKER) };
+    } finally {
+      await session.close();
+    }
+  } finally {
+    await provider.close();
+  }
+}
+
+/**
+ * A root turn that ends with a background subagent and a background job
+ * running, then a second Turn of the same session through resume. The root
+ * waits for both to record their pids, so each is live when the turn ends.
+ */
+async function backgroundTurn() {
+  const box = await createSandbox('dsh-background');
+  const recorder = await fileEgress();
+  const childPid = path.join(box.workspace, 'child.pid');
+  const jobPid = path.join(box.workspace, 'job.pid');
+  const hold = (file: string, seconds: number) => `echo $$ > ${JSON.stringify(file)}; exec sleep ${seconds}`;
+  const script: ProviderScript = request => {
+    const bash = request.tools.find(tool => tool.name === 'bash')!;
+    if (!request.text.includes(ROOT_MARKER)) {
+      return request.toolResults === 0 ? { kind: 'tool', tool: bash, args: { command: hold(childPid, 311), description: 'Hold the child' } } : { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS };
+    }
+    switch (request.toolResults) {
+      case 0: return { kind: 'tool', tool: request.tools.find(tool => tool.name === 'subagent')!, args: { description: 'Hold a shell', prompt: CHILD_MARKER } };
+      case 1: return { kind: 'tool', tool: bash, args: { command: hold(jobPid, 313), description: 'Hold a job', run_in_background: true } };
+      case 2: return { kind: 'tool', tool: bash, args: { command: `until [ -s ${JSON.stringify(childPid)} ] && [ -s ${JSON.stringify(jobPid)} ]; do sleep 0.1; done`, description: 'Wait for both' } };
+      default: return { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS };
+    }
+  };
+  const provider = await startLoopbackProvider('openai-chat', script, MODEL);
+  try {
+    const runtime = await adapter(loopbackModel(provider.baseUrl));
+    const resources = { workspaceDir: box.workspace, env: { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env } };
+    const opened = await startPreparedOperation(runtime, { instruction: `Start the work. ${ROOT_MARKER}` }, resources);
+    for await (const event of opened.events) if (event.type === 'turn_end') break;
+    // turn_end follows the disposal, so the tree is already gone here.
+    const pids = await Promise.all([childPid, jobPid].map(async file => Number(await fs.readFile(file, 'utf8'))));
+    const survivors = pids.filter(isAlive);
+    const diagnostic = processRows(survivors);
+    for (const pid of survivors) process.kill(pid, 'SIGKILL');
+    const sessionRef = opened.sessionRef;
+    await opened.close();
+    const requests = provider.requests.length;
+    const again = await startPreparedOperation(runtime, { instruction: `Continue. ${RESUME_MARKER}`, sessionRef }, resources);
+    const events = [];
+    for await (const event of again.events) {
+      events.push(event);
+      if (event.type === 'turn_end') break;
+    }
+    const resumedRef = again.sessionRef;
+    await again.close();
+    return { survivors, diagnostic, sessionRef, resumedRef, events, resumed: provider.requests.slice(requests).filter(request => request.model) };
+  } finally {
+    await provider.close();
+  }
+}
+
+/** Each real tool's native input reaches `tool_use` whole, so tool authorization classifies it. */
+async function toolInputTurn() {
+  const box = await createSandbox('dsh-tool-input');
+  const recorder = await fileEgress();
+  const outside = path.join(box.root, 'outside.txt');
+  const calls = [
+    { tool: 'bash', args: { command: `echo ${'a'.repeat(12_000)} > /dev/null; git push origin main`, description: 'Long command' } },
+    { tool: 'write', args: { file_path: outside, content: 'probe\n' } },
+    { tool: 'read', args: { file_path: path.join(box.home, '.ssh', 'id_probe') } },
+    { tool: 'edit', args: { file_path: outside, old_string: 'probe', new_string: 'edited' } },
+  ];
+  const script: ProviderScript = request => {
+    const call = calls[request.toolResults];
+    const tool = call === undefined ? undefined : request.tools.find(candidate => candidate.name === call.tool);
+    return tool === undefined || call === undefined ? { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS } : { kind: 'tool', tool, args: call.args };
+  };
+  const provider = await startLoopbackProvider('openai-chat', script, MODEL);
+  try {
+    const env = { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
+    const events = await runTurn(await adapter(loopbackModel(provider.baseUrl)), 'Run the tools.', { workspaceDir: box.workspace, env });
+    const uses = events.filter(event => event.type === 'tool_use');
+    return { calls, uses, risks: uses.map(use => classifyToolCall({ toolName: use.tool, input: use.input as Record<string, unknown>, cwd: box.workspace }, box.workspace, box.home).level) };
+  } finally {
+    await provider.close();
+  }
+}
+
 const contractTurn = once(turn);
+const steered = once(steerTurn);
+const background = once(backgroundTurn);
+const toolInput = once(toolInputTurn);
 const skillControl = once(skillControlTurn);
 const closed = once(() => toolTreeTurn('close'));
 const sigkilled = once(() => toolTreeTurn('sigkill'));
@@ -232,11 +355,36 @@ defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVer
   'isolation.sessionPersistence': skip('the dsh adapter has no session persistence option; dsh keeps sessions under the SDK-owned DSH_HOME, which resume needs'),
   drafts: notAdvertised(descriptor, 'messageDraft'),
   'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
-  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await closed(); await sigkilled(); }),
+  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await closed(); await sigkilled(); await background(); await steered(); await toolInput(); }),
 });
 
 defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersion})`, {
-  'dsh.patch': ['every model request reaches the patch route and names the patch model', check(async () => {
+  'dsh.turnEnd': ['a background subagent and a background job do not outlive the turn', check(async () => {
+    const { survivors, diagnostic } = await background();
+    expect(survivors, diagnostic).toEqual([]);
+  }, 240_000)],
+  'dsh.resume': ['a second Turn of the same session runs through resume after the kill', check(async () => {
+    const { events, sessionRef, resumedRef, resumed } = await background();
+    expect(sessionRef).not.toBe('');
+    expect(resumedRef).toBe(sessionRef);
+    expect(events.at(-1)?.type).toBe('turn_end');
+    expect(resumed.length).toBeGreaterThan(0);
+    for (const request of resumed) {
+      expect(request.text).toContain(ROOT_MARKER);
+      expect(request.text).toContain(RESUME_MARKER);
+    }
+  }, 240_000)],
+  'dsh.steer': ['steer text reaches the next model request of the running turn', check(async () => {
+    const { events, saw } = await steered();
+    expect(events.at(-1)?.type).toBe('turn_end');
+    expect(saw).toBe(true);
+  }, 240_000)],
+  'dsh.toolInput': ['each tool_use carries the whole native input as an object, and tool authorization sees it', check(async () => {
+    const { calls, uses, risks } = await toolInput();
+    expect(uses.map(use => ({ tool: use.tool, args: use.input }))).toEqual(calls);
+    expect(risks).not.toContain('normal');
+  }, 240_000)],
+  'dsh.patch': ['every model request reaches the patch route and names the selected model', check(async () => {
     const { provider } = await contractTurn();
     const models = provider.requests.filter(request => request.model);
     expect(models.length).toBeGreaterThan(0);

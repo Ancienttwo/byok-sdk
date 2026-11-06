@@ -5,4 +5,3 @@ export { RuntimeFailureError } from '../../vendor/oar/0e92470/contracts/runtime-
 export { UnsupportedOptionError } from '../../vendor/oar/0e92470/contracts/errors.js';
 export { grokSession } from '../../vendor/oar/0e92470/runtimes/grok/session.js';
 export { antigravitySession } from '../../vendor/oar/0e92470/runtimes/antigravity/session.js';
-export { dshSession } from './dsh-acp-session.js';

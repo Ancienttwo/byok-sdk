@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2247801,
+      "budgetBytes": 2285855,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -115,7 +115,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 459914,
+      "budgetBytes": 497863,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -136,6 +136,7 @@
         "node:child_process",
         "node:crypto",
         "node:fs",
+        "node:fs/promises",
         "node:http",
         "node:https",
         "node:module",
@@ -160,6 +161,7 @@
           "node:child_process",
           "node:crypto",
           "node:fs",
+          "node:fs/promises",
           "node:http",
           "node:https",
           "node:module",
@@ -435,7 +437,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 439197,
+      "budgetBytes": 477142,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -456,6 +458,7 @@
         "node:child_process",
         "node:crypto",
         "node:fs",
+        "node:fs/promises",
         "node:http",
         "node:https",
         "node:module",
@@ -480,6 +483,7 @@
           "node:child_process",
           "node:crypto",
           "node:fs",
+          "node:fs/promises",
           "node:http",
           "node:https",
           "node:module",
@@ -498,8 +502,8 @@
   "@byok-sdk/client#byok-acp-runtime": {
     "kind": "imports",
     "policy": {
-      "purpose": "Private ACP runtime stack (Grok, dsh, agy)",
-      "budgetBytes": 97039,
+      "purpose": "Private ACP runtime stack (Grok, agy)",
+      "budgetBytes": 96883,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -607,7 +611,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 534258,
+      "budgetBytes": 534227,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2352,7 +2356,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2225060,
+      "budgetBytes": 2263139,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2461,7 +2465,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 45583,
+      "budgetBytes": 45526,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2502,7 +2506,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 45587,
+      "budgetBytes": 45530,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2543,7 +2547,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 45583,
+      "budgetBytes": 45526,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2584,7 +2588,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 45553,
+      "budgetBytes": 45496,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

@@ -6,14 +6,14 @@ import type { RuntimeCapabilities } from '../../types';
  * (#1103). The runtime contract suite refuses to skip a case for a capability
  * declared here.
  *
- * dsh's ACP server sends each assistant message only once it is committed, so
- * there is no draft. Its only pre-execution ask is a sandbox escalation, so
- * there is no `auto` gate. The SDK-owned `DSH_HOME` and an empty
- * `DSH_AGENTS_HOME` keep user instructions, skills and MCP servers out; the
- * acp profile always persists sessions, which resume needs.
+ * The adapter reads each assistant message once it is committed, so there is no
+ * draft. dsh's only pre-execution ask is a sandbox escalation, so there is no
+ * `auto` gate. The SDK-owned `DSH_HOME` and an empty `DSH_AGENTS_HOME` keep user
+ * instructions, skills and MCP servers out; the acp profile always persists
+ * sessions, which resume needs.
  */
 export const DSH_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
-  steer: false,
+  steer: true,
   resume: true,
   approvalInteractive: false,
   mcpToolsets: true,

@@ -28,7 +28,7 @@ the runtime does instead.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.5.0` | `1.5.0` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | no |
-| Redirect the active turn | `steer` | no | no | yes | no | no | no | yes | no |
+| Redirect the active turn | `steer` | no | no | yes | yes | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | yes | yes |
 | Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes |
 | Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no |
@@ -48,8 +48,10 @@ those declarations, and of behavior the matrix does not cover; they are not a
 second registry.
 
 - Resume uses each runtime's exact native identity: Claude `--resume`, Codex
-  `thread/resume`, Grok and dsh ACP `session/resume`. A new instruction after an idle
-  turn (`followUp`) stays in the same native session or thread.
+  `thread/resume`, Grok ACP `session/resume`, dsh `agents.resume` through the OAR
+  bridge. A `followUp` after an idle turn stays in the same native session or
+  thread on Claude, Codex, Grok, Hermes and Pi. agy and dsh refuse it and a later
+  turn resumes in a new process; Pi's durable lane refuses it too.
 - Codex steering targets the exact active `expectedTurnId`. An adapter without
   `steer` returns a typed rejection.
 - Message drafts come from Claude's `--include-partial-messages` text deltas,
@@ -68,7 +70,8 @@ second registry.
 - Local native interaction opt-in: Claude relays structured AskUserQuestion
   only and passes other `can_use_tool` requests through as allow; Codex relays
   structured question IDs only, keeps `approvalPolicy: never` and refuses
-  approval requests; Grok and dsh answer every permission request `cancelled`;
+  approval requests; Grok answers every permission request `cancelled`; dsh has
+  no client for them, see the dsh section;
   Pi has none.
 - MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`): Claude sets
   it for task toolset servers from its own `mcp_status` answer; Codex from the
@@ -808,54 +811,76 @@ The descriptor declares `platforms: ['darwin', 'linux', 'win32']`.
 ## dsh adapter (custom harness)
 
 `DshAdapter` (id `dsh`, #1258) runs DeepSeek Harness (`@deepseek-ai/dsh`, a
-developer preview) over ACP v1: one `dsh --profile acp --patch <file>` process
-per session, driven by the vendored OAR ACP session stack. The dsh profile
-(`runtime/dsh-acp-session.js`) is SDK source built on the vendored
-`acpSession`, and loads lazily through the private `#byok-acp-runtime` entry,
-beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes no dispatch selection.
+developer preview) through the vendored OAR dsh runtime. Each session runs one
+`dsh --profile acp` process with the ACP protocol plugin off and OAR's private
+bridge plugin on, and talks JSON lines over stdio. No ACP message is exchanged
+and `@agentclientprotocol/sdk` does not load. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes no dispatch selection.
 `createDaemon` and `createRuntimeAdapters` build it when `runtimeAllowlist` lists
 `dsh`, from the required `runtimes.dsh` (`home`, `model`, and optional `sandbox`
 and `versionPolicy`). The other options stay on the `DshAdapter` constructor.
 
 - Model: the required `model` option names `provider`, `model`, `keyEnv` and,
-  for `custom`, `baseUrl`. The adapter writes them into the per-execution
-  `--patch` overlay (mode 0600, in the execution scratch directory). `deepseek`
-  uses the DeepSeek API route; `custom` is a hand-declared OpenAI-compatible
+  for `custom`, `baseUrl`. The adapter writes the provider route, `keyEnv` and
+  `baseUrl` into a per-execution `--patch` overlay (mode 0600, in the execution
+  scratch directory), beside OAR's bridge overlay. The model travels as the
+  session's selection, not in the patch. `deepseek` uses the DeepSeek API route; `custom` is a hand-declared OpenAI-compatible
   route; any other provider id is a dsh pi-ai catalog route. The key itself is
   only in the environment, under `keyEnv`; `baseUrl` refuses credentials and a
   query string. `keyEnv` must contain `KEY`,
   `TOKEN`, `SECRET` or `PASSWORD`, which dsh strips from tool processes. It
   must not start with `BYOK_` (the runtime environment drops those) or `DSH_`,
   and it must not be `DEEPSEEK_API_KEY`, which dsh `web_search` also reads.
-- Start: `session/new` (or `session/resume` with the exact `sessionRef`) must
-  answer with the patch route and model in the `model` config option. Any
-  other value fails closed as `authority`, because the overlay did not apply.
+- Start: dsh validates the selected route when the session opens. The first
+  request must then report that route and model; any other value fails closed
+  as `authority`.
 - Working directory: the process starts in the execution scratch directory,
   so dsh never loads a workspace `.env`. The workspace, realpath-resolved, is
-  the ACP session `cwd`.
+  the session `cwd`. `TMPDIR` is the execution scratch too.
+- Host toolsets: dsh takes stdio `command` and `args` only. An entry with
+  `type: 'http'`, non-empty `env` or `headers`, or a name outside
+  `[A-Za-z0-9_-]{1,32}` is refused before dsh starts, without a retry. A Host
+  that configures env for its own server cannot run it under dsh. Do not put a
+  token in `args` instead: dsh persistence of MCP entries is unaudited. Entries
+  are sent again on every resume.
 - Permissions: `sandbox` selects `DSH_PERMISSION_MODE`. The default,
   `danger-full-access`, pairs with dsh approval `never`. `workspace-write` and
   `read-only` keep dsh's OS sandbox (seatbelt on macOS, bwrap or landlock on
-  Linux). Every `session/request_permission` is answered `cancelled`: that
-  tool fails and the turn continues. `auto` is declined before claim.
-- Events: each `agent_message_chunk` is one committed message, so the
-  descriptor sets `progressMessageBoundary: 'event'` and declares no message
-  draft.
-  `tool_call` kinds are always `other`, with the input in `rawInput`; as for
-  Grok, `tool_use.input` is that raw input as JSON text and
-  `tool_result.output` carries the content blocks under `content`.
-  `usage_update` carries context occupancy only (`contextTokens`,
-  `contextWindow`, `contextSource: 'provider'`), never cost counters.
-- Failures: a failed turn is a JSON-RPC error with text only, so it is a
-  non-retryable `semantic` failure with class `unknown`, even when the text
-  names a rate limit. Any JSON-RPC error answering a resume is `authority`:
-  dsh answers an unknown id and another workspace alike (`-32602`). A dsh
-  process that ends on its own, before or after answering, is
-  `runtime_exited`.
-- Interrupt and close: `session/cancel`, then a wait for the cancelled prompt
-  answer, bounded by `interruptTimeoutMs`. `close()` sends `session/close`,
-  then disposes the owned process tree. Steering throws
-  `SteerUnsupportedError`.
+  Linux). The bridge has no approval channel, so nothing waits on a human: a
+  command the sandbox blocks fails with the OS error, and dsh refuses every
+  escalation (`sandbox_permissions`) and returns it to the model as a tool
+  error. The turn goes on either way. `auto` is declined before claim.
+- Events: the adapter reads each native committed assistant message, so each
+  `progress` is one message, the descriptor sets
+  `progressMessageBoundary: 'event'` and declares no message draft.
+  `tool_use.input` is the object parsed from dsh's complete native `arguments`
+  string, never a display text, so tool authorization sees the whole input.
+  Arguments that are not a JSON object fail the session as `authority`.
+  `tool_result.output` carries the content blocks under `content`. `usage`
+  carries each turn's billed tokens, read from OAR's session totals, and the
+  context occupancy (`contextTokens`, `contextWindow`,
+  `contextSource: 'provider'`).
+- Turn end: an Attempt is one prompt on one process. dsh's subagents and
+  background jobs outlive the turn, and when one finishes dsh opens a root turn
+  with no prompt. So on the root turn end the session projects nothing more,
+  closes dsh and disposes the owned process tree, and only then reports
+  `turn_end` (`dsh.turnEnd`). Background subagents and jobs stop there and their
+  unfinished work is lost. This is not a failure: the model's own reply says it
+  started them. `followUp` is refused; a later turn resumes in a new process
+  (`dsh.resume`). After a resume dsh restarts neither: `list_agents` shows the
+  subagent `[inactive]`, `job_list` is empty, and the model gets no notice. One
+  narrow window remains: a background child that finishes between the root turn
+  end and dsh handling the dispose can still start the unprompted turn, and that
+  turn's tokens and tool calls reach no `usage` or `tool_use`.
+- Failures: a failed turn's class comes from dsh's native code or status. A
+  rate limit is a retryable `semantic` failure; the others are non-retryable.
+  A resume of an unknown session or from another workspace is a typed refusal,
+  reported as `authority`. A dsh process that ends on its own, before or after
+  answering, is `runtime_exited`.
+- Steering, interrupt and close: `steer` reaches the running turn's next model
+  request (`dsh.steer`). An interrupt reads the process table, sends the native
+  cancel and waits for the turn end, bounded by `interruptTimeoutMs`. `close()`
+  asks dsh to dispose its sessions and flush its log, then disposes the owned
+  process tree.
 - Process tree: dsh runs each shell tool in its own process group. Closing
   the session reaps them (`dsh.close`). When the dsh root is killed from
   outside (SIGKILL, OOM), disposal ends the tool processes the owned process
@@ -875,7 +900,8 @@ Evidence: `dsh-adapter.test.ts` (synthetic `fake-dsh.mjs`, offline) and the
 [runtime contract suite](runtime-contract.md) against the real qualified dsh.
 Locally on macOS with dsh 0.2.2-rc.1, every case passes, `dsh.close`
 included; `dsh.sigkill` runs in CI. The design and probes are in
-[the dsh adapter plan](researches/2026-11-01-dsh-adapter.md).
+[the dsh adapter plan](researches/2026-11-01-dsh-adapter.md) and
+[the bridge probe](researches/2026-11-06-oar-0.91.0-dsh-bridge.md).
 
 ## agy adapter (custom harness)
 

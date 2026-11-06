@@ -1106,10 +1106,18 @@ the environment.
 
 Sessions persist under `<home>/sessions/<encoded cwd>/<session id>/`; resume
 needs them, and the SDK removes none. The DeepSeek route sends `GET
-https://api.deepseek.com/models` at boot when a key is present. dsh reports
-context occupancy (`usage_update`) and no provider cost counters, so a dsh
-task has no cost usage. The `keyEnv` rules are in
+https://api.deepseek.com/models` at boot when a key is present. A dsh `usage`
+event carries the turn's billed tokens and the provider's context usage, both
+read from OAR's session totals. The `keyEnv` rules are in
 [adapter capabilities](adapter-capabilities.md#dsh-adapter-custom-harness).
+
+An Attempt is one prompt on one process. dsh's subagents and background jobs
+outlive the turn, and when one finishes dsh opens a root turn with no prompt. So
+on the root turn end the session projects nothing more, closes dsh and disposes
+its process tree before it decides the terminal and before the home lease is
+released. Background subagents and jobs stop there and their unfinished work is
+lost; this is not a failure. `followUp` is refused. A later turn resumes the
+session in a new process, and dsh restarts neither.
 
 dsh starts each shell tool in its own process group. `close()` on a live dsh
 root reaps them. After a dsh root is killed from outside (SIGKILL, OOM),
@@ -1808,7 +1816,8 @@ makes itself `unknown`. It keeps `scope` only when the server also advertises
 | Codex | `turn.error.codexErrorInfo`, through the vendored OAR table; `unauthorized` stays `unknown`, and an `other` class OAR takes from Anthropic's error wording is sent as `unknown` |
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
 | agy | the vendored OAR turn outcome; a class OAR took from error text stays `unknown` |
-| Pi, Hermes, dsh | no structured field: `unknown` |
+| dsh | the native `LlmFailure` code, then its HTTP status, through the vendored OAR dsh table; no class comes from error text |
+| Pi, Hermes | no structured field: `unknown` |
 
 Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes), Hermes, dsh and agy report a
 runtime process that ends on its own before its terminal, during start or a turn,
@@ -3906,8 +3915,8 @@ its cumulative `total` remains the provider cost authority. Claude reports
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
-dsh reports ACP `usage_update` (`used` against `size`) as `provider` context
-usage, and no cost counters. agy reports no usage events.
+dsh reports billed tokens per turn and `provider` context usage, read from
+OAR's session totals. agy reports no usage events.
 Historical v1 envelopes remain readable and unchanged; older consumers ignore
 these optional fields.
 
@@ -4323,7 +4332,7 @@ it never runs ungated, and no third mode exists. Current coverage:
 | Codex | Declined before claim | App-server approvals fire only for sandbox escalations, not before every call |
 | Grok | Declined before claim | Only client-hosted terminal commands pass through the SDK; Grok's own file tools do not |
 | Hermes | Declined before claim | No pre-execution hook |
-| dsh | Declined before claim | No pre-execution hook; every ACP permission request is answered `cancelled` |
+| dsh | Declined before claim | No pre-execution hook; the native bridge has no approval channel, so dsh refuses every approval request and returns it to the model as a tool error |
 | agy | Declined before claim | No pre-execution hook; a permission request covers only files outside the workspace |
 
 Classification is one function (`classifyToolCall`) used by both modes. The
