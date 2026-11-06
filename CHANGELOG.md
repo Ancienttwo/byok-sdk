@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed (client)** — an agy session whose process-table read fails at the stop
+  now still sends `session/close` and disposes its process tree and proxy, the
+  read error still fails the session, and a failed stop no longer stays
+  remembered, so a later `close()` disposes again.
+
 - **Fixed (client)** — all-mode tool reminders now fire for Grok and dsh. They
   never did before: every call reached the classifier with an empty input, so a
   destructive command or a write outside the workspace ran with no reminder.

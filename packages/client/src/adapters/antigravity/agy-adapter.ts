@@ -379,10 +379,13 @@ class AgySession implements Session {
   private stopRuntime(): Promise<void> {
     this.stopping = true;
     this.stopAttempt ??= Promise.resolve().then(async () => {
-      // session/close ends the worker, and a daemon command that left its group would then have no parent to be found under.
-      this.child?.observeDescendants();
       try {
-        await this.raw?.dispose();
+        try {
+          // session/close ends the worker, and a daemon command that left its group would then have no parent to be found under.
+          this.child?.observeDescendants();
+        } finally {
+          await this.raw?.dispose();
+        }
       } catch (error) {
         if (!this.failure || isRuntimeDisposalFailure(error)) throw error;
       } finally {
@@ -392,6 +395,9 @@ class AgySession implements Session {
           await this.proxy?.close();
         }
       }
+    }).catch((error: unknown) => {
+      this.stopAttempt = undefined;
+      throw error;
     });
     return this.stopAttempt;
   }
