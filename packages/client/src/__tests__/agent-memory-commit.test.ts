@@ -49,6 +49,9 @@ async function writeAsRuntime(home: string): Promise<void> {
   await fs.writeFile(path.join(home, 'notes', 'opaque.txt'), 'still not a memory file\n');
   await fs.rm(path.join(home, 'notes', 'deep'), { recursive: true });
 }
+async function overfill(home: string, count: number, bytes = 1): Promise<void> {
+  await Promise.all(Array.from({ length: count }, (_, index) => fs.writeFile(path.join(home, 'notes', `n-${index}.md`), Buffer.alloc(bytes, 0x61))));
+}
 async function expectStarted(home: string): Promise<void> {
   expect(await fs.readFile(path.join(home, 'MEMORY.md'), 'utf8')).toBe('as it started\n');
   expect(await fs.readFile(path.join(home, 'notes', 'index.md'), 'utf8')).toBe('index\n');
@@ -326,6 +329,66 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
     expect(redact).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['too many files', /file count/u, (home: string) => overfill(home, 126)],
+    ['too many bytes', /total size/u, (home: string) => overfill(home, 5, 250 * 1024)],
+    ['a note over the file limit', /size_limit|bounded regular file/u, (home: string) => overfill(home, 1, 300 * 1024)],
+    ['a non-UTF-8 note', /invalid_content|UTF-8/u, (home: string) => fs.writeFile(path.join(home, 'notes', 'binary.md'), Buffer.from([0xff, 0xfe]))],
+    ['a symlink in notes/', /unsafe_path|symlink/u, (home: string) => fs.symlink(home, path.join(home, 'notes', 'link'))],
+    ['notes/ replaced by a file', /not a real directory/u, async (home: string) => {
+      await fs.rm(path.join(home, 'notes'), { recursive: true });
+      await fs.writeFile(path.join(home, 'notes'), 'a file');
+    }],
+  ])('fails and rolls back a task that ends on %s, and the next one starts', async (_label, named, leave) => {
+    const { pi, home } = await start();
+    offer('over');
+    await terminal('task.started', 'over');
+    await writeAsRuntime(home);
+    await leave(home);
+    pi.sessions[0]!.emit({ type: 'turn_end' });
+    const failure = await terminal('task.fail', 'over');
+    expect(failure.payload).toMatchObject({ retryable: false, reason: expect.stringMatching(/^agent_memory_commit_refused: .*rolled back$/u) });
+    expect((failure.payload as { reason: string }).reason).toMatch(named);
+    await released();
+    expect(await fs.readFile(path.join(home, 'notes', 'index.md'), 'utf8')).toBe('index\n');
+    expect(await fs.readFile(path.join(home, 'MEMORY.md'), 'utf8')).toBe('as it started\n');
+    expect(await copyFiles(home)).toEqual([]);
+
+    offer('next');
+    await terminal('task.started', 'next');
+    pi.sessions[1]!.emit({ type: 'turn_end' });
+    await terminal('task.complete', 'next');
+    await released();
+  });
+
+  it('completes a task that removed MEMORY.md and notes/, which the next lease builds back', async () => {
+    const { pi, home } = await start();
+    offer('removed');
+    await terminal('task.started', 'removed');
+    await fs.rm(path.join(home, 'MEMORY.md'));
+    await fs.rm(path.join(home, 'notes'), { recursive: true });
+    pi.sessions[0]!.emit({ type: 'turn_end' });
+    await terminal('task.complete', 'removed');
+    await released();
+    expect(await copyFiles(home)).toEqual([]);
+  });
+
+  it('leaves the terminal alone when the check hits an I/O failure, for the next start to decide', async () => {
+    const { pi, home } = await start();
+    offer('unread');
+    await terminal('task.started', 'unread');
+    await overfill(home, 126);
+    const notes = path.join(home, 'notes');
+    const lstat = fs.lstat.bind(fs) as (...args: unknown[]) => Promise<unknown>;
+    vi.spyOn(fs, 'lstat').mockImplementation(((...args: unknown[]) => (args[0] === notes
+      ? Promise.reject(Object.assign(new Error('injected'), { code: 'EIO' })) : lstat(...args))) as typeof fs.lstat);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    pi.sessions[0]!.emit({ type: 'turn_end' });
+    await terminal('task.complete', 'unread');
+    await released();
+    expect(logged).toHaveBeenCalled();
+  });
+
   it('settles the copy of a runtime that failed to start', async () => {
     const { pi, home } = await start();
     pi.startError = new Error('no runtime');
@@ -348,6 +411,7 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
     const failure = await terminal('task.fail', 'refused');
     expect(failure.payload).toMatchObject({ retryable: false, reason: expect.stringContaining('agent_memory_commit_unavailable') });
     expect(pi.startCalls).toHaveLength(0);
+    expect((failure.payload as { reason: string }).reason).toContain('a write task with agentMemory:"none" and no agentMemoryCommit');
     await released();
   });
 

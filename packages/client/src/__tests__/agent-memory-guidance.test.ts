@@ -8,6 +8,7 @@ import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type AgentMemorySelection, type Envelope } from '@byok-sdk/protocol';
 import { AGENT_HOME_DIRECTORY, AgentHomeManager } from '../agent-home';
+import { AGENT_MEMORY_RECOVERY } from '../daemon/agent-memory-commit';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import { resolveAgentMemoryMcpBin } from '../daemon/resolve-agent-memory-mcp-bin';
@@ -273,7 +274,7 @@ describe('Agent memory at the start of a fresh task', () => {
   });
 
   it.each([
-    ['one byte over the limit', async (file: string) => fs.writeFile(file, 'x'.repeat(8193)), 'agent_memory_resident_over_limit: 8193/8192'],
+    ['one byte over the limit', async (file: string) => fs.writeFile(file, 'x'.repeat(8193)), `agent_memory_resident_over_limit: 8193/8192${AGENT_MEMORY_RECOVERY}`],
     ['invalid UTF-8', async (file: string) => fs.writeFile(file, Buffer.from([0xff, 0xfe])), 'agent_memory_resident_unreadable: not valid UTF-8'],
     ['a file with a second hard link', async (file: string) => {
       await fs.writeFile(file, 'small');

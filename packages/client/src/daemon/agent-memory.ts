@@ -858,6 +858,36 @@ export function assertResidentMemoryWithinLimit(relativePath: string, content: s
   );
 }
 
+const SAVE_LIMIT_GUIDANCE = 'merge notes or delete the ones you no longer need, then save again';
+
+/** A home that cannot be measured refuses the save as it refuses a snapshot, with the same way out. An I/O failure stays one. */
+async function measuredForSave<T>(measure: () => Promise<T>): Promise<T> {
+  try {
+    return await measure();
+  } catch (error) {
+    if (!(error instanceof AgentMemoryError) || error instanceof AgentMemoryIoError) throw error;
+    throw new AgentMemoryValidationError(`memory cannot be measured for this save (${error.message}); ${SAVE_LIMIT_GUIDANCE}`);
+  }
+}
+
+/**
+ * The total check of `memory_save` (#1474), against the limits every snapshot
+ * enforces: a replace that would take the home past one is refused. Only growth
+ * is, so a home already over can still shrink, and a delete is never checked.
+ * Host intents do not pass here: their refusal codes are a closed set with no fit.
+ */
+async function assertSaveWithinSnapshotLimits(context: AgentMemoryHomeBinding, relativePath: string, content: string): Promise<void> {
+  const paths = new Set(['MEMORY.md', ...await measuredForSave(() => memoryNotePaths(context))]);
+  if (!paths.has(relativePath) && paths.size >= AGENT_MEMORY_MAX_SNAPSHOT_FILES) {
+    throw new AgentMemorySnapshotLimitError(`memory already has ${paths.size} files, and the limit is ${AGENT_MEMORY_MAX_SNAPSHOT_FILES}; ${SAVE_LIMIT_GUIDANCE}`);
+  }
+  let totalBytes = Buffer.byteLength(content, 'utf8');
+  for (const candidate of paths) if (candidate !== relativePath) totalBytes += (await measuredForSave(() => readFile(context, candidate))).byteCount;
+  if (totalBytes <= AGENT_MEMORY_MAX_SNAPSHOT_BYTES) return;
+  if (Buffer.byteLength(content, 'utf8') <= (await measuredForSave(() => readFile(context, relativePath))).byteCount) return;
+  throw new AgentMemorySnapshotLimitError(`this save would bring memory to ${totalBytes} UTF-8 bytes, and the limit is ${AGENT_MEMORY_MAX_SNAPSHOT_BYTES}; ${SAVE_LIMIT_GUIDANCE}`);
+}
+
 export class AgentMemoryService {
   constructor(private readonly input: AgentMemoryTaskContext) {}
   async recall(input: { readonly path: unknown; readonly ifRevision?: unknown }): Promise<Readonly<AgentMemoryRecallResult>> {
@@ -893,6 +923,7 @@ export class AgentMemoryService {
         return Object.freeze({ path: relativePath, deleted: true, ...(auditWarning === undefined ? {} : { auditWarning }) });
       }
       if (typeof content !== 'string') throw new AgentMemoryValidationError('replace requires string content');
+      await assertSaveWithinSnapshotLimits(context, relativePath, content);
       const current = await replace(context, relativePath, expectedRevision, content);
       const auditWarning = await recordAuditWarning(context, 'save', { path: relativePath, operation: 'replace', revision: current.revision, byteCount: current.byteCount });
       return Object.freeze({ path: relativePath, revision: current.revision, deleted: false, ...(auditWarning === undefined ? {} : { auditWarning }) });

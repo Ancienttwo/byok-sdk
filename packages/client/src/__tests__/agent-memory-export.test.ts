@@ -117,6 +117,42 @@ describe.skipIf(!supported)('native task-free raw memory export (synthetic homes
     await expect(daemon.exportAgentMemory!(AGENT)).resolves.toHaveProperty('totalBytes', 0);
   });
 
+  it('memory_save refuses to pass a snapshot limit, and a home already over can still shrink', async () => {
+    const { homes } = await harness();
+    const binding = await homes.acquire(AGENT);
+    const notes = path.join(binding.lease.canonicalHome, 'notes');
+    let filesystem;
+    try {
+      await homes.initializeTaskFree(binding);
+      if (helperBin !== undefined) filesystem = await openAgentMemoryFilesystemHelper({ helperBin, canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity });
+      const service = new AgentMemoryService({ taskId: 'synthetic-task', tenantId: 'synthetic-tenant', deviceId: 'synthetic-device',
+        agentRef: AGENT, sessionRef: 'synthetic-session', runtimeId: 'pi', leaseId: binding.lease.leaseId,
+        canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity, ...(filesystem === undefined ? {} : { filesystem }) });
+      const note = 'x'.repeat(AGENT_MEMORY_MAX_SNAPSHOT_BYTES / 5);
+      for (let i = 0; i < 5; i++) await fs.writeFile(path.join(notes, `b${i}.md`), note);
+      await expect(service.save({ op: 'replace', path: 'notes/more.md', content: 'x'.repeat(1024), expectedRevision: sha('') }))
+        .rejects.toThrow(new RegExp(`limit is ${AGENT_MEMORY_MAX_SNAPSHOT_BYTES}; merge notes or delete`, 'u'));
+      await expect(fs.stat(path.join(notes, 'more.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+      await fs.writeFile(path.join(notes, 'over.md'), 'x'.repeat(1024));
+      await expect(service.save({ op: 'replace', path: 'notes/over.md', content: 'x'.repeat(1025), expectedRevision: sha('x'.repeat(1024)) }))
+        .rejects.toBeInstanceOf(AgentMemorySnapshotLimitError);
+      const shrunk = await service.save({ op: 'replace', path: 'notes/over.md', content: 'x', expectedRevision: sha('x'.repeat(1024)) });
+      await service.save({ op: 'delete', path: 'notes/over.md', expectedRevision: shrunk.revision });
+
+      await fs.rm(notes, { recursive: true }); await fs.mkdir(notes);
+      for (let i = 1; i < AGENT_MEMORY_MAX_SNAPSHOT_FILES; i++) await fs.writeFile(path.join(notes, `n${i}.md`), '');
+      await expect(service.save({ op: 'replace', path: 'notes/more.md', content: '', expectedRevision: sha('') }))
+        .rejects.toThrow(new RegExp(`limit is ${AGENT_MEMORY_MAX_SNAPSHOT_FILES}; merge notes or delete`, 'u'));
+      await service.save({ op: 'replace', path: 'notes/n1.md', content: 'an existing path adds no file', expectedRevision: sha('') });
+
+      await fs.rm(notes, { recursive: true }); await fs.mkdir(notes);
+      await fs.writeFile(path.join(notes, 'huge.md'), 'x'.repeat(AGENT_MEMORY_MAX_SNAPSHOT_BYTES / 2));
+      await expect(service.save({ op: 'replace', path: 'notes/small.md', content: 'x', expectedRevision: sha('') }))
+        .rejects.toThrow(/cannot be measured for this save .*; merge notes or delete/u);
+    } finally { try { await filesystem?.close(); } finally { await binding.lease.release(); } }
+  });
+
   it('honors pre-abort without creating a home and releases the lease on mid-operation abort', async () => {
     const { daemon, root } = await harness();
     const signal = AbortSignal.abort(new Error('synthetic abort'));

@@ -6,7 +6,7 @@ import { AgentMemoryService } from '../../daemon/agent-memory';
 
 const assetRoot = process.argv[2]!;
 const canonicalHome = path.join(process.argv[3]!, 'home');
-mkdirSync(canonicalHome, { recursive: true });
+mkdirSync(path.join(canonicalHome, 'notes'), { recursive: true });
 const stat = statSync(canonicalHome, { bigint: true });
 const homeIdentity = { dev: stat.dev, ino: stat.ino };
 const helperBin = resolveAgentMemoryFilesystemHelper(assetRoot);
