@@ -6,6 +6,7 @@ import { addTurn, json, type Authority, type CollaborationState, type Turn } fro
 import { SYSTEM_PROMPT } from './rules/schema';
 import type { SealedRoutineTemplate } from './rules/sync';
 import type { SealedRoutineRef } from './rules/turn';
+import type { DreamState } from './dream';
 
 export type { SealedRoutineTemplate } from './rules/sync';
 
@@ -13,6 +14,10 @@ export type { SealedRoutineTemplate } from './rules/sync';
 
 /** The K4 occurrence hook of Bot routines. Other K4 routines of the Host are not Bot routines. */
 export const BOT_ROUTINE = 'bot-routine';
+/** The K4 occurrence hook of dream routines (`dream.ts`). Bot policy never reads these rows. */
+export const BOT_DREAM = 'bot-dream';
+/** Why H concludes a dream occurrence with no task. Full dreaming on H is deferred (#1475). */
+export const DREAM_UNSUPPORTED_ON_H = 'H does not support dreaming yet';
 /** A routine Turn expires this long after K4 records its occurrence. */
 export const ROUTINE_WAIT_MS = 300_000;
 /** A delivery later than this after its planned time is a catch-up. */
@@ -42,6 +47,12 @@ export interface BotRoutine {
   lastError?: { at: number; message: string; wakeKey?: string };
 }
 
+export const dreamTable = (state: CollaborationState): DreamState => state.dreams ??= { bots: {}, open: {} };
+/** H's `bot-dream` fire: H keeps the row and the reason. The caller concludes the occurrence. */
+export function recordUnsupportedDream(state: CollaborationState, run: HostOccurrenceRun, now: number): void {
+  const { owner } = run.input as { owner: string }, dreams = dreamTable(state);
+  (dreams.bots[owner] ??= { since: now }).last = { occurrenceKey: run.occurrenceKey, at: now, outcome: 'skipped', reason: DREAM_UNSUPPORTED_ON_H };
+}
 /** The K4 calendar of the Bot Host core. A rule is a `RoutineSchedule` whose `tz` is the definition time zone. */
 export const routineCalendar: NextOccurrence = (definition, after) => {
   const schedule = definition.rule;

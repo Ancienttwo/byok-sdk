@@ -3,6 +3,7 @@ import { stateOf, type Card, type Turn } from './model';
 import { intentFacts } from './delegation';
 import { turnIntentRetired } from './compaction';
 import { concludeRoutineTurn, routineOccurrence, type BotRoutine } from './routines';
+import { dreamIntentIds } from './dream';
 import { syncTurn, type SyncFacts, type SyncOptions } from './rules/sync';
 import { userFirst } from './rules/priority';
 import { cardCallDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, refuseRetired, retiredIdentity, settleCardCall, type AdmittedIds, type Command,
@@ -55,12 +56,12 @@ export function retainInLedger(ledger: HostLedger, input: RetentionInput, limits
 }
 /**
  * The intents that user input goes ahead of (#1229): a Bot Turn whose source is a routine occurrence or another Bot's
- * request. A self continuation, an answer result or a Bot reply keeps its FIFO position.
+ * request, and a dream (#1475). A self continuation, an answer result or a Bot reply keeps its FIFO position.
  */
 function prioritiseUser(s: LedgerState, state: ReturnType<typeof stateOf>, user: Intent): void {
   // K4 keys an intent by `hash(turn.id)`, so the priority rule compares intent ids, not Turn ids.
   const autonomous = new Set(Object.values(state.turns)
-    .filter(turn => turn.source === 'routine' || turn.source === 'bot_request').map(turn => hash(turn.id)));
+    .filter(turn => turn.source === 'routine' || turn.source === 'bot_request').map(turn => hash(turn.id)).concat(dreamIntentIds(state)));
   const plan = userFirst(Object.values(s.intents), user.id, autonomous, s.sequence);
   if (!plan) return;
   for (const { id, sequence } of plan.assignments) s.intents[id]!.sequence = sequence;

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
+import { canonical, concludeOccurrence, hash, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
   type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/server/execution-core';
-import { botRoutines, endable, owned, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
+import { BOT_DREAM, botRoutines, endable, owned, recordUnsupportedDream, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
   type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
 import { admitBotToolsets, applyHomeTerminal, applyManagement, applyModels, failHomeFlush, homeEnqueued, homeHead, inactive, planHomeRetry, requireMain, updateBot,
   writeSnapshotBot, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
@@ -625,6 +625,9 @@ export class HostedCollaborationStore {
    * the fence: its routine Turn creates no execution, because the sync ends it before any freeze, as L does. A revoke and an archive are both
    * final, so with the fence that slot could never fire.
    *
+   * A `bot-dream` routine (#1475) came with an L import. H does not run dreams yet, so its occurrence concludes `cancelled` in
+   * this transaction, with the reason in the Bot's dream record, no task and no fence.
+   *
    * A Host job routine (#793 S14) records its occurrence and its `host_job` outbox row, as K4 `recordOccurrence` does, with no
    * K8 command and no fence: a Host job creates no execution. The outbox sender runs it.
    *
@@ -637,6 +640,13 @@ export class HostedCollaborationStore {
       if (!routine) return { value: 'skipped' as const, outbox: [] };
       if (routine.definition.hostJob) {
         await writeSlice(client, key, slice, recordDue(slice, scope, routine, now).key);
+        return { value: 'fired' as const, outbox: [] };
+      }
+      if (routine.definition.hostOccurrence?.type === BOT_DREAM) {
+        const occurrence = recordDue(slice, scope, routine, now);
+        concludeOccurrence(slice.state, occurrence.key, 'cancelled');
+        recordUnsupportedDream(state, occurrenceRun(routine, occurrence), now);
+        await writeSlice(client, key, slice, occurrence.key);
         return { value: 'fired' as const, outbox: [] };
       }
       const owner = (routine.definition.hostOccurrence?.input as BotRoutineInput | undefined)?.owner;

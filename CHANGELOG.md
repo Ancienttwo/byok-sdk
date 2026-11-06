@@ -214,6 +214,20 @@
   It is a pure function and nothing calls it for a Host. A Host offers the text
   as a fresh task with `agentMemory: 'none'` and no `agentMemoryCommit`, so the
   instruction is written for no rollback.
+- **Breaking (examples; #1475)** — K8 Bots dream by default. `BotCollaboration`
+  gives each unarchived Bot with a usable template a daily `bot-dream` routine
+  at 03:00 in `dreaming.timeZone`, or the process's local zone when the routine is
+  created. It runs when the Bot completed a Turn since its last successful dream,
+  on the first of `dreaming.models` on the Bot's device, else the Bot's own
+  template, and `snapshot().dreams` records the result. That is one run per Bot
+  per day with new Turns, so a vendored Host should set cheap templates, or pass
+  `dreaming: false`. Default-on needs `wake.consume` routed to `bot.consume` even
+  with no Bot routines, and a Host clock outside the years 2000 to 2200 now throws
+  in sync unless `dreaming: false`. The Host's `enqueueHostIntent` refuses
+  `occurrence:<key>`,
+  and only K8's own hooks promote an occurrence. H concludes `bot-dream`
+  occurrences with no task
+  ([migration](examples/bot-collaboration/README.md#dreaming-1475)).
 
 ## 0.38.0 — 2026-11-04 (published)
 

@@ -27,7 +27,7 @@ async function setup(wrap: (server: ExecutionServer) => ExecutionServer, options
   ledger = new HostLedger(path.join(root, 'host.sqlite'), 'wake-retry', { compactVeto: botCompactVeto });
   server = createByokServer({ productId: 'wake-retry', storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') },
     wake: { consume: async () => {} } });
-  bot = new BotCollaboration(wrap(server), ledger, { botId: 'main', execution: template('device'), connector: async () => null, ...options });
+  bot = new BotCollaboration(wrap(server), ledger, { botId: 'main', execution: template('device'), connector: async () => null, dreaming: false, ...options });
 }
 const pending = async () => (await server.wakes.pending()).map(wake => wake.dedupKey).filter(key => !key.startsWith('host-scan:'));
 /** An SDK schedule that fails for the routine that `taskId` creates, and counts its calls. */
