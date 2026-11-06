@@ -1,3 +1,5 @@
+import { acquireAgySessionRetention, agySessionStoreOf } from '../util/agy-session-retention';
+import { PathMutationGateBusyError } from '../util/path-mutation-gate';
 import type { RuntimeTaskInput } from '../types';
 import { fileURLToPath } from 'node:url';
 import { spawn, type SpawnOptions } from 'node:child_process';
@@ -7,11 +9,15 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
-import { SteerUnsupportedError, type Session } from '../types';
+import { PolicyUnsupportedError, SteerUnsupportedError, type McpToolsetToolObservation, type RuntimeAdapter, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { GrokProjection } from '../adapters/grok/projection';
+import { AgyAdapter, type AgyAdapterOptions } from '../adapters/antigravity/agy-adapter';
+import { agyAdapterWithEndpoint } from '../adapters/antigravity/agy-endpoint';
+import { AGY_PLACEHOLDER_KEY } from '../adapters/antigravity/agy-profile';
+import { agyMcpEventIdentities } from '../adapters/antigravity/projection';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url));
 const sessions: Session[] = [];
@@ -33,7 +39,7 @@ async function ctx(env: NodeJS.ProcessEnv = {}): Promise<PreparedOperationResour
 function facts(log: string): Array<Record<string, any>> {
   return readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
 }
-async function open(a: GrokAdapter, offer: RuntimeTaskInput, resources: PreparedOperationResources): Promise<Session> {
+async function open(a: RuntimeAdapter, offer: RuntimeTaskInput, resources: PreparedOperationResources): Promise<Session> {
   const session = await startPreparedOperation(a, offer, resources);
   sessions.push(session);
   return session;
@@ -52,6 +58,19 @@ async function failureOf(s: Session): Promise<unknown> {
   throw new Error('the turn did not fail');
 }
 const usage = { type: 'usage', inputTokens: 100, cachedInputTokens: 64, outputTokens: 7, contextTokens: 1001, contextSource: 'provider' } as const;
+
+const GEMINI_URL = 'http://127.0.0.1:9';
+const mcpServer = (serverName: string, ...names: string[]): McpToolsetToolObservation[string] => ({
+  serverName, toolsetId: `set.${serverName}`, serverInfo: { name: serverName, version: '1' }, protocolVersion: '2025-06-18',
+  tools: names.map(name => ({ name, description: name, inputSchema: { type: 'object' } })),
+});
+function agy(home: string, options: Partial<AgyAdapterOptions> = {}): AgyAdapter {
+  return agyAdapterWithEndpoint(new AgyAdapter({ home, resolveBin: () => ({ command: fixture, source: 'path' }), runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*', 'GEMINI_*', 'GOOGLE_*', 'AGY_*'] }, ...options }), GEMINI_URL);
+}
+async function agyVersion(version: string) {
+  vi.stubEnv('FAKE_ACP_VERSION', version);
+  return tempDir('byok-agy-');
+}
 
 afterEach(async () => {
   await Promise.all(sessions.splice(0).map(s => s.close()));
@@ -441,5 +460,162 @@ describe('GrokAdapter agentUserMcpServers (#935)', () => {
       expect(kinds(resources.log)).toEqual(['start']);
       expect(Object.keys(facts(resources.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual([]);
     }
+  });
+});
+
+describe('AgyAdapter', () => {
+  it('owns a home that is not the user\'s and takes the model endpoint without credentials', () => {
+    expect(() => new AgyAdapter({ home: 'relative' })).toThrow(/absolute/);
+    expect(() => new AgyAdapter({ home: os.homedir() })).toThrow(/user's home/);
+    expect(() => new AgyAdapter({ home: path.join(os.homedir(), '.gemini', 'x') })).toThrow(/user's home/);
+    expect(() => agyAdapterWithEndpoint(new AgyAdapter({ home: '/owned' }), 'http://user:pw@127.0.0.1:9')).toThrow(/credentials/);
+    expect(() => agyAdapterWithEndpoint(new AgyAdapter({ home: '/owned' }), 'http://127.0.0.1:9?key=x')).toThrow(/query/);
+    expect(new AgyAdapter({ home: '/owned' }).descriptor).toMatchObject({ id: 'agy', platforms: ['darwin', 'linux', 'win32'] });
+  });
+
+  it('detect refuses a CLI without native ACP, a prerelease and an extra notice, and writes the native settings', async () => {
+    const home = await agyVersion('1.4.9');
+    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
+    vi.stubEnv('FAKE_ACP_VERSION', '1.5.0-rc.1');
+    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
+    vi.stubEnv('FAKE_ACP_VERSION', '1.5.0\nupdate available');
+    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
+    vi.stubEnv('FAKE_ACP_VERSION', '1.5.0');
+    expect(await agy(home).detect()).toMatchObject({ kind: 'available', version: '1.5.0' });
+    expect(JSON.parse(readFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), 'utf8')))
+      .toEqual({ modelProvider: 'gemini', setupComplete: true, onboardingComplete: true });
+  });
+
+  it('runs agy on the owned home with the placeholder key, whatever key the Host environment holds', async () => {
+    const home = await agyVersion('1.5.1');
+    vi.stubEnv('GEMINI_API_KEY', 'host-key');
+    vi.stubEnv('GOOGLE_API_KEY', 'host-key-2');
+    vi.stubEnv('GOOGLE_GEMINI_BASE_URL', 'https://elsewhere.test');
+    vi.stubEnv('AGY_ADC_AUTH', '1');
+    const resources = await ctx({ GEMINI_API_KEY: 'task-key', GEMINI_HOME: '/user/.gemini', XDG_CONFIG_HOME: '/user/.config', XDG_RUNTIME_DIR: '/run/user/1', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1/bus', APPDATA: '/user/roaming' });
+    const s = await open(agy(home, { model: 'gemini-3.8-flash' }), { instruction: 'hello' }, resources);
+    expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, { type: 'turn_end' }]);
+    const start = facts(resources.log).find(fact => fact.kind === 'start')!;
+    expect(start.argv).toEqual(['acp', '--dangerously-skip-permissions', '--process-per-session', '--disable-telemetry']);
+    expect(start.env).toMatchObject({
+      HOME: home, USERPROFILE: home, GEMINI_HOME: path.join(home, '.gemini'), GEMINI_API_KEY: AGY_PLACEHOLDER_KEY,
+      GOOGLE_GEMINI_BASE_URL: GEMINI_URL, AGY_CLI_DISABLE_AUTO_UPDATE: '1',
+    });
+    expect(start.env.GOOGLE_API_KEY).toBeUndefined();
+    expect(start.env.AGY_ADC_AUTH).toBeUndefined();
+    expect(start.env).toMatchObject({
+      APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+      DBUS_SESSION_BUS_ADDRESS: `unix:path=${path.join(home, 'no-session-bus')}`,
+    });
+    for (const name of ['XDG_CONFIG_HOME', 'XDG_RUNTIME_DIR']) expect(start.env[name]).toBeUndefined();
+    expect(facts(resources.log).find(fact => fact.kind === 'config')?.params).toMatchObject({ configId: 'model', value: 'gemini-3.8-flash' });
+  });
+
+  it('projects native tool names, the classified command and path keys, and an exact MCP identity', async () => {
+    const home = await agyVersion('1.5.1');
+    const s = await open(agy(home), { instruction: 'agy-tools' }, { ...await ctx(), mcpToolsetTools: { 'market.feed': mcpServer('market.feed', 'quote') } });
+    const events = await turn(s);
+    expect(events.find(event => event.type === 'tool_use' && event.tool === 'run_command')).toMatchObject({ input: { command: 'rm -rf build', CommandLine: 'rm -rf build' } });
+    const tool = (id: string) => events.find(event => event.type === 'tool_use' && event.toolCallId === id) as Extract<AgentEvent, { type: 'tool_use' }>;
+    // OAR's own input text stops at 10,000 characters, far short of this Content.
+    expect(tool('agy-3').input).toMatchObject({ path: '/home/u/.zshrc' });
+    expect(tool('agy-4').input).toMatchObject({ path: '/home/u/e.txt' });
+    expect(tool('agy-5').input).toMatchObject({ path: '/home/u/r.txt' });
+    expect(tool('agy-6').input).toBeUndefined();
+    const mcp = { server: 'market.feed', tool: 'quote' };
+    expect(events.find(event => event.type === 'tool_use' && event.tool === 'mcp_market.feed_quote')).toMatchObject({ mcp });
+    expect(events.find(event => event.type === 'tool_result' && event.tool === 'mcp_market.feed_quote')).toMatchObject({ mcp });
+  });
+
+  it('gives an agy MCP name two tools share no identity', () => {
+    const identities = agyMcpEventIdentities({ a: mcpServer('a', 'b_c'), a_b: mcpServer('a_b', 'c', 'd') });
+    expect(identities.has('mcp_a_b_c')).toBe(false);
+    expect(identities.get('mcp_a_b_d')).toEqual({ server: 'a_b', tool: 'd' });
+  });
+
+  it('refuses an MCP entry carrying env as a non-retryable authority failure', async () => {
+    const home = await agyVersion('1.5.1');
+    const failure = await open(agy(home), { instruction: 'hello' }, { ...await ctx(), mcpServers: { host: { command: 'server', env: { TOKEN: 'x' } } } }).catch(error => error);
+    expect(failure).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(String(failure.message)).toContain('it attaches no entry with env or headers');
+  });
+
+  it('resumes only on a listed saved cwd', async () => {
+    const home = await agyVersion('1.5.1');
+    const unlisted = await open(agy(home), { instruction: 'again', sessionRef: 'fake-grok-session' }, await ctx()).catch(error => error);
+    expect(unlisted).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    const resources = await ctx();
+    const s = await open(agy(home), { instruction: 'again', sessionRef: 'fake-grok-session' }, { ...resources, env: { ...resources.env, FAKE_ACP_LISTED_CWD: resources.workspaceDir } });
+    expect(s.sessionRef).toBe('fake-grok-session');
+    expect(facts(resources.log).find(fact => fact.kind === 'open')).toMatchObject({ method: 'session/resume' });
+  });
+
+  it('appends the persona only for a reader, and again on resume, because agy replaces its append on every open', async () => {
+    const home = await agyVersion('1.5.1');
+    const agentHome = await fs.realpath(await tempDir('byok-agy-home-'));
+    await fs.writeFile(path.join(agentHome, 'AGENTS.md'), 'Persona rules');
+    const run = path.join(agentHome, '.byok', 'runs', 'run-1');
+    await fs.mkdir(run, { recursive: true });
+    const reader = await ctx();
+    await turn(await open(agy(home), { instruction: 'again', sessionRef: 'fake-grok-session' }, {
+      ...reader, workspaceDir: run, reader: { canonicalHome: agentHome }, env: { ...reader.env, FAKE_ACP_LISTED_CWD: run },
+    }));
+    expect(facts(reader.log).find(fact => fact.kind === 'open')?.params._meta).toEqual({ antigravity: { systemPrompt: { append: 'Persona rules' } } });
+    const writer = await ctx();
+    await turn(await open(agy(home), { instruction: 'hello' }, { ...writer, workspaceDir: agentHome, agentHome }));
+    expect(facts(writer.log).find(fact => fact.kind === 'open')?.params._meta).toBeUndefined();
+  });
+
+  it('refuses every task while it has no credential path', async () => {
+    const unset = new AgyAdapter({ home: await tempDir('byok-agy-'), resolveBin: () => { throw new Error('must not probe'); } });
+    expect(await unset.detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
+    expect(await unset.prepare({ offer: { instruction: 'x' } } as never)).toMatchObject({ kind: 'reject', retryable: false, reason: 'agy has no credential path yet' });
+  });
+
+  it('leases a resumed session against the store sweep, and only that session', async () => {
+    const adapter = agy(await agyVersion('1.5.1'));
+    const store = agySessionStoreOf(adapter)!;
+    const prepared = await adapter.prepare({ offer: { instruction: 'x' } } as never);
+    if (prepared.kind !== 'prepared') throw new Error('agy did not prepare');
+    const lease = await prepared.operation.acquireSessionLease!('session-a');
+    await expect(acquireAgySessionRetention(store, 'session-a')).rejects.toBeInstanceOf(PathMutationGateBusyError);
+    await (await acquireAgySessionRetention(store, 'session-b')).release();
+    await lease!.release();
+  });
+
+  it('kills a daemon that left the process group before it reports turn_end', async () => {
+    const home = await agyVersion('1.5.1');
+    const resources = await ctx();
+    const pidFile = path.join(resources.workspaceDir, 'daemon.pid');
+    const s = await open(agy(home), { instruction: `agy-daemon:${pidFile}` }, resources);
+    for await (const event of s.events) if (event.type === 'turn_end') break;
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
+    await expect(s.followUp({ instruction: 'x' })).rejects.toBeInstanceOf(PolicyUnsupportedError);
+  });
+
+  it('answers a writer with allow_once, and fails a reader the model never answered after a reject_once', async () => {
+    const home = await agyVersion('1.5.1');
+    const outside = path.join(os.tmpdir(), 'byok-agy-outside.txt');
+    const writer = await ctx();
+    await turn(await open(agy(home), { instruction: `agy-ask:edit:${outside}` }, writer));
+    expect(facts(writer.log).find(fact => fact.kind === 'permission')?.answer).toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
+    const agentHome = await fs.realpath(await tempDir('byok-agy-home-'));
+    const run = path.join(agentHome, '.byok', 'runs', 'adapter-unit-test');
+    await fs.mkdir(run, { recursive: true });
+    const reader = (resources: Awaited<ReturnType<typeof ctx>>) => ({ ...resources, workspaceDir: run, reader: { canonicalHome: agentHome } });
+    const read = await ctx();
+    await turn(await open(agy(home), { instruction: `agy-ask:read:${path.join(agentHome, 'MEMORY.md')}` }, reader(read)));
+    expect(facts(read.log).find(fact => fact.kind === 'permission')?.answer).toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
+    const write = await ctx();
+    const failure = await failureOf(await open(agy(home), { instruction: `agy-ask:edit:${path.join(agentHome, 'MEMORY.md')}` }, reader(write)));
+    expect(failure).toMatchObject({ category: 'semantic', retry: 'non-retryable', message: expect.stringContaining('refused write') });
+    expect(facts(write.log).find(fact => fact.kind === 'permission')?.answer).toEqual({ outcome: { outcome: 'selected', optionId: 'deny' } });
+  });
+
+  it('declares steer unsupported', async () => {
+    const home = await agyVersion('1.5.1');
+    const s = await open(agy(home), { instruction: 'hello' }, await ctx());
+    await expect(s.steer('x')).rejects.toBeInstanceOf(SteerUnsupportedError);
   });
 });

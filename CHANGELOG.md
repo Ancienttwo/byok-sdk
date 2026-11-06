@@ -64,6 +64,17 @@
   `context_token_invalid`. The admission `tools/list` probe starts the server
   without the argument. See
   [Daemon-free assertion requests](packages/client/README.md#daemon-free-assertion-requests).
+
+- **Added (client; #1469)** — `AgyAdapter` runs the Antigravity CLI (`agy`) as a
+  custom harness on darwin, linux and win32. `createRuntimeAdapters` and
+  `createDaemon` build it when `runtimeAllowlist` lists `agy`, from
+  `DaemonConfig.runtimes.agy` (`home`, `model`, `versionPolicy`); `home` is
+  required, and listing `agy` without `runtimes.agy` is a config error. Until
+  its credential path lands, `detect()` refuses and every agy task is rejected.
+  agy rejects Host toolset entries carrying `env` or `headers`; a Host that
+  configures env for its own server cannot run it under agy. A new retention
+  class, `agy-session-store`, expires what agy keeps in that home after 31 days.
+
 - **Added (client; #1469)** — `createRuntimeAdapters` and `createDaemon` build
   `DshAdapter` when `runtimeAllowlist` lists `dsh`. `DaemonConfig.runtimes.dsh`
   takes `home`, `model`, `sandbox` and `versionPolicy`; `home` and `model` are

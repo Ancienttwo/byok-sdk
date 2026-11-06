@@ -38,7 +38,7 @@ export interface ContractCheck { readonly run: () => Promise<void>; readonly tim
 export const check = (run: () => Promise<void>, timeoutMs?: number): ContractCheck => ({ run, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
 export type ContractPlan = { readonly [K in ContractCaseId]: ContractCheck | ContractSkip };
 
-export type ContractRuntime = 'pi' | 'claude' | 'codex' | 'grok' | 'hermes' | 'dsh';
+export type ContractRuntime = 'pi' | 'claude' | 'codex' | 'grok' | 'hermes' | 'dsh' | 'agy';
 export type ContractMode = 'qualified' | 'latest';
 
 /** The run mode. The suite's own vitest config refuses to start without it, so this never defaults. */

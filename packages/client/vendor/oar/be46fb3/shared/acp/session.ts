@@ -16,7 +16,7 @@ import type {
 import { sessionCredentialRedactor, type CredentialRedactor } from "../credential-redactor.js";
 import { manualCompaction, type CompactionOperation } from "../manual-compaction.js";
 import { createSessionKernel } from "../session-kernel.js";
-import { createAcpClientApp } from "./client-app.js";
+import { createAcpClientApp, type AcpClientHooks } from "./client-app.js";
 import {
   acpMcpOpenGuard,
   closeAcpSession,
@@ -56,6 +56,8 @@ export interface AcpSessionHooks {
   readonly onReady?: (sessionId: string) => void;
   /** A kernel observer from seq 0. The kernel swallows its errors, so it fails the session itself. */
   readonly onRecord?: (record: RawEvent) => void;
+  /** BYOK change: answers each `session/request_permission`. Absent, every request is cancelled. */
+  readonly onPermission?: AcpClientHooks["permission"];
 }
 
 // BYOK change: the caller owns the agent process, every hosted terminal process and the environment.
@@ -123,6 +125,7 @@ async function openAcpRuntimeSession(
         recorder.answered(id, reply);
       },
       extensionNotifications: profile.extensionNotifications ?? [],
+      ...(hooks.onPermission === undefined ? {} : { permission: hooks.onPermission }),
     });
     const runtime = startAcpProcess(spawnLineProcess, installation.command, args, client, { cwd: options.cwd, env: environment, redact: credentials.redact, opening });
     const release = async (): Promise<void> => {

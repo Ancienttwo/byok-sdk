@@ -241,6 +241,9 @@
                 "agent-result": {
                   "type": "number"
                 },
+                "agy-session-store": {
+                  "type": "number"
+                },
                 "confirmed-journal": {
                   "type": "number"
                 },
@@ -765,7 +768,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = the three wire runtimes —\npi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildRuntimeAdapters`; the `grok` and `dsh` custom\nharnesses are built only when listed), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
+      "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = the three wire runtimes —\npi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildRuntimeAdapters`; the `grok`, `dsh` and `agy`\ncustom harnesses are built only when listed), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
     },
     "runtimes": {
       "type": "object",
@@ -1568,6 +1571,159 @@
             "model"
           ],
           "description": "Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only."
+        },
+        "agy": {
+          "type": "object",
+          "properties": {
+            "home": {
+              "type": "string",
+              "description": "`AgyAdapterOptions.home`: the absolute OS home the SDK owns for agy and its tools. It must persist across executions and must not be the user's home."
+            },
+            "model": {
+              "type": "string",
+              "description": "`AgyAdapterOptions.model`: the model id of every session. Default: the CLI's own."
+            },
+            "versionPolicy": {
+              "type": "object",
+              "properties": {
+                "qualifiedVersion": {
+                  "type": "string",
+                  "description": "The normalized token this SDK was qualified against, for example `0.160.0`."
+                },
+                "unqualified": {
+                  "enum": [
+                    "allow",
+                    "block",
+                    "warn"
+                  ],
+                  "description": "What an unmatched token means. A descriptor default may not use `block`; only a Host layer may."
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Explicitly known-good versions outside the qualified range."
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions that must stay a warning even where `unqualified` is `allow`."
+                },
+                "block": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions this Host refuses before claim. Host layer only."
+                }
+              },
+              "required": [
+                "qualifiedVersion",
+                "unqualified"
+              ],
+              "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
+            }
+          },
+          "required": [
+            "home"
+          ],
+          "description": "Required when `runtimeAllowlist` lists `agy`, and applies only then."
         }
       },
       "description": "Isolation options of the runtime adapters `createDaemon` builds (#1094),\npassed to each adapter's constructor; an unset option keeps the\nadapter's default, under which a runtime keeps the user's own context,\nsessions and MCP servers. Which runtimes are built stays\n`runtimeAllowlist`, and the Codex sandbox stays `codexSandbox`.\n`createDaemonWithAdapters` rejects this key, even when undefined:\nconfigure each injected adapter directly."

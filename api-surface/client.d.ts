@@ -1,3 +1,54 @@
+// ==== @byok-sdk/client dist/adapters/antigravity/agy-adapter.d.ts ====
+import type { spawn as nodeSpawn } from 'node:child_process';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import type { ResolvedBin } from '../codex/resolve-bin';
+export interface AgyAdapterOptions {
+    /**
+     * Absolute path of the OS home (`HOME`, `USERPROFILE`) this SDK owns for the
+     * agy process and every tool it starts. It must persist across executions:
+     * agy keeps its conversations below it, and resume reads them back. It must
+     * not be the user's home or anything under the user's `~/.gemini`.
+     */
+    home: string;
+    /** Model id for every session, set again on each resume. Absent: the CLI default. */
+    model?: string;
+    /** Absolute product native asset directory; scoped to this adapter. */
+    nativeAssetRoot?: string;
+    /** The environment agy and its tools get (#1095). Default: the login-shell snapshot. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
+    /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+    versionPolicySource?: 'adapter-option' | 'daemon-config';
+    resolveBin?: () => ResolvedBin;
+    spawnFn?: typeof nodeSpawn;
+    maxRetainedBytes?: number;
+    /** Deadline for a cancelled turn to settle before the session fails. Default 1 s. */
+    interruptTimeoutMs?: number;
+}
+/**
+ * The Antigravity CLI over its native ACP
+ * (`agy acp --dangerously-skip-permissions --process-per-session`), through
+ * the vendored OAR Antigravity profile. The SDK owns the process, the OS home
+ * it runs in, the record budget and the permission policy.
+ *
+ * `agy` is not a frozen wire runtime id, so a task reaches this adapter by the
+ * custom-harness identity (`harnessId: 'agy'`).
+ */
+export declare class AgyAdapter implements RuntimeAdapter {
+    private readonly root;
+    private readonly options;
+    private readonly environmentPolicy;
+    private readonly effectiveVersionPolicy;
+    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    constructor(options: AgyAdapterOptions);
+    runtimeEnvironment(): Promise<RuntimeEnvironment>;
+    /** Reads the version. The credential lives behind the endpoint, so `authPresent` is not reported here. */
+    detect(): Promise<RuntimeDetectResult>;
+    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    private start;
+}
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
@@ -778,6 +829,8 @@ export { GrokAdapter } from './grok/grok-adapter';
 export type { GrokAdapterOptions } from './grok/grok-adapter';
 export { HermesAdapter } from './hermes/hermes-adapter';
 export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter';
+export { AgyAdapter } from './antigravity/agy-adapter';
+export type { AgyAdapterOptions } from './antigravity/agy-adapter';
 export { DshAdapter } from './dsh/dsh-adapter';
 export type { DshAdapterOptions, DshModelSelection, DshSandboxMode } from './dsh/dsh-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
@@ -1226,6 +1279,7 @@ import { type ClaudeAdapterOptions } from './claude/claude-adapter';
 import { type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter';
 import { type GrokAdapterOptions } from './grok/grok-adapter';
 import { type DshAdapterOptions } from './dsh/dsh-adapter';
+import { type AgyAdapterOptions } from './antigravity/agy-adapter';
 /** `RuntimeAdaptersConfig.runtimes.pi`: the Pi options a Host can configure. */
 export interface PiRuntimeConfig {
     /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
@@ -1283,6 +1337,15 @@ export interface RuntimeAdaptersRuntimes {
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
     };
+    /** Required when `runtimeAllowlist` lists `agy`, and applies only then. */
+    agy?: {
+        /** `AgyAdapterOptions.home`: the absolute OS home the SDK owns for agy and its tools. It must persist across executions and must not be the user's home. */
+        home: AgyAdapterOptions['home'];
+        /** `AgyAdapterOptions.model`: the model id of every session. Default: the CLI's own. */
+        model?: AgyAdapterOptions['model'];
+        /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+        versionPolicy?: RuntimeVersionPolicy;
+    };
 }
 /**
  * The input of {@link createRuntimeAdapters}: the `DaemonConfig` keys that
@@ -1295,7 +1358,7 @@ export interface RuntimeAdaptersConfig {
     nativeAssetRoot?: string;
     /** Re-enter the product's single-file/SEA executable for SDK helpers and every Pi launch. */
     sdkHelperHost?: SdkHelperHostConfig;
-    /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok` and `dsh` are built only when listed. */
+    /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok`, `dsh` and `agy` are built only when listed. */
     runtimeAllowlist?: string[];
     runtimes?: RuntimeAdaptersRuntimes;
     /** The environment every built runtime gives its children (#1095); `pass` must not name `PI_PACKAGE_DIR`. */
@@ -5271,8 +5334,8 @@ export interface DaemonConfig {
      * places that must stay consistent: `createDaemon` (this file) builds its
      * bundled adapter set FROM this list (unset = the three wire runtimes —
      * pi, claude, codex; set = exactly the listed runtime ids, unknown ids
-     * ignored — see `buildRuntimeAdapters`; the `grok` and `dsh` custom
-     * harnesses are built only when listed), and `TaskRunner.pickAdapter`
+     * ignored — see `buildRuntimeAdapters`; the `grok`, `dsh` and `agy`
+     * custom harnesses are built only when listed), and `TaskRunner.pickAdapter`
      * (`task-runner.ts`) separately fail-closed-rejects any `task.offer`
      * naming a runtime outside this list regardless of which adapters were
      * constructed. `createDaemonWithAdapters` callers supply their own
@@ -8131,6 +8194,7 @@ export declare function resolveStorageConfig(storeDir: string, input?: StorageCo
     maxPassDurationMs: number;
     ttlMs: Readonly<{
         "agent-result": number;
+        "agy-session-store": number;
         "confirmed-journal": number;
         "daemon-temp": number;
         "durable-replica": number;
@@ -8172,7 +8236,7 @@ export declare class StoragePressure {
     assertAckCriticalAllowed(): void;
 }
 // ==== @byok-sdk/client dist/daemon/retention/registry.d.ts ====
-export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir'];
+export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir', 'agy-session-store'];
 export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'agent-content', 'byok-authority', 'agent-home-lease', 'skill-pack-current', 'store-authority', 'runtime-session-external'];
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
 export type ProtectedClassId = typeof PROTECTED_CLASS_IDS[number];
@@ -9988,6 +10052,7 @@ export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
 export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter';
+export { AgyAdapter, type AgyAdapterOptions } from './adapters/antigravity/agy-adapter';
 export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, ResetDeviceCursorInput, DeviceCursorResetResult, DeviceCursorResetErrorCode, } from './diagnostics/device-doctor';
@@ -13581,7 +13646,7 @@ export declare const SDK_RESERVED_MCP_TOOL_NAMES: Readonly<{
 import { type RuntimeEnvironment } from '../runtime/environment';
 import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types';
 /** The built-in adapters a fake can stand in for. */
-export type FakeRuntimeAdapterId = 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';
+export type FakeRuntimeAdapterId = 'agy' | 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';
 /** What the fake does. It never spawns a process. */
 export interface FakeRuntimeAdapterBehavior {
     /** Default: `{ kind: 'available' }`. A function is called on every probe. */

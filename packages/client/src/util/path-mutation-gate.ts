@@ -4,7 +4,7 @@ import { createServer, type Server } from 'node:net';
 import path from 'node:path';
 import { ensureSecureDir } from './secure-dir';
 
-export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
+export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
 
 /**
  * Scopes with one fixed identity and no target path.

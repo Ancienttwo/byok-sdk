@@ -483,8 +483,8 @@
   "@byok-sdk/client#byok-acp-runtime": {
     "kind": "imports",
     "policy": {
-      "purpose": "Private ACP runtime stack (Grok, dsh)",
-      "budgetBytes": 92601,
+      "purpose": "Private ACP runtime stack (Grok, dsh, agy)",
+      "budgetBytes": 94977,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

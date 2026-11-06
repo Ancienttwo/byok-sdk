@@ -132,15 +132,18 @@ import type { SpawnAcpLineProcess } from '../../packages/client/vendor/oar/be46f
 import type { SpawnAcpTerminal } from '../../packages/client/vendor/oar/be46fb3/shared/acp/terminal.js';
 import type { AdapterSession } from '../../packages/client/vendor/oar/be46fb3/contracts/session.js';
 import type { RuntimeFailureError as VendorRuntimeFailureError } from '../../packages/client/vendor/oar/be46fb3/contracts/runtime-failure-error.js';
+import type { UnsupportedOptionError as VendorUnsupportedOptionError } from '../../packages/client/vendor/oar/be46fb3/contracts/errors.js';
 import type { spawnOwnedTerminalProcess } from '../../packages/client/src/runtime/owned-terminal-process.js';
 import type { grokSession as vendorGrokSession } from '../../packages/client/vendor/oar/be46fb3/runtimes/grok/session.js';
+import type { antigravitySession as vendorAntigravitySession } from '../../packages/client/vendor/oar/be46fb3/runtimes/antigravity/session.js';
 
 type AcpBridgeArgs = Parameters<AcpBridge.StartAcpSession>;
 type AcpBridgeOptions = Mutable<
-  Pick<AcpSessionOptions, 'cwd' | 'env' | 'resume' | 'model' | 'launchArgs' | 'mcpServers'>
+  Pick<AcpSessionOptions, 'cwd' | 'env' | 'resume' | 'model' | 'appendSystemPrompt' | 'launchArgs' | 'mcpServers'>
 >;
-type AcpBridgeHooks = Mutable<Omit<AcpSessionHooks, 'onRecord'>> & {
+type AcpBridgeHooks = Mutable<Omit<AcpSessionHooks, 'onRecord' | 'onPermission'>> & {
   onRecord?: (record: AcpBridge.AcpRecord) => void;
+  onPermission?: (request: AcpBridge.AcpPermissionRequest) => AcpBridge.AcpPermissionResponse;
 };
 type AcpBridgeSession = {
   readonly id: AdapterSession['id'];
@@ -150,11 +153,15 @@ type AcpBridgeSession = {
   dispose: AdapterSession['dispose'];
 };
 
-export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError' | 'RuntimeFailureError' | 'grokSession' | 'dshSession'>>;
+export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError' | 'RuntimeFailureError' | 'UnsupportedOptionError' | 'grokSession' | 'antigravitySession' | 'dshSession'>>;
 export type CheckAcpRuntimeFailure = Assert<Assignable<VendorRuntimeFailureError, AcpBridge.RuntimeFailureError>>;
 export type CheckAcpRuntimeFailureFields = Assert<Equal<Pick<VendorRuntimeFailureError, 'name'>, Pick<AcpBridge.RuntimeFailureError, 'name'>>>;
+export type CheckAcpUnsupportedOption = Assert<Assignable<VendorUnsupportedOptionError, AcpBridge.UnsupportedOptionError>>;
+export type CheckAcpUnsupportedOptionName = Assert<Equal<Pick<VendorUnsupportedOptionError, 'name'>, Pick<AcpBridge.UnsupportedOptionError, 'name'>>>;
 export type CheckGrokVendor = Assert<Equal<typeof vendorGrokSession, VendorStartAcp>>;
 export type CheckGrokBridge = Assert<Equal<typeof AcpBridge.grokSession, AcpBridge.StartAcpSession>>;
+export type CheckAntigravityVendor = Assert<Equal<typeof vendorAntigravitySession, VendorStartAcp>>;
+export type CheckAntigravityBridge = Assert<Equal<typeof AcpBridge.antigravitySession, AcpBridge.StartAcpSession>>;
 export type CheckDshBridge = Assert<Equal<typeof AcpBridge.dshSession, AcpBridge.StartAcpSession>>;
 export type CheckAcpNotFound = Assert<Equal<AcpBridge.SessionNotFoundError, VendorSessionNotFoundError>>;
 export type CheckAcpNotFoundConstructor = Assert<Equal<
@@ -166,10 +173,12 @@ export type CheckAcpRecord = Assert<Equal<AcpBridge.AcpRecord, Flatten<BridgeRec
 export type CheckAcpSession = Assert<Equal<AcpBridge.RawAcpSession, AcpBridgeSession>>;
 // Name each intentional omission so new vendor members fail this check.
 // 'compact' (OAR 0.86 generic contract) is omitted on purpose, as for Codex.
+// 'steer' is omitted for every ACP runtime; agy has a native steer the SDK does not enable (#1469).
 export type CheckAcpSessionMembers = Assert<Equal<
   Exclude<keyof AdapterSession, 'capabilities' | 'goal' | 'steer' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact'>,
   keyof AcpBridge.RawAcpSession
 >>;
+export type CheckAcpPermissionHook = Assert<Assignable<NonNullable<AcpBridgeHooks['onPermission']>, NonNullable<AcpSessionHooks['onPermission']>>>;
 export type CheckAcpVendorSession = Assert<Assignable<AdapterSession, AcpBridge.RawAcpSession>>;
 export type CheckAcpParameters = Assert<Equal<AcpBridgeArgs, [
   spawn: typeof spawnOwnedLineProcess,

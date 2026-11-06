@@ -24,20 +24,20 @@ the descriptor declares. `no` means the SDK makes no such guarantee; the
 the runtime does instead.
 
 <!-- generated:capability-matrix:start -->
-| Capability | Wire field | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durableLane`) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.5.0` | `1.5.0` |
-| Resume a known native session | `resume` | yes | yes | yes | yes | no | yes | no |
-| Redirect the active turn | `steer` | no | yes | no | no | no | yes | no |
-| Display-only message draft | `messageDraft` | yes | yes | no | yes | yes | yes | yes |
-| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes |
-| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no |
-| Tool authorization `auto` | `toolAuthorizationAuto` | yes | no | no | no | no | yes | yes |
-| Prepared lane | `preparedLane` | no | no | no | no | no | yes | no |
-| Durable worker lane | `durableLane` | no | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userContext` | yes | no | yes | no | yes | yes | no |
-| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | no | no |
-| Turns off the transcript store | `isolation.sessionPersistence` | yes | no | no | no | no | no | no |
+| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durableLane`) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.5.0` | `1.5.0` |
+| Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | no |
+| Redirect the active turn | `steer` | no | no | yes | no | no | no | yes | no |
+| Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | yes | yes |
+| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes |
+| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no |
+| Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | yes | yes |
+| Prepared lane | `preparedLane` | no | no | no | no | no | no | yes | no |
+| Durable worker lane | `durableLane` | no | no | no | no | no | no | no | yes |
+| Keeps user-level instructions out | `isolation.userContext` | yes | yes | no | yes | no | yes | yes | no |
+| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | yes | no | no |
+| Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
 
 ## Qualification notes
@@ -507,6 +507,43 @@ no option. Project context still loads: the workspace `AGENTS.md`/`CLAUDE.md`
 suite checks this with markers in `~/.dsh` and `~/.agents`. A positive control
 shows that a skill in the adapter's own `DSH_AGENTS_HOME` does reach the model.
 
+### agy: user-level configuration
+
+The [agy adapter](../packages/client/src/adapters/antigravity/agy-adapter.ts)
+points `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` and `GEMINI_HOME` into the
+Host's `home` and refuses the user's home and anything below `~/.gemini`. It
+drops ambient `GEMINI_*`, `GOOGLE_*`, `AGY_*` and `ANTIGRAVITY_*` variables and
+the `XDG_*` directory variables, because agy reads and removes
+`antigravity/credential-user-scope` in the user config directory.
+`DBUS_SESSION_BUS_ADDRESS` names a socket in the owned home that does not exist:
+agy looks for the session bus, and an address that cannot connect fails as on a
+host with no bus, without starting `dbus-launch`.
+
+Those directories also apply to every tool agy runs. agy and its tools cannot see
+the user's git identity or global git config, and on Linux they cannot reach the
+system keyring, because the session bus is unconnectable. git and `gh` read their
+config from the owned home; system-level git config, such as a system credential
+helper, is still read on every OS. On Windows, Credential Manager stays reachable,
+and a system-configured git credential helper can use it. On macOS, the SDK does
+not isolate the keychain, and whether agy reads it was not checked.
+`systemctl --user` stops working without
+`XDG_RUNTIME_DIR`. Container sockets are not cut off: rootless podman can fall
+back to `/run/user/<uid>`, and a rootful `/var/run/docker.sock` stays reachable
+for a user in the docker group. On Windows, npm and similar tools read
+`%APPDATA%` from the owned home. A Host that needs a git identity passes
+`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
+`GIT_COMMITTER_EMAIL` through `runtimeEnvironment`.
+
+agy reads user context and MCP
+servers from `.gemini` below that home, so the user's own copies never apply and
+agy needs no option. Project context still loads: agy reads `AGENTS.md`,
+`GEMINI.md` and `.agents/AGENTS.md` from the workspace, and it walks up to a
+`.git` root. The runtime contract suite checks this with markers in the ambient
+home, and a positive control shows that files in the adapter's own home reach
+the model. agy always keeps conversations in that home, because resume needs
+them; the `agy-session-store` retention class expires them. A daemon cleans up
+sessions for one agy home only.
+
 ### Agent task session records
 
 An Agent task runs in the Agent home, but a runtime may save the session
@@ -860,14 +897,86 @@ Locally on macOS with dsh 0.2.2-rc.1, every case passes, `dsh.close`
 included; `dsh.sigkill` runs in CI. The design and probes are in
 [the dsh adapter plan](researches/2026-11-01-dsh-adapter.md).
 
+## agy adapter (custom harness)
+
+`AgyAdapter` (id `agy`, #1469) runs the Antigravity CLI over its native ACP:
+one `agy acp --dangerously-skip-permissions --process-per-session
+--disable-telemetry` process per Attempt, driven by the vendored OAR Antigravity
+profile, which loads lazily through the private `#byok-acp-runtime` entry. It
+runs on the custom-harness path (`harnessId: 'agy'`). It takes no dispatch
+selection. `createDaemon` and `createRuntimeAdapters` build it when
+`runtimeAllowlist` lists `agy`, from the required `runtimes.agy` (`home`, and
+optional `model` and `versionPolicy`). The other options stay on the
+`AgyAdapter` constructor.
+
+- Credential: agy passes its whole environment to `run_command` and stdio MCP
+  children, so no real key enters it. agy holds a placeholder
+  `GEMINI_API_KEY`, and `agy.keyIsolation` proves an ambient key does not reach a
+  tool. Only a Gemini API key is supported, never a Google account login. With
+  no stored login, the measured model request carries only the environment's
+  API key and no `Authorization` header. Whether agy switches to a stored Google
+  login when one exists is not verified, and the APPDATA redirection does not
+  affect Windows Credential Manager. Whether agy reads the macOS keychain was not
+  checked, and the SDK does not isolate it. Until the credential path lands, `detect()`
+  reports `refused: acp_unavailable` and `prepare` rejects with `agy has no
+  credential path yet`.
+- Host toolsets: agy rejects Host toolset entries carrying `env` or `headers`;
+  a Host that configures env for its own server cannot run it under agy. agy
+  persists session MCP entries in its conversation database; upstream found env
+  and header values there in plain text after close (botiverse/oar#392). Treat
+  `args` the same way: do not put tokens in `args`.
+- Instructions: a writer runs in the Agent home, where agy reads `AGENTS.md`
+  itself, so nothing is appended. A `memory-reader` runs in
+  `.byok/runs/<task>`, which agy does not read from, so the persona is
+  appended, on every open because agy replaces its append on resume. If the home
+  has `.git`, agy walks up to it and that reader sees the persona twice; agy has
+  no root-marker option.
+- Tools: MCP tools are `mcp_<server>_<tool>`, verbatim. `run_command`,
+  `read_file`, `write_file` and `edit_file` spell their inputs `CommandLine` and
+  `Path`, so the projection adds `command` and `path` for tool authorization.
+  `tool_use.input` is otherwise the structured raw input of the opening frame,
+  never OAR's capped text; a call without one has no input.
+- Turn end: an Attempt is one prompt on one process. Subagents and schedules
+  run in the background and report no ACP frame, so on `end_turn` the session
+  closes agy and disposes the owned process tree before it reports `turn_end`.
+  That includes a `run_command` with `IsDaemon`, which leaves the process group
+  (`agy.turnEnd`). `followUp` is refused; a later turn resumes in a new process,
+  and no wait is needed. Schedules die with the worker: none survived a kill,
+  and on resume agy tells the model its background tasks were stopped. What a
+  subagent did before the kill reaches no reminder and no audit.
+- Permissions: agy still asks for a file outside its workspace, and a
+  `cancelled` answer ends the turn as a success, so the adapter answers with an
+  explicit option. A writer gets `allow_once`. A `memory-reader` gets
+  `allow_once` for reads, `reject_once` for a write below the home outside its
+  run directory, and `allow_once` otherwise. `--add-dir` is not used, because it
+  would also allow those writes. agy ends the turn after `reject_once`, so that
+  Attempt fails as non-retryable `semantic`. `run_command` is never asked.
+  `auto` is declined before claim.
+- Detection: `agy --version` must be at least 1.5.0, the first with native ACP
+  (an older CLI answers `acp` with its help, else `refused: acp_unavailable`),
+  and warns when it is not the qualified `1.5.1`. `authPresent` is not reported,
+  because the credential is not in agy.
+- Failures: a failed turn takes its class from the vendored OAR outcome, and a
+  class taken from error text stays `unknown`. Resume needs `session/list` to
+  confirm the saved cwd, else it fails as `authority`.
+- Steering throws `SteerUnsupportedError`: the native steer exists but is not
+  enabled. agy reports no usage events.
+- Egress: `--disable-telemetry` stops agy's calls to `play.googleapis.com`, and
+  `AGY_CLI_DISABLE_AUTO_UPDATE=1` is always set.
+- Platforms: macOS, Linux and Windows.
+
+Evidence: the `AgyAdapter` cases in `grok-adapter.test.ts` (synthetic
+`fake-acp-agent.mjs`, offline) and the [runtime contract suite](runtime-contract.md)
+against the real qualified agy, including a Windows leg.
+
 ## Selection and platforms
 
 A Host reads the adapter list, not a table of its own. `taskRuntimeTarget(descriptor)`
 from `@byok-sdk/client/adapters` returns `{ runtime }` for a frozen wire runtime
 id (`RUNTIME_IDS` in `@byok-sdk/protocol/constants`) and `{ harnessId }` for any
 other id. `descriptor.platforms` lists the supported `process.platform` values:
-Claude, Codex, Pi and Hermes declare macOS, Linux and Windows; Grok, dsh and
-durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
+Claude, Codex, Pi, Hermes and agy declare macOS, Linux and Windows; Grok, dsh
+and durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
 restriction. `observeRuntimeDetection` refuses an unsupported platform with
 `platform_unsupported` before `detect()` runs, and `projectRuntimeObservation`
 gives the same fields the daemon emits in its `runtimes-detected` event. Both

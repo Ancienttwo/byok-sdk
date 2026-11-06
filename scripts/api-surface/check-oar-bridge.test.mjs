@@ -64,7 +64,9 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
   assert.deepEqual(reexports, [
     ['../../vendor/oar/be46fb3/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
     ['../../vendor/oar/be46fb3/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
+    ['../../vendor/oar/be46fb3/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
     ['../../vendor/oar/be46fb3/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
+    ['../../vendor/oar/be46fb3/runtimes/antigravity/session.js', [['antigravitySession', 'antigravitySession']]],
     ['./dsh-acp-session.js', [['dshSession', 'dshSession']]],
   ]);
 });

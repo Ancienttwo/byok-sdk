@@ -1116,6 +1116,39 @@ root reaps them. After a dsh root is killed from outside (SIGKILL, OOM),
 disposal ends the tool processes the owned process tree observed while the
 root ran ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
 
+### agy runtime (#1469)
+
+The agy adapter runs `agy acp --dangerously-skip-permissions
+--process-per-session --disable-telemetry` in an OS home the SDK owns: `HOME`,
+`USERPROFILE`, `APPDATA`, `LOCALAPPDATA` and `GEMINI_HOME` point into
+`DaemonConfig.runtimes.agy.home`, and `AGY_CLI_DISABLE_AUTO_UPDATE=1` is always
+set. It drops every inherited `GEMINI_*`, `GOOGLE_*`, `AGY_*` and
+`ANTIGRAVITY_*` name and the `XDG_*` directory names, because agy reads and
+removes `antigravity/credential-user-scope` in the user config directory.
+`DBUS_SESSION_BUS_ADDRESS` names a socket in that home that does not exist, so
+agy's look for the session bus fails as on a host with no bus. agy passes its whole
+environment to `run_command` and stdio MCP children, so no real key may enter
+it. agy holds a placeholder `GEMINI_API_KEY` and calls the endpoint in
+`GOOGLE_GEMINI_BASE_URL`. No public option names that endpoint. Until the
+credential path lands, `detect()` refuses with `acp_unavailable` and `prepare`
+rejects with `agy has no credential path yet`.
+
+An Attempt is one prompt on one process. agy's subagents and schedules run in
+the background and report no ACP frame, so on `end_turn` the session closes agy
+and disposes its process tree before it decides the terminal and before the
+home lease is released. `followUp` is refused. A later turn resumes the session
+in a new process and needs no wait after the kill. What a subagent did before
+the kill reaches no reminder and no audit.
+
+agy still sends `session/request_permission` for a file outside its workspace,
+and a `cancelled` answer ends the turn as a success, so the adapter answers with
+an explicit option. A writer gets `allow_once`. A `memory-reader` gets
+`allow_once` for reads, `reject_once` for a write below the Agent home outside
+its run directory, and `allow_once` otherwise. agy ends the turn after
+`reject_once` without asking the model again, so an Attempt ending that way
+fails as non-retryable `semantic`. `run_command` is not asked: a reader's shell
+write to its home is reported by `agentHomeMemoryChange`.
+
 ### Local runtime probe observation
 
 `RuntimeDetectResult` has one required `kind`: `available`, `not-found`,
@@ -1156,7 +1189,7 @@ Runtime version policy is one pure data object on an adapter descriptor
 constructor option and `DaemonConfig.runtimes.<id>.versionPolicy` are complete
 objects that replace one another wholesale through one resolver; fields are
 never merged. The default policy preserves today's behavior exactly: Codex,
-Grok, Hermes and dsh warn on an unqualified version, Claude and Pi do not warn, and
+Grok, Hermes, dsh and agy warn on an unqualified version, Claude and Pi do not warn, and
 no default policy blocks. Only a Host layer may configure a block; a descriptor
 default that carries one is rejected as `invalid_version_policy`
 (`block_requires_host`). A block is enforced locally before claim and produces
@@ -1762,9 +1795,10 @@ makes itself `unknown`. It keeps `scope` only when the server also advertises
 | Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status`. A `quota` takes `scope` from `rate_limit_info.rateLimitType`: `five_hour` and `seven_day` are `account`, `seven_day_opus` and `seven_day_sonnet` are `model`, any other value or none gives no `scope` |
 | Codex | `turn.error.codexErrorInfo`, through the vendored OAR table; `unauthorized` stays `unknown`, and an `other` class OAR takes from Anthropic's error wording is sent as `unknown` |
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
+| agy | the vendored OAR turn outcome; a class OAR took from error text stays `unknown` |
 | Pi, Hermes, dsh | no structured field: `unknown` |
 
-Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes), Hermes and dsh report a
+Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes), Hermes, dsh and agy report a
 runtime process that ends on its own before its terminal, during start or a turn,
 as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
 Pi's durable lane recovers a worker that ends on its own during a run (within its
@@ -3863,7 +3897,7 @@ reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
 dsh reports ACP `usage_update` (`used` against `size`) as `provider` context
-usage, and no cost counters.
+usage, and no cost counters. agy reports no usage events.
 Historical v1 envelopes remain readable and unchanged; older consumers ignore
 these optional fields.
 
@@ -4280,6 +4314,7 @@ it never runs ungated, and no third mode exists. Current coverage:
 | Grok | Declined before claim | Only client-hosted terminal commands pass through the SDK; Grok's own file tools do not |
 | Hermes | Declined before claim | No pre-execution hook |
 | dsh | Declined before claim | No pre-execution hook; every ACP permission request is answered `cancelled` |
+| agy | Declined before claim | No pre-execution hook; a permission request covers only files outside the workspace |
 
 Classification is one function (`classifyToolCall`) used by both modes. The
 precedence is **Always Ask > sensitive-path floor > Allow without Asking >

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 // #1103: install one runtime CLI for the runtime contract suite and hand its
@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url';
 const root = resolve(import.meta.dirname, '../..');
 const adapters = join(root, 'packages/client/src/adapters');
 
-export const RUNTIMES = Object.freeze(['pi', 'claude', 'codex', 'grok', 'hermes', 'dsh']);
+export const RUNTIMES = Object.freeze(['pi', 'claude', 'codex', 'grok', 'hermes', 'dsh', 'agy']);
 
 /** npm packages of the CLIs the SDK does not bundle. */
 export const NPM_PACKAGES = Object.freeze({
@@ -28,6 +28,21 @@ export const NPM_PACKAGES = Object.freeze({
 export const HERMES_INSTALLER = Object.freeze({
   repository: 'https://github.com/NousResearch/hermes-agent',
   sha256: '20f44240ebada354a468104a6a6724d037afcb8883d4d09ddeb4815622c52d8b',
+});
+
+/**
+ * The official agy CLI archives of the qualified release, from its platform
+ * updater manifests. agy is not on npm. A qualification bump changes both.
+ */
+const AGY_ARCHIVE_ROOT = 'https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.1-4523430503120896';
+export const AGY_QUALIFIED = Object.freeze({
+  version: '1.5.1',
+  archives: Object.freeze({
+    'linux-x64': { url: `${AGY_ARCHIVE_ROOT}/linux-x64/cli_linux_x64.tar.gz`, sha512: 'f70406654ebd966f211424338259e2d38d099c48734e901dc06975063e5a0137d55b6eb9366b75983c6908bbc20ae92a2617656bb191d8ed6fe429d654bca4f5' },
+    'darwin-arm64': { url: `${AGY_ARCHIVE_ROOT}/darwin-arm/cli_mac_arm64.tar.gz`, sha512: '078399b392c3bfce70bc5d9fb1a447a4b0a2a26bd40c36148f4944028b8f21e358890d5b9bedcde69296677b1da2c026b4e283ae918823429c13b91ddcb913ce' },
+    'darwin-x64': { url: `${AGY_ARCHIVE_ROOT}/darwin-x64/cli_mac_x64.tar.gz`, sha512: '736a0f1210b42edc6ec292e1f8438696f616bf6906ad5e878d415b18aa53accc59a678205c332e5af564fab8d32ca5ac5b41c9baad8ced0a7bc224a0ccfcc3b5' },
+    'win32-x64': { url: `${AGY_ARCHIVE_ROOT}/windows-x64/cli_windows_x64.exe`, sha512: '218d2751189e25a275122519a2afc6a3d0af5ff68306cebc68a5da3127bca69a497760988bfd40a884a619d4fa58ccafcb2fba1289dc1fc56e3d7d7b565f4cec' },
+  }),
 });
 
 /** Each runtime's qualified version, from the adapter's own constant or the client manifest. */
@@ -48,6 +63,7 @@ export async function qualifiedVersions() {
     grok: await load('grok/grok-version.ts', 'QUALIFIED_GROK_VERSION'),
     hermes: await load('hermes/hermes-version.ts', 'QUALIFIED_HERMES_VERSION'),
     dsh: await load('dsh/dsh-version.ts', 'QUALIFIED_DSH_VERSION'),
+    agy: await load('antigravity/agy-version.ts', 'QUALIFIED_AGY_VERSION'),
   };
 }
 
@@ -104,14 +120,67 @@ function installHermes(mode, version, dir) {
   return { bin, version: run('git', ['-C', agent, 'rev-parse', 'HEAD']) };
 }
 
-export async function install(runtime, mode, { dir, githubEnv = process.env.GITHUB_ENV } = {}) {
+/** The updater manifest of one platform, which names the latest release with its url and SHA-512. */
+export function agyUpdaterManifest(platform = process.platform, arch = process.arch) {
+  const system = { linux: 'linux', darwin: 'darwin', win32: 'windows' }[platform];
+  const architecture = { x64: 'amd64', arm64: 'arm64' }[arch];
+  if (system === undefined || architecture === undefined) throw new Error(`no agy release for ${platform}-${arch}`);
+  return `https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/${system}_${architecture}.json`;
+}
+
+async function agyRelease(mode, version, download) {
+  if (mode === 'qualified') {
+    if (AGY_QUALIFIED.version !== version) throw new Error(`AGY_QUALIFIED pins ${AGY_QUALIFIED.version}, the adapter qualifies ${version}`);
+    const archive = AGY_QUALIFIED.archives[`${process.platform}-${process.arch}`];
+    if (archive === undefined) throw new Error(`no qualified agy archive for ${process.platform}-${process.arch}`);
+    return { ...archive, version };
+  }
+  const manifest = JSON.parse(Buffer.from(await download(agyUpdaterManifest())).toString('utf8'));
+  if (!isExactVersion(manifest.version) || !/^[0-9a-f]{128}$/.test(manifest.sha512 ?? '') || !String(manifest.url).startsWith('https://'))
+    throw new Error(`agy updater manifest is malformed: ${JSON.stringify(manifest)}`);
+  return manifest;
+}
+
+/** The archive is a tar.gz holding `antigravity`, or the Windows executable itself. */
+async function installAgy(mode, version, dir, download) {
+  const release = await agyRelease(mode, version, download);
+  const bytes = Buffer.from(await download(release.url));
+  const actual = createHash('sha512').update(bytes).digest('hex');
+  if (actual !== release.sha512) throw new Error(`agy archive checksum mismatch: expected ${release.sha512}, got ${actual}`);
+  mkdirSync(dir, { recursive: true });
+  let bin;
+  if (release.url.endsWith('.exe')) {
+    bin = join(dir, 'agy.exe');
+    writeFileSync(bin, bytes);
+  } else {
+    const archive = join(dir, 'agy.tar.gz');
+    writeFileSync(archive, bytes);
+    execFileSync('tar', ['-xzf', archive, '-C', dir]);
+    const found = readdirSync(dir, { recursive: true }).filter(file => basename(String(file)) === 'antigravity');
+    if (found.length !== 1) throw new Error(`expected one agy executable in the archive, found ${found.length}`);
+    bin = join(dir, String(found[0]));
+    chmodSync(bin, 0o755);
+  }
+  const reported = run(bin, ['--version'], { timeout: 30_000 });
+  if (reported !== release.version) throw new Error(`agy reports ${JSON.stringify(reported)}, expected ${release.version}`);
+  return { bin, version: release.version };
+}
+
+async function fetchBytes(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(180_000) });
+  if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+  return response.arrayBuffer();
+}
+
+export async function install(runtime, mode, { dir, githubEnv = process.env.GITHUB_ENV, download = fetchBytes } = {}) {
   if (!RUNTIMES.includes(runtime)) throw new Error(`unknown runtime ${JSON.stringify(runtime)}; one of ${RUNTIMES.join(', ')}`);
   if (mode !== 'qualified' && mode !== 'latest') throw new Error('mode must be qualified or latest');
   // Pi is bundled at byok.piRuntimePin: nothing to install, and the suite skips a latest run.
   if (runtime === 'pi') return [];
   const version = (await qualifiedVersions())[runtime];
   const target = dir ?? join(process.env.RUNNER_TEMP ?? root, 'runtime-contract', runtime);
-  const installed = runtime === 'hermes' ? installHermes(mode, version, target) : installNpm(runtime, mode, version, target);
+  const installed = runtime === 'hermes' ? installHermes(mode, version, target)
+    : runtime === 'agy' ? await installAgy(mode, version, target, download) : installNpm(runtime, mode, version, target);
   const lines = contractEnv(runtime, installed.bin, mode === 'latest' ? installed.version : undefined);
   if (githubEnv) appendFileSync(githubEnv, `${lines.join('\n')}\n`);
   console.log(lines.join('\n'));

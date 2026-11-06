@@ -179,6 +179,23 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     expect(facts(log).find(fact => fact.kind === 'config')?.params).toMatchObject({ configId: 'model', value: 'fake-model' });
   });
 
+  it('settles a superseding steer on the latest prompt answer, not on the early answer to the first', async () => {
+    const { dir, log } = workspace();
+    const records: RawEvent[] = [];
+    const startSteering = acpSession({ ...profile, steerParams: () => ({}), steerSupersedesPrompt: true, steerOutcomeIsLatest: true });
+    const session = await startSteering(spawnOwnedLineProcess, spawnOwnedTerminalProcess, { kind: 'available', via: 'executable', command: FAKE },
+      { cwd: dir, env: { PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log, FAKE_ACP_REPLY_GATE: dir } }, { onRecord: record => records.push(record) });
+    live.push(session);
+    const turnsEnded = () => records.flatMap(record => record.kind === 'frame' ? record.body.events.filter(event => event.kind === 'turn_ended') : []);
+    expect((await session.prompt('steer-first')).response.body.kind).toBe('accepted');
+    expect((await session.steer!('steer-second')).response.body.kind).toBe('accepted');
+    await vi.waitFor(() => expect(records.some(record => record.kind === 'frame' && record.body.type === 'session/prompt')).toBe(true));
+    expect(turnsEnded()).toEqual([]);
+    expect((await session.prompt('third')).response.body).toMatchObject({ kind: 'rejected', code: 'busy' });
+    writeFileSync(path.join(dir, 'release'), '');
+    await vi.waitFor(() => expect(turnsEnded()).toEqual([{ kind: 'turn_ended', outcome: { kind: 'completed' } }]));
+  });
+
   it('delivers every record from seq 0 to the record consumer and swallows its errors', async () => {
     const { dir } = workspace();
     const seen: RawEvent[] = [];

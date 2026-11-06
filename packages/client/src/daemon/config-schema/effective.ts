@@ -169,6 +169,10 @@ function sdkBuiltIsolation(id: string, config: DaemonConfig): Readonly<Record<st
       home: runtimes.dsh.home,
       sandbox: runtimes.dsh.sandbox ?? 'danger-full-access',
     };
+    case 'agy': return runtimes?.agy === undefined ? undefined : {
+      home: runtimes.agy.home,
+      ...(runtimes.agy.model === undefined ? {} : { model: runtimes.agy.model }),
+    };
     default: return undefined;
   }
 }
