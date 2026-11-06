@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import type { AgentHomeLease } from '../agent-home';
 import { verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
-import { AgentMemoryRevisionConflictError } from './agent-memory';
+import { AgentMemoryIoError, AgentMemoryRevisionConflictError } from './agent-memory';
 import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry } from './agent-memory-filesystem';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 
@@ -13,6 +13,8 @@ const HELPER_REQUEST_TIMEOUT_MS = 10_000;
 const HELPER_MAX_JSON_LINE_BYTES = 2 * 1024 * 1024;
 const HELPER_MAX_CONTENT_BYTES = 1 * 1024 * 1024;
 const HELPER_MAX_STDERR_BYTES = 4 * 1024;
+/** The helper's codes that say an operation did not complete, as opposed to refusing what it found. */
+const HELPER_IO_FAILURE_CODES: ReadonlySet<string> = new Set(['io_failure', 'file_changed']);
 
 interface HelperSuccess {
   readonly id: string;
@@ -159,7 +161,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     child.stdin.on('error', () => this.fail(new AgentMemoryError('Agent memory filesystem helper request could not be written')));
     child.once('error', () => this.fail(new AgentMemoryError('Agent memory filesystem helper could not be started')));
     child.once('exit', (code, signal) => {
-      if (!this.closed || code !== 0) this.fail(new AgentMemoryError(`Agent memory filesystem helper exited unexpectedly (${code ?? signal ?? 'unknown'})`));
+      if (!this.closed || code !== 0) this.fail(new AgentMemoryIoError(`Agent memory filesystem helper exited unexpectedly (${code ?? signal ?? 'unknown'})`));
     });
   }
 
@@ -287,7 +289,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        const error = new AgentMemoryError('Agent memory filesystem helper request timed out');
+        const error = new AgentMemoryIoError('Agent memory filesystem helper request timed out');
         reject(error);
         this.fail(error);
       }, HELPER_REQUEST_TIMEOUT_MS);
@@ -337,7 +339,8 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
       item.reject(new HelperRevisionConflict(response.error.actualRevision));
       return;
     }
-    item.reject(new AgentMemoryError(`Agent memory filesystem helper rejected the operation: ${response.error.code}`));
+    const rejected = `Agent memory filesystem helper rejected the operation: ${response.error.code}`;
+    item.reject(HELPER_IO_FAILURE_CODES.has(response.error.code) ? new AgentMemoryIoError(rejected) : new AgentMemoryError(rejected));
   }
 
   private fail(error: Error): void {

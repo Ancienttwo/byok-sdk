@@ -13,6 +13,7 @@ import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, agentMessageSealing, cl
 import type { TaskRunner } from '../task-runner';
 import { ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX, MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state';
 import { hostFor } from './host';
+import { agentMemoryCommitRefusalReason } from './agent-memory';
 import type { TerminalPlan } from './finish';
 
 export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> {
@@ -208,6 +209,11 @@ async function pumpTurnEnd(this: TaskRunner, active: ActiveTask, event: Extract<
   }
   active.batcher.push(event);
   active.batcher.flush();
+  const commitRefusal = await agentMemoryCommitRefusalReason.call(this, active);
+  if (commitRefusal !== undefined) {
+    if (this['canPublishAgentMessage'](active)) await this['fail'](active.taskId, commitRefusal, false);
+    return;
+  }
   const finalOutput = active.summaryParts.join('');
   // Resolve the result decision before Git observation and reply handoff.
   // Missing/unreadable results can still deliver a required reply; a task

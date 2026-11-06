@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Fixed (client; #1474)** — an `agentMemoryCommit: 'on-success'` task can no
+  longer end with `task.complete` and leave a home that every later on-success
+  task refuses. The device checks the home when the runtime ends its turn, the
+  same way it does at the start. A home that would be refused turns the terminal
+  into `task.fail` with `retryable: false`, a reason that starts with
+  `agent_memory_commit_refused`, and the usual rollback. `memory_save` refuses a
+  replace that would pass `AGENT_MEMORY_MAX_SNAPSHOT_FILES` or
+  `AGENT_MEMORY_MAX_SNAPSHOT_BYTES` and tells the Agent to merge or delete notes
+  first. On a home that is already refused, the start reason now names the
+  repair: a write task with `agentMemory: 'none'` and no `agentMemoryCommit`,
+  which `docs/protocol.md` describes for both this case and an over-limit
+  `MEMORY.md`, and `agent_memory_resident_over_limit` now names it too. A
+  helper `io_failure` or `file_changed`, a helper timeout and a helper that exits
+  unexpectedly now count as I/O failures, so they are retryable at the start, as
+  `docs/protocol.md` already said. Host memory intents get no new check.
+
 - **Fixed (client)** — all-mode tool reminders now fire for Hermes. They never
   did before, because the classifier got a display title and no arguments for
   every Hermes call. Hosts see Hermes `tool_use` and `tool_result` events

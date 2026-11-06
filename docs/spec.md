@@ -2911,7 +2911,8 @@ A writer Agent offer can also bind its memory writes to the task result with the
 OPTIONAL `agentMemoryCommit: 'on-success'`. `task.complete` keeps what the Attempt
 did to `MEMORY.md` and `notes/`, including writes from the runtime's own file
 tools. Any other end restores those files to how they were at the start of the
-Attempt. The device must advertise `agent-memory-commit-on-success`, and cloud
+Attempt. A task that would leave a home the next copy refuses ends in `task.fail`
+and is restored too. The device must advertise `agent-memory-commit-on-success`, and cloud
 refuses the field to a device without it. A `memory-reader` Attempt and durable Pi
 do not support it. See [the protocol](protocol.md#22-task-free-agent-home-projection).
 
@@ -2947,8 +2948,9 @@ is restored without a start copy or without the memory filesystem (a native
 Linux descriptor backend or the release helper). A failed compare-and-swap is
 audited and not retried, and a crash before the restore loses the copy. On a
 daemon that carries the file, the next fresh task then fails until a Host intent
-replaces it. The compare hashes raw bytes, with no size limit and no UTF-8
-requirement, so the restore handles a file of any size, on both backends. See
+or a write task with `agentMemory: 'none'` repairs it. The compare hashes raw
+bytes, with no size limit and no UTF-8 requirement, so the restore handles a file
+of any size, on both backends. See
 [protocol.md §2.2](protocol.md#22-task-free-agent-home-projection) for the repair
 after a crash.
 

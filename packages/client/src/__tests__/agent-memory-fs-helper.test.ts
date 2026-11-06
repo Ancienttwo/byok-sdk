@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { expectAgentMemoryNameRules, expectAgentMemoryRawByteCompare, expectAgentMemoryRestoreCleanup } from './fixtures/agent-memory-name-rules';
 import { AgentHomeManager } from '../agent-home';
-import { AgentMemoryService, captureAgentMemorySnapshot, type AgentMemoryTaskContext } from '../daemon/agent-memory';
+import { AgentMemoryIoError, AgentMemoryService, captureAgentMemorySnapshot, type AgentMemoryTaskContext } from '../daemon/agent-memory';
 import {
   isAgentMemoryFilesystemHelperSupported,
   openAgentMemoryFilesystemHelper,
@@ -89,6 +89,19 @@ describe('Agent memory external filesystem helper', () => {
       await fs.symlink(path.join(outside, 'sentinel.md'), path.join(binding.resolution.canonicalHome, 'notes', 'linked.md'));
       await expect(service.recall({ path: 'notes/linked.md' })).rejects.toThrow('unsafe_path');
       expect(await fs.readFile(path.join(outside, 'sentinel.md'), 'utf8')).toBe('outside sentinel');
+
+      // #1474: the helper's io_failure is a failure to finish, not a refusal. Windows has no mode bits to deny with.
+      if (process.platform !== 'win32') {
+        const internal = path.join(binding.resolution.canonicalHome, '.byok');
+        await fs.chmod(internal, 0o500);
+        await expect(filesystem.append('.byok/denied.jsonl', 'x', 1024)).rejects.toBeInstanceOf(AgentMemoryIoError).finally(() => fs.chmod(internal, 0o700));
+      }
+
+      // So is a helper that dies under a request.
+      const helper = filesystem as unknown as { child: { kill(signal: string): void }; exited: Promise<void> };
+      helper.child.kill('SIGKILL');
+      await helper.exited;
+      await expect(filesystem.read('MEMORY.md', 8192)).rejects.toBeInstanceOf(AgentMemoryIoError);
     } finally {
       await filesystem.close();
       await binding.lease.release();

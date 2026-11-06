@@ -7,7 +7,7 @@ import { appendAgentMemoryHomeAudit, compareAndSwapAgentMemoryHomeFile, isAgentM
 import type { AgentMemoryCommitHome } from '../agent-memory-commit';
 import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper';
 import type { ActiveTask } from './support';
-import { errorMessage, taskFinalizing } from './support';
+import { errorMessage, outboundErrorMessage, taskFinalizing } from './support';
 import type { TaskRunner } from '../task-runner';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 
@@ -143,6 +143,23 @@ export async function settleAgentMemoryCommitCopy(this: TaskRunner, taskId: stri
   } catch (error) {
     console.error(`[byok/client] Agent memory commit copy of ${taskId} was not settled: ${errorMessage(error)}`);
     return false;
+  }
+}
+
+/**
+ * The reason to fail a task that would otherwise complete, when it leaves a home
+ * the next start of a commit Attempt would refuse (#1474). `task.fail` then rolls
+ * its writes back. A check that cannot finish leaves the terminal as it was, for
+ * that next start to decide.
+ */
+export async function agentMemoryCommitRefusalReason(this: TaskRunner, active: ActiveTask): Promise<string | undefined> {
+  if (active.agentMemoryCommit !== true) return undefined;
+  try {
+    const refusal = await this['deps'].agentMemoryCommit!.refusal(active.agentBinding.lease, active.taskId);
+    return refusal === undefined ? undefined : `agent_memory_commit_refused: ${outboundErrorMessage(refusal)}; the memory changes of this task are rolled back`;
+  } catch (error) {
+    console.error(`[byok/client] Agent memory commit check of ${active.taskId} did not finish: ${errorMessage(error)}`);
+    return undefined;
   }
 }
 

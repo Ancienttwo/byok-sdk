@@ -1015,12 +1015,17 @@ does not fail on the size. The hosted cloud advertises the flag, and
 
 Known limit: the restore compares raw bytes, so it handles a `MEMORY.md` of any
 size, but its start copy is in memory. When the daemon crashes before the
-restore, the copy is lost and the next fresh task fails. To repair it, the Host
-sends a writer task with `agentMemory: 'none'` whose instruction tells the model
-to bring `MEMORY.md` under the limit and move the details to `notes/`. `none`
-adds no memory guidance, file tools have no size limit, and that Attempt has no
-start copy, so nothing restores the file at its end. The file can also be edited
-by hand on the device.
+restore, the copy is lost and the next fresh task fails. A home over a snapshot
+limit stays refused in the same way: every `agentMemoryCommit` offer fails before
+the runtime starts. Both start refusals name this repair. To repair either one,
+the Host sends a write task with `agentMemory: 'none'` and no
+`agentMemoryCommit`, whose instruction tells the model to bring `MEMORY.md` under
+its limit, moving the details to `notes/`, and to bring memory back within the
+snapshot limits. `none` binds no memory MCP, so the resident check at the start
+does not apply, and it adds no memory guidance. File tools have no size limit,
+and that Attempt has no start copy, so nothing restores the files at its end.
+Dreaming (#1475) is such a task. The files can also be edited by hand on the
+device.
 
 **`agentMemory` selects the Agent memory of one ordinary task.** Without the
 field, the daemon admission decides, as before. `none` binds no SDK memory MCP
@@ -1073,9 +1078,35 @@ too.
   the decline. A durable Attempt runs on after a daemon restart, and the crash
   recovery below would roll it back while it is alive.
 - The Attempt fails without retry before the runtime starts when the copy is
-  refused: more than 1 MiB or 128 files, a start record over its 1 MiB manifest,
-  or a symlink in `notes/`. An I/O failure is retryable. The reason starts with
-  `agent_memory_commit_unavailable`.
+  refused: over `AGENT_MEMORY_MAX_SNAPSHOT_BYTES` or
+  `AGENT_MEMORY_MAX_SNAPSHOT_FILES`, a note over the file limit, a memory file
+  that is not UTF-8, too many directory entries, a start record over
+  `AGENT_MEMORY_MAX_LOCAL_LOG_BYTES`, or a symlink in `notes/`. An I/O failure
+  is retryable. The reason starts with `agent_memory_commit_unavailable`, and a
+  refusal also names the repair: a write task with `agentMemory: 'none'` and no
+  `agentMemoryCommit`.
+- When the runtime ends its turn, the device asks the same question of the home
+  before it decides the terminal. If the next copy would be refused, the terminal
+  is `task.fail` with `retryable: false`. The reason starts with
+  `agent_memory_commit_refused`, says what was refused and says the task's memory
+  changes are rolled back. The restore runs as after any other failure, and the
+  next Attempt starts from the old files. The task's `finalMessage` and document
+  do not reach the Host; a message the Agent already sent stays sent. When the
+  check itself hits an I/O failure, the terminal is unchanged and the next copy
+  decides. A write that lands after the check, while the session closes, is seen
+  only by that next copy.
+- While a home is refused, projection stops with a local log line, and
+  `exportAgentMemory` throws. The Known limit paragraph above says how to repair
+  it. The SDK never deletes or merges memory itself.
+- `memory_save` refuses a replace that would take the home past
+  `AGENT_MEMORY_MAX_SNAPSHOT_FILES` or `AGENT_MEMORY_MAX_SNAPSHOT_BYTES`, and the
+  error tells the Agent to merge or delete notes first. A replace that does not
+  grow the home, and every delete, still run, so a home already over can shrink.
+  A note the device cannot measure refuses the save, as it refuses a snapshot,
+  with the same guidance.
+  A Host intent has no such check, because its refusal codes are a closed set.
+  The Host sees the projection and knows the limits, so a Host write past a limit
+  is the Host's to repair.
 - The restore runs after the terminal goes out and before the device releases
   the home, so the next writer, intent, export and projection see the restored
   files. `residentMemoryOverLimit` still reports what the runtime left, measured

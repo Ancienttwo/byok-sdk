@@ -19,7 +19,7 @@ import { isRuntimeStartupDisposalFailure, projectRuntimeBoundaryFailure } from '
 import { toRuntimeInfoCapabilities } from '../runtime-capabilities';
 import { prependAgentMemoryModeGuidance } from '../memory-guidance';
 import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
-import { agentMemoryCommitFailureRetryable } from '../agent-memory-commit';
+import { AGENT_MEMORY_RECOVERY, agentMemoryCommitFailureRetryable } from '../agent-memory-commit';
 import { settleAgentMemoryCommitCopy } from './agent-memory';
 import type { PreparedExecutionObservation, ActiveTask, OfferPhaseContext } from './support';
 import { isKnownRuntimeId, offeredInstruction, errorMessage, outboundErrorMessage } from './support';
@@ -514,8 +514,8 @@ async function startAndActivateRuntime(
   // joined a reader's group took no base lease, so nothing has settled it yet.
   // It goes first: the read below must see the restored file.
   const commitStore = this['deps'].agentMemoryCommit;
-  const failCommitCopy = (error: unknown): Promise<boolean> => this['failClaimedAgent'](
-    taskId, `agent_memory_commit_unavailable: ${outboundErrorMessage(error)}`, agentMemoryCommitFailureRetryable(error),
+  const failCommitCopy = (error: unknown, recovery = ''): Promise<boolean> => this['failClaimedAgent'](
+    taskId, `agent_memory_commit_unavailable: ${outboundErrorMessage(error)}${recovery}`, agentMemoryCommitFailureRetryable(error),
     { binding: agentBinding, runtimeId: pick.descriptor.id },
   );
   if (!readerAttempt && commitStore !== undefined) {
@@ -537,7 +537,7 @@ async function startAndActivateRuntime(
     : undefined;
   if (injectsResidentMemory && residentMemory !== undefined && residentMemory.kind !== 'read') {
     const reason = residentMemory.kind === 'over-limit'
-      ? `agent_memory_resident_over_limit: ${residentMemory.byteCount}/${RESIDENT_MEMORY_MAX_BYTES}`
+      ? `agent_memory_resident_over_limit: ${residentMemory.byteCount}/${RESIDENT_MEMORY_MAX_BYTES}${AGENT_MEMORY_RECOVERY}`
       : `agent_memory_resident_unreadable: ${residentMemory.reason}`;
     await this['failClaimedAgent'](taskId, reason, false, { binding: agentBinding, runtimeId: pick.descriptor.id });
     return;
@@ -634,7 +634,7 @@ async function startAndActivateRuntime(
     try {
       await commitStore!.copy(agentBinding.lease, taskId);
     } catch (error) {
-      await failCommitCopy(error);
+      await failCommitCopy(error, agentMemoryCommitFailureRetryable(error) ? '' : AGENT_MEMORY_RECOVERY);
       return;
     }
   }

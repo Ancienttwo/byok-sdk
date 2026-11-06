@@ -2,12 +2,14 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { AGENT_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
-import { AgentMemoryError, validateAgentMemoryPath } from '@byok-sdk/protocol/agent-memory';
-import { AGENT_HOME_INTERNAL_DIRECTORY, ensureDirectoryNoSymlink, type AgentHomeLease } from '../agent-home';
+import { AgentMemoryError, validateAgentMemoryPath, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
+import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, ensureDirectoryNoSymlink, type AgentHomeLease } from '../agent-home';
 import {
+  AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES,
   agentMemoryHomeBinding,
   AgentMemoryIoError,
+  AgentMemorySnapshotLimitError,
   appendAgentMemoryHomeAudit,
   captureAgentMemoryHomeSnapshot,
   cleanupAgentMemoryHomeForRestore,
@@ -48,6 +50,11 @@ export interface AgentMemoryCommitStore {
   /** Writes the copy, or throws before a runtime may start. */
   copy(home: AgentMemoryCommitHome, taskId: string): Promise<void>;
   /**
+   * What the next `copy` would refuse in this home as it stands, if anything
+   * (#1474). Throws when the check itself fails, which decides nothing.
+   */
+  refusal(home: AgentMemoryCommitHome, taskId: string): Promise<Error | undefined>;
+  /**
    * Ends a copy, if there is one: the journal terminal of its task decides, here
    * as after a crash. `task.complete` keeps the live files; any other terminal,
    * or no terminal, restores them. The copy goes only after that succeeded, so a
@@ -60,6 +67,9 @@ export interface AgentMemoryCommitStore {
 export function agentMemoryCommitFailureRetryable(error: unknown): boolean {
   return !(error instanceof AgentMemoryError) || error instanceof AgentMemoryIoError;
 }
+
+/** Appended to the reason of a start refusal over a memory limit: the home stays refused until a write task changes it. */
+export const AGENT_MEMORY_RECOVERY = '; to recover, send a write task with agentMemory:"none" and no agentMemoryCommit that brings memory back within its limits';
 
 async function writeInternal(home: AgentMemoryHomeBinding, fileName: string, content: string): Promise<void> {
   const current = await readAgentMemoryHomeInternalFile(home, fileName);
@@ -84,6 +94,20 @@ async function readVerifiedContent(home: AgentMemoryHomeBinding, manifest: Manif
     contents.push(stored.content);
   }
   return contents;
+}
+
+/** The whole of what a home must pass to be copied. Throws what `copy` refuses, before anything is written. */
+async function readStartRecord(home: AgentMemoryHomeBinding, taskId: string): Promise<{ readonly snapshot: AgentMemorySnapshot; readonly manifest: string }> {
+  const snapshot = await captureAgentMemoryHomeSnapshot(home);
+  const entries = await recordAgentMemoryHomeEntries(home);
+  const manifest = JSON.stringify({
+    version: 1,
+    taskId,
+    files: snapshot.files.map(({ path: memoryPath, revision, byteCount }) => ({ path: memoryPath, revision, byteCount })),
+    entries: [...entries],
+  } satisfies z.input<typeof ManifestSchema>);
+  if (Buffer.byteLength(manifest, 'utf8') > AGENT_MEMORY_MAX_LOCAL_LOG_BYTES) throw new AgentMemorySnapshotLimitError('memory start record exceeds its bounded manifest');
+  return { snapshot, manifest };
 }
 
 async function restore(home: AgentMemoryHomeBinding, manifest: Manifest): Promise<void> {
@@ -127,15 +151,22 @@ export function createAgentMemoryCommitStore(input: {
 
   return Object.freeze<AgentMemoryCommitStore>({
     copy: (home, taskId) => withBinding(home, async (binding) => {
-      const snapshot = await captureAgentMemoryHomeSnapshot(binding);
-      const entries = await recordAgentMemoryHomeEntries(binding);
+      const { snapshot, manifest } = await readStartRecord(binding, taskId);
       for (const [index, file] of snapshot.files.entries()) await writeInternal(binding, contentFilename(index), file.content);
-      await writeInternal(binding, MANIFEST_FILENAME, JSON.stringify({
-        version: 1,
-        taskId,
-        files: snapshot.files.map(({ path: memoryPath, revision, byteCount }) => ({ path: memoryPath, revision, byteCount })),
-        entries: [...entries],
-      } satisfies z.input<typeof ManifestSchema>));
+      await writeInternal(binding, MANIFEST_FILENAME, manifest);
+    }),
+    refusal: (home, taskId) => withBinding(home, async (binding) => {
+      try {
+        // The next lease builds `notes` and `MEMORY.md` back, so losing them refuses nothing.
+        await ensureDirectoryNoSymlink(home.canonicalHome, path.join(home.canonicalHome, 'notes'));
+        const resident = await observeAgentMemoryHomeFile(binding, 'MEMORY.md');
+        if (!resident.exists) await compareAndSwapAgentMemoryHomeFile(binding, { operation: 'replace', path: 'MEMORY.md', expectedRevision: resident.revision, content: '' });
+        await readStartRecord(binding, taskId);
+        return undefined;
+      } catch (error) {
+        if (error instanceof AgentHomeResolutionError || !agentMemoryCommitFailureRetryable(error)) return error as Error;
+        throw error;
+      }
     }),
     settle: async (home) => {
       // Every lease passes here, and most homes have no copy: this avoids a helper process.
