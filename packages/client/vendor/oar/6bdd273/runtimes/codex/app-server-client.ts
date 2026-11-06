@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 0e92470 for injected processes, a sticky terminal error and server replies (Apache-2.0).
+// BYOK change: Modified from OAR 6bdd273 for injected processes, a sticky terminal error and server replies (Apache-2.0).
 // BYOK change: The caller owns process creation and must enforce bounded kill/exited semantics.
 export interface LineProcess {
   readonly spawned: Promise<void>;

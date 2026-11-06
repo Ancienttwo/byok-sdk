@@ -1,39 +1,42 @@
-# OAR 0e92470 private runtime fork
+# OAR 6bdd273 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.91.0, fixed commit `0e9247014498697ed4aaada8a911de68936ffec9`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.92.0, fixed commit `6bdd2731dc3ce260db9b3e4804adbaaeca754d83`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 111 source files plus LICENSE. Ninety-two source files keep upstream bytes. Nineteen source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the Codex goal-event projection, and the manual-compaction operation that the Codex session composes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options}.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok and Antigravity install, update, inventory, model-list and account-usage modules are not included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 112 source files plus LICENSE. Ninety-three source files keep upstream bytes. Nineteen source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the Codex goal-event projection, and the manual-compaction operation that the Codex session composes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options}.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok and Antigravity install, update, inventory, model-list and account-usage modules are not included.
 
-Upstream's native dsh runtime is selected through `runtimes/dsh/`: `bridge.ts`, `mcp.ts`, `options.ts` and `projection.ts` keep upstream bytes, and `launch.ts`, `control.ts` and `session.ts` carry BYOK changes. `version.ts`, `install.ts`, `installation.ts`, `list-models.ts` and `index.ts` are not selected: the SDK adapter owns version reading, installation and model selection.
+Upstream's native dsh runtime is selected through `runtimes/dsh/`: `bridge.ts`, `jobs.ts`, `mcp.ts`, `options.ts` and `projection.ts` keep upstream bytes, and `launch.ts`, `control.ts` and `session.ts` carry BYOK changes. `version.ts`, `install.ts`, `installation.ts`, `list-models.ts` and `index.ts` are not selected: the SDK adapter owns version reading, installation and model selection.
 
 The SDK typechecks this source with the ES2024 library (`packages/client/tsconfig.json`, `scripts/api-surface/tsconfig.oar-bridge.json`). The emit target stays ES2022, and the Node 24 engine floor provides the ES2023/ES2024 built-ins upstream uses (`Array.prototype.toSorted`, `Promise.withResolvers`).
 
 ## Authoritative release binding
 
-`@botiverse/oar@0.91.0` is the public npm release of this commit. Checked on
-2026-11-06:
+`@botiverse/oar@0.92.0` is the public npm release of this commit. Checked on
+2026-11-07:
 
-- The registry publishes `0.91.0` with tarball integrity
-  `sha512-0RZtsSlHuKmh0bKuRarlXbWN6W1QuPktddoLLAr0jvv3BwVDd7VASG26VysAtXTWMavIBVz4yrJgxa/RBhBVsg==`;
+- The registry publishes `0.92.0` with tarball integrity
+  `sha512-wnuL3EniE2q01RvdJQkgM7adlOMLSeYxoWVLhm/fXOGTdS+AZaq3TU93dzGv7DMuU4D8IA/TdHTISWTfiPspmQ==`;
   the downloaded tarball has sha512
-  `d1166db12947b8a9a1d1b2ae45aae55db58de96d50b8f92d75da0b2c0af48efbf707054377b540486dba572b00b574d631abc8055cf8cab260c5afd1061055b2`
-  and its `package.json` declares `"name": "@botiverse/oar"`, `"version": "0.91.0"`.
+  `c27b8bdc49e2136ab4d51bdd25092033b69d94e30b49e631a1654b866fdf5ce193752f8065aab74d4f777731afec332e5380fc200fd37474c84964df88fb2999`
+  and its `package.json` declares `"name": "@botiverse/oar"`, `"version": "0.92.0"`.
 - Its SLSA v1 provenance attestation
-  (`https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.91.0`)
+  (`https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.92.0`)
   built `.github/workflows/release.yml` from
   `git+https://github.com/botiverse/oar@refs/heads/main` at
-  `0e9247014498697ed4aaada8a911de68936ffec9`, the same commit recorded here.
-- The annotated tag `refs/tags/v0.91.0` dereferences to that commit, whose
-  message is `chore: release v0.91.0 (#660)`.
-- All 112 `upstreamSha256` values in `source-manifest.json` match the files at
+  `6bdd2731dc3ce260db9b3e4804adbaaeca754d83`, the same commit recorded here. Its subject digest is that sha512.
+- The annotated tag object `f7c958fcd656ab510a2bb2f58c8016c65755503b` of
+  `refs/tags/v0.92.0` dereferences to that commit, whose message is
+  `test(claude): distinguish built-in and unavailable plan checks (#674)`. The
+  version commit `chore: release v0.92.0 (#673)` is its parent, and #674 changes
+  only tests.
+- All 113 `upstreamSha256` values in `source-manifest.json` match the files at
   that commit's tree.
 
-The scheduled advisory scan therefore queries `@botiverse/oar@0.91.0` as an
+The scheduled advisory scan therefore queries `@botiverse/oar@0.92.0` as an
 npm package-version, not the bare commit. `source-manifest.json` keeps the
 commit and records the release name, version, tarball integrity and provenance
 URL under `release`; the scanner refuses the release claim unless every field
 agrees with the vendored identity and commit. The query covers the released
-upstream base, not the sixteen local deltas, which OSV has no package identity
+upstream base, not the nineteen local deltas, which OSV has no package identity
 for.
 
 ## Maintained deltas
@@ -768,3 +771,13 @@ The upstream launch has no provider configuration, and the public `DshModelSelec
 The SDK reads tool input from the native `tool/call` `arguments` string, which dsh delivers whole, not from the event text.
 
 Upstream's refusal of HTTP and of non-empty `env` or `headers` on MCP entries stands (`mcp.ts`). This fork adds no `env` support, because the persistence of such values in dsh is unaudited. The adapter reports the refusal as a non-retryable start failure, as for agy.
+
+### 0.91.0 → 0.92.0 re-vendor
+
+The base changes from `0e9247014498697ed4aaada8a911de68936ffec9` to `6bdd2731dc3ce260db9b3e4804adbaaeca754d83`, and the vendor directory from `0e92470` to `6bdd273`, the commit the tag dereferences to. Upstream changed four of the 112 selected paths and deleted none: `runtimes/antigravity/session.ts`, `runtimes/dsh/projection.ts`, `shared/acp/profile.ts` and `shared/acp/turns.ts`. `dsh/projection.ts` now imports the new `runtimes/dsh/jobs.ts`, so the selection grows from 112 to 113 files: 112 source files plus LICENSE, 93 with upstream bytes and the same 19 maintained. `observe/stall-observer.ts` also changed upstream and is not selected. `@agentclientprotocol/sdk` keeps its exact `1.4.0` pin; upstream's range stays `^1.4.0`.
+
+- `shared/acp/turns.ts` takes upstream #661 by a clean three-way merge. Both BYOK deltas are unchanged: the event-loop yield before a failed prompt reads its frames, and `observeDescendants()` before a native cancel. #661 replaces the failed-prompt settle after them with a `refused` decision and adds the profile hook `isSteerRefusal`. The result differs only for a profile with `steerOutcomeIsLatest`, which is Antigravity. The ACP bridge exposes no `steer`, so the SDK cannot reach this path yet.
+- `runtimes/antigravity/session.ts` and `shared/acp/profile.ts` take upstream bytes for that hook.
+- `runtimes/dsh/projection.ts` and `jobs.ts` turn native `job/registered` and `job/settled` into `task_started` and `task_ended` events. `adapters/dsh/projection.ts` has no task case, so they stop at its `default: break`, as subagent tasks already do. No Host sees them.
+
+No SDK source other than vendor paths changes. Build assets copy this source to `dist/assets/provenance/oar/6bdd273/`.

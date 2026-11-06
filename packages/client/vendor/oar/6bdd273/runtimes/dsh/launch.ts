@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 0e92470 for an injected process, an explicit environment and a caller-owned directory (Apache-2.0).
+// BYOK change: Modified from OAR 6bdd273 for an injected process, an explicit environment and a caller-owned directory (Apache-2.0).
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";

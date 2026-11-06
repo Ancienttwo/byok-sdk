@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 0e92470 to mark a failure class taken from error text (Apache-2.0).
+// BYOK change: Modified from OAR 6bdd273 to mark a failure class taken from error text (Apache-2.0).
 import type { FailureClass } from "../contracts/session.js";
 import { asRecord, parseJson } from "./json.js";
 
