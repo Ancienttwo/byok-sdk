@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import { CompactVetoError, occurrenceOfIntentKey } from '@byok-sdk/server/execution-core';
+import { CompactVetoError } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { compactVeto } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { storedKey } from './layout';
@@ -38,7 +38,7 @@ export async function decideCompaction(client: PoolClient, scopeKey: string, sta
   // As K4 `compact`, the K8 veto sees every acknowledged intent before anything is removed. H keeps one receipt per task,
   // the accepted reply itself (messages.ts), so only a delegated reply body without its verdict can refuse on the receipt.
   for (const turnId of present) {
-    const reason = compactVeto(state, turnId, { hasIntent: id => rows.has(storedKey(id)), receipt: taskId => state.replies[taskId], occurrenceOf: occurrenceOfIntentKey });
+    const reason = compactVeto(state, turnId, { hasIntent: id => rows.has(storedKey(id)), receipt: taskId => state.replies[taskId] });
     if (reason !== undefined) throw new CompactVetoError(turnId, reason);
   }
   for (const turnId of turnIds) {

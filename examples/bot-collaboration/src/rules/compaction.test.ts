@@ -9,7 +9,7 @@ function rows() {
   const state = { turns: {} as Record<string, Turn>, delegations: {} as Record<string, Delegation>,
     team: { seats: {} as Record<string, Seat> }, replies: {} as Record<string, AcceptedReply> };
   const intents = new Set<string>(), receipts = new Map<string, { messageId: string; contentHash: string }>();
-  const facts: CompactFacts = { hasIntent: turnId => intents.has(turnId), receipt: taskId => receipts.get(taskId), occurrenceOf: () => undefined };
+  const facts: CompactFacts = { hasIntent: turnId => intents.has(turnId), receipt: taskId => receipts.get(taskId) };
   const turn = (id: string, fields: Partial<Turn> = {}) => {
     state.turns[id] = { id, root: id, botId: 'main', source: 'user', request: '', hop: 0, status: 'succeeded', conclusion: 'succeeded', reported: true, ...fields };
   };

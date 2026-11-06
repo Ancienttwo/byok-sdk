@@ -7,13 +7,31 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "7015d7becb242fcec86c3470deb685c10d93898dba281ddaa2aea06399024dff"
+    "snapshotSha256": "02819de5186018171876702e8275fd556e0fda08aefa411ca2bc5679ce350931"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "k8-dream-compaction-veto",
+      "impact": "additive",
+      "summary": "K8 keeps a dream intent until its result syncs (#1490). botCompactVeto and the rule compactVeto now refuse a dream intent key with 'The dream result is not synced' until the sync closes that dream, so a compaction that names the key throws CompactVetoError and changes nothing. No Host code change: the caller retries after a later pass, as for a Turn K8 still reads.",
+      "migration": "examples/bot-collaboration/README.md#compaction",
+      "items": [
+        "example:bot-collaboration"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=84817467889ca31d",
+      "after": "K8 0.0.1 src-sha256=12bd95552245d39c",
+      "entry": "k8-dream-compaction-veto"
+    }
+  ]
 }

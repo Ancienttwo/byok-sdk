@@ -17,9 +17,10 @@ export interface CompactFacts {
   hasIntent(turnId: string): boolean;
   /** The receipt that the store keeps for the replay of the task's accepted Agent message. */
   receipt(taskId: string): { readonly messageId: string; readonly contentHash: string } | undefined;
-  /** The occurrence key that an intent key names, or `undefined` for any other key. */
-  occurrenceOf(key: string): string | undefined;
 }
+
+/** The occurrence key that an intent key names. K4 `occurrenceIntentKey` owns the format, and a rule cannot import the K4 root entry. */
+const occurrenceOf = (key: string) => key.startsWith('occurrence:') ? key.slice('occurrence:'.length) : undefined;
 
 /**
  * Refuses the compaction of the intent of Turn `key` with a reason, or allows it with `undefined` (#816, #793 S8). A Turn id is
@@ -28,7 +29,7 @@ export interface CompactFacts {
  * Any other key without a Turn, for example a Host job, is not a K8 key. L's K4 veto and H's compaction both run this rule.
  */
 export function compactVeto(state: CompactState, key: string, facts: CompactFacts): string | undefined {
-  const occurrence = facts.occurrenceOf(key);
+  const occurrence = occurrenceOf(key);
   if (occurrence !== undefined && state.dreams && Object.hasOwn(state.dreams.open, occurrence)) return 'The dream result is not synced';
   const turn = Object.hasOwn(state.turns, key) ? state.turns[key]! : undefined;
   if (!turn) return undefined;
