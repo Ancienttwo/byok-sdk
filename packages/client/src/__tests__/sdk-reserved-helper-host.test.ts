@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin } from '../sdk-reserved-helper-host';
+import { sdkReservedHelperArgumentCount } from '../sdk-reserved-helper-context';
 import { runSdkReservedHelperCommand } from '../lifecycle/sdk-reserved-helper-command';
 import { preflightAgentMessageMcp } from '../daemon/agent-message-mcp-preflight';
 
@@ -95,10 +96,27 @@ describe('SDK-reserved helper host composition', () => {
     }
   });
 
+  it.each(['agent-message-mcp', 'agent-result-mcp', 'agent-memory-mcp'] as const)('%s refuses an unusable context file', async (kind) => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-context-'));
+    roots.push(dir);
+    const blank = path.join(dir, 'blank.json');
+    await fs.writeFile(blank, '{}', { mode: 0o600 });
+    await expect(runSdkReservedHelper(kind, [path.join(dir, 'missing.json')])).rejects.toThrow(/cannot read the SDK-reserved helper context file/);
+    await expect(runSdkReservedHelper(kind, [dir])).rejects.toThrow(/cannot read the SDK-reserved helper context file/);
+    await expect(runSdkReservedHelper(kind, [blank])).rejects.toThrow(/has no storeDir/);
+    await expect(runSdkReservedHelper(kind, ['relative.json'])).rejects.toThrow(/must be absolute/);
+  });
+
   it('retains exact MCP arity at both dispatch boundaries', async () => {
-    for (const kind of ['agent-message-mcp', 'agent-result-mcp', 'agent-memory-mcp', 'agent-memory-describe', 'agent-team-mcp'] as const) {
+    for (const kind of ['agent-memory-describe', 'agent-team-mcp'] as const) {
       await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind, '--config', '/x'])).rejects.toThrow(/invalid/);
       await expect(runSdkReservedHelper(kind, ['extra'])).rejects.toThrow(/do not accept arguments/);
+    }
+    for (const kind of ['agent-message-mcp', 'agent-result-mcp', 'agent-memory-mcp'] as const) {
+      await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind])).rejects.toThrow(/invalid/);
+      await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind, '--config', '/x'])).rejects.toThrow(/invalid/);
+      await expect(runSdkReservedHelper(kind)).rejects.toThrow(/exactly one context file/);
+      await expect(runSdkReservedHelper(kind, ['/a', '/b'])).rejects.toThrow(/exactly one context file/);
     }
     await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND])).rejects.toThrow(/invalid/);
   });
@@ -233,7 +251,6 @@ describe('SDK-reserved helper host composition', () => {
     await expect(preflightAgentMessageMcp({
       command: process.execPath,
       args: [helper],
-      env: { BYOK_STORE_DIR: '/tmp/store', BYOK_PRODUCT_ID: 'product', BYOK_AGENT_MESSAGE_CONTEXT: 'context' },
     }, PROBE_BASE_ENV)).resolves.toBeUndefined();
 
     const broken = await fixture('broken.mjs', `process.stderr.write('unknown command\\n'); process.exit(2);`);
@@ -284,7 +301,8 @@ it('accepts exactly the manifest helper kinds and rejects every other kind', asy
   const { reservedHelperKinds } = sdkDistributionManifest;
   expect(Object.keys(sdkDistributionManifest)).not.toContain('piSubagentHelperKinds');
   for (const kind of reservedHelperKinds) {
-    await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind])).resolves.toBe(true);
+    const argv = sdkReservedHelperArgumentCount(kind) === 1 ? ['/context.json'] : [];
+    await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind, ...argv])).resolves.toBe(true);
   }
   expect(runner.mock.calls.map(([kind]) => kind)).toEqual([...reservedHelperKinds]);
   // Pi subagent children run inside pi-subagents; nothing re-enters the helper host for them.

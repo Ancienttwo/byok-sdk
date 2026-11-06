@@ -51,17 +51,11 @@ try {
       { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } },
       { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
     ].map((value) => JSON.stringify(value)).join('\n') + '\n';
-    const result = spawnSync(executable, ['__byok_sdk_helper', kind], {
+    const contextFile = path.join(fixtureRoot, `${kind}-context.json`);
+    writeFileSync(contextFile, JSON.stringify({ storeDir: fixtureRoot, productId: 'single-file-smoke', contextToken: `${kind}-context`, mode: 'read-write', toolList: 'complete' }), { mode: 0o600 });
+    const result = spawnSync(executable, ['__byok_sdk_helper', kind, contextFile], {
       input,
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        BYOK_STORE_DIR: fixtureRoot,
-        BYOK_PRODUCT_ID: 'single-file-smoke',
-        BYOK_TASK_ID: 'single-file-task',
-        BYOK_AGENT_MESSAGE_CONTEXT: 'single-file-message-context',
-        BYOK_AGENT_MEMORY_CONTEXT: 'single-file-memory-context',
-      },
     });
     assert.equal(result.status, 0, `${kind}: ${result.stdout}${result.stderr}`);
     const responses = result.stdout.trim().split('\n').map((line) => JSON.parse(line));

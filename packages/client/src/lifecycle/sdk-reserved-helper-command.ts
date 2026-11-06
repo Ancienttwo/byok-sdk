@@ -1,4 +1,5 @@
 import { BYOK_SDK_HELPER_SUBCOMMAND, sdkReservedHelperKinds, type SdkReservedHelperKind } from '../sdk-reserved-helper-host';
+import { sdkReservedHelperArgumentCount } from '../sdk-reserved-helper-context';
 import { runSdkReservedHelper } from '../bin/sdk-reserved-helper-runners';
 
 const RESERVED_HELPER_KIND_SET: ReadonlySet<string> = new Set(sdkReservedHelperKinds);
@@ -50,9 +51,9 @@ export async function runSdkReservedHelperCommand(
 ): Promise<boolean> {
   if (argv[0] !== BYOK_SDK_HELPER_SUBCOMMAND) return false;
   declareBundledPiRuntime();
-  if (!isHelperKind(argv[1]) || (argv[1] !== 'pi-rpc' && argv[1] !== 'pi-prepared' && argv[1] !== 'pi-durable' && argv.length !== 2)) {
-    throw new Error('invalid SDK-reserved helper command');
-  }
+  if (!isHelperKind(argv[1])) throw new Error('invalid SDK-reserved helper command');
+  const argumentCount = sdkReservedHelperArgumentCount(argv[1]);
+  if (argumentCount !== undefined && argv.length !== 2 + argumentCount) throw new Error('invalid SDK-reserved helper command');
   // These three kinds import the runtime host in `runSdkReservedHelper`. The MCP kinds never load Pi.
   if (argv[1] === 'pi-rpc' || argv[1] === 'pi-prepared' || argv[1] === 'pi-durable') loadNodeUndici();
   await runSdkReservedHelper(argv[1], argv.slice(2));

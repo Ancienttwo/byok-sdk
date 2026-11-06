@@ -19,6 +19,7 @@ import { freezeRuntimeAdapterDescriptor, type Session } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -132,7 +133,7 @@ describe('required Agent message completion gate', () => {
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq: 1 }));
     const ctx = adapter.startCalls[0]!.ctx;
-    const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+    const token = reservedMcpToken(ctx.mcpServers!.byokagentmessage);
     let release!: () => void;
     let entered!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -202,14 +203,14 @@ describe('required Agent message completion gate', () => {
         const ctx = adapter.startCalls[index]!.ctx;
         workspaceDir = ctx.workspaceDir;
         expect(await runner.publishAgentMessage({
-          contextToken: ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!,
+          contextToken: reservedMcpToken(ctx.mcpServers!.byokagentmessage),
           contentType: 'text/markdown', body: 'staged before Session',
         })).toMatchObject({ state: 'staged' });
         await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'pre-active cancel' }, { taskId, seq: index * 2 + 2 }));
         await offer;
         expect(sent.filter(e => e.type === 'task.cancelled')).toHaveLength(index + 1);
         await expect(runner.publishAgentMessage({
-          contextToken: ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!,
+          contextToken: reservedMcpToken(ctx.mcpServers!.byokagentmessage),
           contentType: 'text/markdown', body: 'staged before Session',
         })).rejects.toThrow('invalid or expired');
         const reopened = await AgentMessageOutbox.open(workspaceDir);
@@ -285,7 +286,7 @@ describe('required Agent message completion gate', () => {
       await Promise.race([reachedStart, offer.then(() => { throw new Error('offer settled before the staged runtime started'); })]);
       expect(adapter.startCalls).toHaveLength(1);
       const ctx = adapter.startCalls[0]!.ctx;
-      const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+      const token = reservedMcpToken(ctx.mcpServers!.byokagentmessage);
       await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'retain exact draft' });
       const barrier = new Promise<void>(resolve => { releaseRevoke = resolve; });
       const revoke = AgentMessageOutbox.prototype.revoke;
@@ -349,7 +350,7 @@ describe('required Agent message completion gate', () => {
       await Promise.race([reachedStart, offer.then(() => { throw new Error('offer settled before the staged runtime started'); })]);
       expect(adapter.startCalls).toHaveLength(1);
       const ctx = adapter.startCalls[0]!.ctx;
-      const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+      const token = reservedMcpToken(ctx.mcpServers!.byokagentmessage);
       expect(await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'staged reply' })).toMatchObject({ state: 'staged' });
       let entered!: () => void;
       const gate = new Promise<void>(resolve => { release = resolve; });
@@ -384,7 +385,7 @@ describe('required Agent message completion gate', () => {
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq: 1 }));
     const ctx = adapter.startCalls[0]!.ctx;
-    const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+    const token = reservedMcpToken(ctx.mcpServers!.byokagentmessage);
     const file = path.join(ctx.workspaceDir, '.byok', 'messages', 'outbox-v1.jsonl');
     let release!: () => void;
     let entered!: () => void;
@@ -425,7 +426,7 @@ describe('required Agent message completion gate', () => {
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId: 'failure-after-send', seq: 1 }));
     const ctx = adapter.startCalls[0]!.ctx;
-    const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+    const token = reservedMcpToken(ctx.mcpServers!.byokagentmessage);
     await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'admission still pending' });
     await runner.shutdownActiveTasks('ordinary daemon shutdown');
     const reopened = await AgentMessageOutbox.open(ctx.workspaceDir);
@@ -503,7 +504,7 @@ describe('required Agent message completion gate', () => {
       const session = adapter.sessions[0]!;
       const close = vi.spyOn(session, 'close');
       const ctx = adapter.startCalls[0]!.ctx;
-      const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+      const token = reservedMcpToken(ctx.mcpServers!.byokagentmessage);
       await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'immutable reply' });
       const message = sent.find((e) => e.type === 'agent.message.publish');
       if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw new Error('missing message');
@@ -635,13 +636,11 @@ describe('required Agent message completion gate', () => {
     expect(preflightServer).toEqual(messageMcp);
     expect(preflightEnv).toEqual(projectPiMcpEnvironment(adapter.startCalls[0]!.ctx.env));
     expect(Object.keys(preflightEnv!)).not.toContain('BYOK_STORE_DIR');
-    expect(messageMcp).toMatchObject({
-      command: process.execPath,
-      args: ['/sdk/byok-agent-message-mcp.js'],
-      env: { BYOK_STORE_DIR: storeDir, BYOK_PRODUCT_ID: 'message-test' },
-    });
-    expect(messageMcp?.env).not.toHaveProperty('BYOK_TASK_ID');
-    const contextToken = messageMcp?.env?.BYOK_AGENT_MESSAGE_CONTEXT;
+    expect(messageMcp).toMatchObject({ command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js', expect.any(String)] });
+    expect(messageMcp?.env).toBeUndefined();
+    expect(reservedMcpContext(messageMcp)).toMatchObject({ storeDir, productId: 'message-test' });
+    expect(reservedMcpContext(messageMcp)).not.toHaveProperty('taskId');
+    const contextToken = reservedMcpToken(messageMcp);
     expect(contextToken).toMatch(/^[0-9a-f-]+\.[0-9a-f-]+$/);
     await expect(runner.publishAgentMessage({ contextToken: '0'.repeat(64), contentType: 'text/markdown', body: 'wrong task' }))
       .rejects.toThrow(/invalid or expired/);
@@ -686,7 +685,7 @@ describe('required Agent message completion gate', () => {
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId: refusedTaskId, seq: 4 }));
-    const refusedToken = adapter.startCalls[1]?.ctx.mcpServers?.byokagentmessage?.env?.BYOK_AGENT_MESSAGE_CONTEXT;
+    const refusedToken = reservedMcpToken(adapter.startCalls[1]?.ctx.mcpServers?.byokagentmessage);
     const refusedDraft = await runner.publishAgentMessage({ contextToken: refusedToken!, contentType: 'text/markdown', body: 'refuse me' });
     const refusedMessage = sent.find((envelope) => envelope.type === 'agent.message.publish' && envelope.payload.messageId === refusedDraft.messageId);
     if (refusedMessage?.type !== 'agent.message.publish' || refusedMessage.payload.sealed !== undefined) throw new Error('missing refused message publish');

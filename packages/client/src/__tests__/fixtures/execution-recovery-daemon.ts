@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, promises as fs, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import type { McpStdioServerConfig } from '../../types';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
 import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../../adapters/process-tree';
 import { connectControlClient } from '../../daemon/control-client';
@@ -46,6 +47,10 @@ interface Config {
 }
 
 if (await runSdkReservedHelperCommand()) process.exit(0);
+
+function contextTokenOf(server: McpStdioServerConfig): string {
+  return (JSON.parse(readFileSync(server.args!.at(-1)!, 'utf8')) as { contextToken: string }).contextToken;
+}
 
 const config = JSON.parse(readFileSync(process.argv[2]!, 'utf8')) as Config;
 await fs.mkdir(config.controlDir, { recursive: true });
@@ -107,7 +112,7 @@ class ControlledSession implements Session {
           const connected = await connectControlClient({ storeDir: config.storeDir, productId: config.productId });
           if (!connected.ok) throw new Error(connected.reason);
           try {
-            await connected.client.request('agent_messages.publish', { contextToken: server.env!.BYOK_AGENT_MESSAGE_CONTEXT, contentType: 'text/markdown', body: '**exact durable reply**' });
+            await connected.client.request('agent_messages.publish', { contextToken: contextTokenOf(server), contentType: 'text/markdown', body: '**exact durable reply**' });
             checkpoint('message-staged');
           } finally { connected.client.close(); }
         }
@@ -124,7 +129,7 @@ class ControlledSession implements Session {
             const connected = await connectControlClient({ storeDir: config.storeDir, productId: config.productId });
             if (!connected.ok) throw new Error(connected.reason);
             try {
-              const receipt = await connected.client.request('agent_results.submit', { contextToken: resultServer.env!.BYOK_AGENT_RESULT_CONTEXT, outcome });
+              const receipt = await connected.client.request('agent_results.submit', { contextToken: contextTokenOf(resultServer), outcome });
               writeFileAtomic(path.join(config.controlDir, `${self.taskId}.receipt.json`), JSON.stringify(receipt));
               checkpoint('result-staged');
             } finally { connected.client.close(); }

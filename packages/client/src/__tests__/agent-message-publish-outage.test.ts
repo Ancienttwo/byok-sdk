@@ -1,5 +1,5 @@
 import { createTestDeviceStore } from './fixtures/device-credentials';
-import { testScratchOwner } from './fixtures/execution-scratch';
+import { testScratchOwner, reservedMcpToken } from './fixtures/execution-scratch';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -118,7 +118,7 @@ describe('one pending agent.message.publish per message during a route outage (#
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId: 'live-outage', seq: 1 }));
-    const token = adapter.startCalls[0]!.ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+    const token = reservedMcpToken(adapter.startCalls[0]!.ctx.mcpServers!.byokagentmessage);
 
     f.server.setFailMessagesSends(true);
     await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'reply during outage' });

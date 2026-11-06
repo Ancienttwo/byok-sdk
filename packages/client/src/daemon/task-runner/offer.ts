@@ -350,7 +350,7 @@ export async function handleOffer(
 
     stage('claim');
     const claimed = await claimOffer.call(this, phase, {
-      agentBinding, agentRef, pick, manifest, preparedLaunch, blobAbort, payload, taskMcpServers,
+      agentBinding, agentRef, pick, scratch, manifest, preparedLaunch, blobAbort, payload, taskMcpServers,
     });
     if (claimed === undefined) return;
     const { resolvedInstruction } = claimed;

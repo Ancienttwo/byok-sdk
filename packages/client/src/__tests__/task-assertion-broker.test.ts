@@ -33,6 +33,7 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
+import { reservedMcpToken } from './fixtures/execution-scratch';
 
 /**
  * Contract §8.1 / §8.2(1) / I12 / AC11, daemon half: the `task_assertion.issue`
@@ -822,7 +823,7 @@ describe('task assertion broker: task_assertion.issue', () => {
       ...(memoryAvailable ? ['byokagentmemory'] : []),
     ].sort());
     if (memoryAvailable) {
-      expect(servers.byokagentmemory?.env?.BYOK_AGENT_MEMORY_CONTEXT).toEqual(expect.any(String));
+      expect(reservedMcpToken(servers.byokagentmemory)).toEqual(expect.any(String));
     }
     for (const definition of Object.values(servers)) {
       expect(definition.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();

@@ -1,8 +1,18 @@
-import { mkdtempSync, promises as fs } from 'node:fs';
+import { mkdtempSync, promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll } from 'vitest';
 import { createExecutionScratch, ScratchRoot, type ExecutionScratch } from '../../daemon/retention/scratch';
+
+/** The context a reserved MCP entry points at: the file named by its last argument. */
+export function reservedMcpContext(server: { readonly args?: readonly string[] } | undefined): Record<string, string> {
+  return JSON.parse(readFileSync(server!.args!.at(-1)!, 'utf8')) as Record<string, string>;
+}
+
+/** The token of {@link reservedMcpContext}, or `undefined` for an entry the task did not get. */
+export function reservedMcpToken(server: { readonly args?: readonly string[] } | undefined): string {
+  return (server === undefined ? undefined : reservedMcpContext(server).contextToken) as string;
+}
 
 const roots: string[] = [];
 export function testScratchRoot(): string {

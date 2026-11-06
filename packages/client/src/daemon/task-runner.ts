@@ -2,7 +2,7 @@ import { type ResultReplyFailure } from './result-reply-failure';
 import type { RuntimeTaskInput } from '../types';
 import type { RuntimeUnavailableAdmission } from '../runtime-unavailable';
 import type { ActivityIngress } from '@byok-sdk/protocol';
-import type { ScratchRoot } from './retention/scratch';
+import type { ExecutionScratch, ScratchRoot } from './retention/scratch';
 import { StartupOwnership } from './startup-ownership';
 import {
   createEnvelope,
@@ -1121,16 +1121,18 @@ export class TaskRunner {
     existing: Readonly<Record<string, McpStdioServerConfig>> | undefined,
     taskId: string,
     requirement: Readonly<AgentMessageEgressRequirement> | undefined,
-  ): Readonly<Record<string, McpStdioServerConfig>> | undefined {
-    return withAgentMessageMcp.call(this, existing, taskId, requirement);
+    scratch: ExecutionScratch,
+  ): Promise<Readonly<Record<string, McpStdioServerConfig>> | undefined> {
+    return withAgentMessageMcp.call(this, existing, taskId, requirement, scratch);
   }
 
   private withAgentResultMcp(
     existing: Readonly<Record<string, McpStdioServerConfig>> | undefined,
     taskId: string,
     selection: Readonly<TerminalProjectionSelection> | undefined,
-  ): Readonly<Record<string, McpStdioServerConfig>> | undefined {
-    return withAgentResultMcp.call(this, existing, taskId, selection);
+    scratch: ExecutionScratch,
+  ): Promise<Readonly<Record<string, McpStdioServerConfig>> | undefined> {
+    return withAgentResultMcp.call(this, existing, taskId, selection, scratch);
   }
 
   private revokeAgentResultContext(taskId: string): void {
@@ -1167,8 +1169,9 @@ export class TaskRunner {
     mode: 'read' | 'read-write',
     bin: {command: string; args: readonly string[]},
     toolList: 'granted' | 'complete',
-  ): Readonly<Record<string, McpStdioServerConfig>> {
-    return withAgentMemoryMcp.call(this, existing, taskId, agentRef, mode, bin, toolList);
+    scratch: ExecutionScratch,
+  ): Promise<Readonly<Record<string, McpStdioServerConfig>>> {
+    return withAgentMemoryMcp.call(this, existing, taskId, agentRef, mode, bin, toolList, scratch);
   }
 
   /** Reconstruct all sensitive context from the active sealed task, never from MCP/model arguments. */

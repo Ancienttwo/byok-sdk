@@ -15,6 +15,7 @@ import * as mutationGate from '../util/path-mutation-gate';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { reservedMcpToken } from './fixtures/execution-scratch';
 
 const roots: string[] = [];
 const heldGates = new Set<string>();
@@ -90,7 +91,7 @@ async function activeFixture(unsent: boolean, overrides: Partial<TaskRunnerDeps>
   expect(h.runner.activeTaskCount, JSON.stringify(h.sent)).toBe(1);
   expect(h.sent.filter(e => e.type === 'task.started')).toHaveLength(1);
   const ctx = h.adapter.startCalls[0]!.ctx;
-  const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+  const token = reservedMcpToken(ctx.mcpServers!.byokagentmessage);
   const entered = deferred(); const gate = deferred();
   const activate = AgentMessageOutbox.prototype.activate;
   const activation = unsent ? vi.spyOn(AgentMessageOutbox.prototype, 'activate').mockImplementationOnce(async function (this: AgentMessageOutbox, ...args) {

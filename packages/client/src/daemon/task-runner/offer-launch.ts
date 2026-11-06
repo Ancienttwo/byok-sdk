@@ -263,7 +263,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
 
 export interface OfferClaimInput
   extends Pick<OfferRequest, 'agentRef'>,
-    Pick<OfferRuntime, 'pick'>,
+    Pick<OfferRuntime, 'pick' | 'scratch'>,
     Pick<OfferManifest, 'manifest' | 'preparedLaunch'> {
   readonly agentBinding: OfferWorkspace['agentBinding'];
   readonly blobAbort: AbortController;
@@ -274,7 +274,7 @@ export interface OfferClaimInput
 /** Claims the task, resolves its instruction and binds prepared Agent memory. */
 export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, input: OfferClaimInput) {
   const { taskId, decline, admissionWithdrawn, admission } = phase;
-  const { agentBinding, agentRef, pick, manifest, preparedLaunch, blobAbort, payload } = input;
+  const { agentBinding, agentRef, pick, scratch, manifest, preparedLaunch, blobAbort, payload } = input;
   let { taskMcpServers } = input;
   // All semantic admission is now in `prepare()` and the frozen manifest.
   // Claim is the first externally visible commitment; instruction bytes and
@@ -388,7 +388,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
     try {
       const helper = this['deps'].agentMemoryMcpBin;
       if (preparedLaunch.memory === null || helper === undefined) throw new Error('prepared Agent memory execution state missing');
-      taskMcpServers = this['withAgentMemoryMcp'](taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, helper, 'complete');
+      taskMcpServers = await this['withAgentMemoryMcp'](taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, helper, 'complete', scratch);
     } catch {
       const reason = 'agent_memory_unavailable: the sealed Agent memory helper could not be bound for launch';
       await this['failClaimedAgent'](taskId, reason, false, {

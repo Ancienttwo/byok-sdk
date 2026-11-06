@@ -318,12 +318,16 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
     /^packages\/client\/src\/__tests__\/runtime-contract\//,
     /^scripts\/ci\/runtime-contract-install(?:\.test)?\.mjs$/,
+    // The reserved helpers' context file: their entries, argv and reader.
+    /^packages\/client\/src\/(?:daemon\/task-runner\/mcp-contexts|sdk-reserved-helper-context|bin\/sdk-reserved-helper-runners|bin\/byok-agent-(?:message|result|memory)-mcp|lifecycle\/sdk-reserved-helper-command)\.ts$/,
   ],
   'credential-isolation-audit': [
     /^packages\/client\/src\/adapters\//,
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
     /^packages\/client\/scripts\/(?:credential-audit-core|credential-audit-positive-control|linux-credential-audit|adapter-task-smoke)\.mjs$/,
     /^packages\/keys\/src\//,
+    // The reserved helpers' context file: their entries, argv and reader.
+    /^packages\/client\/src\/(?:daemon\/task-runner\/mcp-contexts|sdk-reserved-helper-context|bin\/sdk-reserved-helper-runners|bin\/byok-agent-(?:message|result|memory)-mcp|lifecycle\/sdk-reserved-helper-command)\.ts$/,
   ],
   // #1364: the Windows leg runs these suites under a freshly created
   // standard-user account.
@@ -334,6 +338,8 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/__tests__\/pi-rpc-key-custody\.test\.ts$/,
     // #1445: real Credential Manager under the standard-user token.
     /^packages\/client\/src\/__tests__\/device-credential-store\.native\.test\.ts$/,
+    // The reserved helper argv that a packed product re-enters.
+    /^packages\/client\/src\/(?:bin\/sdk-reserved-helper-runners|bin\/byok-agent-(?:message|result|memory)-mcp|lifecycle\/sdk-reserved-helper-command)\.ts$/,
   ],
 });
 // #649 and #702: release script paths that the owner reviewed for 0.28.2.

@@ -1,3 +1,5 @@
+import { promises as fs } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import type { Readable } from 'node:stream';
 import { connectControlClient, type ControlClient } from '../daemon/control-client';
 import { serveAgentMessageMcpOverStdio, type AgentMessageMcpDeps } from './agent-message-mcp-server';
@@ -6,12 +8,32 @@ import { serveAgentMemoryDescriptorOverStdio, serveAgentMemoryMcpOverStdio, serv
 import { parsePreparedAgentMemoryMode } from '../agent-memory/prepared-capability';
 import { serveTeamMcpOverStdio, type TeamMcpDeps } from './team-mcp-server';
 import type { SdkReservedHelperKind } from '../sdk-reserved-helper-host';
+import { sdkReservedHelperArgumentCount, type SdkReservedMcpContext } from '../sdk-reserved-helper-context';
 
 
 function required(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`missing required environment variable ${name}`);
   return value;
+}
+
+/** The daemon's context file for this helper; the one source of its task identity. */
+async function readContextFile(argv: readonly string[]): Promise<SdkReservedMcpContext & Readonly<Record<string, unknown>>> {
+  const file = argv[0]!;
+  if (!isAbsolute(file)) throw new Error('the SDK-reserved helper context file path must be absolute');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await fs.readFile(file, 'utf8'));
+  } catch (cause) {
+    throw new Error(`cannot read the SDK-reserved helper context file ${file}`, { cause });
+  }
+  const context = (parsed ?? {}) as Partial<SdkReservedMcpContext>;
+  for (const field of ['storeDir', 'productId', 'contextToken'] as const) {
+    if (typeof context[field] !== 'string' || context[field] === '') {
+      throw new Error(`SDK-reserved helper context file ${file} has no ${field}`);
+    }
+  }
+  return context as SdkReservedMcpContext & Readonly<Record<string, unknown>>;
 }
 
 function waitForInputClose(input: Readable = process.stdin): Promise<void> {
@@ -27,10 +49,8 @@ function waitForInputClose(input: Readable = process.stdin): Promise<void> {
   });
 }
 
-async function runAgentMessageMcp(): Promise<void> {
-  const storeDir = required('BYOK_STORE_DIR');
-  const productId = required('BYOK_PRODUCT_ID');
-  const contextToken = required('BYOK_AGENT_MESSAGE_CONTEXT');
+async function runAgentMessageMcp(argv: readonly string[]): Promise<void> {
+  const { storeDir, productId, contextToken } = await readContextFile(argv);
   let clientPromise: Promise<ControlClient> | undefined;
   const client = async (): Promise<ControlClient> => {
     if (!clientPromise) clientPromise = connectControlClient({ storeDir, productId }).then((result) => {
@@ -46,11 +66,9 @@ async function runAgentMessageMcp(): Promise<void> {
   await waitForInputClose();
 }
 
-/** The context token arrives by env, as for the message helper; the frozen schema only over the control socket. */
-async function runAgentResultMcp(): Promise<void> {
-  const storeDir = required('BYOK_STORE_DIR');
-  const productId = required('BYOK_PRODUCT_ID');
-  const contextToken = required('BYOK_AGENT_RESULT_CONTEXT');
+/** The context token arrives by file, as for the message helper; the frozen schema only over the control socket. */
+async function runAgentResultMcp(argv: readonly string[]): Promise<void> {
+  const { storeDir, productId, contextToken } = await readContextFile(argv);
   let clientPromise: Promise<ControlClient> | undefined;
   const client = async (): Promise<ControlClient> => {
     if (!clientPromise) clientPromise = connectControlClient({ storeDir, productId }).then((result) => {
@@ -70,14 +88,13 @@ async function runAgentResultMcp(): Promise<void> {
   (await clientPromise?.catch(() => undefined))?.close();
 }
 
-async function runAgentMemoryMcp(): Promise<void> {
-  const storeDir = required('BYOK_STORE_DIR');
-  const productId = required('BYOK_PRODUCT_ID');
-  const contextToken = required('BYOK_AGENT_MEMORY_CONTEXT');
-  const mode = parsePreparedAgentMemoryMode(required('BYOK_PREPARED_AGENT_MEMORY_MODE'));
-  if (mode === 'none') throw new Error('BYOK_PREPARED_AGENT_MEMORY_MODE must grant read or read-write');
-  const toolList = process.env.BYOK_AGENT_MEMORY_TOOL_LIST;
-  if (toolList !== undefined && toolList !== 'granted') throw new Error('BYOK_AGENT_MEMORY_TOOL_LIST must be granted when present');
+async function runAgentMemoryMcp(argv: readonly string[]): Promise<void> {
+  const context = await readContextFile(argv);
+  const { storeDir, productId, contextToken } = context;
+  const mode = parsePreparedAgentMemoryMode(context.mode);
+  if (mode === 'none') throw new Error('the Agent memory context must grant read or read-write');
+  const { toolList } = context;
+  if (toolList !== 'granted' && toolList !== 'complete') throw new Error('the Agent memory context must name granted or complete');
   let clientPromise: Promise<ControlClient> | undefined;
   const client = async (): Promise<ControlClient> => {
     if (!clientPromise) clientPromise = connectControlClient({ storeDir, productId }).then((result) => {
@@ -96,9 +113,6 @@ async function runAgentMemoryMcp(): Promise<void> {
 }
 
 async function runAgentMemoryDescribe(): Promise<void> {
-  for (const name of ['BYOK_STORE_DIR', 'BYOK_PRODUCT_ID', 'BYOK_AGENT_MEMORY_CONTEXT', 'BYOK_PREPARED_AGENT_MEMORY_MODE', 'BYOK_AGENT_MEMORY_TOOL_LIST']) {
-    if (process.env[name] !== undefined) throw new Error(`agent-memory-describe rejects ${name}`);
-  }
   serveAgentMemoryDescriptorOverStdio({});
   await waitForInputClose();
 }
@@ -129,8 +143,9 @@ async function runAgentTeamMcp(): Promise<void> {
  * undici first (#700); `runSdkReservedHelperCommand` does.
  */
 export async function runSdkReservedHelper(kind: SdkReservedHelperKind, argv: readonly string[] = []): Promise<void> {
-  if (kind !== 'pi-rpc' && kind !== 'pi-prepared' && kind !== 'pi-durable' && argv.length !== 0) {
-    throw new Error('SDK-reserved MCP helpers do not accept arguments');
+  const argumentCount = sdkReservedHelperArgumentCount(kind);
+  if (argumentCount !== undefined && argv.length !== argumentCount) {
+    throw new Error(argumentCount === 0 ? 'SDK-reserved MCP helpers do not accept arguments' : 'SDK-reserved task helpers take exactly one context file path');
   }
   switch (kind) {
     // The reserved helper is the single-file re-entry, which bundles Pi.
@@ -144,13 +159,13 @@ export async function runSdkReservedHelper(kind: SdkReservedHelperKind, argv: re
       await (await import('#byok-pi-runtime-host')).runPiPreparedHost(argv);
       return;
     case 'agent-message-mcp':
-      await runAgentMessageMcp();
+      await runAgentMessageMcp(argv);
       return;
     case 'agent-result-mcp':
-      await runAgentResultMcp();
+      await runAgentResultMcp(argv);
       return;
     case 'agent-memory-mcp':
-      await runAgentMemoryMcp();
+      await runAgentMemoryMcp(argv);
       return;
     case 'agent-memory-describe':
       await runAgentMemoryDescribe();

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { testScratchRoot } from './fixtures/execution-scratch';
+import { testScratchRoot, reservedMcpToken } from './fixtures/execution-scratch';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -195,7 +195,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
         // The runtime authors its reply through the same daemon control route
         // the shipped message helper uses, then the execution fails or the
         // Host cancels it.
-        const token = adapter.startCalls[index]?.ctx.mcpServers?.byokagentmessage?.env?.BYOK_AGENT_MESSAGE_CONTEXT;
+        const token = reservedMcpToken(adapter.startCalls[index]?.ctx.mcpServers?.byokagentmessage);
         if (!token) throw new Error('synthetic Host: missing Agent message context');
         const connected = await connectControlClient({ storeDir, productId: options.productId });
         if (!connected.ok) throw new Error(connected.reason);
@@ -249,7 +249,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       const document: SummaryDocument = { schemaVersion: 'synthetic-host.summary.v1', jobId: job.jobId,
         coveredThroughTurnSeq: job.targetCoveredThrough, text };
       // The runtime submits the Summary through the route the SDK result helper uses.
-      const token = adapter.startCalls[index]?.ctx.mcpServers?.byokagentresult?.env?.BYOK_AGENT_RESULT_CONTEXT;
+      const token = reservedMcpToken(adapter.startCalls[index]?.ctx.mcpServers?.byokagentresult);
       if (!token) throw new Error('synthetic Host: missing Agent result context');
       const connected = await connectControlClient({ storeDir, productId: options.productId });
       if (!connected.ok) throw new Error(connected.reason);
