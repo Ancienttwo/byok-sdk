@@ -6,11 +6,13 @@
   never did before: every call reached the classifier with an empty input, so a
   destructive command or a write outside the workspace ran with no reminder.
   Hosts see `tool_use.input` on these two runtimes change from OAR's JSON text,
-  capped at 10,000 characters, to the opening frame's `rawInput` object, whole.
-  A `rawInput` that is not an object leaves `input` out. Grok's `target_file`
-  now counts as a path and `search_replace` as a mutating tool, for every
-  runtime. Grok's `grep`, `list_dir`, `monitor` and `use_tool` are unprobed, so
-  their paths and commands may still go unclassified.
+  capped at 10,000 characters, to the whole native object. On Grok that is the
+  opening frame's `rawInput`, and a `rawInput` that is not an object leaves
+  `input` out. On dsh it is parsed from the bridge's native `tool/call`
+  `arguments`, and arguments that are not a JSON object fail the session.
+  Grok's `target_file` now counts as a path and `search_replace` as a mutating
+  tool, for every runtime. Grok's `grep`, `list_dir`, `monitor` and `use_tool`
+  are unprobed, so their paths and commands may still go unclassified.
 
 - **Fixed (client)** — Hosts no longer get an `error` event each time Codex
   reconnects. A native `error` frame with `willRetry: true` now produces no

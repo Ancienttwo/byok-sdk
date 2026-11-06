@@ -4478,8 +4478,8 @@ The built-in classifier marks a call high-risk when:
   `.git-credentials`, `.npmrc`, shell startup files, `Library/Keychains`,
   `Library/LaunchAgents`, `.config/autostart`), read or write;
 - a mutating file tool (`write`, `edit`, `multiedit`, `notebookedit`,
-  `apply_patch`, `write_file`, `patch`, `search_replace`) targets a path outside
-  the task workspace granted by the daemon.
+  `apply_patch`, `write_file`, `patch`, `search_replace`, `edit_file`) targets a
+  path outside the task workspace granted by the daemon.
 
 The built-in fallback treats everything else, including ordinary shell commands,
 reads anywhere, writes in the workspace, web, MCP and subagent calls, as normal;
