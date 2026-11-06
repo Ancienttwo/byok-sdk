@@ -39,7 +39,7 @@ export class GrokProjection {
 
   constructor(private readonly rootSessionId: string) {}
 
-  /** Events for one record; `outcome` receives the root turn end, after its events. */
+  /** Events for one record; `outcome` receives the root turn end, after its events. `GrokSession` decides whether the turn ends or fails. */
   consume(input: AcpRecord, emit: (event: AgentEvent | MessageDraftDelta) => void, outcome: (turn: GrokTurnOutcome) => void): void {
     if (input.kind !== 'frame' || input.sessionId !== this.rootSessionId || input.agentPath.length > 0) return;
     const events = record(input.body)?.events;
@@ -98,7 +98,6 @@ export class GrokProjection {
       });
       return;
     }
-    emit({ type: 'turn_end' });
     outcome({ kind: turn.kind === 'aborted' ? 'aborted' : 'completed' });
   }
 

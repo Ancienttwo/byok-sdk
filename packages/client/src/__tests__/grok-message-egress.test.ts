@@ -26,12 +26,9 @@ async function temporary(prefix: string): Promise<string> {
   return value;
 }
 
-it('publishes the closing Grok reply on the message lane when Grok never called the message tool', async () => {
-  const log = path.join(await temporary('byok-grok-egress-log-'), 'agent.log');
-  vi.stubEnv('FAKE_ACP_LOG', log);
-  const sent: Envelope[] = [];
+async function grokRunner(sent: Envelope[]) {
   const storeDir = await temporary('byok-grok-egress-store-');
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
+  return new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
     adapters: [new GrokAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }) })],
     getServerCapabilities: () => ['custom-harness'],
     agentHome: new AgentHomeManager({ hostStorageRoot: await temporary('byok-grok-egress-home-') }),
@@ -43,8 +40,15 @@ it('publishes the closing Grok reply on the message lane when Grok never called 
     storeDir, productId: 'grok-egress-test', tenantId: 'tenant-grok-egress',
     agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
   });
-  const taskId = 'grok-egress-task';
-  const agentRef = { agentId: 'agent-grok', profileRevision: 'profile-r1' } as const;
+}
+const taskId = 'grok-egress-task';
+const agentRef = { agentId: 'agent-grok', profileRevision: 'profile-r1' } as const;
+
+it('publishes the closing Grok reply on the message lane when Grok never called the message tool', async () => {
+  const log = path.join(await temporary('byok-grok-egress-log-'), 'agent.log');
+  vi.stubEnv('FAKE_ACP_LOG', log);
+  const sent: Envelope[] = [];
+  const runner = await grokRunner(sent);
   await runner.handleEnvelope(createEnvelope('task.offer', {
     session: { mode: 'fresh' }, instruction: 'tool', harnessId: 'grok', agentRef,
     egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -70,4 +74,23 @@ it('publishes the closing Grok reply on the message lane when Grok never called 
   const complete = sent.find((envelope) => envelope.type === 'task.complete');
   if (complete?.type !== 'task.complete' || complete.payload.sealed !== undefined) throw new Error('missing plaintext task.complete');
   expect(complete.payload.finalMessage).toBe('Found a.txt.');
+});
+
+// The frames are real Grok 1.0.52 under a user `ask` rule, answered `cancelled` by the SDK's vendored client.
+it('fails the task when Grok stops on a permission request, and sends no task.complete', async () => {
+  const log = path.join(await temporary('byok-grok-egress-log-'), 'agent.log');
+  vi.stubEnv('FAKE_ACP_LOG', log);
+  const sent: Envelope[] = [];
+  const runner = await grokRunner(sent);
+  await runner.handleEnvelope(createEnvelope('task.offer', {
+    session: { mode: 'fresh' }, instruction: 'recorded-permission-stop', harnessId: 'grok', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+  }, { taskId, seq: 1 }));
+
+  await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true), { timeout: 8000 });
+  const failed = sent.find((envelope) => envelope.type === 'task.fail');
+  if (failed?.type !== 'task.fail' || failed.payload.sealed !== undefined) throw new Error('missing plaintext task.fail');
+  expect(failed.payload.reason).toMatch(/ended the turn as cancelled without an SDK cancel/);
+  expect(failed.payload.retryable).toBe(false);
+  expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
+  expect((await fs.readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).find(fact => fact.kind === 'permission').reply).toEqual({ outcome: { outcome: 'cancelled' } });
 });

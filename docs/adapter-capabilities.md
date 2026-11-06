@@ -69,7 +69,7 @@ second registry.
   only and passes other `can_use_tool` requests through as allow; Codex relays
   structured question IDs only, keeps `approvalPolicy: never` and refuses
   approval requests; Grok and dsh answer every permission request `cancelled`;
-  Pi has none.
+  Hermes refuses every one with `reject_once`; Pi has none.
 - MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`): Claude sets
   it for task toolset servers from its own `mcp_status` answer; Codex from the
   native `mcpToolCall` `server` and `tool`, for every server it runs, SDK
@@ -643,8 +643,11 @@ dependency.
   task environment. The retained records have the same 16 MiB default budget
   as Codex.
 - Permissions: Grok runs in its own approve-all mode. A permission request
-  that still reaches the client (a user's own rule or hook) is answered
-  `cancelled` and recorded. The SDK adds no second permission layer.
+  that still reaches the client (a user's own shell `ask` rule or `ask` hook)
+  is answered `cancelled` and recorded. Grok 1.0.52 then ends the turn as
+  cancelled and calls no model, so the task fails as semantic and
+  non-retryable unless the SDK asked for the cancel. A `reject_once` answer
+  ends the turn the same way. The SDK adds no second permission layer.
 - MCP toolsets: task stdio servers go in the ACP `mcpServers` of
   `session/new` and `session/resume`.
 - Closing reply: Grok streams text. The adapter emits one `progress` event per
@@ -718,9 +721,11 @@ identity. It omits the legacy boolean approval and native interactions, and
 declares no trajectory evidence.
 
 Hermes runs edits in ACP mode `dont_ask` and commands under `--yolo`. A
-permission request that still arrives (Hermes's sensitive-path guard) is
-answered `cancelled`. The adapter owns the Hermes gateway process tree and
-checks the gateway identity before and after the viewer attaches.
+permission request that still arrives (Hermes's guard on sensitive paths and
+agent instruction files) is refused with its `reject_once` option. The tool
+fails and the model sees the refusal. The adapter owns the Hermes gateway
+process tree and checks the gateway identity before and after the viewer
+attaches.
 
 Hermes declares no `toolAuthorizationAuto`, so nothing asks before a tool runs;
 an `all`-mode Task gets a reminder after the call starts. Hermes's ACP

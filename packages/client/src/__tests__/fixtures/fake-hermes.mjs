@@ -174,7 +174,7 @@ function runViewer() {
       const answer = await ask('session/request_permission', {
         sessionId,
         toolCall: { toolCallId: `t${turns}`, title: 'write_file: .env' },
-        options: [{ optionId: 'once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'deny', name: 'Deny', kind: 'reject_once' }],
+        options: [{ optionId: 'once', name: 'Allow once', kind: 'allow_once' }, ...(env.FAKE_HERMES_PERMISSION_NO_REJECT === '1' ? [] : [{ optionId: 'deny', name: 'Deny', kind: 'reject_once' }])],
       });
       receipt({ mode: 'acp', method: 'permission-answer', answer });
     }
