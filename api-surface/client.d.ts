@@ -2036,8 +2036,8 @@ export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
  *
  * A Host toolset server is the shape this entry exists for: a short-lived
  * stdio process the daemon spawns for one task, whose entire job is to take the
- * `BYOK_HOST_TOOLSET_CONTEXT` nonce it was started with, ask the running daemon
- * for one short-lived task assertion, and present it to the product's cloud.
+ * context file path it was started with, ask the running daemon for one
+ * short-lived task assertion, and present it to the product's cloud.
  * It never runs a daemon, never drives a coding-agent runtime, and never
  * touches the transport.
  *
@@ -2053,8 +2053,9 @@ export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
  * So this entry re-exports exactly the two request functions and their public
  * option/result types from `../daemon/assertion-client`, whose own transitive
  * imports are only `@byok-sdk/core`, `@byok-sdk/protocol`,
- * `../daemon/control-client`, `../daemon/control-protocol` and `../daemon/store`
- * (plus `zod` through core's protocol types). Nothing else may be added here.
+ * `../daemon/control-client`, `../daemon/control-protocol`, `../daemon/store`
+ * and `../sdk-reserved-helper-context` (plus `zod` through core's protocol
+ * types). Nothing else may be added here.
  *
  * Two things are deliberately absent, and this file is the record of why.
  *
@@ -2075,11 +2076,11 @@ export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
  * The root entry still exports these two functions and keeps doing so; this
  * entry is a narrower door to the same authority, not a replacement for it.
  */
-/** Asks a running daemon for one short-lived task assertion bound to the caller's `BYOK_HOST_TOOLSET_CONTEXT` nonce. */
+/** Asks a running daemon for one short-lived task assertion bound to the caller's context file. */
 export { requestTaskAssertion } from '../daemon/assertion-client';
 /** Asks a running daemon for one short-lived device assertion scoped to an allowlisted audience. */
 export { requestDeviceAssertion } from '../daemon/assertion-client';
-/** Everything `requestTaskAssertion` needs: the daemon's `productId`/`storeDir`, the context nonce, the exact audience, and an optional round-trip bound. */
+/** Everything `requestTaskAssertion` needs: the context file path from this process's final argv element, the exact audience, and an optional round-trip bound. */
 export type { RequestTaskAssertionOptions } from '../daemon/assertion-client';
 /** The daemon's nine refusal codes plus `unavailable` and `bad_response`, kept as an open string union so a newer daemon's code surfaces verbatim. */
 export type { RequestTaskAssertionErrorCode } from '../daemon/assertion-client';
@@ -3414,13 +3415,14 @@ export declare function requestDeviceAssertion(options: RequestDeviceAssertionOp
  * Contract §8.1 / §8.2(1): ask a running daemon for one task-scoped assertion,
  * for one upcoming tool invocation.
  *
- * `contextToken` is the `BYOK_HOST_TOOLSET_CONTEXT` value the daemon injected
- * into THIS process's environment when it started this task's toolset server.
- * The caller passes it explicitly and this function never reads it from
- * `process.env` itself — a helper that went looking for the variable would work
- * just as well inside a process the daemon never spawned for this task, which
- * is precisely the substitution the nonce exists to prevent. Reading the
- * environment is the child's own decision, made once, at its own entry point.
+ * `contextFile` is the final argv element the daemon appended when it started
+ * THIS task's toolset server. The caller passes it explicitly and this function
+ * never looks at `process.argv` or `process.env` itself — a helper that went
+ * looking for its own task would work just as well inside a process the daemon
+ * never spawned for this task, which is precisely the substitution the nonce
+ * exists to prevent. Taking the path from argv is the child's own decision,
+ * made once, at its own entry point. The file's format is internal: it names the
+ * daemon and holds the nonce, and only this function reads it.
  *
  * §8.1 again, on what this function must NOT grow: no cache, no refresh, no
  * retry. Every tool call takes a NEW assertion with a NEW `jti`, and so does
@@ -3429,12 +3431,8 @@ export declare function requestDeviceAssertion(options: RequestDeviceAssertionOp
  * be. Retrying is the caller's decision, and a retry means calling this again.
  */
 export interface RequestTaskAssertionOptions {
-    /** Same `productId` the daemon was configured with — selects which daemon's socket to dial. */
-    productId: string;
-    /** Same `storeDir` the daemon was configured with. Defaults to `~/.byok/<productId>`. */
-    storeDir?: string;
-    /** The `BYOK_HOST_TOOLSET_CONTEXT` nonce this process was started with. Never read from the environment here. */
-    contextToken: string;
+    /** The absolute path the daemon appended as this process's final argv element. Never read from `process.argv` here. */
+    contextFile: string;
     /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
     audience: string;
     /** Bound on the control-socket round trip, ms. Default 90s, which covers the 15s deadline of the OS credential read. */
@@ -3450,7 +3448,8 @@ export interface RequestTaskAssertionOptions {
  * distinguish "this token was never real" from "this task has finished and been
  * cleaned up". The daemon collapses those deliberately, and a caller that
  * reconstructs the difference by timing or retrying is reading an oracle that is
- * not offered.
+ * not offered. An unusable `contextFile` is the same refusal: task disposal
+ * removes the file, and a lane the deployment did not declare never had one.
  */
 export type RequestTaskAssertionErrorCode = TaskAssertionIssueErrorCode | 'unavailable' | 'bad_response' | (string & {});
 export type RequestTaskAssertionResult = {
@@ -3468,7 +3467,8 @@ export type RequestTaskAssertionResult = {
  * Never throws for an expected outcome, exactly like
  * {@link requestDeviceAssertion}: a missing daemon, a denied audience, an
  * unknown or revoked context, a revoked or unpaired device, and a daemon
- * mid-shutdown all come back as `{ok: false, code, reason}`.
+ * mid-shutdown all come back as `{ok: false, code, reason}`, and so does an
+ * unusable context file.
  *
  * A device assertion is NOT an acceptable answer here and cannot become one:
  * this calls `task_assertion.issue`, and the envelope is parsed with
@@ -7616,7 +7616,7 @@ export type DaemonEvent = ({
  * task lane once the daemon has resolved which task the call belongs to.
  *
  * What is NOT a field here, and never can be: the
- * `BYOK_HOST_TOOLSET_CONTEXT` nonce. It is the task lane's entire authority —
+ * host toolset context nonce. It is the task lane's entire authority —
  * a value that reaches a log is a value an operator's log shipper can replay
  * — so, exactly like the signature, there is no field to carry it rather than
  * a redactor that must remember to strip it.
@@ -8811,17 +8811,6 @@ export declare const PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX = "context_overflow
  * the provider streams no usage.
  */
 export declare const PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX = "usage_unavailable";
-/**
- * The SDK-owned environment variable that carries one host toolset server's
- * `BYOK_HOST_TOOLSET_CONTEXT` nonce (contract §8.1).
- *
- * Injected by the daemon beside `BYOK_STORE_DIR`/`BYOK_PRODUCT_ID` — the two a
- * child already needs to dial this daemon's control socket. A host's own
- * `mcpToolsets` registry still cannot supply an `env` block at all
- * (`toolset-registry.ts`), so this name can only ever hold a value the daemon
- * minted.
- */
-export declare const HOST_TOOLSET_CONTEXT_ENV = "BYOK_HOST_TOOLSET_CONTEXT";
 /** Internal task lifecycle phase. Not the wire TaskState (protocol/task-state.ts). */
 export type TaskPhase = 'received' | 'admitting' | 'claiming' | 'claimed' | 'running' | 'awaiting_approval' | 'terminalizing' | 'retiring' | 'finished' | 'declined';
 /** Ordered effect classes (§6.1): atomic groups cannot be interleaved. */

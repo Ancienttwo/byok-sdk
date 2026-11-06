@@ -365,8 +365,8 @@ export interface TaskRunnerDeps {
    *
    * ABSENT MEANS UNAVAILABLE, not "assume yes". A runner with no way to ask
    * whether the gate is open has not been told that it is, and §8.1 gives this
-   * lane zero fallback — so it injects no nonce, an MCP child gets no
-   * `BYOK_HOST_TOOLSET_CONTEXT`, and a standalone run fails explicitly
+   * lane zero fallback — so it mints no nonce, an MCP child's context path
+   * names no file, and a standalone run fails explicitly
    * (§8.2(1)) instead of quietly reaching for some other identity.
    */
   hostTaskContextAvailable?: () => boolean;
@@ -537,9 +537,10 @@ export class TaskRunner {
   private readonly memoryClosingTasks = new Set<string>();
   private readonly memoryFilesystemByTask = new Map<string, Promise<AgentMemoryFilesystem>>();
   /**
-   * Contract §8.1: the `BYOK_HOST_TOOLSET_CONTEXT` nonce registry — one entry
+   * Contract §8.1: the host toolset context nonce registry — one entry
    * per `(task, host toolset server)`, keyed by the opaque nonce the daemon
-   * injected into that ONE child's environment and nowhere else.
+   * wrote into that ONE server's private context file, named by its final argv
+   * element, and nowhere else.
    *
    * This map is the whole reason the task lane has authority at all. A device
    * assertion deliberately carries no caller identity (see
@@ -1208,13 +1209,13 @@ export class TaskRunner {
   }
 
   /**
-   * Contract §8.1: mint one `BYOK_HOST_TOOLSET_CONTEXT` nonce per host toolset
-   * server of this task and inject it into that server's child environment.
+   * Contract §8.1: append a private context file's path to the argv of each
+   * host toolset server of this task and, where the lane is declared, mint one
+   * nonce per server into that file.
    *
-   * Only the SDK injects here. `toolset-registry.ts` still rejects an `env`
-   * block on a host-configured server outright, which is what makes this
-   * variable un-forgeable from configuration: the name can only ever hold a
-   * value this method minted.
+   * Only the SDK writes that file, which is what makes the nonce un-forgeable
+   * from configuration: a host-configured argument can name a file, but no
+   * file holds a nonce this method did not mint.
    *
    * No `agentRef` means no nonce, and therefore no task lane at all for this
    * task. That is not a degradation to a device-only path — it is the envelope
@@ -1227,8 +1228,9 @@ export class TaskRunner {
     taskId: string,
     agentRef: AgentRef,
     toolsetIdByServer: ReadonlyMap<string, string>,
-  ): Readonly<Record<string, McpStdioServerConfig>> {
-    return withHostToolsetContext.call(this, servers, taskId, agentRef, toolsetIdByServer);
+    scratch: ExecutionScratch,
+  ): Promise<Readonly<Record<string, McpStdioServerConfig>>> {
+    return withHostToolsetContext.call(this, servers, taskId, agentRef, toolsetIdByServer, scratch);
   }
 
   /**

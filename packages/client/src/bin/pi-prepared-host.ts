@@ -652,8 +652,11 @@ async function closePreparedMcpResources(pool: McpServerPool, memoryCall: Prepar
  * list. The binding digest commits to `(serverName, toolsetId, command, args)`,
  * and every one of those already travels in the task-scoped MCP configuration —
  * a separate copy could disagree with the servers this process actually starts.
+ * The digest covers the configured argv, and every observed server has a toolset
+ * id, so the daemon appended a context path to its argv: the last argument is
+ * left out by position. A wrong path is refused at `requestTaskAssertion`.
  */
-function projectedServerBindings(mcp: TaskScopedMcpConfig): readonly PreparedPiServerBinding[] {
+export function projectedServerBindings(mcp: TaskScopedMcpConfig): readonly PreparedPiServerBinding[] {
   return Object.freeze(Object.keys(mcp.observation)
     .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
     .map((serverName) => {
@@ -662,7 +665,7 @@ function projectedServerBindings(mcp: TaskScopedMcpConfig): readonly PreparedPiS
         serverName,
         toolsetId: mcp.observation[serverName]!.toolsetId,
         command: server.command,
-        args: Object.freeze([...(server.args ?? [])]),
+        args: Object.freeze((server.args ?? []).slice(0, -1)),
       });
     }));
 }

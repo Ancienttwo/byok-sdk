@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.38.0",
-    "snapshotSha256": "188e67609b5e6ebaa948d68cb29309cc049abe39831d1d23f61ea9a6b60ca5a6"
+    "snapshotSha256": "0a04248babe2d74b6d28390b1948ef34ce638c70a90478131932d75fc4d8b0c6"
   },
   "configFields": {
     "status": "tracked",
@@ -148,6 +148,16 @@
         "config:runtimes",
         "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
       ]
+    },
+    {
+      "id": "host-toolset-context-file",
+      "impact": "breaking",
+      "summary": "A Host toolset server no longer receives BYOK_HOST_TOOLSET_CONTEXT, BYOK_STORE_DIR or BYOK_PRODUCT_ID, and its MCP entry carries no env. In a task run the daemon appends one path as the server's last argument, so a server whose argument parser rejects extras must accept it. requestTaskAssertion takes { contextFile, audience, timeoutMs? }: pass that path as contextFile when you make the call and drop productId, storeDir and contextToken. Do not read the file at startup. The admission tools/list probe starts the server without the argument.",
+      "migration": "packages/client/README.md#daemon-free-assertion-requests",
+      "items": [
+        "export:@byok-sdk/client#RequestTaskAssertionOptions",
+        "export:@byok-sdk/client/assertion-client#RequestTaskAssertionOptions"
+      ]
     }
   ],
   "changes": [
@@ -179,6 +189,11 @@
       "item": "export:@byok-sdk/client#DeviceEnrollmentStatusOptions",
       "change": "changed",
       "entry": "windows-credential-koffi"
+    },
+    {
+      "item": "export:@byok-sdk/client#RequestTaskAssertionOptions",
+      "change": "changed",
+      "entry": "host-toolset-context-file"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
@@ -219,6 +234,11 @@
       "item": "export:@byok-sdk/client/agent-memory#AgentMemoryWalkEntryKind",
       "change": "added",
       "entry": "agent-memory-filesystem-raw-byte-compare"
+    },
+    {
+      "item": "export:@byok-sdk/client/assertion-client#RequestTaskAssertionOptions",
+      "change": "changed",
+      "entry": "host-toolset-context-file"
     },
     {
       "item": "export:@byok-sdk/client/packaging#loadSdkKoffiAsset",

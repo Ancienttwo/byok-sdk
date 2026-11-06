@@ -345,7 +345,9 @@ createDaemon({
 ```
 
 The map accepts `command`, `args`, and optional `approveTools`; put OAuth tokens, cookies, and other
-secrets behind the local MCP process's own credential broker.
+secrets behind the local MCP process's own credential broker. In a task run the daemon adds one more
+last argument, so the server's argument parser must accept it, even in a server that never asks for
+an assertion. See [Daemon-free assertion requests](#daemon-free-assertion-requests).
 
 For Codex, the local Host can explicitly preapprove exact tools on one server:
 
@@ -718,9 +720,9 @@ mixes both entries.
 ## Daemon-free assertion requests
 
 A Host toolset server is a short-lived stdio process the daemon spawns for one
-task. Its whole job is to trade the `BYOK_HOST_TOOLSET_CONTEXT` nonce it was
-started with for one short-lived task assertion and present it to the product's
-cloud; it runs no daemon, drives no runtime, and touches no transport. Importing
+task. Its whole job is to trade the context file it was started with for one
+short-lived task assertion and present it to the product's cloud; it runs no
+daemon, drives no runtime, and touches no transport. Importing
 `requestTaskAssertion` from the package root handed it all three anyway — the
 root entry composes `createDaemon`, which reaches
 `@earendil-works/pi-coding-agent` and through it `@modelcontextprotocol/sdk` and
@@ -734,12 +736,21 @@ graph.
 ```ts
 import { requestTaskAssertion } from '@byok-sdk/client/assertion-client';
 
-const result = await requestTaskAssertion({
-  productId, contextToken, audience: 'https://api.example.com',
-});
+const contextFile = process.argv.at(-1)!;
+
+const result = await requestTaskAssertion({ contextFile, audience: 'https://api.example.com' });
 if (!result.ok) return refuse(result.code, result.reason);
 presentToCloud(result.assertion, result.expiresAt);
 ```
+
+In a task run the last argument is always this path. Pass it to
+`requestTaskAssertion` only when you make that call, and do not read the file at
+startup: its format is internal, and where the deployment has not declared the
+lane it does not exist. The admission `tools/list` probe starts the server
+without the argument, so take `contextFile` from a task run's argv, not a probe's.
+A missing or unusable file is refused as `context_token_invalid`, the same code
+as a task that has finished. The file is private to the OS user, not to the
+child, so another process of that user can read it while the task runs.
 
 The entry exports exactly `requestTaskAssertion`, `requestDeviceAssertion` and
 their option/result types. `connectControlClient` stays unreachable here for the

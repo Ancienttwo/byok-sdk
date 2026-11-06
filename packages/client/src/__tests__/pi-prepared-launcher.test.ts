@@ -317,7 +317,8 @@ async function prepareOnThisDevice(
     artifactPath,
     requestBody: compiled.requestBody,
     recordPath,
-    mcpServers: toolless ? {} : { teamserver: server },
+    // As the daemon hands them to the adapter: configured argv, then the context path.
+    mcpServers: toolless ? {} : { teamserver: { ...server, args: [...server.args, '/scratch/exec/sdk/context.json'] } },
     observation,
     requiredToolsets,
     childEnv: {

@@ -216,7 +216,7 @@ export type DaemonEvent =
    * task lane once the daemon has resolved which task the call belongs to.
    *
    * What is NOT a field here, and never can be: the
-   * `BYOK_HOST_TOOLSET_CONTEXT` nonce. It is the task lane's entire authority —
+   * host toolset context nonce. It is the task lane's entire authority —
    * a value that reaches a log is a value an operator's log shipper can replay
    * — so, exactly like the signature, there is no field to carry it rather than
    * a redactor that must remember to strip it.

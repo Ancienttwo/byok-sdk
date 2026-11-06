@@ -26,7 +26,10 @@ import { testIngressBudget } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
-import { reservedMcpToken } from './fixtures/execution-scratch';
+import { hostToolsetToken, reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
+
+/** The path the daemon appends to every Host toolset server of a task run. */
+const CONTEXT_PATH = expect.stringContaining('host-toolset-');
 
 // A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
 const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
@@ -136,7 +139,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       expect(adapter.approvals).toEqual([{ host: ['read'] }, { host: ['read', 'write'] }]);
       expect(Object.isFrozen(adapter.approvals[0])).toBe(true);
       expect(Object.isFrozen(adapter.approvals[0]!.host)).toBe(true);
-      expect(adapter.startCalls[0]!.ctx.mcpServers).toEqual({ host: { command: '/opt/host-mcp' } });
+      expect(adapter.startCalls[0]!.ctx.mcpServers).toEqual({ host: { command: '/opt/host-mcp', args: [CONTEXT_PATH] } });
       expect(probe).not.toHaveBeenCalled();
       expect(sent.filter(e => e.type === 'task.claim')).toHaveLength(2);
     } finally {
@@ -157,7 +160,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       expect(sent.some(e => e.type === 'task.decline')).toBe(false);
       expect(sent.filter(e => e.type === 'task.claim')).toHaveLength(1);
       expect(adapter.startCalls).toHaveLength(1);
-      expect(adapter.startCalls[0]!.ctx.mcpServers).toEqual({ host: { command: '/opt/host-mcp' } });
+      expect(adapter.startCalls[0]!.ctx.mcpServers).toEqual({ host: { command: '/opt/host-mcp', args: [CONTEXT_PATH] } });
       expect(adapter.startCalls[0]!.ctx.mcpToolApprovals).toBeUndefined();
     } finally {
       await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'unsupported-approvals', seq: 2 }));
@@ -198,7 +201,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       expect(sent.filter(e => e.type === 'task.claim')).toHaveLength(2);
       expect(codex.approvals).toEqual([{ host: ['read'] }]);
       expect(claude.startCalls).toHaveLength(1);
-      expect(claude.startCalls[0]!.ctx.mcpServers).toEqual({ host: { command: '/opt/host-mcp' } });
+      expect(claude.startCalls[0]!.ctx.mcpServers).toEqual({ host: { command: '/opt/host-mcp', args: [CONTEXT_PATH] } });
       expect(claude.startCalls[0]!.ctx.mcpToolApprovals).toBeUndefined();
     } finally {
       await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'shared-codex', seq: 3 }));
@@ -239,7 +242,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(true);
     expect(adapter.startCalls).toHaveLength(1);
     expect(adapter.startCalls[0]?.ctx.mcpServers).toEqual({
-      salesko: { command: '/opt/salesko/bin/mcp', args: ['--stdio'] },
+      salesko: { command: '/opt/salesko/bin/mcp', args: ['--stdio', CONTEXT_PATH] },
     });
     // The observed tool names travel beside the server definition; they are
     // the only names an adapter may pre-grant to a runtime.
@@ -383,8 +386,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       ),
     );
 
-    expect(adapter.startCalls[0]?.ctx.mcpServers).toEqual({ salesko: { command: '/opt/salesko/mcp-v1' } });
-    expect(adapter.startCalls[1]?.ctx.mcpServers).toEqual({ salesko: { command: '/opt/salesko/mcp-v2' } });
+    expect(adapter.startCalls[0]?.ctx.mcpServers).toEqual({ salesko: { command: '/opt/salesko/mcp-v1', args: [CONTEXT_PATH] } });
+    expect(adapter.startCalls[1]?.ctx.mcpServers).toEqual({ salesko: { command: '/opt/salesko/mcp-v2', args: [CONTEXT_PATH] } });
     expect(adapter.startCalls[1]?.ctx.mcpToolsetTools)
       .toEqual(observationOf({ salesko: ['find_leads'] }, { toolsetId: 'salesko' }));
 
@@ -423,7 +426,7 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(true);
     expect(adapter.startCalls).toHaveLength(1);
     // The server is still projected; only the observation nothing consumes is absent.
-    expect(adapter.startCalls[0]?.ctx.mcpServers).toEqual({ salesko: { command: '/opt/salesko/bin/mcp' } });
+    expect(adapter.startCalls[0]?.ctx.mcpServers).toEqual({ salesko: { command: '/opt/salesko/bin/mcp', args: [CONTEXT_PATH] } });
     expect(adapter.startCalls[0]?.ctx.mcpToolsetTools).toBeUndefined();
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-pi-no-probe', seq: 2 }));
@@ -765,8 +768,8 @@ describe('absolute toolset command, consistently across every runtime', () => {
 });
 
 /**
- * Contract §8.1: the daemon's own `BYOK_HOST_TOOLSET_CONTEXT` nonce, injected
- * into each admitted host toolset server and into nothing else.
+ * Contract §8.1: the daemon's own context nonce, in a private file appended to
+ * each admitted host toolset server's argv and to nothing else.
  *
  * These cases pin the INJECTION half of the task lane. The eight fail-closed
  * gates a nonce then passes through live in `task-assertion-broker.test.ts`;
@@ -855,8 +858,8 @@ describe('TaskRunner host toolset context nonce injection', () => {
     await offerAgentTask(runner, 'task-host-toolset', ['salesko.read.v1', 'salesko.propose.v1']);
 
     const servers = adapter.startCalls[0]?.ctx.mcpServers ?? {};
-    const readToken = servers.saleskoread?.env?.BYOK_HOST_TOOLSET_CONTEXT;
-    const proposeToken = servers.saleskopropose?.env?.BYOK_HOST_TOOLSET_CONTEXT;
+    const readToken = hostToolsetToken(servers.saleskoread);
+    const proposeToken = hostToolsetToken(servers.saleskopropose);
     expect(readToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(proposeToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(readToken).not.toBe(proposeToken);
@@ -872,10 +875,12 @@ describe('TaskRunner host toolset context nonce injection', () => {
     expect(runner.hostToolsetContext(proposeToken!)).toMatchObject({ toolsetId: 'salesko.propose.v1' });
     expect(runner.hostToolsetContext('not-a-nonce')).toEqual({ status: 'unknown' });
 
-    // The command/args the host configured are untouched, and the two env
-    // variables a child needs to dial this daemon travel with the nonce.
-    expect(servers.saleskoread).toMatchObject({ command: '/opt/salesko/read', args: ['--stdio'] });
-    expect(servers.saleskoread?.env?.BYOK_PRODUCT_ID).toBe('host-toolset-product');
+    // The argv the host configured is kept and the context file comes last.
+    // What a child needs to dial this daemon travels with the nonce in that file.
+    expect(servers.saleskoread?.command).toBe('/opt/salesko/read');
+    expect(servers.saleskoread?.args).toEqual(['--stdio', expect.stringContaining('host-toolset-')]);
+    expect(servers.saleskoread?.env).toBeUndefined();
+    expect(reservedMcpContext(servers.saleskoread).productId).toBe('host-toolset-product');
     // The nonce never leaves this device: nothing sent to the server carries it.
     expect(JSON.stringify(sent)).not.toContain(readToken);
     expect(JSON.stringify(sent)).not.toContain(proposeToken);
@@ -898,9 +903,9 @@ describe('TaskRunner host toolset context nonce injection', () => {
     expect(servers.byokagentmemory).toBeDefined();
     // The memory lane has its own context token and its own authority; the
     // toolset nonce is not a general-purpose daemon credential.
-    expect(servers.byokagentmemory?.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
+    expect(hostToolsetToken(servers.byokagentmemory)).toBeUndefined();
     expect(reservedMcpToken(servers.byokagentmemory)).toBeDefined();
-    expect(servers.saleskoread?.env?.BYOK_HOST_TOOLSET_CONTEXT).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(hostToolsetToken(servers.saleskoread)).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
     adapter.sessions[0]?.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
@@ -917,8 +922,10 @@ describe('TaskRunner host toolset context nonce injection', () => {
     // The servers still run — an undeclared task lane withdraws tool AUTHORITY,
     // it does not silently drop the toolset the offer asked for.
     expect(Object.keys(servers).sort()).toEqual(['saleskopropose', 'saleskoread']);
-    expect(servers.saleskoread?.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
-    expect(servers.saleskopropose?.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
+    expect(hostToolsetToken(servers.saleskoread)).toBeUndefined();
+    expect(hostToolsetToken(servers.saleskopropose)).toBeUndefined();
+    // Every task run has one argv shape: the path is there and names no file.
+    expect(servers.saleskoread?.args).toEqual(['--stdio', expect.stringContaining('host-toolset-')]);
   });
 
   it('treats an absent capability hook as undeclared rather than as permission', async () => {
@@ -931,7 +938,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
     await offerAgentTask(runner, 'task-absent-hook', ['salesko.read.v1']);
 
     const servers = adapter.startCalls[0]?.ctx.mcpServers ?? {};
-    expect(servers.saleskoread?.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
+    expect(hostToolsetToken(servers.saleskoread)).toBeUndefined();
   });
 
   it('still refuses a host toolset registry that supplies its own env, nonce name included', () => {
@@ -940,7 +947,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
         new McpToolsetRegistry({
           'salesko.read.v1': {
             mcpServers: {
-              saleskoread: { command: '/opt/salesko/read', env: { BYOK_HOST_TOOLSET_CONTEXT: 'forged' } },
+              saleskoread: { command: '/opt/salesko/read', env: { FORGED_CONTEXT: 'forged' } },
             },
           },
         } as never),

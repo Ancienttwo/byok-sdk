@@ -1,5 +1,5 @@
 import { testAgentHomeConfig } from './fixtures/test-agent';
-import { testScratchRoot } from "./fixtures/execution-scratch";
+import { reservedMcpContext, testScratchRoot } from "./fixtures/execution-scratch";
 import { readdirSync, readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -328,6 +328,7 @@ describe('requestTaskAssertion', () => {
   async function startedWithTask(productId: string): Promise<{
     storeDir: string;
     productId: string;
+    contextFile: string;
     contextToken: string;
     adapter: StubRuntimeAdapter;
   }> {
@@ -369,18 +370,17 @@ describe('requestTaskAssertion', () => {
       ),
     );
     await server.waitFor((envelope) => envelope.type === 'task.started');
-    const contextToken = adapter.startCalls[0]?.ctx.mcpServers?.[SERVER_NAME]?.env?.BYOK_HOST_TOOLSET_CONTEXT;
-    if (contextToken === undefined) throw new Error('expected the daemon to inject a host toolset context');
-    return { storeDir, productId, contextToken, adapter };
+    const entry = adapter.startCalls[0]?.ctx.mcpServers?.[SERVER_NAME];
+    const contextFile = entry?.args?.at(-1);
+    if (contextFile === undefined) throw new Error('expected the daemon to append a host toolset context file');
+    return { storeDir, productId, contextFile, contextToken: reservedMcpContext(entry).contextToken!, adapter };
   }
 
   it('returns a verifiable task assertion whose claims came from the daemon, not the caller', async () => {
     const built = await startedWithTask('acme-task-req-ok');
 
     const result = await requestTaskAssertion({
-      productId: built.productId,
-      storeDir: built.storeDir,
-      contextToken: built.contextToken,
+      contextFile: built.contextFile,
       audience: ALLOWED_AUDIENCE,
     });
 
@@ -418,9 +418,7 @@ describe('requestTaskAssertion', () => {
   it('caches nothing: two calls are two round trips and two jti', async () => {
     const built = await startedWithTask('acme-task-req-fresh');
     const options = {
-      productId: built.productId,
-      storeDir: built.storeDir,
-      contextToken: built.contextToken,
+      contextFile: built.contextFile,
       audience: ALLOWED_AUDIENCE,
     };
 
@@ -435,18 +433,13 @@ describe('requestTaskAssertion', () => {
   it('surfaces the two task-lane refusals verbatim rather than throwing', async () => {
     const built = await startedWithTask('acme-task-req-denied');
 
-    const unknown = await requestTaskAssertion({
-      productId: built.productId,
-      storeDir: built.storeDir,
-      contextToken: 'a'.repeat(43),
-      audience: ALLOWED_AUDIENCE,
-    });
+    const forged = path.join(await tmpDir('byok-task-client-forged-'), 'context.json');
+    await fs.writeFile(forged, JSON.stringify({ storeDir: built.storeDir, productId: built.productId, contextToken: 'a'.repeat(43) }));
+    const unknown = await requestTaskAssertion({ contextFile: forged, audience: ALLOWED_AUDIENCE });
     expect(unknown).toEqual({ ok: false, code: 'context_token_invalid', reason: expect.any(String) });
 
     const denied = await requestTaskAssertion({
-      productId: built.productId,
-      storeDir: built.storeDir,
-      contextToken: built.contextToken,
+      contextFile: built.contextFile,
       audience: 'salesko-api.evil.com',
     });
     expect(denied).toEqual({ ok: false, code: 'audience_denied', reason: expect.any(String) });
@@ -458,21 +451,32 @@ describe('requestTaskAssertion', () => {
     );
     await server.waitFor((envelope) => envelope.type === 'task.cancelled');
     const revoked = await requestTaskAssertion({
-      productId: built.productId,
-      storeDir: built.storeDir,
-      contextToken: built.contextToken,
+      contextFile: built.contextFile,
       audience: ALLOWED_AUDIENCE,
     });
     expect(revoked).toEqual({ ok: false, code: 'context_revoked', reason: expect.any(String) });
     release();
   });
 
+  it('refuses a context file it cannot use the way it refuses an unknown token', async () => {
+    const dir = await tmpDir('byok-task-client-unusable-');
+    const blank = path.join(dir, 'blank.json');
+    await fs.writeFile(blank, '{}');
+    // Task disposal removes the file, an undeclared lane never had one, and the
+    // admission probe's last argument, if any, is the Host's own.
+    for (const contextFile of [path.join(dir, 'gone.json'), blank, '--stdio']) {
+      expect(await requestTaskAssertion({ contextFile, audience: ALLOWED_AUDIENCE })).toEqual({
+        ok: false, code: 'context_token_invalid', reason: expect.any(String),
+      });
+    }
+  });
+
   it('reports unavailable — never a context or pairing claim — when no daemon is running', async () => {
     const storeDir = await tmpDir('byok-task-client-none-store-');
+    const contextFile = path.join(storeDir, 'context.json');
+    await fs.writeFile(contextFile, JSON.stringify({ storeDir, productId: 'acme-task-req-none', contextToken: 'b'.repeat(43) }));
     const result = await requestTaskAssertion({
-      productId: 'acme-task-req-none',
-      storeDir,
-      contextToken: 'b'.repeat(43),
+      contextFile,
       audience: ALLOWED_AUDIENCE,
       timeoutMs: 1_234,
     });
@@ -483,13 +487,13 @@ describe('requestTaskAssertion', () => {
     expect(result.reason).toContain('daemon is not running');
   });
 
-  it('never reads the context token out of its own environment', async () => {
-    // A helper that fell back to `process.env` would work just as well inside a
-    // process the daemon never spawned for this task, which is exactly the
-    // substitution the nonce exists to prevent. Structural, so it stays true.
+  it('never finds its context file in its own process', async () => {
+    // A helper that read `process.argv` or `process.env` would work just as well
+    // inside a process the daemon never spawned for this task, which is exactly
+    // the substitution the nonce exists to prevent. Structural, so it stays true.
     const source = readFileSync(new URL('../daemon/assertion-client.ts', import.meta.url), 'utf8');
     const code = source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
     expect(code).not.toContain('process.env');
-    expect(code).not.toContain('BYOK_HOST_TOOLSET_CONTEXT');
+    expect(code).not.toContain('process.argv');
   });
 });

@@ -5,6 +5,7 @@ import {
   preparedToolBindingDigest,
   preparedToolSurfaceObservationDigest,
 } from '../input-preparation';
+import { projectedServerBindings } from '../bin/pi-prepared-host';
 import { bindMcpToolsetServerObservation } from '../mcp/observation';
 import type { McpToolsetServerObservation } from '../mcp/observation';
 import { probeMcpServer } from '../daemon/mcp-tools-probe';
@@ -176,6 +177,18 @@ describe('the prepared pi tool surface', () => {
     expect(surface.ok).toBe(false);
     if (surface.ok) return;
     expect(surface.code).toBe('tool_binding_drift');
+  }, 30_000);
+
+  it('matches the configured argv the preparation froze after the daemon appended a context path', async () => {
+    const facts = await deviceFacts();
+    const servers = projectedServerBindings({
+      mcpEnv: {},
+      observation: facts.observation,
+      mcpServers: Object.fromEntries(facts.servers.map((server) => [server.serverName, {
+        command: server.command, args: [...server.args, '/scratch/exec/sdk/context.json'],
+      }])),
+    });
+    expect(await assemblePreparedPiToolSurface(launchInput(facts, { servers }))).toMatchObject({ ok: true });
   }, 30_000);
 
   it('assembles memory-only read with a runtime-worker call, without a Host MCP identity', async () => {

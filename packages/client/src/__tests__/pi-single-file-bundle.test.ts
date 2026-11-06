@@ -194,7 +194,7 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
     recordId: 's2-record', requestDigest: compiled.requestDigest, envelopeDigest: compiled.envelopeDigest,
     toolManifestDigest: compiled.toolManifestDigest, requestBody: compiled.requestBody, counterProjection: compiled.counterProjection,
     projection: compiled.projection, residual: [...compiled.residual], envelope: compiled.envelope }));
-  return { model, runtime: compiler.runtime, mcpServers: { fixture: server }, observation,
+  return { model, runtime: compiler.runtime, mcpServers: { fixture: { ...server, args: [...server.args, '/scratch/exec/sdk/context.json'] } }, observation,
     preparation: { agentMemory: 'none', memory: null, reference: { scopeId: 's2', agentRef: 's2', requestId: 's2', recordId: 's2-record' }, artifactPath,
       expected: { envelopeDigest: compiled.envelopeDigest, toolManifestDigest: compiled.toolManifestDigest, model, binding },
       toolBindingDigest: surface.toolBindingDigest, observationDigest: surface.observationDigest,
