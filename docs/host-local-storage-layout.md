@@ -125,7 +125,7 @@ until it has one. TTLs are `storage.retention.ttlMs[<class>]`.
 | `session-ledger` | TTL 30 days by last append | SDK, idle home |
 | `terminal-evidence` | TTL 30 days by last append | SDK, idle home |
 | `pi-session-dir` | TTL 31 days by last write; at least `session-ledger` plus one day | SDK |
-| `agy-session-store` | TTL 31 days by last write; at least `session-ledger` plus one day | SDK |
+| `agy-session-store` | TTL 31 days by last write; with an `AgyAdapter`, at least `session-ledger` plus one day | SDK |
 | `agent-home-lease` | 1 per home | SDK |
 | `skill-pack-current` | 1 revision per installed pack | Host, by uninstalling the pack |
 | `journal` | Exempt: live-task ack and recovery rows; confirmed rows expire as `confirmed-journal` and maintenance compacts the file | SDK |
@@ -182,8 +182,8 @@ the TTL: that file with its `-wal` and `-shm`, `brain/<id>/` and
 `annotations/<id>.pbtxt`. Files in `implicit/` and `log/` go by their own last
 write. Settings and the rest stay, and `conversation_summaries.db` keeps its
 rows. A resume holds a lease the sweep cannot take, and the sweep rechecks the
-last write under that lease. The TTL has the same `session-ledger` lower bound
-as `pi-session-dir`.
+last write under that lease. A daemon with an `AgyAdapter` holds the TTL to the
+same `session-ledger` lower bound as `pi-session-dir`.
 
 Custom adapters that own swept session data implement
 `PreparedRuntimeOperation.acquireSessionLease(sessionRef)`. A custom caller must

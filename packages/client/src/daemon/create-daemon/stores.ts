@@ -15,6 +15,7 @@ import { DeviceMemberRecords } from '../device-member-custody';
 import type { DeviceMemberKeyring } from '../e2ee-keyring';
 import type { DaemonInputs } from './scope';
 import type { DaemonConfigScope } from './config';
+import { assertAgySessionStoreTtl } from './support';
 
 /**
  * The second stage of `buildDaemonWithAdapters` (#926): resolves the
@@ -43,6 +44,7 @@ export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
   const storageConfig = resolveStorageConfig(storeDir, config.storage);
+  assertAgySessionStoreTtl(storageConfig.ttlMs, input.adapters);
   const retentionClock = overrides.retention?.clock ?? (() => new Date());
   const scratchRoot = new ScratchRoot(storageConfig.scratchRoot, retentionClock);
   const storagePressure = new StoragePressure(storageConfig.budget);
