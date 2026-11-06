@@ -187,6 +187,7 @@ test('a platform family is selected only by a path it owns', () => {
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
     'credential-isolation-audit': 'packages/keys/src/index.ts',
     'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
+    'agy-real-windows': 'packages/client/src/__tests__/runtime-contract/agy.contract.ts',
     'runtime-contract': 'packages/client/src/__tests__/runtime-contract/contract.ts',
     'npm-release-pack': 'packages/keys/src/pi-projection-windows.test.ts',
   };
@@ -508,7 +509,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 20);
+  assert.equal(knownFamilies.length, 21);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {

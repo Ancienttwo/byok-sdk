@@ -234,6 +234,18 @@
       "vendoredSha256": "79e1ea99fe99ffa1043f200cfce09027597094959fc6a50d54d58e4902db100b"
     },
     {
+      "path": "runtimes/antigravity/options.ts",
+      "sourcePath": "packages/oar/src/runtimes/antigravity/options.ts",
+      "upstreamSha256": "dbccfb4ab198e9f5e6422e0971306b394cb6c49a6312c833164caf359ba4562c",
+      "vendoredSha256": "dbccfb4ab198e9f5e6422e0971306b394cb6c49a6312c833164caf359ba4562c"
+    },
+    {
+      "path": "runtimes/antigravity/session.ts",
+      "sourcePath": "packages/oar/src/runtimes/antigravity/session.ts",
+      "upstreamSha256": "0ca72a58362c4bdb7497128a9405d0a89fe5ce3f50e43364ebd2a3533d060442",
+      "vendoredSha256": "0ca72a58362c4bdb7497128a9405d0a89fe5ce3f50e43364ebd2a3533d060442"
+    },
+    {
       "path": "runtimes/codex/app-server-client.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
       "upstreamSha256": "c48cdcff3f73ec7e35a5932ae8f72f5377f60e522f36b8a83b2bc4e3aee442bc",
@@ -374,8 +386,8 @@
       "path": "shared/acp/client-app.ts",
       "sourcePath": "packages/oar/src/shared/acp/client-app.ts",
       "upstreamSha256": "3fa6e13b3f3fb53dfe4809b64b0de0caf739f43ecf7e771a71b028c39aaca432",
-      "vendoredSha256": "77c34f01fb27bc8270d76d95349b812e421d93b62a7cd0130cb12ec0b34f4909",
-      "delta": "No permissive fallback: every session/request_permission is answered cancelled (cancelPermission) instead of the broadest allow on offer. The request and the answer stay recorded. Upstream routed request targets, terminal handlers and wire-phase notification routing are retained."
+      "vendoredSha256": "2c61bbf1c536bd8f4ceb10ecb35b85c6aa65a2e061c116b9ff5ad920bbcb9f50",
+      "delta": "No permissive fallback: every session/request_permission is answered cancelled (cancelPermission) instead of the broadest allow on offer, unless the caller passes its own answer (AcpClientHooks.permission). The request and the answer stay recorded. Upstream routed request targets, terminal handlers and wire-phase notification routing are retained."
     },
     {
       "path": "shared/acp/config-updates.ts",
@@ -474,8 +486,8 @@
       "path": "shared/acp/session.ts",
       "sourcePath": "packages/oar/src/shared/acp/session.ts",
       "upstreamSha256": "5facb21e16f5df5d9a880300d6dcd5aafd5f122ee760cfd5932014418e3d3f6c",
-      "vendoredSha256": "7116d4fde54e36946103e543d64ae174a734e443b61974398ebb481ffc2ad239",
-      "delta": "Raw adapter for the SDK: acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader. Dispose does not call prepareShutdown or markNativeStop, and control does not wait on a pending cancellation observation. Upstream configUpdates, manual compaction and the adapter-held queue are wired in; compact goes through the redaction guard. endTurnProcessesOnAbort and retainedBytes are omitted from AcpSessionOptions."
+      "vendoredSha256": "eb810198a2df3e866b13e7b1cef3b41348bb74ad44084a3a4a85e3345b1b842c",
+      "delta": "Raw adapter for the SDK: AcpSessionHooks.onPermission forwards to AcpClientHooks.permission. acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader. Dispose does not call prepareShutdown or markNativeStop, and control does not wait on a pending cancellation observation. Upstream configUpdates, manual compaction and the adapter-held queue are wired in; compact goes through the redaction guard. endTurnProcessesOnAbort and retainedBytes are omitted from AcpSessionOptions."
     },
     {
       "path": "shared/acp/terminal.ts",

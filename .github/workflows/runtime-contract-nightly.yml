@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: [pi, claude, codex, grok, hermes, dsh]
+        runtime: [pi, claude, codex, grok, hermes, dsh, agy]
     env:
       BYOK_RUNTIME_CONTRACT: latest
     steps:

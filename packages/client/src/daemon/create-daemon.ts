@@ -1,3 +1,4 @@
+import { agySessionStoreOf } from '../util/agy-session-retention';
 import type { OutboundStatus } from './outbound-settlement';
 import { TerminalCommitQueue } from './terminal-commit-queue';
 import { type RuntimeObservation } from '../runtime-detection';
@@ -258,8 +259,8 @@ export interface DaemonConfig {
    * places that must stay consistent: `createDaemon` (this file) builds its
    * bundled adapter set FROM this list (unset = the three wire runtimes —
    * pi, claude, codex; set = exactly the listed runtime ids, unknown ids
-   * ignored — see `buildRuntimeAdapters`; the `grok` and `dsh` custom
-   * harnesses are built only when listed), and `TaskRunner.pickAdapter`
+   * ignored — see `buildRuntimeAdapters`; the `grok`, `dsh` and `agy`
+   * custom harnesses are built only when listed), and `TaskRunner.pickAdapter`
    * (`task-runner.ts`) separately fail-closed-rejects any `task.offer`
    * naming a runtime outside this list regardless of which adapters were
    * constructed. `createDaemonWithAdapters` callers supply their own
@@ -864,6 +865,7 @@ function buildDaemon(
   // Q4': an unknown field never stops the daemon; it is logged once and reported in status().config.
   for (const warning of configWarnings) console.warn(`[byok/client] ${warning.message}`);
   const adapters = buildAdapters(piByokLauncher);
+  const agySessionStore = adapters.map(agySessionStoreOf).find(store => store !== undefined);
   // The durable worker's lease and journal barriers live in the Agent home.
   const durable = adapters.find(adapter => adapter.descriptor.capabilities.durableLane === true);
   if (durable !== undefined && !config.agentHome) throw new Error(`the ${durable.descriptor.id} durable lane requires Agent home`);
@@ -895,6 +897,7 @@ function buildDaemon(
     ...(agentHomeManager === undefined ? {} : { home: agentHomeManager }),
     ...(agentSessionHandoffs === undefined ? {} : { handoffs: agentSessionHandoffs }),
     ...(piByokLauncher === undefined ? {} : { piSessionDir: piByokLauncher.sessionDir }),
+    ...(agySessionStore === undefined ? {} : { agySessionStore }),
   });
   const retentionSweeper = new RetentionSweeper({
     config: storageConfig, registry: retentionRegistry, pressure: storagePressure, clock: retentionClock,

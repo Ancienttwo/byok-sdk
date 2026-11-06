@@ -4,7 +4,9 @@
 // (fake-acp-agent.mjs, fake-acp-grok.mjs: Grok 1.0.25 wire, Apache-2.0).
 //
 // argv: `--version` prints a version; `agent stdio --help` prints help;
-// otherwise the last argument must be `stdio` and the process serves ACP.
+// otherwise the last argument must be `stdio`, or the first `acp` as agy
+// (which adds its initialize metadata and `session/list`), and the process
+// serves ACP. FAKE_ACP_LISTED_CWD is the saved cwd agy lists; unset lists none.
 // The prompt text selects the scenario (see `prompt` below).
 // FAKE_ACP_LOG, when set in the child env, receives one JSON line per
 // observed fact (argv, env, cwd, requests) so a test can assert the wire.
@@ -18,7 +20,7 @@
 // left it (setsid) and writes their pids to FAKE_ACP_TOOL_TREE; the native
 // cancel then SIGKILLs the parent, orphaning the tool, as a real cancel can.
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync } from 'node:fs';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 
@@ -38,7 +40,8 @@ if (args[0] === 'inspect') {
   process.stdout.write(`${process.env.FAKE_ACP_INSPECT ?? '{"mcpServers":[],"plugins":[]}'}\n`);
   process.exit(0);
 }
-if (args.at(-1) !== 'stdio') { process.stderr.write(`unexpected argv ${JSON.stringify(args)}\n`); process.exit(64); }
+const agy = args[0] === 'acp';
+if (args.at(-1) !== 'stdio' && !agy) { process.stderr.write(`unexpected argv ${JSON.stringify(args)}\n`); process.exit(64); }
 
 const SESSION = process.env.FAKE_ACP_SESSION_ID ?? 'fake-grok-session';
 const log = (fact) => { if (process.env.FAKE_ACP_LOG) appendFileSync(process.env.FAKE_ACP_LOG, `${JSON.stringify(fact)}\n`); };
@@ -115,6 +118,51 @@ async function prompt(message) {
     result(message.id, answer());
     return;
   }
+  if (input === 'agy-tools') {
+    const call = (toolCallId, name, rawInput) => update({ sessionUpdate: 'tool_call', toolCallId, name, title: `Run ${name}`, kind: 'other', status: 'in_progress', rawInput });
+    call('agy-1', 'run_command', { CommandLine: 'rm -rf build', toolSummary: 'Clean', WaitMsBeforeAsync: 1000 });
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'agy-1', name: 'run_command', status: 'completed' });
+    call('agy-3', 'write_file', { Path: '/home/u/.zshrc', Content: 'x'.repeat(20_000) });
+    call('agy-4', 'edit_file', { Path: '/home/u/e.txt', Target: 'a', Replacement: 'b' });
+    call('agy-5', 'read_file', { Path: '/home/u/r.txt' });
+    call('agy-6', 'run_command', 'not structured');
+    call('agy-2', 'mcp_market.feed_quote', { symbol: 'X', toolSummary: 'Quote' });
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'agy-2', name: 'mcp_market.feed_quote', status: 'completed' });
+    text('Done.');
+    result(message.id, answer());
+    return;
+  }
+  // agy asks with the native name and `kind`, then ends the turn on a reject; only an allow reaches the model again.
+  if (input.startsWith('agy-ask:')) {
+    const [, kind, target] = input.split(':');
+    update({ sessionUpdate: 'tool_call', toolCallId: 'agy-ask', title: 'Write', name: 'write_file', kind, status: 'in_progress', rawInput: { Path: target } });
+    const answer_ = await ask('session/request_permission', { sessionId: SESSION, toolCall: { toolCallId: 'agy-ask', title: 'Write', name: 'write_file', kind, status: 'pending', rawInput: { Path: target }, locations: [{ path: target }] },
+      options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }, { optionId: 'deny', name: 'Deny', kind: 'reject_once' }] });
+    log({ kind: 'permission', answer: answer_ });
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'agy-ask', name: 'write_file', status: answer_.outcome?.optionId === 'allow' ? 'completed' : 'failed' });
+    if (answer_.outcome?.optionId === 'allow') text('Wrote it.');
+    result(message.id, answer());
+    return;
+  }
+  // A daemon command that leaves the agent's process group, as agy's `IsDaemon` does.
+  if (input.startsWith('agy-daemon:')) {
+    const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { detached: true, stdio: 'ignore' });
+    child.unref();
+    writeFileSync(input.slice('agy-daemon:'.length), String(child.pid));
+    await new Promise(resolve => { setTimeout(resolve, 50); });
+    result(message.id, answer());
+    return;
+  }
+  // The second prompt of agy's steer answers the first at once; its own answer waits for FAKE_ACP_REPLY_GATE.
+  if (input === 'steer-first') { pending.set(message.id, 'superseded'); return; }
+  if (input === 'steer-second') {
+    for (const [id, kind] of [...pending]) if (kind === 'superseded') { pending.delete(id); result(id, answer()); }
+    const gate = process.env.FAKE_ACP_REPLY_GATE;
+    while (gate && !existsSync(path.join(gate, 'release'))) await new Promise((resolve) => setTimeout(resolve, 10));
+    text('steered');
+    result(message.id, answer());
+    return;
+  }
   if (input === 'tool-failed') {
     update({ sessionUpdate: 'tool_call', toolCallId: 'call-2', title: 'read_file', status: 'pending', rawInput: { path: 'missing' } });
     update({ sessionUpdate: 'tool_call_update', toolCallId: 'call-2', status: 'failed', content: [{ type: 'content', content: { type: 'text', text: 'not found' } }] });
@@ -175,7 +223,10 @@ function request(message) {
       if (process.env.FAKE_ACP_INITIALIZE === 'error') { error(message.id, -32603, 'Internal error'); return; }
       result(message.id, {
         protocolVersion: 1,
-        agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {}, close: {} }, promptCapabilities: { image: false }, mcpCapabilities: { http: true } },
+        agentCapabilities: {
+          loadSession: true, sessionCapabilities: { resume: {}, close: {}, ...(agy ? { list: {} } : {}) }, promptCapabilities: { image: false }, mcpCapabilities: { http: true },
+          ...(agy ? { _meta: { antigravity: { systemPrompt: { append: true } } } } : {}),
+        },
         authMethods: [{ id: 'cached_token', name: 'Cached login' }],
         _meta: { defaultAuthMethodId: 'cached_token' },
       });
@@ -192,6 +243,9 @@ function request(message) {
       log({ kind: 'open', method: message.method, params: message.params });
       if (message.params?.sessionId !== SESSION) { error(message.id, -32603, 'session not found', { code: 'FS_NOT_FOUND' }); return; }
       result(message.id, {});
+      return;
+    case 'session/list':
+      result(message.id, { sessions: process.env.FAKE_ACP_LISTED_CWD === undefined ? [] : [{ sessionId: SESSION, cwd: process.env.FAKE_ACP_LISTED_CWD }] });
       return;
     case 'session/set_model':
       log({ kind: 'model', params: message.params });

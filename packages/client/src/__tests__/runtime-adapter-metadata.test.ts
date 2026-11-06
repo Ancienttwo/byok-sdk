@@ -7,7 +7,7 @@ import { createEnvelope, HarnessIdSchema, RuntimeIdSchema } from '@byok-sdk/prot
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  ClaudeAdapter, CodexAdapter, DshAdapter, GrokAdapter, HermesAdapter, PiAdapter,
+  AgyAdapter, ClaudeAdapter, CodexAdapter, DshAdapter, GrokAdapter, HermesAdapter, PiAdapter,
   isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult,
 } from '../adapters/index';
 import { fakeRuntimeAdapter, type FakeRuntimeAdapterId } from '../testing/index';
@@ -43,6 +43,7 @@ function builtIns(home: string): Record<FakeRuntimeAdapterId, RuntimeAdapter> {
     grok: new GrokAdapter(),
     hermes: new HermesAdapter({ home }),
     dsh: new DshAdapter({ home, model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' } }),
+    agy: new AgyAdapter({ home }),
   };
 }
 
@@ -72,7 +73,7 @@ describe('selection target', () => {
       if (!wire) expect(HarnessIdSchema.parse(id)).toBe(id);
     }
     expect(Object.values(adapters).map(adapter => taskRuntimeTarget(adapter.descriptor))).toEqual([
-      { runtime: 'claude' }, { runtime: 'codex' }, { runtime: 'pi' }, { harnessId: 'grok' }, { harnessId: 'hermes' }, { harnessId: 'dsh' },
+      { runtime: 'claude' }, { runtime: 'codex' }, { runtime: 'pi' }, { harnessId: 'grok' }, { harnessId: 'hermes' }, { harnessId: 'dsh' }, { harnessId: 'agy' },
     ]);
   });
 });
@@ -87,6 +88,7 @@ describe('supported platforms', () => {
       grok: ['darwin', 'linux'],
       hermes: ['darwin', 'linux', 'win32'],
       dsh: ['darwin', 'linux'],
+      agy: ['darwin', 'linux', 'win32'],
     });
     expect(new PiAdapter({ durableLane: true }).descriptor.platforms).toEqual(['darwin', 'linux']);
     expect(Object.isFrozen(adapters.grok.descriptor.platforms)).toBe(true);
@@ -147,6 +149,7 @@ describe('adapter-declared facts the daemon reads instead of the runtime id', ()
       grok: { fileScope: undefined, providerProfileBinding: undefined },
       hermes: { fileScope: undefined, providerProfileBinding: undefined },
       dsh: { fileScope: undefined, providerProfileBinding: undefined },
+      agy: { fileScope: undefined, providerProfileBinding: undefined },
     });
     const durable = new PiAdapter({ durableLane: true }).descriptor;
     expect(durable.fileScope).toEqual({ lanes: ['durable'] });

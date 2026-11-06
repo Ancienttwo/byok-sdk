@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.38.0",
-    "snapshotSha256": "0a04248babe2d74b6d28390b1948ef34ce638c70a90478131932d75fc4d8b0c6"
+    "snapshotSha256": "65c9924dc9fc478d52e31138cc4eec88bfbd4e623c425ed800b16defa4ea5c1e"
   },
   "configFields": {
     "status": "tracked",
@@ -150,6 +150,22 @@
       ]
     },
     {
+      "id": "daemon-config-runtimes-agy",
+      "impact": "additive",
+      "summary": "AgyAdapter runs the Antigravity CLI as a custom harness. createDaemon and createRuntimeAdapters build it when runtimeAllowlist lists agy, from the new DaemonConfig.runtimes.agy (home, model, versionPolicy). home is required, and listing agy without runtimes.agy is a config error. Until its credential path lands, detect() refuses and every agy task is rejected. agy rejects Host toolset entries carrying env or headers; a Host that configures env for its own server cannot run it under agy. The new retention class agy-session-store expires what agy keeps in that home after 31 days, and its TTL must be at least retention.ttlMs['session-ledger'] plus one day.",
+      "migration": "docs/adapter-capabilities.md#agy-adapter-custom-harness",
+      "items": [
+        "config:storage",
+        "export:@byok-sdk/client#AgyAdapter",
+        "export:@byok-sdk/client#AgyAdapterOptions",
+        "export:@byok-sdk/client#ExpiringClassId",
+        "export:@byok-sdk/client#resolveStorageConfig",
+        "export:@byok-sdk/client/adapters#AgyAdapter",
+        "export:@byok-sdk/client/adapters#AgyAdapterOptions",
+        "export:@byok-sdk/client/testing#FakeRuntimeAdapterId"
+      ]
+    },
+    {
       "id": "host-toolset-context-file",
       "impact": "breaking",
       "summary": "A Host toolset server no longer receives BYOK_HOST_TOOLSET_CONTEXT, BYOK_STORE_DIR or BYOK_PRODUCT_ID, and its MCP entry carries no env. In a task run the daemon appends one path as the server's last argument, so a server whose argument parser rejects extras must accept it. requestTaskAssertion takes { contextFile, audience, timeoutMs? }: pass that path as contextFile when you make the call and drop productId, storeDir and contextToken. Do not read the file at startup. The admission tools/list probe starts the server without the argument.",
@@ -165,8 +181,15 @@
       "item": "config:runtimes",
       "change": "changed",
       "before": "optional schema-sha256=87a07d84a14860fe",
-      "after": "optional schema-sha256=54a878b606104793",
+      "after": "optional schema-sha256=f94f04553cc5444a",
       "entry": "daemon-config-runtimes-dsh"
+    },
+    {
+      "item": "config:storage",
+      "change": "changed",
+      "before": "optional schema-sha256=072bdde0810d910b",
+      "after": "optional schema-sha256=26156d226d19d4c6",
+      "entry": "daemon-config-runtimes-agy"
     },
     {
       "item": "example:bot-collaboration",
@@ -181,6 +204,16 @@
       "entry": "agent-memory-commit-on-success"
     },
     {
+      "item": "export:@byok-sdk/client#AgyAdapter",
+      "change": "added",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgyAdapterOptions",
+      "change": "added",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
       "item": "export:@byok-sdk/client#CreateStoredDeviceProofSignerOptions",
       "change": "changed",
       "entry": "windows-credential-koffi"
@@ -191,9 +224,29 @@
       "entry": "windows-credential-koffi"
     },
     {
+      "item": "export:@byok-sdk/client#ExpiringClassId",
+      "change": "changed",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
       "item": "export:@byok-sdk/client#RequestTaskAssertionOptions",
       "change": "changed",
       "entry": "host-toolset-context-file"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveStorageConfig",
+      "change": "changed",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapter",
+      "change": "added",
+      "entry": "daemon-config-runtimes-agy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapterOptions",
+      "change": "added",
+      "entry": "daemon-config-runtimes-agy"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
@@ -244,6 +297,11 @@
       "item": "export:@byok-sdk/client/packaging#loadSdkKoffiAsset",
       "change": "added",
       "entry": "windows-credential-koffi"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterId",
+      "change": "changed",
+      "entry": "daemon-config-runtimes-agy"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",

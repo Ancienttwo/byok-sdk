@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ClaudeAdapterOptions } from '../adapters/claude/claude-adapter';
 import type { CodexAdapterOptions } from '../adapters/codex/codex-adapter';
+import type { AgyAdapterOptions } from '../adapters/antigravity/agy-adapter';
 import type { DshAdapterOptions } from '../adapters/dsh/dsh-adapter';
 import type { GrokAdapterOptions } from '../adapters/grok/grok-adapter';
 import type { PiAdapterOptions } from '../adapters/pi/pi-adapter';
@@ -47,6 +48,13 @@ vi.mock('../adapters/grok/grok-adapter', async (importOriginal) => {
   }
   return { ...actual, GrokAdapter: RecordingGrokAdapter };
 });
+vi.mock('../adapters/antigravity/agy-adapter', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../adapters/antigravity/agy-adapter')>();
+  class RecordingAgyAdapter extends actual.AgyAdapter {
+    constructor(options: AgyAdapterOptions) { super(options); constructed.push({ id: 'agy', options }); }
+  }
+  return { ...actual, AgyAdapter: RecordingAgyAdapter };
+});
 vi.mock('../adapters/dsh/dsh-adapter', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../adapters/dsh/dsh-adapter')>();
   class RecordingDshAdapter extends actual.DshAdapter {
@@ -59,15 +67,17 @@ afterEach(() => { constructed.splice(0); });
 
 const versionPolicy = { qualifiedVersion: '1.0.0', unqualified: 'warn' } as const;
 const DSH = { home: path.join(os.tmpdir(), 'byok-dsh-home'), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' } };
+const AGY = { home: path.join(os.tmpdir(), 'byok-agy-home') };
 const FACTORY_CONFIG: RuntimeAdaptersConfig = {
   nativeAssetRoot: path.join(os.tmpdir(), 'byok-native-assets'),
-  runtimeAllowlist: ['pi', 'claude', 'codex', 'grok', 'dsh'],
+  runtimeAllowlist: ['pi', 'claude', 'codex', 'grok', 'dsh', 'agy'],
   runtimes: {
     pi: { agentUserContext: 'excluded', versionPolicy, packageDir: path.join(os.tmpdir(), 'byok-pi-assets') },
     claude: { agentUserContext: 'excluded', agentSessionPersistence: 'disabled', versionPolicy },
     codex: { agentUserMcpServers: 'excluded', versionPolicy },
     grok: { compatInstructions: 'disabled', agentUserMcpServers: 'excluded', versionPolicy },
     dsh: { ...DSH, sandbox: 'read-only', versionPolicy },
+    agy: { ...AGY, model: 'gemini-3.8-flash', versionPolicy },
   },
   runtimeEnvironment: { base: 'allowlist', allow: ['LANG'], pass: ['HTTPS_PROXY'] },
   piByokLauncher: { command: '/opt/byok-pi-provider-launcher', profileDbPath: path.join(os.tmpdir(), 'providers.sqlite'), sessionDir: path.join(os.tmpdir(), 'pi-sessions') },
@@ -94,10 +104,11 @@ describe('createRuntimeAdapters', () => {
     const adapters = createRuntimeAdapters(FACTORY_CONFIG);
     const factory = constructed.splice(0);
     createDaemon(daemonConfig(FACTORY_CONFIG));
-    expect(factory.map(({ id }) => id)).toEqual(['pi', 'claude', 'codex', 'grok', 'dsh']);
+    expect(factory.map(({ id }) => id)).toEqual(['pi', 'claude', 'codex', 'grok', 'dsh', 'agy']);
     expect(constructed).toEqual(factory);
-    expect(adapters.map((adapter) => adapter.descriptor.versionPolicy)).toEqual([versionPolicy, versionPolicy, versionPolicy, versionPolicy, versionPolicy]);
-    expect(factory.at(-1)?.options).toMatchObject({ ...DSH, sandbox: 'read-only', versionPolicy, versionPolicySource: 'daemon-config' });
+    expect(adapters.map((adapter) => adapter.descriptor.versionPolicy)).toEqual([versionPolicy, versionPolicy, versionPolicy, versionPolicy, versionPolicy, versionPolicy]);
+    expect(factory.at(-2)?.options).toMatchObject({ ...DSH, sandbox: 'read-only', versionPolicy, versionPolicySource: 'daemon-config' });
+    expect(factory.at(-1)?.options).toMatchObject({ ...AGY, model: 'gemini-3.8-flash', versionPolicy, versionPolicySource: 'daemon-config' });
   });
 
   it('builds dsh only when listed, and needs runtimes.dsh when it is', () => {
@@ -105,6 +116,15 @@ describe('createRuntimeAdapters', () => {
     expect(() => createRuntimeAdapters({ runtimeAllowlist: ['dsh'] })).toThrow(expect.objectContaining({
       issues: [expect.objectContaining({ code: 'missing_required', path: 'runtimes.dsh' })],
     }));
+  });
+
+  it('builds agy only when listed, and needs runtimes.agy when it is', () => {
+    expect(createRuntimeAdapters({ runtimes: { agy: AGY } }).map((adapter) => adapter.descriptor.id)).toEqual(['pi', 'claude', 'codex']);
+    expect(() => createRuntimeAdapters({ runtimeAllowlist: ['agy'] })).toThrow(expect.objectContaining({
+      issues: [expect.objectContaining({ code: 'missing_required', path: 'runtimes.agy' })],
+    }));
+    expectInvalid({ runtimeAllowlist: ['agy'], runtimes: { agy: { home: 'relative' } } }, 'runtimes.agy', /absolute/);
+    expectInvalid({ runtimes: { agy: { ...AGY, home: 1 as never } } }, 'runtimes.agy.home', /a string/);
   });
 
   it('reports what the dsh adapter refuses as a config issue', () => {
@@ -169,6 +189,11 @@ const OPTION_SOURCES = {
     versionPolicy: 'runtimes.grok.versionPolicy', versionPolicySource: 'runtimes.grok.versionPolicy', resolveBin: 'embedded-only',
     spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only',
   } satisfies Record<keyof GrokAdapterOptions, OptionSource>,
+  agy: {
+    home: 'runtimes.agy.home', model: 'runtimes.agy.model', nativeAssetRoot: 'nativeAssetRoot',
+    runtimeEnvironment: 'runtimeEnvironment', versionPolicy: 'runtimes.agy.versionPolicy', versionPolicySource: 'runtimes.agy.versionPolicy',
+    resolveBin: 'embedded-only', spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only',
+  } satisfies Record<keyof AgyAdapterOptions, OptionSource>,
   dsh: {
     home: 'runtimes.dsh.home', model: 'runtimes.dsh.model', sandbox: 'runtimes.dsh.sandbox', nativeAssetRoot: 'nativeAssetRoot',
     runtimeEnvironment: 'runtimeEnvironment', versionPolicy: 'runtimes.dsh.versionPolicy', versionPolicySource: 'runtimes.dsh.versionPolicy',

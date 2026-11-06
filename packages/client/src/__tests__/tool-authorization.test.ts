@@ -351,6 +351,8 @@ describe('high-risk classifier', () => {
     expect(call('write', { path: '/etc/hosts' })).toEqual(['write-outside-workspace']);
     expect(call('write', { path: '../escape.txt' })).toEqual(['write-outside-workspace']);
     expect(call('Write', { file_path: '~/.zshrc' })).toEqual(['sensitive-path', 'write-outside-workspace']);
+    expect(call('edit_file', { path: '/etc/hosts' })).toEqual(['write-outside-workspace']);
+    expect(call('write_file', { path: '/etc/hosts' })).toEqual(['write-outside-workspace']);
     expect(call('read', { path: '~/.ssh/id_rsa' })).toEqual(['sensitive-path']);
     expect(call('Read', { file_path: '.aws/credentials' }, HOME)).toEqual(['sensitive-path']);
     // A runtime that changed directory is still judged against the granted workspace.
