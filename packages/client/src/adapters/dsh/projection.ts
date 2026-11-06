@@ -49,24 +49,25 @@ function messageText(native: unknown): string {
 }
 
 /**
- * Root-session records to `AgentEvent`s, from the events OAR derived beside each
+ * Session records to `AgentEvent`s, from the events OAR derived beside each
  * native frame. Text comes from the durable `assistant/message`: one `progress`
  * per committed message, so a failed attempt's stream adds nothing. OAR reports
- * this session's tokens cumulatively from open; each turn's usage is the
- * difference.
+ * each session's tokens cumulatively from open; usage sums their differences.
+ * Context occupancy and all other events belong to the root session only.
  */
 export class DshProjection {
   private readonly tools = new Map<string, string>();
-  private billed: Required<Pick<Tokens, 'input' | 'output'>> & Tokens = { input: 0, output: 0 };
+  private readonly billed = new Map<string, Tokens>();
   private pending?: Usage;
 
   constructor(private readonly rootSessionId: string, private readonly model: string) {}
 
   /** Events for one record; `outcome` receives the root turn end, after its events. */
   consume(input: DshRecord, emit: (event: AgentEvent) => void, outcome: (turn: DshTurnOutcome) => void): void {
-    if (input.kind !== 'frame' || input.sessionId !== this.rootSessionId || input.agentPath.length > 0) return;
+    if (input.kind !== 'frame') return;
+    const root = input.sessionId === this.rootSessionId && input.agentPath.length === 0;
     const body = record(input.body);
-    if (body?.type === 'session/event:assistant/message') {
+    if (root && body?.type === 'session/event:assistant/message') {
       const text = messageText(body.native);
       if (text.length > 0) emit({ type: 'progress', text });
     }
@@ -75,6 +76,11 @@ export class DshProjection {
     let ended: Record<string, unknown> | undefined;
     for (const value of events) {
       const event = record(value);
+      if (event?.kind === 'usage') {
+        this.usage(record(event.usage), input.sessionId, root);
+        continue;
+      }
+      if (!root) continue;
       switch (event?.kind) {
         case 'model':
           // The SDK patch and the open name this route; a request on another one means they did not apply.
@@ -96,9 +102,6 @@ export class DshProjection {
           });
           break;
         }
-        case 'usage':
-          this.usage(record(event.usage));
-          break;
         case 'turn_ended':
           ended = record(event.outcome) ?? {};
           break;
@@ -130,10 +133,10 @@ export class DshProjection {
     outcome({ kind: turn.kind === 'aborted' ? 'aborted' : 'completed' });
   }
 
-  private usage(report: Record<string, unknown> | undefined): void {
+  private usage(report: Record<string, unknown> | undefined, sessionId: string, root: boolean): void {
     if (report === undefined) return;
     const next: Usage = { ...(this.pending ?? { type: 'usage' }) };
-    const context = record(report.context);
+    const context = root ? record(report.context) : undefined;
     const contextTokens = count(context?.tokens);
     const contextWindow = count(context?.contextWindow);
     if (contextTokens !== undefined) next.contextTokens = contextTokens;
@@ -141,12 +144,13 @@ export class DshProjection {
     if (contextTokens !== undefined || next.contextWindow !== undefined) next.contextSource = 'provider';
     const tokens = record(report.tokens) as Tokens | undefined;
     if (tokens !== undefined && count(tokens.input) !== undefined && count(tokens.output) !== undefined) {
+      const billed = this.billed.get(sessionId);
       for (const [from, to] of [['input', 'inputTokens'], ['output', 'outputTokens'], ['cacheRead', 'cachedInputTokens'], ['reasoning', 'reasoningTokens']] as const) {
         const value = count(tokens[from]);
-        const prior = count(this.billed[from]) ?? 0;
+        const prior = count(billed?.[from]) ?? 0;
         if (value !== undefined && value >= prior) next[to] = (next[to] ?? 0) + value - prior;
       }
-      this.billed = tokens as typeof this.billed;
+      this.billed.set(sessionId, tokens);
     }
     if (Object.keys(next).length > 1) this.pending = next;
   }

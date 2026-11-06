@@ -262,7 +262,11 @@ async function backgroundTurn() {
     const runtime = await adapter(loopbackModel(provider.baseUrl));
     const resources = { workspaceDir: box.workspace, env: { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env } };
     const opened = await startPreparedOperation(runtime, { instruction: `Start the work. ${ROOT_MARKER}` }, resources);
-    for await (const event of opened.events) if (event.type === 'turn_end') break;
+    const usage = [];
+    for await (const event of opened.events) {
+      if (event.type === 'usage') usage.push(event);
+      if (event.type === 'turn_end') break;
+    }
     // turn_end follows the disposal, so the tree is already gone here.
     const pids = await Promise.all([childPid, jobPid].map(async file => Number(await fs.readFile(file, 'utf8'))));
     const survivors = pids.filter(isAlive);
@@ -271,6 +275,7 @@ async function backgroundTurn() {
     const sessionRef = opened.sessionRef;
     await opened.close();
     const requests = provider.requests.length;
+    const modelRequests = provider.requests.filter(request => request.model);
     const again = await startPreparedOperation(runtime, { instruction: `Continue. ${RESUME_MARKER}`, sessionRef }, resources);
     const events = [];
     for await (const event of again.events) {
@@ -279,7 +284,7 @@ async function backgroundTurn() {
     }
     const resumedRef = again.sessionRef;
     await again.close();
-    return { survivors, diagnostic, sessionRef, resumedRef, events, resumed: provider.requests.slice(requests).filter(request => request.model) };
+    return { survivors, diagnostic, sessionRef, resumedRef, events, usage, modelRequests, resumed: provider.requests.slice(requests).filter(request => request.model) };
   } finally {
     await provider.close();
   }
@@ -360,8 +365,11 @@ defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVer
 
 defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersion})`, {
   'dsh.turnEnd': ['a background subagent and a background job do not outlive the turn', check(async () => {
-    const { survivors, diagnostic } = await background();
+    const { survivors, diagnostic, usage, modelRequests } = await background();
     expect(survivors, diagnostic).toEqual([]);
+    expect(modelRequests.some(request => !request.text.includes(ROOT_MARKER))).toBe(true);
+    // The loopback provider bills one input and one output token per request, including the child's.
+    expect(usage).toEqual([expect.objectContaining({ inputTokens: modelRequests.length, outputTokens: modelRequests.length })]);
   }, 240_000)],
   'dsh.resume': ['a second Turn of the same session runs through resume after the kill', check(async () => {
     const { events, sessionRef, resumedRef, resumed } = await background();

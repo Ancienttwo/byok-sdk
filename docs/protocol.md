@@ -2236,6 +2236,16 @@ yet acknowledged `task.cancel` with `task.cancelled`. An unleased hosted offer
 goes directly to `cancelled`; a leased one goes
 `running → cancel_requested → cancelled` at the attempt-store boundary.
 
+For every runtime, the daemon closes the active session when the task ends
+(`closeActiveSession` in `daemon/task-runner/lifecycle.ts`, awaited by terminal
+finalization in `finish.ts`). The task does not stay open to collect later
+background results: closing stops adapter-owned background work, and unfinished
+results are lost to that task. A later Turn resumes the saved session rather
+than keeping this execution alive. This shared close path applies to Claude
+and the other runtimes; their native background-tool behavior is not specified
+here. Process ownership limits are documented
+under [Quiescent runtime disposal](spec.md#quiescent-runtime-disposal).
+
 Task activity (`task.progress`, `task.artifact`) that arrives while a task is
 `AwaitApproval` is applied, but it neither resolves the pending approval nor
 moves the task out of `AwaitApproval`. Only a decision (`task.approve`,
