@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { deflateRawSync } from 'node:zlib';
 import { fetchReleaseArtifact, readReleaseZip, releaseRepository, validateReleaseRequest, verifyReleaseArchive, verifyReleaseIdentity } from './release-artifact.mjs';
 
@@ -160,17 +159,4 @@ test('ZIP reader rejects paths, links, duplicate entries, inconsistent headers a
   inconsistent[30] = 'x'.charCodeAt(0);
   assert.throws(() => readReleaseZip(inconsistent), /truncated/);
   assert.throws(() => readReleaseZip(valid.subarray(0, -1)), /directory/);
-});
-
-test('release workflow keeps protected hosted OIDC and explicit CI identity with pinned actions', () => {
-  const workflowSource = readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
-  assert.match(workflowSource, /environment: npm-release/);
-  assert.match(workflowSource, /if: github.ref == 'refs\/heads\/main'/);
-  assert.match(workflowSource, /runs-on: ubuntu-latest/);
-  assert.match(workflowSource, /id-token: write/);
-  assert.match(workflowSource, /actions: read/);
-  assert.match(workflowSource, /if \[ "\$GITHUB_SHA" != "\$APPROVED_SHA" \]/);
-  assert.match(workflowSource, /--trusted-publishing --ci-run-id "\$CI_RUN_ID" --ci-artifact-id "\$CI_ARTIFACT_ID" --ci-artifact-digest "\$CI_ARTIFACT_DIGEST"/);
-  assert.doesNotMatch(workflowSource, /source-sha|accepted-release|GITHUB_SHA:|export GITHUB_SHA|bun run build|--artifacts/);
-  for (const action of workflowSource.matchAll(/uses: ([^\n]+)/g)) assert.match(action[1], /@[a-f0-9]{40}(?: |$)/);
 });

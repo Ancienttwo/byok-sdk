@@ -76,7 +76,7 @@ test('renames include both deleted source and destination workspace paths', () =
   }
 });
 test('CI policy and runbook changes take the contract-only lane', () => {
-  const plan = planCi({ event: 'pull_request', sha, paths: ['.github/workflows/release.yml', 'deploy/runbooks/release-responsibility.md', 'scripts/ci/plan-ci.mjs'] });
+  const plan = planCi({ event: 'pull_request', sha, paths: ['deploy/runbooks/release-responsibility.md', 'scripts/ci/plan-ci.mjs'] });
   assert.deepEqual(plan.dirs, []); assert.deepEqual(plan.families, []);
   assert.equal(plan.reason, 'root-ci-scripts');
 });

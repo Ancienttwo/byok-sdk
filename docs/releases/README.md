@@ -10,12 +10,6 @@ day. Use the accepted CI artifacts, print the plan, then obtain the owner's
 publication authorization. Follow the
 [release responsibility runbook](../../deploy/runbooks/release-responsibility.md#release-checklist).
 
-The `Release` workflow supports npm trusted publishing (OIDC). Enable it
-only when the owner chooses to complete the separate setup and verify the
-first OIDC publication. Current releases do not require live npm trust.
-The nine-package setup, constraints and recovery steps are in
-[npm trusted publishing](oidc-trusted-publishing.md).
-
 ## Upgrade manifest
 
 A release ships `packages/client/upgrade-manifest.json` with one entry per Host-visible change since the previous release; breaking entries need a MINOR, never a PATCH (Q8). See [the upgrade manifest](../upgrade-manifest.md#release-steps).

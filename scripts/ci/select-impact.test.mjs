@@ -27,7 +27,7 @@ test('docs and known CI contracts select light checks, not release families', ()
   assert.deepEqual(selectImpact(['README.md', 'docs/releases/v0.28.1.md']), {
     dirs: [], files: ['README.md', 'docs/releases/v0.28.1.md'], families: [], reason: 'root-ci-scripts',
   });
-  for (const path of ['.github/workflows/release.yml', 'scripts/ci/select-impact.mjs']) {
+  for (const path of ['scripts/ci/select-impact.mjs']) {
     assert.equal(selectImpact([path]).reason, 'root-ci-scripts');
     assert.deepEqual(selectImpact([path]).families, []);
   }
@@ -110,7 +110,6 @@ test('ci.yml selects every routine family and the client suites that read it (W7
   assert.deepEqual(impact.families, knownFamilies.filter(id => id !== 'build-test' && id !== 'macos-client').sort());
   assert.ok(impact.dirs.includes('packages/client'));
   assert.equal(impact.reason, 'impacted');
-  assert.deepEqual(selectImpact(['.github/workflows/release.yml']).families, []);
   assert.deepEqual(selectImpact(['scripts/ci/select-impact.mjs']).families, []);
 });
 

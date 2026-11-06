@@ -1,6 +1,6 @@
 import { assertFrozenRegistryExpectations, assertPrereleaseRegistryBaseline, frozenRuntimeDependencyMetadata, npmDistTags, npmPackageExists, npmView, readRegistryExpectations } from './registry-contract.mjs';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -27,9 +27,6 @@ import { fetchReleaseArtifact } from '../ci/release-artifact.mjs';
 // but nothing is published, read back or tagged. Steps 5-8 run behind --execute
 // and nothing else. The annotated tag is created last, after the registry has been
 // read back, so a tag never points at an unpublished train.
-//
-// --trusted-publishing authenticates through npm trusted publishing (GitHub Actions
-// OIDC) instead of an npm session and OTP; see docs/releases/oidc-trusted-publishing.md.
 //
 // Writes are fail-closed and never retried. A run converges instead: a package the
 // registry already holds with the frozen integrity is skipped, a failed publish
@@ -104,7 +101,7 @@ export function assertPrereleaseReadyToPublish(entries, expectations, distTag, r
 
 export function parseArguments(argv) {
   const parsed = {
-    execute: false, otp: undefined, outDir: undefined, artifacts: undefined, tag: undefined, trustedPublishing: false,
+    execute: false, otp: undefined, outDir: undefined, artifacts: undefined, tag: undefined,
   };
   const valueFlags = new Map([
     ['--otp', 'otp'],
@@ -117,7 +114,6 @@ export function parseArguments(argv) {
   ]);
   const switches = new Map([
     ['--execute', 'execute'],
-    ['--trusted-publishing', 'trustedPublishing'],
     ['--dry-run', undefined],
   ]);
   const seen = new Set();
@@ -144,9 +140,6 @@ export function parseArguments(argv) {
   }
   if (seen.has('--dry-run') && parsed.execute) {
     throw new Error('--dry-run and --execute are mutually exclusive: a dry run prints the plan, --execute releases it');
-  }
-  if (parsed.trustedPublishing && parsed.otp !== undefined) {
-    throw new Error('--otp has no meaning with --trusted-publishing: OIDC publishing carries no one-time password');
   }
   if (parsed.outDir !== undefined && parsed.artifacts !== undefined) {
     throw new Error(
@@ -346,42 +339,6 @@ export function assertRegistryAccountPolicy({ whoami, profile }) {
   }
 }
 
-// npm trusted publishing needs npm 11.5.1 or later; older clients never ask for the OIDC token.
-const trustedPublishingNpm = [11, 5, 1];
-const longLivedTokenVariables = ['NODE_AUTH_TOKEN', 'NPM_TOKEN', 'NPM_CONFIG__AUTHTOKEN', 'npm_config__authToken'];
-
-/**
- * The --trusted-publishing half of the auth gate. npm accepts OIDC publishing from
- * GitHub-hosted runners only, and only when the job may mint an ID token. A
- * long-lived token in the environment is refused: npm would fall back to it, and the
- * point of the mode is that no publish credential outlives the job.
- */
-export function assertTrustedPublishingEnvironment({ env, npmVersion }) {
-  if (env.GITHUB_ACTIONS !== 'true') {
-    throw new Error('--trusted-publishing needs a GitHub Actions run: npm trusts the OIDC identity of a GitHub workflow, not a local shell');
-  }
-  if (env.RUNNER_ENVIRONMENT !== 'github-hosted') {
-    throw new Error(
-      `--trusted-publishing needs a GitHub-hosted runner, this runner reports RUNNER_ENVIRONMENT=${JSON.stringify(env.RUNNER_ENVIRONMENT ?? null)}; ` +
-        'npm does not accept OIDC publishing from self-hosted runners',
-    );
-  }
-  if (!env.ACTIONS_ID_TOKEN_REQUEST_URL || !env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) {
-    throw new Error('--trusted-publishing found no OIDC token endpoint; the publishing job needs `permissions: id-token: write`');
-  }
-  const present = longLivedTokenVariables.filter((name) => typeof env[name] === 'string' && env[name] !== '');
-  if (present.length > 0) {
-    throw new Error(`--trusted-publishing refuses a long-lived npm token in the environment (${present.join(', ')}); remove it from the job`);
-  }
-  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(typeof npmVersion === 'string' ? npmVersion.trim() : '');
-  const difference = match
-    ? match.slice(1).map((part, index) => Number(part) - trustedPublishingNpm[index]).find((delta) => delta !== 0) ?? 0
-    : -1;
-  if (difference < 0) {
-    throw new Error(`--trusted-publishing needs npm ${trustedPublishingNpm.join('.')} or later, found ${JSON.stringify(npmVersion ?? null)}`);
-  }
-}
-
 // Registry reads lag registry writes. These schedules bound every wait; writes have none.
 // Total waits: about 3 minutes for visibility (v0.26.0 needed about 2), 35 seconds
 // to see whether a failed upload landed, and under 3 minutes of readback retries.
@@ -535,7 +492,7 @@ export async function readbackWithRetry({ readback, sleep: wait, log, delays = r
 }
 
 /** The complete plan a dry run prints and --execute follows. */
-export function describeReleasePlan({ entries, plan, registryState, tag, distTag, trustedPublishing, provenance }) {
+export function describeReleasePlan({ entries, plan, registryState, tag, distTag }) {
   const lines = [];
   if (plan.length === 0) {
     lines.push(`nothing to publish: every package is already on the registry; this run resumes with the readback and tag ${tag}`);
@@ -550,10 +507,8 @@ export function describeReleasePlan({ entries, plan, registryState, tag, distTag
     lines.push(`skip ${skipped.length} package(s) already on the registry:`);
     for (const entry of skipped) lines.push(`  - ${entry.name}@${entry.version}`);
   }
-  lines.push(trustedPublishing
-    ? 'auth: npm trusted publishing (GitHub Actions OIDC); no token, no OTP'
-    : 'auth: the local npm session; tfa.mode auth-and-writes is required');
-  lines.push(provenance ? 'provenance: attached (--provenance)' : 'provenance: not attached (not a GitHub Actions run)');
+  lines.push('auth: the local npm session; tfa.mode auth-and-writes is required');
+  lines.push('provenance: not attached (not a GitHub Actions run)');
   lines.push(`dist-tag: ${distTag ?? 'latest (npm default)'}`);
   const visibility = registryVisibilityDelaysMs.reduce((total, delay) => total + delay, 0);
   lines.push(
@@ -593,7 +548,7 @@ const registry = {
 
 async function main() {
   const {
-    execute, otp, outDir: requestedOut, artifacts: requestedArtifacts, tag: requestedTag, trustedPublishing,
+    execute, otp, outDir: requestedOut, artifacts: requestedArtifacts, tag: requestedTag,
     ciRunId, ciArtifactId, ciArtifactDigest,
   } = parseArguments(process.argv.slice(2));
   if (otp && !execute) throw new Error('--otp is only meaningful with --execute');
@@ -678,13 +633,6 @@ async function main() {
       const verified = fetchReleaseArtifact(ciRequest);
       for (const [name, bytes] of verified.files) writeFileSync(path.join(outDir, name), bytes, { flag: 'wx', mode: 0o600 });
       log(`step 3/8: verified CI run ${ciRequest.runId}, artifact ${ciRequest.artifactId} (${ciRequest.artifactDigest})`);
-      if (process.env.GITHUB_ACTIONS === 'true') {
-        const evidence = { ...verified.evidence, releaseWorkflowSha: process.env.GITHUB_SHA,
-          provenance: 'npm provenance identifies the protected release workflow; this evidence records the original CI build' };
-        writeFileSync(path.join(process.env.RUNNER_TEMP, 'release-evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`);
-        appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-          `## Accepted CI release artifact\n\nSource: ${headSha}\n\nCI: https://github.com/Ancienttwo/byok-sdk/actions/runs/${ciRequest.runId}\n\nArtifact: ${ciRequest.artifactId} (${ciRequest.artifactDigest})\n\n${evidence.provenance}\n`);
-      }
     } else if (frozen) {
       log(`step 3/8: pack skipped — verifying frozen artifacts in ${outDir}`);
     } else {
@@ -715,12 +663,9 @@ async function main() {
     log(`frozen artifacts verified against ${headSha}; ${alreadyPublished.length} already-published package(s) hold the frozen bytes`);
 
     // --- Step 4: the full release plan ---------------------------------------
-    // Provenance attestations are signed from the GitHub OIDC token, so the flag is
-    // only meaningful inside GitHub Actions; a local release says so instead.
-    const attestProvenance = process.env.GITHUB_ACTIONS === 'true';
     log(`step 4/8: release plan for ${tag}:`);
     for (const line of describeReleasePlan({
-      entries: [...manifests.values()], plan, registryState, tag, distTag, trustedPublishing, provenance: attestProvenance,
+      entries: [...manifests.values()], plan, registryState, tag, distTag,
     })) {
       log(line);
     }
@@ -735,13 +680,6 @@ async function main() {
     // action, so a refusal never leaves a half-released train behind.
     if (plan.length === 0) {
       log('step 5/8: registry auth gate skipped — this run writes nothing to the registry');
-    } else if (trustedPublishing) {
-      log('step 5/8: registry auth gate (trusted publishing)');
-      assertTrustedPublishingEnvironment({
-        env: process.env,
-        npmVersion: capture(npmInvocation.command, [...npmInvocation.prefix, '--version']),
-      });
-      log('GitHub-hosted OIDC publishing: no long-lived npm token is present');
     } else {
       log('step 5/8: registry account gate');
       const whoami = capture(npmInvocation.command, [...npmInvocation.prefix, 'whoami']);
@@ -776,7 +714,6 @@ async function main() {
         path.join(outDir, entry.file),
         '--access',
         'public',
-        ...(attestProvenance ? ['--provenance'] : []),
         ...(distTag ? ['--tag', distTag] : []),
         ...(otp ? ['--otp', otp] : []),
       ]),
