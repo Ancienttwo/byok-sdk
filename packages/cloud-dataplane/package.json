@@ -58,8 +58,8 @@
   },
   "devDependencies": {
     "@byok-sdk/conformance": "workspace:*",
-    "@types/pg": "^8.20.4",
+    "@types/pg": "^8.23.1",
     "undici": "8.12.3",
-    "wrangler": "4.156.0"
+    "wrangler": "4.158.0"
   }
 }

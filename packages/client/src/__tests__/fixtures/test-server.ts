@@ -1,6 +1,5 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
-import { onTestFailed } from 'vitest';
-import { getCurrentTest } from 'vitest/suite';
+import { onTestFailed, TestRunner } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { createPublicKey, randomUUID, verify as edVerify } from 'node:crypto';
 import {
@@ -355,7 +354,7 @@ export class TestServer {
     let settled = false;
     // What had arrived when the test timed out, before teardown sends more.
     let arrived: string[] | undefined;
-    const signal = getCurrentTest()!.context.signal;
+    const signal = TestRunner.getCurrentTest()!.context.signal;
     const describeReceived = (): string[] => this.received.map((envelope) =>
       envelope.task_id === undefined ? envelope.type : `${envelope.type}(${envelope.task_id})`);
     signal.addEventListener('abort', () => { arrived ??= describeReceived(); }, { once: true });
