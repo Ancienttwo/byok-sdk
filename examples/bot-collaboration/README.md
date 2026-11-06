@@ -514,11 +514,13 @@ while one of these holds:
   `cancel.targetTurnId`, or any delegation has it as `lateTurnId`;
 - its room seat is not released;
 - one of its reply receipts is not settled: K4 does not hold the receipt for
-  message replay, or a delegated reply body has no verdict yet.
+  message replay, or a delegated reply body has no verdict yet;
+- it is the intent of a dream that the sync has not closed (`dreams.open`), so
+  the dream's result is not in K8 yet.
 
 K4 runs the veto inside `compact`'s own transaction. A refusal throws
 `CompactVetoError` and changes nothing. Retry the key after a later pass.
-A key without a Turn, for example a Host job, is not a K8 key.
+Any other key without a Turn, for example a Host job, is not a K8 key.
 
 The veto guards each `HostLedger` instance that has it. Another instance on
 the same file without the veto can still compact a Turn intent early. Then the
