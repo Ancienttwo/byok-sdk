@@ -422,7 +422,7 @@ for 0.30.0 and 0.30.1, 2026-10-26 (UTC) for 0.30.2, 2026-10-29 (UTC) for
 0.31.0, 2026-11-01 (UTC) for 0.32.0 and 0.33.0, and 2026-11-02 (UTC) for
 0.34.0 and 0.35.0, 2026-11-03 (UTC) for 0.36.0, 2026-11-04 (UTC) for
 0.37.0 and 0.38.0, and 2026-11-06 (UTC) for 0.39.0. The tag `v0.39.0` and its
-GitHub Release point to `bd437e861`, the squash merge of #1494 on main. The
+GitHub Release point to `bd437e861`, the release commit (#1494) on main. The
 tag `v0.38.0` and its GitHub Release point to
 `47a3ac47c`, the squash merge of #1438 on main. The tag `v0.37.0` and its GitHub Release point to `1ba3779fd`, the
 squash merge of #1411 on main. The tag `v0.36.0` and

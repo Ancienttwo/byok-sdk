@@ -5,9 +5,9 @@ enable the dsh and agy runtimes, and how K8 dreaming behaves. A Host on an
 earlier release first applies the [0.38.0 checklist](host-upgrade-0.38.0.md)
 and then this page, in the same maintenance window.
 
-Its fixed source is the release commit `bd437e861`, the squash merge of the
-0.39.0 release PR #1494 on `main`, not moving `main` or Unreleased. 0.39.0 is
-published on npm `latest` for all nine packages. The rows below are counted
+Its fixed source is the release commit `bd437e861` (#1494) on `main`, not
+moving `main` or Unreleased. 0.39.0 is published on npm `latest` for all nine
+packages. The rows below are counted
 from the upgrade manifest on the release PR. It has not been walked through. The
 behavior authorities are the upgrade manifest that `@byok-sdk/client` ships
 (`upgrade-manifest.json`, 0.38.0 to 0.39.0) and the CHANGELOG 0.39.0 section
@@ -153,15 +153,14 @@ These are not tied to a manifest item. The CHANGELOG item is the full note.
   prepared tasks run scoped on Windows instead of declining before claim with
   `file_scope_unsupported`. The durable Pi lane stays darwin and linux only.
 - **Terminal evidence retention** (#1455): a `<runtime>-task-<hash>.jsonl` file
-  under `.byok/runtime-sessions` can be a session ledger as well as terminal
-  evidence, because a runtime id can end in `-task`. It is now deleted only
-  when the larger of `storage.retention.ttlMs['session-ledger']` and
-  `storage.retention.ttlMs['terminal-evidence']` has passed since its last
-  write. Content is not read, so this covers all terminal evidence, not only
-  that of such a runtime: a `terminal-evidence` TTL below the `session-ledger`
-  TTL no longer shortens how long terminal evidence is kept. Only a runtime id
-  of 60 to 64 characters, whose file cannot be a ledger, keeps its own TTL. Both
-  TTLs default to 30 days, so a Host on the defaults sees no change.
+  under `.byok/runtime-sessions` that also matches the session-ledger filename
+  pattern uses the larger of `storage.retention.ttlMs['session-ledger']` and
+  `storage.retention.ttlMs['terminal-evidence']`, measured since its last write.
+  The match uses the filename, not its contents: terminal evidence with a
+  runtime id of up to 59 characters matches both patterns and can outlive its
+  own TTL. A terminal file with a runtime id of 60 to 64 characters uses only
+  the terminal-evidence TTL. Both TTLs default to 30 days, so a Host on the
+  defaults sees no change.
 
 ## Enabling dsh and agy
 
