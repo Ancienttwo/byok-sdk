@@ -77,7 +77,17 @@ function prompt(sessionId, text) {
   assistant(sessionId, [{ type: 'text', text: `first message: ${text}` }, { type: 'tool-call', id: 'call_1', name: 'bash', arguments: '{"command":"ls"}' }], { inputTokens: 90, outputTokens: 5, totalTokens: 95 });
   event(sessionId, 'tool/call', { callId: 'call_1', name: 'bash', arguments: '{"command":"ls"}' });
   event(sessionId, 'tool/result', { message: { toolCallId: 'call_1', isError: false, content: [{ type: 'text', text: 'a.txt\n' }] } });
+  if (text === 'subagent-usage') {
+    event('child-1', 'request/header', { header: { config: { provider: 'child', model: 'other' } } });
+    event('child-1', 'request/context', { contextWindow: 5000 });
+    assistant('child-1', [{ type: 'text', text: 'child reply' }], { inputTokens: 10, outputTokens: 2, cacheReadTokens: 3, reasoningTokens: 1, totalTokens: 15 });
+    event('child-1', 'tool/call', { callId: 'call_1', name: 'bash', arguments: 'child input' });
+    event('child-1', 'tool/result', { message: { toolCallId: 'call_1', content: [] } });
+    event('child-1', 'turn/end', { reason: { kind: 'completed' } });
+    assistant('child-2', [], { inputTokens: 5, outputTokens: 1, totalTokens: 6 });
+  }
   assistant(sessionId, [{ type: 'text', text: 'final answer' }], { inputTokens: 100, outputTokens: 7, cacheReadTokens: 20, totalTokens: 127 });
+  if (text === 'subagent-usage') assistant('child-1', [], { inputTokens: 20, outputTokens: 3, cacheReadTokens: 4, reasoningTokens: 2, totalTokens: 27 });
   end({ kind: 'completed' });
 }
 

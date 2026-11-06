@@ -877,14 +877,16 @@ and `versionPolicy`). The other options stay on the `DshAdapter` constructor.
   string, never a display text, so tool authorization sees the whole input.
   Arguments that are not a JSON object fail the session as `authority`.
   `tool_result.output` carries the content blocks under `content`. `usage`
-  carries each turn's billed tokens, read from OAR's session totals, and the
-  context occupancy (`contextTokens`, `contextWindow`,
+  carries the root and subagent billed tokens observed before the root turn
+  ends, summed from OAR's per-session cumulative totals. Context occupancy
+  stays root-only (`contextTokens`, `contextWindow`,
   `contextSource: 'provider'`).
 - Turn end: an Attempt is one prompt on one process. dsh's subagents and
   background jobs outlive the turn, and when one finishes dsh opens a root turn
   with no prompt. So on the root turn end the session projects nothing more,
   closes dsh and disposes the owned process tree, and only then reports
-  `turn_end` (`dsh.turnEnd`). Background subagents and jobs stop there and their
+  `turn_end` (`dsh.turnEnd`). Work started with `subagent` or `bash` with
+  `run_in_background: true` stops there and its
   unfinished work is lost. This is not a failure: the model's own reply says it
   started them. `followUp` is refused; a later turn resumes in a new process
   (`dsh.resume`). After a resume dsh restarts neither: `list_agents` shows the

@@ -2228,6 +2228,16 @@ stateDiagram-v2
 | `AwaitApproval` | `Running`, `Failed`, `Cancelled` |
 | `Complete` / `Failed` / `Cancelled` | none (terminal) |
 
+For every runtime, the daemon closes the active session when the task ends
+(`closeActiveSession` in `daemon/task-runner/lifecycle.ts`, awaited by terminal
+finalization in `finish.ts`). The task does not stay open to collect later
+background results: closing stops adapter-owned background work, and unfinished
+results are lost to that task. A later Turn resumes the saved session rather
+than keeping this execution alive. This shared close path applies to Claude
+and the other runtimes; it does not establish their native background-tool
+behavior, which was not probed here. Process ownership limits are documented
+under [Quiescent runtime disposal](spec.md#quiescent-runtime-disposal).
+
 The table above is the shared wire task state machine. The hosted cloud also
 has one control-plane attempt state, lower-case `cancel_requested`, which is
 not a new envelope value and does not extend `TaskState`. It means a host

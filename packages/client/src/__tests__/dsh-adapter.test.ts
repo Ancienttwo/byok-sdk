@@ -205,6 +205,18 @@ describe('DshAdapter sessions', () => {
     ]);
   });
 
+  it('sums interleaved subagent usage while keeping context and other events root-only', async () => {
+    const { open } = await setup();
+    expect(await turn(await open({ instruction: 'subagent-usage' }))).toEqual([
+      { type: 'progress', text: 'first message: subagent-usage' },
+      { type: 'tool_use', tool: 'bash', toolCallId: 'call_1', input: { command: 'ls' } },
+      { type: 'tool_result', tool: 'bash', toolCallId: 'call_1', output: { content: [{ type: 'text', text: 'a.txt\n' }] } },
+      { type: 'progress', text: 'final answer' },
+      { type: 'usage', inputTokens: 252, outputTokens: 18, cachedInputTokens: 27, reasoningTokens: 3, contextTokens: 127, contextSource: 'provider', contextWindow: 1000 },
+      { type: 'turn_end' },
+    ]);
+  });
+
   it('keeps a tool input past 10k whole, as the native object', async () => {
     const { open } = await setup();
     const events = await turn(await open({ instruction: 'long-input' }));
