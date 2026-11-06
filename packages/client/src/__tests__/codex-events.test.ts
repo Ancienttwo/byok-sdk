@@ -260,8 +260,9 @@ describe('required Codex native projection', () => {
     ]);
   });
 
-  it('failed turn yields diagnostics without successful terminal', () => {
+  it('a reconnect error is silent and a failed turn yields diagnostics without successful terminal', () => {
     const s = setup();
+    s.feed('error', { willRetry: true, error: { message: 'Reconnecting... 1/5' } });
     s.feed('turn/completed', {
       turn: { status: 'failed', error: { message: 'provider failure' } },
     });

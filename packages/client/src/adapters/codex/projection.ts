@@ -188,6 +188,8 @@ export class CodexProjection {
       return []; // the consumer stops at turn_end, so flush the latest usage immediately before it.
     }
     if (method === 'error') {
+      // Codex is reconnecting and the turn continues; a real failure arrives without willRetry.
+      if (params.willRetry === true) return [];
       const err = record(params.error);
       return [
         {
