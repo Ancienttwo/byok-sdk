@@ -2931,7 +2931,7 @@ one line: `Agent memory (data): ` and a JSON object with `path`, `revision`,
 the first user message, never the system prompt, after blob and sealed
 instructions are opened. The task fails without retry and without truncation
 before the runtime starts when the file is over the limit
-(`agent_memory_resident_over_limit: <bytes>/<limit>`), or when it is missing,
+(`agent_memory_resident_over_limit: <bytes>/<limit>; to recover, send a write task with agentMemory:"none" and no agentMemoryCommit that brings memory back within its limits`), or when it is missing,
 not a regular file or not valid UTF-8, has more than one hard link, or the home
 identity changed (`agent_memory_resident_unreadable: <reason>`). These prefixes
 are reason text, not wire values.
@@ -4078,6 +4078,50 @@ Only the Host's local tool service can enforce actual read-only behavior; model
 annotations are not authorization. External effects retain owner-confirmed Host
 connector execution. This additive slice does not qualify external-authority
 storage, Windows persona persistence or two-process relay.
+
+## K8 Bot dreaming (#1475)
+
+A dream is a background writer task that checks and tidies an Agent's memory
+against the turns a Host holds. [ADR-049](adr/ADR-049-host-owned-bot-dreaming.md)
+records the decision, and the
+[K8 README](../examples/bot-collaboration/README.md#dreaming-1475) holds the
+operating details.
+
+Dreaming belongs to the Host layer. The SDK schedules nothing, stores no history
+and adds no wire field. `@byok-sdk/protocol` exports the pure function
+`buildDreamInstruction`, and a Host calls it on its own data and offers the text
+as a fresh task.
+
+K8 Bots dream by default. `BotCollaboration` gives each unarchived Bot with a
+usable template a daily routine, at 03:00 in `dreaming.timeZone`, or in the
+process's local zone when the routine is created. `dreaming: false` turns dreaming
+off for the whole Host. A routine runs only when the Bot completed a Turn since
+its last successful dream.
+
+A dream runs on the Bot's own device, because its memory home is there. Its
+template is the first name in `dreaming.models` that exists and is on that device,
+else the Bot's own template. When neither exists, K8 skips that occurrence and
+records `model_unavailable`. Only the list decides what is cheap: K8 infers nothing
+from a runtime name. `snapshot().dreams` records the outcome, the template and
+whether it was a fallback.
+
+A dream is a fresh writer with `agentMemory: 'none'` and no `agentMemoryCommit`, on
+every platform. It is the write task that
+[protocol.md §2.2](protocol.md#22-task-free-agent-home-projection) names as the
+repair of a home over its memory limits. It is not a `homeAccess` task, so its cwd
+is the Bot's home and `MEMORY.md` and `notes/` in the instruction resolve from the
+cwd. In `none` mode the device injects no `MEMORY.md` and no memory guidance. Its
+writes have no rollback, so the instruction orders each step to leave usable
+memory.
+
+K8's occurrence hook `bot-dream` records the occurrence, and the K8 sync skips it
+or promotes it into the Bot's FIFO. K4 owns the FIFO position, supersede and
+deadline. User input goes ahead of a dream that has not started, and a running
+dream is not interrupted, so that input waits at most `maxDurationMs`.
+
+The hosted example concludes a `bot-dream` occurrence `cancelled` with no task and
+records why. Full dreaming on hosted and dreaming from device-native sessions are
+deferred.
 
 ## Hosted mailbox hold (#410)
 
