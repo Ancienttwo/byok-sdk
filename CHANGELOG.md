@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed (client)** — Hosts no longer get an `error` event each time Codex
+  reconnects. A native `error` frame with `willRetry: true` now produces no
+  event, because the turn continues. An `error` frame without `willRetry: true`
+  and a failed `turn/completed` still report the failure.
+
 - **Fixed (client; #1474)** — an `agentMemoryCommit: 'on-success'` task can no
   longer end with `task.complete` and leave a home that every later on-success
   task refuses. The device checks the home when the runtime ends its turn, the
