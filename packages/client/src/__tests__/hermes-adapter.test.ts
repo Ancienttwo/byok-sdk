@@ -404,10 +404,15 @@ describe('HermesAdapter session', { timeout: 30_000 }, () => {
     expect(gateways.map((entry) => entry.seededCache)).toEqual([false, true]);
   });
 
-  it('answers a permission request with cancelled, never allow', async () => {
+  it('refuses a permission request with its reject_once option, never allow', async () => {
     const { open, entries } = await setup({ FAKE_HERMES_PERMISSION: '1' });
     await turn(await open());
-    expect((await entries()).find((entry) => entry.method === 'permission-answer')!.answer).toEqual({ outcome: { outcome: 'cancelled' } });
+    expect((await entries()).find((entry) => entry.method === 'permission-answer')!.answer).toEqual({ outcome: { outcome: 'selected', optionId: 'deny' } });
+  });
+
+  it('fails the session on a permission request with no reject_once option', async () => {
+    const { open } = await setup({ FAKE_HERMES_PERMISSION: '1', FAKE_HERMES_PERMISSION_NO_REJECT: '1' });
+    await expect(turn(await open())).rejects.toThrow(/reject_once/);
   });
 
   it('runs an idle follow-up on the same native session and refuses steering', async () => {

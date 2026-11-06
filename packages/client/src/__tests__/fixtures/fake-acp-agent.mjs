@@ -18,7 +18,7 @@
 // left it (setsid) and writes their pids to FAKE_ACP_TOOL_TREE; the native
 // cancel then SIGKILLs the parent, orphaning the tool, as a real cancel can.
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 
@@ -129,6 +129,14 @@ async function prompt(message) {
     vendor({ sessionUpdate: 'subagent_finished', subagent_id: 'fake-child', child_session_id: 'fake-child', status: 'completed' });
     text('parent-answer');
     result(message.id, answer());
+    return;
+  }
+  if (input === 'recorded-permission-stop') {
+    for (const frame of JSON.parse(readFileSync(new URL('./grok-permission-stop-1.0.52.json', import.meta.url), 'utf8'))) {
+      if (frame.method === 'session/request_permission') log({ kind: 'permission', reply: await ask(frame.method, frame.params) });
+      else if (frame.method !== undefined) send(frame);
+      else result(message.id, frame.result);
+    }
     return;
   }
   if (input === 'permission') {

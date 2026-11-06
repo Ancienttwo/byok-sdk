@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2216494,
+      "budgetBytes": 2216953,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -110,7 +110,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 430788,
+      "budgetBytes": 431247,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -425,7 +425,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 410530,
+      "budgetBytes": 410989,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -548,7 +548,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Hermes session runtime; loaded only when starting an execution",
-      "budgetBytes": 22565,
+      "budgetBytes": 22899,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2337,7 +2337,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2175330,
+      "budgetBytes": 2175789,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

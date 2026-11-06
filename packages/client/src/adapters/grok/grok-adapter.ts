@@ -40,6 +40,7 @@ const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
 const DEFAULT_RETAINED_BYTES = 16 * 1024 * 1024;
 const DEFAULT_INTERRUPT_MS = 1000;
+const PERMISSION_STOP_REASON = 'grok ended the turn as cancelled without an SDK cancel (a permission request answered cancelled)';
 /** Grok's per-process switches for the Claude and Cursor `agents` and `rules` compatibility cells. */
 const COMPAT_INSTRUCTIONS_OFF = Object.freeze({
   GROK_CLAUDE_AGENTS_ENABLED: '0', GROK_CLAUDE_RULES_ENABLED: '0',
@@ -95,7 +96,8 @@ export interface GrokAdapterOptions {
  * Grok Build over ACP (`grok agent --always-approve --no-leader stdio`),
  * through the vendored OAR Grok profile. The SDK owns the agent process,
  * every terminal command Grok asks the client to run, the environment, the
- * record budget and the permission policy (requests are cancelled).
+ * record budget and the permission policy (requests are cancelled, and a
+ * turn that ends on one fails).
  *
  * `grok` is not a frozen wire runtime id, so a task reaches this adapter by
  * the custom-harness identity (`harnessId: 'grok'`). It takes no dispatch
@@ -288,6 +290,8 @@ class GrokSession implements Session {
   private readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
   private failure?: RuntimeExecutionFailure;
   private active = false;
+  /** The SDK asked for the active turn's cancel. Grok also ends a turn as cancelled on its own, on a permission request answered `cancelled`. */
+  private interruptRequested = false;
   private readonly interruptWaiters = new Set<() => void>();
   private stopping = false;
   private closeAttempt?: Promise<void>;
@@ -342,7 +346,9 @@ class GrokSession implements Session {
     }
   }
   private turnEnded(turn: GrokTurnOutcome): void {
+    const cancelledBySdk = this.interruptRequested || this.stopping;
     this.active = false;
+    this.interruptRequested = false;
     for (const resolve of this.interruptWaiters) resolve();
     if (turn.kind === 'failed')
       this.fail(new RuntimeExecutionFailure({
@@ -353,6 +359,10 @@ class GrokSession implements Session {
         // A class OAR took from error text is not structured evidence (docs/spec.md runtime failure class).
         failure: { class: turn.fromText ? 'unknown' : turn.failure },
       }));
+    // Grok 1.0.52 calls no model after the refusal, so the turn did not do the work. A `reject_once` answer ends it the same way.
+    else if (turn.kind === 'aborted' && !cancelledBySdk)
+      this.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: PERMISSION_STOP_REASON }));
+    else this.queue.push({ type: 'turn_end' });
   }
   fail(error: unknown): void {
     this.failure ??= isRuntimeExecutionFailure(error)
@@ -402,6 +412,7 @@ class GrokSession implements Session {
   }
   async interrupt(): Promise<void> {
     if (!this.raw || !this.active) return;
+    this.interruptRequested = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let resolveTurn!: () => void;
     const turnSettled = new Promise<void>(resolve => { resolveTurn = resolve; });

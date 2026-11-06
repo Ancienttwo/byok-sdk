@@ -93,16 +93,25 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
             this.projection.update(update as Record<string, unknown>, (event) => this.queue.push(event));
           }
         },
-        request: (method) => {
+        request: (method, params) => {
           // Edits run in `dont_ask` mode and commands under `--yolo`. What still
-          // asks is Hermes's own guard (sensitive paths). No human can answer,
-          // so the guard stands: the request is cancelled, never allowed.
-          if (method === 'session/request_permission') return { outcome: { outcome: 'cancelled' } };
+          // asks is Hermes's own guard (sensitive paths, agent instruction
+          // files). No human can answer, so the guard stands: the request is
+          // refused, never allowed. A `cancelled` answer is no refusal to
+          // Hermes, whose tool then waits out its 300 s approval timeout.
+          if (method === 'session/request_permission') return { outcome: { outcome: 'selected', optionId: this.rejectOption(params) } };
           throw new AcpMethodNotFound(method);
         },
       });
       void viewer.exited.then(() => this.exited('acp viewer'), (error) => this.fail(error));
       return this.connection;
+    }
+
+    private rejectOption(params: Record<string, unknown>): string {
+      const options: unknown[] = Array.isArray(params.options) ? params.options : [];
+      const option = options.find((entry): entry is { optionId: unknown } => (entry as { kind?: unknown } | null)?.kind === 'reject_once');
+      if (typeof option?.optionId !== 'string') throw infrastructure('run', 'hermes permission request offers no reject_once option');
+      return option.optionId;
     }
 
     /**

@@ -23,6 +23,15 @@
   unexpectedly now count as I/O failures, so they are retryable at the start, as
   `docs/protocol.md` already said. Host memory intents get no new check.
 
+- **Fixed (client)** — a Grok task no longer completes when Grok stops on a
+  permission request. A user's own shell `ask` rule or `ask` hook makes Grok
+  ask even under `--always-approve`; the SDK answers `cancelled`, and Grok 1.0.52
+  ends the turn without calling the model again. The task now fails as semantic
+  and non-retryable. A cancel the SDK asked for still ends the turn normally.
+- **Fixed (client)** — Hermes permission requests are refused with `reject_once`
+  instead of `cancelled`. The result is still a denial; the tool no longer waits
+  out Hermes's 300 s approval timeout first.
+
 - **Fixed (client)** — all-mode tool reminders now fire for Hermes. They never
   did before, because the classifier got a display title and no arguments for
   every Hermes call. Hosts see Hermes `tool_use` and `tool_result` events

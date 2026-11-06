@@ -629,7 +629,8 @@ export interface GrokAdapterOptions {
  * Grok Build over ACP (`grok agent --always-approve --no-leader stdio`),
  * through the vendored OAR Grok profile. The SDK owns the agent process,
  * every terminal command Grok asks the client to run, the environment, the
- * record budget and the permission policy (requests are cancelled).
+ * record budget and the permission policy (requests are cancelled, and a
+ * turn that ends on one fails).
  *
  * `grok` is not a frozen wire runtime id, so a task reaches this adapter by
  * the custom-harness identity (`harnessId: 'grok'`). It takes no dispatch
