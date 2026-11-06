@@ -2237,6 +2237,32 @@ export declare const RUNTIME_UNAVAILABLE_CAUSES: readonly ["not_installed", "not
 export type RuntimeUnavailableCause = (typeof RUNTIME_UNAVAILABLE_CAUSES)[number];
 /** Maximum length of a served model name. */
 export declare const TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH = 160;
+// ==== @byok-sdk/protocol dist/dream.d.ts ====
+import type { HandoffPack } from './handoff-pack';
+/** Epoch milliseconds, as a `Date` can hold them, with `fromMs` at most `toMs`. */
+export interface DreamWindow {
+    /** The end of the last successful dream's window, or the first turn's time before any dream. */
+    readonly fromMs: number;
+    readonly toMs: number;
+}
+export interface DreamBudget {
+    /** A positive safe integer: the `maxDurationMs` of the task that runs this instruction. */
+    readonly maxDurationMs: number;
+}
+export interface DreamInstructionInput {
+    /** The turns of `window`, from `buildHandoffPack`. It can be empty: a dream can run only to bring memory under its limits. */
+    readonly history: HandoffPack;
+    readonly window: DreamWindow;
+    readonly budget: DreamBudget;
+}
+/**
+ * Builds the dream instruction. The history is the last line and is one JSON
+ * line, so no turn text can end the data and write after it.
+ *
+ * @throws RangeError when `window` is not a pair of ordered epoch milliseconds,
+ * or `maxDurationMs` is not a positive safe integer.
+ */
+export declare function buildDreamInstruction(input: DreamInstructionInput): string;
 // ==== @byok-sdk/protocol dist/e2ee-member.d.ts ====
 /**
  * Member keys, the member chain and scope key packages as the Host stores
@@ -3521,6 +3547,7 @@ export type { E2eeClientPairingMac, E2eeKeyPackageAvailablePayload, E2eeMemberCh
 export * from './bot-turn-outcome';
 export * from './routine-schedule';
 export { resultOutcomeMaxBytes } from './result-schema';
+export * from './dream';
 export * from './handoff-pack';
 // ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
 import { z } from 'zod';

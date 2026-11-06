@@ -315,6 +315,13 @@
   exceeds `totalBytes`. `truncateUtf8` is the text cut that it shares with
   `boundFailureReason`, whose output does not change.
 
+- **Added (protocol; #1475)** — `buildDreamInstruction({ history, window,
+  budget })` builds the instruction of a dream: a background writer task that
+  checks and tidies an Agent's memory against history from `buildHandoffPack`.
+  It is a pure function and nothing calls it for a Host. A Host offers the text
+  as a fresh task with `agentMemory: 'none'` and no `agentMemoryCommit`, so the
+  instruction is written for no rollback.
+
 ## 0.38.0 — 2026-11-04 (published)
 
 0.38.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
