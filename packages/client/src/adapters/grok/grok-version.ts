@@ -5,11 +5,12 @@ import type { RuntimeVersionPolicy } from '../../types';
  * default. Grok updates itself, so another version is an advisory. This is the
  * newest version that OAR's live evidence covers for the vendored profile (the
  * prompt-option probe in OAR docs/runtimes/grok.md, read at OAR c264f17).
- * The vendored 47c2c3f Grok runtime session differs upstream from c264f17
- * only in the wording of its resume refusal (0.86); the 0.80-0.83 shared ACP
- * stack adds connection opening, input draining and refusal of foreign child
- * attribution without changing the Grok launch profile. Native contracts the
- * adapter depends on are probed directly (`agent stdio`).
+ * The vendored be46fb3 Grok runtime session differs upstream from c264f17
+ * in the wording of its resume refusal (0.86) and the manual compaction control
+ * the SDK bridge does not expose (0.88); the 0.80-0.88 shared ACP stack adds
+ * connection opening, input draining, refusal of foreign child attribution and
+ * the adapter-held queue without changing the Grok launch profile. Native
+ * contracts the adapter depends on are probed directly (`agent stdio`).
  */
 export const QUALIFIED_GROK_VERSION = '1.0.52';
 

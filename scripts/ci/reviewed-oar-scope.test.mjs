@@ -4,21 +4,21 @@ import { selectImpact } from './select-impact.mjs';
 
 test('reviewed OAR trim paths retain client and native qualification, unknown vendor scope refuses', () => {
   for (const file of ['runtimes/codex/app-server-client.ts', 'runtimes/codex/rpc-control.ts', 'runtimes/codex/session.ts', 'shared/acp/session.ts', 'shared/session-kernel.ts']) {
-    const path = `packages/client/vendor/oar/47c2c3f/${file}`;
+    const path = `packages/client/vendor/oar/be46fb3/${file}`;
     const plan = selectImpact([path]);
     assert.ok(plan.dirs.includes('packages/client'));
     assert.ok(plan.dirs.includes('examples/basic'));
     for (const family of ['adapter-lifecycle-smoke', 'execution-recovery-native', 'credential-isolation-audit']) assert.ok(plan.families.includes(family));
-    assert.throws(() => selectImpact([path.replace('47c2c3f', 'aaaaaaa')]));
+    assert.throws(() => selectImpact([path.replace('be46fb3', 'aaaaaaa')]));
   }
-  assert.throws(() => selectImpact(['packages/client/vendor/oar/47c2c3f/shared/unreviewed.ts']));
+  assert.throws(() => selectImpact(['packages/client/vendor/oar/be46fb3/shared/unreviewed.ts']));
 });
 
 test('an OAR snapshot path is reviewed only when its source manifest lists it', () => {
   for (const file of ['contracts/login.ts', 'observe/graph.ts', 'LICENSE', 'shared/acp/profile.ts']) {
-    assert.ok(selectImpact([`packages/client/vendor/oar/47c2c3f/${file}`]).dirs.includes('packages/client'));
+    assert.ok(selectImpact([`packages/client/vendor/oar/be46fb3/${file}`]).dirs.includes('packages/client'));
   }
-  assert.throws(() => selectImpact(['packages/client/vendor/oar/47c2c3f/contracts/unreviewed.ts']));
+  assert.throws(() => selectImpact(['packages/client/vendor/oar/be46fb3/contracts/unreviewed.ts']));
   assert.throws(() => selectImpact(['packages/client/vendor/oar/aaaaaaa/contracts/login.ts']));
 });
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Internal (client)** — the SDK-owned OAR source moves from 0.86.0 to
+  0.88.0 (`vendor/oar/be46fb3/`, upstream commit `be46fb36`). The shared ACP
+  stack takes upstream's adapter-held queue, manual compaction and config-option
+  confirmation, none of which the SDK bridge exposes. A failed Codex start on a
+  missing working directory now says the directory does not exist. All sixteen
+  BYOK deltas are preserved and the API surface is unchanged. Upstream's
+  ending of an aborted turn's processes is not taken; the SDK still kills them
+  at session dispose.
+
 - **Breaking (client; #1440)** — `AgentMemoryFilesystem` gains `observe` and
   `cleanupForRestore`, and `walk` now resolves with
   `{ paths, entries }`: `paths` is the same list of files as before, and

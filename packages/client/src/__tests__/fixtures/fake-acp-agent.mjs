@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fake ACP agent over stdio for offline adapter tests. It calls no model and
-// reads no login. Frame shapes follow OAR 47c2c3f tests/fixtures
+// reads no login. Frame shapes follow OAR be46fb3 tests/fixtures
 // (fake-acp-agent.mjs, fake-acp-grok.mjs: Grok 1.0.25 wire, Apache-2.0).
 //
 // argv: `--version` prints a version; `agent stdio --help` prints help;
@@ -197,6 +197,11 @@ function request(message) {
       log({ kind: 'model', params: message.params });
       if (message.params?.modelId === 'no-such-model') { error(message.id, -32602, 'Invalid params: unknown model'); return; }
       result(message.id, { _meta: { modelId: message.params?.modelId } });
+      return;
+    case 'session/set_config_option':
+      log({ kind: 'config', params: message.params });
+      update({ sessionUpdate: 'config_option_update', configOptions: [{ id: message.params?.configId, currentValue: message.params?.value }] });
+      result(message.id, {});
       return;
     case 'session/prompt':
       void prompt(message);
