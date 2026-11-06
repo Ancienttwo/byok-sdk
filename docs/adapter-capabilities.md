@@ -566,7 +566,7 @@ for Claude it is `agentSessionPersistence: 'disabled'`, below.
 | Pi, prepared | None: the session is in memory |
 | Pi, durable | `durable-<taskId>.sqlite` replica in the daemon store, disjoint from the Agent home, removed after its retention TTL; the lane recovers from it |
 | Hermes | `state.db` and `sessions/` in the execution's profile, `<home>/profiles/byok-<id>/`, removed when the execution closes, or by the 15-minute sweep after a crash |
-| dsh | `<home>/sessions/<encoded cwd>/<session id>/` in the Host's dsh root, kept so that `session/resume` works; the adapter never removes it |
+| dsh | `<home>/sessions/<encoded cwd>/<session id>/` in the Host's dsh root, kept so that `agents.resume` works; the adapter never removes it |
 
 What the upstream runtimes offer that the SDK does not use:
 
@@ -694,6 +694,8 @@ dependency.
   text run; a tool call or the turn end closes a run. The daemon publishes the
   last run as the closing reply when Grok does not call `send_agent_message`.
   Sub-agent sessions produce no events for the parent.
+- Tool input: `tool_use.input` is the native `rawInput` object of the opening
+  `tool_call` frame. When that is not an object, `input` is left out.
 - Resume: ACP `session/resume` with the exact id. Its answer carries no id, so
   the resumed identity is the requested one by construction; the conformance
   identity-drift case does not apply. A missing session fails closed.
