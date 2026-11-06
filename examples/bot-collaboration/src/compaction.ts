@@ -1,4 +1,4 @@
-import { hash, type CompactVeto, type HostLedger, type LedgerState } from '@byok-sdk/server/execution-core';
+import { hash, occurrenceOfIntentKey, type CompactVeto, type HostLedger, type LedgerState } from '@byok-sdk/server/execution-core';
 import type { CollaborationState, Turn } from './model';
 import { routineOccurrence } from './routines';
 import { compactVeto } from './rules/commands';
@@ -24,5 +24,5 @@ export const botCompactVeto: CompactVeto = (ledger, key) => {
   // #975: an exported domain keeps what it exported, so nothing of it is compacted.
   if (state.switchExport) return 'switch_exported';
   return compactVeto(state, key, { hasIntent: turnId => !!ledger.intents[hash(turnId)],
-    receipt: taskId => ledger.executions[taskId]?.messageReceipt });
+    receipt: taskId => ledger.executions[taskId]?.messageReceipt, occurrenceOf: occurrenceOfIntentKey });
 };

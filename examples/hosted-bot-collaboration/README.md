@@ -608,8 +608,8 @@ root ids are retired in `retired_identity`, and every moved command record answe
 scope lock does all of it, and a refusal or a throw writes nothing.
 
 - The K8 rule `compactVeto` checks each acknowledged Turn with an intent row, the rule that L's `botCompactVeto` runs:
-  the Turn is concluded and reported, no unresolved delegation references it, its room seat is released, and its reply
-  receipt is settled. A refusal throws K4's `CompactVetoError`.
+  the Turn is concluded and reported, no unresolved delegation references it, its room seat is released, its reply
+  receipt is settled, and the key is not the intent of an open dream. A refusal throws K4's `CompactVetoError`.
 - The store refuses a row with no conclusion, and a Turn id with neither a row nor an intent tombstone.
 - Each removed row leaves a permanent intent tombstone in `retired_identity`, kind `intent` with K4's intent id
   `hash(turnId)`, as K4 `compact` writes it. A later call counts that Turn as already compacted. `freezeIntent`

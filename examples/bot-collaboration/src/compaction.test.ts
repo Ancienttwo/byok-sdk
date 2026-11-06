@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { CompactVetoError, HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, type ExecutionServer, type ExecutionTemplate, type LedgerState } from '@byok-sdk/server/execution-core';
+import { CompactVetoError, HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, type ExecutionServer, type ExecutionTemplate, type LedgerState } from '@byok-sdk/server/execution-core';
 import { template as k4template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';
@@ -176,4 +176,14 @@ it('refuses each key that K8 still reads, and allows a settled Turn and a key wi
   expect(veto('receipt')).toBeUndefined();
   expect(veto('host-job')).toBeUndefined();
   expect(veto('constructor')).toBeUndefined();
+});
+
+it('refuses a dream intent until the sync closes its dream, and allows another occurrence', () => {
+  const ledger = { intents: {}, executions: {}, application: {} } as unknown as LedgerState;
+  const state = stateOf(ledger.application), slot = hash('dream-slot'), intentKey = occurrenceIntentKey(slot);
+  state.dreams = { bots: {}, open: { [slot]: { botId: 'main', windowEnd: 0, template: 'default', fallback: true } } };
+  expect(botCompactVeto(ledger, intentKey)).toBe('The dream result is not synced');
+  expect(botCompactVeto(ledger, occurrenceIntentKey(hash('other-slot')))).toBeUndefined();
+  state.dreams.open = {};
+  expect(botCompactVeto(ledger, intentKey)).toBeUndefined();
 });
