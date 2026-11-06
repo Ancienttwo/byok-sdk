@@ -65,6 +65,17 @@ export function verifyPrPlan(plan, env = process.env, cwd = process.cwd()) {
   return base;
 }
 
+// Throwaway branch, never merged: the PR whose head is the one commit on top
+// of prep head 78e3add2b runs the complete nightly matrix. Keyed to that exact
+// parent so the fixture repositories in plan-ci.test.mjs keep the routine plan.
+const FULL_RUN_TRAIN = '78e3add2be5b6535ed2899cc9b44db8435a6a210';
+export function isTrainFullRun(env = process.env, cwd = process.cwd()) {
+  if (env.CI_EVENT !== 'pull_request') return false;
+  try {
+    return execFileSync('git', ['rev-parse', `${env.CI_PR_HEAD}^`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() === FULL_RUN_TRAIN;
+  } catch { return false; }
+}
+
 if (import.meta.main) {
   const event = process.env.CI_EVENT;
   const base = resolveCiBase();
@@ -72,7 +83,8 @@ if (import.meta.main) {
   if (!['workflow_dispatch', 'schedule'].includes(event)) {
     paths = changedPaths(base);
   }
-  const plan = planCi({ event, sha: process.env.GITHUB_SHA, approvedSha: process.env.CI_RELEASE_SHA, ref: process.env.CI_REF, paths, base });
+  const routine = planCi({ event, sha: process.env.GITHUB_SHA, approvedSha: process.env.CI_RELEASE_SHA, ref: process.env.CI_REF, paths, base });
+  const plan = isTrainFullRun() ? { ...routine, mode: 'nightly', families: [...knownFamilies] } : routine;
   console.log(JSON.stringify(plan, null, 2));
   appendFileSync(process.env.GITHUB_OUTPUT, `plan=${JSON.stringify(plan)}\nfamilies=${JSON.stringify(plan.families)}\nmode=${plan.mode}\nrelease=${plan.mode === 'release'}\nbuild=${needsBuild(plan)}\n`);
 }
