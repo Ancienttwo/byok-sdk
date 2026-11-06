@@ -168,7 +168,8 @@ function runViewer() {
       pendingPrompt = id;
       return;
     }
-    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: `t${turns}`, title: 'terminal: ls', kind: 'execute', status: 'pending', rawInput: { command: 'ls' } });
+    // The ACP shapes real Hermes 0.22.2+2364.g0b10b9f sends for `terminal`: no `rawInput` or `rawOutput`.
+    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: `t${turns}`, title: 'terminal: ls', kind: 'execute', content: [{ type: 'content', content: { type: 'text', text: '$ ls' } }], locations: [] });
     if (env.FAKE_HERMES_PERMISSION === '1') {
       const answer = await ask('session/request_permission', {
         sessionId,
@@ -177,7 +178,7 @@ function runViewer() {
       });
       receipt({ mode: 'acp', method: 'permission-answer', answer });
     }
-    update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: `t${turns}`, status: 'completed', rawOutput: 'file.txt' });
+    update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: `t${turns}`, kind: 'execute', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'terminal result' } }] });
     const gate = env.FAKE_HERMES_REPLY_GATE;
     for (const chunk of gate ? ['Do', 'ne', '.'] : ['Done.']) {
       while (gate && chunk === '.' && !existsSync(path.join(gate, 'release'))) await new Promise((resolve) => setTimeout(resolve, 10));

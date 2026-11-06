@@ -722,6 +722,20 @@ permission request that still arrives (Hermes's sensitive-path guard) is
 answered `cancelled`. The adapter owns the Hermes gateway process tree and
 checks the gateway identity before and after the viewer attaches.
 
+Hermes declares no `toolAuthorizationAuto`, so nothing asks before a tool runs;
+an `all`-mode Task gets a reminder after the call starts. Hermes's ACP
+`tool_call` has no tool name, and its own tools send no `rawInput`. The
+[projection](../packages/client/src/adapters/hermes/projection.ts) takes the
+name from the title, the path from `locations`, and a shell command from the
+`$ ` content line. These are Hermes display conventions, so a Hermes upgrade
+must check them again. The classifier has three limits on Hermes:
+
+- A call with several `locations` is classified on the first one.
+- A V4A `patch` (`mode: 'patch'`) names no path until its result, so a V4A
+  write outside the workspace raises no reminder.
+- Stdin written to a running `process` and shell commands run from
+  `execute_code` are never seen as commands, so `all`-mode reminders miss them.
+
 Platform notes:
 
 - POSIX: the adapter asks the gateway `identify` over the Unix socket
