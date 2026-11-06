@@ -28,6 +28,7 @@ import { AsyncQueue } from '../../util/async-queue';
 import { comparablePath } from '../../util/comparable-path';
 import { agentPersona } from '../agent-persona';
 import { agyEndpointOf } from './agy-endpoint';
+import { startAgyGeminiProxy, type AgyGeminiProxy } from './agy-gemini-proxy';
 import { agyPermissionDecision, type AgyReaderScope } from './permissions';
 import { acquireAgySessionRetention, brandAgySessionStore } from '../../util/agy-session-retention';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
@@ -127,23 +128,21 @@ export class AgyAdapter implements RuntimeAdapter {
     return buildRuntimeEnvironment(this.environmentPolicy);
   }
 
-  /** Reads the version. The credential lives behind the endpoint, so `authPresent` is not reported here. */
+  /** Reads the version. `authPresent` is whether the runtime environment carries `GEMINI_API_KEY`; the key is not checked against the provider. */
   async detect(): Promise<RuntimeDetectResult> {
-    const geminiBaseUrl = agyEndpointOf(this);
-    // The refusal reasons are a closed list; `prepare` says why.
-    if (geminiBaseUrl === undefined) return { kind: 'refused', reason: 'acp_unavailable' };
     try {
       const { env: base } = await this.runtimeEnvironment();
       const resolved = resolveRuntimeCommand(this.options.resolveBin, () => resolveAgyBin(base));
       const command = resolved.bin.command;
       await ensureAgyHome(this.root);
-      const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, agyEnvironment(base, this.root, geminiBaseUrl));
+      const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, agyEnvironment(base, this.root));
       if (version.kind !== 'available') return version;
       const token = agyVersionToken(version.stdout);
       if (!agyHasNativeAcp(token)) return { kind: 'refused', reason: 'acp_unavailable' };
       return {
         kind: 'available',
         version: token,
+        authPresent: Boolean(base.GEMINI_API_KEY),
         ...runtimeExecutableFields(resolved, command),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, token),
       };
@@ -154,8 +153,6 @@ export class AgyAdapter implements RuntimeAdapter {
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     if (input.offer.dispatchSelection !== undefined) return { kind: 'reject', reason: 'agy does not accept a dispatch selection; the Host configures its model', retryable: false };
-    const geminiBaseUrl = agyEndpointOf(this);
-    if (geminiBaseUrl === undefined) return { kind: 'reject', reason: 'agy has no credential path yet', retryable: false };
     const detected = await this.detect();
     if (detected.kind !== 'available') {
       return { kind: 'reject', reason: `agy installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`, retryable: false };
@@ -164,15 +161,17 @@ export class AgyAdapter implements RuntimeAdapter {
     const command = resolveRuntimeCommand(this.options.resolveBin, () => resolveAgyBin(base)).bin.command;
     return { kind: 'prepared', operation: {
       acquireSessionLease: (sessionRef) => acquireAgySessionRetention(agyStoreDir(this.root), sessionRef),
-      start: (start) => this.start(start, command, geminiBaseUrl),
+      start: (start) => this.start(start, command),
     } };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string, geminiBaseUrl: string): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('agy requires a resolved instruction');
     if (input.manifest.dispatchSelection !== undefined) throw authority('prepared agy operation received a manifest with a dispatch selection');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('agy manifest has no sealed cwd');
+    const apiKey = input.env.GEMINI_API_KEY;
+    if (!apiKey) throw authority('agy requires GEMINI_API_KEY in its runtime environment');
     const resume = input.manifest.sessionRef;
     // A writer runs in the Agent home, where agy reads AGENTS.md itself. A reader runs in `.byok/runs/<task>`, which agy
     // only walks up from when the home has `.git`, and that reader sees the persona twice; there is no root-marker option.
@@ -194,7 +193,9 @@ export class AgyAdapter implements RuntimeAdapter {
     const acp = await import('#byok-acp-runtime');
     try {
       await ensureAgyHome(this.root);
-      const env = agyEnvironment({ ...input.env, ...input.scratch.env }, this.root, geminiBaseUrl);
+      const proxy = await startAgyGeminiProxy({ apiKey, environment: input.env, upstreamOrigin: agyEndpointOf(this) });
+      session.useProxy(proxy);
+      const env = agyEnvironment({ ...input.env, ...input.scratch.env }, this.root, proxy);
       const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
       const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'agy acp' });
       const raw = await acp.antigravitySession(
@@ -264,6 +265,7 @@ class AgySession implements Session {
   sessionRef = '';
   private raw?: RawAcpSession;
   private child?: { dispose(): Promise<void>; kill(): void; observeDescendants(): void };
+  private proxy?: AgyGeminiProxy;
   private exit?: { readonly exitedOnItsOwn: boolean };
   private stopAttempt?: Promise<void>;
   /** The refused permission no model output has followed yet: agy ends the turn on it, and that is no success. */
@@ -289,6 +291,9 @@ class AgySession implements Session {
     private readonly reader?: AgyReaderScope,
   ) {}
 
+  useProxy(proxy: AgyGeminiProxy): void {
+    this.proxy = proxy;
+  }
   own(child: { dispose(): Promise<void>; kill(): void; observeDescendants(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
     this.exit = child;
@@ -381,7 +386,11 @@ class AgySession implements Session {
       } catch (error) {
         if (!this.failure || isRuntimeDisposalFailure(error)) throw error;
       } finally {
-        await this.child?.dispose();
+        try {
+          await this.child?.dispose();
+        } finally {
+          await this.proxy?.close();
+        }
       }
     });
     return this.stopAttempt;

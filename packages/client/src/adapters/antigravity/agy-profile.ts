@@ -1,14 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFile } from '../../util/atomic-write';
-
-/**
- * agy hands its whole environment to every tool and MCP child, with no name
- * scrub (measured on CLI 1.5.0). A real key there is readable by the model's
- * shell, so agy only ever holds this placeholder; the endpoint at
- * `geminiBaseUrl` owns the credential.
- */
-export const AGY_PLACEHOLDER_KEY = 'byok-agy-placeholder';
+import type { AgyGeminiProxy } from './agy-gemini-proxy';
 
 /** The native settings that select the Gemini provider. They name no auth method. */
 const SETTINGS = `${JSON.stringify({ modelProvider: 'gemini', setupComplete: true, onboardingComplete: true })}\n`;
@@ -43,8 +36,12 @@ export async function ensureAgyHome(home: string): Promise<void> {
   if (await fs.readFile(settings, 'utf8').catch(() => undefined) !== SETTINGS) await atomicWriteFile(settings, SETTINGS, { mode: 0o600 });
 }
 
-/** The agy process environment, which every tool it starts inherits, `HOME` included. */
-export function agyEnvironment(base: Readonly<Record<string, string | undefined>>, home: string, geminiBaseUrl: string): Record<string, string> {
+/**
+ * The agy process environment, which every tool it starts inherits, `HOME`
+ * included. agy hands all of it to every tool and MCP child, with no name scrub
+ * (measured on CLI 1.5.0), so the real key stays behind `proxy`.
+ */
+export function agyEnvironment(base: Readonly<Record<string, string | undefined>>, home: string, proxy?: Pick<AgyGeminiProxy, 'url' | 'token'>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(base)) {
     if (value !== undefined && !NATIVE_NAMES.test(name) && !OS_HOME_NAMES.test(name)) env[name] = value;
@@ -55,8 +52,10 @@ export function agyEnvironment(base: Readonly<Record<string, string | undefined>
   env.LOCALAPPDATA = path.join(home, 'AppData', 'Local');
   env.DBUS_SESSION_BUS_ADDRESS = `unix:path=${path.join(home, 'no-session-bus')}`;
   env.GEMINI_HOME = agyNativeHome(home);
-  env.GEMINI_API_KEY = AGY_PLACEHOLDER_KEY;
-  env.GOOGLE_GEMINI_BASE_URL = geminiBaseUrl;
   env.AGY_CLI_DISABLE_AUTO_UPDATE = '1';
+  if (proxy !== undefined) {
+    env.GEMINI_API_KEY = proxy.token;
+    env.GOOGLE_GEMINI_BASE_URL = proxy.url;
+  }
   return env;
 }

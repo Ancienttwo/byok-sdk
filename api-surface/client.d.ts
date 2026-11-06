@@ -44,7 +44,7 @@ export declare class AgyAdapter implements RuntimeAdapter {
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     constructor(options: AgyAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
-    /** Reads the version. The credential lives behind the endpoint, so `authPresent` is not reported here. */
+    /** Reads the version. `authPresent` is whether the runtime environment carries `GEMINI_API_KEY`; the key is not checked against the provider. */
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;

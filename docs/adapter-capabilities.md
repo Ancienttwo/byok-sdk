@@ -889,17 +889,34 @@ selection. `createDaemon` and `createRuntimeAdapters` build it when
 optional `model` and `versionPolicy`). The other options stay on the
 `AgyAdapter` constructor.
 
-- Credential: agy passes its whole environment to `run_command` and stdio MCP
-  children, so no real key enters it. agy holds a placeholder
-  `GEMINI_API_KEY`, and `agy.keyIsolation` proves an ambient key does not reach a
-  tool. Only a Gemini API key is supported, never a Google account login. With
-  no stored login, the measured model request carries only the environment's
-  API key and no `Authorization` header. Whether agy switches to a stored Google
-  login when one exists is not verified, and the APPDATA redirection does not
-  affect Windows Credential Manager. Whether agy reads the macOS keychain was not
-  checked, and the SDK does not isolate it. Until the credential path lands, `detect()`
-  reports `refused: acp_unavailable` and `prepare` rejects with `agy has no
-  credential path yet`.
+- Credential: put a Gemini API key in the runtime environment as
+  `GEMINI_API_KEY`. `detect()` reports `authPresent` from it, without checking
+  it against the provider, and a task without it fails as non-retryable
+  authority. Only a Gemini API key is supported, never a Google account login.
+  agy passes its whole environment to `run_command` and stdio MCP children, so
+  the key stays in the daemon process. Each agy process gets its own proxy on an
+  ephemeral `127.0.0.1` port, started before agy and closed when agy exits. agy
+  holds that address and a random per-session token as its `GEMINI_API_KEY`. The
+  proxy refuses a request without the token, replaces the token with the real
+  key, and forwards to `https://generativelanguage.googleapis.com`, whatever the
+  request names. It stores and logs neither the key nor any body. A proxy that
+  cannot start fails the task before agy starts, and that failure is retryable.
+  `agy.keyIsolation` proves the key reaches the provider and neither a tool nor
+  a stdio MCP server.
+- Residual risk: during a session, commands and MCP servers agy starts can read
+  the token and spend the user's quota through the proxy, on any path of the
+  Gemini API, but they cannot take the key.
+- Network proxy: the daemon's connection to Gemini honors `HTTP_PROXY`,
+  `HTTPS_PROXY` and `NO_PROXY` from the runtime environment only, never the
+  daemon's own environment. Only `http` and `https` proxy URLs work: `ALL_PROXY`
+  is ignored, and a SOCKS URL means a direct connection. A malformed proxy URL
+  fails the start, and no proxy URL appears in an error, because it may carry a
+  password. agy itself never sends its loopback requests into a configured proxy.
+- Login state: with no stored login, the measured model request carries only
+  the API key, in `x-goog-api-key`, and no `Authorization` header. Whether agy
+  switches to a stored Google login when one exists is not verified, and the
+  APPDATA redirection does not affect Windows Credential Manager. Whether agy
+  reads the macOS keychain was not checked, and the SDK does not isolate it.
 - Host toolsets: agy rejects Host toolset entries carrying `env` or `headers`;
   a Host that configures env for its own server cannot run it under agy. agy
   persists session MCP entries in its conversation database; upstream found env
