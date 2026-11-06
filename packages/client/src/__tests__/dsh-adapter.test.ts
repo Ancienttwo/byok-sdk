@@ -193,12 +193,21 @@ describe('DshAdapter sessions', () => {
     const events = await turn(await open());
     expect(events).toEqual([
       { type: 'progress', text: 'first message: hello' },
-      // OAR's runtime-neutral tool events, as for Grok: the raw input as JSON text, the content blocks under `content`.
-      { type: 'tool_use', tool: 'bash', toolCallId: 'call_1', input: '{"command":"ls"}' },
+      // The native rawInput object, as for Grok; OAR's content blocks under `content`.
+      { type: 'tool_use', tool: 'bash', toolCallId: 'call_1', input: { command: 'ls' } },
       { type: 'tool_result', tool: 'bash', toolCallId: 'call_1', output: { content: [{ type: 'text', text: 'a.txt\n' }] } },
       { type: 'progress', text: 'final answer' },
       { type: 'usage', contextTokens: 100, contextSource: 'provider', contextWindow: 1000 },
       { type: 'turn_end' },
+    ]);
+  });
+
+  it('keeps a tool input past OAR\'s text cap whole and leaves a non-object input unknown', async () => {
+    const { open } = await setup();
+    const events = await turn(await open({ instruction: 'tool-inputs' }));
+    expect(events.slice(0, 2)).toEqual([
+      { type: 'tool_use', tool: 'bash', toolCallId: 'call_long', input: { command: `echo ${'a'.repeat(12_000)}; git push origin main` } },
+      { type: 'tool_use', tool: 'bash', toolCallId: 'call_text' },
     ]);
   });
 

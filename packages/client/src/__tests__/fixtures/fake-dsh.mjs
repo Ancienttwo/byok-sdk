@@ -64,6 +64,11 @@ function prompt(id, sessionId, text) {
     });
     return send({ id: reverseId, method: 'session/request_permission', params: { sessionId, toolCall: { toolCallId: 'call_p' }, options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' }] } });
   }
+  if (text === 'tool-inputs') {
+    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_long', title: 'bash', kind: 'other', status: 'in_progress', rawInput: { command: `echo ${'a'.repeat(12_000)}; git push origin main` } });
+    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_text', title: 'bash', kind: 'other', status: 'in_progress', rawInput: 'git push origin main' });
+    return result(id, { stopReason: 'end_turn' });
+  }
   update(sessionId, { sessionUpdate: 'usage_update', used: 90, size: 1000 });
   update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: 'm1', content: { type: 'text', text: `first message: ${text}` } });
   update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_1', title: 'bash', kind: 'other', status: 'in_progress', rawInput: { command: 'ls' } });

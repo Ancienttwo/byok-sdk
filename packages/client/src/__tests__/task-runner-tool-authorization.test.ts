@@ -7,6 +7,7 @@ import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { CodexProjection } from '../adapters/codex/projection';
+import { GrokProjection } from '../adapters/grok/projection';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { DaemonObserver, type DaemonEvent } from '../daemon/observer';
 import { createSessionKernel } from '../../vendor/oar/be46fb3/shared/session-kernel';
@@ -166,6 +167,29 @@ describe('daemon tool authorization', () => {
     expect(reminders[0]).toMatchObject({ toolName: 'file_change', toolCallId: 'files',
       reasons: expect.arrayContaining(['write-outside-workspace', 'sensitive-path']) });
     expect(sent.some(e => e.type === 'task.await_approval')).toBe(false);
+  });
+
+  it('all: Grok native frames remind on its real tool names and keys, never on a workspace read', async () => {
+    const adapter = new GateCapturingAdapter(NO_AUTO);
+    const reminders: ToolReminder[] = [];
+    const { runner } = makeRunner(adapter, [], { onToolReminder: r => reminders.push(r) });
+    await offer(runner, 'grok-native-input');
+    const workspace = adapter.inputs[0]!.manifest.workspace.workspaceDir;
+    const projection = new GrokProjection('root');
+    const calls: ReadonlyArray<readonly [string, string, Record<string, string>]> = [
+      ['inside', 'read_file', { target_file: path.join(workspace, 'note.txt') }],
+      ['ssh', 'read_file', { target_file: path.join(os.homedir(), '.ssh', 'id_ed25519') }],
+      ['edit', 'search_replace', { file_path: path.join(workspace, '..', 'outside.txt'), old_string: 'a', new_string: 'b' }],
+      ['push', 'run_terminal_command', { command: 'git push origin main', description: 'publish' }],
+    ];
+    calls.forEach(([callId, tool, rawInput], seq) => projection.consume({ seq, sessionId: 'root', agentPath: [], kind: 'frame', body: {
+      events: [{ kind: 'tool_call_started', callId, tool, input: JSON.stringify(rawInput) }],
+      native: { update: { sessionUpdate: 'tool_call', toolCallId: callId, rawInput } },
+    } }, event => { if (event.type === 'tool_use') adapter.sessions[0]!.queue.push(event); }, () => {}));
+    await vi.waitFor(() => expect(reminders).toHaveLength(3));
+    expect(reminders.map(r => [r.toolCallId, r.reasons])).toEqual([
+      ['ssh', ['sensitive-path']], ['edit', ['write-outside-workspace']], ['push', ['destructive-git']],
+    ]);
   });
 
   it('auto: the Host resolver sees local task identity; high-risk calls wait for the task approval path', async () => {

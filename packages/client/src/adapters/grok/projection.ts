@@ -19,8 +19,19 @@ const count = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 
 /**
+ * The opening update's structured `rawInput`. OAR's derived `input` is capped
+ * text, so a long field would hide the rest of the call from tool
+ * authorization; anything but an object is an unknown input.
+ */
+function nativeRawInput(body: Record<string, unknown> | undefined, callId: string): Record<string, unknown> | undefined {
+  const update = record(record(body?.native)?.update);
+  return update?.toolCallId === callId ? record(update.rawInput) : undefined;
+}
+
+/**
  * Root-session ACP records to `AgentEvent`s. It reads the runtime-neutral
- * events OAR derived beside each native frame, never the vendor wire. Child
+ * events OAR derived beside each native frame; only a tool call's input comes
+ * from the native frame itself. Child
  * sessions (Grok sub-agents) are recorded under their own id and produce
  * nothing here: their text is not the parent's reply and their tools are not
  * the parent's tools.
@@ -42,7 +53,8 @@ export class GrokProjection {
   /** Events for one record; `outcome` receives the root turn end, after its events. `GrokSession` decides whether the turn ends or fails. */
   consume(input: AcpRecord, emit: (event: AgentEvent | MessageDraftDelta) => void, outcome: (turn: GrokTurnOutcome) => void): void {
     if (input.kind !== 'frame' || input.sessionId !== this.rootSessionId || input.agentPath.length > 0) return;
-    const events = record(input.body)?.events;
+    const body = record(input.body);
+    const events = body?.events;
     if (!Array.isArray(events)) return;
     // The prompt answer's frame lists `turn_ended` before its `usage`: end the turn after every other event.
     let ended: Record<string, unknown> | undefined;
@@ -58,7 +70,8 @@ export class GrokProjection {
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
           this.flush(emit);
           this.tools.set(event.callId, event.tool);
-          emit({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, ...(event.input === undefined ? {} : { input: event.input }) });
+          const raw = nativeRawInput(body, event.callId);
+          emit({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, ...(raw === undefined ? {} : { input: raw }) });
           break;
         }
         case 'tool_call_ended': {
