@@ -24,20 +24,20 @@ the descriptor declares. `no` means the SDK makes no such guarantee; the
 the runtime does instead.
 
 <!-- generated:capability-matrix:start -->
-| Capability | Wire field | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durableLane`) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `2.1.312` | `0.160.0` | `0.2.1-rc.5` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.5.0` | `1.5.0` |
-| Resume a known native session | `resume` | yes | yes | yes | yes | no | yes | no |
-| Redirect the active turn | `steer` | no | yes | no | no | no | yes | no |
-| Display-only message draft | `messageDraft` | yes | yes | no | yes | yes | yes | yes |
-| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes |
-| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no |
-| Tool authorization `auto` | `toolAuthorizationAuto` | yes | no | no | no | no | yes | yes |
-| Prepared lane | `preparedLane` | no | no | no | no | no | yes | no |
-| Durable worker lane | `durableLane` | no | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userContext` | yes | no | yes | no | yes | yes | no |
-| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | no | no |
-| Turns off the transcript store | `isolation.sessionPersistence` | yes | no | no | no | no | no | no |
+| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durableLane`) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.5.0` | `1.5.0` |
+| Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | no |
+| Redirect the active turn | `steer` | no | no | yes | yes | no | no | yes | no |
+| Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | yes | yes |
+| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes |
+| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no |
+| Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | yes | yes |
+| Prepared lane | `preparedLane` | no | no | no | no | no | no | yes | no |
+| Durable worker lane | `durableLane` | no | no | no | no | no | no | no | yes |
+| Keeps user-level instructions out | `isolation.userContext` | yes | yes | no | yes | no | yes | yes | no |
+| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | yes | no | no |
+| Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
 
 ## Qualification notes
@@ -48,8 +48,10 @@ those declarations, and of behavior the matrix does not cover; they are not a
 second registry.
 
 - Resume uses each runtime's exact native identity: Claude `--resume`, Codex
-  `thread/resume`, Grok and dsh ACP `session/resume`. A new instruction after an idle
-  turn (`followUp`) stays in the same native session or thread.
+  `thread/resume`, Grok ACP `session/resume`, dsh `agents.resume` through the OAR
+  bridge. A `followUp` after an idle turn stays in the same native session or
+  thread on Claude, Codex, Grok, Hermes and Pi. agy and dsh refuse it and a later
+  turn resumes in a new process; Pi's durable lane refuses it too.
 - Codex steering targets the exact active `expectedTurnId`. An adapter without
   `steer` returns a typed rejection.
 - Message drafts come from Claude's `--include-partial-messages` text deltas,
@@ -68,8 +70,9 @@ second registry.
 - Local native interaction opt-in: Claude relays structured AskUserQuestion
   only and passes other `can_use_tool` requests through as allow; Codex relays
   structured question IDs only, keeps `approvalPolicy: never` and refuses
-  approval requests; Grok and dsh answer every permission request `cancelled`;
-  Hermes refuses every one with `reject_once`; Pi has none.
+  approval requests; Grok answers every permission request `cancelled`; dsh has
+  no client for them, see the dsh section; Hermes refuses every one with
+  `reject_once`; Pi has none.
 - MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`): Claude sets
   it for task toolset servers from its own `mcp_status` answer; Codex from the
   native `mcpToolCall` `server` and `tool`, for every server it runs, SDK
@@ -280,7 +283,7 @@ task's and the SDK's MCP servers. It changes MCP servers only; the user's
 `AGENTS.md` still loads. A run without an `agentRef`, and the default
 `'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
-[vendored session](../packages/client/vendor/oar/be46fb3/PROVENANCE.md):
+[vendored session](../packages/client/vendor/oar/0e92470/PROVENANCE.md):
 
 - Before the thread opens, `config/read` for the task cwd lists the servers of
   the user and project `config.toml` layers. Each one that is not a task
@@ -336,7 +339,7 @@ ACP `terminal: false` does not hide Grok 1.0.52's native terminal tool. The SDK
 does not provide a hidden-terminal mode; see the [qualified observation and
 limits](researches/2026-10-28-grok-terminal-capability-boundary.md).
 
-The [vendored launch profile](../packages/client/vendor/oar/be46fb3/runtimes/grok/session.ts)
+The [vendored launch profile](../packages/client/vendor/oar/0e92470/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
@@ -498,7 +501,7 @@ anything below it. It drops ambient `DSH_*` variables and sets `DSH_HOME`,
 `DSH_AGENTS_HOME` (an empty `byok-agents-home` directory in that root),
 `DSH_PERMISSION_MODE` and `DSH_TELEMETRY_MODE=DISABLED` itself.
 
-dsh 0.2.1-rc.5 reads user context from `$DSH_HOME/AGENTS.md`,
+dsh 0.2.2-rc.1 reads user context from `$DSH_HOME/AGENTS.md`,
 `$DSH_HOME/skills` and `$DSH_AGENTS_HOME/skills` (default `~/.agents/skills`),
 and user MCP servers from the profile and home `cordis.patch.yml` files under
 `DSH_HOME`. With the SDK root none of the user's own copies apply, so dsh needs
@@ -506,6 +509,43 @@ no option. Project context still loads: the workspace `AGENTS.md`/`CLAUDE.md`
 (and `.local` overrides) and the project `.agents/skills`. The runtime contract
 suite checks this with markers in `~/.dsh` and `~/.agents`. A positive control
 shows that a skill in the adapter's own `DSH_AGENTS_HOME` does reach the model.
+
+### agy: user-level configuration
+
+The [agy adapter](../packages/client/src/adapters/antigravity/agy-adapter.ts)
+points `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` and `GEMINI_HOME` into the
+Host's `home` and refuses the user's home and anything below `~/.gemini`. It
+drops ambient `GEMINI_*`, `GOOGLE_*`, `AGY_*` and `ANTIGRAVITY_*` variables and
+the `XDG_*` directory variables, because agy reads and removes
+`antigravity/credential-user-scope` in the user config directory.
+`DBUS_SESSION_BUS_ADDRESS` names a socket in the owned home that does not exist:
+agy looks for the session bus, and an address that cannot connect fails as on a
+host with no bus, without starting `dbus-launch`.
+
+Those directories also apply to every tool agy runs. agy and its tools cannot see
+the user's git identity or global git config, and on Linux they cannot reach the
+system keyring, because the session bus is unconnectable. git and `gh` read their
+config from the owned home; system-level git config, such as a system credential
+helper, is still read on every OS. On Windows, Credential Manager stays reachable,
+and a system-configured git credential helper can use it. On macOS, the SDK does
+not isolate the keychain, and whether agy reads it was not checked.
+`systemctl --user` stops working without
+`XDG_RUNTIME_DIR`. Container sockets are not cut off: rootless podman can fall
+back to `/run/user/<uid>`, and a rootful `/var/run/docker.sock` stays reachable
+for a user in the docker group. On Windows, npm and similar tools read
+`%APPDATA%` from the owned home. A Host that needs a git identity passes
+`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
+`GIT_COMMITTER_EMAIL` through `runtimeEnvironment`.
+
+agy reads user context and MCP
+servers from `.gemini` below that home, so the user's own copies never apply and
+agy needs no option. Project context still loads: agy reads `AGENTS.md`,
+`GEMINI.md` and `.agents/AGENTS.md` from the workspace, and it walks up to a
+`.git` root. The runtime contract suite checks this with markers in the ambient
+home, and a positive control shows that files in the adapter's own home reach
+the model. agy always keeps conversations in that home, because resume needs
+them; the `agy-session-store` retention class expires them. A daemon cleans up
+sessions for one agy home only.
 
 ### Agent task session records
 
@@ -532,7 +572,7 @@ What the upstream runtimes offer that the SDK does not use:
 
 - Codex: the 0.164.0 app-server schema has `ephemeral` on `thread/start` (a
   thread that "should not be materialized on disk"), and `codex exec --help`
-  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/be46fb3/runtimes/codex/open.ts)
+  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/0e92470/runtimes/codex/open.ts)
   does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread
   leaves the other `CODEX_HOME` files alone.
 - Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
@@ -630,7 +670,7 @@ tracks that remaining work; adding persona text alone does not establish isolati
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/be46fb3`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/0e92470`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 
@@ -790,52 +830,76 @@ The descriptor declares `platforms: ['darwin', 'linux', 'win32']`.
 ## dsh adapter (custom harness)
 
 `DshAdapter` (id `dsh`, #1258) runs DeepSeek Harness (`@deepseek-ai/dsh`, a
-developer preview) over ACP v1: one `dsh --profile acp --patch <file>` process
-per session, driven by the vendored OAR ACP session stack. The dsh profile
-(`runtime/dsh-acp-session.js`) is SDK source built on the vendored
-`acpSession`, and loads lazily through the private `#byok-acp-runtime` entry,
-beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes no dispatch selection.
+developer preview) through the vendored OAR dsh runtime. Each session runs one
+`dsh --profile acp` process with the ACP protocol plugin off and OAR's private
+bridge plugin on, and talks JSON lines over stdio. No ACP message is exchanged
+and `@agentclientprotocol/sdk` does not load. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes no dispatch selection.
+`createDaemon` and `createRuntimeAdapters` build it when `runtimeAllowlist` lists
+`dsh`, from the required `runtimes.dsh` (`home`, `model`, and optional `sandbox`
+and `versionPolicy`). The other options stay on the `DshAdapter` constructor.
 
 - Model: the required `model` option names `provider`, `model`, `keyEnv` and,
-  for `custom`, `baseUrl`. The adapter writes them into the per-execution
-  `--patch` overlay (mode 0600, in the execution scratch directory). `deepseek`
-  uses the DeepSeek API route; `custom` is a hand-declared OpenAI-compatible
+  for `custom`, `baseUrl`. The adapter writes the provider route, `keyEnv` and
+  `baseUrl` into a per-execution `--patch` overlay (mode 0600, in the execution
+  scratch directory), beside OAR's bridge overlay. The model travels as the
+  session's selection, not in the patch. `deepseek` uses the DeepSeek API route; `custom` is a hand-declared OpenAI-compatible
   route; any other provider id is a dsh pi-ai catalog route. The key itself is
   only in the environment, under `keyEnv`; `baseUrl` refuses credentials and a
   query string. `keyEnv` must contain `KEY`,
   `TOKEN`, `SECRET` or `PASSWORD`, which dsh strips from tool processes. It
   must not start with `BYOK_` (the runtime environment drops those) or `DSH_`,
   and it must not be `DEEPSEEK_API_KEY`, which dsh `web_search` also reads.
-- Start: `session/new` (or `session/resume` with the exact `sessionRef`) must
-  answer with the patch route and model in the `model` config option. Any
-  other value fails closed as `authority`, because the overlay did not apply.
+- Start: dsh validates the selected route when the session opens. The first
+  request must then report that route and model; any other value fails closed
+  as `authority`.
 - Working directory: the process starts in the execution scratch directory,
   so dsh never loads a workspace `.env`. The workspace, realpath-resolved, is
-  the ACP session `cwd`.
+  the session `cwd`. `TMPDIR` is the execution scratch too.
+- Host toolsets: dsh takes stdio `command` and `args` only. An entry with
+  `type: 'http'`, non-empty `env` or `headers`, or a name outside
+  `[A-Za-z0-9_-]{1,32}` is refused before dsh starts, without a retry. A Host
+  that configures env for its own server cannot run it under dsh. Do not put a
+  token in `args` instead: dsh persistence of MCP entries is unaudited. Entries
+  are sent again on every resume.
 - Permissions: `sandbox` selects `DSH_PERMISSION_MODE`. The default,
   `danger-full-access`, pairs with dsh approval `never`. `workspace-write` and
   `read-only` keep dsh's OS sandbox (seatbelt on macOS, bwrap or landlock on
-  Linux). Every `session/request_permission` is answered `cancelled`: that
-  tool fails and the turn continues. `auto` is declined before claim.
-- Events: each `agent_message_chunk` is one committed message, so the
-  descriptor sets `progressMessageBoundary: 'event'` and declares no message
-  draft.
-  `tool_call` kinds are always `other`, with the input in `rawInput`; as for
-  Grok, `tool_use.input` is the opening frame's `rawInput` object, left out when
-  it is not an object, and `tool_result.output` carries the content blocks under
-  `content`.
-  `usage_update` carries context occupancy only (`contextTokens`,
-  `contextWindow`, `contextSource: 'provider'`), never cost counters.
-- Failures: a failed turn is a JSON-RPC error with text only, so it is a
-  non-retryable `semantic` failure with class `unknown`, even when the text
-  names a rate limit. Any JSON-RPC error answering a resume is `authority`:
-  dsh answers an unknown id and another workspace alike (`-32602`). A dsh
-  process that ends on its own, before or after answering, is
-  `runtime_exited`.
-- Interrupt and close: `session/cancel`, then a wait for the cancelled prompt
-  answer, bounded by `interruptTimeoutMs`. `close()` sends `session/close`,
-  then disposes the owned process tree. Steering throws
-  `SteerUnsupportedError`.
+  Linux). The bridge has no approval channel, so nothing waits on a human: a
+  command the sandbox blocks fails with the OS error, and dsh refuses every
+  escalation (`sandbox_permissions`) and returns it to the model as a tool
+  error. The turn goes on either way. `auto` is declined before claim.
+- Events: the adapter reads each native committed assistant message, so each
+  `progress` is one message, the descriptor sets
+  `progressMessageBoundary: 'event'` and declares no message draft.
+  `tool_use.input` is the object parsed from dsh's complete native `arguments`
+  string, never a display text, so tool authorization sees the whole input.
+  Arguments that are not a JSON object fail the session as `authority`.
+  `tool_result.output` carries the content blocks under `content`. `usage`
+  carries each turn's billed tokens, read from OAR's session totals, and the
+  context occupancy (`contextTokens`, `contextWindow`,
+  `contextSource: 'provider'`).
+- Turn end: an Attempt is one prompt on one process. dsh's subagents and
+  background jobs outlive the turn, and when one finishes dsh opens a root turn
+  with no prompt. So on the root turn end the session projects nothing more,
+  closes dsh and disposes the owned process tree, and only then reports
+  `turn_end` (`dsh.turnEnd`). Background subagents and jobs stop there and their
+  unfinished work is lost. This is not a failure: the model's own reply says it
+  started them. `followUp` is refused; a later turn resumes in a new process
+  (`dsh.resume`). After a resume dsh restarts neither: `list_agents` shows the
+  subagent `[inactive]`, `job_list` is empty, and the model gets no notice. One
+  narrow window remains: a background child that finishes between the root turn
+  end and dsh handling the dispose can still start the unprompted turn, and that
+  turn's tokens and tool calls reach no `usage` or `tool_use`.
+- Failures: a failed turn's class comes from dsh's native code or status. A
+  rate limit is a retryable `semantic` failure; the others are non-retryable.
+  A resume of an unknown session or from another workspace is a typed refusal,
+  reported as `authority`. A dsh process that ends on its own, before or after
+  answering, is `runtime_exited`.
+- Steering, interrupt and close: `steer` reaches the running turn's next model
+  request (`dsh.steer`). An interrupt reads the process table, sends the native
+  cancel and waits for the turn end, bounded by `interruptTimeoutMs`. `close()`
+  asks dsh to dispose its sessions and flush its log, then disposes the owned
+  process tree.
 - Process tree: dsh runs each shell tool in its own process group. Closing
   the session reaps them (`dsh.close`). When the dsh root is killed from
   outside (SIGKILL, OOM), disposal ends the tool processes the owned process
@@ -843,7 +907,7 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
   [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)); a tool started
   within one second of that kill is not seen.
 - Detection: `dsh --version` (advisory when it is not the qualified
-  `0.2.1-rc.5`), then `dsh --profile acp --help`, which also writes the acp
+  `0.2.2-rc.1`), then `dsh --profile acp --help`, which also writes the acp
   profile into a new root (else `refused: acp_unavailable`). `authPresent`
   means the `keyEnv` variable is set; the key is not checked.
 - Egress: the DeepSeek route sends `GET https://api.deepseek.com/models` when
@@ -853,9 +917,99 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
 
 Evidence: `dsh-adapter.test.ts` (synthetic `fake-dsh.mjs`, offline) and the
 [runtime contract suite](runtime-contract.md) against the real qualified dsh.
-Locally on macOS with dsh 0.2.1-rc.5, every case passes, `dsh.close`
+Locally on macOS with dsh 0.2.2-rc.1, every case passes, `dsh.close`
 included; `dsh.sigkill` runs in CI. The design and probes are in
-[the dsh adapter plan](researches/2026-11-01-dsh-adapter.md).
+[the dsh adapter plan](researches/2026-11-01-dsh-adapter.md) and
+[the bridge probe](researches/2026-11-06-oar-0.91.0-dsh-bridge.md).
+
+## agy adapter (custom harness)
+
+`AgyAdapter` (id `agy`, #1469) runs the Antigravity CLI over its native ACP:
+one `agy acp --dangerously-skip-permissions --process-per-session
+--disable-telemetry` process per Attempt, driven by the vendored OAR Antigravity
+profile, which loads lazily through the private `#byok-acp-runtime` entry. It
+runs on the custom-harness path (`harnessId: 'agy'`). It takes no dispatch
+selection. `createDaemon` and `createRuntimeAdapters` build it when
+`runtimeAllowlist` lists `agy`, from the required `runtimes.agy` (`home`, and
+optional `model` and `versionPolicy`). The other options stay on the
+`AgyAdapter` constructor.
+
+- Credential: put a Gemini API key in the runtime environment as
+  `GEMINI_API_KEY`. `detect()` reports `authPresent` from it, without checking
+  it against the provider, and a task without it fails as non-retryable
+  authority. Only a Gemini API key is supported, never a Google account login.
+  agy passes its whole environment to `run_command` and stdio MCP children, so
+  the key stays in the daemon process. Each agy process gets its own proxy on an
+  ephemeral `127.0.0.1` port, started before agy and closed when agy exits. agy
+  holds that address and a random per-session token as its `GEMINI_API_KEY`. The
+  proxy refuses a request without the token, replaces the token with the real
+  key, and forwards to `https://generativelanguage.googleapis.com`, whatever the
+  request names. It stores and logs neither the key nor any body. A proxy that
+  cannot start fails the task before agy starts, and that failure is retryable.
+  `agy.keyIsolation` proves the key reaches the provider and neither a tool nor
+  a stdio MCP server.
+- Residual risk: during a session, commands and MCP servers agy starts can read
+  the token and spend the user's quota through the proxy, on any path of the
+  Gemini API, but they cannot take the key.
+- Network proxy: the daemon's connection to Gemini honors `HTTP_PROXY`,
+  `HTTPS_PROXY` and `NO_PROXY` from the runtime environment only, never the
+  daemon's own environment. Only `http` and `https` proxy URLs work: `ALL_PROXY`
+  is ignored, and a SOCKS URL means a direct connection. A malformed proxy URL
+  fails the start, and no proxy URL appears in an error, because it may carry a
+  password. agy itself never sends its loopback requests into a configured proxy.
+- Login state: with no stored login, the measured model request carries only
+  the API key, in `x-goog-api-key`, and no `Authorization` header. Whether agy
+  switches to a stored Google login when one exists is not verified, and the
+  APPDATA redirection does not affect Windows Credential Manager. Whether agy
+  reads the macOS keychain was not checked, and the SDK does not isolate it.
+- Host toolsets: agy rejects Host toolset entries carrying `env` or `headers`;
+  a Host that configures env for its own server cannot run it under agy. agy
+  persists session MCP entries in its conversation database; upstream found env
+  and header values there in plain text after close (botiverse/oar#392). Treat
+  `args` the same way: do not put tokens in `args`.
+- Instructions: a writer runs in the Agent home, where agy reads `AGENTS.md`
+  itself, so nothing is appended. A `memory-reader` runs in
+  `.byok/runs/<task>`, which agy does not read from, so the persona is
+  appended, on every open because agy replaces its append on resume. If the home
+  has `.git`, agy walks up to it and that reader sees the persona twice; agy has
+  no root-marker option.
+- Tools: MCP tools are `mcp_<server>_<tool>`, verbatim. `run_command`,
+  `read_file`, `write_file` and `edit_file` spell their inputs `CommandLine` and
+  `Path`, so the projection adds `command` and `path` for tool authorization.
+  `tool_use.input` is otherwise the structured raw input of the opening frame,
+  never OAR's capped text; a call without one has no input.
+- Turn end: an Attempt is one prompt on one process. Subagents and schedules
+  run in the background and report no ACP frame, so on `end_turn` the session
+  closes agy and disposes the owned process tree before it reports `turn_end`.
+  That includes a `run_command` with `IsDaemon`, which leaves the process group
+  (`agy.turnEnd`). `followUp` is refused; a later turn resumes in a new process,
+  and no wait is needed. Schedules die with the worker: none survived a kill,
+  and on resume agy tells the model its background tasks were stopped. What a
+  subagent did before the kill reaches no reminder and no audit.
+- Permissions: agy still asks for a file outside its workspace, and a
+  `cancelled` answer ends the turn as a success, so the adapter answers with an
+  explicit option. A writer gets `allow_once`. A `memory-reader` gets
+  `allow_once` for reads, `reject_once` for a write below the home outside its
+  run directory, and `allow_once` otherwise. `--add-dir` is not used, because it
+  would also allow those writes. agy ends the turn after `reject_once`, so that
+  Attempt fails as non-retryable `semantic`. `run_command` is never asked.
+  `auto` is declined before claim.
+- Detection: `agy --version` must be at least 1.5.0, the first with native ACP
+  (an older CLI answers `acp` with its help, else `refused: acp_unavailable`),
+  and warns when it is not the qualified `1.5.1`. `authPresent` is not reported,
+  because the credential is not in agy.
+- Failures: a failed turn takes its class from the vendored OAR outcome, and a
+  class taken from error text stays `unknown`. Resume needs `session/list` to
+  confirm the saved cwd, else it fails as `authority`.
+- Steering throws `SteerUnsupportedError`: the native steer exists but is not
+  enabled. agy reports no usage events.
+- Egress: `--disable-telemetry` stops agy's calls to `play.googleapis.com`, and
+  `AGY_CLI_DISABLE_AUTO_UPDATE=1` is always set.
+- Platforms: macOS, Linux and Windows.
+
+Evidence: the `AgyAdapter` cases in `grok-adapter.test.ts` (synthetic
+`fake-acp-agent.mjs`, offline) and the [runtime contract suite](runtime-contract.md)
+against the real qualified agy, including a Windows leg.
 
 ## Selection and platforms
 
@@ -863,8 +1017,8 @@ A Host reads the adapter list, not a table of its own. `taskRuntimeTarget(descri
 from `@byok-sdk/client/adapters` returns `{ runtime }` for a frozen wire runtime
 id (`RUNTIME_IDS` in `@byok-sdk/protocol/constants`) and `{ harnessId }` for any
 other id. `descriptor.platforms` lists the supported `process.platform` values:
-Claude, Codex, Pi and Hermes declare macOS, Linux and Windows; Grok, dsh and
-durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
+Claude, Codex, Pi, Hermes and agy declare macOS, Linux and Windows; Grok, dsh
+and durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
 restriction. `observeRuntimeDetection` refuses an unsupported platform with
 `platform_unsupported` before `detect()` runs, and `projectRuntimeObservation`
 gives the same fields the daemon emits in its `runtimes-detected` event. Both

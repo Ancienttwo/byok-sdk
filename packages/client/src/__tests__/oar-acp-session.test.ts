@@ -3,10 +3,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acpSession, type AcpSessionHooks } from '../../vendor/oar/be46fb3/shared/acp/session';
-import type { AcpSessionProfile } from '../../vendor/oar/be46fb3/shared/acp/profile';
-import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/be46fb3/contracts/session';
-import { grokFailureOutcome } from '../../vendor/oar/be46fb3/runtimes/grok/failure';
+import { acpSession, type AcpSessionHooks } from '../../vendor/oar/0e92470/shared/acp/session';
+import type { AcpSessionProfile } from '../../vendor/oar/0e92470/shared/acp/profile';
+import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/0e92470/contracts/session';
+import { grokFailureOutcome } from '../../vendor/oar/0e92470/runtimes/grok/failure';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
@@ -177,6 +177,23 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     const session = await startConfirming(spawnOwnedLineProcess, spawnOwnedTerminalProcess, { kind: 'available', via: 'executable', command: FAKE }, { cwd: dir, env: { PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log }, model: 'fake-model' });
     live.push(session);
     expect(facts(log).find(fact => fact.kind === 'config')?.params).toMatchObject({ configId: 'model', value: 'fake-model' });
+  });
+
+  it('settles a superseding steer on the latest prompt answer, not on the early answer to the first', async () => {
+    const { dir, log } = workspace();
+    const records: RawEvent[] = [];
+    const startSteering = acpSession({ ...profile, steerParams: () => ({}), steerSupersedesPrompt: true, steerOutcomeIsLatest: true });
+    const session = await startSteering(spawnOwnedLineProcess, spawnOwnedTerminalProcess, { kind: 'available', via: 'executable', command: FAKE },
+      { cwd: dir, env: { PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log, FAKE_ACP_REPLY_GATE: dir } }, { onRecord: record => records.push(record) });
+    live.push(session);
+    const turnsEnded = () => records.flatMap(record => record.kind === 'frame' ? record.body.events.filter(event => event.kind === 'turn_ended') : []);
+    expect((await session.prompt('steer-first')).response.body.kind).toBe('accepted');
+    expect((await session.steer!('steer-second')).response.body.kind).toBe('accepted');
+    await vi.waitFor(() => expect(records.some(record => record.kind === 'frame' && record.body.type === 'session/prompt')).toBe(true));
+    expect(turnsEnded()).toEqual([]);
+    expect((await session.prompt('third')).response.body).toMatchObject({ kind: 'rejected', code: 'busy' });
+    writeFileSync(path.join(dir, 'release'), '');
+    await vi.waitFor(() => expect(turnsEnded()).toEqual([{ kind: 'turn_ended', outcome: { kind: 'completed' } }]));
   });
 
   it('delivers every record from seq 0 to the record consumer and swallows its errors', async () => {

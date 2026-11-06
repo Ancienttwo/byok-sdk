@@ -101,8 +101,8 @@ describe('SDK-reserved helper host composition', () => {
     roots.push(dir);
     const blank = path.join(dir, 'blank.json');
     await fs.writeFile(blank, '{}', { mode: 0o600 });
-    await expect(runSdkReservedHelper(kind, [path.join(dir, 'missing.json')])).rejects.toThrow(/cannot read the SDK-reserved helper context file/);
-    await expect(runSdkReservedHelper(kind, [dir])).rejects.toThrow(/cannot read the SDK-reserved helper context file/);
+    await expect(runSdkReservedHelper(kind, [path.join(dir, 'missing.json')])).rejects.toThrow(/cannot read the MCP context file/);
+    await expect(runSdkReservedHelper(kind, [dir])).rejects.toThrow(/cannot read the MCP context file/);
     await expect(runSdkReservedHelper(kind, [blank])).rejects.toThrow(/has no storeDir/);
     await expect(runSdkReservedHelper(kind, ['relative.json'])).rejects.toThrow(/must be absolute/);
   });

@@ -423,12 +423,13 @@ describe('no local listener for provisioning', () => {
     );
   }
 
-  it('limits listeners to local control, ownership, and the authenticated auto tool-authorization IPC', () => {
+  it('limits listeners to local control, ownership, and the token-authenticated tool-authorization IPC and agy Gemini proxy', () => {
     const offenders = [...productionSources(clientSrc), ...productionSources(keysSrc)]
       .filter((file) => LISTENER.test(readFileSync(file, 'utf8')))
       .map((file) => path.relative(path.resolve(here, '../../..'), file).split(path.sep).join('/'))
       .sort();
     expect(offenders).toEqual([
+      'client/src/adapters/antigravity/agy-gemini-proxy.ts',
       'client/src/daemon/control-server.ts',
       'client/src/tool-authorization-ipc.ts',
       'client/src/util/daemon-owner.ts',

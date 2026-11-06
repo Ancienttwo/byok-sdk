@@ -8,7 +8,7 @@ import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../a
 import { dshPatch } from '../adapters/dsh/dsh-profile';
 import { DSH_RUNTIME_CAPABILITIES } from '../adapters/dsh/dsh-capabilities';
 import { QUALIFIED_DSH_VERSION } from '../adapters/dsh/dsh-version';
-import { SteerUnsupportedError, type MessageDraftDelta, type RuntimeTaskInput, type Session } from '../types';
+import { PolicyUnsupportedError, type MessageDraftDelta, type RuntimeTaskInput, type Session } from '../types';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
@@ -98,29 +98,22 @@ describe('DshAdapter construction and descriptor', () => {
 
 describe('dshPatch', () => {
   const parse = (model: DshModelSelection) => JSON.parse(dshPatch(model));
-  const routeOf = (provider: string, model: string) => [
-    { id: 'acp', config: { provider, model } },
-    { id: 'agent-default-model', config: { provider, model } },
-  ];
 
   it('routes deepseek through dsh\'s own DeepSeek plugin', () => {
     expect(parse({ provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'DS_KEY' })).toEqual([
       { id: 'llm-deepseek', config: { apiKeyEnv: 'DS_KEY' } },
-      ...routeOf('deepseek-official', 'deepseek-v4-flash'),
     ]);
   });
 
   it('hand-declares an OpenAI-compatible custom route', () => {
     expect(parse(MODEL)).toEqual([
       { id: 'llm-pi-ai', config: { providers: { 'byok-custom': { apiKeyEnv: 'TEST_DSH_PROVIDER_KEY', api: 'openai-completions', baseURL: 'http://127.0.0.1:9/v1', models: [{ id: 'loop-model' }] } } } },
-      ...routeOf('byok-custom', 'loop-model'),
     ]);
   });
 
   it('keys a pi-ai catalog route by its provider id', () => {
     expect(parse({ provider: 'openai', model: 'gpt-5', keyEnv: 'OA_KEY' })).toEqual([
       { id: 'llm-pi-ai', config: { providers: { openai: { apiKeyEnv: 'OA_KEY' } } } },
-      ...routeOf('openai', 'gpt-5'),
     ]);
   });
 
@@ -167,6 +160,9 @@ describe('DshAdapter sessions', () => {
     const start = (await facts()).find((fact) => fact.kind === 'start')!;
     expect(start.argv.slice(0, 3)).toEqual(['--profile', 'acp', '--patch']);
     expect(path.basename(start.argv[3])).toBe('dsh.patch.yml');
+    expect(start.overlay[0]).toEqual({ id: 'acp', disabled: true });
+    expect(start.env.TMPDIR).toBeTruthy();
+    expect(start.env.TMPDIR).not.toBe(os.tmpdir());
     expect(path.dirname(start.argv[3])).toBe(start.cwd);
     expect(start.cwd).not.toBe(workspaceDir);
     expect(start.env).toMatchObject({ DSH_HOME: root, DSH_AGENTS_HOME: path.join(root, 'byok-agents-home'), DSH_PERMISSION_MODE: 'danger-full-access', DSH_TELEMETRY_MODE: 'DISABLED', TEST_DSH_PROVIDER_KEY: 'test-key' });
@@ -177,70 +173,86 @@ describe('DshAdapter sessions', () => {
   it('opens the session in the canonical workspace with the task MCP servers', async () => {
     const { open, facts, workspaceDir } = await setup();
     const session = await open({ instruction: 'hello' }, {
-      mcpServers: { byokagentresult: { command: '/usr/bin/env', args: ['node', 'helper.mjs'], env: { TOKEN_FILE: '/x' } } },
+      mcpServers: { byokagentresult: { command: '/usr/bin/env', args: ['node', 'helper.mjs'] } },
     });
     await turn(session);
-    const opened = (await facts()).find((fact) => fact.method === 'session/new')!;
-    expect(opened.params).toEqual({
-      cwd: workspaceDir,
-      mcpServers: [{ name: 'byokagentresult', command: '/usr/bin/env', args: ['node', 'helper.mjs'], env: [{ name: 'TOKEN_FILE', value: '/x' }] }],
-    });
-    expect(session.sessionRef).toBe('dsh-session-1');
+    const all = await facts();
+    expect(all.find((fact) => fact.method === 'open')!.request).toMatchObject({ cwd: workspaceDir, agentOptions: { provider: 'byok-custom', model: 'loop-model' } });
+    const [row] = all.find((fact) => fact.kind === 'start')!.overlay[1].insert;
+    expect(row).toMatchObject({ name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'byokagentresult', command: '/usr/bin/env', args: ['node', 'helper.mjs'], cwd: workspaceDir } });
+    expect(session.sessionRef).toBe(all.find((fact) => fact.method === 'open')!.request.sessionId);
   });
 
-  it('projects committed messages, tools and context usage, then ends the turn', async () => {
+  it.each([
+    ['env', { command: '/usr/bin/env', env: { TOKEN: 'x' } }],
+    ['http', { type: 'http', url: 'http://127.0.0.1:9/mcp' }],
+  ])('refuses an MCP entry with %s before dsh starts, without a retry', async (_label, server) => {
+    const { open, facts } = await setup();
+    await expect(open({ instruction: 'x' }, { mcpServers: { host: server } })).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect((await facts()).some((fact) => fact.kind === 'start')).toBe(false);
+  });
+
+  it('projects committed messages, tools and billed usage, then ends the turn', async () => {
     const { open } = await setup();
     const events = await turn(await open());
     expect(events).toEqual([
       { type: 'progress', text: 'first message: hello' },
-      // The native rawInput object, as for Grok; OAR's content blocks under `content`.
       { type: 'tool_use', tool: 'bash', toolCallId: 'call_1', input: { command: 'ls' } },
       { type: 'tool_result', tool: 'bash', toolCallId: 'call_1', output: { content: [{ type: 'text', text: 'a.txt\n' }] } },
       { type: 'progress', text: 'final answer' },
-      { type: 'usage', contextTokens: 100, contextSource: 'provider', contextWindow: 1000 },
+      { type: 'usage', inputTokens: 210, outputTokens: 12, cachedInputTokens: 20, contextTokens: 127, contextSource: 'provider', contextWindow: 1000 },
       { type: 'turn_end' },
     ]);
   });
 
-  it('keeps a tool input past OAR\'s text cap whole and leaves a non-object input unknown', async () => {
+  it('keeps a tool input past 10k whole, as the native object', async () => {
     const { open } = await setup();
-    const events = await turn(await open({ instruction: 'tool-inputs' }));
-    expect(events.slice(0, 2)).toEqual([
-      { type: 'tool_use', tool: 'bash', toolCallId: 'call_long', input: { command: `echo ${'a'.repeat(12_000)}; git push origin main` } },
-      { type: 'tool_use', tool: 'bash', toolCallId: 'call_text' },
-    ]);
+    const events = await turn(await open({ instruction: 'long-input' }));
+    const input = events.find((event) => event.type === 'tool_use')!.input as { command: string };
+    expect(input.command.length).toBe(12027);
+    expect(input.command.endsWith('; git push origin main')).toBe(true);
   });
 
-  it('runs a follow-up on the same session and refuses steering', async () => {
+  it('fails closed on tool arguments that are not a JSON object', async () => {
+    const { open } = await setup();
+    const error = await turn(await open({ instruction: 'bad-input' })).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ category: 'authority', retry: 'non-retryable', message: expect.stringMatching(/not a JSON object/) });
+  });
+
+  it('stops dsh before it reports turn_end, drops what follows and refuses a follow-up', async () => {
     const { open, facts } = await setup();
-    const session = await open();
-    await turn(session);
-    await session.followUp({ instruction: 'again' });
-    expect((await turn(session))[0]).toEqual({ type: 'progress', text: 'first message: again' });
-    await expect(session.steer('x')).rejects.toBeInstanceOf(SteerUnsupportedError);
-    expect((await facts()).filter((fact) => fact.method === 'session/prompt')).toHaveLength(2);
+    const session = await open({ instruction: 'spontaneous' });
+    const events = await turn(session);
+    expect((await facts()).some((fact) => fact.method === 'dispose')).toBe(true);
+    expect(events.filter((event) => event.type === 'progress')).toEqual([{ type: 'progress', text: 'started a subagent' }]);
+    await expect(session.followUp({ instruction: 'again' })).rejects.toBeInstanceOf(PolicyUnsupportedError);
   });
 
-  it('cancels every permission request', async () => {
+  it('steers the running turn and reports a refused steer', async () => {
     const { open, facts } = await setup();
-    const events = await turn(await open({ instruction: 'permission' }));
-    expect(events.at(-2)).toMatchObject({ type: 'tool_result', toolCallId: 'call_p', isError: true });
-    expect((await facts()).find((fact) => fact.kind === 'permission-answer')!.answer).toEqual({ outcome: { outcome: 'cancelled' } });
+    const session = await open({ instruction: 'hang' });
+    await expect.poll(async () => (await facts()).some((fact) => fact.method === 'prompt')).toBe(true);
+    await expect.poll(() => session.steer('turn left').then(() => true, () => false)).toBe(true);
+    expect((await facts()).find((fact) => fact.method === 'steer')!.request).toMatchObject({ text: 'turn left' });
+    const events = turn(session);
+    await session.interrupt();
+    await events;
+    await expect(session.steer('late')).rejects.toMatchObject({ category: 'infrastructure', message: 'runtime exited' });
   });
 
-  it('fails a turn dsh rejects as a non-retryable semantic failure', async () => {
+  it('fails a turn dsh rejects as a non-retryable semantic failure with its native class', async () => {
     const { open } = await setup();
     const session = await open({ instruction: 'fail' });
     const error = await turn(session).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(error).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable' });
+    expect(error).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'auth' } });
     expect((error as Error).message).toMatch(/invalid api key/);
   });
 
-  it('keeps a rate limit dsh reports only in text non-retryable, with class unknown', async () => {
+  it('retries a native rate limit', async () => {
     const { open } = await setup();
     const error = await turn(await open({ instruction: 'rate-limit' })).catch((caught: unknown) => caught);
-    expect(error).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'unknown' } });
+    expect(error).toMatchObject({ phase: 'run', category: 'semantic', retry: 'retryable', failure: { class: 'rate_limited' } });
   });
 
   it('fails the session when dsh exits during a turn', async () => {
@@ -249,56 +261,70 @@ describe('DshAdapter sessions', () => {
     expect(error).toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
   });
 
-  it('interrupts with session/cancel and ends the turn', async () => {
+  it('interrupts with the native cancel and ends the turn', async () => {
     const { open, facts } = await setup();
     const session = await open({ instruction: 'hang' });
     const events = turn(session);
-    await expect.poll(async () => (await facts()).some((fact) => fact.method === 'session/prompt')).toBe(true);
+    await expect.poll(async () => (await facts()).some((fact) => fact.method === 'prompt')).toBe(true);
     await session.interrupt();
     expect((await events).at(-1)).toEqual({ type: 'turn_end' });
-    expect((await facts()).some((fact) => fact.method === 'session/cancel')).toBe(true);
+    expect((await facts()).some((fact) => fact.method === 'cancel')).toBe(true);
   });
 
   it('refuses the interrupt and sends no native cancel when the agent\'s descendants cannot be read first', async () => {
     vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
     const { open, facts } = await setup();
     const session = await open({ instruction: 'hang' });
-    await expect.poll(async () => (await facts()).some((fact) => fact.method === 'session/prompt')).toBe(true);
+    await expect.poll(async () => (await facts()).some((fact) => fact.method === 'prompt')).toBe(true);
     await expect(session.interrupt()).rejects.toMatchObject({ category: 'infrastructure', message: 'dsh interrupt refused: Process table ps: timeout after 5000 ms' });
-    expect((await facts()).some((fact) => fact.method === 'session/cancel')).toBe(false);
+    expect((await facts()).some((fact) => fact.method === 'cancel')).toBe(false);
+    await expect.poll(async () => (await facts()).some((fact) => fact.method === 'dispose')).toBe(true);
   });
 
-  it('closes the native session before disposing the process', async () => {
+  it('disposes the native sessions before the process', async () => {
     const { open, facts } = await setup();
     const session = await open();
     await turn(session);
     await session.close();
-    const close = (await facts()).find((fact) => fact.method === 'session/close');
-    expect(close?.params).toEqual({ sessionId: 'dsh-session-1' });
+    expect((await facts()).some((fact) => fact.method === 'dispose')).toBe(true);
     const pid = (await facts()).find((fact) => fact.kind === 'start')!.pid as number;
     expect(() => process.kill(pid, 0)).toThrow();
   });
 
-  it('resumes a known session in the same workspace', async () => {
-    const { open, facts, workspaceDir } = await setup();
+  it('resumes a known session in the same workspace and re-sends its MCP servers', async () => {
+    const { open, facts } = await setup();
     const first = await open();
     await turn(first);
+    const sessionRef = first.sessionRef;
     await first.close();
-    const resumed = await open({ instruction: 'again', sessionRef: 'dsh-session-1' });
-    expect(resumed.sessionRef).toBe('dsh-session-1');
+    const mcpServers = { byokagentresult: { command: '/usr/bin/env', args: ['node', 'helper.mjs'] } };
+    const resumed = await open({ instruction: 'again', sessionRef }, { mcpServers });
+    expect(resumed.sessionRef).toBe(sessionRef);
     expect((await turn(resumed))[0]).toEqual({ type: 'progress', text: 'first message: again' });
-    expect((await facts()).find((fact) => fact.method === 'session/resume')!.params).toEqual({ sessionId: 'dsh-session-1', cwd: workspaceDir, mcpServers: [] });
+    const all = await facts();
+    expect(all.find((fact) => fact.method === 'resume')!.request).toMatchObject({ sessionId: sessionRef, route: { provider: 'saved', model: 'route' } });
+    expect(all.filter((fact) => fact.kind === 'start').at(-1)!.overlay[1].insert[0].config.serverName).toBe('byokagentresult');
   });
 
-  it('fails a resume dsh refuses as a non-retryable authority failure', async () => {
-    const { open } = await setup();
+  it('fails a resume of an unknown session or another workspace as a non-retryable authority failure', async () => {
+    const { open, workspaceDir } = await setup();
     await expect(open({ instruction: 'x', sessionRef: 'unknown-session' })).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
-    await expect(open({ instruction: 'x', sessionRef: 'corrupt-session' })).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    const first = await open();
+    await turn(first);
+    const sessionRef = first.sessionRef;
+    await first.close();
+    await expect(open({ instruction: 'x', sessionRef }, { workspaceDir: await tempDir('bdo-') })).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', message: expect.stringContaining(workspaceDir) });
   });
 
-  it('fails closed when the session does not run the configured route', async () => {
-    const { open } = await setup({}, { FAKE_DSH_ROUTE: JSON.stringify(['deepseek-official', 'deepseek-v4-flash']) });
-    await expect(open()).rejects.toMatchObject({ phase: 'start', category: 'authority', message: expect.stringMatching(/provider route and model/) });
+  it('refuses a dsh without steer as a non-retryable authority failure', async () => {
+    const { open } = await setup({}, { FAKE_DSH_NO_STEER: '1' });
+    await expect(open()).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+  });
+
+  it('fails closed when a request does not run the configured route', async () => {
+    const { open } = await setup({}, { FAKE_DSH_ROUTE: 'deepseek-official/deepseek-v4-flash' });
+    const error = await turn(await open()).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ category: 'authority', retry: 'non-retryable', message: expect.stringMatching(/provider route and model/) });
   });
 
   it('passes the configured sandbox mode', async () => {

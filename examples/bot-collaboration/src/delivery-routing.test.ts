@@ -138,7 +138,7 @@ it('keeps persisted pending deliveries dormant when the channel is not configure
   vi.useFakeTimers();
   const server = createByokServer({ productId: 'm3-disabled' });
   const db = new HostLedger(':memory:', 'product:m3-disabled', { compactVeto: botCompactVeto });
-  const bot = new BotCollaboration(server, db, { botId: 'main', execution: template('unused-device'), connector: async () => null });
+  const bot = new BotCollaboration(server, db, { botId: 'main', execution: template('unused-device'), connector: async () => null, dreaming: false });
   try {
     db.transaction(s => {
       const state = stateOf(s.application);

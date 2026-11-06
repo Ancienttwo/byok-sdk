@@ -24,7 +24,7 @@ afterEach(async () => {
 });
 const schedule = { minute: 0, hour: (new Date().getUTCHours() + 12) % 24, tz: 'UTC' };
 const options = (): BotOptions => ({ botId: 'main', execution: template(fixture!.deviceId), connector: async () => null, now,
-  hostIntents: { research: () => {} }, contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } });
+  hostIntents: { research: () => {} }, dreaming: { timeZone: 'UTC' }, contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 } });
 const device = () => fixture!.deviceId;
 let bot: BotCollaboration;
 async function setup(): Promise<BotCollaboration> {
@@ -95,7 +95,7 @@ it('exports a drained L domain, imports it as an H export into a new tenant, com
   exported = await exportDomain();
   expect(verifySwitchExport(exported).digest).toBe(exported.manifest.digest);
   expect(exported).toMatchObject({ source: 'L', domain: fixture!.ledger.tenant, devices: [{ deviceId: device(), frozenRevision: 1 }] });
-  expect(exported.manifest.counts).toMatchObject({ intents: 2, routines: 1, occurrences: 1, outbox: 0 });
+  expect(exported.manifest.counts).toMatchObject({ intents: 2, routines: 2, occurrences: 1, outbox: 0 });
   expect(exported.archived.map(row => row.namespace)).toContain('turns');
   expect(exported.tombstones.map(row => row.kind)).toContain('intent');
   expect(exported.intents.find(row => row.key === 'host-1')).toMatchObject({ handler: 'research' });

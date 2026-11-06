@@ -40,7 +40,7 @@ export function assertDshSandboxMode(value: unknown, label: string): asserts val
   if (!SANDBOX_MODES.includes(value as DshSandboxMode)) throw new TypeError(`${label} must be one of ${SANDBOX_MODES.join(', ')}`);
 }
 
-/** The dsh route a selection runs on, as `session/new` reports it in the `model` config option. */
+/** The dsh route a selection runs on. */
 export function dshRoute(model: DshModelSelection): string {
   if (model.provider === 'deepseek') return DEEPSEEK_ROUTE;
   return model.provider === 'custom' ? CUSTOM_ROUTE : model.provider;
@@ -48,28 +48,16 @@ export function dshRoute(model: DshModelSelection): string {
 
 /**
  * The `--patch` overlay of one execution: the provider route with its key
- * reference, and the route and model of every ACP session and of the agent
- * default (subagents). JSON is valid YAML, so no YAML writer is needed.
+ * variable and endpoint, never the key. The model travels as the session's
+ * selection. JSON is valid YAML, so no YAML writer is needed.
  */
 export function dshPatch(model: DshModelSelection): string {
-  const route = dshRoute(model);
-  const entries: unknown[] = [];
-  if (model.provider === 'deepseek') {
-    entries.push({ id: 'llm-deepseek', config: { apiKeyEnv: model.keyEnv } });
-  } else if (model.provider === 'custom') {
-    entries.push({ id: 'llm-pi-ai', config: { providers: { [CUSTOM_ROUTE]: {
-      apiKeyEnv: model.keyEnv, api: 'openai-completions', baseURL: model.baseUrl, models: [{ id: model.model }],
-    } } } });
-  } else {
-    entries.push({ id: 'llm-pi-ai', config: { providers: { [route]: {
-      apiKeyEnv: model.keyEnv, ...(model.baseUrl === undefined ? {} : { baseURL: model.baseUrl }),
-    } } } });
-  }
-  entries.push(
-    { id: 'acp', config: { provider: route, model: model.model } },
-    { id: 'agent-default-model', config: { provider: route, model: model.model } },
-  );
-  return `${JSON.stringify(entries, null, 2)}\n`;
+  const entry = model.provider === 'deepseek'
+    ? { id: 'llm-deepseek', config: { apiKeyEnv: model.keyEnv } }
+    : { id: 'llm-pi-ai', config: { providers: { [dshRoute(model)]: model.provider === 'custom'
+      ? { apiKeyEnv: model.keyEnv, api: 'openai-completions', baseURL: model.baseUrl, models: [{ id: model.model }] }
+      : { apiKeyEnv: model.keyEnv, ...(model.baseUrl === undefined ? {} : { baseURL: model.baseUrl }) } } } };
+  return `${JSON.stringify([entry], null, 2)}\n`;
 }
 
 export function dshAgentsHome(root: string): string {

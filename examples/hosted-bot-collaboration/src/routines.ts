@@ -2,7 +2,7 @@ import type { PoolClient } from 'pg';
 import { applyPlan, auditCalendarError, canonical, hash, nextWake, recordOccurrence, routineCommands, routineWakeKey, scheduleNext, switchVersion,
   versionSwitchDue, type FrozenExecutionInput, type RetryPolicy, type HostJobHandler, type Intent, type Json, type LedgerState, type Occurrence, type Routine,
   type RoutineCommands, type RoutineDefinition } from '@byok-sdk/server/execution-core';
-import { BOT_ROUTINE, createDefinition, owned, routineCalendar, routineTurn, updateDefinition } from '@byok-sdk/example-bot-collaboration/routines';
+import { BOT_DREAM, BOT_ROUTINE, createDefinition, owned, routineCalendar, routineTurn, updateDefinition } from '@byok-sdk/example-bot-collaboration/routines';
 import type { CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { storedKey } from './layout';
 
@@ -104,7 +104,10 @@ export async function writeSlice(client: PoolClient, scopeKey: string, slice: Ro
     if (next && (next.payload !== undefined || next.dedupKey !== routineWakeKey(definition.id, definition.version, next.availableAt))) {
       throw new Error('A routine reservation differs from its stored slot');
     }
-    if (definition.hostOccurrence?.type !== BOT_ROUTINE && !definition.hostJob) throw new Error('H runs only bot-routine and Host job routines');
+    // A `bot-dream` row arrives only with an L import. H fires it as a concluded occurrence (`store.ts` fire).
+    if (definition.hostOccurrence?.type !== BOT_ROUTINE && definition.hostOccurrence?.type !== BOT_DREAM && !definition.hostJob) {
+      throw new Error('H runs only bot-routine, bot-dream and Host job routines');
+    }
     const prior = before.routines[id];
     if (!prior) {
       await client.query(`INSERT INTO routine (scope, id, ordinal, definition, pending, lifecycle, status, next_at, calendar_errors,
@@ -123,10 +126,10 @@ export async function writeSlice(client: PoolClient, scopeKey: string, slice: Ro
     const prior = before.occurrences[key];
     if (!prior) {
       if (key !== recorded) throw new Error('H records occurrences only in its scheduler');
-      await client.query(`INSERT INTO occurrence (scope, key, ordinal, routine_id, definition_version, trigger_kind, planned_at, recorded_at, next_at, job)
-        SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3, $4, $5, $6, $7, $8, $9::json FROM occurrence WHERE scope = $1`,
+      await client.query(`INSERT INTO occurrence (scope, key, ordinal, routine_id, definition_version, trigger_kind, planned_at, recorded_at, next_at, job, conclusion)
+        SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3, $4, $5, $6, $7, $8, $9::json, $10 FROM occurrence WHERE scope = $1`,
       [scopeKey, storedKey(key), storedKey(row.routineId), row.definitionVersion, row.trigger.kind, row.trigger.plannedAt, row.recordedAt, row.nextAt,
-        row.job ? '{}' : null]);
+        row.job ? '{}' : null, row.conclusion ?? null]);
       if (row.job) {
         await client.query(`INSERT INTO outbox (scope, key, ordinal, kind) SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'host_job'
           FROM outbox WHERE scope = $1`, [scopeKey, hostJobRowKey(key)]);

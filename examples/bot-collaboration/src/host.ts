@@ -7,7 +7,7 @@ import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOpti
   type MessageTransaction } from '@byok-sdk/server/execution-core';
 import type { HostJobHandler, Routine } from '@byok-sdk/server/execution-core';
 import { HostLedger, type Conclusion } from '@byok-sdk/server/execution-core';
-import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
+import { canonical, hash, isOccurrenceIntentKey, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
 import { json, stateOf, type CollaborationState, type Turn, type Verdict } from './model';
 import { contextTurns, DEFAULT_HANDOFF_BUDGETS, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { cancellable, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
@@ -18,8 +18,9 @@ import type { CommandRecord } from './rules/commit';
 import { hostMessageDisposition, type MessageDisposition } from './rules/message';
 import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, writeLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
-import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
+import { BOT_DREAM, BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
   ownerRoutineUpdate, updateDefinition, type BotRoutineInput } from './routines';
+import { checkDreamInstruction, dreamOf, dreamPolicy, dreamReads, reconcileDreamRoutines, recordDream, syncDreams, type DreamPolicy, type DreamingOptions } from './dream';
 import { DEFAULT_AUTONOMY, autonomyOf, recordWouldDo, wouldDoRows, type Autonomy, type AutonomyGate, type WouldDo } from './rules/autonomy';
 import { DEVICE_CONCURRENCY, admitDeviceSlot, type DispatchIntent } from './rules/priority';
 
@@ -31,7 +32,7 @@ import type { RoomFields } from '@byok-sdk/protocol';
 
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
-import { admitBot, admitDevice, checkTopology, DeviceModeError, deviceRefusal, deviceTopology, homeSent, switchDrained, switchStep, switchWork,
+import { admitBot, admitDevice, botDeviceRefusal, checkTopology, DeviceModeError, deviceRefusal, deviceTopology, homeSent, switchDrained, switchStep, switchWork,
   type DeviceTopology,
   type SwitchWork } from './topology';
 import { checkSwitchRecords, refuseExported, sealLedger, switchContent, type SwitchHeader } from './switch';
@@ -96,6 +97,11 @@ export interface BotOptions {
    * A Host intent whose name has no message handler refuses its messages with `binding_mismatch`.
    */
   hostIntentMessages?: Readonly<Record<string, HostIntentMessageHandler>>;
+  /**
+   * Dreaming (#1475). Absent: on, one dream per Bot per day that had a completed Turn, at 03:00 local time, on the Bot's own model.
+   * `false`: off for the whole Host, and open dream routines end. See the README for the cost.
+   */
+  dreaming?: DreamingOptions | false;
   /** Passed to the K4 core. Default 100. */
   reconcileMs?: number;
   /** Passed to the K4 core: a coalesced hint after a commit that wrote the outbox. */
@@ -106,7 +112,7 @@ export interface BotOptions {
    * in the ContextPack row shape. The rows replace the stored Turns in that ContextPack and are not stored;
    * the Turn keeps only their hash. Cards, questions and rejected actions stay Host state. Room seats read `roomHistory`.
    * A read that throws, returns another shape or is still open after `historyTimeoutMs` leaves the Turn queued, and the timer
-   * tries again.
+   * tries again. A dream (#1475) reads here too, with `turnId` set to the dream's intent key. A failed read skips that day.
    */
   history?: (input: { botId: string; turnId: string }) => Promise<readonly ContextTurn[]>;
   /**
@@ -242,6 +248,7 @@ function settledTurnCancel(s: LedgerState, id: string): Omit<TurnCancelResult, '
 interface InjectedHistory {
   turns: ReadonlyMap<string, { rows: ContextTurn[]; digest: string }>;
   rooms: ReadonlyMap<string, { rows: RoomMessage[]; digest: string }>;
+  dreams: ReadonlyMap<string, readonly ContextTurn[] | null>;
 }
 /** Reply readback port (§3.3). The Host acceptance record stays the body authority. */
 export type MessageServer = { tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>> };
@@ -292,6 +299,7 @@ export class BotCollaboration {
   private readonly contextMaxBytes: number;
   private readonly contextTurnLimit: number;
   private readonly handoff: HandoffPackBudgets;
+  private readonly dreaming: DreamPolicy | undefined;
   private readonly instructionMaxBytes: number;
   private readonly deviceConcurrency: number;
   private readonly timers: DelegationTimers;
@@ -382,6 +390,8 @@ export class BotCollaboration {
     // A narrowed prompt (#881) keeps a subset of the SYSTEM_PROMPT sentences, so this minimum bounds it too.
     const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
     if (this.instructionMaxBytes < minimum) throw new Error(`instructionMaxBytes must be at least ${minimum}`);
+    this.dreaming = dreamPolicy(options.dreaming);
+    if (this.dreaming) checkDreamInstruction(this.instructionMaxBytes);
     this.timers = { cancelGraceMs: time(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS), uncertainAfterMs: time(options.uncertainAfterMs ?? REPLY_UNCERTAIN_AFTER_MS) };
     if (this.timers.cancelGraceMs < 1 || this.timers.uncertainAfterMs < 1) throw new Error('Invalid delegation timers');
     this.deviceConcurrency = time(options.deviceConcurrency ?? DEVICE_CONCURRENCY);
@@ -400,6 +410,11 @@ export class BotCollaboration {
         refuseExported(state);
         this.commitCallback(state, run.occurrenceKey, { kind: 'occurrence', key: run.occurrenceKey },
           { publish: tx.publish, occurrence: () => routineTurn(state, run) });
+      }, [BOT_DREAM]: (run, tx) => {
+        const state = stateOf(tx.application);
+        admitBot(state, (run.input as { owner: string }).owner);
+        refuseExported(state);
+        recordDream(state, run, this.now());
       } },
       applyMessage: (input, tx) => this.applyMessage(input, tx),
       applyOutcome: (document, tx) => this.applyOutcome(document, tx),
@@ -579,6 +594,8 @@ export class BotCollaboration {
     refuseExported(state);
     const owner = hostIntent(state, key);
     if (owner) return this.applyHostOutcome(key, owner.handler, document, tx);
+    // A dream's result is its memory on the device. The sync closes it from the K4 conclusion.
+    if (dreamOf(state, key)) return;
     // Not a key that K8 wrote. It must never settle as a success.
     if (!Object.hasOwn(state.turns, key)) throw this.intentFailure(key, 'unknown_intent', 'No Bot Turn or Host intent has this key');
     try { this.commitBotOutcome(state, key, taskId, document, tx); } catch (cause) {
@@ -637,6 +654,8 @@ export class BotCollaboration {
   enqueueHostIntent(input: IntentInput, handler: string): Promise<Intent> {
     return this.exclusive(async () => {
       if (!this.hostIntentHandlers.has(handler)) throw new Error(`Unknown Host intent handler: ${handler}`);
+      // Only K8's own hooks promote an occurrence.
+      if (isOccurrenceIntentKey(input.key)) throw new Error('Host intent identity conflict: the key is an occurrence');
       if (input.execution.payload.messageEgress && !this.hostIntentMessageHandlers.has(handler)) {
         throw new Error(`Host intent handler ${handler} has no message handler`);
       }
@@ -1131,6 +1150,7 @@ export class BotCollaboration {
     }
     // A batch sealed here is enqueued in this pass, before later Turns of its Bot.
     sealDueBatches(state, this.coalesce, this.now());
+    reconcileDreamRoutines(s, this.dreaming, this.models(), this.now());
     // Refresh passive state before any new offer freezes its ContextPack.
     expireCards(state, this.now());
     const routines = botRoutines(Object.values(s.routines));
@@ -1139,13 +1159,16 @@ export class BotCollaboration {
       models: Object.keys(this.models()), readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history,
       history: injected?.turns.get(turn.id), roomHistoryMode: !!this.options.roomHistory, roomHistory: injected?.rooms.get(turn.id), routines,
       offer: this.offer }), (key, value) => project(s, key, value));
+    // After the Turns of this pass, so a dream queues behind them.
+    const dreamed = syncDreams(s, { tenant: this.ledger.tenant, policy: this.dreaming, models: this.models(), instructionMaxBytes: this.instructionMaxBytes,
+      now: this.now(), refused: botId => botDeviceRefusal(state, botId) !== undefined, history: injected?.dreams, historyMode: !!this.options.history });
     settleDelegations(s, state, this.now(), (key, value) => project(s, key, value), this.timers);
     reportCardDecisions(state, (key, value) => project(s, key, value));
     cleanReplyTokens(s, state, this.now());
     projectInputBatches(state, (key, value) => project(s, key, value));
     // #1229 item 3: one projection per destination. An unchanged destination is the same projection id and value.
     projectInboundDispositions(state, (key, value) => project(s, key, value));
-    return materialized;
+    return materialized || dreamed;
   }
   /** Example reconcile loop (§3.10). K4 arms no scan after a settled intent, so the Host checks replies itself. */
   private async flushReplies(): Promise<void> {
@@ -1233,7 +1256,8 @@ export class BotCollaboration {
     const read = this.options.history, readRoom = this.options.roomHistory;
     if (!read && !readRoom) return undefined;
     const ledger = this.ledger.snapshot(), state = stateOf(ledger.application);
-    const injected = { turns: new Map<string, { rows: ContextTurn[]; digest: string }>(), rooms: new Map<string, { rows: RoomMessage[]; digest: string }>() };
+    const injected = { turns: new Map<string, { rows: ContextTurn[]; digest: string }>(), rooms: new Map<string, { rows: RoomMessage[]; digest: string }>(),
+      dreams: new Map<string, readonly ContextTurn[] | null>() };
     for (const turn of Object.values(state.turns)) {
       if (!awaitsOffer(ledger, state, turn) || this.unread.has(turn.id)) continue;
       const seat = turn.source === 'room_slot' ? state.team.seats[turn.id] : undefined;
@@ -1253,6 +1277,9 @@ export class BotCollaboration {
           injected.turns.set(turn.id, { rows, digest: hash(canonical(rows)) });
         }
       } catch { this.unread.add(turn.id); }
+    }
+    if (read) for (const { key, botId, turnId } of dreamReads(state)) {
+      injected.dreams.set(key, await bounded(read({ botId, turnId }), this.historyTimeoutMs).then(contextTurns).catch(() => null));
     }
     return injected;
   }

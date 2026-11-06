@@ -1,5 +1,3 @@
-import { promises as fs } from 'node:fs';
-import { isAbsolute } from 'node:path';
 import type { Readable } from 'node:stream';
 import { connectControlClient, type ControlClient } from '../daemon/control-client';
 import { serveAgentMessageMcpOverStdio, type AgentMessageMcpDeps } from './agent-message-mcp-server';
@@ -8,32 +6,13 @@ import { serveAgentMemoryDescriptorOverStdio, serveAgentMemoryMcpOverStdio, serv
 import { parsePreparedAgentMemoryMode } from '../agent-memory/prepared-capability';
 import { serveTeamMcpOverStdio, type TeamMcpDeps } from './team-mcp-server';
 import type { SdkReservedHelperKind } from '../sdk-reserved-helper-host';
-import { sdkReservedHelperArgumentCount, type SdkReservedMcpContext } from '../sdk-reserved-helper-context';
+import { readMcpContextFile, sdkReservedHelperArgumentCount } from '../sdk-reserved-helper-context';
 
 
 function required(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`missing required environment variable ${name}`);
   return value;
-}
-
-/** The daemon's context file for this helper; the one source of its task identity. */
-async function readContextFile(argv: readonly string[]): Promise<SdkReservedMcpContext & Readonly<Record<string, unknown>>> {
-  const file = argv[0]!;
-  if (!isAbsolute(file)) throw new Error('the SDK-reserved helper context file path must be absolute');
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(await fs.readFile(file, 'utf8'));
-  } catch (cause) {
-    throw new Error(`cannot read the SDK-reserved helper context file ${file}`, { cause });
-  }
-  const context = (parsed ?? {}) as Partial<SdkReservedMcpContext>;
-  for (const field of ['storeDir', 'productId', 'contextToken'] as const) {
-    if (typeof context[field] !== 'string' || context[field] === '') {
-      throw new Error(`SDK-reserved helper context file ${file} has no ${field}`);
-    }
-  }
-  return context as SdkReservedMcpContext & Readonly<Record<string, unknown>>;
 }
 
 function waitForInputClose(input: Readable = process.stdin): Promise<void> {
@@ -50,7 +29,7 @@ function waitForInputClose(input: Readable = process.stdin): Promise<void> {
 }
 
 async function runAgentMessageMcp(argv: readonly string[]): Promise<void> {
-  const { storeDir, productId, contextToken } = await readContextFile(argv);
+  const { storeDir, productId, contextToken } = await readMcpContextFile(argv[0]!);
   let clientPromise: Promise<ControlClient> | undefined;
   const client = async (): Promise<ControlClient> => {
     if (!clientPromise) clientPromise = connectControlClient({ storeDir, productId }).then((result) => {
@@ -68,7 +47,7 @@ async function runAgentMessageMcp(argv: readonly string[]): Promise<void> {
 
 /** The context token arrives by file, as for the message helper; the frozen schema only over the control socket. */
 async function runAgentResultMcp(argv: readonly string[]): Promise<void> {
-  const { storeDir, productId, contextToken } = await readContextFile(argv);
+  const { storeDir, productId, contextToken } = await readMcpContextFile(argv[0]!);
   let clientPromise: Promise<ControlClient> | undefined;
   const client = async (): Promise<ControlClient> => {
     if (!clientPromise) clientPromise = connectControlClient({ storeDir, productId }).then((result) => {
@@ -89,7 +68,7 @@ async function runAgentResultMcp(argv: readonly string[]): Promise<void> {
 }
 
 async function runAgentMemoryMcp(argv: readonly string[]): Promise<void> {
-  const context = await readContextFile(argv);
+  const context = await readMcpContextFile(argv[0]!);
   const { storeDir, productId, contextToken } = context;
   const mode = parsePreparedAgentMemoryMode(context.mode);
   if (mode === 'none') throw new Error('the Agent memory context must grant read or read-write');

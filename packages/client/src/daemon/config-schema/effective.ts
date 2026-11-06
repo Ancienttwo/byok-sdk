@@ -165,6 +165,14 @@ function sdkBuiltIsolation(id: string, config: DaemonConfig): Readonly<Record<st
       compatInstructions: runtimes?.grok?.compatInstructions ?? 'inherit',
       agentUserMcpServers: runtimes?.grok?.agentUserMcpServers ?? 'inherit',
     };
+    case 'dsh': return runtimes?.dsh === undefined ? undefined : {
+      home: runtimes.dsh.home,
+      sandbox: runtimes.dsh.sandbox ?? 'danger-full-access',
+    };
+    case 'agy': return runtimes?.agy === undefined ? undefined : {
+      home: runtimes.agy.home,
+      ...(runtimes.agy.model === undefined ? {} : { model: runtimes.agy.model }),
+    };
     default: return undefined;
   }
 }

@@ -1106,15 +1106,68 @@ the environment.
 
 Sessions persist under `<home>/sessions/<encoded cwd>/<session id>/`; resume
 needs them, and the SDK removes none. The DeepSeek route sends `GET
-https://api.deepseek.com/models` at boot when a key is present. dsh reports
-context occupancy (`usage_update`) and no provider cost counters, so a dsh
-task has no cost usage. The `keyEnv` rules are in
+https://api.deepseek.com/models` at boot when a key is present. A dsh `usage`
+event carries the turn's billed tokens and the provider's context usage, both
+read from OAR's session totals. The `keyEnv` rules are in
 [adapter capabilities](adapter-capabilities.md#dsh-adapter-custom-harness).
+
+An Attempt is one prompt on one process. dsh's subagents and background jobs
+outlive the turn, and when one finishes dsh opens a root turn with no prompt. So
+on the root turn end the session projects nothing more, closes dsh and disposes
+its process tree before it decides the terminal and before the home lease is
+released. Background subagents and jobs stop there and their unfinished work is
+lost; this is not a failure. `followUp` is refused. A later turn resumes the
+session in a new process, and dsh restarts neither.
 
 dsh starts each shell tool in its own process group. `close()` on a live dsh
 root reaps them. After a dsh root is killed from outside (SIGKILL, OOM),
 disposal ends the tool processes the owned process tree observed while the
 root ran ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
+
+### agy runtime (#1469)
+
+The agy adapter runs `agy acp --dangerously-skip-permissions
+--process-per-session --disable-telemetry` in an OS home the SDK owns: `HOME`,
+`USERPROFILE`, `APPDATA`, `LOCALAPPDATA` and `GEMINI_HOME` point into
+`DaemonConfig.runtimes.agy.home`, and `AGY_CLI_DISABLE_AUTO_UPDATE=1` is always
+set. It drops every inherited `GEMINI_*`, `GOOGLE_*`, `AGY_*` and
+`ANTIGRAVITY_*` name and the `XDG_*` directory names, because agy reads and
+removes `antigravity/credential-user-scope` in the user config directory.
+`DBUS_SESSION_BUS_ADDRESS` names a socket in that home that does not exist, so
+agy's look for the session bus fails as on a host with no bus. agy passes its whole
+environment to `run_command` and stdio MCP children, so no real key may enter
+it. The key comes from `GEMINI_API_KEY` in the runtime environment and stays in
+the daemon process; a task without it fails as non-retryable authority.
+
+Each agy process gets one proxy, started before agy on an ephemeral `127.0.0.1`
+port and closed when agy exits. If it cannot start, the task fails before agy
+starts, and the failure is retryable. agy gets the proxy address in
+`GOOGLE_GEMINI_BASE_URL` and a random per-session token in `GEMINI_API_KEY`. No
+public option names that address. The proxy refuses a request without the token
+in `x-goog-api-key` or `?key=`, strips both forms, injects the real key and
+forwards to `https://generativelanguage.googleapis.com`, which no request can
+change. It allows every path, streams without buffering, returns the upstream
+status and error body unchanged, and logs no body. During a session, commands and
+MCP servers agy starts can spend the user's quota through the proxy, but they
+cannot take the key. The upstream connection honors `HTTP_PROXY`, `HTTPS_PROXY`
+and `NO_PROXY` from the runtime environment only, and no proxy URL appears in an
+error.
+
+An Attempt is one prompt on one process. agy's subagents and schedules run in
+the background and report no ACP frame, so on `end_turn` the session closes agy
+and disposes its process tree before it decides the terminal and before the
+home lease is released. `followUp` is refused. A later turn resumes the session
+in a new process and needs no wait after the kill. What a subagent did before
+the kill reaches no reminder and no audit.
+
+agy still sends `session/request_permission` for a file outside its workspace,
+and a `cancelled` answer ends the turn as a success, so the adapter answers with
+an explicit option. A writer gets `allow_once`. A `memory-reader` gets
+`allow_once` for reads, `reject_once` for a write below the Agent home outside
+its run directory, and `allow_once` otherwise. agy ends the turn after
+`reject_once` without asking the model again, so an Attempt ending that way
+fails as non-retryable `semantic`. `run_command` is not asked: a reader's shell
+write to its home is reported by `agentHomeMemoryChange`.
 
 ### Local runtime probe observation
 
@@ -1156,7 +1209,7 @@ Runtime version policy is one pure data object on an adapter descriptor
 constructor option and `DaemonConfig.runtimes.<id>.versionPolicy` are complete
 objects that replace one another wholesale through one resolver; fields are
 never merged. The default policy preserves today's behavior exactly: Codex,
-Grok, Hermes and dsh warn on an unqualified version, Claude and Pi do not warn, and
+Grok, Hermes, dsh and agy warn on an unqualified version, Claude and Pi do not warn, and
 no default policy blocks. Only a Host layer may configure a block; a descriptor
 default that carries one is rejected as `invalid_version_policy`
 (`block_requires_host`). A block is enforced locally before claim and produces
@@ -1762,9 +1815,11 @@ makes itself `unknown`. It keeps `scope` only when the server also advertises
 | Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status`. A `quota` takes `scope` from `rate_limit_info.rateLimitType`: `five_hour` and `seven_day` are `account`, `seven_day_opus` and `seven_day_sonnet` are `model`, any other value or none gives no `scope` |
 | Codex | `turn.error.codexErrorInfo`, through the vendored OAR table; `unauthorized` stays `unknown`, and an `other` class OAR takes from Anthropic's error wording is sent as `unknown` |
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
-| Pi, Hermes, dsh | no structured field: `unknown` |
+| agy | the vendored OAR turn outcome; a class OAR took from error text stays `unknown` |
+| dsh | the native `LlmFailure` code, then its HTTP status, through the vendored OAR dsh table; no class comes from error text |
+| Pi, Hermes | no structured field: `unknown` |
 
-Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes), Hermes and dsh report a
+Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes), Hermes, dsh and agy report a
 runtime process that ends on its own before its terminal, during start or a turn,
 as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
 Pi's durable lane recovers a worker that ends on its own during a run (within its
@@ -2206,15 +2261,25 @@ in either direction: a device envelope presented on this lane authenticates as
 nothing, and this lane never falls back to a device assertion. The device
 assertion exchange above is untouched and keeps serving its own consumers.
 
-The daemon injects one opaque `BYOK_HOST_TOOLSET_CONTEXT` nonce per
-`(task, server)` into the MCP child's environment, and nowhere else — a host's
-toolset registry still cannot set an environment block of its own, which is what
-makes the value unforgeable from configuration. The nonce is the child's evidence
-that it is the process the daemon started for that task; it never reaches a
-prompt, a log line, an audit record or the server.
+In a task run the daemon appends one path as the last argument of every host
+toolset server, after the configured `args`, and the MCP entry carries no
+environment block. The path names a mode `0600` file in the Execution's scratch
+directory holding one opaque nonce per `(task, server)`, and the store directory
+and product id that reach this daemon. Only the daemon writes that file, which is
+what makes the nonce unforgeable from configuration: a host's toolset registry can
+name a file but cannot put a nonce in one. The nonce is the child's evidence that
+it is the process the daemon started for that task; it never reaches a prompt, a
+log line, an audit record or the server. The file is private to the OS user, not
+to the child, so another process of that user can read it while the task runs.
 
-A child exchanges its nonce for one short-lived assertion per invocation through
-the daemon's `task_assertion.issue` control method, which resolves the task,
+A host toolset server must accept that extra last argument. It passes the path to
+`requestTaskAssertion` as `contextFile` only when it makes that call, and it must
+not read the file at startup: the format is internal and the file may not exist.
+The admission `tools/list` probe starts the server without that argument, so a
+server tells the two starts apart by counting its own configured arguments.
+
+A child exchanges its context file for one short-lived assertion per invocation
+through the daemon's `task_assertion.issue` control method, which resolves the task,
 AgentRef and toolset from its own registry entry — a caller may not send them.
 Every invocation, including a transport retry, takes a fresh assertion with a
 fresh JTI; TTL is the device lane's existing ceiling, not a second formula
@@ -2241,9 +2306,10 @@ once its host side actually implements the verification; a device advertises the
 same capability string in its connection handshake, and only once it can both
 sign and read that deployment declaration. A device that does not advertise it is
 explicitly unavailable for this lane — never a reason to accept its device
-assertion instead. While either channel is silent the daemon injects no nonce at
-all, so a tool server started without one fails for want of a token rather than
-falling back to some other identity.
+assertion instead. While either channel is silent the daemon mints no nonce at
+all and writes no file. The last argument is still there and names nothing, so
+`requestTaskAssertion` refuses with `context_token_invalid` rather than falling
+back to some other identity.
 
 ## Skill pack delivery
 
@@ -2932,7 +2998,7 @@ one line: `Agent memory (data): ` and a JSON object with `path`, `revision`,
 the first user message, never the system prompt, after blob and sealed
 instructions are opened. The task fails without retry and without truncation
 before the runtime starts when the file is over the limit
-(`agent_memory_resident_over_limit: <bytes>/<limit>`), or when it is missing,
+(`agent_memory_resident_over_limit: <bytes>/<limit>; to recover, send a write task with agentMemory:"none" and no agentMemoryCommit that brings memory back within its limits`), or when it is missing,
 not a regular file or not valid UTF-8, has more than one hard link, or the home
 identity changed (`agent_memory_resident_unreadable: <reason>`). These prefixes
 are reason text, not wire values.
@@ -3781,7 +3847,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.5.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.88.0 source at `packages/client/vendor/oar/be46fb3/`, from upstream commit `be46fb3615a4de38e4004556c2b3a1a4860f72e6`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.5.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.91.0 source at `packages/client/vendor/oar/0e92470/`, from upstream commit `0e9247014498697ed4aaada8a911de68936ffec9`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
@@ -3851,8 +3917,8 @@ its cumulative `total` remains the provider cost authority. Claude reports
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
-dsh reports ACP `usage_update` (`used` against `size`) as `provider` context
-usage, and no cost counters.
+dsh reports billed tokens per turn and `provider` context usage, read from
+OAR's session totals. agy reports no usage events.
 Historical v1 envelopes remain readable and unchanged; older consumers ignore
 these optional fields.
 
@@ -4081,6 +4147,50 @@ annotations are not authorization. External effects retain owner-confirmed Host
 connector execution. This additive slice does not qualify external-authority
 storage, Windows persona persistence or two-process relay.
 
+## K8 Bot dreaming (#1475)
+
+A dream is a background writer task that checks and tidies an Agent's memory
+against the turns a Host holds. [ADR-049](adr/ADR-049-host-owned-bot-dreaming.md)
+records the decision, and the
+[K8 README](../examples/bot-collaboration/README.md#dreaming-1475) holds the
+operating details.
+
+Dreaming belongs to the Host layer. The SDK schedules nothing, stores no history
+and adds no wire field. `@byok-sdk/protocol` exports the pure function
+`buildDreamInstruction`, and a Host calls it on its own data and offers the text
+as a fresh task.
+
+K8 Bots dream by default. `BotCollaboration` gives each unarchived Bot with a
+usable template a daily routine, at 03:00 in `dreaming.timeZone`, or in the
+process's local zone when the routine is created. `dreaming: false` turns dreaming
+off for the whole Host. A routine runs only when the Bot completed a Turn since
+its last successful dream.
+
+A dream runs on the Bot's own device, because its memory home is there. Its
+template is the first name in `dreaming.models` that exists and is on that device,
+else the Bot's own template. When neither exists, K8 skips that occurrence and
+records `model_unavailable`. Only the list decides what is cheap: K8 infers nothing
+from a runtime name. `snapshot().dreams` records the outcome, the template and
+whether it was a fallback.
+
+A dream is a fresh writer with `agentMemory: 'none'` and no `agentMemoryCommit`, on
+every platform. It is the write task that
+[protocol.md §2.2](protocol.md#22-task-free-agent-home-projection) names as the
+repair of a home over its memory limits. It is not a `homeAccess` task, so its cwd
+is the Bot's home and `MEMORY.md` and `notes/` in the instruction resolve from the
+cwd. In `none` mode the device injects no `MEMORY.md` and no memory guidance. Its
+writes have no rollback, so the instruction orders each step to leave usable
+memory.
+
+K8's occurrence hook `bot-dream` records the occurrence, and the K8 sync skips it
+or promotes it into the Bot's FIFO. K4 owns the FIFO position, supersede and
+deadline. User input goes ahead of a dream that has not started, and a running
+dream is not interrupted, so that input waits at most `maxDurationMs`.
+
+The hosted example concludes a `bot-dream` occurrence `cancelled` with no task and
+records why. Full dreaming on hosted and dreaming from device-native sessions are
+deferred.
+
 ## Hosted mailbox hold (#410)
 
 `ByokCloudOptions` and `CloudRootStores` require `MailboxWake`. Held
@@ -4268,7 +4378,8 @@ it never runs ungated, and no third mode exists. Current coverage:
 | Codex | Declined before claim | App-server approvals fire only for sandbox escalations, not before every call |
 | Grok | Declined before claim | Only client-hosted terminal commands pass through the SDK; Grok's own file tools do not |
 | Hermes | Declined before claim | No pre-execution hook |
-| dsh | Declined before claim | No pre-execution hook; every ACP permission request is answered `cancelled` |
+| dsh | Declined before claim | No pre-execution hook; the native bridge has no approval channel, so dsh refuses every approval request and returns it to the model as a tool error |
+| agy | Declined before claim | No pre-execution hook; a permission request covers only files outside the workspace |
 
 Classification is one function (`classifyToolCall`) used by both modes. The
 precedence is **Always Ask > sensitive-path floor > Allow without Asking >
@@ -4367,8 +4478,8 @@ The built-in classifier marks a call high-risk when:
   `.git-credentials`, `.npmrc`, shell startup files, `Library/Keychains`,
   `Library/LaunchAgents`, `.config/autostart`), read or write;
 - a mutating file tool (`write`, `edit`, `multiedit`, `notebookedit`,
-  `apply_patch`, `write_file`, `patch`, `search_replace`) targets a path outside
-  the task workspace granted by the daemon.
+  `apply_patch`, `write_file`, `patch`, `search_replace`, `edit_file`) targets a
+  path outside the task workspace granted by the daemon.
 
 The built-in fallback treats everything else, including ordinary shell commands,
 reads anywhere, writes in the workspace, web, MCP and subagent calls, as normal;

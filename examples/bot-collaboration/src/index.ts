@@ -13,7 +13,8 @@ export { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionB
 export { SYSTEM_PROMPT, contextPack, outcomeOffer, outcomeSchema, DEFAULT_CONTEXT_MAX_BYTES, DEFAULT_CONTEXT_TURN_LIMIT, DEFAULT_HANDOFF_BUDGETS } from './schema';
 export type { CheckedOffer, ConfirmableSpec, MainAction, OutcomeOffer, TurnAction } from './schema';
 export type { Card, CollaborationState, Delegation, InputBatch, ReplyEntry, SealReason, Turn, UserInput } from './model';
-export { BOT_ROUTINE, botRoutines } from './routines';
+export { BOT_DREAM, BOT_ROUTINE, botRoutines, DREAM_UNSUPPORTED_ON_H } from './routines';
+export { DEFAULT_DREAM_MAX_DURATION_MS, DREAM_WAIT_MS, type DreamBot, type DreamingOptions, type DreamRecord, type DreamSkip, type DreamState, type OpenDream } from './dream';
 export { CommitConflict, commitInLedger, retainInLedger, revisionOf } from './commit';
 export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent } from './commit';
 export type { BotRoutine, BotRoutineInput } from './routines';

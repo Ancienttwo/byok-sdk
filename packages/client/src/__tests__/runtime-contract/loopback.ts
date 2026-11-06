@@ -68,7 +68,7 @@ export async function startEgressRecorder(): Promise<EgressRecorder> {
   };
 }
 
-export type ProviderWire = 'openai-responses' | 'openai-chat' | 'anthropic-messages';
+export type ProviderWire = 'openai-responses' | 'openai-chat' | 'anthropic-messages' | 'gemini';
 
 /** One model-visible tool, as the wire names it. */
 export interface ProviderTool {
@@ -83,6 +83,8 @@ export interface ProviderRequest {
   readonly path: string;
   /** Raw request body; marker checks search it. */
   readonly text: string;
+  /** The `x-goog-api-key` header, for the Gemini wire. */
+  readonly apiKey?: string | string[] | undefined;
   readonly tools: readonly ProviderTool[];
   /** Tool results already in the conversation. */
   readonly toolResults: number;
@@ -172,6 +174,10 @@ function view(wire: ProviderWire, body: Json): Pick<ProviderRequest, 'tools' | '
     });
     return { tools, toolResults: records(body.messages).filter(message => message.role === 'tool').length };
   }
+  if (wire === 'gemini') {
+    const tools = records(body.tools).flatMap(tool => records(tool.functionDeclarations)).flatMap(tool => typeof tool.name === 'string' ? [{ name: tool.name }] : []);
+    return { tools, toolResults: records(body.contents).flatMap(content => records(content.parts)).filter(part => part.functionResponse !== undefined).length };
+  }
   const tools = records(body.tools).flatMap(tool => typeof tool.name === 'string' ? [{ name: tool.name }] : []);
   const toolResults = records(body.messages).flatMap(message => records(message.content)).filter(block => block.type === 'tool_result').length;
   return { tools, toolResults };
@@ -181,6 +187,7 @@ function isModelRequest(wire: ProviderWire, method: string, path: string): boole
   if (method !== 'POST') return false;
   if (wire === 'openai-responses') return path.endsWith('/responses');
   if (wire === 'openai-chat') return path.endsWith('/chat/completions');
+  if (wire === 'gemini') return path.endsWith(':streamGenerateContent');
   return path.endsWith('/messages');
 }
 
@@ -259,6 +266,14 @@ function respondAnthropic(response: ServerResponse, step: ProviderStep, stream: 
   ]);
 }
 
+function respondGemini(response: ServerResponse, step: ProviderStep): void {
+  const parts = step.kind === 'tool' ? [{ functionCall: { name: step.tool.name, args: step.args } }] : step.chunks.map(text => ({ text }));
+  sse(response, [[undefined, {
+    candidates: [{ index: 0, finishReason: 'STOP', content: { role: 'model', parts } }],
+    usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+  }]]);
+}
+
 /** A scripted model endpoint speaking one wire format on 127.0.0.1. */
 export async function startLoopbackProvider(wire: ProviderWire, script: ProviderScript, model = 'contract-model'): Promise<LoopbackProvider> {
   const requests: ProviderRequest[] = [];
@@ -272,7 +287,7 @@ export async function startLoopbackProvider(wire: ProviderWire, script: Provider
       let body: Json = {};
       try { body = text ? JSON.parse(text) as Json : {}; } catch { /* recorded as text only */ }
       const model_ = isModelRequest(wire, method, path);
-      const recorded: ProviderRequest = { method, path, text, model: model_, ...(model_ ? view(wire, body) : { tools: [], toolResults: 0 }) };
+      const recorded: ProviderRequest = { method, path, text, apiKey: request.headers['x-goog-api-key'], model: model_, ...(model_ ? view(wire, body) : { tools: [], toolResults: 0 }) };
       requests.push(recorded);
       if (!model_) {
         if (method === 'GET' && path.endsWith('/models')) {
@@ -288,6 +303,7 @@ export async function startLoopbackProvider(wire: ProviderWire, script: Provider
       const stream = body.stream === true;
       if (wire === 'openai-responses') respondResponses(response, step);
       else if (wire === 'openai-chat') respondChat(response, step, stream, model);
+      else if (wire === 'gemini') respondGemini(response, step);
       else respondAnthropic(response, step, stream, typeof body.model === 'string' ? body.model : model);
     });
   });
@@ -295,7 +311,7 @@ export async function startLoopbackProvider(wire: ProviderWire, script: Provider
   const origin = `http://127.0.0.1:${port}`;
   return {
     origin,
-    baseUrl: wire === 'anthropic-messages' ? origin : `${origin}/v1`,
+    baseUrl: wire === 'anthropic-messages' || wire === 'gemini' ? origin : `${origin}/v1`,
     requests,
     saw: marker => requests.some(request => request.text.includes(marker)),
     close: () => close(server),

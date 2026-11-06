@@ -1,10 +1,11 @@
 // Keep this check at root, outside package source and declaration build roots.
 // It compares the private JS/declaration bridge with vendor and SDK source types.
 // The SDK projection imports built protocol types, so run after `bun run build`.
-// On re-vendor, update the be46fb3 pins together in these files:
+// On re-vendor, update the 0e92470 pins together in these files:
 // packages/client/src/runtime/codex-session-runtime.js,
 // packages/client/src/runtime/oar-process-tree.js,
 // packages/client/src/runtime/acp-session-runtime.js,
+// packages/client/src/runtime/dsh-session-runtime.js,
 // packages/client/src/runtime/oar-failure-runtime.js, this test, and
 // scripts/api-surface/oar-bridge-types.ts.
 // The bridge is outside the API golden. New type exports need explicit checks.
@@ -32,8 +33,8 @@ test('OAR JS bridge re-exports the checked vendored codexSession and SessionNotF
     ];
   });
   assert.deepEqual(reexports, [
-    ['../../vendor/oar/be46fb3/runtimes/codex/session.js', [['codexSession', 'codexSession']]],
-    ['../../vendor/oar/be46fb3/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
+    ['../../vendor/oar/0e92470/runtimes/codex/session.js', [['codexSession', 'codexSession']]],
+    ['../../vendor/oar/0e92470/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
   ]);
 });
 
@@ -43,7 +44,7 @@ test('OAR process-tree JS bridge re-exports the checked vendored functions', () 
   assert.equal(body.length, 1, 'OAR process-tree bridge must have one checked re-export');
   const statement = body[0];
   assert.equal(statement.type, 'ExportNamedDeclaration');
-  assert.equal(statement.source?.value, '../../vendor/oar/be46fb3/shared/executable/process-tree.js');
+  assert.equal(statement.source?.value, '../../vendor/oar/0e92470/shared/executable/process-tree.js');
   assert.deepEqual(statement.specifiers.map(({ local, exported }) => [local.name, exported.name]), [
     ['descendantsOf', 'descendantsOf'],
     ['killEntries', 'killEntries'],
@@ -62,10 +63,29 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
     ];
   });
   assert.deepEqual(reexports, [
-    ['../../vendor/oar/be46fb3/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
-    ['../../vendor/oar/be46fb3/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
-    ['../../vendor/oar/be46fb3/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
-    ['./dsh-acp-session.js', [['dshSession', 'dshSession']]],
+    ['../../vendor/oar/0e92470/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
+    ['../../vendor/oar/0e92470/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
+    ['../../vendor/oar/0e92470/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
+    ['../../vendor/oar/0e92470/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
+    ['../../vendor/oar/0e92470/runtimes/antigravity/session.js', [['antigravitySession', 'antigravitySession']]],
+  ]);
+});
+
+test('OAR dsh JS bridge re-exports the checked vendored values', () => {
+  const source = readFileSync(path.join(repoRoot, 'packages/client/src/runtime/dsh-session-runtime.js'), 'utf8');
+  const { body } = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+  const reexports = body.map((statement) => {
+    assert.equal(statement.type, 'ExportNamedDeclaration');
+    return [
+      statement.source?.value,
+      statement.specifiers.map(({ local, exported }) => [local.name, exported.name]),
+    ];
+  });
+  assert.deepEqual(reexports, [
+    ['../../vendor/oar/0e92470/runtimes/dsh/session.js', [['dshSession', 'dshSession']]],
+    ['../../vendor/oar/0e92470/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
+    ['../../vendor/oar/0e92470/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
+    ['../../vendor/oar/0e92470/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
   ]);
 });
 
@@ -80,8 +100,8 @@ test('OAR failure JS bridge re-exports the checked vendored failure tables', () 
     ];
   });
   assert.deepEqual(reexports, [
-    ['../../vendor/oar/be46fb3/runtimes/codex/failure.js', [['codexFailure', 'codexFailure']]],
-    ['../../vendor/oar/be46fb3/shared/failure-class.js', [['failureFromStatus', 'failureFromStatus']]],
+    ['../../vendor/oar/0e92470/runtimes/codex/failure.js', [['codexFailure', 'codexFailure']]],
+    ['../../vendor/oar/0e92470/shared/failure-class.js', [['failureFromStatus', 'failureFromStatus']]],
   ]);
 });
 

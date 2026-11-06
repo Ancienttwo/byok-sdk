@@ -188,7 +188,7 @@ export const knownFamilies = Object.freeze([
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'packaging-consistency', 'npm-release-pack',
   'release-pack-migrate', 'service-upgrade-smoke', 'linux-systemd-smoke', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
-  'hermes-real-windows', 'runtime-contract',
+  'hermes-real-windows', 'agy-real-windows', 'runtime-contract',
 ]);
 // A routine PR selects a platform family only when it changes a path that the
 // family owns: its tests, smoke scripts and the source they qualify. Package
@@ -262,6 +262,14 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/adapters\/hermes\//,
     /^packages\/client\/src\/__tests__\/(?:hermes-real\.test\.ts|fixtures\/hermes-fake-model\.ts)$/,
     /^packages\/keys\/src\/hermes-provider-launcher\.ts$/,
+  ],
+  // The real agy run on Windows, its contract suite and the code it qualifies.
+  'agy-real-windows': [
+    /^packages\/client\/src\/adapters\/(?:antigravity\/|agent-persona\.ts$)/,
+    /^packages\/client\/src\/runtime\/acp-session-runtime\.(?:js|d\.ts)$/,
+    /^packages\/client\/src\/__tests__\/runtime-contract\/(?:agy\.contract|contract|loopback)\.ts$/,
+    /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes\/antigravity|shared\/acp)\//,
+    /^scripts\/ci\/runtime-contract-install(?:\.test)?\.mjs$/,
   ],
   'packageability-smoke': [
     /^examples\/packaging\//,
@@ -669,7 +677,7 @@ export function selectImpact(paths, context = {}) {
       scripts = true; continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.
-    if (/^packages\/client\/vendor\/oar\/be46fb3\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+    if (/^packages\/client\/vendor\/oar\/0e92470\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {

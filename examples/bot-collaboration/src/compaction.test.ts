@@ -30,7 +30,7 @@ afterEach(async () => {
 function open(now: () => number) {
   const root = mkdtempSync(join(tmpdir(), 'k8-compact-')); roots.push(root);
   const file = join(root, 'host.sqlite'), ledger = new HostLedger(file, 'tenant', { compactVeto: botCompactVeto });
-  const bot = new BotCollaboration(server as never, ledger, { botId: 'main', execution: template, now, connector: async () => ({}) });
+  const bot = new BotCollaboration(server as never, ledger, { botId: 'main', execution: template, now, connector: async () => ({}), dreaming: false });
   closers.push(() => ledger.close(), () => bot.close());
   /** A maintenance writer that opens the same file without the veto. */
   const unguarded = () => { const other = new HostLedger(file, 'tenant'); closers.push(() => other.close()); return other; };

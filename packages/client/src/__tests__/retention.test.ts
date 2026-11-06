@@ -6,6 +6,7 @@ import { testIngressBudget } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { acquirePiSessionRetention, acquirePiSessionWriter } from '../util/pi-session-retention';
+import { acquireAgySessionRetention } from '../util/agy-session-retention';
 import { PASS_INSPECTIONS, runtimeReclaimedBytes } from '../daemon/retention/runtime-accounting';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { projectSkillPack } from '../daemon/skill-pack-installer';
@@ -34,12 +35,12 @@ const cleanups: (()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const cleanup of cleanups.splice(0).reverse())await cleanup();vi.restoreAllMocks();});
 const DAY=86_400_000;
 const identity:JournalIdentity={productId:'retention',tenantId:'tenant',deviceId:'device'};
-async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number;piSessionDir?:string;ttlMs?:Partial<Record<ExpiringClassId,number>>}={}) {
+async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number;piSessionDir?:string;agySessionStore?:string;ttlMs?:Partial<Record<ExpiringClassId,number>>}={}) {
  const store=input.store??testScratchRoot();let time=Date.parse('2026-10-14T00:00:00.000Z');const clock=()=>new Date(time);
  const config=resolveStorageConfig(store,{scratchRoot:testScratchRoot(),retention:{maxDeletionsPerPass:input.max??256,ttlMs:input.ttlMs},...(input.budget?{budget:input.budget}:{})});
  const scratch=new ScratchRoot(config.scratchRoot,clock);await scratch.open(store);
  const registry=createRetentionRegistry({storeDir:store,scratch,config,clock,journal:()=>input.journal,identity:()=>identity,preparation:()=>undefined,
-  ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit}),...(input.piSessionDir===undefined?{}:{piSessionDir:input.piSessionDir})});
+  ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit}),...(input.piSessionDir===undefined?{}:{piSessionDir:input.piSessionDir}),...(input.agySessionStore===undefined?{}:{agySessionStore:input.agySessionStore})});
  const pressure=new StoragePressure(config.budget),failures:string[]=[];
  const sweeper=new RetentionSweeper({registry,config,clock,pressure,freeBytes:async()=>input.freeBytes??1_000_000_000,jitter:(_s,ms)=>ms,onFailure:(_t,id,code)=>{failures.push(`${id}:${code}`);}});
  cleanups.push(()=>sweeper.stop());return {store,scratch,sweeper,registry,pressure,failures,config,clock,advance:(ms:number)=>{time+=ms;}};
@@ -223,8 +224,8 @@ it('a daemon runs a jittered retention timer and reports path-free classes in st
  const config={localAgentRelease:{version:'0.0.0-test'},productName:'Retention',productId:'retention',serverUrl:server.url,storeDir:testScratchRoot(),storage:{scratchRoot:testScratchRoot()}};
  const daemon=createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{retention:{timers:{setTimeout:(h,ms)=>{handler=h;delays.push(ms);return 'timer';},clearTimeout:()=>{}}}});
  cleanups.push(()=>daemon.stop());await daemon.pair('pairing-code');await daemon.start();expect(delays[0]).toBeGreaterThanOrEqual(675_000);expect(delays[0]).toBeLessThanOrEqual(1_125_000);
- expect(daemon.status().storage.classes).toHaveLength(23);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
- const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(23);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
+ expect(daemon.status().storage.classes).toHaveLength(24);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
+ const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(24);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
  expect(JSON.stringify(bundle.storage)).not.toContain(config.storeDir);expect(JSON.stringify(bundle.storage)).not.toContain(config.storage.scratchRoot);
 });
 it('uses newly measured pressure for maintenance even when the timer fired as periodic',async()=>{
@@ -628,6 +629,21 @@ it('shared Pi directories keep busy writers, permit different sessions, and pres
  expect(await exists(active)).toBe(true);expect(await exists(idle)).toBe(false);expect(await exists(mismatch)).toBe(true);
  await writer.release();await f.sweeper.runPass('periodic');expect(await exists(active)).toBe(false);
 });
+it('agy cleanup expires one session as a unit, keeps a leased or recent one, and never touches agy settings',async()=>{
+ const dir=testScratchRoot(),[idle,leased,recent]=['1','2','3'].map(digit=>`${digit.repeat(8)}-0000-4000-8000-000000000000`) as [string,string,string];
+ const sessionFiles=(id:string)=>[path.join(dir,'conversations',`${id}.db`),path.join(dir,'brain',id,'scratch','note.txt'),path.join(dir,'annotations',`${id}.pbtxt`)];
+ const files=[...sessionFiles(idle),...sessionFiles(leased),...sessionFiles(recent),path.join(dir,'implicit','old.pb'),path.join(dir,'log','acp-worker-1.log'),path.join(dir,'settings.json')];
+ for(const file of files){await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'x');await stamp(file,EXPIRED);}
+ await fs.writeFile(sessionFiles(recent)[0]!,'x');
+ const lease=await acquireAgySessionRetention(dir,leased);cleanups.push(()=>lease.release());
+ const f=await fixture({agySessionStore:dir});await f.sweeper.runPass('periodic');
+ expect(await Promise.all(sessionFiles(idle).map(exists))).toEqual([false,false,false]);
+ expect(await exists(path.join(dir,'brain',idle))).toBe(false);
+ expect(await Promise.all([...sessionFiles(leased),...sessionFiles(recent)].map(exists))).toEqual(Array(6).fill(true));
+ expect(await exists(path.join(dir,'implicit','old.pb'))).toBe(false);expect(await exists(path.join(dir,'log','acp-worker-1.log'))).toBe(false);
+ expect(await exists(path.join(dir,'settings.json'))).toBe(true);
+ await lease.release();await f.sweeper.runPass('periodic');expect(await exists(sessionFiles(leased)[0]!)).toBe(false);
+});
 it('Pi cleanup rechecks last write after selection, and preserves header ids that disagree with filenames',async()=>{
  const dir=testScratchRoot(),refreshed=path.join(dir,piSession('a')),mismatch=path.join(dir,piSession('b'));
  await fs.writeFile(refreshed,'{}\n');await stamp(refreshed,EXPIRED);
@@ -670,6 +686,7 @@ it('Pi session TTL defaults to 31 days and must outlive the session-ledger TTL b
  const store=testScratchRoot(),config=resolveStorageConfig(store);
  expect([config.ttlMs['pi-session-dir'],config.ttlMs['terminal-evidence']]).toEqual([31*DAY,30*DAY]);
  expect(resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':0,'pi-session-dir':DAY}}}).ttlMs['pi-session-dir']).toBe(DAY);
+ expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'agy-session-store':30*DAY}}})).toThrow('DaemonConfig.storage.retention.ttlMs.agy-session-store');
  expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'pi-session-dir':30*DAY}}})).toThrow("DaemonConfig.storage.retention.ttlMs.pi-session-dir must be at least retention.ttlMs['session-ledger'] plus one day");
  expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':60*DAY}}})).toThrow('DaemonConfig.storage.retention.ttlMs.pi-session-dir');
  expect(resolveStorageConfig(store,{retention:{ttlMs:{'terminal-evidence':0}}}).ttlMs['terminal-evidence']).toBe(0);

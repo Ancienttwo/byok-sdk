@@ -19,6 +19,7 @@ import { selectReaderRuns } from '../../agent-home-reader-retention';
 import { RuntimeCleanup } from './runtime-cleanup';
 import { agentSessionFileTtlMs, isAgentSessionLedgerName, isAgentTaskTerminalName, isPiSessionFileName, piSessionRefFromFileName, pruneByLastWrite } from './session-ledgers';
 import { existingDirectory, measureTree, removeOwnedPath } from './usage';
+import { acquireAgySessionRetention, agySessionPaths, isAgyConversationFileName } from '../../util/agy-session-retention';
 import { acquirePiSessionDiscovery, acquirePiSessionRetention, acquirePiSessionWriter, acquirePiSessionRebinding } from '../../util/pi-session-retention';
 
 interface ProducerOptions {
@@ -32,6 +33,8 @@ interface ProducerOptions {
   readonly handoffs?: AgentSessionHandoffStore;
   /** Folded `DaemonConfig.piByokLauncher.sessionDir`: the SDK expires Pi's own session files in it. */
   readonly piSessionDir?: string;
+  /** `<home>/.gemini/antigravity-cli` of `DaemonConfig.runtimes.agy`: the SDK owns that home, so it expires what agy keeps there. */
+  readonly agySessionStore?: string;
   readonly clock: () => Date;
   /** Entries one usage walk visits before it stops and reports truncated classes. */
   readonly usageScanLimit?: number;
@@ -43,7 +46,7 @@ const HOME_TEMP = /^\.byok-(?:memory|agent-memory)-[a-f0-9-]{36}\.tmp$/u;
 /** Concrete producers, not a table that a Host must remember to populate. */
 export function createRetentionRegistry(options: ProducerOptions): RetentionRegistry {
   const { storeDir, scratch, config, clock } = options;
-  const { piSessionDir } = options;
+  const { piSessionDir, agySessionStore } = options;
   const execRoot = path.join(scratch.root, 'exec');
   const daemonRoot = path.join(storeDir, 'tmp', 'daemon');
   const replicas = path.join(storeDir, 'durable-replicas');
@@ -361,12 +364,37 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     });
     } finally { await rebinding.release(); }
   }
+  async function sweepAgySessions(budget: SweepBudget): Promise<void> {
+    if (agySessionStore === undefined) return;
+    const nowMs = budget.now.getTime(), maxAgeMs = config.ttlMs['agy-session-store'];
+    const conversations = path.join(agySessionStore, 'conversations');
+    await pruneByLastWrite({ directory: conversations, entries: entries('agy-session-store', conversations, budget), match: isAgyConversationFileName, nowMs, maxAgeMs,
+      remove: async file => {
+        const sessionRef = path.basename(file, '.db');
+        let lease;
+        try { lease = await acquireAgySessionRetention(agySessionStore, sessionRef); }
+        catch (error) { if (error instanceof PathMutationGateBusyError) return true; throw error; }
+        try {
+          // Selection happened before the gate; a turn that finished since may have refreshed the file.
+          const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+          if (stat !== undefined && nowMs - stat.mtimeMs >= maxAgeMs) for (const target of agySessionPaths(agySessionStore, sessionRef)) await remove(agySessionStore, target, budget);
+        } finally { await lease.release(); }
+        return true;
+      },
+    });
+    // Neither names a session: `implicit` is keyed by its own ids and each process writes one log.
+    for (const directory of ['implicit', 'log'].map(name => path.join(agySessionStore, name))) {
+      await pruneByLastWrite({ directory, entries: entries('agy-session-store', directory, budget), match: () => true, nowMs, maxAgeMs,
+        remove: async file => { await remove(agySessionStore, file, budget); return true; } });
+    }
+  }
   const sweep: Record<ExpiringClassId, (budget: SweepBudget) => Promise<void>> = {
     'exec-sdk': sweepExecSdk, 'exec-runtime': sweepRuntime, 'daemon-temp': sweepDaemon, 'durable-replica': sweepReplicas,
     'confirmed-journal': sweepJournal, 'input-preparation': sweepPreparation, 'skill-pack-old': sweepSkills,
     'reader-run': budget => sweepHome('reader-run', budget), 'agent-result': budget => sweepHome('agent-result', budget),
     'home-temp': budget => sweepHome('home-temp', budget), 'session-ledger': budget => sweepHome('session-ledger', budget),
     'terminal-evidence': budget => sweepHome('terminal-evidence', budget), 'pi-session-dir': sweepPiSessions,
+    'agy-session-store': sweepAgySessions,
   };
 
   let measurement: Promise<Map<RetentionClassId, ClassUsage>> | undefined;
@@ -392,11 +420,12 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       }
     }
     const homes = options.home === undefined ? undefined : path.join(options.home.layout.hostRootInput(), 'agents');
-    const roots = [...new Set([storeDir, scratch.root, ...config.skillPackDataDirs.map(skillPacksRoot), homes, piSessionDir].filter((root): root is string => root !== undefined))];
+    const roots = [...new Set([storeDir, scratch.root, ...config.skillPackDataDirs.map(skillPacksRoot), homes, piSessionDir, agySessionStore].filter((root): root is string => root !== undefined))];
     const topRoots = roots.filter(root => !roots.some(other => other !== root && inside(other, root)));
     const replicaStates = new Map<string, Promise<boolean>>();
     async function classify(file: string, stat: Stats): Promise<RetentionClassId> {
       if (piSessionDir !== undefined && inside(piSessionDir, file)) return 'pi-session-dir';
+      if (agySessionStore !== undefined && inside(agySessionStore, file)) return 'agy-session-store';
       if (inside(execRoot, file)) return file.includes(`${path.sep}sdk${path.sep}`) ? 'exec-sdk' : file.includes(`${path.sep}runtime${path.sep}`) ? 'exec-runtime' : 'store-authority';
       if (inside(daemonRoot, file)) return 'daemon-temp';
       if (inside(replicas, file)) {
@@ -484,13 +513,14 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       : homeScoped ? (options.home === undefined ? [] : [path.join(options.home.layout.hostRootInput(), 'agents')])
       : skillScoped ? config.skillPackDataDirs.map(skillPacksRoot)
       : id === 'pi-session-dir' ? (piSessionDir === undefined ? [] : [piSessionDir])
+      : id === 'agy-session-store' ? (agySessionStore === undefined ? [] : [agySessionStore])
       : id === 'runtime-session-external' ? []
       : id === 'input-preparation' ? [path.join(storeDir, 'input-preparation')]
       : id === 'quarantine' ? [path.join(storeDir, 'quarantine')]
       : id === 'owned-processes' ? [path.join(storeDir, 'owned-processes')] : [storeDir];
     const maxEntries = id === 'reader-run' ? AGENT_HOME_READER_RUN_MAX_RETAINED : id === 'agent-result' ? AGENT_RESULT_MAX_RETAINED : undefined;
     return Object.freeze({ roots: Object.freeze(roots), owner: ['agent-content', 'runtime-session-external'].includes(id) ? 'host' : 'sdk',
-      scope: homeScoped ? 'agent-home' : replicaScoped ? 'replica' : ['pi-session-dir', 'runtime-session-external'].includes(id) ? 'host' : 'store',
+      scope: homeScoped ? 'agent-home' : replicaScoped ? 'replica' : ['pi-session-dir', 'agy-session-store', 'runtime-session-external'].includes(id) ? 'host' : 'store',
       bound: ttlMs === undefined ? PROTECTED_CLASS_BOUNDS[id as ProtectedClassId]
         : Object.freeze({ kind: 'ttl' as const, ttlMs, ...(maxEntries === undefined ? {} : { maxEntries }) }) });
   }

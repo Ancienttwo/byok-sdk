@@ -1,3 +1,54 @@
+// ==== @byok-sdk/client dist/adapters/antigravity/agy-adapter.d.ts ====
+import type { spawn as nodeSpawn } from 'node:child_process';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import type { ResolvedBin } from '../codex/resolve-bin';
+export interface AgyAdapterOptions {
+    /**
+     * Absolute path of the OS home (`HOME`, `USERPROFILE`) this SDK owns for the
+     * agy process and every tool it starts. It must persist across executions:
+     * agy keeps its conversations below it, and resume reads them back. It must
+     * not be the user's home or anything under the user's `~/.gemini`.
+     */
+    home: string;
+    /** Model id for every session, set again on each resume. Absent: the CLI default. */
+    model?: string;
+    /** Absolute product native asset directory; scoped to this adapter. */
+    nativeAssetRoot?: string;
+    /** The environment agy and its tools get (#1095). Default: the login-shell snapshot. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
+    /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+    versionPolicySource?: 'adapter-option' | 'daemon-config';
+    resolveBin?: () => ResolvedBin;
+    spawnFn?: typeof nodeSpawn;
+    maxRetainedBytes?: number;
+    /** Deadline for a cancelled turn to settle before the session fails. Default 1 s. */
+    interruptTimeoutMs?: number;
+}
+/**
+ * The Antigravity CLI over its native ACP
+ * (`agy acp --dangerously-skip-permissions --process-per-session`), through
+ * the vendored OAR Antigravity profile. The SDK owns the process, the OS home
+ * it runs in, the record budget and the permission policy.
+ *
+ * `agy` is not a frozen wire runtime id, so a task reaches this adapter by the
+ * custom-harness identity (`harnessId: 'agy'`).
+ */
+export declare class AgyAdapter implements RuntimeAdapter {
+    private readonly root;
+    private readonly options;
+    private readonly environmentPolicy;
+    private readonly effectiveVersionPolicy;
+    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    constructor(options: AgyAdapterOptions);
+    runtimeEnvironment(): Promise<RuntimeEnvironment>;
+    /** Reads the version. `authPresent` is whether the runtime environment carries `GEMINI_API_KEY`; the key is not checked against the provider. */
+    detect(): Promise<RuntimeDetectResult>;
+    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    private start;
+}
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
@@ -508,7 +559,7 @@ export interface DshModelSelection {
      */
     readonly keyEnv: string;
 }
-/** dsh's own sandbox modes (`DSH_PERMISSION_MODE`). `danger-full-access` also sets approval to `never`; the other two ask, and every ask is cancelled. */
+/** dsh's own sandbox modes (`DSH_PERMISSION_MODE`). `danger-full-access` also sets approval to `never`; the other two ask, but the bridge has no approval channel, so dsh refuses the request and returns it to the model as a tool error. */
 export type DshSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only';
 export interface DshAdapterOptions {
     /**
@@ -524,8 +575,9 @@ export interface DshAdapterOptions {
     model: DshModelSelection;
     /**
      * dsh's sandbox for every session (`DSH_PERMISSION_MODE`). Default
-     * `danger-full-access`, as for Codex: no human answers a dsh approval, so
-     * every escalation the narrower modes ask for is cancelled.
+     * `danger-full-access`, as for Codex: the bridge has no approval channel, so
+     * dsh refuses every escalation the narrower modes ask for and returns it to
+     * the model as a tool error.
      */
     sandbox?: DshSandboxMode;
     /** Absolute product native asset directory; scoped to this adapter. */
@@ -543,14 +595,13 @@ export interface DshAdapterOptions {
     interruptTimeoutMs?: number;
 }
 /**
- * DeepSeek Harness over ACP (`dsh --profile acp`), through the SDK's dsh
- * profile on the vendored OAR ACP stack. Each session runs one dsh process
- * in an SDK-owned `DSH_HOME`, with a per-execution `--patch` overlay that
- * names the provider route, its key variable and the model. The process
- * starts in the execution scratch directory, not the workspace, so dsh does
- * not load a workspace `.env`; the workspace is the ACP session cwd. The SDK
- * owns the process, the environment, the record budget and the permission
- * policy (requests are cancelled).
+ * DeepSeek Harness through the vendored OAR dsh runtime: a private plugin
+ * loaded into `dsh --profile acp`, with the ACP protocol plugin off. Each
+ * session runs one dsh process in an SDK-owned `DSH_HOME`, with a per-execution
+ * `--patch` overlay that names the provider route and its key variable. The
+ * process starts in the execution scratch directory, not the workspace, so dsh
+ * does not load a workspace `.env`; the workspace is the session cwd. The SDK
+ * owns the process, the environment and the record budget.
  *
  * `dsh` is not a frozen wire runtime id, so a task reaches this adapter by the
  * custom-harness identity (`harnessId: 'dsh'`).
@@ -778,6 +829,8 @@ export { GrokAdapter } from './grok/grok-adapter';
 export type { GrokAdapterOptions } from './grok/grok-adapter';
 export { HermesAdapter } from './hermes/hermes-adapter';
 export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter';
+export { AgyAdapter } from './antigravity/agy-adapter';
+export type { AgyAdapterOptions } from './antigravity/agy-adapter';
 export { DshAdapter } from './dsh/dsh-adapter';
 export type { DshAdapterOptions, DshModelSelection, DshSandboxMode } from './dsh/dsh-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
@@ -1225,6 +1278,8 @@ import { type PiAdapterOptions, type PiByokLauncherConfig } from './pi/pi-adapte
 import { type ClaudeAdapterOptions } from './claude/claude-adapter';
 import { type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter';
 import { type GrokAdapterOptions } from './grok/grok-adapter';
+import { type DshAdapterOptions } from './dsh/dsh-adapter';
+import { type AgyAdapterOptions } from './antigravity/agy-adapter';
 /** `RuntimeAdaptersConfig.runtimes.pi`: the Pi options a Host can configure. */
 export interface PiRuntimeConfig {
     /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
@@ -1271,6 +1326,26 @@ export interface RuntimeAdaptersRuntimes {
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
     };
+    /** Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only. */
+    dsh?: {
+        /** `DshAdapterOptions.home`: the absolute `DSH_HOME` the SDK owns. It must persist across executions, because dsh keeps its sessions there, and must not be `~/.dsh`. */
+        home: DshAdapterOptions['home'];
+        /** `DshAdapterOptions.model`: provider, model, `baseUrl` and the name of the variable that holds the key. */
+        model: DshAdapterOptions['model'];
+        /** `DshAdapterOptions.sandbox`: dsh's sandbox for every session. Default `danger-full-access`. */
+        sandbox?: DshAdapterOptions['sandbox'];
+        /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+        versionPolicy?: RuntimeVersionPolicy;
+    };
+    /** Required when `runtimeAllowlist` lists `agy`, and applies only then. */
+    agy?: {
+        /** `AgyAdapterOptions.home`: the absolute OS home the SDK owns for agy and its tools. It must persist across executions and must not be the user's home. */
+        home: AgyAdapterOptions['home'];
+        /** `AgyAdapterOptions.model`: the model id of every session. Default: the CLI's own. */
+        model?: AgyAdapterOptions['model'];
+        /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+        versionPolicy?: RuntimeVersionPolicy;
+    };
 }
 /**
  * The input of {@link createRuntimeAdapters}: the `DaemonConfig` keys that
@@ -1283,7 +1358,7 @@ export interface RuntimeAdaptersConfig {
     nativeAssetRoot?: string;
     /** Re-enter the product's single-file/SEA executable for SDK helpers and every Pi launch. */
     sdkHelperHost?: SdkHelperHostConfig;
-    /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok` is built only when listed. */
+    /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok`, `dsh` and `agy` are built only when listed. */
     runtimeAllowlist?: string[];
     runtimes?: RuntimeAdaptersRuntimes;
     /** The environment every built runtime gives its children (#1095); `pass` must not name `PI_PACKAGE_DIR`. */
@@ -2025,8 +2100,8 @@ export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
  *
  * A Host toolset server is the shape this entry exists for: a short-lived
  * stdio process the daemon spawns for one task, whose entire job is to take the
- * `BYOK_HOST_TOOLSET_CONTEXT` nonce it was started with, ask the running daemon
- * for one short-lived task assertion, and present it to the product's cloud.
+ * context file path it was started with, ask the running daemon for one
+ * short-lived task assertion, and present it to the product's cloud.
  * It never runs a daemon, never drives a coding-agent runtime, and never
  * touches the transport.
  *
@@ -2042,8 +2117,9 @@ export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
  * So this entry re-exports exactly the two request functions and their public
  * option/result types from `../daemon/assertion-client`, whose own transitive
  * imports are only `@byok-sdk/core`, `@byok-sdk/protocol`,
- * `../daemon/control-client`, `../daemon/control-protocol` and `../daemon/store`
- * (plus `zod` through core's protocol types). Nothing else may be added here.
+ * `../daemon/control-client`, `../daemon/control-protocol`, `../daemon/store`
+ * and `../sdk-reserved-helper-context` (plus `zod` through core's protocol
+ * types). Nothing else may be added here.
  *
  * Two things are deliberately absent, and this file is the record of why.
  *
@@ -2064,11 +2140,11 @@ export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
  * The root entry still exports these two functions and keeps doing so; this
  * entry is a narrower door to the same authority, not a replacement for it.
  */
-/** Asks a running daemon for one short-lived task assertion bound to the caller's `BYOK_HOST_TOOLSET_CONTEXT` nonce. */
+/** Asks a running daemon for one short-lived task assertion bound to the caller's context file. */
 export { requestTaskAssertion } from '../daemon/assertion-client';
 /** Asks a running daemon for one short-lived device assertion scoped to an allowlisted audience. */
 export { requestDeviceAssertion } from '../daemon/assertion-client';
-/** Everything `requestTaskAssertion` needs: the daemon's `productId`/`storeDir`, the context nonce, the exact audience, and an optional round-trip bound. */
+/** Everything `requestTaskAssertion` needs: the context file path from this process's final argv element, the exact audience, and an optional round-trip bound. */
 export type { RequestTaskAssertionOptions } from '../daemon/assertion-client';
 /** The daemon's nine refusal codes plus `unavailable` and `bad_response`, kept as an open string union so a newer daemon's code surfaces verbatim. */
 export type { RequestTaskAssertionErrorCode } from '../daemon/assertion-client';
@@ -3403,13 +3479,14 @@ export declare function requestDeviceAssertion(options: RequestDeviceAssertionOp
  * Contract §8.1 / §8.2(1): ask a running daemon for one task-scoped assertion,
  * for one upcoming tool invocation.
  *
- * `contextToken` is the `BYOK_HOST_TOOLSET_CONTEXT` value the daemon injected
- * into THIS process's environment when it started this task's toolset server.
- * The caller passes it explicitly and this function never reads it from
- * `process.env` itself — a helper that went looking for the variable would work
- * just as well inside a process the daemon never spawned for this task, which
- * is precisely the substitution the nonce exists to prevent. Reading the
- * environment is the child's own decision, made once, at its own entry point.
+ * `contextFile` is the final argv element the daemon appended when it started
+ * THIS task's toolset server. The caller passes it explicitly and this function
+ * never looks at `process.argv` or `process.env` itself — a helper that went
+ * looking for its own task would work just as well inside a process the daemon
+ * never spawned for this task, which is precisely the substitution the nonce
+ * exists to prevent. Taking the path from argv is the child's own decision,
+ * made once, at its own entry point. The file's format is internal: it names the
+ * daemon and holds the nonce, and only this function reads it.
  *
  * §8.1 again, on what this function must NOT grow: no cache, no refresh, no
  * retry. Every tool call takes a NEW assertion with a NEW `jti`, and so does
@@ -3418,12 +3495,8 @@ export declare function requestDeviceAssertion(options: RequestDeviceAssertionOp
  * be. Retrying is the caller's decision, and a retry means calling this again.
  */
 export interface RequestTaskAssertionOptions {
-    /** Same `productId` the daemon was configured with — selects which daemon's socket to dial. */
-    productId: string;
-    /** Same `storeDir` the daemon was configured with. Defaults to `~/.byok/<productId>`. */
-    storeDir?: string;
-    /** The `BYOK_HOST_TOOLSET_CONTEXT` nonce this process was started with. Never read from the environment here. */
-    contextToken: string;
+    /** The absolute path the daemon appended as this process's final argv element. Never read from `process.argv` here. */
+    contextFile: string;
     /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
     audience: string;
     /** Bound on the control-socket round trip, ms. Default 90s, which covers the 15s deadline of the OS credential read. */
@@ -3439,7 +3512,8 @@ export interface RequestTaskAssertionOptions {
  * distinguish "this token was never real" from "this task has finished and been
  * cleaned up". The daemon collapses those deliberately, and a caller that
  * reconstructs the difference by timing or retrying is reading an oracle that is
- * not offered.
+ * not offered. An unusable `contextFile` is the same refusal: task disposal
+ * removes the file, and a lane the deployment did not declare never had one.
  */
 export type RequestTaskAssertionErrorCode = TaskAssertionIssueErrorCode | 'unavailable' | 'bad_response' | (string & {});
 export type RequestTaskAssertionResult = {
@@ -3457,7 +3531,8 @@ export type RequestTaskAssertionResult = {
  * Never throws for an expected outcome, exactly like
  * {@link requestDeviceAssertion}: a missing daemon, a denied audience, an
  * unknown or revoked context, a revoked or unpaired device, and a daemon
- * mid-shutdown all come back as `{ok: false, code, reason}`.
+ * mid-shutdown all come back as `{ok: false, code, reason}`, and so does an
+ * unusable context file.
  *
  * A device assertion is NOT an acceptable answer here and cannot become one:
  * this calls `task_assertion.issue`, and the envelope is parsed with
@@ -5259,8 +5334,8 @@ export interface DaemonConfig {
      * places that must stay consistent: `createDaemon` (this file) builds its
      * bundled adapter set FROM this list (unset = the three wire runtimes —
      * pi, claude, codex; set = exactly the listed runtime ids, unknown ids
-     * ignored — see `buildRuntimeAdapters`; the `grok` custom harness is
-     * built only when listed), and `TaskRunner.pickAdapter`
+     * ignored — see `buildRuntimeAdapters`; the `grok`, `dsh` and `agy`
+     * custom harnesses are built only when listed), and `TaskRunner.pickAdapter`
      * (`task-runner.ts`) separately fail-closed-rejects any `task.offer`
      * naming a runtime outside this list regardless of which adapters were
      * constructed. `createDaemonWithAdapters` callers supply their own
@@ -7605,7 +7680,7 @@ export type DaemonEvent = ({
  * task lane once the daemon has resolved which task the call belongs to.
  *
  * What is NOT a field here, and never can be: the
- * `BYOK_HOST_TOOLSET_CONTEXT` nonce. It is the task lane's entire authority —
+ * host toolset context nonce. It is the task lane's entire authority —
  * a value that reaches a log is a value an operator's log shipper can replay
  * — so, exactly like the signature, there is no field to carry it rather than
  * a redactor that must remember to strip it.
@@ -8119,6 +8194,7 @@ export declare function resolveStorageConfig(storeDir: string, input?: StorageCo
     maxPassDurationMs: number;
     ttlMs: Readonly<{
         "agent-result": number;
+        "agy-session-store": number;
         "confirmed-journal": number;
         "daemon-temp": number;
         "durable-replica": number;
@@ -8160,7 +8236,7 @@ export declare class StoragePressure {
     assertAckCriticalAllowed(): void;
 }
 // ==== @byok-sdk/client dist/daemon/retention/registry.d.ts ====
-export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir'];
+export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir', 'agy-session-store'];
 export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'agent-content', 'byok-authority', 'agent-home-lease', 'skill-pack-current', 'store-authority', 'runtime-session-external'];
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
 export type ProtectedClassId = typeof PROTECTED_CLASS_IDS[number];
@@ -8800,17 +8876,6 @@ export declare const PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX = "context_overflow
  * the provider streams no usage.
  */
 export declare const PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX = "usage_unavailable";
-/**
- * The SDK-owned environment variable that carries one host toolset server's
- * `BYOK_HOST_TOOLSET_CONTEXT` nonce (contract §8.1).
- *
- * Injected by the daemon beside `BYOK_STORE_DIR`/`BYOK_PRODUCT_ID` — the two a
- * child already needs to dial this daemon's control socket. A host's own
- * `mcpToolsets` registry still cannot supply an `env` block at all
- * (`toolset-registry.ts`), so this name can only ever hold a value the daemon
- * minted.
- */
-export declare const HOST_TOOLSET_CONTEXT_ENV = "BYOK_HOST_TOOLSET_CONTEXT";
 /** Internal task lifecycle phase. Not the wire TaskState (protocol/task-state.ts). */
 export type TaskPhase = 'received' | 'admitting' | 'claiming' | 'claimed' | 'running' | 'awaiting_approval' | 'terminalizing' | 'retiring' | 'finished' | 'declined';
 /** Ordered effect classes (§6.1): atomic groups cannot be interleaved. */
@@ -9987,6 +10052,7 @@ export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
 export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter';
+export { AgyAdapter, type AgyAdapterOptions } from './adapters/antigravity/agy-adapter';
 export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, ResetDeviceCursorInput, DeviceCursorResetResult, DeviceCursorResetErrorCode, } from './diagnostics/device-doctor';
@@ -13580,7 +13646,7 @@ export declare const SDK_RESERVED_MCP_TOOL_NAMES: Readonly<{
 import { type RuntimeEnvironment } from '../runtime/environment';
 import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types';
 /** The built-in adapters a fake can stand in for. */
-export type FakeRuntimeAdapterId = 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';
+export type FakeRuntimeAdapterId = 'agy' | 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';
 /** What the fake does. It never spawns a process. */
 export interface FakeRuntimeAdapterBehavior {
     /** Default: `{ kind: 'available' }`. A function is called on every probe. */

@@ -13,6 +13,7 @@ import {
   type TaskAssertionIssueResult,
 } from './control-protocol';
 import { DeviceStore } from './store';
+import { readMcpContextFile, type SdkReservedMcpContext } from '../sdk-reserved-helper-context';
 
 /**
  * Plan `device-assertion-broker`: the ONE public entry point a sibling local
@@ -131,13 +132,14 @@ export async function requestDeviceAssertion(
  * Contract §8.1 / §8.2(1): ask a running daemon for one task-scoped assertion,
  * for one upcoming tool invocation.
  *
- * `contextToken` is the `BYOK_HOST_TOOLSET_CONTEXT` value the daemon injected
- * into THIS process's environment when it started this task's toolset server.
- * The caller passes it explicitly and this function never reads it from
- * `process.env` itself — a helper that went looking for the variable would work
- * just as well inside a process the daemon never spawned for this task, which
- * is precisely the substitution the nonce exists to prevent. Reading the
- * environment is the child's own decision, made once, at its own entry point.
+ * `contextFile` is the final argv element the daemon appended when it started
+ * THIS task's toolset server. The caller passes it explicitly and this function
+ * never looks at `process.argv` or `process.env` itself — a helper that went
+ * looking for its own task would work just as well inside a process the daemon
+ * never spawned for this task, which is precisely the substitution the nonce
+ * exists to prevent. Taking the path from argv is the child's own decision,
+ * made once, at its own entry point. The file's format is internal: it names the
+ * daemon and holds the nonce, and only this function reads it.
  *
  * §8.1 again, on what this function must NOT grow: no cache, no refresh, no
  * retry. Every tool call takes a NEW assertion with a NEW `jti`, and so does
@@ -146,12 +148,8 @@ export async function requestDeviceAssertion(
  * be. Retrying is the caller's decision, and a retry means calling this again.
  */
 export interface RequestTaskAssertionOptions {
-  /** Same `productId` the daemon was configured with — selects which daemon's socket to dial. */
-  productId: string;
-  /** Same `storeDir` the daemon was configured with. Defaults to `~/.byok/<productId>`. */
-  storeDir?: string;
-  /** The `BYOK_HOST_TOOLSET_CONTEXT` nonce this process was started with. Never read from the environment here. */
-  contextToken: string;
+  /** The absolute path the daemon appended as this process's final argv element. Never read from `process.argv` here. */
+  contextFile: string;
   /** The exact audience string, which must appear verbatim in the daemon's configured allowlist. */
   audience: string;
   /** Bound on the control-socket round trip, ms. Default 90s, which covers the 15s deadline of the OS credential read. */
@@ -168,7 +166,8 @@ export interface RequestTaskAssertionOptions {
  * distinguish "this token was never real" from "this task has finished and been
  * cleaned up". The daemon collapses those deliberately, and a caller that
  * reconstructs the difference by timing or retrying is reading an oracle that is
- * not offered.
+ * not offered. An unusable `contextFile` is the same refusal: task disposal
+ * removes the file, and a lane the deployment did not declare never had one.
  */
 export type RequestTaskAssertionErrorCode =
   | TaskAssertionIssueErrorCode
@@ -186,7 +185,8 @@ export type RequestTaskAssertionResult =
  * Never throws for an expected outcome, exactly like
  * {@link requestDeviceAssertion}: a missing daemon, a denied audience, an
  * unknown or revoked context, a revoked or unpaired device, and a daemon
- * mid-shutdown all come back as `{ok: false, code, reason}`.
+ * mid-shutdown all come back as `{ok: false, code, reason}`, and so does an
+ * unusable context file.
  *
  * A device assertion is NOT an acceptable answer here and cannot become one:
  * this calls `task_assertion.issue`, and the envelope is parsed with
@@ -196,17 +196,22 @@ export type RequestTaskAssertionResult =
 export async function requestTaskAssertion(
   options: RequestTaskAssertionOptions,
 ): Promise<RequestTaskAssertionResult> {
-  const storeDir = DeviceStore.resolveDir(options.productId, options.storeDir);
+  let context: SdkReservedMcpContext;
+  try {
+    context = await readMcpContextFile(options.contextFile);
+  } catch (err) {
+    return { ok: false, code: 'context_token_invalid', reason: errorMessage(err) };
+  }
   const connected = await connectControlClient({
-    storeDir,
-    productId: options.productId,
+    storeDir: DeviceStore.resolveDir(context.productId, context.storeDir),
+    productId: context.productId,
     requestTimeoutMs: options.timeoutMs ?? ASSERTION_REQUEST_TIMEOUT_MS,
   });
   if (!connected.ok) return { ok: false, code: 'unavailable', reason: connected.reason };
 
   try {
     const result = await connected.client.request<TaskAssertionIssueResult>('task_assertion.issue', {
-      contextToken: options.contextToken,
+      contextToken: context.contextToken,
       audience: options.audience,
     });
     if (result === null || typeof result !== 'object' || typeof result.expiresAt !== 'string') {

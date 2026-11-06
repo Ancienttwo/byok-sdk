@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { DshAdapter } from '../adapters/dsh/dsh-adapter';
+import { AgyAdapter } from '../adapters/antigravity/agy-adapter';
+import { QUALIFIED_AGY_VERSION } from '../adapters/antigravity/agy-version';
+import { resolveAgyBin } from '../adapters/antigravity/resolve-bin';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
@@ -44,6 +47,13 @@ const CASES: readonly Case[] = [
   { id: 'codex', envName: 'BYOK_CODEX_BIN', fixture: fixture('fake-codex.mjs'), create: async () => new CodexAdapter({ runtimeEnvironment: allowlist }) },
   { id: 'grok', envName: 'BYOK_GROK_BIN', fixture: fixture('fake-acp-agent.mjs'), create: async () => new GrokAdapter({ runtimeEnvironment: allowlist }) },
   {
+    id: 'agy', envName: 'BYOK_AGY_BIN', fixture: fixture('fake-acp-agent.mjs'),
+    create: async () => {
+      vi.stubEnv('FAKE_ACP_VERSION', QUALIFIED_AGY_VERSION);
+      return new AgyAdapter({ home: await tempDir('ba-'), runtimeEnvironment: { ...allowlist, pass: ['FAKE_ACP_*'] } });
+    },
+  },
+  {
     id: 'hermes', envName: 'BYOK_HERMES_BIN', fixture: fixture('fake-hermes.mjs'),
     create: async () => new HermesAdapter({ home: await tempDir('bh-'), runtimeEnvironment: { ...allowlist, pass: ['FAKE_HERMES_*'] } }),
   },
@@ -78,6 +88,17 @@ describe.skipIf(windows)('runtime detection reports the executable it ran', () =
       expect(detected).not.toHaveProperty('executablePath');
     });
   }
+
+  it('agy: the official install location is used only when PATH has no agy', async () => {
+    const home = await tempDir('bh-');
+    const official = path.join(home, '.local', 'bin', 'agy');
+    await fs.mkdir(path.dirname(official), { recursive: true });
+    await fs.writeFile(official, '');
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('BYOK_AGY_BIN', '');
+    expect(resolveAgyBin({ PATH: await tempDir('bp-') })).toEqual({ command: official, source: 'path' });
+    expect(resolveAgyBin({ PATH: path.dirname(official) })).toEqual({ command: 'agy', source: 'path' });
+  });
 
   it('pi: a Host resolveBin reports source config, because the pi-rpc lane launches that file', async () => {
     const fakePi = fixture('fake-pi.mjs');

@@ -130,18 +130,6 @@ export const PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX = 'context_overflow';
  */
 export const PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX = 'usage_unavailable';
 
-/**
- * The SDK-owned environment variable that carries one host toolset server's
- * `BYOK_HOST_TOOLSET_CONTEXT` nonce (contract §8.1).
- *
- * Injected by the daemon beside `BYOK_STORE_DIR`/`BYOK_PRODUCT_ID` — the two a
- * child already needs to dial this daemon's control socket. A host's own
- * `mcpToolsets` registry still cannot supply an `env` block at all
- * (`toolset-registry.ts`), so this name can only ever hold a value the daemon
- * minted.
- */
-export const HOST_TOOLSET_CONTEXT_ENV = 'BYOK_HOST_TOOLSET_CONTEXT';
-
 /* ------------------------------------------------------------------------- *
  * #1099 S1 — pure TaskRunner reducer core.
  *

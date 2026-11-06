@@ -121,9 +121,12 @@ async function main(): Promise<void> {
   }
 
   if (command === 'serve') {
-    assertKnownOptions(args, new Set(['--profile', '--allow-domain']));
-    const profileId = singleOption(args, '--profile');
-    const allowedDomains = optionValues(args, '--allow-domain');
+    // Options come in pairs, so an odd count means the context file path the
+    // daemon appends in a task run. This server requests no task assertion.
+    const options = args.length % 2 === 1 ? args.slice(0, -1) : args;
+    assertKnownOptions(options, new Set(['--profile', '--allow-domain']));
+    const profileId = singleOption(options, '--profile');
+    const allowedDomains = optionValues(options, '--allow-domain');
     if (allowedDomains.length === 0) {
       throw new ConnectorBrokerError('CONFIG_INVALID', 'at least one --allow-domain is required');
     }

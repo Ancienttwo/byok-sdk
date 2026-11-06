@@ -6,11 +6,13 @@
   never did before: every call reached the classifier with an empty input, so a
   destructive command or a write outside the workspace ran with no reminder.
   Hosts see `tool_use.input` on these two runtimes change from OAR's JSON text,
-  capped at 10,000 characters, to the opening frame's `rawInput` object, whole.
-  A `rawInput` that is not an object leaves `input` out. Grok's `target_file`
-  now counts as a path and `search_replace` as a mutating tool, for every
-  runtime. Grok's `grep`, `list_dir`, `monitor` and `use_tool` are unprobed, so
-  their paths and commands may still go unclassified.
+  capped at 10,000 characters, to the whole native object. On Grok that is the
+  opening frame's `rawInput`, and a `rawInput` that is not an object leaves
+  `input` out. On dsh it is parsed from the bridge's native `tool/call`
+  `arguments`, and arguments that are not a JSON object fail the session.
+  Grok's `target_file` now counts as a path and `search_replace` as a mutating
+  tool, for every runtime. Grok's `grep`, `list_dir`, `monitor` and `use_tool`
+  are unprobed, so their paths and commands may still go unclassified.
 
 - **Fixed (client)** — Hosts no longer get an `error` event each time Codex
   reconnects. A native `error` frame with `willRetry: true` now produces no
@@ -52,13 +54,70 @@
   and sensitive-path rules apply. Calls with neither a path nor a command keep
   their content array. A V4A `patch` names no path until its result, so a V4A
   write outside the workspace raises no reminder.
+
+- **Breaking (client; #1469)** — dsh now runs on the vendored OAR dsh runtime, a
+  private plugin inside `dsh --profile acp`, not over ACP. A Host MCP entry for
+  dsh takes stdio `command` and `args` only. An entry with `type: 'http'` or
+  non-empty `env` or `headers` is refused at start without a retry; before this
+  release dsh passed `env` through. A Host-owned server that needs env cannot
+  run under dsh. Do not move a token into `args`, because dsh persistence of MCP
+  entries is unaudited. Hosts also see these changes: `steer` is now supported;
+  `tool_use.input` is the structured native object instead of JSON text, so tool
+  authorization reads the whole input; `usage` adds billed tokens; a failed turn
+  reports the class dsh gives it, and a native rate limit is retryable; a resume
+  of an unknown session or from another workspace is a typed `authority` failure.
+  Tool arguments that are not a JSON object fail the session. A dsh execution is
+  now one prompt on one process: `followUp` is refused and a later turn resumes
+  the session in a new process. dsh is closed at the root turn end, so background
+  subagents and jobs stop there and their unfinished work is lost.
+- **Breaking (client; #1469)** — a Host toolset server no longer receives
+  `BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR` or `BYOK_PRODUCT_ID`, and its MCP
+  entry carries no `env`. In a task run the daemon appends one path as the
+  server's last argument, so a server whose argument parser rejects extras must
+  accept it. `requestTaskAssertion` now takes `{ contextFile, audience, timeoutMs? }`:
+  pass that path as `contextFile` when you make the call, and drop `productId`,
+  `storeDir` and `contextToken`. Do not read the file at startup, because its
+  format is internal and an undeclared lane has none; the call then returns
+  `context_token_invalid`. The admission `tools/list` probe starts the server
+  without the argument. See
+  [Daemon-free assertion requests](packages/client/README.md#daemon-free-assertion-requests).
+
+- **Added (client; #1469)** — `AgyAdapter` runs the Antigravity CLI (`agy`) as a
+  custom harness on darwin, linux and win32. `createRuntimeAdapters` and
+  `createDaemon` build it when `runtimeAllowlist` lists `agy`, from
+  `DaemonConfig.runtimes.agy` (`home`, `model`, `versionPolicy`); `home` is
+  required, and listing `agy` without `runtimes.agy` is a config error. The
+  Gemini API key comes from `GEMINI_API_KEY` in the runtime environment and stays
+  in the daemon: agy reaches Gemini through a per-process loopback proxy with a
+  session token, so tools it starts can spend quota through the proxy during a
+  session but cannot take the key. The proxy honors `HTTP_PROXY`, `HTTPS_PROXY`
+  and `NO_PROXY` from the runtime environment only.
+  agy rejects Host toolset entries carrying `env` or `headers`; a Host that
+  configures env for its own server cannot run it under agy. A new retention
+  class, `agy-session-store`, expires what agy keeps in that home after 31 days.
+
+- **Added (client; #1469)** — `createRuntimeAdapters` and `createDaemon` build
+  `DshAdapter` when `runtimeAllowlist` lists `dsh`. `DaemonConfig.runtimes.dsh`
+  takes `home`, `model`, `sandbox` and `versionPolicy`; `home` and `model` are
+  required, and listing `dsh` without `runtimes.dsh` is a config error. dsh
+  stays on darwin and linux.
 - **Internal (client)** — the `byokagentmessage`, `byokagentresult` and
   `byokagentmemory` MCP entries carry no `env`. Their token, store directory,
   product id and memory settings live in a mode `0600` file in the Execution's
   SDK scratch directory, and the entry's last argument is that file's path. A
   runtime that stores MCP entries in plain text keeps only the path. The file
   goes when the scratch is released at task end, and a helper refuses a missing
-  or unreadable file. `byokagentteam` and Host toolset context are unchanged.
+  or unreadable file. `byokagentteam` is unchanged.
+
+- **Internal (client)** — the SDK-owned OAR source moves from 0.88.0 to
+  0.91.0 (`vendor/oar/0e92470/`, upstream commit `0e924701`). A failed Codex
+  turn with the native `unauthorized` error now reports `failure.class: 'auth'`
+  instead of `unknown`. Grok task events and single-task stop enter the fork, and
+  the SDK uses neither. All sixteen BYOK deltas are preserved and the API surface
+  is unchanged. Upstream's OOM-score forwarding to ACP reverse terminals is not
+  taken, because it needs the npm package `which`: on Linux, when a Host starts a
+  CLI through an OOM wrapper, reverse-terminal commands keep the daemon's score.
+
 - **Internal (client)** — the SDK-owned OAR source moves from 0.86.0 to
   0.88.0 (`vendor/oar/be46fb3/`, upstream commit `be46fb36`). The shared ACP
   stack takes upstream's adapter-held queue, manual compaction and config-option
@@ -257,6 +316,27 @@
   counts the rest. Sizes are UTF-8 bytes of the JSON form, and the pack never
   exceeds `totalBytes`. `truncateUtf8` is the text cut that it shares with
   `boundFailureReason`, whose output does not change.
+
+- **Added (protocol; #1475)** — `buildDreamInstruction({ history, window,
+  budget })` builds the instruction of a dream: a background writer task that
+  checks and tidies an Agent's memory against history from `buildHandoffPack`.
+  It is a pure function and nothing calls it for a Host. A Host offers the text
+  as a fresh task with `agentMemory: 'none'` and no `agentMemoryCommit`, so the
+  instruction is written for no rollback.
+- **Breaking (examples; #1475)** — K8 Bots dream by default. `BotCollaboration`
+  gives each unarchived Bot with a usable template a daily `bot-dream` routine
+  at 03:00 in `dreaming.timeZone`, or the process's local zone when the routine is
+  created. It runs when the Bot completed a Turn since its last successful dream,
+  on the first of `dreaming.models` on the Bot's device, else the Bot's own
+  template, and `snapshot().dreams` records the result. That is one run per Bot
+  per day with new Turns, so a vendored Host should set cheap templates, or pass
+  `dreaming: false`. Default-on needs `wake.consume` routed to `bot.consume` even
+  with no Bot routines, and a Host clock outside the years 2000 to 2200 now throws
+  in sync unless `dreaming: false`. The Host's `enqueueHostIntent` refuses
+  `occurrence:<key>`,
+  and only K8's own hooks promote an occurrence. H concludes `bot-dream`
+  occurrences with no task
+  ([migration](examples/bot-collaboration/README.md#dreaming-1475)).
 
 ## 0.38.0 — 2026-11-04 (published)
 

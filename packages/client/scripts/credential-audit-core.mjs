@@ -5,7 +5,11 @@ export const CANARY_RELATIVE_PATHS = Object.freeze({
   claude: path.join('.claude', 'byok-sdk-audit-canary'),
   codex: path.join('.codex', 'byok-sdk-audit-canary'),
   pi: path.join('.pi', 'byok-sdk-audit-canary'),
+  agy: path.join('.gemini', 'byok-sdk-audit-canary'),
 });
+
+/** The synthetic Gemini key of the smoke's agy task: it may stay only in the daemon process. */
+export const AGY_AUDIT_KEY = 'byok-audit-agy-gemini-key-7c41';
 
 export function canonicalCanaryPaths(home) {
   return Object.fromEntries(
@@ -65,12 +69,17 @@ function roleHints(line) {
     if (line.includes('--version')) roles.push('detect:pi');
     if (line.includes('--mode')) roles.push('task:pi');
   }
+  if (line.includes('fake-acp-agent.mjs')) {
+    roles.push('fixture:agy');
+    if (line.includes('--version')) roles.push('detect:agy');
+    if (line.includes('"acp"')) roles.push('task:agy');
+  }
   if (line.includes('adapter-task-smoke.mjs')) roles.push('smoke-node');
   return roles;
 }
 
 function preferredRole(roles, pid) {
-  const ordered = ['positive-control', 'fixture:claude', 'fixture:codex', 'fixture:pi', 'task:claude', 'task:codex', 'task:pi', 'detect:claude', 'detect:codex', 'detect:pi', 'smoke-node'];
+  const ordered = ['positive-control', 'fixture:claude', 'fixture:codex', 'fixture:pi', 'fixture:agy', 'task:claude', 'task:codex', 'task:pi', 'task:agy', 'detect:claude', 'detect:codex', 'detect:pi', 'detect:agy', 'smoke-node'];
   return ordered.find((role) => roles.includes(role)) ?? (pid === undefined ? 'unknown' : `pid:${pid}`);
 }
 

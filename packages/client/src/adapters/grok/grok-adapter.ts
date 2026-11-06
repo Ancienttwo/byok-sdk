@@ -27,7 +27,7 @@ import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
 import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime';
 import { AsyncQueue } from '../../util/async-queue';
 import type { ResolvedBin } from '../codex/resolve-bin';
-import { grokAgentPersona } from './agent-persona';
+import { agentPersona } from '../agent-persona';
 import { GROK_USER_MCP_SERVERS_OFF, grokUserMcpServersRefusal } from './agent-user-mcp-servers';
 import { GrokProjection, type GrokTurnOutcome } from './projection';
 import { resolveGrokBin } from './resolve-bin';
@@ -191,7 +191,7 @@ export class GrokAdapter implements RuntimeAdapter {
       throw authority('prepared grok operation received a manifest with a dispatch selection');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('grok manifest has no sealed cwd');
-    const persona = await grokAgentPersona(input.manifest);
+    const persona = await agentPersona('grok', input.manifest);
     const env = { ...input.env, ...input.scratch.env } as Record<string, string>;
     const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && input.manifest.agentRef !== undefined;
     // Set on the agent; its own children may inherit them. Hosted terminal commands keep the task env.

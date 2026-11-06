@@ -38,7 +38,7 @@ export interface ContractCheck { readonly run: () => Promise<void>; readonly tim
 export const check = (run: () => Promise<void>, timeoutMs?: number): ContractCheck => ({ run, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
 export type ContractPlan = { readonly [K in ContractCaseId]: ContractCheck | ContractSkip };
 
-export type ContractRuntime = 'pi' | 'claude' | 'codex' | 'grok' | 'hermes' | 'dsh';
+export type ContractRuntime = 'pi' | 'claude' | 'codex' | 'grok' | 'hermes' | 'dsh' | 'agy';
 export type ContractMode = 'qualified' | 'latest';
 
 /** The run mode. The suite's own vitest config refuses to start without it, so this never defaults. */
@@ -272,6 +272,7 @@ export async function writeSubmitResultServer(dir: string, receipt: string, tool
   await fs.writeFile(file, `import readline from 'node:readline';
 import { appendFileSync } from 'node:fs';
 appendFileSync(${JSON.stringify(`${receipt}.spawn`)}, process.pid + '\\n');
+appendFileSync(${JSON.stringify(`${receipt}.env`)}, JSON.stringify(process.env) + '\\n');
 const send = frame => process.stdout.write(JSON.stringify(frame) + '\\n');
 readline.createInterface({ input: process.stdin }).on('line', line => {
   let frame; try { frame = JSON.parse(line); } catch { return; }

@@ -125,6 +125,7 @@ until it has one. TTLs are `storage.retention.ttlMs[<class>]`.
 | `session-ledger` | TTL 30 days by last append | SDK, idle home |
 | `terminal-evidence` | TTL 30 days by last append | SDK, idle home |
 | `pi-session-dir` | TTL 31 days by last write; at least `session-ledger` plus one day | SDK |
+| `agy-session-store` | TTL 31 days by last write; at least `session-ledger` plus one day | SDK |
 | `agent-home-lease` | 1 per home | SDK |
 | `skill-pack-current` | 1 revision per installed pack | Host, by uninstalling the pack |
 | `journal` | Exempt: live-task ack and recovery rows; confirmed rows expire as `confirmed-journal` and maintenance compacts the file | SDK |
@@ -174,6 +175,15 @@ filename, or whose header identity cannot be determined within the bounded
 header read, are retained. A config whose `pi-session-dir` TTL is less than the
 `session-ledger` TTL plus one day fails with `LocalStorageConfigError`. A
 resume whose file was already reclaimed fails like a resume of an expired ledger.
+
+`agy-session-store` is `<home>/.gemini/antigravity-cli` of the `AgyAdapter`
+home. One session goes as a unit once its `conversations/<id>.db` is older than
+the TTL: that file with its `-wal` and `-shm`, `brain/<id>/` and
+`annotations/<id>.pbtxt`. Files in `implicit/` and `log/` go by their own last
+write. Settings and the rest stay, and `conversation_summaries.db` keeps its
+rows. A resume holds a lease the sweep cannot take, and the sweep rechecks the
+last write under that lease. The TTL has the same `session-ledger` lower bound
+as `pi-session-dir`.
 
 Custom adapters that own swept session data implement
 `PreparedRuntimeOperation.acquireSessionLease(sessionRef)`. A custom caller must

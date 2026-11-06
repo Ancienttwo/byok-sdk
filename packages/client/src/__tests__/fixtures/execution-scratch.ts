@@ -1,4 +1,4 @@
-import { mkdtempSync, promises as fs, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll } from 'vitest';
@@ -12,6 +12,12 @@ export function reservedMcpContext(server: { readonly args?: readonly string[] }
 /** The token of {@link reservedMcpContext}, or `undefined` for an entry the task did not get. */
 export function reservedMcpToken(server: { readonly args?: readonly string[] } | undefined): string {
   return (server === undefined ? undefined : reservedMcpContext(server).contextToken) as string;
+}
+
+/** The nonce of a Host toolset entry, or `undefined` for an entry whose last argument names no such context file. */
+export function hostToolsetToken(server: { readonly args?: readonly string[] } | undefined): string | undefined {
+  const file = server?.args?.at(-1);
+  return file !== undefined && path.basename(file).startsWith('host-toolset-') && existsSync(file) ? reservedMcpContext(server).contextToken : undefined;
 }
 
 const roots: string[] = [];

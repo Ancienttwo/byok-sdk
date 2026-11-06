@@ -13,6 +13,11 @@ export declare class RuntimeFailureError extends Error {
   readonly name: 'RuntimeFailureError';
   readonly failure: string;
 }
+/** The runtime refused a session option at open: the vendored typed error, never matched by name or message. */
+export declare class UnsupportedOptionError extends Error {
+  readonly name: 'UnsupportedOptionError';
+  readonly option: string;
+}
 export interface AcpControl {
   // ControlResult also permits an exit response with a numeric or null code.
   response: { body: { kind: string; code?: string | number | null; reason?: string } };
@@ -33,6 +38,19 @@ export interface RawAcpSession {
   records(): readonly AcpRecord[];
   dispose(): Promise<void>;
 }
+/** Structural SPI: the parts of one `session/request_permission` the SDK reads. */
+export interface AcpPermissionRequest {
+  readonly toolCall: {
+    readonly toolCallId: string;
+    readonly kind?: string | null;
+    readonly rawInput?: unknown;
+    readonly locations?: readonly { readonly path: string }[] | null;
+  };
+  readonly options: readonly { readonly optionId: string; readonly kind: string }[];
+}
+export interface AcpPermissionResponse {
+  readonly outcome: { readonly outcome: 'selected'; readonly optionId: string };
+}
 /** Every vendored ACP runtime start: the SDK owns the agent process, each hosted terminal process and the environment. */
 export type StartAcpSession = (
   spawn: typeof spawnOwnedLineProcess,
@@ -43,6 +61,8 @@ export type StartAcpSession = (
     env: Readonly<Record<string, string>>;
     resume?: string;
     model?: string;
+    /** OAR SessionOptions.appendSystemPrompt: session-local instructions added to the runtime's built-in ones. */
+    appendSystemPrompt?: string;
     /** OAR SessionOptions.launchArgs: joined to the profile's argv where the profile places them. */
     launchArgs?: readonly string[];
     /** OAR SessionOptions.mcpServers: the ACP `mcpServers` of session/new and session/resume. */
@@ -54,9 +74,11 @@ export type StartAcpSession = (
   hooks?: {
     onReady?: (sessionId: string) => void;
     onRecord?: (record: AcpRecord) => void;
+    /** Answers each `session/request_permission`. Absent, every request is cancelled. */
+    onPermission?: (request: AcpPermissionRequest) => AcpPermissionResponse;
   },
 ) => Promise<RawAcpSession>;
 /** OAR's Grok Build profile: `grok agent --always-approve --no-leader stdio`. */
 export declare const grokSession: StartAcpSession;
-/** The SDK's dsh profile on the vendored ACP stack: `dsh --profile acp`, plus the adapter's `--patch <file>`. */
-export declare const dshSession: StartAcpSession;
+/** OAR's Antigravity profile: `agy acp --dangerously-skip-permissions --process-per-session`. */
+export declare const antigravitySession: StartAcpSession;

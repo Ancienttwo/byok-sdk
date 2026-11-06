@@ -29,7 +29,7 @@ it('archives a settled root out of the window, replays its input, and refuses a 
   let now = 1_000_000;
   const root = mkdtempSync(join(tmpdir(), 'k8-retain-')); roots.push(root);
   const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto });
-  const bot = new BotCollaboration(server as never, ledger, { botId: 'main', execution: template, now: () => now, contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 }, connector: async () => ({}) });
+  const bot = new BotCollaboration(server as never, ledger, { botId: 'main', execution: template, now: () => now, dreaming: false, contextTurnLimit: 1, handoff: { recentBytes: 200, earlyBytes: 0, totalBytes: 1024 }, connector: async () => ({}) });
   closers.push(() => ledger.close(), () => bot.close());
   const first = await bot.input('k1', 'hello');
   await bot.core.cancel(first);

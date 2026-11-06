@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { AgyAdapter } from '../adapters/antigravity/agy-adapter';
 import { DshAdapter } from '../adapters/dsh/dsh-adapter';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
@@ -16,7 +17,7 @@ import type {
 } from '../types';
 
 /** The built-in adapters a fake can stand in for. */
-export type FakeRuntimeAdapterId = 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';
+export type FakeRuntimeAdapterId = 'agy' | 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';
 
 /** What the fake does. It never spawns a process. */
 export interface FakeRuntimeAdapterBehavior {
@@ -31,6 +32,7 @@ export interface FakeRuntimeAdapterBehavior {
 /** The real adapter's default descriptor. Construction reads no file and spawns nothing. */
 function realDescriptor(id: FakeRuntimeAdapterId): RuntimeAdapterDescriptor {
   switch (id) {
+    case 'agy': return new AgyAdapter({ home: path.join(os.tmpdir(), 'byok-fake-agy') }).descriptor;
     case 'claude': return new ClaudeAdapter().descriptor;
     case 'codex': return new CodexAdapter().descriptor;
     case 'dsh': return new DshAdapter({ home: path.join(os.tmpdir(), 'byok-fake-dsh'), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'FAKE_DSH_PROVIDER_KEY' } }).descriptor;

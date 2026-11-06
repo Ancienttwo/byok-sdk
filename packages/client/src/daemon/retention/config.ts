@@ -49,6 +49,7 @@ export const DEFAULT_RETENTION_TTL_MS: Readonly<Record<ExpiringClassId, number>>
   'input-preparation': 0, 'confirmed-journal': 30 * 86_400_000, 'reader-run': 7 * 86_400_000,
   'agent-result': 7 * 86_400_000, 'home-temp': 3_600_000, 'skill-pack-old': 86_400_000,
   'session-ledger': 30 * 86_400_000, 'terminal-evidence': 30 * 86_400_000, 'pi-session-dir': 31 * 86_400_000,
+  'agy-session-store': 31 * 86_400_000,
 });
 function integer(value: number, field: string, minimum = 1): number {
   if (!Number.isSafeInteger(value) || value < minimum) throw new LocalStorageConfigError(field);
@@ -84,6 +85,7 @@ export function resolveStorageConfig(storeDir: string, input: StorageConfig = {}
   if (ttlMs['confirmed-journal'] <= 7 * 86_400_000) throw new LocalStorageConfigError('retention.ttlMs.confirmed-journal');
   // A live session ledger may name a Pi session to resume; that session file must outlive it by a day.
   if (ttlMs['pi-session-dir'] < ttlMs['session-ledger'] + 86_400_000) throw new LocalStorageConfigError('retention.ttlMs.pi-session-dir', "must be at least retention.ttlMs['session-ledger'] plus one day");
+  if (ttlMs['agy-session-store'] < ttlMs['session-ledger'] + 86_400_000) throw new LocalStorageConfigError('retention.ttlMs.agy-session-store', "must be at least retention.ttlMs['session-ledger'] plus one day");
   // A public entry: fold the store once here; both defaults derive from it.
   const store = foldNameAliases(storeDir);
   const configuredRoots = input.skillPackDataDirs;

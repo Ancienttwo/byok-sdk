@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Deterministic, real-server task-loop smoke for all three bundled adapters.
+// Deterministic, real-server task-loop smoke for the three bundled adapters and agy.
 // The adapter processes are the existing fake CLI fixtures, selected through
 // each adapter's public resolver seam; no vendor binary or model call is used.
 
@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { AGY_AUDIT_KEY, CANARY_RELATIVE_PATHS } from './credential-audit-core.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const clientDir = path.resolve(scriptDir, '..');
@@ -16,6 +17,9 @@ const clientDistIndex = path.join(clientDir, 'dist', 'index.js');
 const serverDistIndex = path.join(clientDir, '..', 'server', 'dist', 'index.js');
 const fixtureDir = path.join(clientDir, 'src', '__tests__', 'fixtures');
 const runtimes = ['claude', 'codex', 'pi'];
+// A custom harness on an executable .mjs fixture, which Windows cannot execFile.
+const runsAgy = process.platform !== 'win32';
+const allowedRuntimes = runsAgy ? [...runtimes, 'agy'] : runtimes;
 const timeoutMs = 20_000;
 // The client default Agent egress policy. The daemon below runs it (an empty
 // `agentEgress`) and declines an offer that names any other policy.
@@ -101,6 +105,20 @@ function processExists(pid) {
   } catch (error) {
     return error?.code !== 'ESRCH';
   }
+}
+
+async function filesHolding(roots, text) {
+  // Opening a canary, even here, is what the strace audit fails on.
+  const canary = path.basename(CANARY_RELATIVE_PATHS.agy);
+  const holders = [];
+  for (const root of roots) {
+    for (const entry of await fs.readdir(root, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile() || entry.name === canary) continue;
+      const file = path.join(entry.parentPath, entry.name);
+      if ((await fs.readFile(file).catch(() => Buffer.alloc(0))).includes(text)) holders.push(file);
+    }
+  }
+  return holders;
 }
 
 async function waitForAsync(predicate, label, ms = timeoutMs) {
@@ -305,6 +323,8 @@ try {
   let piSpawnCount = 0;
   // Each fake reads its lifecycle variables, set on the live environment below, from its child environment.
   const fakeEnvironment = (runtime) => ({ pass: ['PATH', `FAKE_${runtime.toUpperCase()}_*`] });
+  const agyLog = path.join(workDir, 'agy.jsonl');
+  Object.assign(process.env, { FAKE_ACP_VERSION: '1.5.1', FAKE_ACP_LOG: agyLog, GEMINI_API_KEY: AGY_AUDIT_KEY });
   const adapters = [
     new client.ClaudeAdapter({ runtimeEnvironment: fakeEnvironment('claude'), resolveBin: () => ({ command: runtimeShim('claude'), source: 'path' }) }),
     new client.CodexAdapter({ runtimeEnvironment: fakeEnvironment('codex'), resolveBin: () => ({ command: runtimeShim('codex'), source: 'path' }) }),
@@ -316,6 +336,11 @@ try {
         return spawnFixture(command, args, options);
       },
     })),
+    ...(runsAgy ? [new client.AgyAdapter({
+      home: path.join(workDir, 'agy-home'),
+      runtimeEnvironment: { pass: ['PATH', 'FAKE_ACP_*', 'GEMINI_API_KEY'] },
+      resolveBin: () => ({ command: path.join(fixtureDir, 'fake-acp-agent.mjs'), source: 'path' }),
+    })] : []),
   ];
 
   const pairingCode = (await byok.pairing.createPairingCode({ productId })).code;
@@ -327,7 +352,7 @@ try {
       serverUrl,
       storeDir,
       storage: { scratchRoot },
-      runtimeAllowlist: runtimes,
+      runtimeAllowlist: allowedRuntimes,
       runtimePreference: runtimes,
       shutdownGraceMs: 2_000,
       agentHome: { hostStorageRoot: path.join(workDir, 'agent-home') },
@@ -456,6 +481,20 @@ try {
       `PASS ${runtime}: offer -> claim(${runtime}) -> started -> complete; ` +
         `server claimedRuntime=${snapshot.claimedRuntime}; local observer claimedRuntime=${localTask.claimedRuntime}`,
     );
+  }
+
+  if (runsAgy) {
+    const handle = await withTimeout(submit('adapter-smoke-agy', { instruction: 'adapter task smoke: agy', harnessId: 'agy' }), 'agy submit');
+    const result = await terminalResult(handle.taskId, 'agy task lifecycle');
+    assert(result.state === 'Complete', `agy result was not Complete: ${JSON.stringify(result)}`);
+    const started = (await fs.readFile(agyLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line)).find((fact) => fact.kind === 'start');
+    assert(started !== undefined, 'agy never started');
+    // Every tool and MCP child inherits this environment whole. The real CLI's contract proves the key still reaches the provider.
+    assert(started.env.GOOGLE_GEMINI_BASE_URL?.startsWith('http://127.0.0.1:'), 'agy was not pointed at the local proxy');
+    assert(started.env.GEMINI_API_KEY !== undefined && !JSON.stringify(started.env).includes(AGY_AUDIT_KEY), 'the agy key reached the agy environment');
+    const holders = await filesHolding([workDir, home, scratchRoot], AGY_AUDIT_KEY);
+    assert(holders.length === 0, `the agy key reached the disk: ${JSON.stringify(holders)}`);
+    console.log('PASS agy: Complete, with the key in neither the agy environment nor any file');
   }
 
   const lifecycleEnv = {

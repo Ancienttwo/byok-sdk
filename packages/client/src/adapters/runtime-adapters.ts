@@ -11,6 +11,8 @@ import { PiAdapter, PI_PACKAGE_DIR_ENV, validatePiByokLauncherConfig, type PiAda
 import { ClaudeAdapter, type ClaudeAdapterOptions } from './claude/claude-adapter';
 import { CodexAdapter, assertCodexSandboxSetting, type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter';
 import { GrokAdapter, type GrokAdapterOptions } from './grok/grok-adapter';
+import { DshAdapter, type DshAdapterOptions } from './dsh/dsh-adapter';
+import { AgyAdapter, type AgyAdapterOptions } from './antigravity/agy-adapter';
 
 /** `RuntimeAdaptersConfig.runtimes.pi`: the Pi options a Host can configure. */
 export interface PiRuntimeConfig {
@@ -59,6 +61,26 @@ export interface RuntimeAdaptersRuntimes {
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
   };
+  /** Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only. */
+  dsh?: {
+    /** `DshAdapterOptions.home`: the absolute `DSH_HOME` the SDK owns. It must persist across executions, because dsh keeps its sessions there, and must not be `~/.dsh`. */
+    home: DshAdapterOptions['home'];
+    /** `DshAdapterOptions.model`: provider, model, `baseUrl` and the name of the variable that holds the key. */
+    model: DshAdapterOptions['model'];
+    /** `DshAdapterOptions.sandbox`: dsh's sandbox for every session. Default `danger-full-access`. */
+    sandbox?: DshAdapterOptions['sandbox'];
+    /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+  };
+  /** Required when `runtimeAllowlist` lists `agy`, and applies only then. */
+  agy?: {
+    /** `AgyAdapterOptions.home`: the absolute OS home the SDK owns for agy and its tools. It must persist across executions and must not be the user's home. */
+    home: AgyAdapterOptions['home'];
+    /** `AgyAdapterOptions.model`: the model id of every session. Default: the CLI's own. */
+    model?: AgyAdapterOptions['model'];
+    /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+  };
 }
 
 /**
@@ -72,7 +94,7 @@ export interface RuntimeAdaptersConfig {
   nativeAssetRoot?: string;
   /** Re-enter the product's single-file/SEA executable for SDK helpers and every Pi launch. */
   sdkHelperHost?: SdkHelperHostConfig;
-  /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok` is built only when listed. */
+  /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok`, `dsh` and `agy` are built only when listed. */
   runtimeAllowlist?: string[];
   runtimes?: RuntimeAdaptersRuntimes;
   /** The environment every built runtime gives its children (#1095); `pass` must not name `PI_PACKAGE_DIR`. */
@@ -125,12 +147,12 @@ export interface DaemonRuntimeAdaptersConfig extends RuntimeAdaptersConfig {
 export const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 
 /**
- * Every runtime the SDK can build, in construction order. `grok` is a custom
- * harness, not a wire runtime id, so it is built only when `runtimeAllowlist`
- * lists it; an unset allowlist keeps `ALL_RUNTIME_IDS`.
+ * Every runtime the SDK can build, in construction order. `grok`, `dsh` and
+ * `agy` are custom harnesses, not wire runtime ids, so each is built only when
+ * `runtimeAllowlist` lists it; an unset allowlist keeps `ALL_RUNTIME_IDS`.
  */
-const SDK_BUILT_RUNTIME_IDS: readonly SdkBuiltRuntimeId[] = [...ALL_RUNTIME_IDS, 'grok'];
-type SdkBuiltRuntimeId = RuntimeId | 'grok';
+const SDK_BUILT_RUNTIME_IDS: readonly SdkBuiltRuntimeId[] = [...ALL_RUNTIME_IDS, 'grok', 'dsh', 'agy'];
+type SdkBuiltRuntimeId = RuntimeId | 'grok' | 'dsh' | 'agy';
 
 /** The enumerated runtime options and their admitted values. */
 const RUNTIME_OPTION_VALUES: Readonly<Record<keyof RuntimeAdaptersRuntimes, Readonly<Record<string, readonly string[]>>>> = {
@@ -138,6 +160,8 @@ const RUNTIME_OPTION_VALUES: Readonly<Record<keyof RuntimeAdaptersRuntimes, Read
   claude: { agentUserContext: ['excluded', 'inherit'], agentSessionPersistence: ['disabled', 'enabled'] },
   codex: { agentUserMcpServers: ['excluded', 'inherit'] },
   grok: { compatInstructions: ['disabled', 'inherit'], agentUserMcpServers: ['excluded', 'inherit'] },
+  dsh: { sandbox: ['danger-full-access', 'read-only', 'workspace-write'] },
+  agy: {},
 };
 
 /**
@@ -216,6 +240,49 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
         ...(grok?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: grok.agentUserMcpServers }),
         ...(grok?.versionPolicy === undefined ? {} : { versionPolicy: grok.versionPolicy, versionPolicySource: 'daemon-config' as const }),
       });
+    case 'dsh':
+      return buildDshAdapter(config, environment);
+    case 'agy':
+      return buildAgyAdapter(config, environment);
+  }
+}
+
+/**
+ * The `DshAdapter` constructor is the one authority on `home`, `model` and
+ * `sandbox`; the daemon reports what it refuses as a config issue.
+ */
+function buildDshAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<DshAdapterOptions, 'runtimeEnvironment'>): DshAdapter {
+  const dsh = config.runtimes?.dsh;
+  if (dsh === undefined) {
+    throw new DaemonConfigInvalidError([{ severity: 'error', code: 'missing_required', path: 'runtimes.dsh', message: 'DaemonConfig.runtimes.dsh is required when runtimeAllowlist lists dsh' }]);
+  }
+  try {
+    return new DshAdapter({
+      home: dsh.home, model: dsh.model, nativeAssetRoot: config.nativeAssetRoot, ...environment,
+      ...(dsh.sandbox === undefined ? {} : { sandbox: dsh.sandbox }),
+      ...(dsh.versionPolicy === undefined ? {} : { versionPolicy: dsh.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw new DaemonConfigInvalidError([invalid('runtimes.dsh', `DaemonConfig.runtimes.dsh is invalid: ${error.message}`)]);
+    throw error;
+  }
+}
+
+/** The `AgyAdapter` constructor is the one authority on `home` and `model`. */
+function buildAgyAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<AgyAdapterOptions, 'runtimeEnvironment'>): AgyAdapter {
+  const agy = config.runtimes?.agy;
+  if (agy === undefined) {
+    throw new DaemonConfigInvalidError([{ severity: 'error', code: 'missing_required', path: 'runtimes.agy', message: 'DaemonConfig.runtimes.agy is required when runtimeAllowlist lists agy' }]);
+  }
+  try {
+    return new AgyAdapter({
+      home: agy.home, nativeAssetRoot: config.nativeAssetRoot, ...environment,
+      ...(agy.model === undefined ? {} : { model: agy.model }),
+      ...(agy.versionPolicy === undefined ? {} : { versionPolicy: agy.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw new DaemonConfigInvalidError([invalid('runtimes.agy', `DaemonConfig.runtimes.agy is invalid: ${error.message}`)]);
+    throw error;
   }
 }
 
@@ -263,6 +330,16 @@ function runtimeAdaptersConfigIssues(config: RuntimeAdaptersConfig): DaemonConfi
         const value = (runtime as Record<string, unknown> | undefined)?.[option];
         expect(optional(value, (candidate) => values.includes(candidate as string)), `runtimes.${id}.${option}`, `one of ${values.map((name) => JSON.stringify(name)).join(', ')}`);
       }
+    }
+    const dsh = record.dsh;
+    if (isObject(dsh)) {
+      expect(isString(dsh.home), 'runtimes.dsh.home', 'a string');
+      expect(isObject(dsh.model), 'runtimes.dsh.model', 'an object');
+    }
+    const agy = record.agy;
+    if (isObject(agy)) {
+      expect(isString(agy.home), 'runtimes.agy.home', 'a string');
+      expect(optional(agy.model, isString), 'runtimes.agy.model', 'a string');
     }
     const pi = record.pi as Record<string, unknown> | undefined;
     if (isObject(pi) && Object.hasOwn(pi, 'durableLane')) {
