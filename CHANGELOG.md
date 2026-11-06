@@ -92,6 +92,15 @@
   goes when the scratch is released at task end, and a helper refuses a missing
   or unreadable file. `byokagentteam` is unchanged.
 
+- **Internal (client)** — the SDK-owned OAR source moves from 0.88.0 to
+  0.91.0 (`vendor/oar/0e92470/`, upstream commit `0e924701`). A failed Codex
+  turn with the native `unauthorized` error now reports `failure.class: 'auth'`
+  instead of `unknown`. Grok task events and single-task stop enter the fork, and
+  the SDK uses neither. All sixteen BYOK deltas are preserved and the API surface
+  is unchanged. Upstream's OOM-score forwarding to ACP reverse terminals is not
+  taken, because it needs the npm package `which`: on Linux, when a Host starts a
+  CLI through an OOM wrapper, reverse-terminal commands keep the daemon's score.
+
 - **Internal (client)** — the SDK-owned OAR source moves from 0.86.0 to
   0.88.0 (`vendor/oar/be46fb3/`, upstream commit `be46fb36`). The shared ACP
   stack takes upstream's adapter-held queue, manual compaction and config-option

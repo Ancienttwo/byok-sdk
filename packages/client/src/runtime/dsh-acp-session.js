@@ -1,6 +1,6 @@
 // DeepSeek Harness (`dsh --profile acp`) on the vendored OAR ACP session stack. Upstream OAR's native
-// dsh runtime is not vendored, so this profile is SDK source built on the fork (vendor/oar/be46fb3/PROVENANCE.md).
-import { acpSession } from '../../vendor/oar/be46fb3/shared/acp/session.js';
+// dsh runtime is not vendored, so this profile is SDK source built on the fork (vendor/oar/0e92470/PROVENANCE.md).
+import { acpSession } from '../../vendor/oar/0e92470/shared/acp/session.js';
 
 /**
  * dsh 0.2.1-rc.5 ACP (docs/researches/2026-11-01-dsh-adapter.md §1). The adapter
@@ -8,7 +8,7 @@ import { acpSession } from '../../vendor/oar/be46fb3/shared/acp/session.js';
  * vendor notifications. A failed resume is left to the adapter: dsh answers
  * an unknown session and another workspace alike with -32602.
  *
- * @type {import('../../vendor/oar/be46fb3/shared/acp/profile.js').AcpSessionProfile}
+ * @type {import('../../vendor/oar/0e92470/shared/acp/profile.js').AcpSessionProfile}
  */
 export const dshAcpProfile = {
   args: ['--profile', 'acp'],
