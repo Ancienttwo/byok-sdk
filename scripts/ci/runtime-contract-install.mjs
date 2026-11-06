@@ -85,10 +85,12 @@ function installHermes(mode, version, dir) {
   // The installer edits shell profiles and ~/.local/bin; give it a throwaway HOME.
   const fakeHome = join(dir, 'installer-home');
   mkdirSync(fakeHome, { recursive: true });
-  const ref = mode === 'latest' ? 'HEAD' : hermesBuildCommit(version);
-  const installerUrl = `https://raw.githubusercontent.com/NousResearch/hermes-agent/${mode === 'latest' ? 'main' : ref}/scripts/install.sh`;
+  const ref = mode === 'latest' ? 'main' : hermesBuildCommit(version);
   const installer = join(dir, 'install.sh');
-  execFileSync('curl', ['-fsSL', '-o', installer, installerUrl], { stdio: 'inherit' });
+  // raw.githubusercontent.com rate-limits unauthenticated requests per shared runner IP; gh counts against the caller's token.
+  const endpoint = `repos/NousResearch/hermes-agent/contents/scripts/install.sh?ref=${ref}`;
+  console.log(`Downloading the Hermes installer: https://api.github.com/${endpoint}`);
+  writeFileSync(installer, execFileSync('gh', ['api', '-H', 'Accept: application/vnd.github.raw', endpoint], { stdio: ['ignore', 'pipe', 'inherit'] }));
   if (mode === 'qualified') {
     const actual = createHash('sha256').update(readFileSync(installer)).digest('hex');
     if (actual !== HERMES_INSTALLER.sha256) throw new Error(`Hermes installer checksum mismatch: expected ${HERMES_INSTALLER.sha256}, got ${actual}`);

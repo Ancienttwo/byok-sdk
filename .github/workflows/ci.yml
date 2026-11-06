@@ -2085,11 +2085,14 @@ jobs:
         run: bun run build
 
       - name: Install the qualified Hermes (pinned commit, checksum-verified installer)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $commit = "0b10b9f8155a7ecadd8c540b87712c791b5c8ac9"
           $sha = "3d428ce54dea5fe26f8f52e40b2a49876d3cb95c49760e8350d6458046519479"
           $installer = Join-Path $env:RUNNER_TEMP "hermes-install.ps1"
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NousResearch/hermes-agent/$commit/scripts/install.ps1" -OutFile $installer
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github.raw" }
+          Invoke-WebRequest -Uri "https://api.github.com/repos/NousResearch/hermes-agent/contents/scripts/install.ps1?ref=$commit" -Headers $headers -OutFile $installer
           $actual = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLower()
           if ($actual -ne $sha) { Write-Error "Hermes installer checksum mismatch: expected $sha, got $actual"; exit 1 }
           # The install's own home, apart from the SDK root the test creates.
@@ -2141,6 +2144,8 @@ jobs:
       - run: bun ci
       - run: bun run build
       - name: Install the qualified runtime CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: node scripts/ci/runtime-contract-install.mjs ${{ matrix.runtime }} qualified
       - name: Run the runtime contract suite
         run: bun run --filter @byok-sdk/client test:runtime-contract -- src/__tests__/runtime-contract/${{ matrix.runtime }}.contract.ts
