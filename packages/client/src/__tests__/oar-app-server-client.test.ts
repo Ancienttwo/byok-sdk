@@ -5,10 +5,10 @@ import path from 'node:path';
 import {
   startAppServerClient,
   type LineProcess, type SpawnLineProcess,
-} from '../../vendor/oar/0e92470/runtimes/codex/app-server-client.js';
-import { rpcControl } from '../../vendor/oar/0e92470/runtimes/codex/rpc-control.js';
-import { createSessionKernel } from '../../vendor/oar/0e92470/shared/session-kernel.js';
-import { sessionCredentialRedactor } from '../../vendor/oar/0e92470/shared/credential-redactor.js';
+} from '../../vendor/oar/6bdd273/runtimes/codex/app-server-client.js';
+import { rpcControl } from '../../vendor/oar/6bdd273/runtimes/codex/rpc-control.js';
+import { createSessionKernel } from '../../vendor/oar/6bdd273/shared/session-kernel.js';
+import { sessionCredentialRedactor } from '../../vendor/oar/6bdd273/shared/credential-redactor.js';
 
 function fakeProcess() {
   const lines: Array<(line: string) => void> = [];
@@ -186,7 +186,7 @@ describe('OAR session kernel record redaction', () => {
 });
 
 it('accounts for every vendored file and the nineteen maintained source deltas', () => {
-  const root = path.resolve(import.meta.dirname, '../../vendor/oar/0e92470');
+  const root = path.resolve(import.meta.dirname, '../../vendor/oar/6bdd273');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     packageVersion: string;
     commit: string;
@@ -203,9 +203,9 @@ it('accounts for every vendored file and the nineteen maintained source deltas',
   }
   expect(manifest.release).toEqual({
     ecosystem: 'npm', name: '@botiverse/oar', version: manifest.packageVersion,
-    integrity: 'sha512-0RZtsSlHuKmh0bKuRarlXbWN6W1QuPktddoLLAr0jvv3BwVDd7VASG26VysAtXTWMavIBVz4yrJgxa/RBhBVsg==',
+    integrity: 'sha512-wnuL3EniE2q01RvdJQkgM7adlOMLSeYxoWVLhm/fXOGTdS+AZaq3TU93dzGv7DMuU4D8IA/TdHTISWTfiPspmQ==',
     gitCommit: manifest.commit,
-    provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.91.0',
+    provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.92.0',
   });
   expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['contracts/failure.ts', 'observe/events.ts', 'runtimes/codex/app-server-client.ts', 'runtimes/codex/failure.ts', 'runtimes/codex/open.ts', 'runtimes/codex/session.ts', 'runtimes/dsh/control.ts', 'runtimes/dsh/launch.ts', 'runtimes/dsh/session.ts', 'runtimes/grok/session.ts', 'shared/acp/client-app.ts', 'shared/acp/errors.ts', 'shared/acp/failure.ts', 'shared/acp/process.ts', 'shared/acp/session.ts', 'shared/acp/terminal.ts', 'shared/acp/turns.ts', 'shared/executable/process-tree.ts', 'shared/failure-class.ts']);
   expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Apache License');

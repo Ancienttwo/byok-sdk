@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 0e92470 for the injected process and its bounded diagnostics (Apache-2.0).
+// BYOK change: Modified from OAR 6bdd273 for the injected process and its bounded diagnostics (Apache-2.0).
 import type { LineProcess } from "../codex/app-server-client.js";
 import { asRecord, parseJson, type JsonRecord } from "../../shared/json.js";
 import { DSH_BRIDGE_PROTOCOL } from "./bridge.js";

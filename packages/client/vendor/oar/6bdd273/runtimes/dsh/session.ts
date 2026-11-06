@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 0e92470 for an injected process, a required explicit environment, a record consumer and session credential redaction without sealSession (Apache-2.0).
+// BYOK change: Modified from OAR 6bdd273 for an injected process, a required explicit environment, a record consumer and session credential redaction without sealSession (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- Native launch, controls, projection and the credential boundary meet here. */
 /* oxlint-disable eslint/require-await -- Session controls return kernel promises directly. */
 import { randomUUID } from "node:crypto";

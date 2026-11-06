@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Re-vendor OAR 0.92.0 (`packages/client/vendor/oar/6bdd273/`), replacing the 0.91.0 snapshot. Hosts see no change: the upstream Antigravity steer fix and the dsh task events do not reach an SDK surface.
+
 ## 0.39.0 — 2026-11-06 (published)
 
 0.39.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

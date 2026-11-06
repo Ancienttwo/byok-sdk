@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2292686,
+      "budgetBytes": 2293562,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -115,7 +115,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 498629,
+      "budgetBytes": 499495,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -437,7 +437,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 477908,
+      "budgetBytes": 478774,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -503,7 +503,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok, agy)",
-      "budgetBytes": 96883,
+      "budgetBytes": 96988,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2356,7 +2356,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2269973,
+      "budgetBytes": 2270849,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
