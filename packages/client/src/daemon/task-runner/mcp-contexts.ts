@@ -12,23 +12,21 @@ import type { ExecutionScratch } from '../retention/scratch';
 import type { AgentResultContext } from './support';
 import { freshHostToolsetContextToken } from './support';
 import type { TaskRunner } from '../task-runner';
-import { HOST_TOOLSET_CONTEXT_ENV } from './state';
 
 /**
- * One reserved server's context, in the Execution's SDK directory: private to
- * this user on POSIX by mode, on Windows by the scratch root's inherited ACL.
- * Releasing the scratch at task disposal removes it. A mid-task revocation
- * leaves it, because a runtime that restarts the helper must still reach the
- * refusal of the revoked token and not a failed server start.
+ * One server's context, in the Execution's SDK directory: private to this user
+ * on POSIX by mode, on Windows by the scratch root's inherited ACL. Releasing
+ * the scratch at task disposal removes it. A mid-task revocation leaves it,
+ * because a runtime that restarts the server must still reach the refusal of
+ * the revoked token and not a failed server start.
  */
-async function writeMcpContextFile(
-  scratch: ExecutionScratch,
-  serverName: string,
-  context: SdkReservedMcpContext,
-): Promise<string> {
-  const file = path.join(scratch.sdkDir, `${serverName}-context.json`);
+async function writeMcpContextFile(file: string, context: SdkReservedMcpContext): Promise<string> {
   await atomicWriteFile(file, JSON.stringify(context), { mode: 0o600 });
   return file;
+}
+
+function mcpContextFile(scratch: ExecutionScratch, name: string): string {
+  return path.join(scratch.sdkDir, `${name}-context.json`);
 }
 
 export async function withAgentMessageMcp(
@@ -41,7 +39,7 @@ export async function withAgentMessageMcp(
   if (requirement === undefined) return existing;
   const bin = this['deps'].agentMessageMcpBin!;
   const contextToken = `${randomUUID()}.${randomUUID()}`;
-  const contextFile = await writeMcpContextFile(scratch, AGENT_MESSAGE_MCP_SERVER_NAME, {
+  const contextFile = await writeMcpContextFile(mcpContextFile(scratch, AGENT_MESSAGE_MCP_SERVER_NAME), {
     storeDir: this['deps'].storeDir, productId: this['deps'].productId, contextToken,
   });
   this['revokeAgentMessageContext'](taskId);
@@ -66,7 +64,7 @@ export async function withAgentResultMcp(
   if (selection?.mode !== 'result-document') return existing;
   const bin = this['deps'].agentResultMcpBin!;
   const contextToken = `${randomUUID()}.${randomUUID()}`;
-  const contextFile = await writeMcpContextFile(scratch, AGENT_RESULT_MCP_SERVER_NAME, {
+  const contextFile = await writeMcpContextFile(mcpContextFile(scratch, AGENT_RESULT_MCP_SERVER_NAME), {
     storeDir: this['deps'].storeDir, productId: this['deps'].productId, contextToken,
   });
   this['revokeAgentResultContext'](taskId);
@@ -99,7 +97,7 @@ export async function withAgentMemoryMcp(
   const context: AgentMemoryMcpContext = {
     storeDir: this['deps'].storeDir, productId: this['deps'].productId, contextToken, mode, toolList,
   };
-  const contextFile = await writeMcpContextFile(scratch, AGENT_MEMORY_MCP_SERVER_NAME, context);
+  const contextFile = await writeMcpContextFile(mcpContextFile(scratch, AGENT_MEMORY_MCP_SERVER_NAME), context);
   this['revokeAgentMemoryContext'](taskId);
   this['memoryContextByToken'].set(contextToken, Object.freeze({ taskId, agentRef: Object.freeze({ ...agentRef }), mode }));
   this['memoryContextByTask'].set(taskId, contextToken);
@@ -112,35 +110,35 @@ export async function withAgentMemoryMcp(
   });
 }
 
-export function withHostToolsetContext(
+export async function withHostToolsetContext(
   this: TaskRunner,
   servers: Readonly<Record<string, McpStdioServerConfig>>,
   taskId: string,
   agentRef: AgentRef,
   toolsetIdByServer: ReadonlyMap<string, string>,
-): Readonly<Record<string, McpStdioServerConfig>> {
-  // §8.1's capability gate, asked before anything is minted. An undeclared
-  // lane gets no nonce at all — not a weaker one, and not a device
-  // assertion's identity wearing a task's name. The MCP child then fails
-  // explicitly for want of a token (§8.2(1)), which is the visible outcome
-  // §8.3 asks for when a device or a deployment cannot serve this lane.
-  if (this['deps'].hostTaskContextAvailable?.() !== true) return servers;
+  scratch: ExecutionScratch,
+): Promise<Readonly<Record<string, McpStdioServerConfig>>> {
   // A re-offer of the same taskId must not leave the previous attempt's
   // nonces mintable: the old child is gone, so its tokens are authority
   // nobody holds any more.
   this['deleteHostToolsetContexts'](taskId);
+  // §8.1's capability gate, asked before anything is minted. An undeclared
+  // lane gets no nonce at all — not a weaker one, and not a device
+  // assertion's identity wearing a task's name. Its server still gets the
+  // argument, which names no file, so every task run has one argv shape, the
+  // prepared host can recover the configured argv by position, and the child
+  // fails explicitly for want of a token (§8.2(1)), which is the visible
+  // outcome §8.3 asks for when a device or a deployment cannot serve this lane.
+  const available = this['deps'].hostTaskContextAvailable?.() === true;
   const frozenAgentRef = Object.freeze({ ...agentRef });
   const tokens = new Set<string>();
-  const injected: Record<string, McpStdioServerConfig> = {};
-  for (const [serverName, server] of Object.entries(servers)) {
+  const tokenByServer = new Map<string, string>();
+  for (const serverName of available ? Object.keys(servers) : []) {
     const toolsetId = toolsetIdByServer.get(serverName);
     // A server with no owning toolset would mean the resolution above lost
     // the binding; minting a nonce for it would produce a claim no frozen
     // offer can confirm, so it simply gets no task lane.
-    if (toolsetId === undefined) {
-      injected[serverName] = server;
-      continue;
-    }
+    if (toolsetId === undefined) continue;
     const contextToken = freshHostToolsetContextToken();
     this['hostToolsetContextByToken'].set(contextToken, {
       taskId,
@@ -150,16 +148,31 @@ export function withHostToolsetContext(
       state: 'active',
     });
     tokens.add(contextToken);
+    tokenByServer.set(serverName, contextToken);
+  }
+  // Every nonce is registered before the first write, so a cancel landing
+  // during one revokes them all.
+  if (tokens.size > 0) this['hostToolsetContextTokensByTask'].set(taskId, tokens);
+  const injected: Record<string, McpStdioServerConfig> = {};
+  for (const [serverName, server] of Object.entries(servers)) {
+    if (!toolsetIdByServer.has(serverName)) {
+      injected[serverName] = server;
+      continue;
+    }
+    // Random, not the server name: names that differ only in case would share
+    // one file on a case-insensitive filesystem.
+    const contextFile = mcpContextFile(scratch, `host-toolset-${randomUUID()}`);
+    const contextToken = tokenByServer.get(serverName);
+    if (contextToken !== undefined) {
+      await writeMcpContextFile(contextFile, {
+        storeDir: this['deps'].storeDir, productId: this['deps'].productId, contextToken,
+      });
+    }
     injected[serverName] = Object.freeze({
       ...server,
-      env: Object.freeze({
-        BYOK_STORE_DIR: this['deps'].storeDir,
-        BYOK_PRODUCT_ID: this['deps'].productId,
-        [HOST_TOOLSET_CONTEXT_ENV]: contextToken,
-      }),
+      args: Object.freeze([...(server.args ?? []), contextFile]),
     });
   }
-  if (tokens.size > 0) this['hostToolsetContextTokensByTask'].set(taskId, tokens);
   return Object.freeze(injected);
 }
 

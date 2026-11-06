@@ -33,11 +33,12 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
-import { reservedMcpToken } from './fixtures/execution-scratch';
+import { hostToolsetToken, reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
+import { requestTaskAssertion } from '../daemon/assertion-client';
 
 /**
  * Contract §8.1 / §8.2(1) / I12 / AC11, daemon half: the `task_assertion.issue`
- * control method's EIGHT fail-closed gates, the `BYOK_HOST_TOOLSET_CONTEXT`
+ * control method's EIGHT fail-closed gates, the host toolset context
  * nonce registry those last two gates consult, and the two-layer revocation
  * that makes a cancelled task stop being able to mint tool authority.
  *
@@ -265,7 +266,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     const servers = built.adapter.startCalls[0]!.ctx.mcpServers ?? {};
     const tokens: Record<string, string> = {};
     for (const [name, definition] of Object.entries(servers)) {
-      const token = definition.env?.BYOK_HOST_TOOLSET_CONTEXT;
+      const token = hostToolsetToken(definition);
       if (token !== undefined) tokens[name] = token;
     }
     return tokens;
@@ -289,14 +290,20 @@ describe('task assertion broker: task_assertion.issue', () => {
     const call = built.adapter.startCalls[0]!;
     const readServer = call.ctx.mcpServers?.[READ_SERVER];
     expect(readServer?.command).toBe('/opt/salesko/read');
-    expect(readServer?.args).toEqual(['--stdio']);
-    expect(readServer?.env?.BYOK_STORE_DIR).toBe(built.storeDir);
-    expect(readServer?.env?.BYOK_PRODUCT_ID).toBe(built.config.productId);
+    // The configured argv, then the context file. The entry carries no env.
+    expect(readServer?.args).toEqual(['--stdio', expect.stringContaining('host-toolset-')]);
+    expect(readServer?.env).toBeUndefined();
+    expect(reservedMcpContext(readServer)).toEqual({
+      storeDir: built.storeDir, productId: built.config.productId, contextToken: tokens[READ_SERVER],
+    });
+    if (process.platform !== 'win32') {
+      expect((await fs.stat(readServer!.args!.at(-1)!)).mode & 0o777).toBe(0o600);
+    }
     // SDK-reserved servers may also be present; only the host toolset servers
-    // ever carry the host authority variable.
+    // ever carry the host authority.
     for (const [name, definition] of Object.entries(call.ctx.mcpServers ?? {})) {
       if (name !== READ_SERVER && name !== PROPOSE_SERVER) {
-        expect(definition.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
+        expect(hostToolsetToken(definition)).toBeUndefined();
       }
     }
     // The nonce never travels to the server, in any envelope.
@@ -311,7 +318,7 @@ describe('task assertion broker: task_assertion.issue', () => {
         mcpToolsets: {
           [READ_TOOLSET]: {
             mcpServers: {
-              [READ_SERVER]: { command: '/opt/salesko/read', env: { BYOK_HOST_TOOLSET_CONTEXT: 'forged' } },
+              [READ_SERVER]: { command: '/opt/salesko/read', env: { FORGED_CONTEXT: 'forged' } },
             },
           },
         },
@@ -810,7 +817,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     const built = await pairedAndStartedUngated('acme-cap-refuse');
     const tokens = await offerAgentTask(built, 'task-undeclared');
 
-    // §8.2(1): the MCP child is started with no `BYOK_HOST_TOOLSET_CONTEXT` at
+    // §8.2(1): the MCP child's context path names no file at
     // all, so a standalone run fails explicitly for want of a token rather than
     // reaching for some other identity.
     expect(tokens).toEqual({});
@@ -826,8 +833,11 @@ describe('task assertion broker: task_assertion.issue', () => {
       expect(reservedMcpToken(servers.byokagentmemory)).toEqual(expect.any(String));
     }
     for (const definition of Object.values(servers)) {
-      expect(definition.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
+      expect(hostToolsetToken(definition)).toBeUndefined();
     }
+    expect(servers[READ_SERVER]?.args).toEqual(['--stdio', expect.stringContaining('host-toolset-')]);
+    await expect(requestTaskAssertion({ contextFile: servers[READ_SERVER]!.args!.at(-1)!, audience: ALLOWED_AUDIENCE }))
+      .resolves.toEqual({ ok: false, code: 'context_token_invalid', reason: expect.any(String) });
 
     // And the RPC says so in its own right, ahead of the params check — a
     // caller that guessed a token learns nothing about whether it was real.

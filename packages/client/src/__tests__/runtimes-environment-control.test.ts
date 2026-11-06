@@ -40,7 +40,7 @@ it('answers each adapter build as names and sources, a capture failure as its co
   };
   const shell = {
     PATH: '/opt/homebrew/bin:/usr/bin', SHELL_ONLY_SENTINEL: 'shell-value-sentinel', CLAUDECODE: '1',
-    BYOK_TOOL_AUTHORIZATION_GATE: 'shell-gate-token-value-sentinel', BYOK_HOST_TOOLSET_CONTEXT: 'host-toolset-value-sentinel',
+    BYOK_TOOL_AUTHORIZATION_GATE: 'shell-gate-token-value-sentinel', BYOK_STORE_DIR: 'store-dir-value-sentinel',
   };
   const built = new StubRuntimeAdapter('claude');
   built.runtimeEnvironment = async () => composeRuntimeEnvironment({
@@ -78,7 +78,7 @@ it('answers each adapter build as names and sources, a capture failure as its co
             { name: 'no_proxy', source: 'sdk' },
           ],
           removed: [
-            { name: 'BYOK_HOST_TOOLSET_CONTEXT', rule: 'deny' },
+            { name: 'BYOK_STORE_DIR', rule: 'deny' },
             { name: 'BYOK_TOOL_AUTHORIZATION_GATE', rule: 'deny' },
             { name: 'CLAUDECODE', rule: 'deny' },
           ],

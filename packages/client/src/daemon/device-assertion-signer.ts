@@ -120,7 +120,7 @@ export function mintDeviceAssertion(input: MintDeviceAssertionInput): MintedDevi
  *
  * `taskId`, `agentRef` and `toolsetId` are what separate this envelope from a
  * device assertion, and the daemon reads all three out of its own
- * `BYOK_HOST_TOOLSET_CONTEXT` registry entry — never out of RPC params. This
+ * host toolset context registry entry — never out of RPC params. This
  * signature deliberately offers no way to pass a "requested" one alongside the
  * resolved one.
  */

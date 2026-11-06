@@ -53,6 +53,17 @@
   their content array. A V4A `patch` names no path until its result, so a V4A
   write outside the workspace raises no reminder.
 
+- **Breaking (client; #1469)** — a Host toolset server no longer receives
+  `BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR` or `BYOK_PRODUCT_ID`, and its MCP
+  entry carries no `env`. In a task run the daemon appends one path as the
+  server's last argument, so a server whose argument parser rejects extras must
+  accept it. `requestTaskAssertion` now takes `{ contextFile, audience, timeoutMs? }`:
+  pass that path as `contextFile` when you make the call, and drop `productId`,
+  `storeDir` and `contextToken`. Do not read the file at startup, because its
+  format is internal and an undeclared lane has none; the call then returns
+  `context_token_invalid`. The admission `tools/list` probe starts the server
+  without the argument. See
+  [Daemon-free assertion requests](packages/client/README.md#daemon-free-assertion-requests).
 - **Added (client; #1469)** — `createRuntimeAdapters` and `createDaemon` build
   `DshAdapter` when `runtimeAllowlist` lists `dsh`. `DaemonConfig.runtimes.dsh`
   takes `home`, `model`, `sandbox` and `versionPolicy`; `home` and `model` are
@@ -64,7 +75,7 @@
   SDK scratch directory, and the entry's last argument is that file's path. A
   runtime that stores MCP entries in plain text keeps only the path. The file
   goes when the scratch is released at task end, and a helper refuses a missing
-  or unreadable file. `byokagentteam` and Host toolset context are unchanged.
+  or unreadable file. `byokagentteam` is unchanged.
 
 - **Internal (client)** — the SDK-owned OAR source moves from 0.86.0 to
   0.88.0 (`vendor/oar/be46fb3/`, upstream commit `be46fb36`). The shared ACP

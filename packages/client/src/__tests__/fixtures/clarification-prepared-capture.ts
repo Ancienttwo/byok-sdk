@@ -244,7 +244,8 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
     artifactPath,
     requestBody: compiled.requestBody,
     recordPath,
-    mcpServers: { teamserver: server },
+    // As the daemon hands them to the adapter: configured argv, then the context path.
+    mcpServers: { teamserver: { ...server, args: [...server.args, '/scratch/exec/sdk/context.json'] } },
     observation,
     childEnv: {
       PATH: process.env.PATH ?? '',

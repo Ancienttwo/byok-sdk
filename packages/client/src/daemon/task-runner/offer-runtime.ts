@@ -5,6 +5,7 @@ import { observeRuntimeDetection } from '../../runtime-detection';
 import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../../types';
 import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment';
+import type { McpStdioServerConfig } from '../../types';
 import type { ExecutionScratch } from '../retention/scratch';
 import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
 import { McpAuthorityError, MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from '../mcp-tools-probe';
@@ -99,15 +100,16 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     await this['deps'].prepareHostTaskContext(taskId, blobAbort.signal);
     if (admissionWithdrawn()) return undefined;
   }
-  // Contract §8.1: the host toolset servers this task will actually run
-  // get their per-`(task, server)` nonce here, on the copy handed to the
-  // adapter. The admission probe below keeps reading `resolvedMcp.servers`,
-  // which stays clean — a `tools/list` handshake is not this task's
-  // execution and has no business holding its tool authority.
-  let taskMcpServers = resolvedMcp?.ok
-    ? this['withHostToolsetContext'](resolvedMcp.servers, taskId, agentRef, resolvedMcp.toolsetIdByServer)
-    : undefined;
+  let taskMcpServers: Readonly<Record<string, McpStdioServerConfig>> | undefined;
   try {
+    // Contract §8.1: the host toolset servers this task will actually run
+    // get their per-`(task, server)` nonce here, on the copy handed to the
+    // adapter. The admission probe below keeps reading `resolvedMcp.servers`,
+    // which stays clean — a `tools/list` handshake is not this task's
+    // execution and has no business holding its tool authority.
+    if (resolvedMcp?.ok) {
+      taskMcpServers = await this['withHostToolsetContext'](resolvedMcp.servers, taskId, agentRef, resolvedMcp.toolsetIdByServer, scratch);
+    }
     if (preparation === undefined) {
       taskMcpServers = await this['withAgentMessageMcp'](taskMcpServers, taskId, messageRequirement, scratch);
     }

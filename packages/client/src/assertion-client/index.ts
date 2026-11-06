@@ -4,8 +4,8 @@
  *
  * A Host toolset server is the shape this entry exists for: a short-lived
  * stdio process the daemon spawns for one task, whose entire job is to take the
- * `BYOK_HOST_TOOLSET_CONTEXT` nonce it was started with, ask the running daemon
- * for one short-lived task assertion, and present it to the product's cloud.
+ * context file path it was started with, ask the running daemon for one
+ * short-lived task assertion, and present it to the product's cloud.
  * It never runs a daemon, never drives a coding-agent runtime, and never
  * touches the transport.
  *
@@ -21,8 +21,9 @@
  * So this entry re-exports exactly the two request functions and their public
  * option/result types from `../daemon/assertion-client`, whose own transitive
  * imports are only `@byok-sdk/core`, `@byok-sdk/protocol`,
- * `../daemon/control-client`, `../daemon/control-protocol` and `../daemon/store`
- * (plus `zod` through core's protocol types). Nothing else may be added here.
+ * `../daemon/control-client`, `../daemon/control-protocol`, `../daemon/store`
+ * and `../sdk-reserved-helper-context` (plus `zod` through core's protocol
+ * types). Nothing else may be added here.
  *
  * Two things are deliberately absent, and this file is the record of why.
  *
@@ -44,12 +45,12 @@
  * entry is a narrower door to the same authority, not a replacement for it.
  */
 
-/** Asks a running daemon for one short-lived task assertion bound to the caller's `BYOK_HOST_TOOLSET_CONTEXT` nonce. */
+/** Asks a running daemon for one short-lived task assertion bound to the caller's context file. */
 export { requestTaskAssertion } from '../daemon/assertion-client';
 /** Asks a running daemon for one short-lived device assertion scoped to an allowlisted audience. */
 export { requestDeviceAssertion } from '../daemon/assertion-client';
 
-/** Everything `requestTaskAssertion` needs: the daemon's `productId`/`storeDir`, the context nonce, the exact audience, and an optional round-trip bound. */
+/** Everything `requestTaskAssertion` needs: the context file path from this process's final argv element, the exact audience, and an optional round-trip bound. */
 export type { RequestTaskAssertionOptions } from '../daemon/assertion-client';
 /** The daemon's nine refusal codes plus `unavailable` and `bad_response`, kept as an open string union so a newer daemon's code surfaces verbatim. */
 export type { RequestTaskAssertionErrorCode } from '../daemon/assertion-client';

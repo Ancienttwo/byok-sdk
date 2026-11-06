@@ -2206,15 +2206,25 @@ in either direction: a device envelope presented on this lane authenticates as
 nothing, and this lane never falls back to a device assertion. The device
 assertion exchange above is untouched and keeps serving its own consumers.
 
-The daemon injects one opaque `BYOK_HOST_TOOLSET_CONTEXT` nonce per
-`(task, server)` into the MCP child's environment, and nowhere else — a host's
-toolset registry still cannot set an environment block of its own, which is what
-makes the value unforgeable from configuration. The nonce is the child's evidence
-that it is the process the daemon started for that task; it never reaches a
-prompt, a log line, an audit record or the server.
+In a task run the daemon appends one path as the last argument of every host
+toolset server, after the configured `args`, and the MCP entry carries no
+environment block. The path names a mode `0600` file in the Execution's scratch
+directory holding one opaque nonce per `(task, server)`, and the store directory
+and product id that reach this daemon. Only the daemon writes that file, which is
+what makes the nonce unforgeable from configuration: a host's toolset registry can
+name a file but cannot put a nonce in one. The nonce is the child's evidence that
+it is the process the daemon started for that task; it never reaches a prompt, a
+log line, an audit record or the server. The file is private to the OS user, not
+to the child, so another process of that user can read it while the task runs.
 
-A child exchanges its nonce for one short-lived assertion per invocation through
-the daemon's `task_assertion.issue` control method, which resolves the task,
+A host toolset server must accept that extra last argument. It passes the path to
+`requestTaskAssertion` as `contextFile` only when it makes that call, and it must
+not read the file at startup: the format is internal and the file may not exist.
+The admission `tools/list` probe starts the server without that argument, so a
+server tells the two starts apart by counting its own configured arguments.
+
+A child exchanges its context file for one short-lived assertion per invocation
+through the daemon's `task_assertion.issue` control method, which resolves the task,
 AgentRef and toolset from its own registry entry — a caller may not send them.
 Every invocation, including a transport retry, takes a fresh assertion with a
 fresh JTI; TTL is the device lane's existing ceiling, not a second formula
@@ -2241,9 +2251,10 @@ once its host side actually implements the verification; a device advertises the
 same capability string in its connection handshake, and only once it can both
 sign and read that deployment declaration. A device that does not advertise it is
 explicitly unavailable for this lane — never a reason to accept its device
-assertion instead. While either channel is silent the daemon injects no nonce at
-all, so a tool server started without one fails for want of a token rather than
-falling back to some other identity.
+assertion instead. While either channel is silent the daemon mints no nonce at
+all and writes no file. The last argument is still there and names nothing, so
+`requestTaskAssertion` refuses with `context_token_invalid` rather than falling
+back to some other identity.
 
 ## Skill pack delivery
 
