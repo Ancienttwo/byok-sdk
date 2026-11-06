@@ -4,7 +4,7 @@ import type { RuntimeAdapter } from '../../types';
 import { AgentEgressPolicyError, resolveAgentEgressPolicy } from '../agent-egress-policy';
 import { resolveDaemonConfig } from '../create-daemon/config';
 import { resolveDaemonOperationalConfig } from '../create-daemon/operational-config';
-import { injectedAdapterConfigConflicts } from '../create-daemon/support';
+import { assertAgySessionStoreTtl, injectedAdapterConfigConflicts } from '../create-daemon/support';
 import { buildRuntimeAdapters } from '../../adapters/runtime-adapters';
 import type { DaemonConfig } from '../create-daemon';
 import { resolveStorageConfig } from '../retention/config';
@@ -62,6 +62,7 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
     const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
     const storage = resolveStorageConfig(storeDir, config.storage);
     const adapters = options.adapters ?? buildRuntimeAdapters(config, scope.piByokLauncher);
+    assertAgySessionStoreTtl(storage.ttlMs, adapters);
     const runtimeSource = options.adapters === undefined ? 'sdk-built' : 'injected';
     const authorizationIssues = toolAuthorizationIssues(config, adapters, runtimeSource);
     if (authorizationIssues.length > 0) return { ok: false, issues: [...issues, ...authorizationIssues] };

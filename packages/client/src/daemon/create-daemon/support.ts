@@ -11,6 +11,8 @@ import { type AgentContentReadSurface, type AgentContentReadPolicySelection, AGE
 import { DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_MAX_TTL_MS } from '@byok-sdk/core';
 import type { AgentContentReadConfig, DaemonConfig, DeviceAssertionConfig } from '../create-daemon';
 import { ALL_RUNTIME_IDS } from '../../adapters/runtime-adapters';
+import { agySessionStoreOf } from '../../util/agy-session-retention';
+import { LocalStorageConfigError, type ResolvedStorageConfig } from '../retention/config';
 
 /**
  * Module-scope helpers of the daemon composition (#926): constants, adapter
@@ -318,6 +320,12 @@ export function injectedAdapterConfigConflicts(config: object): { readonly key: 
   return CREATE_DAEMON_ONLY_KEYS
     .filter(([key]) => Object.hasOwn(config, key))
     .map(([key, remedy]) => ({ key, message: `DaemonConfig.${key} is only supported by createDaemon; ${remedy}` }));
+}
+
+/** A live session ledger may name an agy session to resume, but only a daemon with an agy session store has one. */
+export function assertAgySessionStoreTtl(ttlMs: ResolvedStorageConfig['ttlMs'], adapters: readonly object[]): void {
+  if (adapters.every(adapter => agySessionStoreOf(adapter) === undefined)) return;
+  if (ttlMs['agy-session-store'] < ttlMs['session-ledger'] + 86_400_000) throw new LocalStorageConfigError('retention.ttlMs.agy-session-store', "must be at least retention.ttlMs['session-ledger'] plus one day");
 }
 
 /**

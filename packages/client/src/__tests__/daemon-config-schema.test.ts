@@ -205,6 +205,22 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     expect(checkDaemonConfig(injected, { source: 'embedded', adapters }).issues).toEqual([expect.objectContaining({ path: 'toolAuthorization.byRuntime.cladue' })]);
   });
 
+  it('holds the agy-session-store TTL to the session ledger only for a daemon with an agy session store', async () => {
+    const DAY = 86_400_000;
+    const storage = () => ({ scratchRoot: testScratchRoot(), retention: { ttlMs: { 'session-ledger': 45 * DAY, 'pi-session-dir': 46 * DAY } } });
+    const home = await tmpDir('byok-agy-ttl-home-');
+
+    // agy configured but not listed builds no adapter, so it holds no session store either.
+    const withoutAgy = await bundled({ storage: storage(), runtimes: { agy: { home } } });
+    expect(checkDaemonConfig(cliInput(withoutAgy), { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE }).ok).toBe(true);
+    expect(() => createDaemon(withoutAgy)).not.toThrow();
+
+    const message = "DaemonConfig.storage.retention.ttlMs.agy-session-store must be at least retention.ttlMs['session-ledger'] plus one day";
+    const withAgy = await bundled({ storage: storage(), runtimeAllowlist: ['agy'], toolAuthorization: { default: 'all' }, runtimes: { agy: { home } } });
+    expect(checkDaemonConfig(cliInput(withAgy), { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE }).issues).toEqual([expect.objectContaining({ severity: 'error', code: 'invalid_value', message })]);
+    expect(() => createDaemon(withAgy)).toThrow(message);
+  });
+
   it('refuses auto for a runtime without toolAuthorizationAuto (codex), at the field that sets it', async () => {
     const fromDefault: Partial<DaemonConfig> = { runtimeAllowlist: ['claude', 'codex'], toolAuthorization: { default: 'auto' } };
     const defaultIssue = {
