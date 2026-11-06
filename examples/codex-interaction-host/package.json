@@ -21,6 +21,6 @@
     "@types/node": "^24",
     "tsup": "^9.0.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^5.1.0"
   }
 }

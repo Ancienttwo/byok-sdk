@@ -1,5 +1,4 @@
-import { onTestFailed } from 'vitest';
-import { getCurrentTest } from 'vitest/suite';
+import { onTestFailed, TestRunner } from 'vitest';
 
 /**
  * Resolves once `check()` holds, re-evaluating it every 10 ms. It has no
@@ -9,7 +8,7 @@ import { getCurrentTest } from 'vitest/suite';
  * failed test prints the last state `observe()` reported before that.
  */
 export function until(check: () => boolean, observe: () => string): Promise<void> {
-  const signal = getCurrentTest()!.context.signal;
+  const signal = TestRunner.getCurrentTest()!.context.signal;
   let settled = false;
   let last = observe();
   onTestFailed(() => {

@@ -22,9 +22,9 @@
   },
   "devDependencies": {
     "@types/node": "^24",
-    "linkedom": "0.16.11",
-    "tsx": "^4.19.2",
+    "linkedom": "0.18.15",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^5.1.0"
   }
 }
