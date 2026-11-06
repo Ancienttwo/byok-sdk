@@ -301,7 +301,7 @@ describe('Agent memory MCP local authority', () => {
     expect(supported.startCalls).toHaveLength(1);
     expect(supported.startCalls[0]?.ctx.mcpServers?.byokagentmemory).toMatchObject({
       command: 'node',
-      args: ['memory-mcp.js'],
+      args: ['memory-mcp.js', expect.any(String)],
     });
 
     supported.sessions[0]?.emit({ type: 'turn_end' });

@@ -12,6 +12,7 @@ import { connectControlClient } from '../daemon/control-client';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { OPEN_LIFECYCLE } from './fixtures/lifecycle-barrier';
+import { reservedMcpToken } from './fixtures/execution-scratch';
 
 it('runs two recurring executions through real HTTP and TaskRunner with distinct fresh sessions', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-execution-submit-integration-'));
@@ -100,7 +101,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
   }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   /** The route the SDK result helper's submit_result forwards to. */
   const submit = async (index: number, value: unknown): Promise<unknown> => {
-    const token = adapter.startCalls[index]?.ctx.mcpServers?.byokagentresult?.env?.BYOK_AGENT_RESULT_CONTEXT;
+    const token = reservedMcpToken(adapter.startCalls[index]?.ctx.mcpServers?.byokagentresult);
     if (!token) throw new Error('missing Agent result context');
     const connected = await connectControlClient({ storeDir, productId: options.productId });
     if (!connected.ok) throw new Error(connected.reason);

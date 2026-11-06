@@ -61,6 +61,7 @@ import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
 
 /**
  * The prepared `task.offer` end to end through the real `TaskRunner`, the real
@@ -589,7 +590,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     expect(start.preparation.toolsetDefinitionRevisions).toEqual({});
 
     const session = adapter.sessions[0]!;
-    const staged = await runner.submitAgentResult({ contextToken: start.input.mcpServers!.byokagentresult!.env!.BYOK_AGENT_RESULT_CONTEXT!, outcome: document });
+    const staged = await runner.submitAgentResult({ contextToken: reservedMcpToken(start.input.mcpServers!.byokagentresult), outcome: document });
     expect(staged.state).toBe('staged');
     session.emit({ type: 'usage', inputTokens: 1_000, outputTokens: 10 });
     session.emit({ type: 'turn_end' });
@@ -770,8 +771,9 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       const start = adapter.preparedStartCalls[0]!.input;
       expect(Object.keys(start.mcpServers ?? {})).toEqual([AGENT_MEMORY_MCP_SERVER_NAME]);
       const reserved = start.mcpServers?.[AGENT_MEMORY_MCP_SERVER_NAME];
-      expect(reserved?.env?.BYOK_PREPARED_AGENT_MEMORY_MODE).toBe('read');
-      expect(reserved?.env?.BYOK_AGENT_MEMORY_CONTEXT).toMatch(/^[0-9a-f-]+\.[0-9a-f-]+$/u);
+      expect(reserved?.env).toBeUndefined();
+      expect(reservedMcpContext(reserved)).toMatchObject({ mode: 'read', toolList: 'complete' });
+      expect(reservedMcpToken(reserved)).toMatch(/^[0-9a-f-]+\.[0-9a-f-]+$/u);
       expect(start.mcpToolsetTools).toBeUndefined();
 
       const loserAdapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
@@ -1674,14 +1676,17 @@ describe('prepared Agent memory admission declines with its exact typed reason',
     try {
       const fixture = await memoryOnlyRunner();
       fixture.adapter.startError = new Error('prepared runtime refused to start');
+      const tokens = (fixture.runner as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken;
+      const registered = vi.spyOn(tokens, 'set');
       await fixture.runner.handleEnvelope(fixture.offer('task-memory-launch-fails'));
 
       expect(fixture.sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(1);
       // The token WAS minted for the launch that failed…
-      const minted = fixture.adapter.preparedStartCalls[0]?.input.mcpServers?.[AGENT_MEMORY_MCP_SERVER_NAME]?.env?.BYOK_AGENT_MEMORY_CONTEXT;
+      const minted = registered.mock.calls[0]?.[0];
       expect(minted).toMatch(/^[0-9a-f-]+\.[0-9a-f-]+$/u);
-      // …and is gone once the offer settled: no memory operation can use it.
-      const tokens = (fixture.runner as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken;
+      // …and is gone once the offer settled, with the file that carried it:
+      // no memory operation can use it.
+      await expect(fs.stat(fixture.adapter.preparedStartCalls[0]!.input.mcpServers![AGENT_MEMORY_MCP_SERVER_NAME]!.args!.at(-1)!)).rejects.toMatchObject({ code: 'ENOENT' });
       expect(tokens.has(minted!)).toBe(false);
       expect(tokens.size).toBe(0);
       await expect(fixture.runner.recallAgentMemory({ contextToken: minted!, path: 'MEMORY.md' })).rejects.toThrow(/invalid, expired/u);

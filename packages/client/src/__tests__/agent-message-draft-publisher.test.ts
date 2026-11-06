@@ -15,7 +15,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapterDescriptor, type Session } from '../types';
 import { testIngressBudget } from './fixtures/activity-ingress';
-import { testScratchOwner } from './fixtures/execution-scratch';
+import { testScratchOwner, reservedMcpToken } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -382,7 +382,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
       return { publish: { ...publish, payload: publish.payload }, lastFrames };
     };
     return { runner, sent, session: adapter.sessions[0]!, frames, published,
-      contextToken: adapter.startCalls[0]!.ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT! };
+      contextToken: reservedMcpToken(adapter.startCalls[0]!.ctx.mcpServers!.byokagentmessage) };
   }
 
   it('replaces the empty post-tool revision with the whole-run fallback', async () => {

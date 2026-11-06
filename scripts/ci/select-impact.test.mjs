@@ -197,6 +197,12 @@ test('a platform family is selected only by a path it owns', () => {
     for (const owner of owners) assert.ok([...tracked].some(path => owner.test(path)), `${family} owner ${owner} matches no tracked file`);
   }
   for (const [family, path] of Object.entries(owned)) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
+  for (const path of ['packages/client/src/bin/sdk-reserved-helper-runners.ts', 'packages/client/src/bin/byok-agent-result-mcp.ts', 'packages/client/src/lifecycle/sdk-reserved-helper-command.ts']) {
+    for (const family of ['runtime-contract', 'credential-isolation-audit', 'npm-release-pack']) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
+  }
+  for (const path of ['packages/client/src/daemon/task-runner/mcp-contexts.ts', 'packages/client/src/sdk-reserved-helper-context.ts']) {
+    for (const family of ['runtime-contract', 'credential-isolation-audit']) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
+  }
   for (const path of ['packages/client/src/daemon/task-runner.ts', 'packages/protocol/src/task.ts', 'packages/core/src/index.ts', 'packages/server/src/index.ts']) {
     assert.deepEqual(selectImpact([path]).families.filter(id => id in familyOwners), [], path);
   }

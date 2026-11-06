@@ -62,13 +62,7 @@ function runtimeMemoryConfig() {
     memory: MEMORY,
     memoryCall: {
       command: '/execution',
-      args: ['__byok_sdk_helper', 'agent-memory-mcp'],
-      env: {
-        BYOK_STORE_DIR: '/private/store',
-        BYOK_PRODUCT_ID: 'product',
-        BYOK_AGENT_MEMORY_CONTEXT: 'context',
-        BYOK_PREPARED_AGENT_MEMORY_MODE: 'read',
-      },
+      args: ['__byok_sdk_helper', 'agent-memory-mcp', '/execution-sdk/byokagentmemory-context.json'],
     },
     mcp: { mcpEnv: {} },
   } as never;
@@ -210,13 +204,7 @@ const __executionScratch = await testExecutionScratch();
     });
     const memoryServer = {
       command: '/agent-memory-helper',
-      args: ['__byok_sdk_helper', 'agent-memory-mcp'],
-      env: {
-        BYOK_STORE_DIR: '/private/store',
-        BYOK_PRODUCT_ID: 'product',
-        BYOK_AGENT_MEMORY_CONTEXT: 'context',
-        BYOK_PREPARED_AGENT_MEMORY_MODE: 'read',
-      },
+      args: ['__byok_sdk_helper', 'agent-memory-mcp', '/execution-sdk/byokagentmemory-context.json'],
     };
     const session = await prepared.operation.start({ scratch: (runtimeLaunch).scratch,
       runtimeLaunch,

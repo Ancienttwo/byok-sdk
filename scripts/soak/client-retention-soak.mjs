@@ -438,10 +438,11 @@ async function main() {
         }
         outcomes.failed++;
       } else {
-        // The start that just resolved holds the result-helper env; stage the
+        // The start that just resolved names the result helper's context file; stage the
         // real staged-result record before the fake runtime ends its turn.
         const start = adapter.startCalls.at(-1);
-        const contextToken = start === undefined ? undefined : start.input?.mcpServers?.byokagentresult?.env?.BYOK_AGENT_RESULT_CONTEXT;
+        const contextFile = start === undefined ? undefined : start.input?.mcpServers?.byokagentresult?.args?.at(-1);
+        const contextToken = contextFile === undefined ? undefined : JSON.parse(await fs.readFile(contextFile, 'utf8')).contextToken;
         if (typeof contextToken !== 'string') {
           const decline = terminalFor(taskId);
           throw new Error('result helper was not injected for ' + taskId + (decline === undefined ? '' : ': ' + JSON.stringify(decline.payload)));

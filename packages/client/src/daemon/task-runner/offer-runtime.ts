@@ -107,10 +107,15 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   let taskMcpServers = resolvedMcp?.ok
     ? this['withHostToolsetContext'](resolvedMcp.servers, taskId, agentRef, resolvedMcp.toolsetIdByServer)
     : undefined;
-  if (preparation === undefined) {
-    taskMcpServers = this['withAgentMessageMcp'](taskMcpServers, taskId, messageRequirement);
+  try {
+    if (preparation === undefined) {
+      taskMcpServers = await this['withAgentMessageMcp'](taskMcpServers, taskId, messageRequirement, scratch);
+    }
+    taskMcpServers = await this['withAgentResultMcp'](taskMcpServers, taskId, terminalProjection, scratch);
+  } catch (error) {
+    if (!admissionWithdrawn()) decline(`execution scratch unavailable: ${outboundErrorMessage(error)}`, true);
+    return undefined;
   }
-  taskMcpServers = this['withAgentResultMcp'](taskMcpServers, taskId, terminalProjection);
   // Only the adapters that register projected toolset tools themselves
   // need the daemon's `tools/list` observation (see
   // `RuntimeAdapterDescriptor.requiresMcpToolsetToolObservation`). An
@@ -139,7 +144,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   if (requiresAgentMemoryMcp && ordinaryMemoryMode !== 'none') {
     try {
       // A `read` task, which includes every reader, is sealed `read` and its helper lists only `memory_recall`.
-      taskMcpServers = this['withAgentMemoryMcp'](taskMcpServers, taskId, agentRef, ordinaryMemoryMode, this['deps'].agentMemoryMcpBin!, 'granted');
+      taskMcpServers = await this['withAgentMemoryMcp'](taskMcpServers, taskId, agentRef, ordinaryMemoryMode, this['deps'].agentMemoryMcpBin!, 'granted', scratch);
     } catch (error) {
       decline(`Agent memory MCP configuration failed: ${errorMessage(error)}`, false);
       return undefined;

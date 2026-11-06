@@ -21,6 +21,7 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
+import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
 
 // A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
 const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
@@ -84,7 +85,7 @@ async function offerResult(runner: TaskRunner, taskId: string, terminalProjectio
 }
 
 function resultToken(adapter: StubRuntimeAdapter, index = 0): string {
-  const token = adapter.startCalls[index]?.ctx.mcpServers?.byokagentresult?.env?.BYOK_AGENT_RESULT_CONTEXT;
+  const token = reservedMcpToken(adapter.startCalls[index]?.ctx.mcpServers?.byokagentresult);
   if (token === undefined) throw new Error('result helper was not injected');
   return token;
 }
@@ -111,20 +112,21 @@ describe('submit_result: injection and describe', () => {
     const { adapter, runner, preflight, storeDir } = await harness();
     await offerResult(runner, 'describe-task');
     const server = adapter.startCalls[0]!.ctx.mcpServers!.byokagentresult!;
-    expect(server).toMatchObject({
-      command: process.execPath,
-      args: ['/sdk/byok-agent-result-mcp.js'],
-      env: { BYOK_STORE_DIR: storeDir, BYOK_PRODUCT_ID: 'result-test' },
-    });
-    // R3: the schema never travels by env or argv.
+    expect(server).toMatchObject({ command: process.execPath, args: ['/sdk/byok-agent-result-mcp.js', expect.any(String)] });
+    expect(server.env).toBeUndefined();
+    const contextFile = server.args!.at(-1)!;
+    expect(reservedMcpContext(server)).toEqual({ storeDir, productId: 'result-test', contextToken: resultToken(adapter) });
+    if (process.platform !== 'win32') expect((await fs.stat(contextFile)).mode & 0o777).toBe(0o600);
+    // R3: the schema never travels by env, argv or the context file.
     expect(JSON.stringify(server)).not.toContain('verdict');
-    expect(Object.keys(server.env!).sort()).toEqual(['BYOK_AGENT_RESULT_CONTEXT', 'BYOK_PRODUCT_ID', 'BYOK_STORE_DIR']);
+    expect(await fs.readFile(contextFile, 'utf8')).not.toContain('verdict');
     expect(preflight).toHaveBeenCalledOnce();
     expect(preflight.mock.calls[0]![0]).toEqual(server);
     const described = runner.describeAgentResult({ contextToken: resultToken(adapter) });
     expect(described).toMatchObject({ name: 'submit_result', inputSchema: SCHEMA });
     expect(() => runner.describeAgentResult({ contextToken: '0'.repeat(64) })).toThrow(/invalid or expired/);
     await runner.shutdownActiveTasks('test cleanup');
+    await expect(fs.stat(contextFile)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('does not inject the result helper for mode none and completes without a document', async () => {
@@ -322,7 +324,7 @@ describe('submit_result with a required Agent message (R10)', () => {
     }, { taskId, seq: 1 }));
     const servers = adapter.startCalls[0]!.ctx.mcpServers!;
     expect(Object.keys(servers).sort()).toEqual(['byokagentmessage', 'byokagentresult']);
-    await runner.publishAgentMessage({ contextToken: servers.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!, contentType: 'text/markdown', body: 'reviewed' });
+    await runner.publishAgentMessage({ contextToken: reservedMcpToken(servers.byokagentmessage), contentType: 'text/markdown', body: 'reviewed' });
     await runner.submitAgentResult({ contextToken: resultToken(adapter), outcome: { verdict: 'pass', score: 8 } });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await new Promise((resolve) => setTimeout(resolve, 50));

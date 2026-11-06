@@ -26,6 +26,7 @@ import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
 
 const roots: string[] = [];
 
@@ -117,14 +118,14 @@ describe('Agent memory guidance', () => {
       );
       const strictMcp = adapter.startCalls[0]?.ctx.mcpServers?.byokagentmemory;
       if (isAgentMemorySecureFilesystemAvailable()) {
-        expect(strictMcp).toMatchObject({ command: 'node', args: ['memory-mcp.js'] });
-        expect(strictMcp?.env?.BYOK_AGENT_MEMORY_CONTEXT).toMatch(/^[-a-f0-9]{36}\.[-a-f0-9]{36}$/u);
+        expect(strictMcp).toMatchObject({ command: 'node', args: ['memory-mcp.js', expect.stringMatching(/byokagentmemory-context\.json$/u)] });
+        expect(reservedMcpToken(strictMcp)).toMatch(/^[-a-f0-9]{36}\.[-a-f0-9]{36}$/u);
       } else {
         expect(strictMcp).toBeUndefined();
       }
     }
 
-    const piToken = adapters[0]?.startCalls[0]?.ctx.mcpServers?.byokagentmemory?.env?.BYOK_AGENT_MEMORY_CONTEXT;
+    const piToken = reservedMcpToken(adapters[0]?.startCalls[0]?.ctx.mcpServers?.byokagentmemory);
     if (isAgentMemorySecureFilesystemAvailable()) {
       expect(piToken).toBeTypeOf('string');
       await fs.writeFile(path.join(hostStorageRoot, 'agents', 'agent-pi', 'MEMORY.md'), 'strict task only', 'utf8');
@@ -343,12 +344,8 @@ describe('Agent memory admission follow-ups', () => {
       const { writer, reader } = await memoryRunner(mode);
       expect(writer.task.instruction).toBe(freshMemoryInstruction('instruction for writer-task'));
       expect(reader.task.instruction).toBe(freshMemoryInstruction('instruction for reader-task', { reader: true }));
-      expect(writer.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
-        BYOK_PREPARED_AGENT_MEMORY_MODE: 'read-write', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
-      });
-      expect(reader.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
-        BYOK_PREPARED_AGENT_MEMORY_MODE: 'read', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
-      });
+      expect(reservedMcpContext(writer.ctx.mcpServers?.byokagentmemory)).toMatchObject({ mode: 'read-write', toolList: 'granted' });
+      expect(reservedMcpContext(reader.ctx.mcpServers?.byokagentmemory)).toMatchObject({ mode: 'read', toolList: 'granted' });
     },
   );
 
@@ -399,17 +396,11 @@ describe('per-task Agent memory selection', () => {
     expect(adapter.startCalls).toHaveLength(3);
     const [read, readWrite, reader] = adapter.startCalls;
     expect(read!.task.instruction).toBe(`${readOnlyGuidance}\n\n${emptyMemoryBlock}\n\ninstruction for writer-read`);
-    expect(read!.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
-      BYOK_PREPARED_AGENT_MEMORY_MODE: 'read', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
-    });
+    expect(reservedMcpContext(read!.ctx.mcpServers?.byokagentmemory)).toMatchObject({ mode: 'read', toolList: 'granted' });
     expect(readWrite!.task.instruction).toBe(freshMemoryInstruction('instruction for writer-read-write'));
-    expect(readWrite!.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
-      BYOK_PREPARED_AGENT_MEMORY_MODE: 'read-write', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
-    });
+    expect(reservedMcpContext(readWrite!.ctx.mcpServers?.byokagentmemory)).toMatchObject({ mode: 'read-write', toolList: 'granted' });
     expect(reader!.task.instruction).toBe(freshMemoryInstruction('instruction for reader-read', { reader: true }));
-    expect(reader!.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
-      BYOK_PREPARED_AGENT_MEMORY_MODE: 'read', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
-    });
+    expect(reservedMcpContext(reader!.ctx.mcpServers?.byokagentmemory)).toMatchObject({ mode: 'read', toolList: 'granted' });
   });
 
   it('declines a memory-reader that selects read-write before it starts', async () => {
@@ -450,9 +441,7 @@ describe('agentMemory read-if-admitted', () => {
     const [writerRead, writerIf, readerRead, readerIf] = adapter.startCalls;
     for (const [read, ifAdmitted, name] of [[writerRead!, writerIf!, 'writer'], [readerRead!, readerIf!, 'reader']] as const) {
       expect(String(ifAdmitted.task.instruction).replace('-if', ''), name).toBe(String(read.task.instruction).replace('-read', ''));
-      expect(ifAdmitted.ctx.mcpServers?.byokagentmemory?.env, name).toMatchObject({
-        BYOK_PREPARED_AGENT_MEMORY_MODE: 'read', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
-      });
+      expect(reservedMcpContext(ifAdmitted.ctx.mcpServers?.byokagentmemory), name).toMatchObject({ mode: 'read', toolList: 'granted' });
     }
   });
 
@@ -493,9 +482,7 @@ describe('agentMemory read-write-if-admitted', () => {
     const [readWrite, ifAdmitted] = adapter.startCalls;
     expect(ifAdmitted!.task.instruction).toBe(freshMemoryInstruction('instruction for writer-rw-if'));
     expect(readWrite!.task.instruction).toBe(freshMemoryInstruction('instruction for writer-rw'));
-    expect(ifAdmitted!.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
-      BYOK_PREPARED_AGENT_MEMORY_MODE: 'read-write', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
-    });
+    expect(reservedMcpContext(ifAdmitted!.ctx.mcpServers?.byokagentmemory)).toMatchObject({ mode: 'read-write', toolList: 'granted' });
   });
 
   it('runs a writer exactly as none when the daemon does not admit memory, with no decline and no adapter MCP support', async () => {

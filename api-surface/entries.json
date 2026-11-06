@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2211893,
+      "budgetBytes": 2212993,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -592,7 +592,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 533718,
+      "budgetBytes": 534258,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2337,7 +2337,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2171271,
+      "budgetBytes": 2171829,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2441,7 +2441,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 45030,
+      "budgetBytes": 45583,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2482,7 +2482,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 45034,
+      "budgetBytes": 45587,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2523,7 +2523,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 45030,
+      "budgetBytes": 45583,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2564,7 +2564,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 45022,
+      "budgetBytes": 45553,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

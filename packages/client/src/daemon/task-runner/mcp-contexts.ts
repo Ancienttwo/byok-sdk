@@ -1,24 +1,49 @@
 // `TaskRunner` members that add the SDK-owned MCP servers and their context
 // tokens to a task (see ./support.ts for how a member module runs).
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type { AgentMessageEgressRequirement, TerminalProjectionSelection } from '@byok-sdk/protocol';
 import type { McpStdioServerConfig } from '../../types';
 import type { AgentRef } from '../../agent-home';
 import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
+import type { AgentMemoryMcpContext, SdkReservedMcpContext } from '../../sdk-reserved-helper-context';
+import { atomicWriteFile } from '../../util/atomic-write';
+import type { ExecutionScratch } from '../retention/scratch';
 import type { AgentResultContext } from './support';
 import { freshHostToolsetContextToken } from './support';
 import type { TaskRunner } from '../task-runner';
 import { HOST_TOOLSET_CONTEXT_ENV } from './state';
 
-export function withAgentMessageMcp(
+/**
+ * One reserved server's context, in the Execution's SDK directory: private to
+ * this user on POSIX by mode, on Windows by the scratch root's inherited ACL.
+ * Releasing the scratch at task disposal removes it. A mid-task revocation
+ * leaves it, because a runtime that restarts the helper must still reach the
+ * refusal of the revoked token and not a failed server start.
+ */
+async function writeMcpContextFile(
+  scratch: ExecutionScratch,
+  serverName: string,
+  context: SdkReservedMcpContext,
+): Promise<string> {
+  const file = path.join(scratch.sdkDir, `${serverName}-context.json`);
+  await atomicWriteFile(file, JSON.stringify(context), { mode: 0o600 });
+  return file;
+}
+
+export async function withAgentMessageMcp(
   this: TaskRunner,
   existing: Readonly<Record<string, McpStdioServerConfig>> | undefined,
   taskId: string,
   requirement: Readonly<AgentMessageEgressRequirement> | undefined,
-): Readonly<Record<string, McpStdioServerConfig>> | undefined {
+  scratch: ExecutionScratch,
+): Promise<Readonly<Record<string, McpStdioServerConfig>> | undefined> {
   if (requirement === undefined) return existing;
   const bin = this['deps'].agentMessageMcpBin!;
   const contextToken = `${randomUUID()}.${randomUUID()}`;
+  const contextFile = await writeMcpContextFile(scratch, AGENT_MESSAGE_MCP_SERVER_NAME, {
+    storeDir: this['deps'].storeDir, productId: this['deps'].productId, contextToken,
+  });
   this['revokeAgentMessageContext'](taskId);
   this['messageContextByToken'].set(contextToken, taskId);
   this['messageContextByTask'].set(taskId, contextToken);
@@ -26,25 +51,24 @@ export function withAgentMessageMcp(
     ...(existing ?? {}),
     [AGENT_MESSAGE_MCP_SERVER_NAME]: Object.freeze({
       command: bin.command,
-      args: Object.freeze([...bin.args]),
-      env: Object.freeze({
-        BYOK_STORE_DIR: this['deps'].storeDir,
-        BYOK_PRODUCT_ID: this['deps'].productId,
-        BYOK_AGENT_MESSAGE_CONTEXT: contextToken,
-      }),
+      args: Object.freeze([...bin.args, contextFile]),
     }),
   });
 }
 
-export function withAgentResultMcp(
+export async function withAgentResultMcp(
   this: TaskRunner,
   existing: Readonly<Record<string, McpStdioServerConfig>> | undefined,
   taskId: string,
   selection: Readonly<TerminalProjectionSelection> | undefined,
-): Readonly<Record<string, McpStdioServerConfig>> | undefined {
+  scratch: ExecutionScratch,
+): Promise<Readonly<Record<string, McpStdioServerConfig>> | undefined> {
   if (selection?.mode !== 'result-document') return existing;
   const bin = this['deps'].agentResultMcpBin!;
   const contextToken = `${randomUUID()}.${randomUUID()}`;
+  const contextFile = await writeMcpContextFile(scratch, AGENT_RESULT_MCP_SERVER_NAME, {
+    storeDir: this['deps'].storeDir, productId: this['deps'].productId, contextToken,
+  });
   this['revokeAgentResultContext'](taskId);
   const context: AgentResultContext = { taskId, token: contextToken, contract: selection.contract, schema: selection.schema };
   this['resultContextByToken'].set(contextToken, context);
@@ -53,17 +77,12 @@ export function withAgentResultMcp(
     ...(existing ?? {}),
     [AGENT_RESULT_MCP_SERVER_NAME]: Object.freeze({
       command: bin.command,
-      args: Object.freeze([...bin.args]),
-      env: Object.freeze({
-        BYOK_STORE_DIR: this['deps'].storeDir,
-        BYOK_PRODUCT_ID: this['deps'].productId,
-        BYOK_AGENT_RESULT_CONTEXT: contextToken,
-      }),
+      args: Object.freeze([...bin.args, contextFile]),
     }),
   });
 }
 
-export function withAgentMemoryMcp(
+export async function withAgentMemoryMcp(
   this: TaskRunner,
   existing: Readonly<Record<string, McpStdioServerConfig>> | undefined,
   taskId: string,
@@ -71,11 +90,16 @@ export function withAgentMemoryMcp(
   mode: 'read' | 'read-write',
   bin: {command: string; args: readonly string[]},
   toolList: 'granted' | 'complete',
-): Readonly<Record<string, McpStdioServerConfig>> {
+  scratch: ExecutionScratch,
+): Promise<Readonly<Record<string, McpStdioServerConfig>>> {
   if (existing !== undefined && Object.prototype.hasOwnProperty.call(existing, AGENT_MEMORY_MCP_SERVER_NAME)) {
     throw new Error(`MCP server name "${AGENT_MEMORY_MCP_SERVER_NAME}" is reserved by the daemon`);
   }
   const contextToken = `${randomUUID()}.${randomUUID()}`;
+  const context: AgentMemoryMcpContext = {
+    storeDir: this['deps'].storeDir, productId: this['deps'].productId, contextToken, mode, toolList,
+  };
+  const contextFile = await writeMcpContextFile(scratch, AGENT_MEMORY_MCP_SERVER_NAME, context);
   this['revokeAgentMemoryContext'](taskId);
   this['memoryContextByToken'].set(contextToken, Object.freeze({ taskId, agentRef: Object.freeze({ ...agentRef }), mode }));
   this['memoryContextByTask'].set(taskId, contextToken);
@@ -83,14 +107,7 @@ export function withAgentMemoryMcp(
     ...(existing ?? {}),
     [AGENT_MEMORY_MCP_SERVER_NAME]: Object.freeze({
       command: bin.command,
-      args: Object.freeze([...bin.args]),
-      env: Object.freeze({
-        BYOK_STORE_DIR: this['deps'].storeDir,
-        BYOK_PRODUCT_ID: this['deps'].productId,
-        BYOK_AGENT_MEMORY_CONTEXT: contextToken,
-        BYOK_PREPARED_AGENT_MEMORY_MODE: mode,
-        ...(toolList === 'granted' ? { BYOK_AGENT_MEMORY_TOOL_LIST: 'granted' } : {}),
-      }),
+      args: Object.freeze([...bin.args, contextFile]),
     }),
   });
 }

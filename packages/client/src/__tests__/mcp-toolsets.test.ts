@@ -26,6 +26,7 @@ import { testIngressBudget } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
+import { reservedMcpToken } from './fixtures/execution-scratch';
 
 // A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
 const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
@@ -898,7 +899,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
     // The memory lane has its own context token and its own authority; the
     // toolset nonce is not a general-purpose daemon credential.
     expect(servers.byokagentmemory?.env?.BYOK_HOST_TOOLSET_CONTEXT).toBeUndefined();
-    expect(servers.byokagentmemory?.env?.BYOK_AGENT_MEMORY_CONTEXT).toBeDefined();
+    expect(reservedMcpToken(servers.byokagentmemory)).toBeDefined();
     expect(servers.saleskoread?.env?.BYOK_HOST_TOOLSET_CONTEXT).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
     adapter.sessions[0]?.emit({ type: 'turn_end' });
