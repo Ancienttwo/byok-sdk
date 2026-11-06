@@ -7,6 +7,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { HermesAdapter, type HermesAdapterOptions } from '../adapters/hermes/hermes-adapter';
 import { hermesProfileConfig } from '../adapters/hermes/hermes-home';
+import { HermesProjection } from '../adapters/hermes/projection';
+import { classifyToolCall } from '../tool-authorization';
 import { sealRuntimeOperationManifest, SteerUnsupportedError, type Session, type MessageDraftDelta } from '../types';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
@@ -285,6 +287,38 @@ describe('HermesAdapter prepare', () => {
   });
 });
 
+describe('HermesProjection tool calls', () => {
+  const content = (text: string) => [{ type: 'content', content: { type: 'text', text } }];
+  const toolUse = (update: Record<string, unknown>) => {
+    const events: AgentEvent[] = [];
+    new HermesProjection().update({ sessionUpdate: 'tool_call', toolCallId: 'c1', ...update }, (event) => events.push(event));
+    return events[0] as Extract<AgentEvent, { type: 'tool_use' }>;
+  };
+  const longPath = `/outside/${'d'.repeat(120)}/deep.txt`;
+
+  // The first five updates are from real Hermes 0.22.2+2364.g0b10b9f.
+  it.each<[string, Record<string, unknown>, string, unknown]>([
+    ['a file write', { title: 'write_file: /outside/a.txt', kind: 'edit', locations: [{ path: '/outside/a.txt' }], content: content('Preparing write to /outside/a.txt.') }, 'write_file', { path: '/outside/a.txt' }],
+    ['a title that cut the path', { title: `write_file: ${longPath.slice(0, 60)}...`, kind: 'edit', locations: [{ path: longPath }], content: content('Preparing write.') }, 'write_file', { path: longPath }],
+    ['a read with no content', { title: 'read_file: a.txt', kind: 'read', locations: [{ path: '/outside/a.txt' }], content: null }, 'read_file', { path: '/outside/a.txt' }],
+    ['a shell command whose title dropped the redirect', { title: 'terminal: echo hi', kind: 'execute', locations: [], content: content('$ echo hi > term.txt') }, 'terminal', { command: 'echo hi > term.txt' }],
+    ['a V4A patch, which names no path', { title: 'patch', kind: 'edit', locations: [], content: content('Preparing patch edit for patch input.') }, 'patch', content('Preparing patch edit for patch input.')],
+    ['code, which is not a shell command', { title: 'execute_code: print(1)', kind: 'execute', locations: [], content: content('Running Python helper script') }, 'execute_code', content('Running Python helper script')],
+    ['a title that is not a tool name', { title: 'Run the tests: all', kind: 'other', locations: [] }, 'Run the tests: all', undefined],
+    ['a tool with its own arguments', { title: 'custom: x', kind: 'other', locations: [{ path: 'a' }], rawInput: { path: 'b' }, content: content('{}') }, 'custom', { path: 'b' }],
+  ])('projects %s', (_label, update, tool, input) => {
+    const event = toolUse(update);
+    expect(event.tool).toBe(tool);
+    expect(event.input).toEqual(input);
+  });
+
+  it('lets the classifier see a write outside the workspace', () => {
+    const event = toolUse({ title: 'write_file: /outside/a.txt', kind: 'edit', locations: [{ path: '/outside/a.txt' }], content: content('Preparing write.') });
+    expect(classifyToolCall({ toolName: event.tool, input: event.input as Record<string, unknown>, cwd: '/workspace' }, '/workspace', '/home'))
+      .toMatchObject({ level: 'high', reasons: ['write-outside-workspace'] });
+  });
+});
+
 // Every test here opens a gateway. Its ready wait, which on Windows includes a
 // PowerShell process-table walk, has the adapter's 20 s budget; the test timeout
 // stays above it so a slow start fails with the adapter's error.
@@ -320,8 +354,8 @@ describe('HermesAdapter session', { timeout: 30_000 }, () => {
     expect(await turn(session)).toEqual([
       { type: 'progress', text: 'Hello' },
       { type: 'progress', text: ' turn 1' },
-      { type: 'tool_use', tool: 'terminal: ls', toolCallId: 't1', input: { command: 'ls' } },
-      { type: 'tool_result', tool: 'terminal: ls', toolCallId: 't1', output: 'file.txt' },
+      { type: 'tool_use', tool: 'terminal', toolCallId: 't1', input: { command: 'ls' } },
+      { type: 'tool_result', tool: 'terminal', toolCallId: 't1', output: [{ type: 'content', content: { type: 'text', text: 'terminal result' } }] },
       { type: 'progress', text: 'Done.' },
       { type: 'usage', inputTokens: 11, outputTokens: 3, totalTokens: 14, contextTokens: 20, contextWindow: 1000, contextSource: 'provider' },
       { type: 'turn_end' },

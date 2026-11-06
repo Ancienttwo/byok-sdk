@@ -5,6 +5,30 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
 const count = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 
+/** `build_tool_title` writes `<tool_name>: <preview>`, or the bare name when the arguments give no preview. */
+const toolName = (title: string): string => /^(\S+): /.exec(title)?.[1] ?? title;
+
+/**
+ * Hermes sends `rawInput` only for tools it does not render itself, so its
+ * file and terminal tools carry their arguments in other fields. A path comes
+ * from `locations`, and only the first one is kept: a call that names several
+ * files is classified on that one. A shell command comes from the `$ ` line of
+ * `content`, the one place Hermes keeps it whole; the title preview drops
+ * redirects. A V4A `patch` has no path in any field until its result, so it
+ * reaches the classifier with no target.
+ * Delete this parsing and `toolName` with the Hermes upgrade that sends `rawInput`: https://github.com/NousResearch/hermes-agent/issues/149876
+ */
+function toolInput(update: Record<string, unknown>): unknown {
+  if (update.rawInput !== undefined && update.rawInput !== null) return update.rawInput;
+  const location = record(Array.isArray(update.locations) ? update.locations[0] : undefined);
+  if (typeof location?.path === 'string' && location.path.length > 0) return { path: location.path };
+  if (update.kind === 'execute' && Array.isArray(update.content)) {
+    const text = update.content.map((block) => record(record(block)?.content)).find((block) => block?.type === 'text')?.text;
+    if (typeof text === 'string' && text.startsWith('$ ')) return { command: text.slice(2) };
+  }
+  return update.content;
+}
+
 /**
  * Maps one ACP session's `session/update` notifications and the
  * `session/prompt` answer to SDK events. Text arrives as deltas
@@ -69,9 +93,9 @@ export class HermesProjection {
     let known = this.tools.get(toolCallId);
     if (known === undefined) {
       if (kind !== 'tool_call') return;
-      known = { tool: typeof update.title === 'string' && update.title.length > 0 ? update.title : 'tool', done: false };
+      known = { tool: typeof update.title === 'string' && update.title.length > 0 ? toolName(update.title) : 'tool', done: false };
       this.tools.set(toolCallId, known);
-      const input = update.rawInput ?? update.content;
+      const input = toolInput(update);
       emit({ type: 'tool_use', tool: known.tool, toolCallId, ...(input === undefined || input === null ? {} : { input }) });
     }
     const status = update.status;

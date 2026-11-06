@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Fixed (client)** — all-mode tool reminders now fire for Hermes. They never
+  did before, because the classifier got a display title and no arguments for
+  every Hermes call. Hosts see Hermes `tool_use` and `tool_result` events
+  change: `tool` goes from a title such as `write_file: inside.txt` to the name
+  `write_file`, and `tool_use.input` goes from the ACP content array to
+  `{ path }` or `{ command }`. `write_file` and `patch` now count as mutating
+  tools, so a write outside the workspace raises a reminder, and the command
+  and sensitive-path rules apply. Calls with neither a path nor a command keep
+  their content array. A V4A `patch` names no path until its result, so a V4A
+  write outside the workspace raises no reminder.
 - **Internal (client)** — the `byokagentmessage`, `byokagentresult` and
   `byokagentmemory` MCP entries carry no `env`. Their token, store directory,
   product id and memory settings live in a mode `0600` file in the Execution's
