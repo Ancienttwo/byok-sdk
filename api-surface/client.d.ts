@@ -559,7 +559,7 @@ export interface DshModelSelection {
      */
     readonly keyEnv: string;
 }
-/** dsh's own sandbox modes (`DSH_PERMISSION_MODE`). `danger-full-access` also sets approval to `never`; the other two ask, and every ask is cancelled. */
+/** dsh's own sandbox modes (`DSH_PERMISSION_MODE`). `danger-full-access` also sets approval to `never`; the other two ask, but the bridge has no approval channel, so dsh refuses the request and returns it to the model as a tool error. */
 export type DshSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only';
 export interface DshAdapterOptions {
     /**
@@ -575,8 +575,9 @@ export interface DshAdapterOptions {
     model: DshModelSelection;
     /**
      * dsh's sandbox for every session (`DSH_PERMISSION_MODE`). Default
-     * `danger-full-access`, as for Codex: no human answers a dsh approval, so
-     * every escalation the narrower modes ask for is cancelled.
+     * `danger-full-access`, as for Codex: the bridge has no approval channel, so
+     * dsh refuses every escalation the narrower modes ask for and returns it to
+     * the model as a tool error.
      */
     sandbox?: DshSandboxMode;
     /** Absolute product native asset directory; scoped to this adapter. */
@@ -594,14 +595,13 @@ export interface DshAdapterOptions {
     interruptTimeoutMs?: number;
 }
 /**
- * DeepSeek Harness over ACP (`dsh --profile acp`), through the SDK's dsh
- * profile on the vendored OAR ACP stack. Each session runs one dsh process
- * in an SDK-owned `DSH_HOME`, with a per-execution `--patch` overlay that
- * names the provider route, its key variable and the model. The process
- * starts in the execution scratch directory, not the workspace, so dsh does
- * not load a workspace `.env`; the workspace is the ACP session cwd. The SDK
- * owns the process, the environment, the record budget and the permission
- * policy (requests are cancelled).
+ * DeepSeek Harness through the vendored OAR dsh runtime: a private plugin
+ * loaded into `dsh --profile acp`, with the ACP protocol plugin off. Each
+ * session runs one dsh process in an SDK-owned `DSH_HOME`, with a per-execution
+ * `--patch` overlay that names the provider route and its key variable. The
+ * process starts in the execution scratch directory, not the workspace, so dsh
+ * does not load a workspace `.env`; the workspace is the session cwd. The SDK
+ * owns the process, the environment and the record budget.
  *
  * `dsh` is not a frozen wire runtime id, so a task reaches this adapter by the
  * custom-harness identity (`harnessId: 'dsh'`).

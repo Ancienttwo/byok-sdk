@@ -53,6 +53,21 @@
   their content array. A V4A `patch` names no path until its result, so a V4A
   write outside the workspace raises no reminder.
 
+- **Breaking (client; #1469)** — dsh now runs on the vendored OAR dsh runtime, a
+  private plugin inside `dsh --profile acp`, not over ACP. A Host MCP entry for
+  dsh takes stdio `command` and `args` only. An entry with `type: 'http'` or
+  non-empty `env` or `headers` is refused at start without a retry; before this
+  release dsh passed `env` through. A Host-owned server that needs env cannot
+  run under dsh. Do not move a token into `args`, because dsh persistence of MCP
+  entries is unaudited. Hosts also see these changes: `steer` is now supported;
+  `tool_use.input` is the structured native object instead of JSON text, so tool
+  authorization reads the whole input; `usage` adds billed tokens; a failed turn
+  reports the class dsh gives it, and a native rate limit is retryable; a resume
+  of an unknown session or from another workspace is a typed `authority` failure.
+  Tool arguments that are not a JSON object fail the session. A dsh execution is
+  now one prompt on one process: `followUp` is refused and a later turn resumes
+  the session in a new process. dsh is closed at the root turn end, so background
+  subagents and jobs stop there and their unfinished work is lost.
 - **Breaking (client; #1469)** — a Host toolset server no longer receives
   `BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR` or `BYOK_PRODUCT_ID`, and its MCP
   entry carries no `env`. In a task run the daemon appends one path as the

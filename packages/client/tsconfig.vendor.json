@@ -12,7 +12,7 @@
     "vendor/rpiv-todo/2.15.0/**/*.ts",
     "vendor/oar/0e92470/**/*.ts",
     "src/bin/pi-todo-runtime.js",
-    "src/runtime/dsh-acp-session.js",
+    "src/runtime/dsh-session-runtime.js",
     "vendor/pi-tui/0.85.1/**/*.d.ts",
     "vendor/get-east-asian-width/1.6.0/**/*.d.ts"
   ],

@@ -5,6 +5,7 @@
 // packages/client/src/runtime/codex-session-runtime.js,
 // packages/client/src/runtime/oar-process-tree.js,
 // packages/client/src/runtime/acp-session-runtime.js,
+// packages/client/src/runtime/dsh-session-runtime.js,
 // packages/client/src/runtime/oar-failure-runtime.js, this test, and
 // scripts/api-surface/oar-bridge-types.ts.
 // The bridge is outside the API golden. New type exports need explicit checks.
@@ -67,7 +68,24 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
     ['../../vendor/oar/0e92470/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
     ['../../vendor/oar/0e92470/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
     ['../../vendor/oar/0e92470/runtimes/antigravity/session.js', [['antigravitySession', 'antigravitySession']]],
-    ['./dsh-acp-session.js', [['dshSession', 'dshSession']]],
+  ]);
+});
+
+test('OAR dsh JS bridge re-exports the checked vendored values', () => {
+  const source = readFileSync(path.join(repoRoot, 'packages/client/src/runtime/dsh-session-runtime.js'), 'utf8');
+  const { body } = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+  const reexports = body.map((statement) => {
+    assert.equal(statement.type, 'ExportNamedDeclaration');
+    return [
+      statement.source?.value,
+      statement.specifiers.map(({ local, exported }) => [local.name, exported.name]),
+    ];
+  });
+  assert.deepEqual(reexports, [
+    ['../../vendor/oar/0e92470/runtimes/dsh/session.js', [['dshSession', 'dshSession']]],
+    ['../../vendor/oar/0e92470/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
+    ['../../vendor/oar/0e92470/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
+    ['../../vendor/oar/0e92470/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
   ]);
 });
 

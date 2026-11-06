@@ -82,5 +82,3 @@ export type StartAcpSession = (
 export declare const grokSession: StartAcpSession;
 /** OAR's Antigravity profile: `agy acp --dangerously-skip-permissions --process-per-session`. */
 export declare const antigravitySession: StartAcpSession;
-/** The SDK's dsh profile on the vendored ACP stack: `dsh --profile acp`, plus the adapter's `--patch <file>`. */
-export declare const dshSession: StartAcpSession;

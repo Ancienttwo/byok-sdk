@@ -153,7 +153,7 @@ type AcpBridgeSession = {
   dispose: AdapterSession['dispose'];
 };
 
-export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError' | 'RuntimeFailureError' | 'UnsupportedOptionError' | 'grokSession' | 'antigravitySession' | 'dshSession'>>;
+export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError' | 'RuntimeFailureError' | 'UnsupportedOptionError' | 'grokSession' | 'antigravitySession'>>;
 export type CheckAcpRuntimeFailure = Assert<Assignable<VendorRuntimeFailureError, AcpBridge.RuntimeFailureError>>;
 export type CheckAcpRuntimeFailureFields = Assert<Equal<Pick<VendorRuntimeFailureError, 'name'>, Pick<AcpBridge.RuntimeFailureError, 'name'>>>;
 export type CheckAcpUnsupportedOption = Assert<Assignable<VendorUnsupportedOptionError, AcpBridge.UnsupportedOptionError>>;
@@ -162,7 +162,6 @@ export type CheckGrokVendor = Assert<Equal<typeof vendorGrokSession, VendorStart
 export type CheckGrokBridge = Assert<Equal<typeof AcpBridge.grokSession, AcpBridge.StartAcpSession>>;
 export type CheckAntigravityVendor = Assert<Equal<typeof vendorAntigravitySession, VendorStartAcp>>;
 export type CheckAntigravityBridge = Assert<Equal<typeof AcpBridge.antigravitySession, AcpBridge.StartAcpSession>>;
-export type CheckDshBridge = Assert<Equal<typeof AcpBridge.dshSession, AcpBridge.StartAcpSession>>;
 export type CheckAcpNotFound = Assert<Equal<AcpBridge.SessionNotFoundError, VendorSessionNotFoundError>>;
 export type CheckAcpNotFoundConstructor = Assert<Equal<
   ConstructorParameters<typeof AcpBridge.SessionNotFoundError>,
@@ -212,3 +211,37 @@ export type CheckCodexFailureParameters = Assert<Equal<Parameters<typeof Failure
 export type CheckCodexFailureClass = Assert<Equal<ReturnType<typeof FailureBridge.codexFailure>['failure'], ReturnType<typeof vendorCodexFailure>['failure']>>;
 export type CheckCodexFailureFromText = Assert<Equal<ReturnType<typeof FailureBridge.codexFailure>['fromText'], Field<ReturnType<typeof vendorCodexFailure>, 'fromText'>>>;
 export type CheckCodexFailureVendor = Assert<Assignable<typeof vendorCodexFailure, typeof FailureBridge.codexFailure>>;
+
+// The dsh bridge: the vendored native runtime, narrowed to what the SDK calls.
+// 'queue' and 'withdraw' are omitted on purpose, as for Codex. The runtime reports steer; the vendored session always returns it for the qualified dsh.
+import type * as DshBridge from '../../packages/client/src/runtime/dsh-session-runtime.js';
+import type { dshSession as vendorDshSession, DshSessionHooks } from '../../packages/client/vendor/oar/0e92470/runtimes/dsh/session.js';
+import type { DshLineProcess } from '../../packages/client/vendor/oar/0e92470/runtimes/dsh/launch.js';
+
+type VendorDshArgs = Parameters<typeof vendorDshSession>;
+type DshBridgeArgs = Parameters<typeof DshBridge.dshSession>;
+type DshBridgeOptions = { cwd: string; model: string; resume?: string; mcpServers?: VendorDshArgs[2]['mcpServers']; launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> } };
+type DshVendorSession = Awaited<ReturnType<typeof vendorDshSession>>;
+type DshBridgeSession = {
+  readonly id: AdapterSession['id'];
+  prompt(...args: FirstInput<AdapterSession['prompt']>): Promise<DshBridge.DshControl>;
+  steer(...args: FirstInput<DshVendorSession['steer']>): Promise<DshBridge.DshControl>;
+  abort(...args: Parameters<AdapterSession['abort']>): Promise<DshBridge.DshControl>;
+  records(): readonly DshBridge.DshRecord[];
+  dispose: AdapterSession['dispose'];
+};
+export type CheckDshExports = Assert<Equal<keyof typeof DshBridge, 'dshSession' | 'SessionNotFoundError' | 'RuntimeFailureError' | 'UnsupportedOptionError'>>;
+export type CheckDshOptions = Assert<Equal<Mutable<DshBridgeArgs[2]>, DshBridgeOptions>>;
+export type CheckDshVendorOptions = Assert<Assignable<DshBridgeArgs[2], VendorDshArgs[2]>>;
+export type CheckDshHooks = Assert<Assignable<DshHooksFromBridge, Partial<Mutable<DshSessionHooks>> | undefined>>;
+type DshHooksFromBridge = DshBridgeArgs[3];
+export type CheckDshControl = Assert<Equal<DshBridge.DshControl, BridgeControl>>;
+export type CheckDshRecord = Assert<Equal<DshBridge.DshRecord, Flatten<BridgeRecord>>>;
+export type CheckDshSession = Assert<Equal<DshBridge.RawDshSession, DshBridgeSession>>;
+export type CheckDshSessionMembers = Assert<Equal<
+  Exclude<keyof DshVendorSession, 'capabilities' | 'goal' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
+  keyof DshBridge.RawDshSession
+>>;
+export type CheckDshVendorSession = Assert<Assignable<DshVendorSession, DshBridge.RawDshSession>>;
+export type CheckDshSpawn = Assert<Assignable<ReturnType<typeof spawnOwnedLineProcess>, DshLineProcess>>;
+export type CheckDshNotFound = Assert<Equal<DshBridge.SessionNotFoundError, VendorSessionNotFoundError>>;

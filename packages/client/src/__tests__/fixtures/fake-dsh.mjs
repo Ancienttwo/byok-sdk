@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 // Fake DeepSeek Harness CLI for offline adapter tests. It calls no model and
-// reads no credential. Frame shapes follow the dsh 0.2.1-rc.5 ACP server as
-// probed in docs/researches/2026-11-01-dsh-adapter.md §2.
+// reads no credential. It stands in for dsh with the OAR bridge plugin loaded:
+// the same JSON lines, with native payloads as probed on dsh 0.2.1-rc.5
+// (docs/researches/2026-11-06-oar-0.91.0-dsh-bridge.md).
 //
 // argv: `--version` prints FAKE_DSH_VERSION (default 0.2.2-rc.1).
 // `--profile acp --help` writes $DSH_HOME/profiles/acp and exits 0
-// (FAKE_DSH_NO_ACP=1: exits 2). `--profile acp --patch <file>` serves ACP.
-// The prompt text selects the scenario (see `prompt` below).
+// (FAKE_DSH_NO_ACP=1: exits 2). `--profile acp --patch <sdk> --patch <bridge>`
+// serves the bridge. The prompt text selects the scenario (see `prompt` below).
 // FAKE_DSH_LOG receives one JSON line per observed fact.
-// FAKE_DSH_ROUTE overrides the model route session/new reports.
+// FAKE_DSH_ROUTE overrides the model route the first request reports.
+// FAKE_DSH_NO_STEER=1: `open` reports no native steer.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -28,85 +30,93 @@ if (args[2] === '--help') {
   log({ kind: 'help', cwd: process.cwd() });
   process.exit(0);
 }
-if (args[2] !== '--patch' || args.length !== 4) { process.stderr.write(`unexpected argv ${JSON.stringify(args)}\n`); process.exit(64); }
+if (args[2] !== '--patch' || args[4] !== '--patch' || args.length !== 6) { process.stderr.write(`unexpected argv ${JSON.stringify(args)}\n`); process.exit(64); }
 
 const patch = JSON.parse(readFileSync(args[3], 'utf8'));
-const acp = patch.find((entry) => entry.id === 'acp')?.config;
-const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => /^(DSH_|FAKE_|TEST_)/.test(name)));
-log({ kind: 'start', argv: args, cwd: process.cwd(), env, patch, pid: process.pid });
+const overlay = JSON.parse(readFileSync(args[5], 'utf8'));
+const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => /^(DSH_|FAKE_|TEST_|TMPDIR$)/.test(name)));
+log({ kind: 'start', argv: args, cwd: process.cwd(), env, patch, overlay, pid: process.pid });
 
 const sessions = path.join(home, 'fake-sessions');
-const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
-const result = (id, value = {}) => send({ id, result: value });
-const error = (id, code, message) => send({ id, error: { code, message } });
-const update = (sessionId, value) => send({ method: 'session/update', params: { sessionId, update: value } });
-const configOptions = () => [{
-  id: 'model', name: 'Model', category: 'model', type: 'select',
-  currentValue: process.env.FAKE_DSH_ROUTE ?? JSON.stringify([acp.provider, acp.model]),
-  options: [],
-}];
+const write = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
+const event = (sessionId, type, data = {}) => write({ type: 'native', channel: 'session/event', sessionId, event: { type, data } });
+const assistant = (sessionId, content, usage) => event(sessionId, 'assistant/message', { message: { role: 'assistant', content }, usage });
+const toolCall = (sessionId, callId, name, args) => {
+  assistant(sessionId, [{ type: 'tool-call', id: callId, name, arguments: args }], { inputTokens: 90, outputTokens: 5, totalTokens: 95 });
+  event(sessionId, 'tool/call', { callId, name, arguments: args });
+};
+let route;
 let hanging;
-let reverseId = 0;
-const reverse = new Map();
 
-function prompt(id, sessionId, text) {
-  if (text === 'fail') return error(id, -32603, 'Internal error: turn failed: 401: {"message":"invalid api key"}');
-  if (text === 'rate-limit') return error(id, -32603, 'Internal error: turn failed: 429: {"message":"rate limit exceeded"}');
+function prompt(sessionId, text) {
+  event(sessionId, 'turn/start');
+  const end = (reason) => event(sessionId, 'turn/end', { reason });
+  if (text === 'fail') return end({ kind: 'error', error: { code: 'AUTH', status: 401, message: 'invalid api key' } });
+  if (text === 'rate-limit') return end({ kind: 'error', error: { code: 'RATE_LIMIT', status: 429, message: 'rate limit exceeded' } });
   if (text === 'exit') process.exit(3);
-  if (text === 'hang') { hanging = { id, sessionId }; return; }
-  if (text === 'permission') {
-    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_p', title: 'bash', kind: 'other', status: 'in_progress', rawInput: { command: 'echo x > ../out', sandbox_permissions: 'danger-full-access' } });
-    reverseId += 1;
-    reverse.set(reverseId, (answer) => {
-      log({ kind: 'permission-answer', answer });
-      update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'call_p', status: 'failed', content: [{ type: 'content', content: { type: 'text', text: 'Error: approval was cancelled' } }] });
-      result(id, { stopReason: 'end_turn' });
-    });
-    return send({ id: reverseId, method: 'session/request_permission', params: { sessionId, toolCall: { toolCallId: 'call_p' }, options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' }] } });
+  if (text === 'hang') { hanging = sessionId; return; }
+  const [provider, ...model] = (process.env.FAKE_DSH_ROUTE ?? route).split('/');
+  event(sessionId, 'request/header', { header: { config: { provider, model: model.join('/') } } });
+  event(sessionId, 'request/context', { contextWindow: 1000 });
+  if (text === 'long-input') {
+    toolCall(sessionId, 'call_long', 'bash', JSON.stringify({ command: `echo ${'a'.repeat(12000)}; git push origin main`, description: 'long' }));
+    return end({ kind: 'completed' });
   }
-  if (text === 'tool-inputs') {
-    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_long', title: 'bash', kind: 'other', status: 'in_progress', rawInput: { command: `echo ${'a'.repeat(12_000)}; git push origin main` } });
-    update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_text', title: 'bash', kind: 'other', status: 'in_progress', rawInput: 'git push origin main' });
-    return result(id, { stopReason: 'end_turn' });
+  if (text === 'spontaneous') {
+    assistant(sessionId, [{ type: 'text', text: 'started a subagent' }], { inputTokens: 90, outputTokens: 5, totalTokens: 95 });
+    end({ kind: 'completed' });
+    // The turn dsh opens by itself when a background child finishes.
+    event(sessionId, 'turn/start');
+    assistant(sessionId, [{ type: 'text', text: 'stray reply' }], { inputTokens: 90, outputTokens: 5, totalTokens: 95 });
+    return end({ kind: 'completed' });
   }
-  update(sessionId, { sessionUpdate: 'usage_update', used: 90, size: 1000 });
-  update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: 'm1', content: { type: 'text', text: `first message: ${text}` } });
-  update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call_1', title: 'bash', kind: 'other', status: 'in_progress', rawInput: { command: 'ls' } });
-  update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'call_1', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'a.txt\n' } }] });
-  update(sessionId, { sessionUpdate: 'agent_message_chunk', messageId: 'm2', content: { type: 'text', text: 'final answer' } });
-  update(sessionId, { sessionUpdate: 'usage_update', used: 100, size: 1000 });
-  result(id, { stopReason: 'end_turn' });
+  if (text === 'bad-input') {
+    toolCall(sessionId, 'call_bad', 'bash', 'not json');
+    return end({ kind: 'completed' });
+  }
+  assistant(sessionId, [{ type: 'text', text: `first message: ${text}` }, { type: 'tool-call', id: 'call_1', name: 'bash', arguments: '{"command":"ls"}' }], { inputTokens: 90, outputTokens: 5, totalTokens: 95 });
+  event(sessionId, 'tool/call', { callId: 'call_1', name: 'bash', arguments: '{"command":"ls"}' });
+  event(sessionId, 'tool/result', { message: { toolCallId: 'call_1', isError: false, content: [{ type: 'text', text: 'a.txt\n' }] } });
+  assistant(sessionId, [{ type: 'text', text: 'final answer' }], { inputTokens: 100, outputTokens: 7, cacheReadTokens: 20, totalTokens: 127 });
+  end({ kind: 'completed' });
 }
 
-createInterface({ input: process.stdin }).on('line', (line) => {
-  const message = JSON.parse(line);
-  if (message.method === undefined) {
-    const answer = reverse.get(message.id);
-    reverse.delete(message.id);
-    answer?.(message.result ?? message.error);
-    return;
-  }
-  log({ kind: 'request', method: message.method, params: message.params });
-  const { id, method, params } = message;
-  if (method === 'initialize') return result(id, { protocolVersion: Number(process.env.FAKE_DSH_PROTOCOL ?? 1), agentInfo: { name: 'deepseek-harness-acp', version: '0.0.1' }, agentCapabilities: { sessionCapabilities: { close: {}, list: {}, resume: {} } }, authMethods: [] });
-  if (method === 'session/new') {
-    const sessionId = process.env.FAKE_DSH_SESSION_ID ?? 'dsh-session-1';
+const commands = {
+  open(request) {
+    route = `${request.agentOptions.provider}/${request.agentOptions.model}`;
     mkdirSync(sessions, { recursive: true });
-    writeFileSync(path.join(sessions, sessionId), params.cwd);
-    return result(id, { sessionId, configOptions: configOptions() });
-  }
-  if (method === 'session/resume') {
-    if (params.sessionId === 'corrupt-session') return error(id, -32603, 'Internal error: session file is corrupt');
-    const file = path.join(sessions, params.sessionId);
-    if (!existsSync(file)) return error(id, -32602, `Invalid params: session is not resumable: ${params.sessionId}`);
-    if (readFileSync(file, 'utf8') !== params.cwd) return error(id, -32602, `Invalid params: session cwd does not match: ${params.cwd}`);
-    return result(id, { configOptions: configOptions() });
-  }
-  if (method === 'session/prompt') return prompt(id, params.sessionId, params.prompt.map((block) => block.text).join(''));
-  if (method === 'session/cancel') {
-    if (hanging) { result(hanging.id, { stopReason: 'cancelled' }); hanging = undefined; }
-    return;
-  }
-  if (method === 'session/close') return result(id, {});
-  if (id !== undefined) error(id, -32601, `Method not found: ${method}`);
+    writeFileSync(path.join(sessions, request.sessionId), request.cwd);
+    return { sessionId: request.sessionId, methods: { followup: true, steer: process.env.FAKE_DSH_NO_STEER !== '1', cancel: true }, inboxMethods: { remove: true } };
+  },
+  peek(request) {
+    const file = path.join(sessions, request.sessionId);
+    if (!existsSync(file)) throw Object.assign(new Error(`no session ${request.sessionId}`), { name: 'SessionPersistenceNotFoundError' });
+    return { header: { cwd: readFileSync(file, 'utf8') }, route: { provider: 'saved', model: 'route' } };
+  },
+  resume(request) {
+    route = `${request.agentOptions.provider}/${request.agentOptions.model}`;
+    return { sessionId: request.sessionId, methods: { followup: true, steer: true, cancel: true }, inboxMethods: { remove: true } };
+  },
+  prompt(request) {
+    setImmediate(() => prompt(request.sessionId, request.text));
+    return { messageId: 'message-1' };
+  },
+  steer(request) {
+    if (hanging === undefined) throw Object.assign(new Error('no active turn'), { code: 'no_active_turn' });
+    return { messageId: `steer-${request.text}` };
+  },
+  cancel() {
+    if (hanging === undefined) throw Object.assign(new Error('no active turn'), { code: 'no_active_turn' });
+    setImmediate(() => { event(hanging, 'turn/end', { reason: { kind: 'aborted' } }); hanging = undefined; });
+    return {};
+  },
+  dispose() { return {}; },
+};
+
+write({ type: 'ready', protocol: 1, services: {} });
+createInterface({ input: process.stdin }).on('line', (line) => {
+  const { id, method, ...request } = JSON.parse(line);
+  log({ kind: 'request', method, request });
+  try { write({ type: 'response', id, result: commands[method](request) }); }
+  catch (error) { write({ type: 'response', id, error: { name: error.name, message: error.message }, code: error.code }); }
 });

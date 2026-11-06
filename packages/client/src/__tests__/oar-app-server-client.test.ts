@@ -185,7 +185,7 @@ describe('OAR session kernel record redaction', () => {
   });
 });
 
-it('accounts for every vendored file and the sixteen maintained source deltas', () => {
+it('accounts for every vendored file and the nineteen maintained source deltas', () => {
   const root = path.resolve(import.meta.dirname, '../../vendor/oar/0e92470');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     packageVersion: string;
@@ -207,6 +207,6 @@ it('accounts for every vendored file and the sixteen maintained source deltas', 
     gitCommit: manifest.commit,
     provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.91.0',
   });
-  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['contracts/failure.ts', 'observe/events.ts', 'runtimes/codex/app-server-client.ts', 'runtimes/codex/failure.ts', 'runtimes/codex/open.ts', 'runtimes/codex/session.ts', 'runtimes/grok/session.ts', 'shared/acp/client-app.ts', 'shared/acp/errors.ts', 'shared/acp/failure.ts', 'shared/acp/process.ts', 'shared/acp/session.ts', 'shared/acp/terminal.ts', 'shared/acp/turns.ts', 'shared/executable/process-tree.ts', 'shared/failure-class.ts']);
+  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['contracts/failure.ts', 'observe/events.ts', 'runtimes/codex/app-server-client.ts', 'runtimes/codex/failure.ts', 'runtimes/codex/open.ts', 'runtimes/codex/session.ts', 'runtimes/dsh/control.ts', 'runtimes/dsh/launch.ts', 'runtimes/dsh/session.ts', 'runtimes/grok/session.ts', 'shared/acp/client-app.ts', 'shared/acp/errors.ts', 'shared/acp/failure.ts', 'shared/acp/process.ts', 'shared/acp/session.ts', 'shared/acp/terminal.ts', 'shared/acp/turns.ts', 'shared/executable/process-tree.ts', 'shared/failure-class.ts']);
   expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Apache License');
 });
