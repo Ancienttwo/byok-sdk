@@ -487,9 +487,9 @@ export const SENSITIVE_HOME_PATHS: readonly string[] = Object.freeze([
   '.ssh', '.aws', '.gnupg', '.kube', '.docker/config.json', '.config/gh', '.netrc', '.git-credentials', '.npmrc',
   '.zshrc', '.zprofile', '.bashrc', '.bash_profile', '.profile', 'Library/Keychains', 'Library/LaunchAgents', '.config/autostart',
 ]);
-const MUTATING_TOOLS = new Set(['write', 'edit', 'multiedit', 'notebookedit', 'apply_patch', 'write_file', 'patch']);
+const MUTATING_TOOLS = new Set(['write', 'edit', 'multiedit', 'notebookedit', 'apply_patch', 'write_file', 'patch', 'search_replace']);
 const MUTATING_FILE_CHANGE_KINDS = new Set(['add', 'update', 'delete']);
-const PATH_KEYS = ['path', 'file_path', 'filePath', 'notebook_path'] as const;
+const PATH_KEYS = ['path', 'file_path', 'filePath', 'notebook_path', 'target_file'] as const;
 
 function within(root: string, target: string): boolean {
   const rel = relative(root, target);

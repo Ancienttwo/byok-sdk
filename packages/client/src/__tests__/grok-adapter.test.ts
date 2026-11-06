@@ -129,7 +129,7 @@ describe('GrokAdapter sessions', () => {
     const s = await open(adapter(), { instruction: 'tool' }, await ctx());
     expect(await turn(s)).toEqual([
       { type: 'progress', text: 'Let me look. ' },
-      { type: 'tool_use', tool: 'run_terminal_command', toolCallId: 'call-1', input: '{"command":"ls"}' },
+      { type: 'tool_use', tool: 'run_terminal_command', toolCallId: 'call-1', input: { command: 'ls' } },
       { type: 'tool_result', tool: 'run_terminal_command', toolCallId: 'call-1', output: { content: [{ type: 'text', text: 'a.txt' }], exitCode: 0 } },
       { type: 'progress', text: 'Found a.txt.' },
       usage,
@@ -137,11 +137,19 @@ describe('GrokAdapter sessions', () => {
     ]);
     await s.followUp({ instruction: 'tool-failed' });
     expect(await turn(s)).toEqual([
-      { type: 'tool_use', tool: 'read_file', toolCallId: 'call-2', input: '{"path":"missing"}' },
+      { type: 'tool_use', tool: 'read_file', toolCallId: 'call-2', input: { target_file: 'missing' } },
       { type: 'tool_result', tool: 'read_file', toolCallId: 'call-2', output: { content: [{ type: 'text', text: 'not found' }] }, isError: true },
       { type: 'progress', text: 'No file.' },
       { ...usage, contextTokens: 1002 },
       { type: 'turn_end' },
+    ]);
+  });
+
+  it('keeps a tool input past OAR\'s text cap whole and leaves a non-object input unknown', async () => {
+    const s = await open(adapter(), { instruction: 'tool-inputs' }, await ctx());
+    expect((await turn(s)).slice(0, 2)).toEqual([
+      { type: 'tool_use', tool: 'run_terminal_command', toolCallId: 'call-long', input: { command: `echo ${'a'.repeat(12_000)}; git push origin main` } },
+      { type: 'tool_use', tool: 'run_terminal_command', toolCallId: 'call-text' },
     ]);
   });
 

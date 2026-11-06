@@ -17,6 +17,16 @@ const count = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 
 /**
+ * The opening update's structured `rawInput`. OAR's derived `input` is capped
+ * text, so a long field would hide the rest of the call from tool
+ * authorization; anything but an object is an unknown input.
+ */
+function nativeRawInput(body: Record<string, unknown> | undefined, callId: string): Record<string, unknown> | undefined {
+  const update = record(record(body?.native)?.update);
+  return update?.toolCallId === callId ? record(update.rawInput) : undefined;
+}
+
+/**
  * Root-session ACP records to `AgentEvent`s, from the runtime-neutral events
  * OAR derived beside each native frame. dsh sends each committed assistant
  * message as one `agent_message_chunk`, so each `text_delta` is one whole
@@ -34,7 +44,8 @@ export class DshProjection {
   /** Events for one record; `outcome` receives the root turn end, after its events. */
   consume(input: AcpRecord, emit: (event: AgentEvent) => void, outcome: (turn: DshTurnOutcome) => void): void {
     if (input.kind !== 'frame' || input.sessionId !== this.rootSessionId || input.agentPath.length > 0) return;
-    const events = record(input.body)?.events;
+    const body = record(input.body);
+    const events = body?.events;
     if (!Array.isArray(events)) return;
     // The prompt answer's frame lists `turn_ended` before its `usage`: end the turn after every other event.
     let ended: Record<string, unknown> | undefined;
@@ -47,11 +58,13 @@ export class DshProjection {
         case 'text_delta':
           if (typeof event.text === 'string' && event.text.length > 0) emit({ type: 'progress', text: event.text });
           break;
-        case 'tool_call_started':
+        case 'tool_call_started': {
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
           this.tools.set(event.callId, event.tool);
-          emit({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, ...(event.input === undefined ? {} : { input: event.input }) });
+          const raw = nativeRawInput(body, event.callId);
+          emit({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, ...(raw === undefined ? {} : { input: raw }) });
           break;
+        }
         case 'tool_call_ended': {
           if (typeof event.callId !== 'string') break;
           const tool = this.tools.get(event.callId) ?? 'tool';

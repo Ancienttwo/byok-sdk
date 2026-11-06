@@ -821,8 +821,9 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
   descriptor sets `progressMessageBoundary: 'event'` and declares no message
   draft.
   `tool_call` kinds are always `other`, with the input in `rawInput`; as for
-  Grok, `tool_use.input` is that raw input as JSON text and
-  `tool_result.output` carries the content blocks under `content`.
+  Grok, `tool_use.input` is the opening frame's `rawInput` object, left out when
+  it is not an object, and `tool_result.output` carries the content blocks under
+  `content`.
   `usage_update` carries context occupancy only (`contextTokens`,
   `contextWindow`, `contextSource: 'provider'`), never cost counters.
 - Failures: a failed turn is a JSON-RPC error with text only, so it is a

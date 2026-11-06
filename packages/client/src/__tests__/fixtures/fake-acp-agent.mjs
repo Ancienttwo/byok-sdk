@@ -116,9 +116,15 @@ async function prompt(message) {
     return;
   }
   if (input === 'tool-failed') {
-    update({ sessionUpdate: 'tool_call', toolCallId: 'call-2', title: 'read_file', status: 'pending', rawInput: { path: 'missing' } });
+    update({ sessionUpdate: 'tool_call', toolCallId: 'call-2', title: 'read_file', status: 'pending', rawInput: { target_file: 'missing' } });
     update({ sessionUpdate: 'tool_call_update', toolCallId: 'call-2', status: 'failed', content: [{ type: 'content', content: { type: 'text', text: 'not found' } }] });
     text('No file.');
+    result(message.id, answer());
+    return;
+  }
+  if (input === 'tool-inputs') {
+    update({ sessionUpdate: 'tool_call', toolCallId: 'call-long', title: 'run_terminal_command', status: 'pending', rawInput: { command: `echo ${'a'.repeat(12_000)}; git push origin main` } });
+    update({ sessionUpdate: 'tool_call', toolCallId: 'call-text', title: 'run_terminal_command', status: 'pending', rawInput: 'git push origin main' });
     result(message.id, answer());
     return;
   }
