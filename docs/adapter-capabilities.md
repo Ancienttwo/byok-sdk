@@ -26,7 +26,7 @@ the runtime does instead.
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `2.1.312` | `0.160.0` | `0.2.1-rc.5` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.5.0` | `1.5.0` |
+| Qualified version (PR CI) | — | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.5.0` | `1.5.0` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | no | yes | no |
 | Redirect the active turn | `steer` | no | yes | no | no | no | yes | no |
 | Display-only message draft | `messageDraft` | yes | yes | no | yes | yes | yes | yes |
@@ -498,7 +498,7 @@ anything below it. It drops ambient `DSH_*` variables and sets `DSH_HOME`,
 `DSH_AGENTS_HOME` (an empty `byok-agents-home` directory in that root),
 `DSH_PERMISSION_MODE` and `DSH_TELEMETRY_MODE=DISABLED` itself.
 
-dsh 0.2.1-rc.5 reads user context from `$DSH_HOME/AGENTS.md`,
+dsh 0.2.2-rc.1 reads user context from `$DSH_HOME/AGENTS.md`,
 `$DSH_HOME/skills` and `$DSH_AGENTS_HOME/skills` (default `~/.agents/skills`),
 and user MCP servers from the profile and home `cordis.patch.yml` files under
 `DSH_HOME`. With the SDK root none of the user's own copies apply, so dsh needs
@@ -776,6 +776,9 @@ per session, driven by the vendored OAR ACP session stack. The dsh profile
 (`runtime/dsh-acp-session.js`) is SDK source built on the vendored
 `acpSession`, and loads lazily through the private `#byok-acp-runtime` entry,
 beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes no dispatch selection.
+`createDaemon` and `createRuntimeAdapters` build it when `runtimeAllowlist` lists
+`dsh`, from the required `runtimes.dsh` (`home`, `model`, and optional `sandbox`
+and `versionPolicy`). The other options stay on the `DshAdapter` constructor.
 
 - Model: the required `model` option names `provider`, `model`, `keyEnv` and,
   for `custom`, `baseUrl`. The adapter writes them into the per-execution
@@ -823,7 +826,7 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
   [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)); a tool started
   within one second of that kill is not seen.
 - Detection: `dsh --version` (advisory when it is not the qualified
-  `0.2.1-rc.5`), then `dsh --profile acp --help`, which also writes the acp
+  `0.2.2-rc.1`), then `dsh --profile acp --help`, which also writes the acp
   profile into a new root (else `refused: acp_unavailable`). `authPresent`
   means the `keyEnv` variable is set; the key is not checked.
 - Egress: the DeepSeek route sends `GET https://api.deepseek.com/models` when
@@ -833,7 +836,7 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
 
 Evidence: `dsh-adapter.test.ts` (synthetic `fake-dsh.mjs`, offline) and the
 [runtime contract suite](runtime-contract.md) against the real qualified dsh.
-Locally on macOS with dsh 0.2.1-rc.5, every case passes, `dsh.close`
+Locally on macOS with dsh 0.2.2-rc.1, every case passes, `dsh.close`
 included; `dsh.sigkill` runs in CI. The design and probes are in
 [the dsh adapter plan](researches/2026-11-01-dsh-adapter.md).
 

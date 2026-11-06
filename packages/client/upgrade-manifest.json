@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.38.0",
-    "snapshotSha256": "0fa1fb244f2fa76f8d0fda58c4f221b506241538b3a4da4223af8991b085dd93"
+    "snapshotSha256": "188e67609b5e6ebaa948d68cb29309cc049abe39831d1d23f61ea9a6b60ca5a6"
   },
   "configFields": {
     "status": "tracked",
@@ -138,9 +138,26 @@
         "export:@byok-sdk/protocol/constants#TruncateOptions",
         "export:@byok-sdk/protocol/constants#truncateUtf8"
       ]
+    },
+    {
+      "id": "daemon-config-runtimes-dsh",
+      "impact": "additive",
+      "summary": "createDaemon and createRuntimeAdapters build DshAdapter when runtimeAllowlist lists dsh, from the new DaemonConfig.runtimes.dsh (home, model, sandbox, versionPolicy). home and model are required, and listing dsh without runtimes.dsh is a config error. A config that does not list dsh is unaffected, and a Host that constructs DshAdapter itself changes nothing. The qualified dsh version moves to 0.2.2-rc.1.",
+      "migration": "docs/adapter-capabilities.md#dsh-adapter-custom-harness",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=87a07d84a14860fe",
+      "after": "optional schema-sha256=54a878b606104793",
+      "entry": "daemon-config-runtimes-dsh"
+    },
     {
       "item": "example:bot-collaboration",
       "change": "changed",
@@ -162,6 +179,11 @@
       "item": "export:@byok-sdk/client#DeviceEnrollmentStatusOptions",
       "change": "changed",
       "entry": "windows-credential-koffi"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "daemon-config-runtimes-dsh"
     },
     {
       "item": "export:@byok-sdk/client/agent-memory#AgentMemoryFileObservation",

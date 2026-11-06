@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Added (client; #1469)** — `createRuntimeAdapters` and `createDaemon` build
+  `DshAdapter` when `runtimeAllowlist` lists `dsh`. `DaemonConfig.runtimes.dsh`
+  takes `home`, `model`, `sandbox` and `versionPolicy`; `home` and `model` are
+  required, and listing `dsh` without `runtimes.dsh` is a config error. dsh
+  stays on darwin and linux.
+
 - **Internal (client)** — the `byokagentmessage`, `byokagentresult` and
   `byokagentmemory` MCP entries carry no `env`. Their token, store directory,
   product id and memory settings live in a mode `0600` file in the Execution's
@@ -9,6 +15,7 @@
   runtime that stores MCP entries in plain text keeps only the path. The file
   goes when the scratch is released at task end, and a helper refuses a missing
   or unreadable file. `byokagentteam` and Host toolset context are unchanged.
+
 - **Internal (client)** — the SDK-owned OAR source moves from 0.86.0 to
   0.88.0 (`vendor/oar/be46fb3/`, upstream commit `be46fb36`). The shared ACP
   stack takes upstream's adapter-held queue, manual compaction and config-option

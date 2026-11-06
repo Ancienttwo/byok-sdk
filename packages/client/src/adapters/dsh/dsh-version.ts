@@ -8,7 +8,7 @@ import type { RuntimeVersionPolicy } from '../../types';
  * (`docs/researches/2026-11-01-dsh-adapter.md` §2). Another version is an
  * advisory, as for the other runtimes; a block is Host-only.
  */
-export const QUALIFIED_DSH_VERSION = '0.2.1-rc.5';
+export const QUALIFIED_DSH_VERSION = '0.2.2-rc.1';
 
 /** The adapter's default policy (#1103). */
 export const DSH_VERSION_POLICY: RuntimeVersionPolicy = Object.freeze({
@@ -16,7 +16,7 @@ export const DSH_VERSION_POLICY: RuntimeVersionPolicy = Object.freeze({
   unqualified: 'warn',
 });
 
-/** `dsh --version` prints the bare version, for example `0.2.1-rc.5`: the token is its first line. */
+/** `dsh --version` prints the bare version, for example `0.2.2-rc.1`: the token is its first line. */
 export function dshVersionToken(output: string): string {
   return output.trim().split('\n')[0]?.trim() ?? '';
 }
