@@ -242,6 +242,9 @@ test('Hermes adapter, fake and custody launcher paths select the Windows Hermes 
     'packages/keys/src/__tests__/hermes-provider-launcher.test.ts',
     'packages/client/src/runtime/environment.ts',
     'packages/client/src/__tests__/environment.test.ts',
+    'packages/client/src/daemon/task-runner/mcp-contexts.ts',
+    'packages/client/src/daemon/retention/scratch.ts',
+    'packages/client/src/__tests__/task-assertion-broker.test.ts',
   ]) assert.ok(selectImpact([path]).families.includes('windows-client'), path);
   // The job does not run these, so a change to them does not select it.
   for (const path of ['packages/client/src/adapters/codex/codex-adapter.ts', 'packages/keys/src/pi-provider-launcher.ts', 'packages/client/src/__tests__/hermes-pipe-open-errors.test.ts']) {

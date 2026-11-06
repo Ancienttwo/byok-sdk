@@ -971,7 +971,8 @@ jobs:
           $env:TEMP = $specialTemp
           $env:TMP = $specialTemp
           bun run --filter @byok-sdk/client test -- `
-            src/__tests__/secure-dir.test.ts
+            src/__tests__/secure-dir.test.ts `
+            src/__tests__/task-assertion-broker.test.ts
 
       - name: Run diagnostics and lifecycle lease safety tests on Windows
         run: |

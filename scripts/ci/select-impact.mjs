@@ -254,6 +254,8 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/__tests__\/(?:file-scope-(?:guard|policy|launch|tool-approval|discovery-tools)|pi-scoped-file-tools)\.test\.ts$/,
     // #1317: the win32 runtime environment base and the suite that reads the real registry.
     /^packages\/client\/src\/(?:runtime\/environment\.ts|__tests__\/environment\.test\.ts)$/,
+    // The reserved MCP context file on win32: the writer, the scratch ACL it relies on and the suite.
+    /^packages\/client\/src\/(?:daemon\/task-runner\/mcp-contexts\.ts|daemon\/retention\/scratch\.ts|__tests__\/task-assertion-broker\.test\.ts)$/,
   ],
   // #608: the real Hermes run on Windows, its fake model endpoint and the code it qualifies.
   'hermes-real-windows': [
