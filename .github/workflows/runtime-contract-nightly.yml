@@ -97,6 +97,8 @@ jobs:
             echo "run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           } > "$log"
       - name: Install the latest runtime CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: >-
           node scripts/ci/runtime-contract-install.mjs
           ${{ matrix.runtime }} latest
