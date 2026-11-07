@@ -10,6 +10,11 @@ import { grokFailureOutcome } from '../../vendor/oar/6bdd273/runtimes/grok/failu
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
+import { createAcpTurns } from '../../vendor/oar/6bdd273/shared/acp/turns';
+import { createUsageUpdateGate } from '../../vendor/oar/6bdd273/shared/acp/profile';
+import type { AcpProcess } from '../../vendor/oar/6bdd273/shared/acp/process';
+import { createSessionKernel } from '../../vendor/oar/6bdd273/shared/session-kernel';
+import { antigravityAcpProfile } from '../../vendor/oar/6bdd273/runtimes/antigravity/session';
 
 const FAKE = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
 // A runtime-neutral profile: the shared stack under test, not a vendor's.
@@ -51,6 +56,36 @@ async function turn(session: AdapterSession, records: RawEvent[], input: string)
 }
 
 describe('vendored OAR ACP session over SDK-owned processes', () => {
+  it.each(['settlement', 'interrupt'] as const)('rejects a steer waiting on spawn after %s', async (transition) => {
+    const gate = Promise.withResolvers<void>();
+    const reply = Promise.withResolvers<{ stopReason: string }>();
+    let spawned = Promise.resolve();
+    const request = vi.fn(() => reply.promise);
+    const runtime = {
+      get spawned() { return spawned; }, closed: false, exitCode: null,
+      connection: { agent: { request, notify: vi.fn(async () => {}) } },
+      observeDescendants: () => {},
+    } as unknown as AcpProcess;
+    const kernel = createSessionKernel('race');
+    const turns = createAcpTurns({ kernel, runtime, profile: antigravityAcpProfile,
+      usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+    expect(turns.begin(null, 'first').kind).toBe('accepted');
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    const state = turns.active()!;
+    spawned = gate.promise;
+    const steer = turns.steer(state, 'second', undefined, {});
+    if (transition === 'interrupt') await turns.abort(state);
+    else {
+      reply.resolve({ stopReason: 'end_turn' });
+      await vi.waitFor(() => expect(turns.active()).toBeNull());
+    }
+    gate.resolve();
+    expect(await steer).toEqual({ kind: 'rejected', code: 'no_active_turn', reason: 'not_steerable: no active turn' });
+    if (transition === 'interrupt') reply.resolve({ stopReason: 'end_turn' });
+    await vi.waitFor(() => expect(turns.active()).toBeNull());
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(kernel.records().flatMap(record => record.kind === 'frame' ? record.body.events : []).filter(event => event.kind === 'turn_ended')).toHaveLength(1);
+  });
   it('passes exactly the explicit env to the agent and to hosted terminals', async () => {
     vi.stubEnv('BYOK_ACP_AMBIENT_SECRET', 'must not inherit');
     const { dir, log } = workspace();

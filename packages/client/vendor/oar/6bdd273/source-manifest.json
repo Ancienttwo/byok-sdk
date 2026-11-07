@@ -575,8 +575,8 @@
       "path": "shared/acp/turns.ts",
       "sourcePath": "packages/oar/src/shared/acp/turns.ts",
       "upstreamSha256": "d3d732ee3aa1f9dd8c7aa7a4f564a312a61c82a8f42dd31519d8a1edc4130148",
-      "vendoredSha256": "782a6cded21f035a8da3a23aef4711555881fea90c03f6a8ce8038bab06c7e8b",
-      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp. abort has no upstream observation window (pendingCancellation is absent): it calls runtime.observeDescendants() synchronously before the native cancel, so a tool the cancel orphans stays known to the SDK process-tree authority, which kills it at dispose while it is the same process. A failed read rejects the abort with code error and sends no cancel."
+      "vendoredSha256": "5fa7ad35aba2792208c062ca53c78bbd49a07df52f8da866ad1e0feced969daf",
+      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp. abort has no upstream observation window (pendingCancellation is absent): it calls runtime.observeDescendants() synchronously before the native cancel, so a tool the cancel orphans stays known to the SDK process-tree authority, which kills it at dispose while it is the same process. A failed read rejects the abort with code error and sends no cancel. After the spawn wait, a steer whose captured turn settled or whose abort started is rejected with no_active_turn."
     },
     {
       "path": "shared/acp/usage-wait.ts",
