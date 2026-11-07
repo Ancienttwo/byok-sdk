@@ -8,7 +8,8 @@ The source for the train items below is the local `origin/train/next-minor`
 snapshot `cc7989bdcd03c432f586beda74e10d28a6d931f7`, compared with
 `origin/main` at `c7417c145afc8ae6ce3232d8555b6d1fa46000d8`. The train is
 still moving. Its manifest still names 0.39.0 as its target; it is not a
-0.40.0 release manifest. The final release manifest and CHANGELOG will be the
+0.40.0 release manifest. The additions marked as pending below also describe
+work outside that snapshot. The final release manifest and CHANGELOG will be the
 behavior authorities. This page has not been walked through and does not
 establish release, publication or production readiness.
 
@@ -69,6 +70,11 @@ The train manifest records this breaking entry; the final list is pending.
 
 ### Other changes a Host may see
 
+- **agy steer.** `AgyAdapter` declares steer and forwards it to the active turn.
+  A refused steer fails as an infrastructure error, as with dsh. Hosts using
+  steer should verify that an active agy turn accepts it and handle a refusal
+  as an infrastructure error.
+
 - `pi-web-access` moves from 0.45.0 to 0.47.0, including optional search
   providers, proxy routing fixes, PDF text results and platform-native temporary
   clone paths (#1511).
@@ -99,6 +105,35 @@ actions are pending; do not treat this section as a completed migration.
   and capability gate. The model provider sees the parameter summaries; the
   ADR also records residual secret risk and required macOS, Linux and Windows
   acceptance. Confirm each slice and its final contract before adopting it.
+  `DaemonConfig.nativeSessions` defaults off; enable it only on macOS or Linux
+  devices with a Pi memory lane and a configured `sessionDir`. Only those
+  devices declare the capability. K8 `DreamingOptions.nativeSessions` defaults
+  on as `ifAdvertised`; a harness template gets no request. Verify both sides
+  advertise `native-sessions` before expecting native-session input: the server
+  advertises it too. A device refuses an unsupported offer before claim with
+  the non-retryable code `native_sessions_unsupported`, using its own
+  `task.decline` wire row gated on the server flag. An offer from a server that
+  does not advertise the capability is a protocol violation.
+
+## OpenCode free-model onboarding: pending #1538
+
+This item is landing in the 0.40 train and is not yet merged. The SDK runs the
+official OpenCode CLI directly with its supported free models; there is no
+gateway, proxy or credential injection. Platform support is established per
+OS and version line as each passes its canary. Hosts should check the canary
+for their target before offering onboarding.
+
+The Host owns the model preference list. Examples default to
+`opencode/deepseek-v4.1-flash-free`, then `opencode/crouton-alpha-free`, then
+`opencode/beam-free`. The SDK passes the chosen model explicitly, reads back
+the session model and refuses a mismatch. Verify the selected model and the
+session model agree. If rate limited before any output, the SDK retries once
+with the next candidate and records an observable event; after output starts,
+it does not switch. Hosts should verify the event when exercising that retry.
+
+As an optional later product choice, a Host may guide users to buy DeepSeek
+pay-as-you-go credit and use their own key through the existing BYOK runtimes.
+The SDK adds nothing for this step.
 
 ## Checklist
 
