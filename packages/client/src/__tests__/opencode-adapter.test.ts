@@ -309,3 +309,46 @@ it('retries failed v1 prompt cleanup and shares concurrent and successful dispos
     await terminal?.dispose();
   }
 });
+
+it.each(['status', 'input', 'completion'] as const)('buffers ACP tool input until %s', async branch => {
+  const { OpenCodeProjection } = await import('../adapters/opencode/projection');
+  const { GrokProjection } = await import('../adapters/grok/projection');
+  const { AgyProjection } = await import('../adapters/antigravity/projection');
+  for (const projection of [new OpenCodeProjection('root'), new GrokProjection('root'), new AgyProjection('root', new Map())]) {
+    const events: AgentEvent[] = [];
+    const send = (update: Record<string, unknown>, derived: object[]) => projection.consume({ kind: 'frame', sessionId: 'root', agentPath: [], body: { native: { update }, events: derived } } as never, event => events.push(event as AgentEvent), () => {});
+    send({ toolCallId: 'c', status: 'pending', rawInput: { cwd: '/repo' } }, [{ kind: 'tool_call_started', callId: 'c', tool: 'shell' }]);
+    expect(events).toEqual([]);
+    const input = { command: 'pwd', cwd: '/repo' };
+    if (branch === 'input') send({ toolCallId: 'c', rawInput: input }, [{ kind: 'tool_call_input', callId: 'c', input: JSON.stringify(input) }]);
+    else if (branch === 'status') send({ toolCallId: 'c', status: 'in_progress', rawInput: input }, []);
+    else send({ toolCallId: 'c', status: 'completed', rawInput: input }, [{ kind: 'tool_call_input', callId: 'c', input: JSON.stringify(input) }, { kind: 'tool_call_ended', callId: 'c', result: 'ok' }]);
+    expect(events[0]).toEqual({ type: 'tool_use', tool: 'shell', toolCallId: 'c', input });
+    if (branch !== 'completion') send({ toolCallId: 'c', status: 'completed' }, [{ kind: 'tool_call_ended', callId: 'c', result: 'ok' }]);
+    expect(events.map(event => event.type)).toEqual(['tool_use', 'tool_result']);
+  }
+});
+
+it('emits dsh tool use when complete native arguments arrive', async () => {
+  const { DshProjection } = await import('../adapters/dsh/projection');
+  const projection = new DshProjection('root', 'model');
+  const events: AgentEvent[] = [];
+  projection.consume({ kind: 'frame', sessionId: 'root', agentPath: [], body: {
+    native: { data: { arguments: '{"command":"sleep 600"}' } },
+    events: [{ kind: 'tool_call_started', callId: 'c', tool: 'shell' }],
+  } } as never, event => events.push(event), () => {});
+  expect(events).toEqual([{ type: 'tool_use', tool: 'shell', toolCallId: 'c', input: { command: 'sleep 600' } }]);
+});
+
+it('flushes pending text before a directly completed ACP call', async () => {
+  const { GrokProjection } = await import('../adapters/grok/projection');
+  const { AgyProjection } = await import('../adapters/antigravity/projection');
+  for (const projection of [new GrokProjection('root'), new AgyProjection('root', new Map())]) {
+    const events: Array<{ type: string }> = [];
+    const send = (update: object, derived: object[]) => projection.consume({ kind: 'frame', sessionId: 'root', agentPath: [], body: { native: { update }, events: derived } } as never, event => events.push(event), () => {});
+    send({ toolCallId: 'c', status: 'pending', rawInput: { cwd: '/repo' } }, [{ kind: 'tool_call_started', callId: 'c', tool: 'shell' }]);
+    send({}, [{ kind: 'text_delta', text: 'waiting' }]);
+    send({ toolCallId: 'c', status: 'completed', rawInput: { command: 'pwd', cwd: '/repo' } }, [{ kind: 'tool_call_input', callId: 'c' }, { kind: 'tool_call_ended', callId: 'c', result: 'ok' }]);
+    expect(events.filter(event => event.type !== 'message_draft_delta').map(event => event.type)).toEqual(['progress', 'tool_use', 'tool_result']);
+  }
+});
