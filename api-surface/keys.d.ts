@@ -1643,6 +1643,7 @@ export declare const MODEL_PROVIDER_VENDORS: {
     readonly 'moonshotai-cn': ModelProviderVendor;
     readonly nvidia: ModelProviderVendor;
     readonly openai: ModelProviderVendor;
+    readonly 'opencode-go': ModelProviderVendor;
     readonly openrouter: ModelProviderVendor;
     readonly 'qwen-token-plan': ModelProviderVendor;
     readonly 'qwen-token-plan-cn': ModelProviderVendor;
@@ -1912,6 +1913,7 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
         "moonshotai-cn": "moonshotai-cn";
         nvidia: "nvidia";
         openai: "openai";
+        "opencode-go": "opencode-go";
         openrouter: "openrouter";
         "qwen-token-plan": "qwen-token-plan";
         "qwen-token-plan-cn": "qwen-token-plan-cn";

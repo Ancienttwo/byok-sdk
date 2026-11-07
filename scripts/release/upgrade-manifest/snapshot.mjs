@@ -227,7 +227,20 @@ function arrayLiteral(root, dir, constant) {
   const pattern = new RegExp(`^(?:export )?const ${constant}\\b[^=]*=\\s*(\\[[\\s\\S]*?\\])`, 'm');
   for (const file of listFiles(root, dir).filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))) {
     const match = pattern.exec(read(root, file));
-    if (match) return match[1].replace(/\s+/g, ' ');
+    if (match) {
+      const literal = match[1].replace(/\s+/g, ' ');
+      if (constant !== 'MODEL_PROVIDER_KINDS') return literal;
+      const catalog = read(root, `${dir}/provider-catalog.ts`);
+      const body = requireMatch(catalog, /^export const MODEL_PROVIDER_VENDORS = \{\n([\s\S]*?)^\} as const satisfies /m, 'provider-catalog.ts');
+      const kinds = body.split('\n').filter((line) => /^  \S/.test(line) && line !== '  ),').map((line) => {
+        const name = /^  (?:'([^']+)'|([a-zA-Z_$][\w$]*)):\s/.exec(line);
+        if (!name) throw new Error('MODEL_PROVIDER_VENDORS must contain named properties');
+        return name[1] ?? name[2];
+      });
+      if (kinds.length === 0) throw new Error('MODEL_PROVIDER_VENDORS has no properties');
+      if (!literal.includes('...MODEL_PROVIDER_VENDOR_IDS')) throw new Error('MODEL_PROVIDER_KINDS catalog spread not found');
+      return literal.replace('...MODEL_PROVIDER_VENDOR_IDS', JSON.stringify(kinds));
+    }
   }
   throw new Error(`${dir}: const ${constant} array literal not found`);
 }

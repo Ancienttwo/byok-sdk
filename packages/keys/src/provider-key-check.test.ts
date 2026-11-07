@@ -25,6 +25,16 @@ const answer = {
 afterEach(() => vi.useRealTimers());
 
 describe('checkProviderKey reasoning probe', () => {
+  it('sends a fresh OpenCode session header for each explicit opencode-go check', async () => {
+    const openCode = profile({ provider_kind: 'opencode-go' });
+    const fetchImpl = vi.fn<ProviderFetch>(async () => response(answer));
+    await expect(checkProviderKey(openCode, 'inert-fixture', { fetchImpl })).resolves.toBe('ok');
+    await expect(checkProviderKey(openCode, 'inert-fixture', { fetchImpl })).resolves.toBe('ok');
+    const sessions = fetchImpl.mock.calls.map(call => new Headers(call[1]?.headers).get('x-opencode-session'));
+    expect(sessions[0]).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(sessions[1]).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(sessions[0]).not.toBe(sessions[1]);
+  });
   it('retries a reasoning-only length response once and requires a final answer', async () => {
     const fetchImpl = vi.fn<ProviderFetch>()
       .mockImplementationOnce(async () => response(reasoningOnly))

@@ -200,6 +200,12 @@ difference is an earlier `provider_kind` CHECK set; see the
 Key-based BYOK: a validated provider profile, credential-backed auth headers, and
 direct transports to OpenAI-compatible and Anthropic providers.
 
+Choose `provider_kind: 'opencode-go'` explicitly for OpenCode Go. Key checks
+send a fresh `x-opencode-session` per check; the endpoint URL does not select
+this behavior. The SQLite profile schema changes when this kind is added:
+preserve the refused old store, review its configuration, provision a separate
+current-schema store, and re-enter provider keys.
+
 Status: **P5 + Pi provider launcher done** — the pure-function layer (K0), the `SecretStore` layer
 backed by the macOS Keychain and the Windows Credential Manager (K1), and the
 configure/resolve registry with pluggable profile persistence (K2) have all
