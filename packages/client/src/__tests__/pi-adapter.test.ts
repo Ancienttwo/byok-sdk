@@ -581,6 +581,14 @@ const __executionScratch = await testExecutionScratch();
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/did not yield an authoritative session id/);
   });
 
+  it('completes after overflow compaction and a successful retry', async () => {
+    const session = await startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_OVERFLOW_RECOVERY: '1' }));
+    openSessions.push(session);
+    const events = await takeEvents(session, 4);
+    expect(events).toContainEqual({ type: 'usage', inputTokens: 1, cachedInputTokens: 0, outputTokens: 2, totalTokens: 3 });
+    expect(events.at(-1)).toEqual({ type: 'turn_end' });
+  });
+
   it('fails a provider error turn with redacted diagnostics and its usage', async () => {
     const session = await startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_PROVIDER_ERROR: '1' }));
     openSessions.push(session);
