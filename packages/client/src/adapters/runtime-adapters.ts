@@ -1,3 +1,4 @@
+import { OpenCodeAdapter, type OpenCodeAdapterOptions } from './opencode/opencode-adapter';
 import type { RuntimeId } from '@byok-sdk/protocol';
 import { isAbsolute } from 'node:path';
 import type { RuntimeAdapter, RuntimeVersionPolicy } from '../types';
@@ -70,6 +71,13 @@ export interface RuntimeAdaptersRuntimes {
     /** `DshAdapterOptions.sandbox`: dsh's sandbox for every session. Default `danger-full-access`. */
     sandbox?: DshAdapterOptions['sandbox'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+  };
+  /** Required when runtimeAllowlist lists opencode. Native user configuration is inherited. */
+  opencode?: {
+    models: OpenCodeAdapterOptions['models'];
+    /** Absolute executable override, resolved before PATH. Never installs or migrates OpenCode. */
+    executable?: string;
     versionPolicy?: RuntimeVersionPolicy;
   };
   /** Required when `runtimeAllowlist` lists `agy`, and applies only then. */
@@ -151,8 +159,8 @@ export const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
  * `agy` are custom harnesses, not wire runtime ids, so each is built only when
  * `runtimeAllowlist` lists it; an unset allowlist keeps `ALL_RUNTIME_IDS`.
  */
-const SDK_BUILT_RUNTIME_IDS: readonly SdkBuiltRuntimeId[] = [...ALL_RUNTIME_IDS, 'grok', 'dsh', 'agy'];
-type SdkBuiltRuntimeId = RuntimeId | 'grok' | 'dsh' | 'agy';
+const SDK_BUILT_RUNTIME_IDS: readonly SdkBuiltRuntimeId[] = [...ALL_RUNTIME_IDS, 'grok', 'dsh', 'agy', 'opencode'];
+type SdkBuiltRuntimeId = RuntimeId | 'grok' | 'dsh' | 'agy' | 'opencode';
 
 /** The enumerated runtime options and their admitted values. */
 const RUNTIME_OPTION_VALUES: Readonly<Record<keyof RuntimeAdaptersRuntimes, Readonly<Record<string, readonly string[]>>>> = {
@@ -162,6 +170,7 @@ const RUNTIME_OPTION_VALUES: Readonly<Record<keyof RuntimeAdaptersRuntimes, Read
   grok: { compatInstructions: ['disabled', 'inherit'], agentUserMcpServers: ['excluded', 'inherit'] },
   dsh: { sandbox: ['danger-full-access', 'read-only', 'workspace-write'] },
   agy: {},
+  opencode: {},
 };
 
 /**
@@ -244,6 +253,19 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
       return buildDshAdapter(config, environment);
     case 'agy':
       return buildAgyAdapter(config, environment);
+    case 'opencode': {
+      const options = config.runtimes?.opencode;
+      if (!options) throw new DaemonConfigInvalidError([invalid('runtimes.opencode', 'OpenCode requires a Host model candidate list')]);
+      try {
+        return new OpenCodeAdapter({ models: options.models, nativeAssetRoot: config.nativeAssetRoot, ...environment,
+          ...(options.executable === undefined ? {} : { resolveBin: () => ({ command: options.executable!, source: 'env' as const }) }),
+          ...(options.versionPolicy === undefined ? {} : { versionPolicy: options.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+        });
+      } catch (error) {
+        if (error instanceof TypeError) throw new DaemonConfigInvalidError([invalid('runtimes.opencode', error.message)]);
+        throw error;
+      }
+    }
   }
 }
 
@@ -335,6 +357,11 @@ function runtimeAdaptersConfigIssues(config: RuntimeAdaptersConfig): DaemonConfi
     if (isObject(dsh)) {
       expect(isString(dsh.home), 'runtimes.dsh.home', 'a string');
       expect(isObject(dsh.model), 'runtimes.dsh.model', 'an object');
+    }
+    const opencode = record.opencode;
+    if (isObject(opencode)) {
+      expect(isStringArray(opencode.models), 'runtimes.opencode.models', 'an array of strings');
+      expect(optional(opencode.executable, isString), 'runtimes.opencode.executable', 'a string');
     }
     const agy = record.agy;
     if (isObject(agy)) {

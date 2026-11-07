@@ -88,7 +88,9 @@ export type RuntimeExecutableSource = 'config' | 'path' | 'env';
  */
 export type RuntimeDetectResult =
   | {
-    readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory; readonly versionVerdict?: RuntimeVersionVerdict;
+    readonly kind: 'available'; readonly version?: string;
+    /** Verbatim local version probe output; never an admission token. */
+    readonly rawVersion?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory; readonly versionVerdict?: RuntimeVersionVerdict;
     /** The absolute executable this probe ran (#1103 O10). Local-only and user-path sensitive: never on the wire, in audit or in a support bundle. */
     readonly executablePath?: string;
     /** Who chose that executable; present whenever `executablePath` is. */

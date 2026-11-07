@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2319244,
+      "budgetBytes": 2335678,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -121,7 +121,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 503612,
+      "budgetBytes": 519105,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -523,8 +523,8 @@
   "@byok-sdk/client#byok-acp-runtime": {
     "kind": "imports",
     "policy": {
-      "purpose": "Private ACP runtime stack (Grok, agy)",
-      "budgetBytes": 98032,
+      "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
+      "budgetBytes": 112633,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -544,8 +544,11 @@
         "@agentclientprotocol/sdk",
         "node:crypto",
         "node:fs",
+        "node:fs/promises",
+        "node:os",
         "node:path",
         "node:string_decoder",
+        "node:timers/promises",
         "node:url"
       ],
       "lazyImports": [],
@@ -559,8 +562,11 @@
         "workspace": [
           "node:crypto",
           "node:fs",
+          "node:fs/promises",
+          "node:os",
           "node:path",
           "node:string_decoder",
+          "node:timers/promises",
           "node:url"
         ],
         "thirdParty": []
@@ -2428,7 +2434,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2296499,
+      "budgetBytes": 2312919,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

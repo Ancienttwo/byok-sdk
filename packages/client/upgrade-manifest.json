@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "88ad9a725c801252441aee2f0ee69531227b49b806e05f14f9cceb5decc3c4d0"
+    "snapshotSha256": "23c86101e54898df3069437d6e6802db3ee2895991d2f7c65a1d859ef6e836a3"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,22 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "opencode-native-runtime",
+      "impact": "additive",
+      "summary": "Opt-in OpenCodeAdapter (harnessId opencode) and runtimes.opencode.models select an explicit Host candidate through native ACP, refuse mismatching model readback, and retry once on a pre-output rate limit with a progress model_switch record. Native user context, MCP and transcript storage are inherited; all isolation guarantees are false. RuntimeDetectResult.rawVersion retains local probe output separately from normalized version. Platform canaries and task-scoped Host MCP qualification remain pending; no platform or default qualified version is advertised.",
+      "migration": "docs/adapter-capabilities.md#opencode-implementation-and-qualification-1538",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#OpenCodeAdapter",
+        "export:@byok-sdk/client#OpenCodeAdapterOptions",
+        "export:@byok-sdk/client#RuntimeDetectResult",
+        "export:@byok-sdk/client/adapters#OpenCodeAdapter",
+        "export:@byok-sdk/client/adapters#OpenCodeAdapterOptions",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+        "export:@byok-sdk/client/adapters#RuntimeDetectResult"
+      ]
+    },
     {
       "id": "native-session-sealed-decline",
       "impact": "additive",
@@ -161,6 +177,13 @@
       "entry": "native-session-dream-device-wiring"
     },
     {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=f94f04553cc5444a",
+      "after": "optional schema-sha256=bef6a1db2b3b066f",
+      "entry": "opencode-native-runtime"
+    },
+    {
       "item": "entry:@byok-sdk/core/system-tool",
       "change": "added",
       "entry": "linux-secret-service-store"
@@ -188,9 +211,24 @@
       "entry": "pi-memory-lane-audit-mode"
     },
     {
+      "item": "export:@byok-sdk/client#OpenCodeAdapter",
+      "change": "added",
+      "entry": "opencode-native-runtime"
+    },
+    {
+      "item": "export:@byok-sdk/client#OpenCodeAdapterOptions",
+      "change": "added",
+      "entry": "opencode-native-runtime"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
       "change": "changed",
       "entry": "native-session-dream-device-wiring"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "opencode-native-runtime"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
@@ -213,9 +251,29 @@
       "entry": "koffi-native-assets-3-3-7"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#OpenCodeAdapter",
+      "change": "added",
+      "entry": "opencode-native-runtime"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#OpenCodeAdapterOptions",
+      "change": "added",
+      "entry": "opencode-native-runtime"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
       "change": "changed",
       "entry": "native-session-dream-device-wiring"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "opencode-native-runtime"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "opencode-native-runtime"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",

@@ -287,11 +287,12 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
   }
   const result = value as Record<string, unknown>;
   if (!Object.hasOwn(result, 'kind')) throw new TypeError('invalid runtime detection result');
-  const { kind, version, authPresent, advisory, versionVerdict, executablePath, executableSource } = result;
+  const { kind, version, rawVersion, authPresent, advisory, versionVerdict, executablePath, executableSource } = result;
   if (kind === 'available') {
-    if (Object.keys(result).some((key) => !['kind', 'version', 'authPresent', 'advisory', 'versionVerdict', 'executablePath', 'executableSource'].includes(key))
+    if (Object.keys(result).some((key) => !['kind', 'version', 'rawVersion', 'authPresent', 'advisory', 'versionVerdict', 'executablePath', 'executableSource'].includes(key))
       || !isExecutableFields(executablePath, executableSource)
       || (version !== undefined && typeof version !== 'string')
+      || (rawVersion !== undefined && typeof rawVersion !== 'string')
       || (authPresent !== undefined && typeof authPresent !== 'boolean')
       || (advisory !== undefined && !isAdvisory(advisory))
       || (versionVerdict !== undefined && !isVersionVerdict(versionVerdict))) {
@@ -311,6 +312,7 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
     return Object.freeze({
       kind,
       ...(version === undefined ? {} : { version }),
+      ...(rawVersion === undefined ? {} : { rawVersion }),
       ...(authPresent === undefined ? {} : { authPresent }),
       ...(executablePath === undefined ? {} : { executablePath: executablePath as string }),
       ...(executableSource === undefined ? {} : { executableSource: executableSource as RuntimeExecutableSource }),

@@ -154,7 +154,7 @@ type AcpBridgeSession = {
   dispose: AdapterSession['dispose'];
 };
 
-export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError' | 'RuntimeFailureError' | 'UnsupportedOptionError' | 'grokSession' | 'antigravitySession'>>;
+export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError' | 'RuntimeFailureError' | 'UnsupportedOptionError' | 'grokSession' | 'antigravitySession' | 'opencodeSession'>>;
 export type CheckAcpRuntimeFailure = Assert<Assignable<VendorRuntimeFailureError, AcpBridge.RuntimeFailureError>>;
 export type CheckAcpRuntimeFailureFields = Assert<Equal<Pick<VendorRuntimeFailureError, 'name'>, Pick<AcpBridge.RuntimeFailureError, 'name'>>>;
 export type CheckAcpUnsupportedOption = Assert<Assignable<VendorUnsupportedOptionError, AcpBridge.UnsupportedOptionError>>;
@@ -182,7 +182,7 @@ export type CheckAcpVendorSession = Assert<Assignable<AdapterSession, AcpBridge.
 export type CheckAcpParameters = Assert<Equal<AcpBridgeArgs, [
   spawn: typeof spawnOwnedLineProcess,
   spawnTerminal: typeof spawnOwnedTerminalProcess,
-  installation: BridgeInstallation,
+  installation: Mutable<Pick<Executable, 'kind' | 'via' | 'command' | 'version'>>,
   options: AcpBridgeOptions,
   hooks?: Mutable<AcpBridgeHooks>,
 ]>>;
@@ -245,3 +245,7 @@ export type CheckDshSessionMembers = Assert<Equal<
 export type CheckDshVendorSession = Assert<Assignable<DshVendorSession, DshBridge.RawDshSession>>;
 export type CheckDshSpawn = Assert<Assignable<ReturnType<typeof spawnOwnedLineProcess>, DshLineProcess>>;
 export type CheckDshNotFound = Assert<Equal<DshBridge.SessionNotFoundError, VendorSessionNotFoundError>>;
+
+import type { opencodeSession as vendorOpenCodeSession } from '../../packages/client/vendor/oar/45488e7/runtimes/opencode/session.js';
+export type CheckOpenCodeVendor = Assert<Equal<typeof vendorOpenCodeSession, VendorStartAcp>>;
+export type CheckOpenCodeBridge = Assert<Equal<typeof AcpBridge.opencodeSession, AcpBridge.StartAcpSession>>;

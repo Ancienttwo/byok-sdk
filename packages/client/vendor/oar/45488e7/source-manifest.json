@@ -440,6 +440,45 @@
       "vendoredSha256": "7bccf92f8b7c7413707a0401fe4efb9d23ab7db9358c190df1921c76b5a2bd96"
     },
     {
+      "path": "runtimes/opencode/attribution.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/attribution.ts",
+      "upstreamSha256": "75db23dfd90ac037564081c7ce3834eced9b07768a32f66b6e1f750a5282afa3",
+      "vendoredSha256": "75db23dfd90ac037564081c7ce3834eced9b07768a32f66b6e1f750a5282afa3"
+    },
+    {
+      "path": "runtimes/opencode/compaction.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/compaction.ts",
+      "upstreamSha256": "f75a7b8a17363b953efadd0d4ae79ac55b6dc327354b7caa6c3cd81bf960f6ea",
+      "vendoredSha256": "f75a7b8a17363b953efadd0d4ae79ac55b6dc327354b7caa6c3cd81bf960f6ea"
+    },
+    {
+      "path": "runtimes/opencode/options.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/options.ts",
+      "upstreamSha256": "7ef5a8fd08b2ad299f5c5bd35fae0dd3ed5594b13b745bc091334e4d54dc74e6",
+      "vendoredSha256": "7ef5a8fd08b2ad299f5c5bd35fae0dd3ed5594b13b745bc091334e4d54dc74e6"
+    },
+    {
+      "path": "runtimes/opencode/prompt-config.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/prompt-config.ts",
+      "upstreamSha256": "3d12ae7fbe27916eb6042b407d6ff77a80f3497a60a1671f902933c9b645e768",
+      "vendoredSha256": "4ce16666d4f4e6833c0ddc0bd900067511d9ba6482b465d7f50fc6e04a3c77fe",
+      "delta": "Require an injected owned query runner and build query environments from the explicit session environment only; retain native prompt validation, agent readback and cleanup."
+    },
+    {
+      "path": "runtimes/opencode/session.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/session.ts",
+      "upstreamSha256": "177bdb2de8c2f2acb2732ec00bca50918d95a4d06c907ffeb527f37d62a3e551",
+      "vendoredSha256": "b69cde0001c3ff20c56252921742f84c47d55e94b6b5633d18b13e9db3a3ea3b",
+      "delta": "Inject SDK-owned line and terminal processes, explicit environment and hooks; require the probed release token; run bounded prompt configuration queries through the owned terminal seam without sealSession."
+    },
+    {
+      "path": "runtimes/opencode/version.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/version.ts",
+      "upstreamSha256": "642c9de79fedf92628606a57943d91dd07625af723423099da073a5d0f01c179",
+      "vendoredSha256": "e3e587e3f4d355cc50cab3b34fa5bd63f1ba6562c8fd511ed97e6e538ad62125",
+      "delta": "Require the SDK-probed executable version instead of launching another version process."
+    },
+    {
       "path": "shared/abort-fallback.ts",
       "sourcePath": "packages/oar/src/shared/abort-fallback.ts",
       "upstreamSha256": "665fad321bdcfc1b1e9d67f7f8beb621e2d796cd61383d8fb2d27e52573670a3",
@@ -615,6 +654,12 @@
       "vendoredSha256": "e7358de620f170bcd2b4ec1e46d98a6fe58a1e6d52dfe5dc535c090a713af6be"
     },
     {
+      "path": "shared/environment.ts",
+      "sourcePath": "packages/oar/src/shared/environment.ts",
+      "upstreamSha256": "6548ab8cdae0eac04b04d3a3609bbeecf8f0fda759fffbb906738d9795c17f4d",
+      "vendoredSha256": "6548ab8cdae0eac04b04d3a3609bbeecf8f0fda759fffbb906738d9795c17f4d"
+    },
+    {
       "path": "shared/executable/process-tree.ts",
       "sourcePath": "packages/oar/src/shared/executable/process-tree.ts",
       "upstreamSha256": "721f8b5b7577ab68b24048dd6fbcc2034b2da0b11d1e3636f1b7a085c37bd38e",
@@ -669,6 +714,12 @@
       "sourcePath": "packages/oar/src/shared/native-error.ts",
       "upstreamSha256": "771f4d97eaf7904808b3e5b3676cc4d054e9b57c17b6b3e0359e1ad0b9e54108",
       "vendoredSha256": "771f4d97eaf7904808b3e5b3676cc4d054e9b57c17b6b3e0359e1ad0b9e54108"
+    },
+    {
+      "path": "shared/private-temp.ts",
+      "sourcePath": "packages/oar/src/shared/private-temp.ts",
+      "upstreamSha256": "08cfbca95f8cec40afc04dfd08b3693e8d8af9c1b4124f15dbe5f08b566b66df",
+      "vendoredSha256": "08cfbca95f8cec40afc04dfd08b3693e8d8af9c1b4124f15dbe5f08b566b66df"
     },
     {
       "path": "shared/record-retention.ts",

@@ -839,6 +839,39 @@ export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from '../
 export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from '../runtime/environment';
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
+export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './opencode/opencode-adapter';
+// ==== @byok-sdk/client dist/adapters/opencode/opencode-adapter.d.ts ====
+import type { spawn as nodeSpawn } from 'node:child_process';
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
+import type { ResolvedBin } from '../codex/resolve-bin';
+export interface OpenCodeAdapterOptions {
+    /** Ordered Host model ids. The SDK has no default and does not consult prices or a model catalog. */
+    models: readonly string[];
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
+    /** No default qualification policy exists until native OS/line canaries pass. */
+    versionPolicy?: RuntimeVersionPolicy;
+    /** Internal: marks the source of a daemon-configured policy. */
+    versionPolicySource?: 'adapter-option' | 'daemon-config';
+    resolveBin?: () => ResolvedBin;
+    nativeAssetRoot?: string;
+    spawnFn?: typeof nodeSpawn;
+    maxRetainedBytes?: number;
+    interruptTimeoutMs?: number;
+}
+/** Native OpenCode ACP, addressed through harnessId `opencode`; never touches user configuration or login storage. */
+export declare class OpenCodeAdapter implements RuntimeAdapter {
+    private readonly options;
+    private readonly environment;
+    private readonly policy?;
+    constructor(options: OpenCodeAdapterOptions);
+    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    runtimeEnvironment(): Promise<import("..").RuntimeEnvironment>;
+    private probe;
+    detect(): Promise<RuntimeDetectResult>;
+    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    private start;
+}
 // ==== @byok-sdk/client dist/adapters/packaging.d.ts ====
 import { type SdkPackagingFormat } from '../sdk-native-assets';
 export type { SdkPackagingFormat } from '../sdk-native-assets';
@@ -1283,6 +1316,7 @@ export interface CopyPiRuntimeAssetsOptions {
  */
 export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;
 // ==== @byok-sdk/client dist/adapters/runtime-adapters.d.ts ====
+import { type OpenCodeAdapterOptions } from './opencode/opencode-adapter';
 import type { RuntimeId } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, RuntimeVersionPolicy } from '../types';
 import { type RuntimeEnvironmentPolicy } from '../runtime/environment';
@@ -1348,6 +1382,13 @@ export interface RuntimeAdaptersRuntimes {
         /** `DshAdapterOptions.sandbox`: dsh's sandbox for every session. Default `danger-full-access`. */
         sandbox?: DshAdapterOptions['sandbox'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+        versionPolicy?: RuntimeVersionPolicy;
+    };
+    /** Required when runtimeAllowlist lists opencode. Native user configuration is inherited. */
+    opencode?: {
+        models: OpenCodeAdapterOptions['models'];
+        /** Absolute executable override, resolved before PATH. Never installs or migrates OpenCode. */
+        executable?: string;
         versionPolicy?: RuntimeVersionPolicy;
     };
     /** Required when `runtimeAllowlist` lists `agy`, and applies only then. */
@@ -10332,6 +10373,7 @@ export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sd
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 export { classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES, TOOL_FILE_ACCESS, } from './tool-authorization';
 export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolAuthorizationMode, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolFileAccess, ToolFileScope, ToolFileScopeRoot, ToolReminder, ToolRisk, ToolRiskReason, ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule, } from './tool-authorization';
+export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './adapters/opencode/opencode-adapter';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
@@ -14265,6 +14307,8 @@ export type RuntimeExecutableSource = 'config' | 'path' | 'env';
 export type RuntimeDetectResult = {
     readonly kind: 'available';
     readonly version?: string;
+    /** Verbatim local version probe output; never an admission token. */
+    readonly rawVersion?: string;
     readonly authPresent?: boolean;
     readonly advisory?: RuntimeDetectionAdvisory;
     readonly versionVerdict?: RuntimeVersionVerdict;

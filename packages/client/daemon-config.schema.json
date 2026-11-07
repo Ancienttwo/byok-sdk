@@ -1576,6 +1576,160 @@
           ],
           "description": "Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only."
         },
+        "opencode": {
+          "type": "object",
+          "properties": {
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "executable": {
+              "type": "string",
+              "description": "Absolute executable override, resolved before PATH. Never installs or migrates OpenCode."
+            },
+            "versionPolicy": {
+              "type": "object",
+              "properties": {
+                "qualifiedVersion": {
+                  "type": "string",
+                  "description": "The normalized token this SDK was qualified against, for example `0.160.0`."
+                },
+                "unqualified": {
+                  "enum": [
+                    "allow",
+                    "block",
+                    "warn"
+                  ],
+                  "description": "What an unmatched token means. A descriptor default may not use `block`; only a Host layer may."
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Explicitly known-good versions outside the qualified range."
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions that must stay a warning even where `unqualified` is `allow`."
+                },
+                "block": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions this Host refuses before claim. Host layer only."
+                }
+              },
+              "required": [
+                "qualifiedVersion",
+                "unqualified"
+              ]
+            }
+          },
+          "required": [
+            "models"
+          ],
+          "description": "Required when runtimeAllowlist lists opencode. Native user configuration is inherited."
+        },
         "agy": {
           "type": "object",
           "properties": {

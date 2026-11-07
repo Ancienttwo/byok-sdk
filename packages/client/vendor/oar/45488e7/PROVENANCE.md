@@ -2,9 +2,11 @@
 
 Source: https://github.com/botiverse/oar, version 0.94.0, fixed commit `45488e745abc9e320da9adb2df851b249160c74e`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 113 source files plus LICENSE. Ninety-four source files keep upstream bytes. Nineteen source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the Codex goal-event projection, and the manual-compaction operation that the Codex session composes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options}.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok and Antigravity install, update, inventory, model-list and account-usage modules are not included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 121 source files plus LICENSE. 99 source files keep upstream bytes. 22 source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the Codex goal-event projection, and the manual-compaction operation that the Codex session composes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options}.ts`) with their import closure. The OpenCode session and its prompt, attribution, compaction and version helpers are also selected, with shared environment and private-temp helpers. No Cursor, CLI, arena, executable manager or branded resources are included. The Grok and Antigravity install, update, inventory, model-list and account-usage modules are not included.
 
 Upstream's native dsh runtime is selected through `runtimes/dsh/`: `bridge.ts`, `jobs.ts`, `mcp.ts`, `options.ts` and `projection.ts` keep upstream bytes, and `launch.ts`, `control.ts` and `session.ts` carry BYOK changes. `version.ts`, `install.ts`, `installation.ts`, `list-models.ts` and `index.ts` are not selected: the SDK adapter owns version reading, installation and model selection.
+
+The OpenCode closure is selected from OAR 0.94.0 at the same pinned commit. Its three maintained deltas keep SDK process ownership, the explicit environment and the SDK-probed version; native profile behavior stays upstream-owned.
 
 The SDK typechecks this source with the ES2024 library (`packages/client/tsconfig.json`, `scripts/api-surface/tsconfig.oar-bridge.json`). The emit target stays ES2022, and the Node 24 engine floor provides the ES2023/ES2024 built-ins upstream uses (`Array.prototype.toSorted`, `Promise.withResolvers`).
 
@@ -31,15 +33,14 @@ attestation bundles, read offline:
   Annotated tag object `ee244a2f82bdf770e86cb3168f923cd096299275`
   (`refs/tags/v0.94.0`) dereferences to it, with commit message
   `chore: release v0.94.0 (#695)`.
-- All 114 `upstreamSha256` values match that commit's blobs. LICENSE is
+- All 122 `upstreamSha256` values match that commit's blobs. LICENSE is
   byte-identical to the previous base. There is no root NOTICE file;
   no brand assets enter the selected closure.
 
 `source-manifest.json` records the package identity, release integrity, source
 commit and attestation endpoint under `release`. The scheduled advisory scan
 therefore queries the upstream base as `@botiverse/oar@0.94.0`, not a bare
-commit. That npm identity covers the released upstream base, not the nineteen
-maintained BYOK deltas, which have no separate OSV package identity.
+commit. That npm identity covers the released upstream base, not the maintained BYOK deltas, which have no separate OSV package identity.
 
 ## Maintained deltas
 
@@ -60,15 +61,19 @@ Policy: follow upstream. A file is maintained only where the SDK's ownership of 
 - `shared/acp/errors.ts`. Invariant: process diagnostics stay SDK-owned. Upstream's optional native diagnostic bundle (and its executable-manager dependency) is not imported; `acpProcessExitedError(exitCode)` keeps the transport's bounded exit message.
 - `contracts/failure.ts`, `shared/failure-class.ts`, `runtimes/codex/failure.ts` and `shared/acp/failure.ts`. Invariant: a failure class that a text rule chose is marked, so the SDK sends it as `unknown`. Every `FailedTurn` variant and `Classified` take an optional `fromText: true`. `acpFailureOutcome` sets it on its `classifyFailure` fallback, and `failureFromErrorBody` sets it on a class from Anthropic's 400 wording (`anthropicLimitText`), which Codex `codexErrorInfo` `other` carries through. The class itself, and so every OAR consumer of `failure`, is unchanged.
 
+- `runtimes/opencode/session.ts`. Invariant: every CLI or prompt query uses the SDK process-tree authority. The wrapper takes the same injected processes, explicit environment and record hooks as other ACP sessions, requires the SDK-probed release token, and omits `withSessionCredentials`/`sealSession`. Prompt queries use the owned terminal seam with a 2 MiB output budget and a deadline whose failure awaits disposal. Native v1 prompt preparation/readback/cleanup, v2 prompt refusals, child attribution and compaction retain upstream behavior.
+- `runtimes/opencode/version.ts`. Invariant: one selected executable and one version probe. Require the version the SDK already probed; no second unowned probe or executable manager.
+- `runtimes/opencode/prompt-config.ts`. Invariant: query processes see only the explicit runtime environment. Require the injected query runner and call `sessionEnvironment` with an empty inherited environment. Retain the native overlay and agent readback; the adapter exposes appended Agent-reader personas only, and never queries or edits user configuration itself.
+
 The SDK adapters own the retained-record budget (`maxRetainedBytes`, default 16 MiB) and the Codex operation deadlines (`operationTimeoutMs`, default 30000ms); see the last history section. The SDK releases the retained stream at completion. The SDK JS/declaration bridge (`src/runtime/codex-session-runtime.{js,d.ts}`) exposes text-only `prompt` and `steer`, `abort`, `records` and `dispose`; `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
 
 The SDK bridge `src/runtime/oar-failure-runtime.{js,d.ts}` re-exports two failure tables: `codexFailure` (`runtimes/codex/failure.ts`) and `failureFromStatus` (`shared/failure-class.ts`). The Codex and Claude adapters classify a failed turn with them, so the class reaches the `task.fail` terminal (#869), not BYOK events. The Codex adapter sends `unknown` for a `codexFailure` result marked `fromText`. `scripts/api-surface/oar-bridge-types.ts` checks the bridge and that the protocol's `RuntimeFailureClass` equals `FailureClass`.
 
 The SDK bridge `src/runtime/dsh-session-runtime.{js,d.ts}` exposes the dsh session with text-only `prompt` and `steer`, `abort`, `records` and `dispose`, and the typed open errors. It has no ACP dependency, and `queue`, `withdraw` and `stopTask` are named omissions. `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
 
-The SDK bridge `src/runtime/acp-session-runtime.{js,d.ts}` declares one start signature for every vendored ACP runtime: text-only `prompt`, `abort`, `records` and `dispose`. It exports `grokSession` from the Grok profile and `antigravitySession` from the Antigravity profile, which keep upstream bytes. The build emits it as the private `#byok-acp-runtime` entry, so `@agentclientprotocol/sdk` loads only when an ACP session starts, never with `@byok-sdk/client/adapters`. `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
+The SDK bridge `src/runtime/acp-session-runtime.{js,d.ts}` declares one start signature for every vendored ACP runtime: text-only `prompt`, `abort`, `records` and `dispose`. It exports `grokSession`, `antigravitySession` and `opencodeSession`; OpenCode requires a probed executable version in the installation. The build emits it as the private `#byok-acp-runtime` entry, so `@agentclientprotocol/sdk` loads only when an ACP session starts, never with `@byok-sdk/client/adapters`. `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
 
-Not vendored: `shared/session-credentials.ts`, `shared/seal-session.ts`, `shared/environment.ts`, `shared/home-initialization.ts`, the executable manager and its diagnostics, the shared ACP connection pool (`shared/acp/routing.ts`, `shared-session.ts`, `shared-wire.ts`), observe modules outside the selected closure, and all runtimes other than Codex, dsh, the Grok session and the Antigravity session. One upstream npm dependency enters the SDK: `@agentclientprotocol/sdk`, exact pin `1.4.0` (the version in OAR's lockfile at this commit, Apache-2.0), which owns the ACP wire. `cross-spawn` does not enter; the terminal delta replaces it.
+Not vendored: `shared/session-credentials.ts`, `shared/seal-session.ts`, `shared/home-initialization.ts`, the executable manager and its diagnostics, the shared ACP connection pool (`shared/acp/routing.ts`, `shared-session.ts`, `shared-wire.ts`), observe modules outside the selected closure, and all runtimes other than Codex, dsh, the Grok session, the Antigravity session and the OpenCode session. One upstream npm dependency enters the SDK: `@agentclientprotocol/sdk`, exact pin `1.4.0` (the version in OAR's lockfile at this commit, Apache-2.0), which owns the ACP wire. `cross-spawn` does not enter; the terminal delta replaces it.
 
 ## History
 

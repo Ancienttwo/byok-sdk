@@ -630,3 +630,5 @@ export type {
   ToolAuthorizationVerdict, ToolCall, ToolFileAccess, ToolFileScope, ToolFileScopeRoot, ToolReminder, ToolRisk, ToolRiskReason,
   ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule,
 } from './tool-authorization';
+
+export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './adapters/opencode/opencode-adapter';
