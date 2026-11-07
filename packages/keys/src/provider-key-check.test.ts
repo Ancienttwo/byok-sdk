@@ -3,6 +3,7 @@ import { checkProviderKey } from './provider-key-check';
 import { OpenAiCompatibleChatClient } from './openai-client';
 import type { ProviderFetch } from './http';
 import { parseModelProviderProfile, type ModelProviderProfileInput } from './provider-profile';
+import packageManifest from '../package.json' with { type: 'json' };
 
 const profile = (overrides: Partial<ModelProviderProfileInput> = {}) => parseModelProviderProfile({
   adapter: 'openai_compatible', auth_mode: 'bearer',
@@ -25,6 +26,11 @@ const answer = {
 afterEach(() => vi.useRealTimers());
 
 describe('checkProviderKey reasoning probe', () => {
+  it('identifies the keys package version in OpenCode Go checks', async () => {
+    const fetchImpl = vi.fn<ProviderFetch>(async () => response(answer));
+    await checkProviderKey(profile({ provider_kind: 'opencode-go' }), 'inert-fixture', { fetchImpl });
+    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get('user-agent')).toBe(`@byok-sdk/keys/${packageManifest.version}`);
+  });
   it('sends a fresh OpenCode session header for each explicit opencode-go check', async () => {
     const openCode = profile({ provider_kind: 'opencode-go' });
     const fetchImpl = vi.fn<ProviderFetch>(async () => response(answer));

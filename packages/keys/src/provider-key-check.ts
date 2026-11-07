@@ -1,3 +1,4 @@
+import packageManifest from '../package.json' with { type: 'json' };
 import { AnthropicMessagesClient } from './anthropic-client';
 import type { ProviderKeyCheckOutcome } from './custody';
 import { ByokKeysError } from './errors';
@@ -40,7 +41,7 @@ export async function checkProviderKey(
     const headers = new Headers(init?.headers);
     // Pi's withOpenCodeSessionHeader sends the session id for OpenCode Go routing.
     headers.set('x-opencode-session', sessionId);
-    headers.set('user-agent', '@byok-sdk/keys');
+    headers.set('user-agent', `@byok-sdk/keys/${packageManifest.version}`);
     return (options.fetchImpl ?? fetch)(input, { ...init, headers });
   };
   const client = profile.adapter === 'anthropic'
