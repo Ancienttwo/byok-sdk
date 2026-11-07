@@ -63,6 +63,13 @@ describe('boundFailureReason (#1124)', () => {
     expect(boundFailureReason(`before ${secret} after`)).toBe('before [redacted] after');
   });
 
+  it('redacts armor through the real end after marker-shaped header text', () => {
+    const input = 'before -----BEGIN PGP PRIVATE KEY BLOCK-----\nComment: -----END PGP PRIVATE KEY BLOCK-----\n\nsynthetic-key-body\n-----END PGP PRIVATE KEY BLOCK----- after';
+    expect(redactSecrets(input)).toBe('before [redacted] after');
+    expect(boundFailureReason(input)).toBe('before [redacted] after');
+    expect(redactSecrets('before -----BEGIN PGP PRIVATE KEY BLOCK-----\nComment: header\n-----END PGP PRIVATE KEY BLOCK-----\nsynthetic-key-body')).toBe('before [redacted]');
+  });
+
   it('leaves ordinary diagnostics and closed codes untouched', () => {
     for (const text of [
       'claude process exited (code=1, signal=null); stderr: error: unknown option --frobnicate',
