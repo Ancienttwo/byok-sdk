@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2318257,
+      "budgetBytes": 2319081,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -192,7 +192,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 73377,
+      "budgetBytes": 73941,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2428,7 +2428,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2295512,
+      "budgetBytes": 2296336,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

@@ -8,6 +8,7 @@ import { copySdkNativeAssets } from '@byok-sdk/client';
 const root = await mkdtemp(path.join(tmpdir(), 'sdk-native-sea-'));
 const assets = path.join(root, 'assets');
 let host;
+let hostExited;
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const until = async check => { const deadline = Date.now() + 15_000; while (!check()) { if (Date.now() > deadline) throw Error('native SEA fixture condition timed out'); await new Promise(r => setTimeout(r, 50)); } };
 try {
@@ -26,6 +27,7 @@ try {
     assert.deepEqual(credentials(assets), { status: 'unpaired', roundTrip: true, cleared: true });
     let output = '', errors = '';
     host = spawn(executable, ['--host', assets], { cwd: root, env: { SystemRoot: process.env.SystemRoot, PATH: process.env.PATH, TEMP: root, TMP: root } });
+    hostExited = new Promise((resolve, reject) => { host.once('exit', resolve); host.once('error', reject); });
     host.stdout.on('data', chunk => { output += chunk; });
     host.stderr.on('data', chunk => { errors += chunk; });
     await until(() => output.includes('\n') || host.exitCode !== null);
@@ -53,4 +55,8 @@ try {
     assert.deepEqual(credentials(assets), { failed: 'DeviceCredentialStoreUnavailableError' });
     console.log('Windows x64 relocated SEA ownership, credential round trip and missing or modified assets refusal passed');
   }
-} finally { host?.kill('SIGKILL'); await rm(root, { recursive: true, force: true }); }
+} finally {
+  host?.kill('SIGKILL');
+  await hostExited;
+  await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+}

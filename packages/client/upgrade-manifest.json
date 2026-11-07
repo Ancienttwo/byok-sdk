@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "fad8cb379c54aab6e1dbbe95bea2165f55dd2aae8b1407d504082d2f812b1b62"
+    "snapshotSha256": "88ad9a725c801252441aee2f0ee69531227b49b806e05f14f9cceb5decc3c4d0"
   },
   "configFields": {
     "status": "tracked",
@@ -63,7 +63,7 @@
     {
       "id": "k8-dream-compaction-veto",
       "impact": "additive",
-      "summary": "K8 and H retain dream intents until their results sync (#1490), using compactVeto to refuse compaction while dreams.open owns the occurrence. H now runs full dreaming through K8 package exports (#1516), with per-scope configuration, shared model selection, instruction and pack limits, skip reasons and success-only mark advancement. H stores dream state outside the bounded frame in one dream_state row per scope; store.migrate() creates the table. H and L share userFirst and the autonomous intent set for routine Turns, bot_request Turns and dreams; H does not add device slot reservation. The obsolete recordUnsupportedDream helper and DREAM_UNSUPPORTED_ON_H export are removed with the unsupported H path. K8 sealed routine creation and resealing validate Host templates with HostOfferSealedPayloadSchema, accepting agentMemoryCommit: on-success-if-advertised (#1506); cloud enqueue owns resolution and the device wire is unchanged.",
+      "summary": "K8 and H retain dream intents until their results sync (#1490), using compactVeto to refuse compaction while dreams.open owns the occurrence. H now runs full dreaming through K8 package exports (#1516), with per-scope configuration, shared model selection, instruction and pack limits, skip reasons and success-only mark advancement. H stores dream state outside the bounded frame in one dream_state row per scope; store.migrate() creates the table. H and L share userFirst and the autonomous intent set for routine Turns, bot_request Turns and dreams; H does not add device slot reservation. The obsolete recordUnsupportedDream helper and DREAM_UNSUPPORTED_ON_H export are removed with the unsupported H path. K8 sealed routine creation and resealing validate Host templates with HostOfferSealedPayloadSchema, accepting agentMemoryCommit: on-success-if-advertised (#1506); cloud enqueue owns resolution and the device wire is unchanged. With BotOptions.history, the dream mark advances only through settled history rows actually read. No completed row read after the mark skips that day with no_new_turns and leaves the mark unchanged, just as in K8-state mode; a Bot whose history authority never returns completed rows never dreams. Hosts vendoring K8 should copy the updated example.",
       "migration": "examples/bot-collaboration/README.md#compaction",
       "items": [
         "example:bot-collaboration"
@@ -169,7 +169,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=84817467889ca31d",
-      "after": "K8 0.0.1 src-sha256=6f79dd51175c5cc2",
+      "after": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
       "entry": "k8-dream-compaction-veto"
     },
     {

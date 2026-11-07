@@ -478,12 +478,13 @@ new BotCollaboration(server, ledger, { ...options,
   to the first Turn that is still queued or processing, so a Turn that user input
   overtook is covered by a later dream. A blocked Turn does not stop the run; if it
   later completes, no dream covers it. With `BotOptions.history`, K8 reads the rows
-  there with `turnId` set to the dream's intent key, but the mark comes from K8
-  state, so a history authority that lags can miss a Turn. A failed read skips that
-  day. An authority that returns no rows gives an empty
-  pack, so the dream only tidies memory. The pack fills what `instructionMaxBytes`
-  leaves after the fixed text. The first dream window starts when dreaming was
-  set up for the Bot; older Turns of an upgraded ledger still go into its pack.
+  there with `turnId` set to the dream's intent key. The mark advances only through
+  the settled rows that history returned. A failed read skips that day; no completed
+  row read after the mark skips it with `no_new_turns`, leaving the mark unchanged,
+  just as in K8-state mode. A Bot whose history authority never returns completed
+  rows never dreams. The pack fills what `instructionMaxBytes` leaves after the fixed text.
+  The first dream window starts when dreaming was set up for the Bot; older Turns
+  of an upgraded ledger still go into its pack.
 - **Native sessions.** `dreaming.nativeSessions` defaults to `true` and requests
   native session input for the same window when the device advertises support.
   Set it to `false` to omit the request. The device switch is off by default;

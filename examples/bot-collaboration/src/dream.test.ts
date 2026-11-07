@@ -12,6 +12,7 @@ import { BOT_DREAM, botRoutines, routineCalendar } from './routines';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
 import { TENANT_A, createHarness } from '../../../packages/cloud/src/__tests__/support/harness';
 import { seedCollaboration } from './commit-vectors.test-support';
+import { historyRowFromTurn } from './rules/context';
 
 let fixture: TestHost | undefined, bot: BotCollaboration | undefined, clock = 0;
 afterEach(async () => { await bot?.close(); await fixture?.close(); bot = fixture = undefined; });
@@ -243,4 +244,32 @@ it('reads an external history with the dream key, fits the instruction limit, an
   fail = true;
   await due();
   expect(record()?.last).toMatchObject({ outcome: 'skipped', reason: 'history_unavailable' });
+});
+
+it.each(['lagging', 'empty', 'failed'] as const)('advances the dream mark only through rows read when history is %s', async mode => {
+  let visible = 1, failed = false;
+  await open({ history: async ({ turnId }) => turnId.startsWith('occurrence:')
+    ? Object.values(bot!.snapshot().turns).slice(0, visible).map(turn => historyRowFromTurn({ ...turn, owner: 'main', status: failed ? 'failed' : turn.status })) : [] });
+  await completedTurn('Already visible');
+  if (mode === 'lagging') await completedTurn('Late history fact');
+  const key = await due();
+  expect(bot!.core.intent(key)!.execution.payload.instruction).toContain('Already visible');
+  expect(bot!.core.intent(key)!.execution.payload.instruction).not.toContain('Late history fact');
+  await finish(key, undefined);
+  expect(record()?.throughTurn).toBe(Object.keys(bot!.snapshot().turns)[0]);
+  const { since, throughTurn } = record()!;
+  if (mode !== 'lagging') await completedTurn('Late history fact');
+  failed = mode === 'failed';
+  visible = mode === 'empty' ? 0 : 2;
+  const next = await due();
+  if (mode !== 'lagging') {
+    expect(record()).toMatchObject({ since, throughTurn, last: { outcome: 'skipped', reason: 'no_new_turns' } });
+    expect(bot!.core.intent(next)).toBeUndefined();
+    expect(Object.values(bot!.ledger.snapshot().occurrences).at(-1)).toMatchObject({ conclusion: 'cancelled' });
+    return;
+  }
+  expect(bot!.core.intent(next)!.execution.payload.instruction).toContain('Late history fact');
+  expect(bot!.core.intent(next)!.execution.payload.instruction).not.toContain('Already visible');
+  await finish(next, undefined);
+  expect(record()?.throughTurn).toBe(Object.keys(bot!.snapshot().turns)[1]);
 });

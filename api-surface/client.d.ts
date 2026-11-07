@@ -7335,9 +7335,10 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
  * The SDK reads one file, the bounded `MEMORY.md`. At the start of a fresh task
  * whose memory mode reads memory, on a daemon that admits the memory MCP, it
  * puts that file before the instruction verbatim, as data. It does not interpret, select, summarize or truncate it,
- * and it does not read `notes/` for the model. The SDK writes memory itself in
- * one case only: at the end of a writer Attempt that left `MEMORY.md` over the
- * limit, it restores that file to its content at the start of the Attempt.
+ * and it does not read `notes/` for the model. At the end of a writer Attempt
+ * that left `MEMORY.md` over the limit, the SDK restores that file to its
+ * content at the start of the Attempt. With `agentMemoryCommit: 'on-success'`,
+ * an unsuccessful task also restores the copied memory files to their start content.
  *
  * This constant is the guidance without the data: a resumed session, a fresh
  * task on a daemon that does not admit the memory MCP, and an embedded Host
