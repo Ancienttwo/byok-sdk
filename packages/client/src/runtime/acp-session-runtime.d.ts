@@ -56,7 +56,7 @@ export interface AcpPermissionResponse {
 export type StartAcpSession = (
   spawn: typeof spawnOwnedLineProcess,
   spawnTerminal: typeof spawnOwnedTerminalProcess,
-  installation: { kind: 'available'; via: 'executable'; command: string },
+  installation: { kind: 'available'; via: 'executable'; command: string; version?: string },
   options: {
     cwd: string;
     env: Readonly<Record<string, string>>;
@@ -83,3 +83,6 @@ export type StartAcpSession = (
 export declare const grokSession: StartAcpSession;
 /** OAR's Antigravity profile: `agy acp --dangerously-skip-permissions --process-per-session`. */
 export declare const antigravitySession: StartAcpSession;
+
+/** Native OpenCode 1 and 2 ACP; requires the installation's probed version. */
+export declare const opencodeSession: StartAcpSession;

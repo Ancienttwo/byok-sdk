@@ -1,0 +1,76 @@
+import type { AgentEvent } from '@byok-sdk/protocol';
+import type { AcpRecord } from '../../runtime/acp-session-runtime';
+import { runtimeFailureClassOf } from '../../runtime-failure';
+
+export const object = (value: unknown): Record<string, unknown> | undefined =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+export interface OpenCodeTurnOutcome { kind: 'completed' | 'aborted' | 'failed'; failure?: string; reason?: string; fromText?: boolean }
+
+/** Per-native-session state keeps v2 child call ids distinct; SDK events have no child graph field. */
+export class OpenCodeProjection {
+  private readonly tools = new Map<string, string>();
+  output = false;
+  constructor(private readonly root: string) {}
+
+  consume(record: AcpRecord, emit: (event: AgentEvent) => void, end: (outcome: OpenCodeTurnOutcome) => void): void {
+    if (record.kind !== 'frame') return;
+    const body = object(record.body);
+    if (!Array.isArray(body?.events)) return;
+    for (const item of body.events) {
+      const event = object(item);
+      if (!event) continue;
+      const root = record.sessionId === this.root && record.agentPath.length === 0;
+      const callId = typeof event.callId === 'string' ? (root ? event.callId : `${record.sessionId}:${event.callId}`) : undefined;
+      switch (event.kind) {
+        case 'text_delta':
+          if (typeof event.text === 'string' && event.text.length > 0) {
+            this.output = true;
+            if (root) emit({ type: 'progress', text: event.text });
+          }
+          break;
+        case 'reasoning':
+          this.output = true;
+          break;
+        case 'tool_call_started': {
+          this.output = true;
+          if (callId === undefined || typeof event.tool !== 'string') break;
+          this.tools.set(callId, event.tool);
+          const input = object(object(body.native)?.update)?.rawInput;
+          emit({ type: 'tool_use', tool: event.tool, toolCallId: callId, ...(input === undefined ? {} : { input }) });
+          break;
+        }
+        case 'tool_call_ended': {
+          this.output = true;
+          if (callId === undefined) break;
+          const tool = this.tools.get(callId);
+          if (tool === undefined) break;
+          this.tools.delete(callId);
+          emit({ type: 'tool_result', tool, toolCallId: callId, output: event.content,
+            ...(event.result === 'failed' ? { isError: true } : {}) });
+          break;
+        }
+        case 'usage': {
+          const nativeUsage = object(event.usage);
+          const tokens = object(nativeUsage?.tokens);
+          const context = object(nativeUsage?.context);
+          const usage: AgentEvent = { type: 'usage',
+            ...(typeof tokens?.input === 'number' ? { inputTokens: tokens.input } : {}),
+            ...(typeof tokens?.output === 'number' ? { outputTokens: tokens.output } : {}),
+            ...(typeof context?.tokens === 'number' ? { contextTokens: context.tokens } : {}),
+            ...(typeof context?.contextWindow === 'number' ? { contextWindow: context.contextWindow } : {}),
+          };
+          if (Object.keys(usage).length > 1) emit(usage);
+          break;
+        }
+        case 'turn_ended': {
+          if (!root) break;
+          const outcome = object(event.outcome);
+          end(outcome?.kind === 'failed'
+            ? { kind: 'failed', failure: runtimeFailureClassOf(outcome.failure), reason: typeof outcome.reason === 'string' ? outcome.reason : 'opencode turn failed', fromText: outcome.fromText === true }
+            : { kind: outcome?.kind === 'aborted' ? 'aborted' : 'completed' });
+          break;
+        }
+      }
+    }
+  }
+}

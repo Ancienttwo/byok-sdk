@@ -24,21 +24,71 @@ the descriptor declares. `no` means the SDK makes no such guarantee; the
 the runtime does instead.
 
 <!-- generated:capability-matrix:start -->
-| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durableLane`) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.5.0` | `1.5.0` |
-| Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | no |
-| Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
-| Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | yes | yes |
-| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes |
-| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no |
-| Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | yes | yes |
-| Prepared lane | `preparedLane` | no | no | no | no | no | no | yes | no |
-| Durable worker lane | `durableLane` | no | no | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userContext` | yes | yes | no | yes | no | yes | yes | no |
-| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | yes | no | no |
-| Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no |
+| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | OpenCode (unqualified) | Pi | Pi (`durableLane`) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `unqualified` | `1.5.0` | `1.5.0` |
+| Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | yes | no |
+| Redirect the active turn | `steer` | yes | no | yes | yes | no | no | no | yes | no |
+| Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | no | yes | yes |
+| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | no | yes | yes |
+| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no | no |
+| Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | no | yes | yes |
+| Prepared lane | `preparedLane` | no | no | no | no | no | no | no | yes | no |
+| Durable worker lane | `durableLane` | no | no | no | no | no | no | no | no | yes |
+| Keeps user-level instructions out | `isolation.userContext` | yes | yes | no | yes | no | yes | no | yes | no |
+| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | yes | no | no | no |
+| Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
+
+## OpenCode implementation and qualification (#1538)
+
+`OpenCodeAdapter` is an opt-in custom harness (`harnessId: 'opencode'`). Its
+platform list is empty until native OS/line onboarding canaries qualify it;
+replay tests do not advertise a platform. The compatibility floors are v1
+1.18.35 and v2 2.0.26. No default qualified-version policy is installed yet.
+A Host can supply a version policy; unrecognized, below-floor and prerelease
+tokens still fail the executable compatibility gate.
+
+The Host supplies `runtimes.opencode.models`, an ordered list of native model
+ids, and optionally `executable`. There is no SDK model default, price check,
+model listing, automatic installation, upgrade or cross-major migration.
+The adapter selects the first id, applies it explicitly through ACP and refuses
+an absent or differing native readback before prompting. On an OAR-classified
+rate limit before text, reasoning or tool output, it retries once with the next
+candidate after reaping the first process tree, resuming the same admitted native
+session and verifying its model readback. It never creates a replacement
+session; an unsupported resume or model switch preserves the rate-limit failure.
+A non-terminal `error` diagnostic event contains a
+JSON switch record with `event: "model_switch"`, `from`, `to` and
+`reason: "rate_limited"`. A second rate limit or any preceding output prevents
+another switch. Text-classified failure categories remain `unknown` in terminal
+failure reporting, as for the other ACP adapters.
+
+OpenCode runs in the device user's environment and owns its native session
+store. The SDK does not read credentials, filter or rewrite user configuration,
+provide a home, or proxy model traffic. All isolation fields are false.
+A later turn resumes its native session in a new owned process; OAR refuses
+resume if the original cwd is different or cannot be proved. The SDK owns no
+persistent OpenCode transcript directory, so no SDK retention store is created.
+
+Steering and interactive permissions are unsupported on both lines. The ACP
+boundary cancels permission requests. V1 retains OAR's session-local appended
+persona overlay and cleanup; v2 refuses Agent-memory readers before execution
+because that appended instruction channel is unavailable. Task-scoped Host MCP
+toolsets are rejected before launch until both lines pass qualification. Native
+user MCP remains inherited. V2 `execute` calls remain opaque without a proven
+native tool identity; the SDK never derives MCP names from code. Child call IDs
+carry the native child session id to avoid merging their calls with root calls.
+Child-session text is excluded from root answer progress. The SDK's flat event
+schema has no parent-graph field; no spawning-tool edge is invented. Usage fields
+are emitted only when OAR supplies native counters.
+
+Install the chosen line as an operator action. OpenCode v1 uses `opencode-ai`
+on npm and `https://opencode.ai/install`; v2 uses `@opencode/cli` and
+`https://opencode.ai/v2/install`. The installer locations collide at
+`~/.opencode/bin/opencode`; choose and retain one line. Native Windows npm
+command shims use the existing shell-free invocation resolver and owned job
+lifecycle. Neither a Linux nor WSL run qualifies native Windows.
 
 ## Qualification notes
 

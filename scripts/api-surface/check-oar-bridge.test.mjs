@@ -68,6 +68,7 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
     ['../../vendor/oar/45488e7/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
     ['../../vendor/oar/45488e7/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
     ['../../vendor/oar/45488e7/runtimes/antigravity/session.js', [['antigravitySession', 'antigravitySession']]],
+    ['../../vendor/oar/45488e7/runtimes/opencode/session.js', [['opencodeSession', 'opencodeSession']]],
   ]);
 });
 

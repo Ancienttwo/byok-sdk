@@ -13,7 +13,7 @@ const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start',
  * trust. `reappliesOnResume` is for a runtime that replaces its append on
  * every resume; any other runtime refuses a resumed persona.
  */
-export async function agentPersona(runtime: 'grok' | 'agy', manifest: RuntimeOperationManifest, { reappliesOnResume = false }: { readonly reappliesOnResume?: boolean } = {}): Promise<string | undefined> {
+export async function agentPersona(runtime: 'grok' | 'agy' | 'opencode', manifest: RuntimeOperationManifest, { reappliesOnResume = false }: { readonly reappliesOnResume?: boolean } = {}): Promise<string | undefined> {
   if (manifest.agentRef === undefined) return undefined;
   const home = manifest.lease?.canonicalHome;
   if (!home || !manifest.lease?.leaseId || !path.isAbsolute(home) || path.resolve(home) !== home) {
