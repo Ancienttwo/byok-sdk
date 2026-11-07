@@ -132,6 +132,7 @@ class OpenCodeSession implements Session {
   private prompting = false;
   private retained = 0;
   private failure?: RuntimeExecutionFailure;
+  private haltExit?: Promise<number | null>;
   private ending = false;
   private cancelled = false;
   private closing = false;
@@ -164,6 +165,7 @@ class OpenCodeSession implements Session {
     this.raw = undefined;
     this.prompting = false;
     this.child = undefined;
+    this.haltExit = undefined;
     this.ending = false;
     this.model = undefined;
     this.stopAttempt = undefined;
@@ -223,6 +225,7 @@ class OpenCodeSession implements Session {
   private halt(error: unknown): void {
     this.failure ??= isRuntimeExecutionFailure(error) ? error : infrastructure(error instanceof Error ? error.message : 'opencode stream failed');
     this.settle?.({ kind: 'failed' });
+    this.haltExit = this.child?.exited;
     this.child?.kill();
   }
   private async prompt(): Promise<void> {
@@ -264,7 +267,12 @@ class OpenCodeSession implements Session {
     this.stopAttempt ??= (async () => {
       try {
         try { this.child?.observeDescendants(); }
-        finally { await this.raw?.dispose(); }
+        finally {
+          // A halt can kill during opening, before ACP observes the exit.
+          // Settle that exit before disposal can send session/close.
+          try { await this.haltExit; }
+          finally { await this.raw?.dispose(); }
+        }
       }
       finally { await this.child?.dispose(); }
     })().catch(error => { this.stopAttempt = undefined; throw error; });
