@@ -1,5 +1,5 @@
 import type { HostOfferPlainPayload, HostOfferSealedPayload } from '@byok-sdk/protocol';
-import type { ByokCloudOptions, EnqueuedAgentControl, EnqueuedOffer } from '../cloud';
+import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl, EnqueuedOffer } from '../cloud';
 import { contentHash, type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import {
   AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY,
@@ -7,7 +7,6 @@ import {
   AgentContentReceiptPayloadSchema,
   AgentEgressAckPayloadSchema,
   AgentMessageServerContextSchema,
-  HarnessIdSchema,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
@@ -76,28 +75,53 @@ interface Dependencies {
   root: CloudRootStores;
   controlPlane: (tenant: TenantId) => ControlPlanePrincipal;
   options: ByokCloudOptions;
+  readTaskOffer: ByokCloud['readTaskOffer'];
 }
 
 /**
  * The admission gates and mailbox appends shared by every Host enqueue lane
  * and by the device routes that acknowledge inbound messages.
  */
-export function createEnqueuePaths({ root, controlPlane, options }: Dependencies) {
-  /** Resolve Host policy once from the authenticated durable device declaration, before admission. */
+export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer }: Dependencies) {
+  /** The first offer owns resolution and admission; retries compare against that receipt without another device read. */
   async function resolveOfferPayload(
     tenant: TenantId, deviceId: string, payload: HostOfferPlainPayload | HostOfferSealedPayload,
+    taskId?: string,
   ): Promise<TaskOfferPayload> {
+    if (taskId !== undefined) {
+      const messageId = await taskOfferMessageId(tenant, taskId, deviceId, payload.agentRef, bytes => options.crypto.sha256(bytes));
+      await assertOfferUndelivered(tenantStoresFor(controlPlane(tenant), root), taskId, messageId);
+    }
+    const recorded = taskId === undefined ? undefined : await readTaskOffer(tenant, taskId);
     const { agentMemoryCommit, nativeSessions, ...rest } = payload;
     const conditionalCommit = agentMemoryCommit === 'on-success-if-advertised';
     const conditionalSessions = nativeSessions?.ifAdvertised === true;
-    const device = conditionalCommit || conditionalSessions ? await options.cloud.devices.get(tenant, deviceId) : undefined;
+    const device = recorded === undefined && (conditionalCommit || conditionalSessions)
+      ? await options.cloud.devices.get(tenant, deviceId) : undefined;
     const commit = conditionalCommit
-      ? (device?.capabilities?.includes(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY) ? 'on-success' : undefined)
+      ? (recorded !== undefined ? recorded.payload.agentMemoryCommit
+        : device?.capabilities?.includes(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY) ? 'on-success' : undefined)
       : agentMemoryCommit;
-    const window = nativeSessions !== undefined && (!conditionalSessions || device?.capabilities?.includes(NATIVE_SESSIONS_CAPABILITY))
+    const window = nativeSessions !== undefined && (!conditionalSessions || (recorded !== undefined
+      ? recorded.payload.nativeSessions !== undefined : device?.capabilities?.includes(NATIVE_SESSIONS_CAPABILITY)))
       ? { fromMs: nativeSessions.fromMs, toMs: nativeSessions.toMs } : undefined;
-    return { ...rest, ...(commit === undefined ? {} : { agentMemoryCommit: commit }),
+    const resolved = { ...rest, ...(commit === undefined ? {} : { agentMemoryCommit: commit }),
       ...(window === undefined ? {} : { nativeSessions: window }) };
+    if (recorded === undefined) {
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', resolved));
+      if (resolved.harnessId !== undefined) {
+        if (resolved.runtime !== undefined || resolved.dispatchSelection !== undefined) throw new ByokCloudError('coordination_input_invalid', 'harnessId conflicts with built-in runtime selection');
+        const target = await options.cloud.devices.get(tenant, deviceId);
+        if (!target?.harnesses?.some(harness => harness.id === resolved.harnessId)) throw new ByokCloudError('coordination_input_invalid', 'requested custom harness is not advertised by this device');
+      }
+    }
+    return resolved;
+  }
+
+  async function assertOfferUndelivered(stores: TenantStores, taskId: string, messageId: string): Promise<void> {
+    if (await stores.receipts.get(`task-offer-delivered:${messageId}`) !== undefined) {
+      throw new ByokCloudError('agent_task_already_exists', `Task ${taskId} already has a durable delivered attempt and cannot be enqueued again.`);
+    }
   }
 
   async function enqueueTaskEnvelope(
@@ -113,14 +137,6 @@ export function createEnqueuePaths({ root, controlPlane, options }: Dependencies
     const messageId = await taskOfferMessageId(tenant, taskId, deviceId, agentRef, bytes => options.crypto.sha256(bytes));
     const proposed = buildEnvelope(taskId, 0, messageId);
     await assertSealedCiphertext(tenant, proposed.payload);
-    const selection = proposed.payload as { harnessId?: string; runtime?: string; dispatchSelection?: unknown };
-    if (selection.harnessId !== undefined) {
-      HarnessIdSchema.parse(selection.harnessId);
-      if (selection.runtime !== undefined || selection.dispatchSelection !== undefined) throw new ByokCloudError('coordination_input_invalid', 'harnessId conflicts with built-in runtime selection');
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(proposed.type, proposed.payload));
-      const device = await options.cloud.devices.get(tenant, deviceId);
-      if (!device?.harnesses?.some(harness => harness.id === selection.harnessId)) throw new ByokCloudError('coordination_input_invalid', 'requested custom harness is not advertised by this device');
-    }
     // An attempt is the task authority, so reserve/open it BEFORE the offer is
     // observable in a mailbox.  The stable message identity then makes an
     // append failure retry converge on the one offer rather than allocating a
@@ -141,14 +157,7 @@ export function createEnqueuePaths({ root, controlPlane, options }: Dependencies
     // This receipt outlives mailbox retention, so a completed or retired task
     // can never be made executable again by reusing the caller-supplied id. A
     // missing marker is the sole retryable state after a pre-delivery failure.
-    if (
-      (await stores.receipts.get(deliveryReceiptKey)) !== undefined
-    ) {
-      throw new ByokCloudError(
-        'agent_task_already_exists',
-        `Task ${taskId} already has a durable delivered attempt and cannot be enqueued again.`,
-      );
-    }
+    await assertOfferUndelivered(stores, taskId, messageId);
 
     // Reserve the immutable executable semantics before a fallible mailbox
     // append. The attempt intentionally contains no payload; this existing
