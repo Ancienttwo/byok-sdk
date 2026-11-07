@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS scope (
   CHECK (switch_export IS NULL OR switch_import IS NULL)
 );
 CREATE INDEX IF NOT EXISTS scope_due ON scope (due_at, scope) WHERE due_at IS NOT NULL;
+CREATE TABLE IF NOT EXISTS dream_state (
+  scope    text PRIMARY KEY REFERENCES scope (scope),
+  body     json NOT NULL
+);
 CREATE TABLE IF NOT EXISTS entity (
   scope    text   NOT NULL REFERENCES scope (scope),
   kind     text   NOT NULL CHECK (kind IN (${names(MAPS.map(([kind]) => kind))})),

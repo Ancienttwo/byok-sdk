@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "12f89f031b560a992100933d45ebbb5b37f08d7047a8e695d3a149997c5468b1"
+    "snapshotSha256": "46f3626a34d66d3be02d6bdfd6005c41611e8ae04519b45d2d188a1fe05d5ca9"
   },
   "configFields": {
     "status": "tracked",
@@ -37,7 +37,7 @@
     {
       "id": "k8-dream-compaction-veto",
       "impact": "additive",
-      "summary": "K8 keeps a dream intent until its result syncs (#1490). botCompactVeto and the rule compactVeto now refuse a dream intent key with 'The dream result is not synced' until the sync closes that dream, so a compaction that names the key throws CompactVetoError and changes nothing. No Host code change: the caller retries after a later pass, as for a Turn K8 still reads. K8 sealed routine creation and resealing validate Host execution templates with HostOfferSealedPayloadSchema, accepting agentMemoryCommit: on-success-if-advertised (#1506). Hosts can use the conditional option in those templates; cloud enqueue still owns resolution and the device wire is unchanged.",
+      "summary": "K8 and H retain dream intents until their results sync (#1490), using compactVeto to refuse compaction while dreams.open owns the occurrence. H now runs full dreaming through K8 package exports (#1516), with per-scope configuration, shared model selection, instruction and pack limits, skip reasons and success-only mark advancement. H stores dream state outside the bounded frame in one dream_state row per scope; store.migrate() creates the table. H and L share userFirst and the autonomous intent set for routine Turns, bot_request Turns and dreams; H does not add device slot reservation. The obsolete recordUnsupportedDream helper and DREAM_UNSUPPORTED_ON_H export are removed with the unsupported H path. K8 sealed routine creation and resealing validate Host templates with HostOfferSealedPayloadSchema, accepting agentMemoryCommit: on-success-if-advertised (#1506); cloud enqueue owns resolution and the device wire is unchanged.",
       "migration": "examples/bot-collaboration/README.md#compaction",
       "items": [
         "example:bot-collaboration"
@@ -137,7 +137,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=84817467889ca31d",
-      "after": "K8 0.0.1 src-sha256=087f672853560d06",
+      "after": "K8 0.0.1 src-sha256=7dd6a28164969dde",
       "entry": "k8-dream-compaction-veto"
     },
     {

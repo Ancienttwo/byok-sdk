@@ -37,6 +37,8 @@ const COMMAND_FIELDS = new Set(['evidence', 'result', 'root']);
 /** The rows of one state. Each map keeps the iteration order of the state. */
 export interface Split {
   frame: string;
+  /** One scope row for the dream marks and open occurrences; they grow with the Bot count. */
+  dreams?: string;
   entities: Map<EntityKind, Map<string, string>>;
   /** Keyed by `kind` and owner: the owner is '' for a state list and the room key for room messages. */
   entries: Map<string, { kind: EntryKind; owner: string; bodies: string[] }>;
@@ -94,6 +96,10 @@ export function split(state: CollaborationState): Split {
     }
     root.commands = {};
   }
+  if (root.dreams !== undefined) {
+    out.dreams = JSON.stringify(root.dreams);
+    root.dreams = {};
+  }
   out.frame = JSON.stringify(root);
   if (Buffer.byteLength(out.frame) > FRAME_MAX_BYTES) throw new Error('Collaboration frame is too large: a state field has no row layout');
   return out;
@@ -104,6 +110,8 @@ const define = (target: Container, id: string, value: unknown) =>
 /** Builds a state from its rows. Rows of each kind arrive in insertion order. */
 export function assemble(rows: Split): CollaborationState {
   const root = JSON.parse(rows.frame) as Container;
+  if (Object.hasOwn(root, 'dreams') !== (rows.dreams !== undefined)) throw new Error('Stored dream row and frame disagree');
+  if (rows.dreams !== undefined) root.dreams = JSON.parse(rows.dreams);
   for (const [kind, path] of MAPS) {
     const entities = rows.entities.get(kind);
     if (!entities?.size) continue;

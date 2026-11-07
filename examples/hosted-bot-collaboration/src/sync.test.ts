@@ -66,7 +66,7 @@ const intentRow = async (scope: string, turnId: string) => (await opened!.pool.q
 const OLD = template('device', 'main'), NEW = { ...template('other-device', 'main'), payload: { ...template('other-device', 'main').payload, requiredToolsets: ['docs'] } };
 /** #1358: a store over the test schema whose Host config the test replaces between calls. */
 function configured(models: Record<string, ExecutionTemplate>) {
-  const config = { models, readOnlyToolsets: ['docs'] };
+  const config = { models, readOnlyToolsets: ['docs'], dreaming: false as const };
   return { config, store: new HostedCollaborationStore(opened!.pool, store().schema, { host: async () => structuredClone(config) }) };
 }
 const frozenExecution = async (scope: string, turnId: string) => JSON.parse((await intentRow(scope, turnId))!.input) as ExecutionTemplate;

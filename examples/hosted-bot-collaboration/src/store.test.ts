@@ -33,6 +33,32 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
 
   commitVectors('H HostedCollaborationStore on Postgres', hosted);
 
+  it('migrates frame dreams atomically, refuses conflicting rows, and is idempotent', async () => {
+    const legacy = await openStore(), schema = `"${legacy.store.schema}"`;
+    const scopes = ['legacy-a', 'legacy-b'], dreams = { bots: { main: { since: 1000, throughTurn: 't1' } }, open: {} };
+    try {
+      const expected = [];
+      for (const scope of scopes) {
+        await legacy.store.seed(scope, state => { seedCollaboration(state); state.dreams = structuredClone(dreams); });
+        expected.push(JSON.stringify(await legacy.store.read(scope)));
+        const { rows: [row] } = await legacy.pool.query<{ frame: string }>(`SELECT frame::text FROM ${schema}.scope WHERE scope = $1`, [JSON.stringify(scope)]);
+        const frame = JSON.parse(row!.frame);
+        frame.dreams = dreams;
+        await legacy.pool.query(`UPDATE ${schema}.scope SET frame = $2::json WHERE scope = $1`, [JSON.stringify(scope), JSON.stringify(frame)]);
+      }
+      await legacy.pool.query(`DELETE FROM ${schema}.dream_state WHERE scope = $1`, [JSON.stringify(scopes[0])]);
+      const before = await Promise.all(scopes.map(scope => legacy.store.dump(scope)));
+      await expect(legacy.store.migrate()).rejects.toThrow();
+      expect(await Promise.all(scopes.map(scope => legacy.store.dump(scope)))).toEqual(before);
+      await legacy.pool.query(`DELETE FROM ${schema}.dream_state WHERE scope = $1`, [JSON.stringify(scopes[1])]);
+      await legacy.store.migrate();
+      expect(await Promise.all(scopes.map(async scope => JSON.stringify(await legacy.store.read(scope))))).toEqual(expected);
+      const migrated = await Promise.all(scopes.map(scope => legacy.store.dump(scope)));
+      await legacy.store.migrate();
+      expect(await Promise.all(scopes.map(scope => legacy.store.dump(scope)))).toEqual(migrated);
+    } finally { await legacy.close(); }
+  });
+
   // #793 O2: only a byte compare sees drift in map order, key order or optional-field presence.
   it.each<[SeedTeam, Array<[string, Command]>]>([
     ['local', [

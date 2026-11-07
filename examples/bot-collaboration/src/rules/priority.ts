@@ -1,3 +1,11 @@
+import { hash } from '@byok-sdk/server/execution-core/canonical';
+import type { Turn } from './turn';
+
+/** The background intents that user input overtakes; dream ids already use the ledger's hashed identity. */
+export function autonomousIntentIds(turns: readonly Pick<Turn, 'id' | 'source'>[], dreams: readonly string[]): Set<string> {
+  return new Set(turns.filter(turn => turn.source === 'routine' || turn.source === 'bot_request').map(turn => hash(turn.id)).concat(dreams));
+}
+
 /**
  * The reference Host's explicit work priority as pure rules (#1229 item 1). The K4 FIFO keeps its order: one queue per
  * Agent, the lowest sequence is the head, and a submitted execution keeps its taskId generation

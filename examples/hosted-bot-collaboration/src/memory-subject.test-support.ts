@@ -8,7 +8,7 @@ import { seedCollaboration, VECTOR_NOW, type CommitSubject, type SeedTeam } from
 import type { HostConfig, OutcomeRoutinePorts } from './store';
 
 /** The Host config of every test scope: the snapshot Bot template of the K8 vector subject (K8 commit-contract.test.ts). */
-export const testHostConfig = (): HostConfig => ({ models: { default: template('device', 'main') }, readOnlyToolsets: [] });
+export const testHostConfig = (): HostConfig => ({ models: { default: template('device', 'main') }, readOnlyToolsets: [], dreaming: false });
 /** The store's `host` option for tests: every scope gets `testHostConfig()`. */
 export const TEST_HOST = async (): Promise<HostConfig> => testHostConfig();
 /** The vector clock, as the Host clock of a commit or a terminal transaction. */
