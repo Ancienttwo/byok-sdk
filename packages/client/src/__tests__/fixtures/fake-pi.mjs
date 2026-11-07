@@ -272,6 +272,23 @@ async function handleCommand(msg) {
       // assistant text reply, then the real settle event.
       send({ type: 'agent_start' });
       send({ type: 'turn_start' });
+      if (process.env.FAKE_PI_PROVIDER_ERROR === '1' || process.env.FAKE_PI_OVERFLOW_RECOVERY === '1') {
+        send({ type: 'message_end', message: { role: 'assistant', content: [],
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+          stopReason: 'error', errorMessage: process.env.FAKE_PI_OVERFLOW_RECOVERY === '1'
+            ? 'context window exceeded' : '401 authentication_error: Authorization: Bearer fake-secret' } });
+        send({ type: 'agent_end', messages: [], willRetry: false });
+        if (process.env.FAKE_PI_OVERFLOW_RECOVERY === '1') {
+          send({ type: 'compaction_start', reason: 'overflow' });
+          send({ type: 'compaction_end', aborted: false, willRetry: true });
+          send({ type: 'agent_start' });
+          send({ type: 'message_end', message: { role: 'assistant', content: [],
+            usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 3 }, stopReason: 'stop' } });
+          send({ type: 'agent_end', messages: [], willRetry: false });
+        }
+        send({ type: 'agent_settled', aborted: false });
+        break;
+      }
       const trajectory = process.env.FAKE_PI_TRAJECTORY;
       if (trajectory === 'open-calls') {
         for (let index = 0; index < 4097; index++) {
