@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Dependencies** — Upgrade the core encryption-test reference implementation `@hpke/core` from 1.9.0 to 1.10.0 (#1511).
+
 - **Dependencies** — Upgrade `@modelcontextprotocol/client` from 2.3.1 to 2.4.0 in the client and MCP server example (#1511).
 
 - **Added** — `@byok-sdk/protocol` and its `/constants` entry export `AGENT_MEMORY_MAX_FILE_BYTES` (256 KiB) and `AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES` (512) for Host memory prechecks (#1507). The client uses these shared limits; validation behavior is unchanged.
