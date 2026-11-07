@@ -586,8 +586,8 @@ async function startAndActivateRuntime(
       },
     });
   }
-  // Commit-policy addition to memory guidance, kept here so memory-guidance.ts's public declaration surface does not move.
-  const memoryCommitGuidance = sessionRef === undefined && !readerAttempt && ordinaryMemoryMode === 'read-write' && activation.payload.agentMemoryCommit === 'on-success'
+  // Fresh and resumed ordinary writers get the commit policy here, without changing memory-guidance.ts's public declarations.
+  const memoryCommitGuidance = !readerAttempt && ordinaryMemoryMode === 'read-write' && activation.payload.agentMemoryCommit === 'on-success'
     ? 'Memory writes are kept only if this task completes successfully.\n'
     : '';
   const startInput: RuntimeOperationStartInput = {
