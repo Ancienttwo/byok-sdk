@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "2a8711b43fd91a0126a9efdfbff6542859cc1cf4ad7db0ea6fbf976baba9a144"
+    "snapshotSha256": "fbe0f3428a6031ddafd63c391edb4d5c02e6501b355a6be46684f6b9c0b2624c"
   },
   "configFields": {
     "status": "tracked",
@@ -55,6 +55,16 @@
         "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_FILE_BYTES",
         "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES"
       ]
+    },
+    {
+      "id": "koffi-native-assets-3-3-7",
+      "impact": "breaking",
+      "summary": "Koffi moves from 3.2.0 to 3.3.7. sdkNativeAssetTargets and sdkDistributionManifest change the exported Windows x64 native asset version, URL, integrity and SHA256 literals. Hosts must rebuild their packaged Windows native assets with copySdkNativeAssets and update any literal-pinned metadata; the supported SDK target set and signing policy are unchanged.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1511",
+      "items": [
+        "export:@byok-sdk/client#sdkDistributionManifest",
+        "export:@byok-sdk/client#sdkNativeAssetTargets"
+      ]
     }
   ],
   "changes": [
@@ -64,6 +74,16 @@
       "before": "K8 0.0.1 src-sha256=84817467889ca31d",
       "after": "K8 0.0.1 src-sha256=087f672853560d06",
       "entry": "k8-dream-compaction-veto"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkDistributionManifest",
+      "change": "changed",
+      "entry": "koffi-native-assets-3-3-7"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkNativeAssetTargets",
+      "change": "changed",
+      "entry": "koffi-native-assets-3-3-7"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentDispatchInput",

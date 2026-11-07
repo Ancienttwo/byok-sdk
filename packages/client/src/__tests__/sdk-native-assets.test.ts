@@ -12,7 +12,7 @@ it('uses the official lockfile integrity for cross-host Windows x64 copy', async
   const lock = await fs.readFile(new URL('../../../../bun.lock', import.meta.url), 'utf8');
   const pin = sdkNativeAssetTargets['win32-x64'];
   expect(lock).toContain(`"${pin.package}@${pin.version}"`); expect(lock).toContain(pin.integrity);
-  expect(pin.url).toBe('https://registry.npmjs.org/@koromix/koffi-win32-x64/-/koffi-win32-x64-3.2.0.tgz');
+  expect(pin.url).toBe('https://registry.npmjs.org/@koromix/koffi-win32-x64/-/koffi-win32-x64-3.3.7.tgz');
 });
 it('lists the Windows memory helper apart from Koffi with its own signing policy', async () => {
   const { AGENT_MEMORY_HELPER_RELEASE } = await import('../util/agent-memory-helper-release-pin');
