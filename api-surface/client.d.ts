@@ -2875,10 +2875,8 @@ import { AgentMemoryError, AgentMemoryValidationError, type AgentMemoryProjectio
 export declare const AGENT_MEMORY_AUDIT_FILENAME = "agent-memory-audit-v1.jsonl";
 /** v2 is one atomically replaced state file, never an append-only log. */
 export declare const AGENT_MEMORY_OUTBOX_FILENAME = "agent-memory-redacted-outbox-v2.json";
-export declare const AGENT_MEMORY_MAX_FILE_BYTES: number;
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
-export declare const AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES = 512;
 /** One atomically replaced audit/outbox state must fit the cross-platform helper contract. */
 export declare const AGENT_MEMORY_MAX_LOCAL_LOG_BYTES: number;
 /** A complete snapshot cannot fit the bounded export contract. No partial result is returned. */

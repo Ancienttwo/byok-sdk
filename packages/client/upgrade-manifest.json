@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "cef2d5f917d169262590ba34b0ca53bf67276e25b0ddc26da230c07d30fcc98b"
+    "snapshotSha256": "2a8711b43fd91a0126a9efdfbff6542859cc1cf4ad7db0ea6fbf976baba9a144"
   },
   "configFields": {
     "status": "tracked",
@@ -42,6 +42,18 @@
         "export:@byok-sdk/protocol#HostOfferSealedPayload",
         "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
         "export:@byok-sdk/server/execution-core#SealedAgentExecutionInput"
+      ]
+    },
+    {
+      "id": "protocol-memory-limits",
+      "impact": "additive",
+      "summary": "Protocol and its constants entry export AGENT_MEMORY_MAX_FILE_BYTES (256 KiB) and AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES (512) for Host memory prechecks (#1507). The client imports the same limits from protocol and removes both declarations from its reachable internal daemon/agent-memory declaration file; no client package entry exported these names. Existing validation behavior is unchanged.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1507",
+      "items": [
+        "export:@byok-sdk/protocol#AGENT_MEMORY_MAX_FILE_BYTES",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES",
+        "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_FILE_BYTES",
+        "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES"
       ]
     }
   ],
@@ -89,6 +101,16 @@
       "entry": "agent-memory-commit-if-advertised"
     },
     {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_MAX_FILE_BYTES",
+      "change": "added",
+      "entry": "protocol-memory-limits"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES",
+      "change": "added",
+      "entry": "protocol-memory-limits"
+    },
+    {
       "item": "export:@byok-sdk/protocol#HostOfferPlainPayload",
       "change": "added",
       "entry": "agent-memory-commit-if-advertised"
@@ -107,6 +129,16 @@
       "item": "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
       "change": "added",
       "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_FILE_BYTES",
+      "change": "added",
+      "entry": "protocol-memory-limits"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES",
+      "change": "added",
+      "entry": "protocol-memory-limits"
     },
     {
       "item": "export:@byok-sdk/server/execution-core#SealedAgentExecutionInput",
