@@ -159,7 +159,7 @@ function assertNonEmptyString(value: unknown, label: string): asserts value is s
   }
 }
 
-function parseSessionEntries(raw: string): AgentSessionHandoff[] {
+export function parseSessionEntries(raw: string): AgentSessionHandoff[] {
   try {
     const lines = raw.split('\n').filter((line) => line.length > 0);
     return lines.map((line) => parseEntry(JSON.parse(line) as unknown));
@@ -283,7 +283,7 @@ function missingHandoff(sessionRef: string): AgentSessionHandoffMismatchError {
   );
 }
 
-function sessionFileName(runtimeId: string, sessionRef: string): string {
+export function sessionFileName(runtimeId: string, sessionRef: string): string {
   const digest = createHash('sha256').update(sessionRef, 'utf8').digest('hex');
   const runtime = runtimeId.replace(/[^a-z0-9._-]/giu, '_').slice(0, 64) || 'runtime';
   return `${runtime}-${digest}.jsonl`;

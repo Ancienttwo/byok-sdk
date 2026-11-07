@@ -27,22 +27,33 @@ ledgers with `runtimeId: 'pi'` under `.byok/runtime-sessions/` and their matchin
 match the ledger under the same rules as `openPiRpcSession`. The existing K8
 dream window selects the input; the device stores no additional cursor.
 Only tool names, argument summaries and `ok`/`error`/`none` outcomes derived
-from `toolResult.isError` are selected. Bash contributes at most the first
-256 bytes of its first command line; read/write/edit/ls/find/grep contribute
-paths or patterns, with paths relative to home. Arguments are included only
-for Pi built-ins identified by provenance, never by name alone. MCP and
+from `toolResult.isError` are selected. Bash splits its first line on whitespace
+and contributes the command word and at most two subcommand words. Each word
+must match `^[a-z][a-z0-9-]{0,22}$`; the first non-matching word stops selection.
+If the command word fails, only the tool name and result remain.
+Read/write/edit/ls/find/grep contribute paths relative to home, never patterns.
+Arguments are included only for Pi built-ins identified by provenance,
+never by name alone. MCP and
 extension tools contribute no arguments. Tool output, user and assistant
 body text, thinking, written contents, images and compaction are never read
 as dream input.
 
 Secret protection has two layers. First, output and body text are structurally
-excluded. Second, argument summaries pass through `redactSecrets`: the shared
-failure-reason rules plus PEM, `xox*-`, `glpat-`, `npm_` and `hf_` patterns.
-Summary-only rules also remove sensitive flag values and mixed alphanumeric
-tokens of at least 24 characters; they do not alter shared failure-reason
-handling of SHA and UUID values. The serialized input is scanned again; a
-remaining match fails the task without retry. Unknown format versions,
-mismatched id/cwd or malformed lines skip and count the whole file, without
+excluded, and bash uses the structural word allowlist above. It does not parse
+shell syntax, apply a 1 KiB omission rule or scan the selected words for secrets.
+Second, paths pass through `redactSecrets`: the shared failure-reason rules
+plus PEM, `xox*-`, `glpat-`, `npm_` and `hf_` patterns.
+The path-only summary rule also removes mixed alphanumeric tokens of at least
+24 characters without altering shared failure-reason handling of SHA and UUID
+values. Any raw path containing `://` becomes the fixed marker `[url]`, without
+parsing or redaction. Otherwise, raw paths exceeding 256 bytes become
+`[omitted: too long]`; values at or below that limit are redacted in full before
+normalization and home-relative rewriting. There is no post-redaction truncation.
+The final scan also recognizes URL userinfo with a collapsed `:/` separator.
+Decoded tool names and paths are scanned again after serialization; a remaining
+match fails the task without retry. Bash summaries are excluded from this scan.
+Unknown format versions, mismatched id/cwd, malformed lines or records exceeding
+the 256 KiB validation bound skip and count the whole file, without
 partial rendering. An unusable session directory, unreadable ledger or
 exhausted budget fails with `native_sessions_unavailable: <closed detail>`;
 errors contain no raw session bytes. Streaming parsing is abortable and
@@ -73,10 +84,15 @@ offers are rejected before claim with non-retryable
 `native_sessions_unsupported`. Windows does not advertise it in 0.40;
 non-Pi runtimes neither supply this input nor execute the lane.
 
-Residual risks remain: short, unprefixed secrets under 24 characters that
-are not flag values or assignments can escape filtering, and the model
-provider sees the resulting argument summaries. At ten times the input
-volume, the 2000-call cap is reached first; older calls are discarded and
+Residual risks remain: a short word in either of the two positions after the
+command can enter the summary when it matches the allowlist, for example
+`echo hunter2`. Short secrets in paths can escape filtering. Assignments whose
+key exceeds the shared rule's 64-character bound are also an accepted residual
+risk, for example `password_<more than 64 characters>=x`. Concrete shell
+arguments and search patterns are omitted: `docker login --pass''word x`
+becomes `docker login`, `mysql -phunter2` becomes `mysql`, and `PASSWORD=x cmd`
+contributes no arguments. The model provider sees the resulting summaries.
+At ten times the input volume, the 2000-call cap is reached first; older calls are discarded and
 counted in `omittedCalls`. Redaction does not promise complete secret removal.
 
 ## Positioning
