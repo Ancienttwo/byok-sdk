@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "415011125c6ebd89b71745e56f89bc3395bfd6f62e987e315670b8dbb98be99e"
+    "snapshotSha256": "c88f05dc1601b3844cb3b26ac08b5135ddd80ef6be6043caf8c0bc8ea9f52e54"
   },
   "configFields": {
     "status": "tracked",
@@ -36,7 +36,7 @@
     {
       "id": "agent-memory-commit-if-advertised",
       "impact": "additive",
-      "summary": "Host enqueue inputs accept agentMemoryCommit: on-success-if-advertised (#1506). Cloud and embedded server resolve it from the durable device capability declaration before enqueue: on-success when agent-memory-commit-on-success is advertised, otherwise the field is omitted. Literal on-success keeps its strict capability gate. K4 templates retain the Host option and compare replay against the recorded resolution without reading current capabilities. The shared HostOfferPlainPayloadSchema and HostOfferSealedPayloadSchema and their payload types are exported by protocol; the device wire is unchanged. Hosts can replace platform inference with this fixed template option.",
+      "summary": "Host enqueue inputs accept agentMemoryCommit: on-success-if-advertised (#1506). Cloud and embedded server resolve it from the durable device capability declaration before enqueue: on-success when agent-memory-commit-on-success is advertised, otherwise the field is omitted. Literal on-success keeps its strict capability gate. K4 templates retain the Host option and compare replay against the recorded resolution without reading current capabilities. The shared HostOfferPlainPayloadSchema and HostOfferSealedPayloadSchema and their payload types are exported by protocol; the device wire is unchanged. Hosts can replace platform inference with this fixed template option. Native-session dream input (#1526) uses the same Host schemas and enqueue resolution: nativeSessions { fromMs, toMs, ifAdvertised: true } sends only the window when native-sessions is advertised, otherwise omits it. Host and wire admission require a fresh session, agentMemory none, no terminal projection, and no commit, homeAccess, preparation, requiredToolsets, messageEgress or harnessId. Frozen replay compares the original window with the recorded resolution without re-reading capabilities.",
       "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1506",
       "items": [
         "export:@byok-sdk/cloud#AgentDispatchInput",
@@ -89,6 +89,31 @@
         "export:@byok-sdk/core/system-tool#systemExecutable",
         "export:@byok-sdk/keys#LinuxSecretServiceSecretStore",
         "export:@byok-sdk/keys#LinuxSecretServiceSecretStoreOptions"
+      ]
+    },
+    {
+      "id": "native-session-dream-offer",
+      "impact": "additive",
+      "summary": "Offers admit nativeSessions { fromMs, toMs } with integer bounds and fromMs <= toMs (#1526), gated by native-sessions. Both plain and sealed offers require a fresh session, agentMemory none and terminalProjection absent or none; agentMemoryCommit, homeAccess, preparation, requiredToolsets, messageEgress and harnessId are forbidden. Hosts may request ifAdvertised: true to omit the field on devices without this capability. Existing offers without nativeSessions are unchanged.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1526",
+      "items": [
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#NATIVE_SESSIONS_CAPABILITY",
+        "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#NATIVE_SESSIONS_CAPABILITY"
+      ]
+    },
+    {
+      "id": "shared-secret-redaction",
+      "impact": "additive",
+      "summary": "Protocol and its constants entry export redactSecrets without truncation (#1526). The shared failure-reason rule list adds PEM blocks and xox*-, glpat-, npm_ and hf_ token shapes. boundFailureReason continues to use the same rules before its existing byte cap; SHA and UUID diagnostics remain intact. Summary-only sensitive flag and generic mixed-token rules are not part of this export.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1526",
+      "items": [
+        "export:@byok-sdk/protocol#redactSecrets",
+        "export:@byok-sdk/protocol/constants#redactSecrets"
       ]
     }
   ],
@@ -196,6 +221,11 @@
       "entry": "protocol-memory-limits"
     },
     {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "native-session-dream-offer"
+    },
+    {
       "item": "export:@byok-sdk/protocol#HostOfferPlainPayload",
       "change": "added",
       "entry": "agent-memory-commit-if-advertised"
@@ -216,6 +246,31 @@
       "entry": "agent-memory-commit-if-advertised"
     },
     {
+      "item": "export:@byok-sdk/protocol#NATIVE_SESSIONS_CAPABILITY",
+      "change": "added",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+      "change": "changed",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#redactSecrets",
+      "change": "added",
+      "entry": "shared-secret-redaction"
+    },
+    {
       "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_FILE_BYTES",
       "change": "added",
       "entry": "protocol-memory-limits"
@@ -224,6 +279,21 @@
       "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES",
       "change": "added",
       "entry": "protocol-memory-limits"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#NATIVE_SESSIONS_CAPABILITY",
+      "change": "added",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#redactSecrets",
+      "change": "added",
+      "entry": "shared-secret-redaction"
     },
     {
       "item": "export:@byok-sdk/server#ByokServer",

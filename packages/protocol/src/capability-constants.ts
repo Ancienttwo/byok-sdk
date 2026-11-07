@@ -139,3 +139,6 @@ export const PREPARED_AGENT_MEMORY_MODES = ['none', 'read', 'read-write'] as con
 export function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number] {
   return typeof value === 'string' && PREPARED_AGENT_MEMORY_MODES.some(mode => mode === value);
 }
+
+/** The device admits native Pi session summaries in the memory-only dream lane. */
+export const NATIVE_SESSIONS_CAPABILITY = 'native-sessions' as const;

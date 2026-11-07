@@ -3,6 +3,7 @@ import type { ByokCloudOptions, EnqueuedAgentControl, EnqueuedOffer } from '../c
 import { contentHash, type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import {
   AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY,
+  NATIVE_SESSIONS_CAPABILITY,
   AgentContentReceiptPayloadSchema,
   AgentEgressAckPayloadSchema,
   AgentMessageServerContextSchema,
@@ -86,11 +87,17 @@ export function createEnqueuePaths({ root, controlPlane, options }: Dependencies
   async function resolveOfferPayload(
     tenant: TenantId, deviceId: string, payload: HostOfferPlainPayload | HostOfferSealedPayload,
   ): Promise<TaskOfferPayload> {
-    const { agentMemoryCommit, ...rest } = payload;
-    if (agentMemoryCommit !== 'on-success-if-advertised') return { ...rest, ...(agentMemoryCommit === undefined ? {} : { agentMemoryCommit }) };
-    const device = await options.cloud.devices.get(tenant, deviceId);
-    return device?.capabilities?.includes(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY)
-      ? { ...rest, agentMemoryCommit: 'on-success' } : rest;
+    const { agentMemoryCommit, nativeSessions, ...rest } = payload;
+    const conditionalCommit = agentMemoryCommit === 'on-success-if-advertised';
+    const conditionalSessions = nativeSessions?.ifAdvertised === true;
+    const device = conditionalCommit || conditionalSessions ? await options.cloud.devices.get(tenant, deviceId) : undefined;
+    const commit = conditionalCommit
+      ? (device?.capabilities?.includes(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY) ? 'on-success' : undefined)
+      : agentMemoryCommit;
+    const window = nativeSessions !== undefined && (!conditionalSessions || device?.capabilities?.includes(NATIVE_SESSIONS_CAPABILITY))
+      ? { fromMs: nativeSessions.fromMs, toMs: nativeSessions.toMs } : undefined;
+    return { ...rest, ...(commit === undefined ? {} : { agentMemoryCommit: commit }),
+      ...(window === undefined ? {} : { nativeSessions: window }) };
   }
 
   async function enqueueTaskEnvelope(

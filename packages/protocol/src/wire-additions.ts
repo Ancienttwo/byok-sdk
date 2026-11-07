@@ -115,6 +115,7 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   offerRow('agentMemory', 'agent-memory-read-if-admitted', 'read-if-admitted'),
   offerRow('agentMemory', 'agent-memory-read-write-if-admitted', 'read-write-if-admitted'),
   offerRow('agentMemoryCommit', 'agent-memory-commit-on-success'),
+  offerRow('nativeSessions', 'native-sessions'),
   offerRow('egressPolicy', 'agent-egress-policy'),
   offerRow('egressPolicy', 'agent-egress-reliable-ack'),
   offerRow('messageEgress', 'agent-message-egress'),

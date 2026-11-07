@@ -399,6 +399,11 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             }, z.core.$strip>;
         }, z.core.$strict>]>>;
         agentMemoryCommit: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"on-success">, z.ZodLiteral<"on-success-if-advertised">]>>;
+        nativeSessions: z.ZodOptional<z.ZodObject<{
+            fromMs: z.ZodNumber;
+            toMs: z.ZodNumber;
+            ifAdvertised: z.ZodOptional<z.ZodLiteral<true>>;
+        }, z.core.$strict>>;
         session: z.ZodObject<{
             mode: z.ZodLiteral<"fresh">;
         }, z.core.$strict>;
@@ -561,6 +566,11 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             notAfter: z.ZodString;
         }, z.core.$strict>>;
         agentMemoryCommit: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"on-success">, z.ZodLiteral<"on-success-if-advertised">]>>;
+        nativeSessions: z.ZodOptional<z.ZodObject<{
+            fromMs: z.ZodNumber;
+            toMs: z.ZodNumber;
+            ifAdvertised: z.ZodOptional<z.ZodLiteral<true>>;
+        }, z.core.$strict>>;
         session: z.ZodObject<{
             mode: z.ZodLiteral<"fresh">;
         }, z.core.$strict>;
