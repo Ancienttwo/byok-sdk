@@ -45,6 +45,15 @@ async function verifyFailure(value: Parameters<typeof verifySerializedFileScopeG
 }
 
 describe('Pi file-scope launch serialization (#1061 slice 3)', () => {
+  it.skipIf(process.platform === 'win32')('round-trips memory grants and refuses workspace or reader roots', async () => {
+    const home = await tmpDir('byok-memory-launch-');
+    const grant = await resolveFileScopeGrant({ fileScope: { mode: 'memory' }, home: { path: home, identity: await identityOf(home) }, attempt: { homeAccess: 'writer' } });
+    const serialized = serializeFileScopeGrant(grant);
+    expect(await verifySerializedFileScopeGrant(parseOrThrow(serialized))).toEqual(grant);
+    const workspace = await grantFixture();
+    expect(() => parseOrThrow({ ...serialized, roots: serializeFileScopeGrant(workspace).roots })).toThrow();
+    expect(() => parseOrThrow({ ...serialized, home: { ...serialized.home, access: 'read' }, run: { ...serialized.home, id: 'run', path: path.join(home, '.byok/runs/x') } })).toThrow();
+  });
   it('round-trips a grant and re-verifies the same dev+ino identities', async () => {
     const grant = await grantFixture();
     const serialized = serializeFileScopeGrant(grant);

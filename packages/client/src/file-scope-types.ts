@@ -17,6 +17,12 @@
 export const SCOPED_FILE_TOOL_NAMES = Object.freeze(['read', 'write', 'edit', 'find', 'grep', 'ls'] as const);
 export type ScopedFileToolName = (typeof SCOPED_FILE_TOOL_NAMES)[number];
 
+/** Internal grant for the dreaming lane; not a Host-configurable file policy. */
+export interface MemoryFileScope {
+  readonly mode: 'memory';
+  readonly roots?: never;
+}
+
 const SCOPED_FILE_TOOL_NAME_SET: ReadonlySet<string> = new Set(SCOPED_FILE_TOOL_NAMES);
 export function isScopedFileToolName(value: string): value is ScopedFileToolName {
   return SCOPED_FILE_TOOL_NAME_SET.has(value);

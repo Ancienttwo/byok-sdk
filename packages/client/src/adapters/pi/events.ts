@@ -235,6 +235,7 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage, identities?: McpEven
  * traffic doesn't also trip that alarm on every single task.
  */
 export const ROUTINE_PI_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'byok_host_ready',
   'agent_start',
   'agent_end',
   'turn_start',

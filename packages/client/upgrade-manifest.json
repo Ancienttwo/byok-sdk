@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "c88f05dc1601b3844cb3b26ac08b5135ddd80ef6be6043caf8c0bc8ea9f52e54"
+    "snapshotSha256": "12f89f031b560a992100933d45ebbb5b37f08d7047a8e695d3a149997c5468b1"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,16 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "pi-memory-lane-audit-mode",
+      "impact": "additive",
+      "summary": "DaemonEvent and DaemonRecord file-scope audit modes include memory for the internal Pi dreaming lane (#1526). The lane restricts file access to MEMORY.md and notes, disables other tools and instruction resources, and uses an in-memory session. Host-configurable file-scope policies remain home or workspaces; daemon offer wiring is a separate slice.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1526",
+      "items": [
+        "export:@byok-sdk/client#DaemonEvent",
+        "export:@byok-sdk/client#DaemonRecord"
+      ]
+    },
     {
       "id": "embedded-server-activity-reads",
       "impact": "additive",
@@ -129,6 +139,16 @@
       "before": "K8 0.0.1 src-sha256=84817467889ca31d",
       "after": "K8 0.0.1 src-sha256=087f672853560d06",
       "entry": "k8-dream-compaction-veto"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEvent",
+      "change": "changed",
+      "entry": "pi-memory-lane-audit-mode"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonRecord",
+      "change": "changed",
+      "entry": "pi-memory-lane-audit-mode"
     },
     {
       "item": "export:@byok-sdk/client#SystemToolUnavailableError",

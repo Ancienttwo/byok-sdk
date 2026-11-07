@@ -63,7 +63,7 @@ export type DaemonRecord =
       decision: 'deny' | 'policy-adoption';
       lane: 'rpc' | 'prepared' | 'durable';
       homeAccess: 'writer' | 'memory-reader';
-      scope: { source: 'host'; mode: 'home' | 'workspaces'; digest: string };
+      scope: { source: 'host'; mode: 'home' | 'workspaces' | 'memory'; digest: string };
       rootIds?: readonly string[];
       rootId?: string;
       access?: ToolFileAccess;
