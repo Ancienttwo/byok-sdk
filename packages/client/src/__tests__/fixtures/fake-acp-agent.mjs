@@ -155,10 +155,11 @@ async function prompt(message) {
   }
   // The second prompt of agy's steer answers the first at once; its own answer waits for FAKE_ACP_REPLY_GATE.
   if (input === 'steer-first') { pending.set(message.id, 'superseded'); return; }
-  if (input === 'steer-second') {
+  if (input === 'steer-second' || input === 'steer-fail') {
     for (const [id, kind] of [...pending]) if (kind === 'superseded') { pending.delete(id); result(id, answer()); }
     const gate = process.env.FAKE_ACP_REPLY_GATE;
     while (gate && !existsSync(path.join(gate, 'release'))) await new Promise((resolve) => setTimeout(resolve, 10));
+    if (input === 'steer-fail') { error(message.id, -32603, 'Internal error'); return; }
     text('steered');
     result(message.id, answer());
     return;

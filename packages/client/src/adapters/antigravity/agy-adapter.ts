@@ -7,7 +7,6 @@ import type { McpEventIdentities } from '../../mcp/event-identity';
 import {
   freezeRuntimeAdapterDescriptor,
   PolicyUnsupportedError,
-  SteerUnsupportedError,
   type RuntimeAdapter,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
@@ -348,7 +347,7 @@ class AgySession implements Session {
     this.queue.push(event);
   }
   /**
-   * agy has no steer, so an Attempt is one prompt. Its subagents and schedules
+   * agy's subagents and schedules
    * run in the background and report no ACP frame, so nothing of agy's may
    * outlive the turn: the tree goes before the terminal is decided and before
    * the home lease is released. Resume reads what agy already persisted.
@@ -438,8 +437,9 @@ class AgySession implements Session {
   async followUp(): Promise<void> {
     throw new PolicyUnsupportedError('agy runs one turn per process; a later turn resumes the session');
   }
-  async steer(): Promise<void> {
-    throw new SteerUnsupportedError('agy', 'agy steer is not enabled');
+  async steer(text: string): Promise<void> {
+    const result = await this.raw?.steer?.(text);
+    if (result?.response.body.kind !== 'accepted') throw infrastructure(result?.response.body.reason ?? 'agy steer refused');
   }
   async interrupt(): Promise<void> {
     if (!this.raw || !this.active) return;

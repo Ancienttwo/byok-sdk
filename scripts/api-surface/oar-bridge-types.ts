@@ -148,6 +148,7 @@ type AcpBridgeHooks = Mutable<Omit<AcpSessionHooks, 'onRecord' | 'onPermission'>
 type AcpBridgeSession = {
   readonly id: AdapterSession['id'];
   prompt(...args: FirstInput<AdapterSession['prompt']>): Promise<AcpBridge.AcpControl>;
+  steer?(...args: FirstInput<NonNullable<AdapterSession['steer']>>): Promise<AcpBridge.AcpControl>;
   abort(...args: Parameters<AdapterSession['abort']>): Promise<AcpBridge.AcpControl>;
   records(): readonly AcpBridge.AcpRecord[];
   dispose: AdapterSession['dispose'];
@@ -172,9 +173,8 @@ export type CheckAcpRecord = Assert<Equal<AcpBridge.AcpRecord, Flatten<BridgeRec
 export type CheckAcpSession = Assert<Equal<AcpBridge.RawAcpSession, AcpBridgeSession>>;
 // Name each intentional omission so new vendor members fail this check.
 // 'compact' (OAR 0.86 generic contract) is omitted on purpose, as for Codex.
-// 'steer' is omitted for every ACP runtime; agy has a native steer the SDK does not enable (#1469).
 export type CheckAcpSessionMembers = Assert<Equal<
-  Exclude<keyof AdapterSession, 'capabilities' | 'goal' | 'steer' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
+  Exclude<keyof AdapterSession, 'capabilities' | 'goal' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
   keyof AcpBridge.RawAcpSession
 >>;
 export type CheckAcpPermissionHook = Assert<Assignable<NonNullable<AcpBridgeHooks['onPermission']>, NonNullable<AcpSessionHooks['onPermission']>>>;

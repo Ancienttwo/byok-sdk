@@ -248,6 +248,10 @@ export function createAcpTurns(deps: {
       if (runtime.closed) {
         return gone();
       }
+      // BYOK change: the captured turn can settle or be interrupted while spawn is pending.
+      if (active !== state || state.abortRequested) {
+        return { kind: "rejected", code: "no_active_turn", reason: "not_steerable: no active turn" };
+      }
       return withInputImages(capabilities, options?.images, (loaded) => {
         startVendorPrompt(state, acpPrompt(input, loaded), extraParams, { inputId: options?.inputId });
         return { kind: "accepted" };

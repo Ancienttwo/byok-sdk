@@ -28,7 +28,7 @@ the runtime does instead.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.5.0` | `1.5.0` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | no |
-| Redirect the active turn | `steer` | no | no | yes | yes | no | no | yes | no |
+| Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | yes | yes |
 | Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes |
 | Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no |
@@ -1005,8 +1005,7 @@ optional `model` and `versionPolicy`). The other options stay on the
 - Failures: a failed turn takes its class from the vendored OAR outcome, and a
   class taken from error text stays `unknown`. Resume needs `session/list` to
   confirm the saved cwd, else it fails as `authority`.
-- Steering throws `SteerUnsupportedError`: the native steer exists but is not
-  enabled. agy reports no usage events.
+- Steering redirects the active turn through native ACP. agy reports no usage events.
 - Egress: `--disable-telemetry` stops agy's calls to `play.googleapis.com`, and
   `AGY_CLI_DISABLE_AUTO_UPDATE=1` is always set.
 - Platforms: macOS, Linux and Windows.

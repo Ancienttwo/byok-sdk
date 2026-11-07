@@ -34,6 +34,7 @@ export interface AcpRecord {
 export interface RawAcpSession {
   readonly id: string;
   prompt(input: string): Promise<AcpControl>;
+  steer?(input: string): Promise<AcpControl>;
   abort(): Promise<AcpControl>;
   records(): readonly AcpRecord[];
   dispose(): Promise<void>;
