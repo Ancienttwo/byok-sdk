@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ByokCloudError, createInProcessTaskEventsWake, isCloudError, type ActivityTail, type ActivityTailEntry } from '@byok-sdk/cloud';
 import { tenantId } from '@byok-sdk/core';
+import { replayApprovalTimeline, replayTimeline } from '../../../ui-runtime/src/index';
 import { createEnvelope, type AgentEventOrUnknown, type Envelope } from '@byok-sdk/protocol';
 import { TaskEventRelay } from '../relay';
 import { readTaskEvents, type ActivityLogPosition, type TaskEventFacts, type TaskEventSources } from '../task-events';
@@ -117,6 +118,51 @@ describe('ByokServer.tasks.events', () => {
     await send(daemon, createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId }));
     await send(daemon, createEnvelope('task.started', {}, { taskId }));
   }
+
+  it.each([false, true])('reads an activity tail directly replayable by ui-runtime (after: %s)', async (after) => {
+    const { byok: instance, daemon } = await start();
+    await submit(instance, daemon, 'activity');
+    await claimStarted(daemon, 'activity');
+    await send(daemon, createEnvelope('task.progress', progress(1, 'before'), { taskId: 'activity' }));
+    const before = await instance.tasks.activity('activity');
+    expect(before).toBeDefined();
+    const batch = createEnvelope('task.progress', { seq: 2, events: [
+      { type: 'tool_use', tool: 'shell', toolCallId: 'call-1', input: { command: 'pwd' } },
+      { type: 'tool_result', tool: 'shell', toolCallId: 'call-1', output: 'ok', isError: false },
+    ] }, { taskId: 'activity' });
+    await send(daemon, batch);
+    const tail = await instance.tasks.activity('activity', after ? { after: before!.cursor } : undefined);
+    expect(tail).toMatchObject({ tenantId: `product:${PRODUCT_ID}`, taskId: 'activity', after: after ? before!.cursor.revision : 0 });
+    expect(tail!.entries).toHaveLength(after ? 1 : 2);
+    expect(tail!.entries.at(-1)).toMatchObject({ sourceEnvelopeId: batch.id, kind: 'progress' });
+    const replay = replayTimeline(tail!);
+    expect(replay.items).toHaveLength(after ? 1 : 2);
+    expect(replay.items.at(-1)).toMatchObject({ kind: 'tool', state: 'output-available', toolCallId: 'call-1',
+      eventKeys: [{ sourceEnvelopeId: batch.id, eventIndex: 0 }, { sourceEnvelopeId: batch.id, eventIndex: 1 }] });
+  });
+
+  it('reads an approval timeline directly replayable by ui-runtime', async () => {
+    const { byok: instance, daemon } = await start();
+    await submit(instance, daemon, 'approval-tail');
+    await claimStarted(daemon, 'approval-tail');
+    const request = createEnvelope('task.await_approval', { summary: 'ok to write?', approvalId: 'approval-1' }, { taskId: 'approval-tail' });
+    await send(daemon, request);
+    await instance.tasks.approve('approval-tail', { approvalId: 'approval-1' });
+    const tail = await instance.tasks.approvalTimeline('approval-tail');
+    expect(tail).toMatchObject({ tenantId: `product:${PRODUCT_ID}`, taskId: 'approval-tail', cursor: 2 });
+    expect(tail!.entries).toHaveLength(2);
+    expect(tail!.entries[0]).toMatchObject({ sourceEnvelopeId: request.id });
+    expect(replayApprovalTimeline(tail!).items).toEqual([expect.objectContaining({
+      kind: 'approval', approvalId: 'approval-1', status: 'approved', correlation: 'paired',
+      summary: 'ok to write?', resolvedBy: 'host', sourceRevisions: [1, 2],
+    })]);
+  });
+
+  it('returns undefined tails for an unknown task', async () => {
+    const { byok: instance } = await start();
+    await expect(instance.tasks.activity('missing')).resolves.toBeUndefined();
+    await expect(instance.tasks.approvalTimeline('missing')).resolves.toBeUndefined();
+  });
 
   it('follows state, approval and the activity log of a submitted task, with distinct cursors, and ends at the terminal', async () => {
     const { byok: instance, daemon } = await start();

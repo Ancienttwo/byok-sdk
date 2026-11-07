@@ -953,7 +953,7 @@ export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeCo
 import { type MaintenanceReport } from '@byok-sdk/cloud';
 export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
-import { type AgentExecutionInput, type AgentMemoryIntentNoticeInput, type EnqueuedAgentControl, type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
+import { type ActivityReadOptions, type ActivityTail, type ApprovalTimelineTail, type AgentExecutionInput, type AgentMemoryIntentNoticeInput, type EnqueuedAgentControl, type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, TaskEventEntry, TaskHandle, TaskSnapshot } from './types';
 export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, } from './types';
@@ -1093,6 +1093,18 @@ export interface ByokServer {
         reject(taskId: string, reason?: string, opts?: {
             approvalId?: string;
         }): Promise<void>;
+        /**
+         * Read this tenant's bounded activity tail, directly consumable by
+         * ui-runtime's `replayTimeline`. `after` is the cloud activity cursor,
+         * distinct from the `tasks.events` cursor; cloud cursor errors propagate.
+         * Without `after`, returns undefined when no tail is retained.
+         */
+        activity(taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
+        /**
+         * Read this tenant's bounded approval timeline for ui-runtime's
+         * `replayApprovalTimeline`; undefined when no timeline is retained.
+         */
+        approvalTimeline(taskId: string): Promise<ApprovalTimelineTail | undefined>;
         /**
          * Follow one task: its state, the pending approval request, and its Agent
          * progress and artifacts, read from the durable stores — the same reads as
