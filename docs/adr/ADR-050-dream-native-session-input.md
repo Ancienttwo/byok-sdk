@@ -24,16 +24,16 @@ v1 只用现有记忆和 Host 历史，看不到工具层面的事实。v2 由�
 
 - 只读 SDK 为这个 Agent 记录的 Pi 会话：来源是 `.byok/runtime-sessions/` 中 `runtimeId` 为 `pi` 的 handoff ledger，以及 `piByokLauncher.sessionDir` 中对应 `sessionRef` 的文件。文件 header 的 id 和 cwd 必须与 ledger 一致，规则同 `openPiRpcSession`。
 - 窗口沿用 K8 的 `{ fromMs, toMs }`，设备不另存游标。
-- 只提取工具名、参数摘要、结果（`ok`、`error` 或 `none`，只看 `toolResult.isError`）。bash 取命令首行，最多 256 字节；read、write、edit、ls、find、grep 取路径或模式，路径改为相对 home 的写法。
+- 只提取工具名、参数摘要、结果（`ok`、`error` 或 `none`，只看 `toolResult.isError`）。按 [#1526 的参数摘要裁定](https://github.com/Ancienttwo/byok-sdk/issues/1526)，bash 首行按空白切词，只取命令词及最多 2 个子命令词；每个词必须匹配 `^[a-z][a-z0-9-]{0,22}$`，遇到第一个不匹配的词就停。命令词不匹配时不带参数，只保留工具名和结果。read、write、edit、ls、find、grep 只取路径，改为相对 home 的写法；不取 pattern。
 - 只有按来源确认的 Pi 内置工具才带参数，不按名字认。MCP 和扩展工具不带参数。工具输出、用户和助手的正文、thinking、写入内容、图片和 compaction 一律不读。
 - 最多 512 个 ledger，总读取 32 MiB，单文件只读尾部 8 MiB，单条记录最多 256 KiB，超出不缓冲。最多保留 2000 次调用、64 KiB；超出时保留最新调用，在 `omittedCalls` 中计数。
 - 渲染预算为 `min(10 s, 剩余的启动时间)`。流式解析，可被 abort 打断。
 
 ### D2. 两层 secret 防护和失败边界
 
-第一层从结构上排除输出和正文。第二层让参数经过 `redactSecrets`：从 `packages/protocol/src/failure-reason.ts` 导出现有规则，并补上 PEM、`xox*-`、`glpat-`、`npm_`、`hf_`。摘要另外过滤敏感 flag 的值及 24 位以上字母数字混合的 token；这两条专用规则不进入共享规则，因为 failure reason 要保留 SHA 和 UUID。
+第一层从结构上排除输出和正文，并以固定词形白名单限制 bash。bash 不解析 shell，不做 secret 扫描，不使用 1 KiB 省略规则；每词最多 23 字符，最多 3 词。第二层让路径经过 `redactSecrets`：从 `packages/protocol/src/failure-reason.ts` 导出现有规则，并补上 PEM、`xox*-`、`glpat-`、`npm_`、`hf_`。路径另外过滤 24 位以上字母数字混合的 token；这条专用规则不进入共享规则，因为 failure reason 要保留 SHA 和 UUID。原始路径含 `://` 时整项替换为 `[url]`，不解析、不脱敏；否则超过 256 字节时整项替换为 `[omitted: too long]`。不超过该上限的路径先完整脱敏，再规范化并改写为相对 home 的路径；不在脱敏后截断。
 
-序列化后再扫描一次，有命中就使 task 失败，non-retryable。不认识的格式版本、id 或 cwd 不一致、坏行都使整个文件跳过并计数，不做部分渲染。会话目录损坏、ledger 读不了或超出预算时，task 以固定的 `native_sessions_unavailable: <closed detail>` 失败，错误中不带原始字节。
+序列化后对解码出的工具名和路径再扫描一次，有命中就使 task 失败，non-retryable；bash 命令词摘要不再扫描。不认识的格式版本、id 或 cwd 不一致、坏行或超过 256 KiB 而无法验证的记录都使整个文件跳过并计数，不做部分渲染。会话目录损坏、ledger 读不了或超出预算时，task 以固定的 `native_sessions_unavailable: <closed detail>` 失败，错误中不带原始字节。
 
 ### D3. 注入和工具边界
 
@@ -66,7 +66,8 @@ Windows 在 0.40 不声明能力。非 Pi runtime 既不作为摘要来源，也
 
 ## 3. 影响和残余风险
 
-- 参数中无前缀的短 secret（不足 24 位，且不以 flag 或赋值形式出现）可能漏过过滤。
+- 命令后两个位置中的短词只要符合词形就会进入摘要，例如 `echo hunter2`；结构白名单不判断这些词是不是 secret。路径中的短 secret 也可能漏过过滤；键名超过共享规则 64 字符上限的赋值是接受的残余风险，见 security.md。
+- 摘要不保留具体 shell 参数和搜索模式；例如 `docker login --pass''word x` 只留下 `docker login`，`mysql -phunter2` 只留下 `mysql`，`PASSWORD=x cmd` 不带参数。
 - 做梦模型 provider 会看到参数摘要；过滤不等于只在本地推理。
 - 量增至 10 倍时，2000 次调用上限先到，较早的调用被丢弃，`omittedCalls` 显示这一损失。
 

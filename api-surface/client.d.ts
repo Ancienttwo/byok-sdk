@@ -3239,6 +3239,8 @@ export declare class AgentSessionHandoffCorruptError extends AgentSessionHandoff
 export declare class AgentSessionHandoffMismatchError extends AgentSessionHandoffStoreError {
     constructor(message: string);
 }
+export declare function parseSessionEntries(raw: string): AgentSessionHandoff[];
+export declare function sessionFileName(runtimeId: string, sessionRef: string): string;
 /**
  * Durable, fail-closed session evidence stored inside the canonical Agent
  * home. Each session gets one hash-addressed append-only JSONL ledger under

@@ -148,7 +148,12 @@ test('the control-plane SQL invariants select the cloud-dataplane suites that ru
 });
 
 test('client source/deleted tests select reverse dependents and only the dataplane family', () => {
-  for (const path of ['packages/client/src/daemon/task-runner.ts', 'packages/client/src/__tests__/deleted.test.ts', 'api-surface/client.d.ts']) {
+  for (const path of [
+    'packages/client/src/daemon/task-runner.ts', 'packages/client/src/__tests__/deleted.test.ts', 'api-surface/client.d.ts',
+    'packages/client/src/__tests__/native-sessions.test.ts',
+    'packages/client/src/__tests__/fixtures/native-sessions/pi-1.5.0.jsonl',
+    'packages/client/src/__tests__/fixtures/native-sessions/generate.mjs',
+  ]) {
     const impact = selectImpact([path]);
     assert.ok(impact.dirs.includes('packages/client'));
     assert.ok(impact.dirs.includes('examples/host-execution-core'));
