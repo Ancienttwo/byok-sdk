@@ -1,3 +1,4 @@
+import { HostOfferPlainPayloadSchema, HostOfferSealedPayloadSchema } from '@byok-sdk/protocol';
 import type { ByokCloud, EnqueuedOffer } from '../cloud';
 import { z } from 'zod';
 import { type TenantId } from '@byok-sdk/core';
@@ -5,12 +6,9 @@ import {
   AgentEgressPolicySchema,
   InputPreparationOfferBindingSchema,
   SessionSelectionSchema,
-  TaskOfferPlainPayloadSchema,
-  TaskOfferSealedPayloadSchema,
   createEnvelope,
   requiredReceiverCapabilities,
   type AgentMessageServerContext,
-  type TaskOfferSealedPayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from '../errors';
 import { refuseSealedFields, type EnqueuePaths } from './enqueue';
@@ -19,13 +17,13 @@ const RESUME_SESSION = SessionSelectionSchema.options[0];
 const NO_EGRESS = { egressPolicy: z.never().optional(), messageEgress: z.never().optional() };
 
 /** The `task.offer` payload each enqueue lane admits; every lane sends `task.offer`. */
-const AgentOfferLaneSchema = TaskOfferPlainPayloadSchema.safeExtend({ session: RESUME_SESSION, ...NO_EGRESS, preparation: z.never().optional() });
-const AgentEgressOfferLaneSchema = TaskOfferPlainPayloadSchema.safeExtend({
+const AgentOfferLaneSchema = HostOfferPlainPayloadSchema.safeExtend({ session: RESUME_SESSION, ...NO_EGRESS, preparation: z.never().optional() });
+const AgentEgressOfferLaneSchema = HostOfferPlainPayloadSchema.safeExtend({
   session: RESUME_SESSION, egressPolicy: AgentEgressPolicySchema, preparation: z.never().optional(),
 });
-const PreparedOfferLaneSchema = TaskOfferPlainPayloadSchema.safeExtend({ preparation: InputPreparationOfferBindingSchema });
-const SealedAgentOfferLaneSchema = TaskOfferSealedPayloadSchema.safeExtend({ session: RESUME_SESSION, ...NO_EGRESS });
-const SealedAgentEgressOfferLaneSchema = TaskOfferSealedPayloadSchema.safeExtend({ session: RESUME_SESSION, egressPolicy: AgentEgressPolicySchema });
+const PreparedOfferLaneSchema = HostOfferPlainPayloadSchema.safeExtend({ preparation: InputPreparationOfferBindingSchema });
+const SealedAgentOfferLaneSchema = HostOfferSealedPayloadSchema.safeExtend({ session: RESUME_SESSION, ...NO_EGRESS });
+const SealedAgentEgressOfferLaneSchema = HostOfferSealedPayloadSchema.safeExtend({ session: RESUME_SESSION, egressPolicy: AgentEgressPolicySchema });
 
 /** Resume-only Agent lanes refuse a payload that does not resume an exact session. */
 function assertResumeSession(payload: { readonly session?: unknown }): void {
@@ -39,12 +37,14 @@ function assertResumeSession(payload: { readonly session?: unknown }): void {
 }
 
 interface Dependencies {
+  resolveOfferPayload: EnqueuePaths['resolveOfferPayload'];
   assertAgentCapabilities: EnqueuePaths['assertAgentCapabilities'];
   enqueueTaskEnvelope: EnqueuePaths['enqueueTaskEnvelope'];
   agentMessageOfferWriter: EnqueuePaths['agentMessageOfferWriter'];
 }
 
 export function createOffersApi({
+  resolveOfferPayload,
   assertAgentCapabilities,
   enqueueTaskEnvelope,
   agentMessageOfferWriter,
@@ -70,7 +70,7 @@ export function createOffersApi({
   ): Promise<EnqueuedOffer> {
     const { taskId } = input;
     assertResumeSession(input.payload);
-    const payload: TaskOfferSealedPayload = lane.parse(input.payload);
+    const payload = await resolveOfferPayload(tenant, deviceId, lane.parse(input.payload));
     // A sealed instruction binds the task id, so cloud cannot mint one for it.
     if (payload.sealed !== undefined && (typeof taskId !== 'string' || taskId === '')) {
       throw new ByokCloudError('coordination_input_invalid', 'a sealed instruction needs its taskId');
@@ -94,23 +94,23 @@ export function createOffersApi({
       // caller always gets the same code whatever the target device's state.
       refuseSealedFields(input.payload, ['sealing', 'sealed'], 'enqueueSealedAgentOffer');
       assertResumeSession(input.payload);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', input.payload));
       // Parse the strict control payload before reserving a mailbox sequence.
       // A malformed/oversized AgentRef therefore cannot leave a durable
       // delivery row behind.
-      const payload = AgentOfferLaneSchema.parse(input.payload);
+      const payload = await resolveOfferPayload(tenant, deviceId, AgentOfferLaneSchema.parse(input.payload));
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', payload));
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
         createEnvelope('task.offer', payload, { id: messageId, taskId, seq }),
       );
     },
 
     async enqueuePreparedOffer(tenant, deviceId, input) {
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', input.payload));
       // Parsed before a mailbox sequence is reserved, exactly as the strict
       // Agent offer above is: a malformed preparation reference must not leave
       // a durable delivery row behind. A caller that tried to smuggle an
       // `instruction` or a resume session onto this lane is rejected here.
-      const payload = PreparedOfferLaneSchema.parse(input.payload);
+      const payload = await resolveOfferPayload(tenant, deviceId, PreparedOfferLaneSchema.parse(input.payload));
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', payload));
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
         createEnvelope('task.offer', payload, { id: messageId, taskId, seq }),
         agentMessageOfferWriter(deviceId, payload, input.agentMessageContext),
@@ -120,8 +120,8 @@ export function createOffersApi({
     async enqueueAgentEgressOffer(tenant, deviceId, input) {
       refuseSealedFields(input.payload, ['sealing', 'sealed'], 'enqueueSealedAgentEgressOffer');
       assertResumeSession(input.payload);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', input.payload));
-      const payload = AgentEgressOfferLaneSchema.parse(input.payload);
+      const payload = await resolveOfferPayload(tenant, deviceId, AgentEgressOfferLaneSchema.parse(input.payload));
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', payload));
       const enqueued = await enqueueTaskEnvelope(
         tenant,
         deviceId,

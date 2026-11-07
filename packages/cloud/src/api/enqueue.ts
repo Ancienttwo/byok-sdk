@@ -1,6 +1,8 @@
+import type { HostOfferPlainPayload, HostOfferSealedPayload } from '@byok-sdk/protocol';
 import type { ByokCloudOptions, EnqueuedAgentControl, EnqueuedOffer } from '../cloud';
 import { contentHash, type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import {
+  AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY,
   AgentContentReceiptPayloadSchema,
   AgentEgressAckPayloadSchema,
   AgentMessageServerContextSchema,
@@ -80,6 +82,17 @@ interface Dependencies {
  * and by the device routes that acknowledge inbound messages.
  */
 export function createEnqueuePaths({ root, controlPlane, options }: Dependencies) {
+  /** Resolve Host policy once from the authenticated durable device declaration, before admission. */
+  async function resolveOfferPayload(
+    tenant: TenantId, deviceId: string, payload: HostOfferPlainPayload | HostOfferSealedPayload,
+  ): Promise<TaskOfferPayload> {
+    const { agentMemoryCommit, ...rest } = payload;
+    if (agentMemoryCommit !== 'on-success-if-advertised') return { ...rest, ...(agentMemoryCommit === undefined ? {} : { agentMemoryCommit }) };
+    const device = await options.cloud.devices.get(tenant, deviceId);
+    return device?.capabilities?.includes(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY)
+      ? { ...rest, agentMemoryCommit: 'on-success' } : rest;
+  }
+
   async function enqueueTaskEnvelope(
     tenant: TenantId,
     deviceId: string,
@@ -443,6 +456,7 @@ export function createEnqueuePaths({ root, controlPlane, options }: Dependencies
   }
 
   return {
+    resolveOfferPayload,
     enqueueTaskEnvelope,
     assertSealedCiphertext,
     retainTaskCiphertext,

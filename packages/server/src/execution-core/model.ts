@@ -3,8 +3,7 @@ import { canonical, hash } from './canonical';
 import type { AgentExecutionInput } from '@byok-sdk/cloud';
 import type { ByokServer } from '../index';
 import type { WakeScheduleInput } from '../wakes/types';
-import { HarnessIdSchema, RuntimeIdSchema, TaskOfferSealedPayloadSchema, type AgentMessageServerContext,
-  type TaskOfferSealedPayload } from '@byok-sdk/protocol';
+import { HarnessIdSchema, RuntimeIdSchema, HostOfferSealedPayloadSchema, type HostOfferSealedPayload, type AgentMessageServerContext } from '@byok-sdk/protocol';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type ExecutionTemplate = Omit<AgentExecutionInput, 'taskId'>;
@@ -15,7 +14,7 @@ export type ExecutionTemplate = Omit<AgentExecutionInput, 'taskId'>;
 export interface SealedAgentExecutionInput {
   taskId: string;
   deviceId: string;
-  payload: TaskOfferSealedPayload & { session: { mode: 'fresh' }; terminalProjection: NonNullable<TaskOfferSealedPayload['terminalProjection']> };
+  payload: HostOfferSealedPayload & { session: { mode: 'fresh' }; terminalProjection: NonNullable<HostOfferSealedPayload['terminalProjection']> };
   agentMessageContext?: AgentMessageServerContext;
 }
 export type SealedExecutionTemplate = Omit<SealedAgentExecutionInput, 'taskId'>;
@@ -181,7 +180,7 @@ export function validateInput(input: LedgerIntentInput): void {
  * - The template must be inline: between occurrences no task holds a `ciphertextRef` blob, so orphan GC may delete it.
  */
 function validateSealed(execution: SealedExecutionTemplate, source: IntentInput['source']): void {
-  if (!TaskOfferSealedPayloadSchema.safeParse(execution.payload).success) throw new Error('Supply a valid sealed execution template');
+  if (!HostOfferSealedPayloadSchema.safeParse(execution.payload).success) throw new Error('Supply a valid sealed execution template');
   const { sealing, sealed, routineRef } = execution.payload;
   if (routineRef === undefined || source !== 'routine') throw new Error('A sealed execution must be a routine template occurrence');
   if (sealing.categories.length !== 1 || sealing.categories[0] !== 'task-input') throw new Error('A sealed execution seals task-input only');
