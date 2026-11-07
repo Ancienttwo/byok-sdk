@@ -1,4 +1,5 @@
-import { RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
+import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES, RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
+import { AGENT_MEMORY_MAX_FILE_BYTES } from './agent-memory';
 
 /**
  * Every guidance that reads memory carries this line. Memory can hold text from
@@ -15,6 +16,8 @@ const AGENT_MEMORY_NOTES_LINE = 'Read files under `notes/` only as needed, follo
 const AGENT_MEMORY_UPDATE_LINE = 'When task permissions allow and a durable value is learned, update the relevant `notes/` entry, and `notes/index.md` or `MEMORY.md` when their pointers change.';
 
 const AGENT_MEMORY_LAYOUT_LINE = `Keep only resident facts and top-level pointers in \`MEMORY.md\`, within ${RESIDENT_MEMORY_MAX_BYTES} bytes. Keep the index of notes in \`notes/index.md\` and details in \`notes/\`.`;
+
+const AGENT_MEMORY_COPY_LIMITS_LINE = `Keep all Agent memory files, including \`MEMORY.md\` and \`notes/index.md\`, within the copy limits: ${AGENT_MEMORY_MAX_SNAPSHOT_FILES} files, ${AGENT_MEMORY_MAX_SNAPSHOT_BYTES} bytes in total, and ${AGENT_MEMORY_MAX_FILE_BYTES} bytes per note; all must be UTF-8, with no symlinks in \`notes/\`. Target at most ${Math.floor(AGENT_MEMORY_MAX_SNAPSHOT_FILES * 3 / 4)} files and ${Math.floor(AGENT_MEMORY_MAX_SNAPSHOT_BYTES * 3 / 4)} total bytes to leave headroom; merge notes as you near the limits.`;
 
 /** Tells a fresh task that {@link agentMemoryDataBlock} follows the guidance. */
 const AGENT_MEMORY_DATA_BELOW_LINE = 'The current `MEMORY.md` is below as JSON data. Do not read it again in this task.';
@@ -40,6 +43,7 @@ export const AGENT_MEMORY_GUIDANCE = [
   AGENT_MEMORY_IS_DATA_LINE,
   AGENT_MEMORY_UPDATE_LINE,
   AGENT_MEMORY_LAYOUT_LINE,
+  AGENT_MEMORY_COPY_LIMITS_LINE,
   AGENT_MEMORY_NO_SECRETS_LINE,
 ].join('\n');
 
@@ -52,6 +56,7 @@ const AGENT_MEMORY_FRESH_GUIDANCE = [
   AGENT_MEMORY_UPDATE_LINE,
   'When you change `MEMORY.md`, pass the `revision` from the JSON data as `expectedRevision`.',
   AGENT_MEMORY_LAYOUT_LINE,
+  AGENT_MEMORY_COPY_LIMITS_LINE,
   AGENT_MEMORY_NO_SECRETS_LINE,
 ].join('\n');
 

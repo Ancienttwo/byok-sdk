@@ -586,6 +586,10 @@ async function startAndActivateRuntime(
       },
     });
   }
+  // Commit-policy addition to memory guidance, kept here so memory-guidance.ts's public declaration surface does not move.
+  const memoryCommitGuidance = sessionRef === undefined && !readerAttempt && ordinaryMemoryMode === 'read-write' && activation.payload.agentMemoryCommit === 'on-success'
+    ? 'Memory writes are kept only if this task completes successfully.\n'
+    : '';
   const startInput: RuntimeOperationStartInput = {
     scratch,
     ...(input.sessionLease === undefined ? {} : { sessionLease: input.sessionLease }),
@@ -614,7 +618,7 @@ async function startAndActivateRuntime(
     ...(preparedLaunch === undefined
       ? {
         kind: 'instruction' as const,
-        instruction: prependAgentMemoryModeGuidance(resolvedInstruction, ordinaryMemoryMode, readerAttempt, injectsResidentMemory ? residentMemoryRead : undefined),
+        instruction: `${memoryCommitGuidance}${prependAgentMemoryModeGuidance(resolvedInstruction, ordinaryMemoryMode, readerAttempt, injectsResidentMemory ? residentMemoryRead : undefined)}`,
       }
       : { kind: 'prepared' as const, preparation: preparedLaunch }),
     manifest,
