@@ -486,7 +486,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/cloud-do/package.json` | Package metadata | — | forbidden | 1630 B |
 | `@byok-sdk/cloud/package.json` | Package metadata | — | forbidden | 1272 B |
 | `@byok-sdk/core` | Shared contracts and validation | `zod` | allowed | 100782 B |
-| `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1403 B |
+| `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1404 B |
 | `@byok-sdk/core/sealed-payload` | Sealed payload v1 byte rules | `zod` | allowed | 160958 B |
 | `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 235911 B |
 | `@byok-sdk/keys/model-route` | Headless Pi model route: choices, linkage, field errors and submission | `zod` | allowed | 307348 B |
