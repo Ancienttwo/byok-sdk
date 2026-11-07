@@ -2215,6 +2215,10 @@ export * from './failure-reason';
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
 /** Maximum memory files in one local Host export, including MEMORY.md. */
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
+/** Maximum raw UTF-8 content bytes in one Agent-memory note. */
+export declare const AGENT_MEMORY_MAX_FILE_BYTES: number;
+/** Maximum directory entries visited while walking Agent-memory notes. */
+export declare const AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES = 512;
 /**
  * Maximum UTF-8 bytes of the resident Agent-memory file, `MEMORY.md` (#1439).
  * The device refuses a larger `memory_save` or Host intent, and a writer
