@@ -28,7 +28,7 @@ export interface DreamingOptions {
   models?: readonly string[];
   /** Default `DEFAULT_DREAM_MAX_DURATION_MS`. */
   maxDurationMs?: number;
-  /** Request native session input when the device advertises it. Default true. */
+  /** Request native session input when the device advertises it. Default true. This applies only to runtime templates: a harness template, like a device that does not advertise native sessions, receives no request and the dream runs without that input. */
   nativeSessions?: boolean;
 }
 export interface DreamPolicy { timeZone?: string; models: readonly string[]; maxDurationMs: number; nativeSessions: boolean }
