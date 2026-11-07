@@ -3,18 +3,18 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acpSession, type AcpSessionHooks } from '../../vendor/oar/6bdd273/shared/acp/session';
-import type { AcpSessionProfile } from '../../vendor/oar/6bdd273/shared/acp/profile';
-import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/6bdd273/contracts/session';
-import { grokFailureOutcome } from '../../vendor/oar/6bdd273/runtimes/grok/failure';
+import { acpSession, type AcpSessionHooks } from '../../vendor/oar/45488e7/shared/acp/session';
+import type { AcpSessionProfile } from '../../vendor/oar/45488e7/shared/acp/profile';
+import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/45488e7/contracts/session';
+import { grokFailureOutcome } from '../../vendor/oar/45488e7/runtimes/grok/failure';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
-import { createAcpTurns } from '../../vendor/oar/6bdd273/shared/acp/turns';
-import { createUsageUpdateGate } from '../../vendor/oar/6bdd273/shared/acp/profile';
-import type { AcpProcess } from '../../vendor/oar/6bdd273/shared/acp/process';
-import { createSessionKernel } from '../../vendor/oar/6bdd273/shared/session-kernel';
-import { antigravityAcpProfile } from '../../vendor/oar/6bdd273/runtimes/antigravity/session';
+import { createAcpTurns } from '../../vendor/oar/45488e7/shared/acp/turns';
+import { createUsageUpdateGate } from '../../vendor/oar/45488e7/shared/acp/profile';
+import type { AcpProcess } from '../../vendor/oar/45488e7/shared/acp/process';
+import { createSessionKernel } from '../../vendor/oar/45488e7/shared/session-kernel';
+import { antigravityAcpProfile } from '../../vendor/oar/45488e7/runtimes/antigravity/session';
 
 const FAKE = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
 // A runtime-neutral profile: the shared stack under test, not a vendor's.
@@ -56,13 +56,18 @@ async function turn(session: AdapterSession, records: RawEvent[], input: string)
 }
 
 describe('vendored OAR ACP session over SDK-owned processes', () => {
-  it.each(['settlement', 'interrupt'] as const)('rejects a steer waiting on spawn after %s', async (transition) => {
+  it.each(['spawn', 'dispatch'].flatMap(wait => ['settlement', 'interrupt'].map(transition => ({ wait, transition }))))('rejects a steer waiting on $wait after $transition', async ({ wait, transition }) => {
     const gate = Promise.withResolvers<void>();
     const reply = Promise.withResolvers<{ stopReason: string }>();
-    let spawned = Promise.resolve();
+    let waiting = false;
+    let spawnReads = 0;
     const request = vi.fn(() => reply.promise);
     const runtime = {
-      get spawned() { return spawned; }, closed: false, exitCode: null,
+      get spawned() {
+        if (!waiting) return Promise.resolve();
+        const read = ++spawnReads;
+        return wait === 'dispatch' && read === 1 ? Promise.resolve() : gate.promise;
+      }, closed: false, exitCode: null,
       connection: { agent: { request, notify: vi.fn(async () => {}) } },
       observeDescendants: () => {},
     } as unknown as AcpProcess;
@@ -72,8 +77,9 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     expect(turns.begin(null, 'first').kind).toBe('accepted');
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     const state = turns.active()!;
-    spawned = gate.promise;
+    waiting = true;
     const steer = turns.steer(state, 'second', undefined, {});
+    await vi.waitFor(() => expect(spawnReads).toBe(wait === 'dispatch' ? 2 : 1));
     if (transition === 'interrupt') await turns.abort(state);
     else {
       reply.resolve({ stopReason: 'end_turn' });

@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 6bdd273 so the caller spawns, adopts and reaps every hosted terminal process (Apache-2.0).
+// BYOK change: Modified from OAR 45488e7 so the caller spawns, adopts and reaps every hosted terminal process (Apache-2.0).
 /* oxlint-disable typescript/promise-function-async -- SDK handlers deliberately return terminal promises directly. */
 import {
   RequestError,

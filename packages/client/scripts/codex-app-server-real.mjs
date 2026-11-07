@@ -15,7 +15,7 @@ const { join } = await import('node:path');
 const { execFile } = await import('node:child_process');
 const { promisify } = await import('node:util');
 const { codexSession } = await import(
-  '../vendor/oar/6bdd273/runtimes/codex/session.ts'
+  '../vendor/oar/45488e7/runtimes/codex/session.ts'
 );
 const { spawnOwnedLineProcess } = await import(
   '../src/runtime/owned-line-process.ts'

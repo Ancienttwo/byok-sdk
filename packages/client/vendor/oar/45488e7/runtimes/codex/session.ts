@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 6bdd273 for injected processes, native-first recording, bounded request refusal, caller-selected sandbox, caller-owned open steps and session credential redaction without sealSession (Apache-2.0).
+// BYOK change: Modified from OAR 45488e7 for injected processes, native-first recording, bounded request refusal, caller-selected sandbox, caller-owned open steps and session credential redaction without sealSession (Apache-2.0).
 import { codexTaskControl } from "./task-control.js";
 import { manualCompaction } from "../../shared/manual-compaction.js";
 import { codexCompaction, codexCompactionBusy } from "./compaction.js";

@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 6bdd273 for injected processes, an explicit environment, a record consumer and session credential redaction without sealSession (Apache-2.0).
+// BYOK change: Modified from OAR 45488e7 for injected processes, an explicit environment, a record consumer and session credential redaction without sealSession (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- Session assembly wires the environment, process, terminal host, recorder and control machinery. */
 /* oxlint-disable typescript/promise-function-async -- SDK callbacks deliberately return the SDK's native promises. */
 import type { AvailableInstallation } from "../../contracts/installation.js";
@@ -28,7 +28,8 @@ import { acpLaunchArgs } from "./launch-args.js";
 import { startAcpProcess, type SpawnAcpLineProcess } from "./process.js";
 import { createAcpRecorder } from "./records.js";
 import { createAcpTerminalHost, type SpawnAcpTerminal } from "./terminal.js";
-import { acpTakesImages, createAcpTurns, type ActiveTurn } from "./turns.js";
+import { createAcpTurns, type ActiveTurn } from "./turns.js";
+import { acpTakesImages } from "./prompt.js";
 import { createAcpTokenUsage } from "./token-usage.js";
 import { createAcpOpening } from "./opening.js";
 import { createAcpConfigUpdates } from "./config-updates.js";
