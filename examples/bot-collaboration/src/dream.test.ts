@@ -1,17 +1,38 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { occurrenceIntentKey, setLifecycle, type ExecutionTemplate, type Routine } from '@byok-sdk/server/execution-core';
+import type { AgentExecutionInput } from '@byok-sdk/cloud';
+import { HostLedger, hash, occurrenceIntentKey, setLifecycle, type ExecutionTemplate, type Routine } from '@byok-sdk/server/execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { botCompactVeto } from './compaction';
-import { DEFAULT_DREAM_MAX_DURATION_MS, DREAM_WAIT_MS } from './dream';
+import { DEFAULT_DREAM_MAX_DURATION_MS, DREAM_WAIT_MS, dreamPolicy, reconcileDreamRoutines, syncDreams } from './dream';
 import { DEFAULT_INSTRUCTION_MAX_BYTES } from './delegation';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
 import { BOT_DREAM, botRoutines, routineCalendar } from './routines';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
+import { TENANT_A, createHarness } from '../../../packages/cloud/src/__tests__/support/harness';
+import { seedCollaboration } from './commit-vectors.test-support';
 
 let fixture: TestHost | undefined, bot: BotCollaboration | undefined, clock = 0;
 afterEach(async () => { await bot?.close(); await fixture?.close(); bot = fixture = undefined; });
 const ZONE = 'Asia/Hong_Kong';
+const WINDOW_START = Date.UTC(2026, 0, 1), WINDOW_END = WINDOW_START + 1000;
+function offlineDream(nativeSessions?: boolean): AgentExecutionInput {
+  const ledger = new HostLedger(':memory:', TENANT_A), models = { default: template('device') }, policy = dreamPolicy({ timeZone: ZONE, nativeSessions })!;
+  ledger.transaction(s => {
+    const state = stateOf(s.application); seedCollaboration(state); state.turns.t1!.status = 'succeeded';
+    reconcileDreamRoutines(s, policy, models, WINDOW_START);
+    const routine = Object.values(s.routines)[0]!, key = 'dream-key';
+    s.occurrences[key] = { key, routineId: routine.definition.id, definitionVersion: 1, trigger: { kind: 'scheduled', plannedAt: WINDOW_END },
+      wakeKey: 'wake', recordedAt: WINDOW_END, nextAt: null, hook: {}, attempts: 0 };
+    state.dreams!.open[key] = { botId: 'main', windowEnd: WINDOW_END };
+    syncDreams(s, { tenant: TENANT_A, policy, models, instructionMaxBytes: DEFAULT_INSTRUCTION_MAX_BYTES, now: WINDOW_END, refused: () => false, historyMode: false });
+  });
+  const execution = ledger.snapshot().intents[hash(occurrenceIntentKey('dream-key'))]!.execution as AgentExecutionInput;
+  ledger.close(); return execution;
+}
+it('freezes the default native session request with the dream window', () => {
+  expect(offlineDream().payload.nativeSessions).toEqual({ fromMs: WINDOW_START, toMs: WINDOW_END, ifAdvertised: true });
+});
 async function open(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
   fixture ??= await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
   clock ||= Date.now();
@@ -89,14 +110,16 @@ it('dreaming: false ends the routines and adds none', async () => {
 
 it('offers a fresh writer with agentMemory none, keeps the Host out of its intent, and skips a day with no new Turn', async () => {
   await open();
+  const fromMs = record()!.since;
   await completedTurn('The release moved to Friday');
   const key = await due(), intent = bot!.core.intent(key)!;
   expect(intent).toMatchObject({ source: 'routine' });
   const { payload, ...execution } = intent.execution as ExecutionTemplate;
   expect(execution).toEqual({ deviceId: fixture!.deviceId });
   expect(payload).toMatchObject({ agentMemory: 'none', session: { mode: 'fresh' }, agentRef: { agentId: 'main' }, terminalProjection: { mode: 'none' },
-    limits: { maxDurationMs: DEFAULT_DREAM_MAX_DURATION_MS } });
-  for (const field of ['agentMemoryCommit', 'homeAccess', 'messageEgress', 'requiredToolsets', 'preparation']) expect(payload).not.toHaveProperty(field);
+    limits: { maxDurationMs: DEFAULT_DREAM_MAX_DURATION_MS }, nativeSessions: { fromMs, toMs: clock, ifAdvertised: true } });
+  for (const field of ['agentMemoryCommit', 'homeAccess', 'messageEgress', 'requiredToolsets', 'preparation', 'harnessId']) expect(payload).not.toHaveProperty(field);
+  expect(bot!.ledger.snapshot().intents[intent.id]!.execution.payload.nativeSessions).toEqual(payload.nativeSessions);
   expect(payload.instruction).toContain('The release moved to Friday');
   await expect(bot!.cancelHostIntent(key)).rejects.toMatchObject({ code: 'unknown_intent' });
   await expect(bot!.failStuckIntent(key)).rejects.toMatchObject({ code: 'not_stuck' });
@@ -129,6 +152,21 @@ it('offers a fresh writer with agentMemory none, keeps the Host out of its inten
   expect(rest).toContain('Late routine fact');
   expect(rest).toContain('User fact');
   expect(rest).not.toContain('Busy fact');
+});
+
+it('omits native sessions when disabled', async () => {
+  expect(offlineDream(false).payload).not.toHaveProperty('nativeSessions');
+});
+
+it('omits native sessions from the cloud offer when the device does not advertise them', async () => {
+  const execution = offlineDream();
+  const harness = createHarness(), device = await harness.pairDevice(TENANT_A);
+  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [
+    'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection', 'agent-memory-selection',
+  ] });
+  await harness.cloud.submitAgentExecution(TENANT_A, { ...execution, deviceId: device.deviceId, taskId: 'dream' });
+  expect((await harness.cloud.readTaskOffer(TENANT_A, 'dream'))!.payload).not.toHaveProperty('nativeSessions');
+  expect(execution.payload.nativeSessions).toMatchObject({ ifAdvertised: true });
 });
 
 it('takes the first listed template on the Bot device, falls back to the Bot template, and skips without one', async () => {

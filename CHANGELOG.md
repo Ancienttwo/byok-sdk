@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Added** — K8 dreaming requests native session input for its dream window when the device advertises support; `dreaming.nativeSessions: false` disables the request ([#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526)).
+
 - **Fixed** — `@byok-sdk/keys` `runCommand` now returns exit code 127 on signal termination or a stdin error, instead of reporting exit code 1 for signal termination or crashing on a stdin error.
 
 - **Dependencies** — Upgrade the bundled `pi-web-access` extension from 0.45.0 to 0.47.0 (#1511), including optional search providers, proxy routing fixes, PDF text results, and platform-native temporary clone paths.
