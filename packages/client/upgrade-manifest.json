@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "02819de5186018171876702e8275fd556e0fda08aefa411ca2bc5679ce350931"
+    "snapshotSha256": "dea76342cc10959cf946e5218727c4566d4046cd5e24c2d41a2305bee8ae09f8"
   },
   "configFields": {
     "status": "tracked",
@@ -16,10 +16,10 @@
   },
   "entries": [
     {
-      "id": "k8-dream-compaction-veto",
+      "id": "k8-dreaming-progress",
       "impact": "additive",
-      "summary": "K8 keeps a dream intent until its result syncs (#1490). botCompactVeto and the rule compactVeto now refuse a dream intent key with 'The dream result is not synced' until the sync closes that dream, so a compaction that names the key throws CompactVetoError and changes nothing. No Host code change: the caller retries after a later pass, as for a Turn K8 still reads.",
-      "migration": "examples/bot-collaboration/README.md#compaction",
+      "summary": "K8 keeps a dream intent until its result syncs (#1490). botCompactVeto and the rule compactVeto now refuse a dream intent key with 'The dream result is not synced' until the sync closes that dream, so a compaction that names the key throws CompactVetoError and changes nothing. No Host code change: the caller retries after a later pass, as for a Turn K8 still reads. With BotOptions.history, the dream mark advances only through settled history rows actually read. No settled rows after the mark skips that day with no_new_turns and leaves the mark unchanged; a Bot whose history authority never returns rows never dreams. Hosts vendoring K8 should copy the updated example.",
+      "migration": "examples/bot-collaboration/README.md#dreaming-1475",
       "items": [
         "example:bot-collaboration"
       ]
@@ -30,8 +30,8 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=84817467889ca31d",
-      "after": "K8 0.0.1 src-sha256=12bd95552245d39c",
-      "entry": "k8-dream-compaction-veto"
+      "after": "K8 0.0.1 src-sha256=86696f5c9bd4e28b",
+      "entry": "k8-dreaming-progress"
     }
   ]
 }
