@@ -1,4 +1,4 @@
-import { checkRoutineSchedule, nextRoutineOccurrence, TaskOfferSealedPayloadSchema, type CreateRoutineAction, type RoutineSchedule, type RoutineScheduleFields,
+import { checkRoutineSchedule, nextRoutineOccurrence, HostOfferSealedPayloadSchema, type CreateRoutineAction, type RoutineSchedule, type RoutineScheduleFields,
   type UpdateRoutineAction } from '@byok-sdk/protocol';
 import { canonical, concludeOccurrence, hash, occurrenceIntentKey, occurrenceOfIntentKey, type ExecutionTemplate, type HostOccurrenceRoutineDefinition, type HostOccurrenceRun, type LedgerState,
   type NextOccurrence, type Routine } from '@byok-sdk/server/execution-core';
@@ -148,7 +148,7 @@ function checkSealed(id: string, version: number, sealed: SealedRoutineTemplate,
   }
   const { instruction: _, ...plain } = execution.payload;
   const offer = { ...plain, sealing: sealed.sealing, sealed: sealed.template, routineRef: { routineId: id, definitionVersion: version, notAfter: sealed.notAfter } };
-  if (!TaskOfferSealedPayloadSchema.safeParse(offer).success) throw new Error('Supply a valid sealed template');
+  if (!HostOfferSealedPayloadSchema.safeParse(offer).success) throw new Error('Supply a valid sealed template');
   if ('ciphertextRef' in sealed.template) throw new Error('A sealed routine template must be inline');
 }
 /**
