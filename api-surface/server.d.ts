@@ -518,7 +518,7 @@ import { canonical, hash } from './canonical';
 import type { AgentExecutionInput } from '@byok-sdk/cloud';
 import type { ByokServer } from '../index';
 import type { WakeScheduleInput } from '../wakes/types';
-import { type AgentMessageServerContext, type TaskOfferSealedPayload } from '@byok-sdk/protocol';
+import { type HostOfferSealedPayload, type AgentMessageServerContext } from '@byok-sdk/protocol';
 export type Json = null | boolean | number | string | Json[] | {
     [key: string]: Json;
 };
@@ -530,11 +530,11 @@ export type ExecutionTemplate = Omit<AgentExecutionInput, 'taskId'>;
 export interface SealedAgentExecutionInput {
     taskId: string;
     deviceId: string;
-    payload: TaskOfferSealedPayload & {
+    payload: HostOfferSealedPayload & {
         session: {
             mode: 'fresh';
         };
-        terminalProjection: NonNullable<TaskOfferSealedPayload['terminalProjection']>;
+        terminalProjection: NonNullable<HostOfferSealedPayload['terminalProjection']>;
     };
     agentMessageContext?: AgentMessageServerContext;
 }

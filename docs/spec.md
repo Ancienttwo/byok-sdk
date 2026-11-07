@@ -2990,6 +2990,17 @@ and is restored too. The device must advertise `agent-memory-commit-on-success`,
 refuses the field to a device without it. A `memory-reader` Attempt and durable Pi
 do not support it. See [the protocol](protocol.md#22-task-free-agent-home-projection).
 
+Host enqueue inputs also accept `agentMemoryCommit: 'on-success-if-advertised'`
+(#1506). The shared cloud and embedded-server enqueue path reads the device's
+durable capability declaration: it sends `on-success` when
+`agent-memory-commit-on-success` is advertised, otherwise it omits the field
+and writes retain their ordinary behavior. This option does not require the
+commit capability; literal `on-success` still does. The device wire is unchanged.
+K4 templates retain the Host option as given. Task offer readback contains the
+resolved wire value, and frozen replay accepts either recorded resolution for
+the conditional option without reading current capabilities. Every other field
+and a literal `on-success` input still compare exactly.
+
 A fresh instruction task whose effective mode is `read` or `read-write`, on a
 daemon that admits the memory MCP, carries `MEMORY.md`
 ([ADR-048](adr/ADR-048-device-injects-resident-memory.md), #1439), for a writer

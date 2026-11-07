@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Added** — Host enqueue inputs accept `agentMemoryCommit: 'on-success-if-advertised'` (#1506). Cloud and embedded server send `on-success` only when the device advertises `agent-memory-commit-on-success`; otherwise they omit the field. Frozen templates retain the option and replay against the recorded resolution. The device wire and strict `on-success` admission are unchanged.
+
 - Re-vendor OAR 0.92.0 (`packages/client/vendor/oar/6bdd273/`), replacing the 0.91.0 snapshot. Hosts see no change: the upstream Antigravity steer fix and the dsh task events do not reach an SDK surface.
 - Fixed dsh terminal usage omitting subagent tokens; token totals now include root and child sessions while context occupancy stays root-only.
 

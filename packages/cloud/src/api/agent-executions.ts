@@ -12,6 +12,7 @@ import { refuseSealedFields, type EnqueuePaths } from './enqueue';
 
 interface Dependencies {
   options: ByokCloudOptions;
+  resolveOfferPayload: EnqueuePaths['resolveOfferPayload'];
   assertAgentCapabilities: EnqueuePaths['assertAgentCapabilities'];
   enqueueTaskEnvelope: EnqueuePaths['enqueueTaskEnvelope'];
   agentMessageOfferWriter: EnqueuePaths['agentMessageOfferWriter'];
@@ -19,6 +20,7 @@ interface Dependencies {
 
 export function createAgentExecutionsApi({
   options,
+  resolveOfferPayload,
   assertAgentCapabilities,
   enqueueTaskEnvelope,
   agentMessageOfferWriter,
@@ -44,7 +46,8 @@ export function createAgentExecutionsApi({
     tenant: TenantId,
     validated: AgentExecutionInput | SealedAgentExecutionInput,
   ): Promise<EnqueuedOffer> {
-    const { deviceId, payload } = validated;
+    const { deviceId } = validated;
+    const payload = await resolveOfferPayload(tenant, deviceId, validated.payload);
     // A task that seals its message needs `consumeSealed` instead; agentMessageOfferWriter checks it.
     const sealsMessage = payload.sealing?.categories.includes('agent-message') === true;
     if (payload.messageEgress !== undefined && !sealsMessage && typeof options.agentMessage?.consume !== 'function') {

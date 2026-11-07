@@ -1,3 +1,4 @@
+import type { HostOfferPlainPayload, HostOfferSealedPayload } from '@byok-sdk/protocol';
 import { createTenantApi } from './api/tenant';
 import { createTaskReadsApi } from './api/task-reads';
 import { createTaskCancellationApi } from './api/task-cancellation';
@@ -101,8 +102,6 @@ import {
   type InputPreparationOfferBinding,
   type SessionSelection,
   type TaskOfferPayload,
-  type TaskOfferPlainPayload,
-  type TaskOfferSealedPayload,
   type AgentRef,
   type AgentContentReadPayload,
   type AgentMessageDispositionPayload,
@@ -371,7 +370,7 @@ export interface AgentDispatchInput {
    * execution is admitted only through {@link ByokCloud.submitAgentExecution};
    * an egress policy only through {@link ByokCloud.enqueueAgentEgressOffer}.
    */
-  readonly payload: TaskOfferPlainPayload & {
+  readonly payload: HostOfferPlainPayload & {
     readonly session: ResumeSession;
     readonly egressPolicy?: never;
     readonly messageEgress?: never;
@@ -391,7 +390,7 @@ export interface PreparedDispatchInput {
   /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
   readonly taskId?: string;
   /** Instruction-free strict fresh payload naming the preparation this Execution consumes. */
-  readonly payload: TaskOfferPlainPayload & { readonly preparation: InputPreparationOfferBinding };
+  readonly payload: HostOfferPlainPayload & { readonly preparation: InputPreparationOfferBinding };
   /** Host-only destination/freshness authority; never serialized to the daemon. */
   readonly agentMessageContext?: AgentMessageServerContext;
 }
@@ -400,7 +399,7 @@ export interface PreparedDispatchInput {
 export interface AgentEgressDispatchInput {
   /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
   readonly taskId?: string;
-  readonly payload: TaskOfferPlainPayload & {
+  readonly payload: HostOfferPlainPayload & {
     readonly session: ResumeSession;
     readonly egressPolicy: AgentEgressPolicy;
     readonly preparation?: never;
@@ -419,7 +418,7 @@ export interface AgentEgressDispatchInput {
 export interface SealedAgentDispatchInput {
   /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
   readonly taskId?: string;
-  readonly payload: TaskOfferSealedPayload & {
+  readonly payload: HostOfferSealedPayload & {
     readonly session: ResumeSession;
     readonly egressPolicy?: never;
     readonly messageEgress?: never;
@@ -430,7 +429,7 @@ export interface SealedAgentDispatchInput {
 export interface SealedAgentEgressDispatchInput {
   /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
   readonly taskId?: string;
-  readonly payload: TaskOfferSealedPayload & { readonly session: ResumeSession; readonly egressPolicy: AgentEgressPolicy };
+  readonly payload: HostOfferSealedPayload & { readonly session: ResumeSession; readonly egressPolicy: AgentEgressPolicy };
   /** Host-only product destination/freshness authority; never serialized to the daemon. */
   readonly agentMessageContext?: AgentMessageServerContext;
 }

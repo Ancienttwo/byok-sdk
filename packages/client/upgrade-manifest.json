@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "02819de5186018171876702e8275fd556e0fda08aefa411ca2bc5679ce350931"
+    "snapshotSha256": "d2037259096f603c5b202c47aac0b87c0c57c1e4813e3391c13af41dc6f49e95"
   },
   "configFields": {
     "status": "tracked",
@@ -23,6 +23,26 @@
       "items": [
         "example:bot-collaboration"
       ]
+    },
+    {
+      "id": "agent-memory-commit-if-advertised",
+      "impact": "additive",
+      "summary": "Host enqueue inputs accept agentMemoryCommit: on-success-if-advertised (#1506). Cloud and embedded server resolve it from the durable device capability declaration before enqueue: on-success when agent-memory-commit-on-success is advertised, otherwise the field is omitted. Literal on-success keeps its strict capability gate. K4 templates retain the Host option and compare replay against the recorded resolution without reading current capabilities. The shared HostOfferPlainPayloadSchema and HostOfferSealedPayloadSchema and their payload types are exported by protocol; the device wire is unchanged. Hosts can replace platform inference with this fixed template option.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1506",
+      "items": [
+        "export:@byok-sdk/cloud#AgentDispatchInput",
+        "export:@byok-sdk/cloud#AgentEgressDispatchInput",
+        "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+        "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+        "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+        "export:@byok-sdk/protocol#HostOfferPlainPayload",
+        "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#HostOfferSealedPayload",
+        "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+        "export:@byok-sdk/server/execution-core#SealedAgentExecutionInput"
+      ]
     }
   ],
   "changes": [
@@ -32,6 +52,66 @@
       "before": "K8 0.0.1 src-sha256=84817467889ca31d",
       "after": "K8 0.0.1 src-sha256=12bd95552245d39c",
       "entry": "k8-dream-compaction-veto"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentDispatchInput",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentEgressDispatchInput",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ByokCloud",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferPlainPayload",
+      "change": "added",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+      "change": "added",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferSealedPayload",
+      "change": "added",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+      "change": "added",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#SealedAgentExecutionInput",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
     }
   ]
 }

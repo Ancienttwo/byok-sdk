@@ -62,6 +62,19 @@ async function mailboxTypes(harness: CloudHarness, deviceId: string): Promise<st
 }
 
 describe('hosted per-task Agent memory selection (#614)', () => {
+  it.each([true, false])('resolves conditional commit at enqueue (advertised=%s)', async (advertised) => {
+    const { harness, deviceId } = await deviceWith([...BASE_CAPABILITIES, ...(advertised ? ['agent-memory-commit-on-success'] : [])]);
+    const payload = { instruction: 'plan only', runtime: 'codex' as const, terminalProjection: { mode: 'none' as const },
+      agentRef: AGENT_REF, session: { mode: 'fresh' as const }, egressPolicy: POLICY, agentMemoryCommit: 'on-success-if-advertised' as const };
+    await harness.cloud.submitAgentExecution(TENANT_A, { deviceId, taskId: 'conditional-commit', payload });
+    const offer = await harness.cloud.readTaskOffer(TENANT_A, 'conditional-commit');
+    const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId, afterSeq: 0, limit: 10 });
+    expect(decodeEnvelope(page.messages[0]!.body).payload).toEqual(offer!.payload);
+    if (advertised) expect(offer!.payload.agentMemoryCommit).toBe('on-success');
+    else expect(offer!.payload).not.toHaveProperty('agentMemoryCommit');
+    expect(payload.agentMemoryCommit).toBe('on-success-if-advertised');
+  });
+
   it('refuses agentMemoryCommit to a device without agent-memory-commit-on-success (#1440)', async () => {
     const { harness, deviceId } = await deviceWith(BASE_CAPABILITIES);
     await expect(harness.cloud.submitAgentExecution(TENANT_A, { deviceId, taskId: 'commit-refused', payload: {

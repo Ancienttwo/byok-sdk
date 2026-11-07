@@ -44,6 +44,20 @@ function readback(input: SealedAgentExecutionInput | FrozenInput, delivered: boo
 }
 
 describe('a sealed frozen input (#953)', () => {
+  it('replays a conditional commit template against its recorded resolution', async () => {
+    const input: FrozenInput = { ...plainTemplate('device-1'), taskId: 'conditional-commit' };
+    input.payload.agentMemoryCommit = 'on-success-if-advertised';
+    for (const agentMemoryCommit of ['on-success', undefined] as const) {
+      const wire = { ...input, payload: { ...input.payload, agentMemoryCommit } };
+      const port = { offer: vi.fn(async () => readback(wire, true)), submit: vi.fn() };
+      expect(await submitFrozen(port, input, () => true)).toBe('delivered');
+      expect(port.submit).not.toHaveBeenCalled();
+      expect(sameFrozenOffer(readback({ ...wire, payload: { ...wire.payload, instruction: 'changed' } }, true), input)).toBe(false);
+      expect(sameFrozenOffer(readback(wire, true), { ...input, payload: { ...input.payload, agentMemoryCommit: 'on-success' } })).toBe(agentMemoryCommit === 'on-success');
+    }
+    expect(input.payload.agentMemoryCommit).toBe('on-success-if-advertised');
+  });
+
   it('reads back only the offer of its own lane', async () => {
     const sealed = await sealedInput('task-1', 'device-1'), open = plain(sealed);
     expect(sameFrozenOffer(readback(sealed, true), sealed)).toBe(true);

@@ -21,8 +21,11 @@ export type FrozenOffer = NonNullable<Awaited<ReturnType<FrozenSubmitPort['offer
  * matches a sealed input, nor the reverse: the sealed payload carries `sealing`, the plain one does not. The Host resubmits its frozen bytes, so a sealed payload compares exactly.
  */
 export function sameFrozenOffer(offer: FrozenOffer, input: FrozenExecutionInput): boolean {
+  // Conditional policy accepts the recorded resolution, never today's device declaration.
+  const payload = input.payload.agentMemoryCommit === 'on-success-if-advertised'
+    ? { ...input.payload, agentMemoryCommit: offer.payload.agentMemoryCommit } : input.payload;
   return offer.taskId === input.taskId && offer.deviceId === input.deviceId && offer.type === 'task.offer'
-    && canonical(offer.payload) === canonical(input.payload);
+    && canonical(offer.payload) === canonical(payload);
 }
 
 /** The recorded offer of the task is not the frozen input. The submit must stop, and an operator must look at it. */

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
+import { AgentExecutionInputSchema } from '@byok-sdk/cloud';
 import { HostExecutionCore, HostLedger, type ExecutionServer, type Intent, type LedgerState } from '@byok-sdk/server/execution-core';
 import { template } from './test-support';
 
@@ -24,6 +25,16 @@ function open(admitSubmit: (intent: Readonly<Intent>, state: Readonly<LedgerStat
 }
 const input = (key: string) => ({ key, source: 'user' as const, waitUntil: Date.now() + 600_000, execution: template('device') });
 const execution = (key: string) => { const intent = core!.intent(key)!; return ledger!.snapshot().executions[intent.taskId]!; };
+
+it('stores and returns the conditional commit template unchanged', async () => {
+  open(() => false);
+  const request = input('conditional-commit');
+  request.execution.payload.agentMemoryCommit = 'on-success-if-advertised';
+  request.execution.payload = AgentExecutionInputSchema.parse({ ...request.execution, taskId: 'validation' }).payload;
+  await core!.enqueue(request);
+  expect(core!.intent(request.key)!.execution.payload.agentMemoryCommit).toBe('on-success-if-advertised');
+  await expect(core!.enqueue(request)).resolves.toMatchObject({ execution: request.execution });
+});
 
 it('holds a queued intent with no submit and no new generation, and submits it once admitted', async () => {
   let admitted = false;
