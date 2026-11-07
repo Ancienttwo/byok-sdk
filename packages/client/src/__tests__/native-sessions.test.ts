@@ -6,7 +6,6 @@ import { renderNativeSessions, NativeSessionsUnavailableError, type NativeSessio
 
 const fixture = readFileSync(new URL('./fixtures/native-sessions/pi-1.5.0.jsonl', import.meta.url), 'utf8');
 const header = JSON.parse(fixture.split('\n')[0]!);
-const builtins = ['bash', 'read', 'write', 'edit', 'ls', 'find', 'grep'];
 const home = path.resolve('/agent');
 const sessionDir = path.resolve('/sessions');
 const ledgerDir = path.join(home, '.byok/runtime-sessions');
@@ -38,7 +37,7 @@ function setup(text = fixture.replaceAll('"cwd":"/agent"', `"cwd":${JSON.stringi
       };
     },
   };
-  const input = { home, sessionDir, window: { fromMs: 1000, toMs: 4000 }, signal: new AbortController().signal, deadlineMs: Date.now() + 60_000, io, readBuiltinToolSets: async () => [new Set(builtins)] };
+  const input = { home, sessionDir, window: { fromMs: 1000, toMs: 4000 }, signal: new AbortController().signal, deadlineMs: Date.now() + 60_000, io };
   return { files, reads, io, input, get closed() { return closed; }, run: () => renderNativeSessions(input) };
 }
 
@@ -59,13 +58,6 @@ describe('native Pi session input', () => {
     expect(result.jsonLine).not.toContain('\n');
     expect(result.counts).toMatchObject({ files: 1, calls: 9, omittedCalls: 0, skippedFiles: 0 });
   });
-  it('requires builtin provenance in every recorded launch; absent provenance never grants arguments', async () => {
-    const f = setup();
-    for (const sets of [undefined, [], [new Set(builtins), new Set<string>()]]) {
-      const result = await renderNativeSessions({ ...f.input, readBuiltinToolSets: sets === undefined ? undefined : async () => sets });
-      expect(JSON.parse(result.jsonLine).calls.every((c: object) => !('arguments' in c))).toBe(true);
-    }
-  });
   it.each([
     ["docker login --pass''word shortsecret", 'docker login'],
     ['run --to\\ken shortsecret', 'run'],
@@ -84,7 +76,7 @@ describe('native Pi session input', () => {
     const result = await setup(head() + message('call', command)).run();
     expect(JSON.parse(result.jsonLine).calls).toEqual([{ tool: 'bash', ...(expected ? { arguments: { command: expected } } : {}), result: 'none' }]);
   });
-  it.each(['find', 'grep'])('drops free-text patterns from %s even with confirmed provenance', async tool => {
+  it.each(['find', 'grep'])('drops free-text patterns from %s by name', async tool => {
     const entry = JSON.parse(message('call', '', 2000, tool));
     entry.message.content[0].arguments = { pattern: 'PATTERN_CANARY' };
     const result = await setup(head() + JSON.stringify(entry) + '\n').run();
@@ -210,7 +202,6 @@ describe('native Pi session input', () => {
   });
   it('retains the newest 2000 calls and counts omissions', async () => {
     const f = setup(head() + Array.from({ length: 2001 }, (_, i) => message(`call-${i}`, '', 1000 + i, i === 0 ? 'old' : i === 2000 ? 'new' : 'x')).join(''));
-    f.input.readBuiltinToolSets = async () => [];
     const result = await f.run();
     expect(result.counts).toMatchObject({ calls: 2000, omittedCalls: 1 });
     expect(result.jsonLine).not.toContain('"old"');
@@ -306,11 +297,6 @@ describe('native Pi session input', () => {
     else f.io.realpath = async file => { if (file === sessionDir) throw Object.assign(new Error('PRIVATE'), { code: 'ENOENT' }); return file; };
     const result = await f.run();
     expect(result.counts).toMatchObject({ calls: 0, skippedFiles: 1, skippedFilesByReason: { session_missing: 1 } });
-  });
-  it('rejects unavailable provenance without inventing a source', async () => {
-    const f = setup();
-    f.input.readBuiltinToolSets = async () => { throw new Error('PRIVATE'); };
-    await expect(f.run()).rejects.toMatchObject({ detail: 'provenance_unavailable' });
   });
   it('uses the ledger parser and skips a corrupt ledger atomically', async () => {
     const f = setup();

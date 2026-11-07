@@ -14,7 +14,7 @@ import type { StartTerminals } from './start-terminals';
  * The fourth stage of `runStartUnderLease` (#926), synchronous: builds the
  * `TaskRunnerDeps` for this start.
  */
-export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals, 'record' | 'sendEnvelope' | 'withReplyTransition' | 'activeJournal' | 'journalIdentity' | 'recordReplyState' | 'blobClient' | 'opened' | 'activePressureEngine' | 'agentMemoryBackend'>) {
+export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals, 'record' | 'sendEnvelope' | 'withReplyTransition' | 'activeJournal' | 'journalIdentity' | 'recordReplyState' | 'blobClient' | 'opened' | 'activePressureEngine' | 'agentMemoryBackend' | 'capabilities'>) {
   const {
     adapters, config, agentHomeManager, agentHomeReaderLimit, scratchRoot, agentSessionHandoffs,
     toolsetRegistry, daemonState, inputPreparationLimits, egressBatcherOptions, egressPolicy,
@@ -29,6 +29,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
   } = run;
   const deps: TaskRunnerDeps = {
     adapters,
+    ...(run.capabilities.includes('native-sessions') ? { nativeSessions: { sessionDir: config.piByokLauncher!.sessionDir! } } : {}),
     runtimeAllowlist: config.runtimeAllowlist,
     // M5 batch-3: see `DaemonConfig.runtimePreference`'s own doc comment above.
     runtimePreference: config.runtimePreference,

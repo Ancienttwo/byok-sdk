@@ -54,3 +54,24 @@ it.each([['event'], [undefined]] as const)('starts a session without progressSta
 it('refuses a progressMessageBoundary outside its closed set', () => {
   expect(() => descriptor('message' as never)).toThrow(TypeError);
 });
+
+it('keeps a timed-out memory startup pending until the late session acknowledges abort', async () => {
+  let releaseStart!: (session: Session) => void, acknowledge!: () => void;
+  const pending = new Promise<Session>(resolve => { releaseStart = resolve; });
+  const drain = new Promise<void>(resolve => { acknowledge = resolve; });
+  const interrupt = vi.fn(() => drain), close = vi.fn(async () => {});
+  let ended = false;
+  const opening = startOwnedRuntime(() => pending, { memoryLane: { mode: 'memory' } } as RuntimeOperationStartInput,
+    descriptor(), new AbortController().signal, 1).catch(error => { ended = true; return error; });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(ended).toBe(false);
+    releaseStart({ interrupt, close } as unknown as Session);
+    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledOnce());
+    expect(close).not.toHaveBeenCalled();
+    expect(ended).toBe(false);
+    acknowledge();
+    expect(await opening).toBeInstanceOf(RuntimeStartupDisposalFailure);
+    expect(close).toHaveBeenCalledOnce();
+  } finally { acknowledge(); releaseStart({ interrupt, close } as unknown as Session); await opening; }
+});

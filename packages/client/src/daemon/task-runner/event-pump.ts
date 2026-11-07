@@ -41,6 +41,7 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
       // guarantees for genuinely stale terminal messages. Mirrors the
       // same check already used below for the non-turn_end loop exits.
       if (this['tasks'].get(active.taskId) !== active) return;
+      if (active.memoryLane !== undefined && event.type !== 'usage' && event.type !== 'turn_end') continue;
       // Display only: a delta never reaches the batcher, the record or the reply.
       if (event.type === 'message_draft_delta') {
         active.messageDraft?.pushDelta(event.text, event.startsMessage);
@@ -301,12 +302,12 @@ export function successfulCompletionPlan(
     retryable: false,
     prepare: async () => {
       await this['persistAgentTerminalEvidence'](active, 'complete');
-      const finalMessage = closingReply(active);
+      const finalMessage = active.memoryLane?.egress.finalMessage === false ? undefined : closingReply(active);
       return createEnvelope('task.complete', {
-        summary: finalOutput,
+        summary: active.memoryLane?.egress.summary ?? finalOutput,
         ...(finalMessage === undefined ? {} : { finalMessage }),
         sessionRef: active.session.sessionRef,
-        ...(document !== undefined ? { document } : {}),
+        ...(active.memoryLane?.egress.resultDocument !== false && document !== undefined ? { document } : {}),
         ...this['terminalInferenceUsagePayload'](active),
         ...this['preparedObservationPayload'](active),
         ...this['agentTerminalPayload'](active),

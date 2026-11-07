@@ -642,6 +642,7 @@ linked JSON schema for full array/union shapes and descriptions.
 <!-- generated:fields:start -->
 | Field | Tier | Shape |
 |-------|------|-------|
+| `nativeSessions` | advanced | boolean |
 | `nativeAssetRoot` | advanced | string |
 | `toolAuthorization` | advanced | object |
 | `toolAuthorization.default` | required when parent is set | "all" / "auto" |
@@ -933,6 +934,7 @@ Manifest transition: **0.39.0 → 0.39.0**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
+| native-session-dream-device-wiring | additive | DaemonConfig.nativeSessions defaults off. Opted-in macOS/Linux devices with a Pi memory lane and sessionDir declare native-sessions; unsupported offers decline before claim. The daemon renders after claim, prepends sanitized JSON data, and runs the Pi memory-only in-memory lane without progress, summary text, finalMessage or result documents. Argument summaries apply the command-word allowlist and path rules by tool name; tool result content is excluded. The local byok_host_ready receipt contains only sessionId and is consumed only by memory-lane admission. Cancellation and startup disposal await the abort drain before terminating the process tree. [Migration](../docs/security.md#native-session-input) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

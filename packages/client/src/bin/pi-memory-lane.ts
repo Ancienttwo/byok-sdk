@@ -3,11 +3,8 @@ import { createScopedFileTools, type ScopedFileToolOptions } from '../file-scope
 import { isScopedFileToolName, SCOPED_FILE_TOOL_NAMES } from '../file-scope-types';
 import type { PiToolLoadoutSession } from './pi-session-runtime';
 
-/** V4 must suppress these envelopes and await abort acknowledgement or process exit before ending the task. */
-export const PI_MEMORY_LANE = Object.freeze({
-  egress: Object.freeze({ taskProgress: false, summary: '', finalMessage: false, resultDocument: false }),
-  cancellation: 'await-rpc-abort-or-process-exit' as const,
-});
+import { PI_MEMORY_LANE } from '../adapters/pi/memory-lane-contract';
+export { PI_MEMORY_LANE } from '../adapters/pi/memory-lane-contract';
 
 export class PiMemoryLaneError extends Error {
   constructor(readonly code: 'memory_lane_tool_set_mismatch' | 'memory_lane_closed' | 'memory_lane_operation_denied') {

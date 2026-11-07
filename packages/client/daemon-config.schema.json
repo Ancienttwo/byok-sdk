@@ -5,6 +5,10 @@
   "x-byok-schemaVersion": 1,
   "type": "object",
   "properties": {
+    "nativeSessions": {
+      "type": "boolean",
+      "description": "Opt in to sanitized Pi session input sent to the device BYOK model. Default false. macOS/Linux only."
+    },
     "nativeAssetRoot": {
       "type": "string",
       "description": "Absolute native asset root for SDK-created runtime adapters. Custom adapters own their option."

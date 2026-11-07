@@ -472,7 +472,7 @@ describe('sealed payload v1: capability gates (§8.4)', () => {
 
   it('gates the sealed decline codes on plain task.decline on the server flag, and not the earlier codes', () => {
     for (const code of SEALED_DECLINE_CODES) {
-      expect(requiredReceiverCapabilities('task.decline', { reason: code, code })).toEqual(['sealed-payload-v1']);
+      expect(requiredReceiverCapabilities('task.decline', { reason: code, code })).toEqual([code === 'native_sessions_unsupported' ? 'native-sessions' : 'sealed-payload-v1']);
       expect(parse('task.decline', { reason: code, code })).toBe(true);
     }
     expect(requiredReceiverCapabilities('task.decline', { reason: 'busy', code: 'agent_home_writer_busy' })).toEqual([]);

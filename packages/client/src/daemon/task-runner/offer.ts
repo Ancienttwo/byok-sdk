@@ -168,6 +168,13 @@ export async function handleOffer(
     return;
   }
 
+  if (payload.nativeSessions !== undefined && (this['deps'].nativeSessions === undefined
+    || !this['deps'].advertisedCapabilities?.().includes('native-sessions')
+    || (payload.runtime !== undefined && payload.runtime !== 'pi')
+    || (payload.dispatchSelection !== undefined && payload.dispatchSelection.runtimeId !== 'pi'))) {
+    decline('native_sessions_unsupported', false, 'native_sessions_unsupported');
+    return;
+  }
   const request = readOfferRequest.call(this, taskId, payload, admission, decline);
   if (request === undefined) return;
   const {
@@ -350,7 +357,7 @@ export async function handleOffer(
 
     stage('claim');
     const claimed = await claimOffer.call(this, phase, {
-      agentBinding, agentRef, pick, scratch, manifest, preparedLaunch, blobAbort, payload, taskMcpServers,
+      agentBinding, agentRef, pick, scratch, manifest, preparedLaunch, blobAbort, payload, taskMcpServers, startupDeadline,
     });
     if (claimed === undefined) return;
     const { resolvedInstruction } = claimed;

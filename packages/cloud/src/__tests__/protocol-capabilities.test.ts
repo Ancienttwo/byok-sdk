@@ -23,6 +23,7 @@ import { TENANT_A, createHarness, decodeEventsPage, grantAgentHome, offerPayload
  */
 const EXPECTED_CAPABILITIES = [
   'custom-harness',
+  'native-sessions',
   'mailbox-read-ahead',
   'agent-message-draft',
   'agent-home-contract',

@@ -130,6 +130,8 @@ export const DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME = 4;
 export const DEFAULT_MAX_CONCURRENT_TASKS = 8;
 
 export interface TaskRunnerDeps {
+  /** Present only when the device declared native-sessions. */
+  readonly nativeSessions?: { readonly sessionDir: string };
   adapters: RuntimeAdapter[];
   runtimeAllowlist?: string[];
   /**
@@ -1546,6 +1548,10 @@ export class TaskRunner {
 
   /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
   private decline(taskId: string, admission: OfferAdmissionTiming, reason: string, retryable: boolean, agentRef?: AgentRef, code?: TaskDeclinePayload['code'], runtimeUnavailable?: RuntimeUnavailableAdmission): void {
+    const capabilities = this.deps.getServerCapabilities?.() ?? [];
+    if (!requiredReceiverCapabilities('task.decline', { code }).every(flag => capabilities.includes(flag))) {
+      throw new Error('protocol violation: task.decline code requires an unadvertised server capability');
+    }
     const timings = admission.snapshot();
     this.deps.send(createEnvelope(
       'task.decline',

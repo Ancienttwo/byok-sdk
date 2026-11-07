@@ -1,5 +1,6 @@
 import {
   MAILBOX_READ_AHEAD_CAPABILITY,
+  NATIVE_SESSIONS_CAPABILITY,
   MAILBOX_READ_AHEAD_MAX_SEQS,
   RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY,
   RUNTIME_FAILURE_CLASS_CAPABILITY,
@@ -76,6 +77,7 @@ import { admitDeviceRequest, type DeviceRouteDeps } from './shared';
  */
 export const CLOUD_PROTOCOL_CAPABILITIES = [
   'custom-harness',
+  NATIVE_SESSIONS_CAPABILITY,
   MAILBOX_READ_AHEAD_CAPABILITY,
   'agent-message-draft',
   'agent-home-contract',

@@ -2044,7 +2044,11 @@ export declare const RUNTIME_QUOTA_SCOPES: readonly ['account', 'model'];
 /** Single value authority shared by schema validation and schema-free consumers. */
 export declare const PREPARED_AGENT_MEMORY_MODES: readonly ['none', 'read', 'read-write'];
 export declare function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number];
-/** The device admits native Pi session summaries in the memory-only dream lane. */
+/**
+ * A device can run the native-session lane. A server understands the V1
+ * `nativeSessions` offer field, resolves `ifAdvertised` at enqueue, and accepts
+ * the `native_sessions_unsupported` decline code.
+ */
 export declare const NATIVE_SESSIONS_CAPABILITY: 'native-sessions';
 // ==== @byok-sdk/protocol dist/codec.d.ts ====
 import type { z } from 'zod';
@@ -6367,7 +6371,7 @@ export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
  */
 export declare const TaskStartedPayloadSchema: z.ZodObject<{}, z.core.$strip>;
 export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
-declare const DECLINE_CODES: readonly ["agent_home_writer_busy", "agent_home_reader_busy", "sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch"];
+declare const DECLINE_CODES: readonly ["agent_home_writer_busy", "agent_home_reader_busy", "sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch", "native_sessions_unsupported"];
 export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
 /** A decline code as this version understands it: one it does not know reads as `unknown`, its raw token kept. */
 export type TaskDeclineCodeReading = {
@@ -7173,6 +7177,7 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
     code: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
         agent_home_reader_busy: "agent_home_reader_busy";
         agent_home_writer_busy: "agent_home_writer_busy";
+        native_sessions_unsupported: "native_sessions_unsupported";
         sealed_content_mac_mismatch: "sealed_content_mac_mismatch";
         sealed_key_unavailable: "sealed_key_unavailable";
         sealed_open_failed: "sealed_open_failed";
@@ -8590,7 +8595,7 @@ export type SealedPayloadCategory = (typeof SEALED_PAYLOAD_CATEGORIES)[number];
  * reason. A device sends them only to a server that advertised
  * `sealed-payload-v1`.
  */
-export declare const SEALED_DECLINE_CODES: readonly ['sealed_key_unavailable', 'sealed_open_failed', 'sealed_content_mac_mismatch', 'sealing_policy_mismatch'];
+export declare const SEALED_DECLINE_CODES: readonly ['sealed_key_unavailable', 'sealed_open_failed', 'sealed_content_mac_mismatch', 'sealing_policy_mismatch', 'native_sessions_unsupported'];
 export type SealedDeclineCode = (typeof SEALED_DECLINE_CODES)[number];
 /**
  * The closed plaintext codes of a task whose output is sealed (#654 12d).
@@ -8607,7 +8612,7 @@ export declare const SEALED_TASK_PLAIN_CODES: Readonly<{
         readonly reason: readonly ["daemon_interrupted", "sealed_key_unavailable"];
     };
     readonly 'task.decline': {
-        readonly reason: readonly ["sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch"];
+        readonly reason: readonly ["sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch", "native_sessions_unsupported"];
     };
     readonly 'task.cancelled': {
         readonly reason: readonly [];
