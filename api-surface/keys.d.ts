@@ -53,7 +53,7 @@ export type CommandRunner = (executable: string, args: string[], stdin?: string)
  * Spawn `executable`, feed it `stdin`, and collect its output
  * (`index.ts:2498-2527`).
  *
- * It never rejects: a missing executable resolves as exit code 127 so an
+ * It never rejects: spawn/input failures and abnormal termination resolve as exit code 127 so an
  * `available()` probe can treat "no such binary" the same way it treats "binary
  * said no". Stdin is always closed, otherwise a child that reads
  * to EOF would hang forever.
@@ -587,6 +587,8 @@ export { PROVIDER_PROVISIONING_SECRET_MAX_BYTES } from './secret-value';
 export type { ModelProviderSecretName, SecretStore } from './secret-store';
 export { DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX, MacOsKeychainSecretStore, } from './macos-keychain';
 export type { MacOsKeychainSecretStoreOptions } from './macos-keychain';
+export { LinuxSecretServiceSecretStore } from './linux-secret-service';
+export type { LinuxSecretServiceSecretStoreOptions } from './linux-secret-service';
 export { WindowsCredentialManagerSecretStore } from './windows-credential-manager';
 export type { WindowsCredentialManagerSecretStoreOptions } from './windows-credential-manager';
 export { DEFAULT_SECRET_ENVELOPE_PREFIX, EnvelopeScopedSecretStore, scopeSecretStore, secretScopeId, } from './secret-scope';
@@ -614,6 +616,28 @@ export { parsePiProviderLauncherOptions, runPiProviderLauncher, } from './pi-pro
 export type { PiProviderLauncherHost, PiProviderLauncherOptions, } from './pi-provider-launcher-core';
 export { HERMES_PROVIDER_KEY_ENV, hermesProviderModel, parseHermesProviderLauncherRequest, runHermesProviderLauncher } from './hermes-provider-launcher';
 export type { HermesProviderLauncherRequest } from './hermes-provider-launcher';
+// ==== @byok-sdk/keys dist/linux-secret-service.d.ts ====
+import { type CommandRunner } from './command-runner';
+import { type SecretStore } from './secret-store';
+export interface LinuxSecretServiceSecretStoreOptions {
+    account?: string;
+    commandRunner?: CommandRunner;
+    platform?: NodeJS.Platform;
+    servicePrefix?: string;
+    storagePrefix?: string;
+}
+/** Linux Secret Service through the trusted system secret-tool; no plaintext fallback. */
+export declare class LinuxSecretServiceSecretStore<TName extends string = string> implements SecretStore<TName> {
+    #private;
+    readonly providerLabel = "Linux Secret Service";
+    constructor(options?: LinuxSecretServiceSecretStoreOptions);
+    available(): Promise<boolean>;
+    delete(name: TName): Promise<boolean>;
+    get(name: TName): Promise<string | undefined>;
+    has(name: TName): Promise<boolean>;
+    scope(namespace: string): SecretStore<TName>;
+    set(name: TName, secret: string): Promise<void>;
+}
 // ==== @byok-sdk/keys dist/macos-keychain.d.ts ====
 import { type CommandRunner } from './command-runner';
 import { type SecretStore } from './secret-store';

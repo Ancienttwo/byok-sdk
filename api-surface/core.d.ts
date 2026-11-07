@@ -3487,6 +3487,26 @@ export interface CoreStores {
 /** Names of the ports in {@link CoreStores}, in contract order. */
 export declare const CORE_STORE_NAMES: readonly ['mailbox', 'board', 'truth', 'presence', 'objects', 'quota', 'skillPacks'];
 export type CoreStoreName = (typeof CORE_STORE_NAMES)[number];
+// ==== @byok-sdk/core dist/system-tool.d.ts ====
+/** A system tool has no trusted location on this platform, or is not at it. Nothing was started. */
+export declare class SystemToolUnavailableError extends Error {
+    readonly tool: string;
+    constructor(tool: string, detail: string);
+}
+/** What resolution reads from the host. Tests supply their own. */
+export interface SystemToolHost {
+    readonly platform: NodeJS.Platform;
+    readonly systemRoot: string | undefined;
+    isFile(file: string): boolean;
+}
+/** The absolute path of `tool` at its trusted location ({@link SYSTEM_TOOLS}); throws {@link SystemToolUnavailableError}. */
+export declare function resolveSystemTool(tool: string, host?: SystemToolHost): string;
+/**
+ * The file a real runner starts for `command`: an absolute path the caller
+ * owns (a WinSW wrapper, a compiled bridge) as given, any other name as a
+ * system tool from its trusted location. A bare name never reaches `PATH`.
+ */
+export declare function systemExecutable(command: string): string;
 // ==== @byok-sdk/core dist/tenant.d.ts ====
 /**
  * A validated tenant identifier.

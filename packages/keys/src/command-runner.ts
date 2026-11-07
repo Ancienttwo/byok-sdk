@@ -22,7 +22,7 @@ export type CommandRunner = (
  * Spawn `executable`, feed it `stdin`, and collect its output
  * (`index.ts:2498-2527`).
  *
- * It never rejects: a missing executable resolves as exit code 127 so an
+ * It never rejects: spawn/input failures and abnormal termination resolve as exit code 127 so an
  * `available()` probe can treat "no such binary" the same way it treats "binary
  * said no". Stdin is always closed, otherwise a child that reads
  * to EOF would hang forever.
@@ -47,15 +47,18 @@ export async function runCommand(
     child.stderr.on('data', (chunk: string) => {
       stderr += chunk;
     });
-    child.on('error', () => {
+    const unavailable = () => {
       resolveResult({
         exitCode: 127,
         stderr: 'command unavailable',
         stdout: '',
       });
-    });
-    child.on('close', (code) => {
-      resolveResult({ exitCode: code ?? 1, stderr, stdout });
+    };
+    child.on('error', unavailable);
+    child.stdin.on('error', unavailable);
+    child.on('close', (code, signal) => {
+      if (code === null || signal !== null) unavailable();
+      else resolveResult({ exitCode: code, stderr, stdout });
     });
     if (stdin === undefined) child.stdin.end();
     else child.stdin.end(stdin);

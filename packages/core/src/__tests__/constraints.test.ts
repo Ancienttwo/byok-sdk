@@ -11,9 +11,10 @@
  *
  * "Shipped source" below means `src/**` minus `src/__tests__/**`: the test tree
  * is excluded from `tsconfig.build.json` and is never reachable from the tsup
- * entry, so it may use `node:fs` to do the scanning that proves the shipped
- * source does not.
+ * entries, so it may use `node:fs` to scan the shipped source. The system-tool
+ * Node-only subpath is isolated from every portable core source module.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as publicApi from '../index';
@@ -81,11 +82,24 @@ describe('dependency isolation', () => {
     expect(offenders.map((file) => file.path)).toEqual([]);
   });
 
-  it('never imports a node: builtin from shipped source', () => {
+  it('isolates Node builtins in the Node-only system-tool entry', () => {
     const offenders = SHIPPED_SOURCES.filter((file) =>
       /from\s+'node:|require\('node:|import\('node:/.test(stripComments(file.text)),
     );
-    expect(offenders.map((file) => file.path)).toEqual([]);
+    expect(offenders.map((file) => file.path)).toEqual(['system-tool.ts']);
+    expect(SHIPPED_SOURCES.filter((file) => file.path !== 'system-tool.ts'
+      && /system-tool/.test(stripComments(file.text))).map((file) => file.path)).toEqual([]);
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', SRC_URL), 'utf8'));
+    expect(manifest.exports['./system-tool']).toEqual({
+      types: './dist/system-tool.d.ts', node: { import: './dist/system-tool.js' },
+    });
+    const builtins = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import { createWalker, manifestEntries } from './scripts/api-surface/entry-closure.mjs';
+      const root = process.cwd();
+      const entry = manifestEntries(root).find(entry => entry.id === '@byok-sdk/core');
+      console.log(JSON.stringify(createWalker(root)(entry).nodeBuiltins));
+    `], { cwd: new URL('../../../', SRC_URL), encoding: 'utf8' }));
+    expect(builtins).toEqual({ workspace: [], thirdParty: [] });
   });
 
   it('never imports any other @byok package', () => {

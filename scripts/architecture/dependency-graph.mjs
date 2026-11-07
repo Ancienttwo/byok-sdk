@@ -140,9 +140,16 @@ function resolveSource(file, sources) {
   return [file, `${stem}.ts`, `${stem}.tsx`, `${file}/index.ts`, `${file}/index.tsx`].find(p => sources.has(p));
 }
 function exportTarget(value) {
+  if (value === null) return null;
   if (typeof value === 'string') return value;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  return exportTarget(value.import ?? value.default);
+  // Node ESM selects the first matching condition in manifest insertion order.
+  for (const [condition, target] of Object.entries(value)) {
+    if (!['node', 'import', 'default'].includes(condition)) continue;
+    const resolved = exportTarget(target);
+    if (resolved !== undefined) return resolved;
+  }
+  return undefined;
 }
 /** Convert native filesystem paths once, before they enter the rule graph. */
 export function graphSourcePath(root, file, nativePath = path) {
