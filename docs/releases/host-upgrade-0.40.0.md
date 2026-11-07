@@ -1,155 +1,47 @@
 # Host upgrade to 0.40.0
 
-This page tracks what a Host moving from 0.39.0 to 0.40.0 should review.
-A Host on an earlier release first applies the
-[0.39.0 checklist](host-upgrade-0.39.0.md) and its predecessors.
+Use this checklist for a Host moving from 0.39.0 to the planned 0.40.0 MINOR train. Earlier Hosts must first apply the [0.39.0 checklist](host-upgrade-0.39.0.md) and its predecessors. This guide describes train head `d4adc2321726a9a33fb9f260bc965357060d62fb`, using the Unreleased CHANGELOG and `packages/client/upgrade-manifest.json`. The manifest still targets 0.39.0; the release commit, final manifest, tag and publication remain pending. Recheck them before upgrading and pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
 
-The source for the train items below is the local `origin/train/next-minor`
-snapshot `cc7989bdcd03c432f586beda74e10d28a6d931f7`, compared with
-`origin/main` at `c7417c145afc8ae6ce3232d8555b6d1fa46000d8`. The train is
-still moving. Its manifest still names 0.39.0 as its target; it is not a
-0.40.0 release manifest. The additions marked as pending below also describe
-work outside that snapshot. The final release manifest and CHANGELOG will be the
-behavior authorities. This page has not been walked through and does not
-establish release, publication or production readiness.
+## Required Host actions
 
-## Version policy
+- **Windows packages:** Koffi moves from 3.2.0 to 3.3.7 in client and keys. Rebuild packaged Windows native assets with `copySdkNativeAssets` and update literal pins of `sdkNativeAssetTargets` or `sdkDistributionManifest` Windows x64 version, URL, integrity and SHA256 metadata. The supported targets and signing policy are unchanged.
+- **Hosted Bot storage:** H now runs full dreaming using K8's shared rules. Run the hosted example's `store.migrate()` to create the per-scope `dream_state` table before using the updated store; back up and verify rollback against the final release. Hosts vendoring K8 should copy the updated [example](../../examples/bot-collaboration/README.md#compaction). Remove uses of the removed `recordUnsupportedDream` and `DREAM_UNSUPPORTED_ON_H` exports.
+- **Linux provider credentials:** The Pi provider launcher now selects `LinuxSecretServiceSecretStore`. Ensure Secret Service and `secret-tool` are available on applicable devices; unavailable service fails closed. Secrets are sent on stdin. Trusted tool resolution is available from Node-only `@byok-sdk/core/system-tool`.
+- **ACP event consumers:** `tool_use` now waits for settled tool input. Update UI, authorization and event timing assumptions that relied on the initial partial input; exercise affected flows with complete input.
 
-0.40.0 is the planned MINOR train under the
-[pre-1.0 policy](../spec.md#pre-10-package-version-policy). The final manifest
-entries and their counts are pending.
+## Dreaming and native sessions
 
-## Fixed revisions
+H uses per-scope dreaming configuration, shared model selection, instruction and pack limits, skip reasons, success-only mark advancement and compaction protection until result sync. H and L share user-first priority for unsubmitted routine, `bot_request` and dream intents; device slot reservation is unchanged. With `BotOptions.history`, marks advance only through settled history actually read; no new completed row yields `no_new_turns`. Ensure the history authority returns completed rows if the Bot should dream.
 
-The release commit, tag, package versions and publication are pending. Do not
-use the train snapshot above as a release pin. Once the release is fixed, pin
-the Host's direct SDK dependencies and resolved SDK graph to the release
-versions and retain the lockfile, as in the 0.39.0 checklist.
+`buildDreamInstruction` now asks the model to correct outdated facts in place, keep only a one-line note to prevent repeated mistakes, delete duplicate or unhelpful content, and organize linked topic notes with an index summary for each page. Review this behavior wherever the Host uses the exported builder. Memory writer guidance also states copy limits and that ordinary fresh and resumed `on-success` writes are kept only on success.
 
-## Wire protocol
+K8 requests native-session input for the dream window when advertised; `dreaming.nativeSessions: false` disables it. Device `DaemonConfig.nativeSessions` defaults off: opt in only on macOS or Linux with a Pi memory lane and configured `sessionDir`. Both server and device must advertise `native-sessions`. Host offers may use `nativeSessions: { fromMs, toMs, ifAdvertised: true }` to omit the window when unsupported; frozen replay preserves the recorded resolution. Offers require a fresh session, `agentMemory: 'none'`, no terminal projection, and no commit, `homeAccess`, preparation, `requiredToolsets`, `messageEgress` or `harnessId`. The memory-only in-memory lane suppresses progress and result text; sanitized tool argument summaries, not tool results, are sent to the model provider. Review the privacy and platform acceptance requirements in [security](../security.md#native-session-input).
 
-The conditional memory commit Host input resolves before enqueue; the device
-wire and strict `on-success` admission are unchanged (#1506). The final wire
-version and any other wire changes are pending the release manifest, including
-the native-session work below.
+Pi's memory-lane admission consumes exactly one local `{ type: 'byok_host_ready', sessionId }` receipt per session start and requires the ID to match the native session. The receipt carries no tool provenance; do not rely on the removed provenance-confirmation contract. Unsupported offers decline before claim with `native_sessions_unsupported`, including when the device owner disables the feature after enqueue. Handle it as non-retryable for sealed tasks; plain declines use the same code. Its sealed `task.decline` row and the offer field use the two-way capability gate.
 
-## Stores
+## Optional OpenCode adoption
 
-The embedded activity and approval timeline reads add no store format change
-(#1513). The final store and rollback compatibility assessment is pending.
+`OpenCodeAdapter` (`harnessId: 'opencode'`) is opt-in. No OS/version line or default version is qualified yet, and task-scoped Host MCP qualification also awaits native canaries. Check the [qualification evidence](../researches/2026-11-08-opencode-native-qualification.md) for the intended combination before offering dispatch. Configure explicit Host model candidates in `runtimes.opencode.models`; the adapter verifies native session model readback, rejects mismatches, and retries once with the next candidate on a pre-output rate limit, recording a non-terminal `model_switch` diagnostic. It does not switch after output starts.
 
-## Postgres migrations
+OpenCode inherits native user context, MCP configuration and transcript storage; all isolation guarantees are false. Assess those exposures before opting in. The SDK runs the official CLI directly without a gateway or injected credentials.
 
-The pinned train diff has no changes under `deploy/sql`. The final migration
-assessment is pending the release commit.
+## Other Host-visible changes
 
-## Sealed payloads
+- Use `ByokServer.tasks.activity(taskId, { after? })` and `tasks.approvalTimeline(taskId)` for tenant-bound ui-runtime replay. Both return `undefined` when no tail is retained; activity validates its cursor.
+- Enqueue `agentMemoryCommit: 'on-success-if-advertised'` to resolve the commit from device capability instead of platform inference. Literal `on-success` retains its strict gate; frozen templates retain the recorded resolution. Protocol exports the shared Host offer schemas and payload types.
+- Use protocol or `@byok-sdk/protocol/constants` exports `AGENT_MEMORY_MAX_FILE_BYTES` (256 KiB), `AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES` (512), and `redactSecrets` for Host prechecks and shared redaction. Existing memory validation is unchanged.
+- `DaemonEvent` and `DaemonRecord` can report file-scope audit mode `memory` for the internal Pi dreaming lane; Host-configurable policies remain `home` or `workspaces`.
+- `AgyAdapter` supports steer on an active turn. Handle a refused steer as an infrastructure error. Vendored OAR moves from 0.92.0 to 0.94.0.
+- Pi provider errors fail the turn with a redacted diagnostic while preserving usage. dsh terminal usage now includes subagent tokens; context occupancy remains root-only. `@byok-sdk/keys` `runCommand` returns exit code 127 for signal termination or stdin errors.
+- `pi-web-access` moves from 0.45.0 to 0.47.0, including optional search providers, proxy fixes, PDF text results and native temporary clone paths. `@hpke/core` moves from 1.9.0 to 1.10.0 for encryption tests, and `@modelcontextprotocol/client` from 2.3.1 to 2.4.0 in client and the MCP server example. Revalidate integrations that depend on these behaviors.
 
-K8 sealed routine creation and resealing accept the Host option
-`agentMemoryCommit: 'on-success-if-advertised'`; cloud enqueue resolves it
-(#1506). The final sealing and rollback assessment is pending.
+## Release and verification checklist
 
-## Breaking changes that touch Host config
+The train adds capability-gated native-session offer and decline wire rows; the conditional memory-commit option itself leaves the device wire unchanged. The embedded activity reads add no store format change. The train has no new `deploy/sql` migration; H's example store migration above is separate. Check the final release's wire, store, migration and rollback boundaries before use.
 
-### From 0.39.0 to 0.40.0
+- [ ] Record the release commit, tag, final manifest and publication; review every final breaking entry and pin the release graph.
+- [ ] Apply the backup, stop, precheck, smoke and rollback gates in the [0.39.0 checklist](host-upgrade-0.39.0.md#checklist), adjusted to the final 0.40.0 authorities.
+- [ ] Walk affected flows on each target platform, including Windows packaged native assets, Linux Secret Service, and dreaming where enabled.
+- [ ] Qualify each intended OpenCode OS/version and Host MCP combination before offering it; verify model readback, retry diagnostics and process cleanup.
 
-The train manifest records this breaking entry; the final list is pending.
-
-| Package | Entry | Change | What the Host does |
-| --- | --- | --- | --- |
-| client | `koffi-native-assets-3-3-7` | Koffi moves from 3.2.0 to 3.3.7 and the exported Windows x64 native asset metadata changes (#1511). | Rebuild packaged Windows native assets with `copySdkNativeAssets` and update any literal-pinned metadata. |
-
-### Additive entries
-
-| Entry | Change | When the Host acts |
-| --- | --- | --- |
-| `embedded-server-activity-reads` | `ByokServer.tasks.activity` and `tasks.approvalTimeline` expose tenant-bound cloud tails for ui-runtime replay, returning `undefined` when no tail is retained; activity reads preserve cursor validation (#1513). | Use the reads when the embedded Host needs replay. |
-| `agent-memory-commit-if-advertised` | Host enqueue accepts `agentMemoryCommit: 'on-success-if-advertised'` (#1506). Cloud and embedded server send `on-success` when the device advertises `agent-memory-commit-on-success`, otherwise omit it. Frozen templates retain the option and replay against the recorded resolution. | A Host can use the fixed option instead of platform inference. Literal `on-success` retains its strict capability gate. |
-| `protocol-memory-limits` | Protocol and `@byok-sdk/protocol/constants` export `AGENT_MEMORY_MAX_FILE_BYTES` (256 KiB) and `AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES` (512) (#1507). Validation is unchanged. | Use these constants for Host memory prechecks. |
-| `linux-secret-service-store` | `@byok-sdk/keys` adds `LinuxSecretServiceSecretStore`, selected by the Pi provider launcher on Linux (#1515). Secrets go to `secret-tool` through stdin; an unavailable Secret Service fails closed. | Ensure Secret Service is available where the Linux launcher uses it. Trusted tool resolution is in Node-only `@byok-sdk/core/system-tool`. |
-
-### Other changes a Host may see
-
-- **agy steer.** `AgyAdapter` declares steer and forwards it to the active turn.
-  A refused steer fails as an infrastructure error, as with dsh. Hosts using
-  steer should verify that an active agy turn accepts it and handle a refusal
-  as an infrastructure error.
-
-- `pi-web-access` moves from 0.45.0 to 0.47.0, including optional search
-  providers, proxy routing fixes, PDF text results and platform-native temporary
-  clone paths (#1511).
-- `@hpke/core` moves from 1.9.0 to 1.10.0 for encryption tests;
-  `@modelcontextprotocol/client` moves from 2.3.1 to 2.4.0 in the client and MCP
-  server example (#1511).
-- `@byok-sdk/keys` `runCommand` returns exit code 127 on signal termination or
-  stdin error, instead of code 1 for a signal or a crash on stdin error.
-
-## Dreaming: pending train items
-
-These items are on their way into the train. Their inclusion and final Host
-actions are pending; do not treat this section as a completed migration.
-
-- **Full dreaming on H, pending #1523.** The candidate runs full dreaming via
-  K8's shared rules, with per-scope configuration, success-only mark advancement
-  and protection until result sync. H shares K8's user-first priority for
-  unsubmitted routine, `bot_request` and dream intents; device slot reservation
-  is unchanged. This changes the 0.39.0 guide's H limitation if included.
-- **Dream instruction text, pending #1527.** The candidate changes
-  `buildDreamInstruction` to ask for correction of wrong or outdated facts,
-  removal of duplicate and no-longer-useful content, and linked topic notes
-  with an index summary for each page.
-- **Native-session dream input V0–V5, pending #1528–#1531.**
-  [ADR-050 at the train snapshot](https://github.com/Ancienttwo/byok-sdk/blob/cc7989bdcd03c432f586beda74e10d28a6d931f7/docs/adr/ADR-050-dream-native-session-input.md) records the design,
-  not completed implementation or platform acceptance. It describes Pi native
-  tool-call metadata as input to a memory-only Pi RPC lane, with a device opt-in
-  and capability gate. The model provider sees the parameter summaries; the
-  ADR also records residual secret risk and required macOS, Linux and Windows
-  acceptance. Confirm each slice and its final contract before adopting it.
-  `DaemonConfig.nativeSessions` defaults off; enable it only on macOS or Linux
-  devices with a Pi memory lane and a configured `sessionDir`. Only those
-  devices declare the capability. K8 `DreamingOptions.nativeSessions` defaults
-  on as `ifAdvertised`; a harness template gets no request. Verify both sides
-  advertise `native-sessions` before expecting native-session input: the server
-  advertises it too. A device refuses an unsupported offer before claim with
-  the non-retryable code `native_sessions_unsupported`, using its own
-  `task.decline` wire row gated on the server flag. An offer from a server that
-  does not advertise the capability is a protocol violation.
-
-## OpenCode free-model onboarding: pending #1538
-
-This item is landing in the 0.40 train and is not yet merged. The SDK runs the
-official OpenCode CLI directly with its supported free models; there is no
-gateway, proxy or credential injection. Platform support is established per
-OS and version line as each passes its canary. Hosts should check the canary
-for their target before offering onboarding.
-
-The Host owns the model preference list. Examples default to
-`opencode/deepseek-v4.1-flash-free`, then `opencode/crouton-alpha-free`, then
-`opencode/beam-free`. The SDK passes the chosen model explicitly, reads back
-the session model and refuses a mismatch. Verify the selected model and the
-session model agree. If rate limited before any output, the SDK retries once
-with the next candidate and records an observable event; after output starts,
-it does not switch. Hosts should verify the event when exercising that retry.
-
-As an optional later product choice, a Host may guide users to buy DeepSeek
-pay-as-you-go credit and use their own key through the existing BYOK runtimes.
-The SDK adds nothing for this step.
-
-## Checklist
-
-The complete 0.39.0 → 0.40.0 checklist is pending the release. Before an
-upgrade, fix the release commit and manifest, review every final breaking entry,
-and follow the backup, stop, precheck, smoke and rollback gates in the
-[0.39.0 checklist](host-upgrade-0.39.0.md#checklist), adjusted only against the
-final 0.40.0 authorities. A package pin alone does not establish acceptance.
-
-### Walkthrough evidence
-
-- [ ] **[pending]** Release commit, tag, manifest and publication recorded.
-- [ ] **[pending]** Final wire, store, migration and rollback boundaries checked.
-- [ ] **[unverified]** Complete checklist walked on the Host's target platforms,
-  including packaged Windows native assets and Linux Secret Service where used.
-- [ ] **[unverified]** Applicable dreaming changes and their platform acceptance
-  verified against the final release.
-
-These boxes are not filled by documentation tests.
+Documentation checks do not establish release, platform or production acceptance.
