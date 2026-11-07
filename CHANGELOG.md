@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Dependencies** — Upgrade the bundled `pi-web-access` extension from 0.45.0 to 0.47.0 (#1511), including optional search providers, proxy routing fixes, PDF text results, and platform-native temporary clone paths.
+
 - **Dependencies** — Upgrade Koffi from 3.2.0 to 3.3.7 in client and keys, including the pinned Windows x64 native asset (#1511). Rebuild packaged Windows native assets with `copySdkNativeAssets`; the exported native-asset metadata now identifies the new addon.
 
 - **Dependencies** — Upgrade the core encryption-test reference implementation `@hpke/core` from 1.9.0 to 1.10.0 (#1511).
