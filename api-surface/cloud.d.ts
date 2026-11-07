@@ -307,7 +307,6 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             "read-write": "read-write";
             "read-write-if-admitted": "read-write-if-admitted";
         }>>;
-        agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
@@ -399,6 +398,12 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>>;
+        agentMemoryCommit: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"on-success">, z.ZodLiteral<"on-success-if-advertised">]>>;
+        nativeSessions: z.ZodOptional<z.ZodObject<{
+            fromMs: z.ZodNumber;
+            toMs: z.ZodNumber;
+            ifAdvertised: z.ZodOptional<z.ZodLiteral<true>>;
+        }, z.core.$strict>>;
         session: z.ZodObject<{
             mode: z.ZodLiteral<"fresh">;
         }, z.core.$strict>;
@@ -429,7 +434,6 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             "read-write": "read-write";
             "read-write-if-admitted": "read-write-if-admitted";
         }>>;
-        agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
@@ -560,6 +564,12 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             routineId: z.ZodString;
             definitionVersion: z.ZodNumber;
             notAfter: z.ZodString;
+        }, z.core.$strict>>;
+        agentMemoryCommit: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"on-success">, z.ZodLiteral<"on-success-if-advertised">]>>;
+        nativeSessions: z.ZodOptional<z.ZodObject<{
+            fromMs: z.ZodNumber;
+            toMs: z.ZodNumber;
+            ifAdvertised: z.ZodOptional<z.ZodLiteral<true>>;
         }, z.core.$strict>>;
         session: z.ZodObject<{
             mode: z.ZodLiteral<"fresh">;
@@ -1498,6 +1508,7 @@ export declare function capabilityDeclarationForPorts(ports: CapabilityPorts, ve
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
+import type { HostOfferPlainPayload, HostOfferSealedPayload } from '@byok-sdk/protocol';
 import { z } from 'zod';
 import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft';
 import { type MaintenanceInput, type MaintenanceReport, type ProofReceiptRetentionOptions } from './maintenance';
@@ -1523,7 +1534,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail, ActivityReadOptions } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type TaskOfferPlainPayload, type TaskOfferSealedPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1685,7 +1696,7 @@ export interface AgentDispatchInput {
      * execution is admitted only through {@link ByokCloud.submitAgentExecution};
      * an egress policy only through {@link ByokCloud.enqueueAgentEgressOffer}.
      */
-    readonly payload: TaskOfferPlainPayload & {
+    readonly payload: HostOfferPlainPayload & {
         readonly session: ResumeSession;
         readonly egressPolicy?: never;
         readonly messageEgress?: never;
@@ -1704,7 +1715,7 @@ export interface PreparedDispatchInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
     /** Instruction-free strict fresh payload naming the preparation this Execution consumes. */
-    readonly payload: TaskOfferPlainPayload & {
+    readonly payload: HostOfferPlainPayload & {
         readonly preparation: InputPreparationOfferBinding;
     };
     /** Host-only destination/freshness authority; never serialized to the daemon. */
@@ -1714,7 +1725,7 @@ export interface PreparedDispatchInput {
 export interface AgentEgressDispatchInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
-    readonly payload: TaskOfferPlainPayload & {
+    readonly payload: HostOfferPlainPayload & {
         readonly session: ResumeSession;
         readonly egressPolicy: AgentEgressPolicy;
         readonly preparation?: never;
@@ -1732,7 +1743,7 @@ export interface AgentEgressDispatchInput {
 export interface SealedAgentDispatchInput {
     /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
     readonly taskId?: string;
-    readonly payload: TaskOfferSealedPayload & {
+    readonly payload: HostOfferSealedPayload & {
         readonly session: ResumeSession;
         readonly egressPolicy?: never;
         readonly messageEgress?: never;
@@ -1742,7 +1753,7 @@ export interface SealedAgentDispatchInput {
 export interface SealedAgentEgressDispatchInput {
     /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
     readonly taskId?: string;
-    readonly payload: TaskOfferSealedPayload & {
+    readonly payload: HostOfferSealedPayload & {
         readonly session: ResumeSession;
         readonly egressPolicy: AgentEgressPolicy;
     };

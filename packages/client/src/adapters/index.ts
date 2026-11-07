@@ -62,3 +62,5 @@ export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnviron
 
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
+
+export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './opencode/opencode-adapter';

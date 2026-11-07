@@ -8,6 +8,7 @@ import { parseModelProviderProfile, type ModelProviderProfileInput } from './pro
 import { exactProviderProfileBinding } from './provider-profile-binding';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import { MacOsKeychainSecretStore } from './macos-keychain';
+import { LinuxSecretServiceSecretStore } from './linux-secret-service';
 import {
   PI_AUTH_NONE_API_KEY,
   PI_PROJECTED_KEY_ENV,
@@ -48,6 +49,29 @@ process.exit(${CHILD_EXIT_CODE});
 `;
 
 const roots: string[] = [];
+
+it('the executable selects Linux Secret Service with the requested service prefix', async () => {
+  let selected: unknown;
+  vi.stubGlobal('process', { ...process, platform: 'linux', exitCode: undefined });
+  const run = vi.fn(async (_options, dependencies) => {
+    selected = dependencies.createSecretStore();
+    return 0;
+  });
+  vi.doMock('./pi-provider-launcher-core', () => ({
+    parsePiProviderLauncherOptions: () => ({ secretServicePrefix: 'host.linux' }),
+    runPiProviderLauncher: run,
+  }));
+  try {
+    await import('./bin/pi-provider-launcher');
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+    expect(selected).toBeInstanceOf(LinuxSecretServiceSecretStore);
+    expect((selected as LinuxSecretServiceSecretStore).providerLabel).toBe('Linux Secret Service');
+  } finally {
+    vi.doUnmock('./pi-provider-launcher-core');
+    vi.unstubAllGlobals();
+  }
+});
+
 afterEach(async () => {
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });

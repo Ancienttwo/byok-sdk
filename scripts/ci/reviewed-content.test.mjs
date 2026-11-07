@@ -160,9 +160,9 @@ test('a bin API entry selects the package that declares the bin; an undeclared b
   assert.throws(() => selectImpact(['api-surface/entries.json'], f), /unmapped API entry bin:byok-unknown/);
 });
 test('reviewed vendor and registry paths map explicitly, siblings still refuse', () => {
-  assert.ok(selectImpact(['packages/client/vendor/oar/6bdd273/runtimes/grok/session.ts']).dirs.includes('packages/client'));
+  assert.ok(selectImpact(['packages/client/vendor/oar/45488e7/runtimes/grok/session.ts']).dirs.includes('packages/client'));
   assert.deepEqual(selectImpact(['scripts/release/registry-contract.test.mjs', 'scripts/release/registry-expectations.json']).dirs, []);
-  assert.throws(() => selectImpact(['packages/client/vendor/oar/6bdd273/unreviewed.ts']));
+  assert.throws(() => selectImpact(['packages/client/vendor/oar/45488e7/unreviewed.ts']));
   assert.throws(() => selectImpact(['scripts/release/registry-contract.mjs']));
 });
 test('CLI and aggregate revalidate content against the same trusted comparison base', t => {
@@ -244,7 +244,7 @@ test('result-helper close regression selects only its exact basic workspace path
   assert.throws(() => selectImpact(['examples/basic/goal-btw-close-other.test.ts']));
 });
 
-test('core sealed-payload subpath admits the exact addition only', t => {
+test('core sealed-payload and Node-only system-tool subpaths admit exact additions only', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-core-sealed-payload-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(join(cwd, 'packages/core'), { recursive: true });
@@ -271,6 +271,25 @@ test('core sealed-payload subpath admits the exact addition only', t => {
   const entry = selectImpact(['packages/core/tsup.config.ts']);
   assert.ok(entry.dirs.includes('packages/core'));
   assert.ok(entry.families.includes('npm-release-pack'));
+  const systemTool = structuredClone(baseline);
+  systemTool.exports['./system-tool'] = { types: './dist/system-tool.d.ts', node: { import: './dist/system-tool.js' } };
+  write(systemTool);
+  assert.ok(selectImpact(['packages/core/package.json'], context).dirs.includes('packages/core'));
+  for (const mutate of [
+    m => { m.exports['./system-tool'].node.import = './dist/other.js'; },
+    m => { m.exports['./system-tool'].default = './dist/system-tool.js'; },
+    m => { m.exports['.'].import = './dist/replaced.js'; },
+    m => { m.files = ['dist', 'src']; },
+    m => { m.scripts = { build: 'tsup' }; },
+  ]) {
+    const invalid = structuredClone(systemTool); mutate(invalid); write(invalid);
+    assert.throws(() => selectImpact(['packages/core/package.json'], context), /more than/);
+  }
+  const previous = structuredClone(systemTool);
+  previous.exports['./system-tool'].node.import = './dist/other.js';
+  write(previous); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'existing subpath');
+  write(systemTool);
+  assert.throws(() => selectImpact(['packages/core/package.json'], { cwd, base: git('rev-parse', 'HEAD').trim() }), /more than/);
 });
 
 test('keys pi-catalog subpath and its generator admit exact additions only', t => {
@@ -674,6 +693,21 @@ test('#975 slice 5: the K8 manifest admits the switch entry only on top of the e
   f.base = git('rev-parse', 'HEAD').trim();
   f.write(path, { ...manifest, exports: { ...migrated, ...sw, ...lTestHost, ...message } });
   assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
+  // #1516: exactly the dream and priority entries together, preserving every earlier export.
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the message rule entry');
+  f.base = git('rev-parse', 'HEAD').trim();
+  const current = { ...migrated, ...sw, ...lTestHost, ...message };
+  const dreams = { './dream': './src/dream.ts', './rules/priority': './src/rules/priority.ts' };
+  f.write(path, { ...manifest, exports: { ...current, ...dreams } });
+  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
+  for (const changed of [
+    { ...current, './dream': './src/dream.ts' },
+    { ...current, ...dreams, './rules/priority': './src/host.ts' },
+    { ...current, ...dreams, './host': './src/host.ts' },
+  ]) {
+    f.write(path, { ...manifest, exports: changed });
+    assert.throws(() => selectImpact([path], f), /more than/);
+  }
 });
 
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {

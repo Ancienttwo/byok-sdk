@@ -4,12 +4,13 @@ import type { RuntimeTaskInput } from '../types';
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
 import { spawn as realSpawn } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
+import { resolveFileScopeGrant } from '../file-scope-guard';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
 import type { Session, MessageDraftDelta } from '../types';
@@ -790,6 +791,35 @@ const __executionScratch = await testExecutionScratch();
     await session.close();
     openSessions.splice(openSessions.indexOf(session), 1);
     await expect(fs.access(configPath as string)).rejects.toThrow();
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps runtime PATH and HOME out of the memory-lane MCP config', async () => {
+    const ctx = await makeCtx();
+    ctx.workspaceDir = await fs.realpath(ctx.workspaceDir);
+    ctx.agentHome = ctx.workspaceDir;
+    ctx.env = { PATH: process.env.PATH, HOME: ctx.workspaceDir, FAKE_PI_HOST_READY: '1' };
+    const memoryLane = await resolveFileScopeGrant({ fileScope: { mode: 'memory' },
+      home: { path: ctx.workspaceDir, identity: await fs.stat(ctx.workspaceDir, { bigint: true }) },
+      attempt: { homeAccess: 'writer' } });
+    let mcpEnvNames: string[] | undefined;
+    const adapter = new PiAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      spawnFn: ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+        const config = JSON.parse(readFileSync(args[args.indexOf('--config') + 1]!, 'utf8'));
+        mcpEnvNames = Object.keys(config.mcp.mcpEnv);
+        return realSpawn(FIXTURE_PATH, args, options);
+      }) as never });
+    const wrapped: import('../types').RuntimeAdapter = { descriptor: adapter.descriptor,
+      runtimeEnvironment: () => adapter.runtimeEnvironment(), detect: () => adapter.detect(), prepare: async input => {
+        const prepared = await adapter.prepare(input);
+        if (prepared.kind !== 'prepared') return prepared;
+        return { ...prepared, operation: { ...prepared.operation,
+          start: input => prepared.operation.start({ ...input, memoryLane }) } };
+      } };
+    try {
+      const session = await startPreparedOperation(wrapped, baseTask, ctx);
+      openSessions.push(session);
+      expect(mcpEnvNames).toEqual([]);
+    } finally { await Promise.all(openSessions.splice(0).map(session => session.close())); await fs.rm(ctx.workspaceDir, { recursive: true, force: true }); }
   });
 
   it.skipIf(process.platform === 'win32')('writes one private launch file without provider credential values and removes it on close', async () => {

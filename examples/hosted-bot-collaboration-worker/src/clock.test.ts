@@ -79,8 +79,9 @@ async function busyBot(home: Home) {
 }
 
 describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
+  // These fixtures isolate non-dream routine cadence from the default daily dream schedule.
   it('fires a routine slot from an alarm pass, inside the K8 late bound, and offers its Turn', async () => {
-    h = await openHome();
+    h = await openHome({}, false);
     await h.worker.armClock();
     const slot = await routine(h);
     await h.restart({ fault: 'drop-notify' });
@@ -100,7 +101,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
   }, ROUTINE_TEST_MS);
 
   it('a duplicate alarm runs two passes at once: one occurrence, one routine Turn, one offer', async () => {
-    h = await openHome();
+    h = await openHome({}, false);
     await h.worker.armClock();
     const slot = await routine(h);
     await h.restart({ fault: 'drop-notify,duplicate-alarm' });
@@ -120,7 +121,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
   }, ROUTINE_TEST_MS);
 
   it('an instance lost mid-alarm, after the routine Turn was offered: the stored alarm of the next instance reads it back', async () => {
-    h = await openHome();
+    h = await openHome({}, false);
     await h.worker.armClock();
     const slot = await routine(h);
     let worker = await h.restart({ fault: 'drop-notify,hang-after-submit', vars: { H_SUBMIT_LEASE_MS: '2000' } });
@@ -145,7 +146,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
   }, ROUTINE_TEST_MS);
 
   it('seals a coalesced input batch from an alarm pass, within a minute of its seal time', async () => {
-    h = await openHome(COALESCE);
+    h = await openHome(COALESCE, false);
     await h.worker.armClock();
     const token = await busyBot(h);
     await h.restart({ ...COALESCE, fault: 'drop-notify' });
@@ -158,7 +159,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
   }, 240_000);
 
   it('lost alarms leave a due batch open; the next alarm after them seals it from Postgres', async () => {
-    h = await openHome(COALESCE);
+    h = await openHome(COALESCE, false);
     await h.worker.armClock();
     const token = await busyBot(h);
     await settled(h);

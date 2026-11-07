@@ -46,6 +46,16 @@ describe('sealed Bot routines (#953)', () => {
     expect(sealedTemplate(commands.list(), { routineId: 'r-1', definitionVersion: 2 })).toBeUndefined();
   });
 
+  it('creates and reseals with conditional memory commit in the Host execution template', () => {
+    const { commands } = ledger();
+    const conditional = { ...execution, payload: { ...execution.payload,
+      agentMemory: 'read-write-if-admitted' as const, agentMemoryCommit: 'on-success-if-advertised' as const } };
+    commands.create(sealedDefinition(commands.list(), 'main', action(1, v1), conditional));
+    expect(sealedTemplate(commands.list(), { routineId: 'r-1', definitionVersion: 1 })).toEqual(v1);
+    commands.update(resealDefinition(commands.list(), 'main', action(2, v2), conditional));
+    expect(sealedTemplate(commands.list(), { routineId: 'r-1', definitionVersion: 2 })).toEqual(v2);
+  });
+
   it('refuses an id that exists, another version, another Agent, other categories and the ninth open routine', async () => {
     const { commands } = ledger();
     commands.create(sealedDefinition(commands.list(), 'main', action(1, v1), execution));

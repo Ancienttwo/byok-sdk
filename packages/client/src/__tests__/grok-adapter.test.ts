@@ -645,9 +645,18 @@ describe('AgyAdapter', () => {
     expect(facts(write.log).find(fact => fact.kind === 'permission')?.answer).toEqual({ outcome: { outcome: 'selected', optionId: 'deny' } });
   });
 
-  it('declares steer unsupported', async () => {
+  it('steers the active turn through ACP', async () => {
     const home = await agyVersion('1.5.1');
-    const s = await open(agy(home), { instruction: 'hello' }, await agyCtx());
-    await expect(s.steer('x')).rejects.toBeInstanceOf(SteerUnsupportedError);
+    const resources = await agyCtx();
+    const s = await open(agy(home), { instruction: 'steer-first' }, resources);
+    await s.steer('steer-second');
+    await turn(s);
+    expect(facts(resources.log).filter(fact => fact.kind === 'prompt').map(fact => fact.text)).toContain('steer-second');
+  });
+
+  it('refuses a steer after the turn ends as an infrastructure failure', async () => {
+    const s = await open(agy(await agyVersion('1.5.1')), { instruction: 'hello' }, await agyCtx());
+    await turn(s);
+    await expect(s.steer('late')).rejects.toMatchObject({ category: 'infrastructure', message: 'runtime exited' });
   });
 });

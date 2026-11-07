@@ -678,7 +678,7 @@ export function selectImpact(paths, context = {}) {
       scripts = true; continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.
-    if (/^packages\/client\/vendor\/oar\/6bdd273\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+    if (/^packages\/client\/vendor\/oar\/45488e7\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
@@ -797,6 +797,9 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (/^examples\/service-upgrade\/(?:app-installer(?:\.test)?\.ts|upgrade-smoke\.mjs)$/.test(path)) { dirs.add(dir); continue; }
+    if (path === 'packages/client/src/__tests__/fixtures/native-sessions/pi-1.5.0.jsonl') {
+      dirs.add('packages/client'); continue;
+    }
     if (!/^(?:src|test|tests|migrations)\//.test(relative)
       || !/\.(?:[cm]?[jt]sx?|json|ndjson|sql|sh|go|txt|md)$/.test(relative)) requireMapping(path);
     dirs.add(dir);

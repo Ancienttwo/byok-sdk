@@ -179,8 +179,13 @@ export function computeCapabilities(
   providerProvisioningConfigured = false,
   agentMemoryIntentsProven = false,
   agentMemoryBackendProven = false,
+  nativeSessions?: { enabled?: boolean; platform?: NodeJS.Platform; sessionDir?: string },
 ): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
+  if (nativeSessions?.enabled === true
+    && ['darwin', 'linux'].includes(nativeSessions.platform ?? process.platform)
+    && nativeSessions.sessionDir !== undefined
+    && adapters.some(adapter => adapter.descriptor.id === 'pi' && adapter.descriptor.memoryLane !== undefined)) flags.push('native-sessions');
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
   flags.push('blob-upload');
   // #1103 B2b: this daemon understands the typed runtime-unavailable cause it

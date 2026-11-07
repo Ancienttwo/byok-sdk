@@ -1,3 +1,4 @@
+import { BufferedToolUse } from '../buffered-tool-use';
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
 import type { McpEventIdentities, McpEventIdentity } from '../../mcp/event-identity';
 import { runtimeFailureClassOf } from '../../runtime-failure';
@@ -30,15 +31,7 @@ export function agyMcpEventIdentities(observation: McpToolsetToolObservation = {
   return new Map([...byName].filter((entry): entry is [string, McpEventIdentity] => entry[1] !== null));
 }
 
-/**
- * The opening update's structured `rawInput`. OAR's derived `input` is capped
- * text, so a long field would hide the rest of the call from tool
- * authorization; anything but an object is an unknown input.
- */
-function nativeRawInput(body: Record<string, unknown> | undefined, callId: string): Record<string, unknown> | undefined {
-  const update = record(record(body?.native)?.update);
-  return update?.toolCallId === callId ? record(update.rawInput) : undefined;
-}
+
 
 /** The SDK classifies a tool call by `command` and `path`, which agy spells `CommandLine` and `Path`. */
 function toolInput(tool: string, input: Record<string, unknown>): Record<string, unknown> {
@@ -56,6 +49,7 @@ function toolInput(tool: string, input: Record<string, unknown>): Record<string,
 export class AgyProjection {
   private text = '';
   private readonly tools = new Map<string, string>();
+  private readonly buffered = new BufferedToolUse();
 
   constructor(private readonly rootSessionId: string, private readonly identities: McpEventIdentities) {}
 
@@ -65,6 +59,16 @@ export class AgyProjection {
     const body = record(input.body);
     const events = body?.events;
     if (!Array.isArray(events)) return;
+    const update = record(record(body?.native)?.update);
+    const updateId = typeof update?.toolCallId === 'string' ? update.toolCallId : undefined;
+    const observe = () => {
+      if (updateId === undefined) return;
+      const raw = record(update?.rawInput);
+      const tool = this.tools.get(updateId);
+      const input = raw === undefined || tool === undefined ? raw : toolInput(tool, raw);
+      this.buffered.observe(updateId, input, update?.rawInput !== undefined, events.some(value => record(value)?.kind === 'tool_call_input') || ['in_progress', 'completed', 'failed', 'cancelled'].includes(String(update?.status)), emit);
+    };
+    if (!events.some(value => record(value)?.kind === 'tool_call_ended')) observe();
     let ended: Record<string, unknown> | undefined;
     for (const value of events) {
       const event = record(value);
@@ -77,18 +81,16 @@ export class AgyProjection {
           this.flush(emit);
           this.tools.set(event.callId, event.tool);
           const mcp = this.identities.get(event.tool);
-          const raw = nativeRawInput(body, event.callId);
-          emit({
-            type: 'tool_use', tool: event.tool, toolCallId: event.callId,
-            ...(raw === undefined ? {} : { input: toolInput(event.tool, raw) }),
-            ...(mcp === undefined ? {} : { mcp }),
-          });
+          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, ...(mcp === undefined ? {} : { mcp }) });
+          observe();
           break;
         }
         case 'tool_call_ended': {
           if (typeof event.callId !== 'string') break;
           this.flush(emit);
+          observe();
           const tool = this.tools.get(event.callId) ?? 'tool';
+          this.buffered.finish(event.callId, emit);
           this.tools.delete(event.callId);
           const mcp = this.identities.get(tool);
           emit({
@@ -112,6 +114,7 @@ export class AgyProjection {
   private endTurn(turn: Record<string, unknown>, emit: (event: AgentEvent) => void, outcome: (turn: AgyTurnOutcome) => void): void {
     this.flush(emit);
     for (const [toolCallId, tool] of this.tools) {
+      this.buffered.finish(toolCallId, emit);
       emit({ type: 'tool_result', tool, toolCallId, output: { status: turn.kind === 'aborted' ? 'interrupted' : 'ended', reason: 'closed at turn end; runtime did not report the call ended' } });
     }
     this.tools.clear();

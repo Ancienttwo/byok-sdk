@@ -1,12 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { AGENT_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
+import { AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES, AGENT_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
 import { AgentMemoryError, validateAgentMemoryPath, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
 import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, ensureDirectoryNoSymlink, type AgentHomeLease } from '../agent-home';
 import {
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
-  AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES,
   agentMemoryHomeBinding,
   AgentMemoryIoError,
   AgentMemorySnapshotLimitError,

@@ -1,17 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { createRoutine, hash, MIN_TOMBSTONE_RETENTION_MS, occurrenceIntentKey, occurrenceOfIntentKey, taskId, type FrozenSubmitPort, type Json, type RoutineDefinition } from '@byok-sdk/server/execution-core';
+import { createRoutine, hash, MIN_TOMBSTONE_RETENTION_MS, occurrenceIntentKey, occurrenceOfIntentKey, promoteOccurrence, taskId, type FrozenSubmitPort, type Json, type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { BOT_DREAM, createDefinition, DREAM_UNSUPPORTED_ON_H, ROUTINE_WAIT_MS, routineCalendar, routineTurn } from '@byok-sdk/example-bot-collaboration/routines';
+import { BOT_DREAM, createDefinition, ROUTINE_WAIT_MS, routineCalendar, routineTurn } from '@byok-sdk/example-bot-collaboration/routines';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent, HostedSubmitter } from './intents';
-import { storedKey } from './layout';
+import { assemble, FRAME_MAX_BYTES, split, storedKey } from './layout';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedReconciler, type TaskEvidence } from './reconcile';
-import { hostedRoutineCommands, INTENT_OF, loadSlice, OCCURRENCE_OF, writeSlice } from './routines';
-import { inSchema, lockScope } from './store';
+import { hostedRoutineCommands, INTENT_OF, loadSlice, OCCURRENCE_OF, recordDue, writeSlice } from './routines';
+import { HostedCollaborationStore, inSchema, lockScope } from './store';
+import { testHostConfig } from './memory-subject.test-support';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -102,22 +103,117 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
     expect(instruction).toContain(PROMPT);
   });
 
-  it('fires an imported bot-dream row with no task, and the scope keeps its routine commands (#1475)', async () => {
-    const scope = await scoped(), id = await created(scope), dream = 'dream:main:1';
-    await locked(scope, async client => {
+  async function dreamDue(scope: string) {
+    const host = new HostedCollaborationStore(opened!.pool, store().schema, {
+      host: async () => ({ ...testHostConfig(), dreaming: { timeZone: 'UTC' } }),
+    });
+    await store().seed(scope, settled);
+    await host.sync(scope, SYNC);
+    const dream = 'dream:main:1', at = Number((await routineRow(scope, dream))!.next_at);
+    expect(await host.fire(scope, dream, at)).toBe('fired');
+    const key = hash([dream, 1, { kind: 'scheduled', plannedAt: at }]);
+    return { host, key, at, intent: occurrenceIntentKey(key) };
+  }
+
+  it('runs a dream, syncs its success without parsing a Bot outcome, and keeps routine commands working', async () => {
+    const scope = await scoped(), id = await created(scope), { host, key, at, intent } = await dreamDue(scope);
+    await host.sync(scope, { ...SYNC, now: at, historyMode: true,
+      dreamHistory: new Map([[key, [{ id: 't1', root: 't1', botId: 'main', source: 'user' as const, hop: 0,
+        request: 'Remember Friday', status: 'succeeded' as const, outcomeSummary: ['Done'] }]]]) });
+    expect(await intentRow(scope, intent)).toMatchObject({ source: 'routine', conclusion: null, input: { payload: {
+      agentMemory: 'none', session: { mode: 'fresh' }, terminalProjection: { mode: 'none' }, instruction: expect.stringContaining('Remember Friday'),
+    } } });
+    const before = (await host.read(scope)).dreams!.bots.main!;
+    expect(await host.finish(scope, intent, completed(intent, 'Memory updated'), () => at)).toBe('succeeded');
+    expect((await host.read(scope)).dreams!.bots.main).toEqual(before);
+    await expect(host.compactIntents(scope, { acknowledgedTurnIds: [intent] })).rejects.toMatchObject({ name: 'CompactVetoError' });
+    await host.sync(scope, { ...SYNC, now: at });
+    expect((await host.read(scope)).dreams).toEqual({ bots: { main: { since: at, throughTurn: 't1', last: {
+      occurrenceKey: key, at, outcome: 'succeeded', template: 'default', fallback: true,
+    } } }, open: {} });
+    await host.updateRoutine(scope, 'main', { routineId: id, prompt: 'Version 2' }, NOW);
+    expect((await routineRow(scope, id))!.definition.version).toBe(2);
+    expect(await host.fire(scope, id, FIRST)).toBe('fired');
+  });
+
+  it('persists promoted dreams for a 24-Bot scope outside the frame and still queues a user Turn', async () => {
+    const scope = await scoped();
+    const options = { host: async () => ({ ...testHostConfig(), dreaming: { timeZone: 'UTC' } }) };
+    const host = new HostedCollaborationStore(opened!.pool, store().schema, options);
+    await host.seed(scope, state => {
+      settled(state);
+      for (let i = 1; i < 24; i++) {
+        const id = `b${i}`, turn = `t${i + 1}`;
+        state.team.bots[id] = { ...state.team.bots.main!, id, mainBot: false, execution: template('device', id) };
+        state.turns[turn] = { ...state.turns.t1!, id: turn, root: turn, botId: id };
+      }
+    });
+    await host.sync(scope, SYNC);
+    const routines = await query<{ id: string; next_at: string }>(`SELECT id, next_at::text FROM ${table('routine')} WHERE scope = $1`, [storedKey(scope)]);
+    expect(routines).toHaveLength(24);
+    for (const row of routines) expect(await host.fire(scope, JSON.parse(row.id), Number(row.next_at))).toBe('fired');
+    const at = Number(routines[0]!.next_at);
+    await host.sync(scope, { ...SYNC, now: at });
+    const state = await host.read(scope), rows = split(state);
+    expect(Object.values(state.dreams!.open)).toHaveLength(24);
+    expect(Object.values(state.dreams!.open).every(dream => dream.template === 'default')).toBe(true);
+    expect(Buffer.byteLength(rows.frame)).toBeLessThanOrEqual(FRAME_MAX_BYTES);
+    expect(assemble(rows)).toEqual(state);
+    const reopened = new HostedCollaborationStore(opened!.pool, store().schema, options);
+    expect(await reopened.read(scope)).toEqual(state);
+    await reopened.seed(scope, next => {
+      next.turns.user = { id: 'user', root: 'user', botId: 'main', source: 'user', request: 'Urgent', hop: 0, status: 'queued', authority: 'owner' };
+    });
+    await reopened.sync(scope, { ...SYNC, now: at });
+    expect(await intentRow(scope, 'user')).toMatchObject({ source: 'user', tries: 0, conclusion: null });
+    expect((await reopened.read(scope)).dreams).toEqual(state.dreams);
+  });
+
+  it('skips a failed history read without advancing the dream mark or falling back to local Turns', async () => {
+    const scope = await scoped(), { host, key, at, intent } = await dreamDue(scope);
+    const before = (await host.read(scope)).dreams!.bots.main!;
+    await host.sync(scope, { ...SYNC, now: at, historyMode: true, dreamHistory: new Map([[key, null]]) });
+    expect(await intentRow(scope, intent)).toBeUndefined();
+    expect(await occurrenceRow(scope, key)).toMatchObject({ conclusion: 'cancelled' });
+    expect((await host.read(scope)).dreams).toEqual({ bots: { main: { ...before,
+      last: { occurrenceKey: key, at, outcome: 'skipped', reason: 'history_unavailable' } } }, open: {} });
+  });
+
+  it('records a failed dream without advancing its mark', async () => {
+    const scope = await scoped(), { host, key, at, intent } = await dreamDue(scope);
+    await host.sync(scope, { ...SYNC, now: at });
+    const before = (await host.read(scope)).dreams!.bots.main!;
+    const evidence = completed(intent, null);
+    evidence.terminal = { envelope: { task_id: taskId(intent, 0), type: 'task.fail', payload: { message: 'Failed' } } } as unknown as DeviceTerminal;
+    expect(await host.finish(scope, intent, evidence, () => at)).toBe('failed');
+    await host.sync(scope, { ...SYNC, now: at });
+    expect((await host.read(scope)).dreams).toEqual({ bots: { main: { ...before,
+      last: { occurrenceKey: key, at, outcome: 'failed', template: 'default', fallback: true } } }, open: {} });
+  });
+
+  it('submits a user Turn ahead of an unstarted dream in the same Agent FIFO', async () => {
+    const scope = await scoped(), dream = 'dream:main:1';
+    const key = await locked(scope, async client => {
       const slice = await loadSlice(client, storedKey(scope));
       createRoutine(slice.state, { id: dream, version: 1, timeZone: 'UTC', rule: DAILY, waitMs: 3_600_000, lateAfterMs: 60_000,
         hostOccurrence: { type: BOT_DREAM, input: { owner: 'main' } } }, NOW, routineCalendar);
-      await writeSlice(client, storedKey(scope), slice);
+      const occurrence = recordDue(slice, scope, slice.state.routines[hash(dream)]!, FIRST);
+      const intent = promoteOccurrence(slice.state, scope, occurrence.key, template('device', 'main'));
+      await writeSlice(client, storedKey(scope), slice, occurrence.key);
+      await freezeIntent(client, scope, { key: intent.key, source: 'routine', execution: intent.execution, waitUntil: intent.waitUntil });
+      return occurrence.key;
     });
-    expect(await store().fire(scope, dream, FIRST)).toBe('fired');
-    const key = hash([dream, 1, { kind: 'scheduled', plannedAt: FIRST }]);
-    expect(await occurrenceRow(scope, key)).toEqual({ execution_superseded: false, conclusion: 'cancelled' });
-    expect(await intentRow(scope, occurrenceIntentKey(key))).toBeUndefined();
-    expect((await store().read(scope)).dreams?.bots.main?.last).toEqual({ occurrenceKey: key, at: FIRST, outcome: 'skipped', reason: DREAM_UNSUPPORTED_ON_H });
-    await store().updateRoutine(scope, 'main', { routineId: id, prompt: 'Version 2' }, NOW);
-    expect((await routineRow(scope, id))!.definition.version).toBe(2);
-    expect(await store().fire(scope, id, FIRST)).toBe('fired');
+    await store().seed(scope, state => {
+      settled(state);
+      state.dreams = { bots: { main: { since: NOW } }, open: { [key]: { botId: 'main', windowEnd: FIRST, template: 'default', fallback: true } } };
+      state.turns.user = { id: 'user', root: 'user', botId: 'main', source: 'user', request: 'Urgent question', hop: 0, status: 'queued', authority: 'owner' };
+    });
+    await store().sync(scope, { ...SYNC, now: FIRST });
+    const submitted: string[] = [];
+    const port: FrozenSubmitPort = { submit: async input => { submitted.push(input.taskId); return undefined as never; }, offer: async () => undefined };
+    expect(await new HostedSubmitter(opened!.pool, store().schema, { port: () => port, now: () => FIRST }).run()).toEqual({ tried: 1, failed: [] });
+    expect(submitted).toEqual([taskId('user', 0)]);
+    expect(await intentRow(scope, occurrenceIntentKey(key))).toMatchObject({ tries: 0, conclusion: null });
   });
 
   it('stages, switches, pauses, resumes and completes a routine through the Main Bot owner API, and refuses another Bot', async () => {

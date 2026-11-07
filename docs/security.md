@@ -14,6 +14,92 @@ pilot's commands and evidence ledger are in
 [`docs/security-review-m4.md`](security-review-m4.md) remains historical M4
 evidence.
 
+## Native session input
+
+The accepted 0.40 design in [ADR-050](adr/ADR-050-dream-native-session-input.md),
+from [#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526), adds optional
+device-local Pi session input to dreaming. This section records the design;
+implementation and platform acceptance remain subject to that issue's gates.
+
+The device reads only SDK-recorded Pi sessions for the task's Agent: handoff
+ledgers with `runtimeId: 'pi'` under `.byok/runtime-sessions/` and their matching
+`sessionRef` files under `piByokLauncher.sessionDir`. Header id and cwd must
+match the ledger under the same rules as `openPiRpcSession`. The existing K8
+dream window selects the input; the device stores no additional cursor.
+Only tool names, argument summaries and `ok`/`error`/`none` outcomes derived
+from `toolResult.isError` are selected. Bash splits its first line on whitespace
+and contributes the command word and at most two subcommand words. Each word
+must match `^[a-z][a-z0-9-]{0,22}$`; the first non-matching word stops selection.
+If the command word fails, only the tool name and result remain.
+Read/write/edit/ls/find/grep contribute paths relative to home, never patterns.
+The same argument summary rules apply by tool name, including extension tools
+with matching names. Other tools contribute no arguments. Summary safety comes
+from the command-word allowlist and path rules. Tool output, user and assistant
+body text, thinking, written contents, images and compaction are never read
+as dream input.
+
+Secret protection has two layers. First, output and body text are structurally
+excluded, and bash uses the structural word allowlist above. It does not parse
+shell syntax, apply a 1 KiB omission rule or scan the selected words for secrets.
+Second, paths pass through `redactSecrets`: the shared failure-reason rules
+plus PEM, `xox*-`, `glpat-`, `npm_` and `hf_` patterns.
+The path-only summary rule also removes mixed alphanumeric tokens of at least
+24 characters without altering shared failure-reason handling of SHA and UUID
+values. Any raw path containing `://` becomes the fixed marker `[url]`, without
+parsing or redaction. Otherwise, raw paths exceeding 256 bytes become
+`[omitted: too long]`; values at or below that limit are redacted in full before
+normalization and home-relative rewriting. There is no post-redaction truncation.
+The final scan also recognizes URL userinfo with a collapsed `:/` separator.
+Decoded tool names and paths are scanned again after serialization; a remaining
+match fails the task without retry. Bash summaries are excluded from this scan.
+Unknown format versions, mismatched id/cwd, malformed lines or records exceeding
+the 256 KiB validation bound skip and count the whole file, without
+partial rendering. An unusable session directory, unreadable ledger or
+exhausted budget fails with `native_sessions_unavailable: <closed detail>`;
+errors contain no raw session bytes. Streaming parsing is abortable and
+bounded as specified in ADR-050.
+
+The host emits one `{ type: 'byok_host_ready', sessionId }` per session start.
+Only memory-lane admission consumes this readiness receipt, requiring exactly one
+receipt whose sessionId matches the native session before the first prompt.
+
+The dream runs in a memory-only Pi RPC lane with exactly six SDK file tools:
+`read`, `write`, `edit`, `ls`, `find` and `grep`. The `memory` file-scope grant
+limits them to `MEMORY.md` and `notes/`, retaining symlink, hardlink, `.byok`
+and case checks. Shell, network tools, MCP, web, todo, subagents, user
+extensions and skills are absent; Agent instruction files are not read.
+Other tool names are rejected directly without approval. The exact tool set
+is asserted before the first prompt. The session stays in memory, so it
+does not become future dream input. A single JSON line appears between
+device guidance and the Host instruction, without an intermediate file or
+a change to `buildDreamInstruction`. Timeout or cancellation waits for the lane's abort acknowledgement (or process exit) before reporting task end. Process-tree
+termination also waits for that receipt, so admitted file IO drains without
+SIGKILL and no write remains after acknowledgement. The lane emits no `task.progress`, has an empty
+`summary`, no `finalMessage`, and permits no `result-document`.
+
+**The device switch `DaemonConfig.nativeSessions` is off by default. Turning
+it on is consent to send argument summaries to the dream model provider.**
+The model is the user's device-configured BYOK template; memory-only refers
+to the tool boundary, not local-only inference. K8's
+`DreamingOptions.nativeSessions` defaults to `true` but omits the field when
+the device has not advertised support, so it does not enable device consent.
+Only opted-in macOS/Linux devices with a configured session directory and
+an adapter declaring the lane advertise `native-sessions`. Unsupported
+offers are rejected before claim with non-retryable
+`native_sessions_unsupported`. Windows does not advertise it in 0.40;
+non-Pi runtimes neither supply this input nor execute the lane.
+
+Residual risks remain: a short word in either of the two positions after the
+command can enter the summary when it matches the allowlist, for example
+`echo hunter2`. Short secrets in paths can escape filtering. Assignments whose
+key exceeds the shared rule's 64-character bound are also an accepted residual
+risk, for example `password_<more than 64 characters>=x`. Concrete shell
+arguments and search patterns are omitted: `docker login --pass''word x`
+becomes `docker login`, `mysql -phunter2` becomes `mysql`, and `PASSWORD=x cmd`
+contributes no arguments. The model provider sees the resulting summaries.
+At ten times the input volume, the 2000-call cap is reached first; older calls are discarded and
+counted in `omittedCalls`. Redaction does not promise complete secret removal.
+
 ## Positioning
 
 ### Provider-profile authority

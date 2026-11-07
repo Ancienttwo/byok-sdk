@@ -139,3 +139,10 @@ export const PREPARED_AGENT_MEMORY_MODES = ['none', 'read', 'read-write'] as con
 export function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number] {
   return typeof value === 'string' && PREPARED_AGENT_MEMORY_MODES.some(mode => mode === value);
 }
+
+/**
+ * A device can run the native-session lane. A server understands the V1
+ * `nativeSessions` offer field, resolves `ifAdvertised` at enqueue, and accepts
+ * the `native_sessions_unsupported` decline code.
+ */
+export const NATIVE_SESSIONS_CAPABILITY = 'native-sessions' as const;

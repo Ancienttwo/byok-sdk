@@ -94,15 +94,15 @@
     "build:agent-memory-helper": "node scripts/build-agent-memory-helper.mjs && node scripts/check-agent-memory-helper-build.mjs"
   },
   "optionalDependencies": {
-    "koffi": "3.2.0"
+    "koffi": "3.3.7"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
     "@earendil-works/pi-coding-agent": "1.5.0",
-    "@modelcontextprotocol/client": "2.3.1",
-    "pi-web-access": "0.45.0",
+    "@modelcontextprotocol/client": "2.4.0",
+    "pi-web-access": "0.47.0",
     "pi-subagents": "0.83.1",
     "undici": "8.12.3",
     "@juicesharp/rpiv-i18n": "2.15.0",

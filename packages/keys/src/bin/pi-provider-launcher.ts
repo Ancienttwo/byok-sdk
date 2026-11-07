@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { LinuxSecretServiceSecretStore } from '../linux-secret-service';
 import { ByokKeysError } from '../errors';
 import { MacOsKeychainSecretStore } from '../macos-keychain';
 import {
@@ -18,6 +19,8 @@ function createSecretStore(options: PiProviderLauncherOptions): SecretStore {
         keychainPath: options.macosKeychainPath,
         servicePrefix: options.secretServicePrefix,
       });
+    case 'linux':
+      return new LinuxSecretServiceSecretStore({ servicePrefix: options.secretServicePrefix });
     case 'win32':
       return new WindowsCredentialManagerSecretStore({ servicePrefix: options.secretServicePrefix });
     default:

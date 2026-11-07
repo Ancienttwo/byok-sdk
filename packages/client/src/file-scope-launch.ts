@@ -1,4 +1,5 @@
 import type { ToolFileScope } from './tool-authorization';
+import type { MemoryFileScope } from './file-scope-types';
 import {
   FileScopeGuardError,
   resolveFileScopeGrant,
@@ -33,12 +34,9 @@ export async function verifySerializedFileScopeGrant(
   serialized: SerializedFileScopeGrant,
   options: VerifySerializedFileScopeGrantOptions = {},
 ): Promise<FileScopeGrant> {
-  const fileScope: ToolFileScope = {
-    mode: serialized.mode,
-    ...(serialized.mode === 'home' ? {} : {
-      roots: serialized.roots.map((root) => Object.freeze({ id: root.id, path: root.lexicalPath, access: root.access })),
-    }),
-  };
+  const fileScope: ToolFileScope | MemoryFileScope = serialized.mode === 'workspaces'
+    ? { mode: 'workspaces', roots: serialized.roots.map((root) => Object.freeze({ id: root.id, path: root.lexicalPath, access: root.access })) }
+    : { mode: serialized.mode };
   let grant: FileScopeGrant;
   try {
     grant = await resolveFileScopeGrant({

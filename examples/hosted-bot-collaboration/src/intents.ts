@@ -3,6 +3,8 @@ import { agentKey, canonical, fifoHeads, frozenInput, hash, isSealed, promoteOcc
   submitFrozen, taskId,
   type Conclusion, type RetryPolicy, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution, type Json } from '@byok-sdk/server/execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
+import { dreamIntentIds } from '@byok-sdk/example-bot-collaboration/dream';
+import { autonomousIntentIds, userFirst } from '@byok-sdk/example-bot-collaboration/rules/priority';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import type { SeatFacts, settleDelegations, SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
@@ -233,10 +235,11 @@ type SettleFacts = Parameters<typeof settleDelegations>[1];
  * step run the K4 rules on `slice`, which the caller writes back after the last step. The caller holds the scope lock.
  * Returns true when the step changed an intent fact or an occurrence, so the sync runs its Turns again, as L drains again.
  */
-export async function writeSyncStep(client: PoolClient, scope: string, turn: Turn, step: SyncStep<ExecutionTemplate>, slice: RoutineSlice,
+export async function writeSyncStep(client: PoolClient, scope: string, state: CollaborationState, turn: Turn, step: SyncStep<ExecutionTemplate>, slice: RoutineSlice,
   now: number): Promise<boolean> {
   if (step.kind === 'freeze') {
     await freezeIntent(client, scope, step.input);
+    if (step.input.source === 'user') await prioritiseUser(client, scope, state, turn.id);
     return true;
   }
   if (step.kind === 'routine') {
@@ -252,6 +255,24 @@ export async function writeSyncStep(client: PoolClient, scope: string, turn: Tur
   // An untried row concludes now, and L drains again for it.
   if (step.kind === 'cancel') return cancelIntent(client, scope, turn.id, now);
   return false;
+}
+
+/** Runs L's priority rule in the enqueue transaction; submitted intents keep their order and frozen identity. */
+async function prioritiseUser(client: PoolClient, scope: string, state: CollaborationState, key: string): Promise<void> {
+  const scopeKey = storedKey(scope);
+  const found = await client.query<{ key: string; agent: string; ordinal: string; tries: number; top: string }>(
+    `SELECT key, agent, ordinal::text, tries, (SELECT max(ordinal) FROM intent WHERE scope = $1)::text AS top
+      FROM intent WHERE scope = $1 AND conclusion IS NULL
+      AND agent = (SELECT agent FROM intent WHERE scope = $1 AND key = $2)`, [scopeKey, storedKey(key)]);
+  const rows = found.rows.map(row => ({ id: hash(idOf(row.key)), agent: row.agent, sequence: Number(row.ordinal),
+    phase: row.tries === 0 ? 'queued' : 'inflight', attempts: row.tries }));
+  const autonomous = autonomousIntentIds(Object.values(state.turns), dreamIntentIds(state));
+  const plan = userFirst(rows, hash(key), autonomous, Number(found.rows[0]!.top));
+  if (!plan) return;
+  const keys = new Map(found.rows.map(row => [hash(idOf(row.key)), row.key]));
+  for (const { id, sequence } of plan.assignments) {
+    await client.query('UPDATE intent SET ordinal = $3 WHERE scope = $1 AND key = $2', [scopeKey, keys.get(id), sequence]);
+  }
 }
 
 export interface SubmitterOptions {

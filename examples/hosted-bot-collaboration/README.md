@@ -86,6 +86,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | Table | One row per |
 |---|---|
 | `scope` | scope: the store version, the frame (the state without its rows), the due time, and its owner switch export mark or import record (#975) |
+| `dream_state` | scope: K8's dream marks, last results and open occurrences, outside the bounded frame |
 | `entity` | map entry of the state (Turn, card, Bot, room, delivery, ...), keyed by its id |
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
@@ -151,6 +152,37 @@ untried intent it cancelled. Each of those steps happens once per intent or occu
 
 In history mode, `options.history` maps each Turn id to that Turn's history rows, as L reads them, in the row shape of
 `src/rules/context.ts` (`contextTurns`), with the optional `reply` text (#1318). A Turn without an entry does not freeze.
+
+### Dreaming (#1516)
+
+H runs K8's `dream.ts` through the `@byok-sdk/example-bot-collaboration/dream` export.
+The scope's Host config accepts `dreaming` with L's `timeZone`, `models` and `maxDurationMs` options;
+absent means on and `false` turns it off. A sync reconciles one daily routine per eligible Bot.
+Each `fire` records an open dream; the next sync decides its skip or freezes a fresh writer.
+Model selection, fallback, mark, instruction budget and result records are the same K8 rules.
+The default cost is one task per day for each Bot with new completed Turns, using its own model
+unless the Host lists a suitable model in `dreaming.models`.
+
+Without history mode, dreaming reads this scope's stored Turns. With history mode, the deployment
+calls K8 `dreamReads(await store.read(scope))`, reads and validates its Host history outside the
+scope transaction, and passes `dreamHistory` to `store.sync`, keyed by occurrence key. A missing
+entry waits; `null` records `history_unavailable` and skips that occurrence. It never substitutes
+local Turns for unavailable external history. `limits.instructionMaxBytes` must leave the room
+that K8 `checkDreamInstruction` requires.
+
+The submitter and reconciler run the normal task path. An owned dream's success bypasses Bot
+outcome parsing, after the Host intent handler check; the next sync reads its persisted conclusion
+and records the result. Only success advances the mark. Keep wiring the scheduler, submitter and
+reconciler `changed` callbacks to the deployment's scope sync, as for Bot Turns. A new open dream
+and a terminal committed through the store also project an immediately due scope.
+
+User Turns use the shared K8 `userFirst` rule and autonomous set: they overtake unsubmitted routine,
+bot_request and dream intents in their Agent FIFO. Submitted work keeps its order. H does not
+yet apply L's `admitDeviceSlot` reservation. Dream records live in one `dream_state` row per scope,
+read and written in the same transaction as its intents. `store.migrate()` creates the table and
+atomically moves existing frame dreams into it once, refusing a conflicting row or invalid frame.
+Dream state does not count toward the 4096-byte frame limit. Discarding an uncommitted import
+also removes its dream row.
 
 ### Batch seal
 

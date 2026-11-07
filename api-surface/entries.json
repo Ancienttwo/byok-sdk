@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2295201,
+      "budgetBytes": 2340654,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -22,12 +22,14 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -42,6 +44,7 @@
         "node:url",
         "node:util",
         "node:zlib",
+        "path",
         "zod"
       ],
       "lazyImports": [
@@ -51,6 +54,7 @@
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"
@@ -68,6 +72,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -81,7 +86,8 @@
           "node:stream",
           "node:url",
           "node:util",
-          "node:zlib"
+          "node:zlib",
+          "path"
         ],
         "thirdParty": [
           "node:crypto"
@@ -89,7 +95,7 @@
       },
       "codegen": [
         {
-          "file": "@modelcontextprotocol/client/dist/ajvProvider-97rDpkRx.mjs",
+          "file": "@modelcontextprotocol/client/dist/ajvProvider-BIwGVY6G.mjs",
           "line": 2594,
           "rule": "Function constructor"
         },
@@ -115,7 +121,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 500310,
+      "budgetBytes": 523322,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -132,7 +138,9 @@
         "packages/client/dist/adapters/index.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol/constants",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -145,7 +153,8 @@
         "node:path",
         "node:stream",
         "node:url",
-        "node:util"
+        "node:util",
+        "path"
       ],
       "lazyImports": [
         "#byok-acp-runtime",
@@ -158,6 +167,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -170,7 +180,8 @@
           "node:path",
           "node:stream",
           "node:url",
-          "node:util"
+          "node:util",
+          "path"
         ],
         "thirdParty": []
       },
@@ -181,7 +192,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 73431,
+      "budgetBytes": 74684,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -227,7 +238,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 123084,
+      "budgetBytes": 123349,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -245,12 +256,15 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/system-tool",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
         "node:net",
         "node:os",
         "node:path",
+        "path",
         "zod"
       ],
       "lazyImports": [],
@@ -261,12 +275,14 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
           "node:net",
           "node:os",
-          "node:path"
+          "node:path",
+          "path"
         ],
         "thirdParty": []
       },
@@ -437,7 +453,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 479589,
+      "budgetBytes": 485891,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -454,7 +470,9 @@
         "packages/client/dist/testing/index.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol/constants",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -467,7 +485,8 @@
         "node:path",
         "node:stream",
         "node:url",
-        "node:util"
+        "node:util",
+        "path"
       ],
       "lazyImports": [
         "#byok-acp-runtime",
@@ -480,6 +499,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -492,7 +512,8 @@
           "node:path",
           "node:stream",
           "node:url",
-          "node:util"
+          "node:util",
+          "path"
         ],
         "thirdParty": []
       },
@@ -502,8 +523,8 @@
   "@byok-sdk/client#byok-acp-runtime": {
     "kind": "imports",
     "policy": {
-      "purpose": "Private ACP runtime stack (Grok, agy)",
-      "budgetBytes": 96988,
+      "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
+      "budgetBytes": 112677,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -523,8 +544,11 @@
         "@agentclientprotocol/sdk",
         "node:crypto",
         "node:fs",
+        "node:fs/promises",
+        "node:os",
         "node:path",
         "node:string_decoder",
+        "node:timers/promises",
         "node:url"
       ],
       "lazyImports": [],
@@ -538,8 +562,11 @@
         "workspace": [
           "node:crypto",
           "node:fs",
+          "node:fs/promises",
+          "node:os",
           "node:path",
           "node:string_decoder",
+          "node:timers/promises",
           "node:url"
         ],
         "thirdParty": []
@@ -567,7 +594,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Hermes session runtime; loaded only when starting an execution",
-      "budgetBytes": 22899,
+      "budgetBytes": 23164,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -584,11 +611,14 @@
         "packages/client/dist/adapters/hermes/hermes-session-runtime.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/system-tool",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
         "node:os",
-        "node:path"
+        "node:path",
+        "path"
       ],
       "lazyImports": [],
       "thirdParty": [],
@@ -596,11 +626,13 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
           "node:os",
-          "node:path"
+          "node:path",
+          "path"
         ],
         "thirdParty": []
       },
@@ -611,7 +643,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 536579,
+      "budgetBytes": 546586,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -628,6 +660,7 @@
         "packages/client/dist/bin/pi-runtime-host.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
@@ -642,6 +675,7 @@
         "@earendil-works/pi-durable/tools",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
+        "fs",
         "node:async_hooks",
         "node:child_process",
         "node:crypto",
@@ -656,6 +690,7 @@
         "node:string_decoder",
         "node:url",
         "node:util",
+        "path",
         "pi-web-access/dist/index.js",
         "typebox",
         "zod"
@@ -725,6 +760,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:async_hooks",
           "node:child_process",
           "node:crypto",
@@ -738,7 +774,8 @@
           "node:stream/promises",
           "node:string_decoder",
           "node:url",
-          "node:util"
+          "node:util",
+          "path"
         ],
         "thirdParty": [
           "assert",
@@ -819,7 +856,7 @@
           "rule": "opaque import()"
         },
         {
-          "file": "@modelcontextprotocol/client/dist/ajvProvider-97rDpkRx.mjs",
+          "file": "@modelcontextprotocol/client/dist/ajvProvider-BIwGVY6G.mjs",
           "line": 2594,
           "rule": "Function constructor"
         },
@@ -835,17 +872,17 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 33,
+          "line": 34,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 33,
+          "line": 34,
           "rule": "opaque import()"
         },
         {
           "file": "pi-web-access/dist/index.js",
-          "line": 26512,
+          "line": 27685,
           "rule": "opaque import()"
         },
         {
@@ -885,7 +922,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 494449,
+      "budgetBytes": 504456,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -902,6 +939,7 @@
         "packages/client/dist/bin/pi-runtime-host-sealed.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
@@ -1094,7 +1132,7 @@
           "rule": "opaque import()"
         },
         {
-          "file": "@modelcontextprotocol/client/dist/ajvProvider-97rDpkRx.mjs",
+          "file": "@modelcontextprotocol/client/dist/ajvProvider-BIwGVY6G.mjs",
           "line": 2594,
           "rule": "Function constructor"
         },
@@ -1110,7 +1148,7 @@
         },
         {
           "file": "pi-web-access/dist/index.js",
-          "line": 26512,
+          "line": 27685,
           "rule": "opaque import()"
         },
         {
@@ -1192,7 +1230,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 554419,
+      "budgetBytes": 558887,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1250,7 +1288,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 799467,
+      "budgetBytes": 803935,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1380,7 +1418,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 761208,
+      "budgetBytes": 765676,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1636,7 +1674,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1403,
+      "budgetBytes": 1542,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1713,11 +1751,50 @@
       ]
     }
   },
+  "@byok-sdk/core/system-tool": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Trusted system tools for Node hosts",
+      "budgetBytes": 1968,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/core/dist/system-tool.js",
+      "conditions": [
+        "node",
+        "import"
+      ],
+      "types": [
+        "packages/core/dist/system-tool.d.ts"
+      ],
+      "bareImports": [
+        "fs",
+        "path"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "fs",
+          "path"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
   "@byok-sdk/keys": {
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 235911,
+      "budgetBytes": 240716,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1735,6 +1812,7 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/system-tool",
         "child_process",
         "crypto",
         "fs",
@@ -1915,7 +1993,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 149694,
+      "budgetBytes": 152826,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2001,7 +2079,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Schema-free protocol values",
-      "budgetBytes": 8410,
+      "budgetBytes": 9682,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2061,7 +2139,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 713054,
+      "budgetBytes": 717672,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2137,7 +2215,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 414442,
+      "budgetBytes": 419215,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2269,7 +2347,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 579150,
+      "budgetBytes": 583618,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2356,7 +2434,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2272488,
+      "budgetBytes": 2317895,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2371,12 +2449,14 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -2392,6 +2472,7 @@
         "node:stream",
         "node:url",
         "node:util",
+        "path",
         "zod"
       ],
       "lazyImports": [
@@ -2400,6 +2481,7 @@
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"
@@ -2417,6 +2499,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -2431,7 +2514,8 @@
           "node:readline/promises",
           "node:stream",
           "node:url",
-          "node:util"
+          "node:util",
+          "path"
         ],
         "thirdParty": [
           "node:crypto"
@@ -2439,7 +2523,7 @@
       },
       "codegen": [
         {
-          "file": "@modelcontextprotocol/client/dist/ajvProvider-97rDpkRx.mjs",
+          "file": "@modelcontextprotocol/client/dist/ajvProvider-BIwGVY6G.mjs",
           "line": 2594,
           "rule": "Function constructor"
         },
@@ -2465,7 +2549,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 45526,
+      "budgetBytes": 46798,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2506,7 +2590,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 45530,
+      "budgetBytes": 46802,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2547,7 +2631,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 45526,
+      "budgetBytes": 46798,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2588,7 +2672,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 45496,
+      "budgetBytes": 46768,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2689,7 +2773,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 175886,
+      "budgetBytes": 181044,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2703,6 +2787,7 @@
       "types": [],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/system-tool",
         "child_process",
         "crypto",
         "fs",

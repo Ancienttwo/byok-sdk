@@ -37,6 +37,20 @@ const lost = async () => { throw new Error('lost response'); };
 const open = () => true;
 
 describe('submitFrozen (#793 D2b)', () => {
+  it.each([true, false])('replays the recorded nativeSessions resolution (advertised=%s)', async advertised => {
+    const frozen: FrozenInput = { ...input, payload: { ...input.payload, agentMemory: 'none', terminalProjection: { mode: 'none' },
+      nativeSessions: { fromMs: 1, toMs: 2, ifAdvertised: true } } };
+    const { nativeSessions: _native, agentMemoryCommit: _commit, ...base } = frozen.payload;
+    const payload = { ...base, ...(advertised ? { nativeSessions: { fromMs: 1, toMs: 2 } } : {}) };
+    const p = port([readback(true, { payload })]);
+    expect(await submitFrozen(p, frozen, open)).toBe('delivered');
+    expect(p.submit).not.toHaveBeenCalled();
+    if (advertised) {
+      const changed = port([readback(true, { payload: { ...payload, nativeSessions: { fromMs: 1, toMs: 3 } } })]);
+      await expect(submitFrozen(changed, frozen, open)).rejects.toBeInstanceOf(FrozenOfferMismatchError);
+    }
+  });
+
   it('submits once when no offer is recorded', async () => {
     const p = port([undefined]);
     expect(await submitFrozen(p, input, open)).toBe('delivered');

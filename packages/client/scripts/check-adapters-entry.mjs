@@ -58,13 +58,13 @@ assert.match(manifest.dependencies?.['@earendil-works/pi-coding-agent'] ?? '', E
   'client @earendil-works/pi-coding-agent pin must be an exact semver');
 assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'], nativeManifest.version);
 assert.equal(manifest.optionalDependencies?.['@earendil-works/pi-coding-agent'], undefined);
-assert.equal(manifest.dependencies?.['pi-web-access'], '0.45.0');
+assert.equal(manifest.dependencies?.['pi-web-access'], '0.47.0');
 assert.equal(manifest.dependencies?.['pi-subagents'], '0.83.1');
 assert.equal(manifest.devDependencies?.['pi-subagents'], undefined);
 // The MCP client this package's own core is built on. `pi-mcp-adapter` is
 // retired: the SDK owns its MCP connection, observation and tool projection
 // (`src/mcp/`), so there is no second MCP authority in the graph to pin.
-assert.equal(manifest.dependencies?.['@modelcontextprotocol/client'], '2.3.1');
+assert.equal(manifest.dependencies?.['@modelcontextprotocol/client'], '2.4.0');
 // The ACP wire library behind the private `#byok-acp-runtime` entry (vendored OAR shared/acp).
 assert.equal(manifest.dependencies?.['@agentclientprotocol/sdk'], '1.4.0');
 assert.equal(manifest.dependencies?.['pi-mcp-adapter'], undefined);
@@ -100,7 +100,7 @@ const adapters = await import(new URL('../dist/adapters/index.js', import.meta.u
 const root = await import(new URL('../dist/index.js', import.meta.url));
 assert.deepEqual(
   Object.keys(adapters).sort(),
-  ['AgyAdapter', 'ClaudeAdapter', 'CodexAdapter', 'DshAdapter', 'GrokAdapter', 'HermesAdapter', 'NativeInteractionController', 'NativeInteractionError', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeEnvironmentUnavailableError', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnvironment', 'createExecutionScratch', 'createRuntimeAdapters', 'isWireRuntimeId', 'observeRuntimeDetection', 'projectRuntimeObservation', 'taskRuntimeTarget', 'validateRuntimeDetectResult'],
+  ['AgyAdapter', 'ClaudeAdapter', 'CodexAdapter', 'DshAdapter', 'GrokAdapter', 'HermesAdapter', 'NativeInteractionController', 'NativeInteractionError', 'OpenCodeAdapter', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeEnvironmentUnavailableError', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnvironment', 'createExecutionScratch', 'createRuntimeAdapters', 'isWireRuntimeId', 'observeRuntimeDetection', 'projectRuntimeObservation', 'taskRuntimeTarget', 'validateRuntimeDetectResult'],
 );
 // The public testing entry is transport-free too: a Host test must not load the daemon.
 const bundledTesting = readFileSync(new URL('../dist/testing/index.js', import.meta.url), 'utf8');

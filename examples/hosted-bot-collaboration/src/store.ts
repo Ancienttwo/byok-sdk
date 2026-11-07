@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { canonical, concludeOccurrence, hash, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
+import { canonical, concludeOccurrence, hash, occurrenceIntentKey, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
   type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/server/execution-core';
-import { BOT_DREAM, botRoutines, endable, owned, recordUnsupportedDream, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
+import { BOT_DREAM, botRoutines, endable, owned, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
   type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
 import { admitBotToolsets, applyHomeTerminal, applyManagement, applyModels, failHomeFlush, homeEnqueued, homeHead, inactive, planHomeRetry, requireMain, updateBot,
   writeSnapshotBot, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
@@ -10,6 +10,7 @@ import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, ty
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
+import { checkDreamInstruction, dreamPolicy, recordDream, reconcileDreamRoutines, type DreamingOptions, type DreamSync } from '@byok-sdk/example-bot-collaboration/dream';
 import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
   commandBots, seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
@@ -17,6 +18,7 @@ import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefu
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
+import { syncDreamSlice } from './dreams';
 import { decideMessage, messageCommandId, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDecision } from './messages';
 import { decideFinish, type HostedIntentHandler, type IntentOutcomeError, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
@@ -48,14 +50,20 @@ type TurnHistory = NonNullable<SyncOptions<never>['history']>;
  * (#793 S4). The model names and the read-only toolsets come from the scope's Host config (#793 S9).
  */
 export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines' | 'models' | 'readOnlyToolsets' | 'sealedTemplate'>
-  & { history?: ReadonlyMap<string, TurnHistory> };
+  & { history?: ReadonlyMap<string, TurnHistory>;
+    /** External dream history by occurrence key, from K8 dreamReads. Absent entry waits; null records a failed read. */
+    dreamHistory?: DreamSync['history'] };
 /** `dueAt`: the scope's due time after the sync, the value that it wrote to `scope.due_at` (#793 S4). */
 export interface SyncResult { dueAt: number | null }
 /**
  * The Host config of one scope, as L's `BotOptions.models` and `readOnlyToolsets` (#793 S9). A model template carries the
  * device that a new Bot runs on, so each scope has its own: the user's own devices.
  */
-export interface HostConfig { models: Record<string, ExecutionTemplate>; readOnlyToolsets?: readonly string[] }
+export interface HostConfig {
+  models: Record<string, ExecutionTemplate>; readOnlyToolsets?: readonly string[];
+  /** As L: absent means daily dreaming on; false disables it for this scope. */
+  dreaming?: DreamingOptions | false;
+}
 /** The outcome ports of the routine actions of a callback command. The store builds the committed intents and `manage`. */
 export type OutcomeRoutinePorts = Omit<NonNullable<CommandPorts['outcome']>, 'committed' | 'manage'>;
 /**
@@ -266,6 +274,23 @@ export class HostedCollaborationStore {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`hosted-collaboration:${this.schema}`]);
       await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
       await client.query(DDL);
+      // Older H frames (including L imports) can contain dreams. Move them once, under the same scope locks as writes.
+      // Keep JSON key order: jsonb replacement would change the byte-preserving snapshot/export contract.
+      const legacy = await client.query<{ scope: string; state_version: number; frame: string; has_row: boolean }>(
+        `SELECT s.scope, s.state_version, s.frame::text, d.scope IS NOT NULL AS has_row FROM scope s
+         LEFT JOIN dream_state d ON d.scope = s.scope WHERE s.frame::jsonb ? 'dreams' ORDER BY s.scope FOR UPDATE OF s`);
+      const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+      for (const row of legacy.rows) {
+        if (!SUPPORTED_STORE_VERSIONS.has(row.state_version)) throw new HostedStoreVersionError(row.state_version);
+        const frame = JSON.parse(row.frame) as Record<string, unknown>, dreams = frame.dreams;
+        if (row.has_row && object(dreams) && Object.keys(dreams).length === 0) continue;
+        if (row.has_row || !object(dreams) || Object.keys(dreams).length !== 2 || !object(dreams.bots) || !object(dreams.open)) {
+          throw new Error(`Cannot migrate dreams for ${row.scope}: conflicting row or invalid frame`);
+        }
+        await client.query('INSERT INTO dream_state (scope, body) VALUES ($1, $2::json)', [row.scope, JSON.stringify(dreams)]);
+        frame.dreams = {};
+        await client.query('UPDATE scope SET frame = $2::json WHERE scope = $1', [row.scope, JSON.stringify(frame)]);
+      }
     }, false);
   }
 
@@ -455,6 +480,7 @@ export class HostedCollaborationStore {
       const rows = [];
       for (const query of [
         'SELECT state_version, frame::text, due_at::text, switch_export::text, switch_import::text FROM scope WHERE scope = $1',
+        'SELECT body::text FROM dream_state WHERE scope = $1',
         'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, key',
         'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, entry.position',
         'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
@@ -497,11 +523,16 @@ export class HostedCollaborationStore {
     // As L checks its coalesce policy against its ContextPack budget (K8 host.ts constructor).
     if (this.coalesce) coalescePolicy(this.coalesce, options.limits.contextMaxBytes);
     const key = storedKey(scope), config = await this.host(scope), models = Object.keys(config.models), readOnlyToolsets = config.readOnlyToolsets ?? [];
+    const dreaming = dreamPolicy(config.dreaming);
+    if (dreaming) checkDreamInstruction(options.limits.instructionMaxBytes);
     return this.change(scope, undefined, async (state, publish, client) => {
       // As L re-projects the Host's templates (#1357), so a freeze in this sync uses the scope config's current templates (#1358).
       applyModels(state, config.models, readOnlyToolsets);
       const published = new Set<string>();
-      const slice = await loadSlice(client, key), routines = botRoutines(Object.values(slice.state.routines));
+      const slice = await loadSlice(client, key, Object.keys(state.dreams?.open ?? {}));
+      slice.state.application = { collaboration: state as unknown as Json };
+      reconcileDreamRoutines(slice.state, dreaming, config.models, options.now);
+      const routines = botRoutines(Object.values(slice.state.routines));
       const emit: Publish = (id, body) => { publish(id, body); published.add(id); };
       let more = true;
       while (more) {
@@ -524,7 +555,10 @@ export class HostedCollaborationStore {
           if (step) steps.push([turn, step]);
         }
         more = false;
-        for (const [turn, step] of steps) more = await writeSyncStep(client, scope, turn, step, slice, options.now) || more;
+        for (const [turn, step] of steps) more = await writeSyncStep(client, scope, state, turn, step, slice, options.now) || more;
+        more = await syncDreamSlice(client, scope, slice, { tenant: scope, policy: dreaming, models: config.models,
+          instructionMaxBytes: options.limits.instructionMaxBytes, now: options.now, refused: botId => facts.deviceRefusal!(botId) !== undefined,
+          historyMode: options.historyMode, history: options.dreamHistory }) || more;
         const turns = Object.keys(state.turns).length;
         settleDelegations(state, await settleFacts(client, scope, Object.keys(state.turns)), options.now, emit, this.timers);
         reportCardDecisions(state, emit);
@@ -625,8 +659,8 @@ export class HostedCollaborationStore {
    * the fence: its routine Turn creates no execution, because the sync ends it before any freeze, as L does. A revoke and an archive are both
    * final, so with the fence that slot could never fire.
    *
-   * A `bot-dream` routine (#1475) came with an L import. H does not run dreams yet, so its occurrence concludes `cancelled` in
-   * this transaction, with the reason in the Bot's dream record, no task and no fence.
+   * A `bot-dream` routine records its open dream in this transaction. The sync decides whether to skip or promote it,
+   * using K8's rule and the device binding of that transaction.
    *
    * A Host job routine (#793 S14) records its occurrence and its `host_job` outbox row, as K4 `recordOccurrence` does, with no
    * K8 command and no fence: a Host job creates no execution. The outbox sender runs it.
@@ -644,8 +678,7 @@ export class HostedCollaborationStore {
       }
       if (routine.definition.hostOccurrence?.type === BOT_DREAM) {
         const occurrence = recordDue(slice, scope, routine, now);
-        concludeOccurrence(slice.state, occurrence.key, 'cancelled');
-        recordUnsupportedDream(state, occurrenceRun(routine, occurrence), now);
+        recordDream(state, occurrenceRun(routine, occurrence), now);
         await writeSlice(client, key, slice, occurrence.key);
         return { value: 'fired' as const, outbox: [] };
       }
@@ -1267,7 +1300,7 @@ export class HostedCollaborationStore {
     return this.transaction(async client => {
       await this.importMark(client, key);
       for (const table of ['intent_execution', 'occurrence', 'routine', 'intent', 'outbox', 'entity', 'entry', 'command', 'device_binding',
-        'retired_identity', 'archived_row', 'scope']) await client.query(`DELETE FROM ${table} WHERE scope = $1`, [key]);
+        'retired_identity', 'archived_row', 'dream_state', 'scope']) await client.query(`DELETE FROM ${table} WHERE scope = $1`, [key]);
     }, false);
   }
 
@@ -1469,6 +1502,10 @@ export class HostedCollaborationStore {
    */
   private async dueAt(client: PoolClient, key: string, state: CollaborationState): Promise<number | null> {
     const due = collaborationDue(state, this.timers), bots = state.team.bots;
+    const dreams = Object.entries(state.dreams?.open ?? {});
+    if (dreams.some(([, dream]) => dream.template === undefined)) due.push(0);
+    else if (dreams.length && (await client.query(`SELECT 1 FROM intent WHERE scope = $1 AND key = ANY($2::text[])
+      AND conclusion IS NOT NULL LIMIT 1`, [key, dreams.map(([occurrence]) => storedKey(occurrenceIntentKey(occurrence)))])).rowCount) due.push(0);
     const held = Object.values(state.turns).filter(turn => turn.held && !turn.conclusion)
       .map(turn => Object.hasOwn(bots, turn.botId) && !inactive(bots[turn.botId]) ? bots[turn.botId]!.execution.deviceId : undefined);
     if (held.length) {
@@ -1483,6 +1520,7 @@ export class HostedCollaborationStore {
   private async load(client: PoolClient, scopeKey: string, frame: string, commandId: string | undefined): Promise<Split & { ordinals: Map<EntityKind, Map<string, number>> }> {
     const rows: Split & { ordinals: Map<EntityKind, Map<string, number>> } =
       { frame, entities: new Map(), entries: new Map(), commands: new Map(), ordinals: new Map() };
+    rows.dreams = (await client.query<{ body: string }>('SELECT body::text FROM dream_state WHERE scope = $1', [scopeKey])).rows[0]?.body;
     const entities = await client.query<{ kind: EntityKind; key: string; ordinal: string; body: string }>(
       'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, entity.ordinal', [scopeKey]);
     for (const row of entities.rows) {
@@ -1512,6 +1550,11 @@ export class HostedCollaborationStore {
   /** Writes only the rows that changed. A new row of a kind gets the next ordinal of that kind. */
   private async write(client: PoolClient, scopeKey: string, loaded: { ordinals: Map<EntityKind, Map<string, number>> }, before: Split, after: Split): Promise<void> {
     if (after.frame !== before.frame) await client.query('UPDATE scope SET frame = $2::json WHERE scope = $1', [scopeKey, after.frame]);
+    if (after.dreams !== before.dreams) {
+      if (after.dreams === undefined) await client.query('DELETE FROM dream_state WHERE scope = $1', [scopeKey]);
+      else await client.query(`INSERT INTO dream_state (scope, body) VALUES ($1, $2::json)
+        ON CONFLICT (scope) DO UPDATE SET body = EXCLUDED.body`, [scopeKey, after.dreams]);
+    }
     for (const kind of new Set([...before.entities.keys(), ...after.entities.keys()])) {
       const old = before.entities.get(kind) ?? new Map<string, string>(), next = after.entities.get(kind) ?? new Map<string, string>();
       const ordinals = loaded.ordinals.get(kind) ?? new Map<string, number>();

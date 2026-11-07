@@ -1,4 +1,4 @@
-import { checkRoutineSchedule, nextRoutineOccurrence, TaskOfferSealedPayloadSchema, type CreateRoutineAction, type RoutineSchedule, type RoutineScheduleFields,
+import { checkRoutineSchedule, nextRoutineOccurrence, HostOfferSealedPayloadSchema, type CreateRoutineAction, type RoutineSchedule, type RoutineScheduleFields,
   type UpdateRoutineAction } from '@byok-sdk/protocol';
 import { canonical, concludeOccurrence, hash, occurrenceIntentKey, occurrenceOfIntentKey, type ExecutionTemplate, type HostOccurrenceRoutineDefinition, type HostOccurrenceRun, type LedgerState,
   type NextOccurrence, type Routine } from '@byok-sdk/server/execution-core';
@@ -16,8 +16,6 @@ export type { SealedRoutineTemplate } from './rules/sync';
 export const BOT_ROUTINE = 'bot-routine';
 /** The K4 occurrence hook of dream routines (`dream.ts`). Bot policy never reads these rows. */
 export const BOT_DREAM = 'bot-dream';
-/** Why H concludes a dream occurrence with no task. Full dreaming on H is deferred (#1475). */
-export const DREAM_UNSUPPORTED_ON_H = 'H does not support dreaming yet';
 /** A routine Turn expires this long after K4 records its occurrence. */
 export const ROUTINE_WAIT_MS = 300_000;
 /** A delivery later than this after its planned time is a catch-up. */
@@ -48,11 +46,6 @@ export interface BotRoutine {
 }
 
 export const dreamTable = (state: CollaborationState): DreamState => state.dreams ??= { bots: {}, open: {} };
-/** H's `bot-dream` fire: H keeps the row and the reason. The caller concludes the occurrence. */
-export function recordUnsupportedDream(state: CollaborationState, run: HostOccurrenceRun, now: number): void {
-  const { owner } = run.input as { owner: string }, dreams = dreamTable(state);
-  (dreams.bots[owner] ??= { since: now }).last = { occurrenceKey: run.occurrenceKey, at: now, outcome: 'skipped', reason: DREAM_UNSUPPORTED_ON_H };
-}
 /** The K4 calendar of the Bot Host core. A rule is a `RoutineSchedule` whose `tz` is the definition time zone. */
 export const routineCalendar: NextOccurrence = (definition, after) => {
   const schedule = definition.rule;
@@ -148,7 +141,7 @@ function checkSealed(id: string, version: number, sealed: SealedRoutineTemplate,
   }
   const { instruction: _, ...plain } = execution.payload;
   const offer = { ...plain, sealing: sealed.sealing, sealed: sealed.template, routineRef: { routineId: id, definitionVersion: version, notAfter: sealed.notAfter } };
-  if (!TaskOfferSealedPayloadSchema.safeParse(offer).success) throw new Error('Supply a valid sealed template');
+  if (!HostOfferSealedPayloadSchema.safeParse(offer).success) throw new Error('Supply a valid sealed template');
   if ('ciphertextRef' in sealed.template) throw new Error('A sealed routine template must be inline');
 }
 /**

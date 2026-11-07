@@ -88,7 +88,9 @@ export type RuntimeExecutableSource = 'config' | 'path' | 'env';
  */
 export type RuntimeDetectResult =
   | {
-    readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory; readonly versionVerdict?: RuntimeVersionVerdict;
+    readonly kind: 'available'; readonly version?: string;
+    /** Verbatim local version probe output; never an admission token. */
+    readonly rawVersion?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory; readonly versionVerdict?: RuntimeVersionVerdict;
     /** The absolute executable this probe ran (#1103 O10). Local-only and user-path sensitive: never on the wire, in audit or in a support bundle. */
     readonly executablePath?: string;
     /** Who chose that executable; present whenever `executablePath` is. */
@@ -312,6 +314,8 @@ export interface SessionEvidence {
  * capability authority again during admission, claim or start.
  */
 export interface RuntimeAdapterDescriptor {
+  /** Pi RPC memory-only execution contract; omission means unsupported. */
+  readonly memoryLane?: typeof import('./adapters/pi/memory-lane-contract').PI_MEMORY_LANE;
   readonly id: string;
   readonly capabilities: RuntimeCapabilities;
   /**
@@ -558,6 +562,8 @@ export interface RuntimeLaunchResources {
 
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
+  /** Device-owned memory grant; never sourced from the offer. */
+  readonly memoryLane?: import('./file-scope-guard').FileScopeGrant;
   readonly scratch: ExecutionScratch;
   /** Exact local resource acquired by this operation before resume handoff validation; never serialized. */
   readonly sessionLease?: RuntimeSessionLease;
@@ -683,6 +689,7 @@ function progressMessageBoundaryOf(value: unknown): 'event' | 'session' {
 export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescriptor): RuntimeAdapterDescriptor {
   return Object.freeze({
     id: descriptor.id,
+    ...(descriptor.memoryLane === undefined ? {} : { memoryLane: descriptor.memoryLane }),
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     ...(descriptor.mcpToolApprovals === true ? { mcpToolApprovals: true } : {}),

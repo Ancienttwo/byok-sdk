@@ -2,9 +2,8 @@ import { z } from 'zod';
 import {
   AgentMessageServerContextSchema,
   SessionSelectionSchema,
-  TaskOfferPlainPayloadSchema,
-  TaskOfferSealedPayloadSchema,
 } from '@byok-sdk/protocol';
+import { HostOfferPlainPayloadSchema, HostOfferSealedPayloadSchema } from '@byok-sdk/protocol';
 
 /** An execution is a fresh `task.offer`, never a prepared one. */
 const FRESH_EXECUTION = { session: SessionSelectionSchema.options[1], preparation: z.never().optional() };
@@ -39,7 +38,7 @@ function executionTargetRule(
 export const AgentExecutionInputSchema = z.object({
   taskId: z.string().min(1),
   deviceId: z.string().min(1),
-  payload: TaskOfferPlainPayloadSchema.required({ terminalProjection: true }).safeExtend(FRESH_EXECUTION).superRefine(executionTargetRule),
+  payload: HostOfferPlainPayloadSchema.required({ terminalProjection: true }).safeExtend(FRESH_EXECUTION).superRefine(executionTargetRule),
   agentMessageContext: AgentMessageServerContextSchema.optional(),
 }).strict();
 export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema>;
@@ -51,7 +50,7 @@ export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema>;
 export const SealedAgentExecutionInputSchema = z.object({
   taskId: z.string().min(1),
   deviceId: z.string().min(1),
-  payload: TaskOfferSealedPayloadSchema
+  payload: HostOfferSealedPayloadSchema
     .required({ terminalProjection: true })
     .safeExtend(FRESH_EXECUTION)
     .superRefine(executionTargetRule),

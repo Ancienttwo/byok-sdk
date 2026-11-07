@@ -10,7 +10,7 @@ import { CodexProjection } from '../adapters/codex/projection';
 import { GrokProjection } from '../adapters/grok/projection';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { DaemonObserver, type DaemonEvent } from '../daemon/observer';
-import { createSessionKernel } from '../../vendor/oar/6bdd273/shared/session-kernel';
+import { createSessionKernel } from '../../vendor/oar/45488e7/shared/session-kernel';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { describe, expect, it, vi } from 'vitest';
@@ -184,7 +184,7 @@ describe('daemon tool authorization', () => {
     ];
     calls.forEach(([callId, tool, rawInput], seq) => projection.consume({ seq, sessionId: 'root', agentPath: [], kind: 'frame', body: {
       events: [{ kind: 'tool_call_started', callId, tool, input: JSON.stringify(rawInput) }],
-      native: { update: { sessionUpdate: 'tool_call', toolCallId: callId, rawInput } },
+      native: { update: { sessionUpdate: 'tool_call', toolCallId: callId, status: 'in_progress', rawInput } },
     } }, event => { if (event.type === 'tool_use') adapter.sessions[0]!.queue.push(event); }, () => {}));
     await vi.waitFor(() => expect(reminders).toHaveLength(3));
     expect(reminders.map(r => [r.toolCallId, r.reasons])).toEqual([

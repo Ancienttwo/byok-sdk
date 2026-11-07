@@ -3,13 +3,18 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acpSession, type AcpSessionHooks } from '../../vendor/oar/6bdd273/shared/acp/session';
-import type { AcpSessionProfile } from '../../vendor/oar/6bdd273/shared/acp/profile';
-import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/6bdd273/contracts/session';
-import { grokFailureOutcome } from '../../vendor/oar/6bdd273/runtimes/grok/failure';
+import { acpSession, type AcpSessionHooks } from '../../vendor/oar/45488e7/shared/acp/session';
+import type { AcpSessionProfile } from '../../vendor/oar/45488e7/shared/acp/profile';
+import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/45488e7/contracts/session';
+import { grokFailureOutcome } from '../../vendor/oar/45488e7/runtimes/grok/failure';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
+import { createAcpTurns } from '../../vendor/oar/45488e7/shared/acp/turns';
+import { createUsageUpdateGate } from '../../vendor/oar/45488e7/shared/acp/profile';
+import type { AcpProcess } from '../../vendor/oar/45488e7/shared/acp/process';
+import { createSessionKernel } from '../../vendor/oar/45488e7/shared/session-kernel';
+import { antigravityAcpProfile } from '../../vendor/oar/45488e7/runtimes/antigravity/session';
 
 const FAKE = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
 // A runtime-neutral profile: the shared stack under test, not a vendor's.
@@ -51,6 +56,42 @@ async function turn(session: AdapterSession, records: RawEvent[], input: string)
 }
 
 describe('vendored OAR ACP session over SDK-owned processes', () => {
+  it.each(['spawn', 'dispatch'].flatMap(wait => ['settlement', 'interrupt'].map(transition => ({ wait, transition }))))('rejects a steer waiting on $wait after $transition', async ({ wait, transition }) => {
+    const gate = Promise.withResolvers<void>();
+    const reply = Promise.withResolvers<{ stopReason: string }>();
+    let waiting = false;
+    let spawnReads = 0;
+    const request = vi.fn(() => reply.promise);
+    const runtime = {
+      get spawned() {
+        if (!waiting) return Promise.resolve();
+        const read = ++spawnReads;
+        return wait === 'dispatch' && read === 1 ? Promise.resolve() : gate.promise;
+      }, closed: false, exitCode: null,
+      connection: { agent: { request, notify: vi.fn(async () => {}) } },
+      observeDescendants: () => {},
+    } as unknown as AcpProcess;
+    const kernel = createSessionKernel('race');
+    const turns = createAcpTurns({ kernel, runtime, profile: antigravityAcpProfile,
+      usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+    expect(turns.begin(null, 'first').kind).toBe('accepted');
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    const state = turns.active()!;
+    waiting = true;
+    const steer = turns.steer(state, 'second', undefined, {});
+    await vi.waitFor(() => expect(spawnReads).toBe(wait === 'dispatch' ? 2 : 1));
+    if (transition === 'interrupt') await turns.abort(state);
+    else {
+      reply.resolve({ stopReason: 'end_turn' });
+      await vi.waitFor(() => expect(turns.active()).toBeNull());
+    }
+    gate.resolve();
+    expect(await steer).toEqual({ kind: 'rejected', code: 'no_active_turn', reason: 'not_steerable: no active turn' });
+    if (transition === 'interrupt') reply.resolve({ stopReason: 'end_turn' });
+    await vi.waitFor(() => expect(turns.active()).toBeNull());
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(kernel.records().flatMap(record => record.kind === 'frame' ? record.body.events : []).filter(event => event.kind === 'turn_ended')).toHaveLength(1);
+  });
   it('passes exactly the explicit env to the agent and to hosted terminals', async () => {
     vi.stubEnv('BYOK_ACP_AMBIENT_SECRET', 'must not inherit');
     const { dir, log } = workspace();
@@ -194,6 +235,23 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     expect((await session.prompt('third')).response.body).toMatchObject({ kind: 'rejected', code: 'busy' });
     writeFileSync(path.join(dir, 'release'), '');
     await vi.waitFor(() => expect(turnsEnded()).toEqual([{ kind: 'turn_ended', outcome: { kind: 'completed' } }]));
+  });
+
+  it.each([true, false])('attributes a late steer failure with steerOutcomeIsLatest=%s', async (latest) => {
+    const { dir, log } = workspace();
+    const records: RawEvent[] = [];
+    const startSteering = acpSession({ ...profile, steerParams: () => ({}), steerSupersedesPrompt: true, ...(latest ? { steerOutcomeIsLatest: true } : {}) });
+    const session = await startSteering(spawnOwnedLineProcess, spawnOwnedTerminalProcess, { kind: 'available', via: 'executable', command: FAKE },
+      { cwd: dir, env: { PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log, FAKE_ACP_REPLY_GATE: dir } }, { onRecord: record => records.push(record) });
+    live.push(session);
+    expect((await session.prompt('steer-first')).response.body.kind).toBe('accepted');
+    expect((await session.steer!('steer-fail', { inputId: 'steer-1' })).response.body.kind).toBe('accepted');
+    await vi.waitFor(() => expect(records.some(record => record.kind === 'frame' && record.body.type === 'session/prompt')).toBe(true));
+    writeFileSync(path.join(dir, 'release'), '');
+    await vi.waitFor(() => expect(records.some(record => record.kind === 'frame' && record.body.type === 'session/prompt/error')).toBe(true));
+    const events = records.flatMap(record => record.kind === 'frame' ? record.body.events : []);
+    expect(events.filter(event => event.kind === 'turn_ended')).toEqual([{ kind: 'turn_ended', outcome: latest ? { kind: 'failed', reason: 'Internal error', failure: 'provider', fromText: true } : { kind: 'completed' } }]);
+    expect(events.filter(event => event.kind === 'input_dropped')).toEqual(latest ? [] : [{ kind: 'input_dropped', inputId: 'steer-1', reason: 'runtime_refused' }]);
   });
 
   it('delivers every record from seq 0 to the record consumer and swallows its errors', async () => {

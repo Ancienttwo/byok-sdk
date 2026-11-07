@@ -365,7 +365,8 @@ describe('sealed payload v1: a routine template opens under the binding its rout
 
 describe('sealed payload v1: a task without output sealing refuses sealed output (#654)', () => {
   const sealedInbound = corpus.filter((line) => !isServerToDaemonType(line.type)
-    && requiredReceiverCapabilities(line.type, line.payload).some((flag) => flag.startsWith('sealed-payload-')));
+    && requiredReceiverCapabilities(line.type, line.payload).some((flag) => flag.startsWith('sealed-payload-')
+      || (line.type === 'task.decline' && flag === 'native-sessions')));
 
   it('covers every daemon-to-server sealed type and every sealed decline code', () => {
     expect(new Set(sealedInbound.filter(isSealedLine).map((line) => line.type))).toEqual(
@@ -373,7 +374,7 @@ describe('sealed payload v1: a task without output sealing refuses sealed output
     );
     // The plaintext branch of task.decline carries the sealed failure codes.
     expect(sealedInbound.filter((line) => line.type === 'task.decline' && !isSealedLine(line)).map((line) => line.payload.code).sort())
-      .toEqual(['sealed_content_mac_mismatch', 'sealed_key_unavailable', 'sealed_open_failed', 'sealing_policy_mismatch']);
+      .toEqual(['native_sessions_unsupported', 'sealed_content_mac_mismatch', 'sealed_key_unavailable', 'sealed_open_failed', 'sealing_policy_mismatch']);
   });
 
   /** A plaintext task offered to this device, claimed unless the line is a decline. */

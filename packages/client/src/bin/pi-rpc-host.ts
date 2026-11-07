@@ -19,10 +19,19 @@ import { createPiToolAuthorizationHook } from '../adapters/pi/tool-authorization
 import { parseSerializedFileScopeGrant, verifySerializedFileScopeGrant, type SerializedFileScopeGrant } from '../file-scope-launch';
 import { createPiFileScopeExtension } from '../adapters/pi/file-scope-extension';
 import { assertPiFileScopeRegistry } from '../adapters/pi/file-scope-registry';
+import { createPiMemoryLane, assertPiMemoryToolLoadout } from './pi-memory-lane';
 
 declare const __BYOK_PI_SUBAGENTS__: boolean;
 
 const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
+
+export { parsePiHostReadyEvent, type PiHostReadyEvent } from '../adapters/pi/host-ready';
+import type { PiHostReadyEvent } from '../adapters/pi/host-ready';
+
+/** Readiness receipt consumed only by memory-lane admission. */
+export function createPiHostReady(session: { readonly sessionId: string }): PiHostReadyEvent {
+  return Object.freeze({ type: 'byok_host_ready', sessionId: session.sessionId });
+}
 
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
@@ -102,6 +111,14 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
     fail('config.agentHome must be a normalized absolute path under excluded user context and null otherwise');
   }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
+  const fileScope = raw.fileScope === null ? null : parseSerializedFileScopeGrant(raw.fileScope, fail);
+  if (fileScope?.mode === 'memory' && (resources.userContext !== 'excluded'
+    || agentHome !== raw.cwd || fileScope.home.path !== raw.cwd
+    || resources.skillPaths.length !== 0 || resources.extensionPaths.length !== 0
+    || raw.toolAuthorization !== null || Object.keys(mcp.mcpServers).length !== 0
+    || Object.keys(mcp.mcpEnv).length !== 0 || Object.keys(mcp.observation).length !== 0)) {
+    fail('memory lane requires only its Agent home and no resource or approval grants');
+  }
   return {
     format: 'byok.pi.rpc-launch', version: 11,
     credentialSource: credentialSource as PiRpcHostConfig['credentialSource'], cwd: raw.cwd, mcp,
@@ -110,7 +127,7 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
     agentSkillPaths: resources.skillPaths,
     agentExtensionPaths: resources.extensionPaths,
     toolAuthorization: raw.toolAuthorization === null ? null : parseToolAuthorizationIpcConfig(raw.toolAuthorization),
-    fileScope: raw.fileScope === null ? null : parseSerializedFileScopeGrant(raw.fileScope, fail),
+    fileScope,
   };
 }
 
@@ -192,6 +209,12 @@ export function parsePiRpcHostArgs(
  * SDK-reserved helper; its assets then live in its Pi asset root.
  */
 export async function runPiRpcHost(argv: readonly string[], packaging: 'installed' | 'bundled' = 'installed'): Promise<void> {
+  // Capture before Pi redirects ordinary stdout to stderr. Replacements keep
+  // this same JSONL writer, so their ready event remains on the RPC channel.
+  const writeHostFrame = process.stdout.write.bind(process.stdout);
+  const ready = (session: { readonly sessionId: string }): void => {
+    writeHostFrame(JSON.stringify(createPiHostReady(session)) + '\n');
+  };
   const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
   // #1061 D14: re-resolve every serialized root before an extension or
@@ -217,6 +240,22 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     }
   }
   else if (process.connected) fail('an undeclared custody IPC channel is open');
+  if (fileScope?.mode === 'memory') {
+    if (args.session !== undefined) fail('memory lane cannot resume a session');
+    const memoryLane = createPiMemoryLane({ grant: fileScope });
+    const resourceAgentDir = join(dirname(args.configPath), 'pi-agent-resources');
+    mkdirSync(resourceAgentDir, { mode: 0o700 });
+    await runPiSessionRuntime({
+      cwd: config.cwd, provider: args.provider, model: args.model, thinking: args.thinking,
+      resourceAgentDir, memoryLane, ...memoryLane.toolOptions,
+      resourceLoaderOptions: memoryLane.resourceLoaderOptions,
+      ...(providerApiKey === undefined ? {} : { providerApiKey }),
+      assertToolLoadout: assertPiMemoryToolLoadout,
+      onSessionReady: ready,
+      initialModel: 'required', label: 'byok-pi-rpc', reject: fail,
+    });
+    return;
+  }
   const localeAnchor = packaging === 'bundled' ? verifyTodoLocaleAssets(bundledAssetRoot) : verifyTodoLocaleAssets();
   const { createTodoExtension } = await import('#byok-pi-todo-runtime');
   // The bundled web access and todo are defaults for a Pi with neither. Pi
@@ -270,6 +309,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   }
   await runPiSessionRuntime({
     cwd: config.cwd, session: args.session, sessionDir,
+    onSessionReady: ready,
     provider: args.provider, model: args.model, thinking: args.thinking,
     ...(resourceAgentDir === undefined ? {} : { resourceAgentDir }),
     resourceLoaderOptions: {

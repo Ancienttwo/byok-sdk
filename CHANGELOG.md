@@ -2,9 +2,44 @@
 
 ## Unreleased
 
+- **Changed** — ACP adapter `tool_use` events wait until the tool input is settled (#1542).
+
+- **Added** — Opt-in `OpenCodeAdapter` (`harnessId: opencode`) runs native OpenCode v1/v2 with explicit Host model candidates, native model readback, one observable pre-output rate-limit fallback and owned process cleanup (#1538). It inherits user context, MCP configuration and native transcript storage. Platform and Host MCP qualification remain pending native canaries.
+
+- **Documentation** — Record [native OpenCode onboarding qualification evidence](docs/researches/2026-11-08-opencode-native-qualification.md) per OS and version line, with explicit model readback and process cleanup gates. Installation and replay coverage alone do not qualify a combination for dispatch (#1538).
+
+- **Added** — `AgyAdapter` supports steering an active turn ([#1492](https://github.com/Ancienttwo/byok-sdk/issues/1492)).
+
+- **Added** — K8 dreaming requests native session input for its dream window when the device advertises support; `dreaming.nativeSessions: false` disables the request ([#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526)).
+
+- **Fixed** — `@byok-sdk/keys` `runCommand` now returns exit code 127 on signal termination or a stdin error, instead of reporting exit code 1 for signal termination or crashing on a stdin error.
+
+- **Dependencies** — Upgrade the bundled `pi-web-access` extension from 0.45.0 to 0.47.0 (#1511), including optional search providers, proxy routing fixes, PDF text results, and platform-native temporary clone paths.
+
+- **Dependencies** — Upgrade Koffi from 3.2.0 to 3.3.7 in client and keys, including the pinned Windows x64 native asset (#1511). Rebuild packaged Windows native assets with `copySdkNativeAssets`; the exported native-asset metadata now identifies the new addon.
+
+- **Dependencies** — Upgrade the core encryption-test reference implementation `@hpke/core` from 1.9.0 to 1.10.0 (#1511).
+
+- **Dependencies** — Upgrade `@modelcontextprotocol/client` from 2.3.1 to 2.4.0 in the client and MCP server example (#1511).
+
+- **Added** — `ByokServer.tasks.activity` and `tasks.approvalTimeline` expose the embedded server's tenant-bound cloud tails for direct ui-runtime replay, including activity cursor reads (#1513).
+
+- **Added** — `@byok-sdk/keys` provides `LinuxSecretServiceSecretStore` and the Pi provider launcher uses it on Linux (#1515). Secrets reach `secret-tool` through stdin; unavailable Secret Service fails closed. Client and keys share trusted tool resolution through the Node-only `@byok-sdk/core/system-tool` entry.
+
+- **Added** — Device opt-in native-session dream wiring: capability-gated Pi admission, bounded post-claim rendering, tool argument summaries bounded by the command-word allowlist and path rules, and in-memory memory-only execution. Sealed and plain declines use the same `native_sessions_unsupported` code when the capability is unavailable, including after enqueue. The lane suppresses progress and result text and drains cancellation before task end ([#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526)).
+- **Added** — Native-session dream input through the capability-gated `nativeSessions` offer window and Host `ifAdvertised` resolution; frozen replay preserves that resolution. Protocol exports shared `redactSecrets`, including PEM, Slack, GitLab, npm and Hugging Face token shapes ([#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526)).
+
+- **Added** — The hosted Bot example runs full dreaming through K8's shared rules, with per-scope configuration, success-only mark advancement and protection until result sync (#1516). H also shares K8's user-first priority for unsubmitted routine, bot_request and dream intents; device slot reservation is unchanged.
+
+- **Changed** — All Hosts using `buildDreamInstruction` now ask dreaming to rewrite wrong or outdated facts in place, keep a one-line change note only to prevent a repeated mistake, delete duplicate, one-off and no-longer-useful content, and organize `notes/` into linked topic pages with an index summary for every page ([#1524](https://github.com/Ancienttwo/byok-sdk/issues/1524)).
+
+- **Added** — `@byok-sdk/protocol` and its `/constants` entry export `AGENT_MEMORY_MAX_FILE_BYTES` (256 KiB) and `AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES` (512) for Host memory prechecks (#1507). The client uses these shared limits; validation behavior is unchanged.
+
+- **Added** — Host enqueue inputs accept `agentMemoryCommit: 'on-success-if-advertised'` (#1506). Cloud and embedded server send `on-success` only when the device advertises `agent-memory-commit-on-success`; otherwise they omit the field. Frozen templates retain the option and replay against the recorded resolution. The device wire and strict `on-success` admission are unchanged.
+
 - **Fixed (client; #1543)** — Pi provider errors now fail the turn with a redacted diagnostic while preserving usage.
 - **Fixed (client)** — Memory writer guidance, including the exported `AGENT_MEMORY_GUIDANCE`, now states the copy limits and, for fresh and resumed ordinary `on-success` writers, that writes are kept only on success.
-- Re-vendor OAR 0.92.0 (`packages/client/vendor/oar/6bdd273/`), replacing the 0.91.0 snapshot. Hosts see no change: the upstream Antigravity steer fix and the dsh task events do not reach an SDK surface.
+- **Changed** — Re-vendor OAR 0.94.0 (`packages/client/vendor/oar/45488e7/`), replacing the complete 0.92.0 snapshot. Follow upstream steer dispatch admission and preserve SDK process, environment and permission ownership (#1538).
 - Fixed dsh terminal usage omitting subagent tokens; token totals now include root and child sessions while context occupancy stays root-only.
 
 ## 0.39.0 — 2026-11-06 (published)

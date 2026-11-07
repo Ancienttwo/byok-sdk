@@ -24,21 +24,82 @@ the descriptor declares. `no` means the SDK makes no such guarantee; the
 the runtime does instead.
 
 <!-- generated:capability-matrix:start -->
-| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durableLane`) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.5.0` | `1.5.0` |
-| Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | no |
-| Redirect the active turn | `steer` | no | no | yes | yes | no | no | yes | no |
-| Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | yes | yes |
-| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes |
-| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no |
-| Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | yes | yes |
-| Prepared lane | `preparedLane` | no | no | no | no | no | no | yes | no |
-| Durable worker lane | `durableLane` | no | no | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userContext` | yes | yes | no | yes | no | yes | yes | no |
-| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | yes | no | no |
-| Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no |
+| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | OpenCode (unqualified) | Pi | Pi (`durableLane`) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `unqualified` | `1.5.0` | `1.5.0` |
+| Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | yes | no |
+| Redirect the active turn | `steer` | yes | no | yes | yes | no | no | no | yes | no |
+| Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | no | yes | yes |
+| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | no | yes | yes |
+| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no | no |
+| Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | no | yes | yes |
+| Prepared lane | `preparedLane` | no | no | no | no | no | no | no | yes | no |
+| Durable worker lane | `durableLane` | no | no | no | no | no | no | no | no | yes |
+| Keeps user-level instructions out | `isolation.userContext` | yes | yes | no | yes | no | yes | no | yes | no |
+| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | yes | no | no | no |
+| Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
+
+## OpenCode implementation and qualification (#1538)
+
+`OpenCodeAdapter` is an opt-in custom harness (`harnessId: 'opencode'`). Its
+platform list is empty until native OS/line onboarding canaries qualify it;
+replay tests do not advertise a platform. The compatibility floors are v1
+1.18.35 and v2 2.0.26. No default qualified-version policy is installed yet.
+A Host can supply a version policy; unrecognized, below-floor and prerelease
+tokens still fail the executable compatibility gate.
+
+Native qualification results and the distinction between native CLI
+availability and adapter acceptance are recorded in the [PR 3 canary evidence](researches/2026-11-08-opencode-native-qualification.md).
+An installed CLI, matching model readback or passing replay suite alone does
+not enable onboarding. Every advertised OS/line combination needs completion,
+resume and cwd refusal, permission refusal, cancellation and disposal evidence,
+including no surviving `serve --service` process. A pre-output rate-limit
+fallback that cannot be provoked honestly stays covered by replay only.
+
+The Host supplies `runtimes.opencode.models`, an ordered list of native model
+ids, and optionally `executable`. There is no SDK model default, price check,
+model listing, automatic installation, upgrade or cross-major migration.
+The adapter selects the first id, applies it explicitly through ACP and refuses
+an absent or differing native readback before prompting. On an OAR-classified
+rate limit before text, reasoning or tool output, it retries once with the next
+candidate after reaping the first process tree, resuming the same admitted native
+session and verifying its model readback. It never creates a replacement
+session; an unsupported resume or model switch preserves the rate-limit failure.
+A non-terminal `error` diagnostic event contains a
+JSON switch record with `event: "model_switch"`, `from`, `to` and
+`reason: "rate_limited"`. A second rate limit or any preceding output prevents
+another switch. Text-classified failure categories remain `unknown` in terminal
+failure reporting, as for the other ACP adapters.
+
+OpenCode runs in the device user's environment and owns its native session
+store. The SDK does not read credentials, filter or rewrite user configuration,
+provide a home, or proxy model traffic. All isolation fields are false.
+A later turn resumes its native session in a new owned process; OAR refuses
+resume if the original cwd is different or cannot be proved. The SDK owns no
+persistent OpenCode transcript directory, so no SDK retention store is created.
+
+Steering and interactive permissions are unsupported on both lines. The ACP
+boundary cancels permission requests. V1 retains OAR's session-local appended
+persona overlay and cleanup; v2 refuses Agent-memory readers before execution
+because that appended instruction channel is unavailable. Task-scoped Host MCP
+toolsets are rejected before launch until both lines pass qualification. Native
+user MCP remains inherited. V2 `execute` calls remain opaque without a proven
+native tool identity; the SDK never derives MCP names from code. Child call IDs
+carry the native child session id to avoid merging their calls with root calls.
+Child-session text is excluded from root answer progress. The SDK's flat event
+schema has no parent-graph field; no spawning-tool edge is invented. Usage fields
+are emitted only when OAR supplies native counters.
+
+Install the chosen line as an operator action. OpenCode v1 uses `opencode-ai`
+on npm and `https://opencode.ai/install`; v2 uses `@opencode/cli` and
+`https://opencode.ai/v2/install`. The installer locations collide at
+`~/.opencode/bin/opencode`; choose and retain one line. Native Windows npm
+command shims use the existing shell-free invocation resolver and owned job
+lifecycle. Neither a Linux nor WSL run qualifies native Windows.
+Current [upstream installation guidance](https://opencode.ai/docs/) recommends
+a standalone v2 Windows CLI binary and does not support Windows package managers.
+Retain the chosen line; do not overwrite a v1 installation to perform a v2 canary.
 
 ## Qualification notes
 
@@ -283,7 +344,7 @@ task's and the SDK's MCP servers. It changes MCP servers only; the user's
 `AGENTS.md` still loads. A run without an `agentRef`, and the default
 `'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
-[vendored session](../packages/client/vendor/oar/6bdd273/PROVENANCE.md):
+[vendored session](../packages/client/vendor/oar/45488e7/PROVENANCE.md):
 
 - Before the thread opens, `config/read` for the task cwd lists the servers of
   the user and project `config.toml` layers. Each one that is not a task
@@ -339,7 +400,7 @@ ACP `terminal: false` does not hide Grok 1.0.52's native terminal tool. The SDK
 does not provide a hidden-terminal mode; see the [qualified observation and
 limits](researches/2026-10-28-grok-terminal-capability-boundary.md).
 
-The [vendored launch profile](../packages/client/vendor/oar/6bdd273/runtimes/grok/session.ts)
+The [vendored launch profile](../packages/client/vendor/oar/45488e7/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
@@ -572,7 +633,7 @@ What the upstream runtimes offer that the SDK does not use:
 
 - Codex: the 0.164.0 app-server schema has `ephemeral` on `thread/start` (a
   thread that "should not be materialized on disk"), and `codex exec --help`
-  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/6bdd273/runtimes/codex/open.ts)
+  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/45488e7/runtimes/codex/open.ts)
   does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread
   leaves the other `CODEX_HOME` files alone.
 - Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
@@ -670,7 +731,7 @@ tracks that remaining work; adding persona text alone does not establish isolati
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/6bdd273`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/45488e7`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 
@@ -1005,8 +1066,7 @@ optional `model` and `versionPolicy`). The other options stay on the
 - Failures: a failed turn takes its class from the vendored OAR outcome, and a
   class taken from error text stays `unknown`. Resume needs `session/list` to
   confirm the saved cwd, else it fails as `authority`.
-- Steering throws `SteerUnsupportedError`: the native steer exists but is not
-  enabled. agy reports no usage events.
+- Steering redirects the active turn through native ACP. agy reports no usage events.
 - Egress: `--disable-telemetry` stops agy's calls to `play.googleapis.com`, and
   `AGY_CLI_DISABLE_AUTO_UPDATE=1` is always set.
 - Platforms: macOS, Linux and Windows.

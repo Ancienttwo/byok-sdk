@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 import { runCommand } from './command-runner';
@@ -9,6 +10,16 @@ import { runCommand } from './command-runner';
  * touched here; the macOS backend receives an injected {@link CommandRunner}.
  */
 describe('runCommand', () => {
+  it('settles early stdin closure as unavailable without crashing the caller', () => {
+    const probe = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import assert from 'node:assert/strict';
+      import { runCommand } from ${JSON.stringify(new URL('./command-runner.ts', import.meta.url).href)};
+      const result = await runCommand(process.execPath, ['-e', 'process.exit(0)'], 'x'.repeat(1024 * 1024));
+      assert.deepEqual(result, { exitCode: 127, stderr: 'command unavailable', stdout: '' });
+    `], { encoding: 'utf8' });
+    expect(probe.status, probe.stderr).toBe(0);
+  });
+
   it('captures stdout and a zero exit code', async () => {
     const result = await runCommand(process.execPath, [
       '-e',

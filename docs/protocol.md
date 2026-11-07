@@ -223,6 +223,7 @@ field or value row on `task.offer`:
 | `agentMemory: 'read-if-admitted'` | `agent-memory-read-if-admitted` |
 | `agentMemory: 'read-write-if-admitted'` | `agent-memory-read-write-if-admitted` |
 | `agentMemoryCommit` | `agent-memory-commit-on-success` |
+| `nativeSessions` | `native-sessions` |
 | `egressPolicy` | `agent-egress-policy` and `agent-egress-reliable-ack` |
 | `messageEgress` | `agent-message-egress` |
 | `session.mode: 'fresh'` | `agent-egress-fresh-session` |
@@ -637,7 +638,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
 | `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `harnesses?`, `runtimeUnavailable?` (additive — §11.4.1), `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
-| `task.offer` | S→D | **required** | **required** | `agentRef`, `session` (§1.3), `instruction` (absent on a prepared offer; may move into `sealed`, §2.5), `preparation?` (§2.0), `agentMemory?` (§2.2), `agentMemoryCommit?` (§2.2), `homeAccess?` (§2.2), `requiredToolsets?`, `runtime?`, `harnessId?`, `dispatchSelection?` (see below), `terminalProjection?`, `limits?`, `egressPolicy?` (§2.1), `messageEgress?`; sealed branch also `sealing`, `sealed?`, `routineRef?` (§2.5) | An Agent dispatch, execution or prepared Execution targets a device that advertises every flag its fields need (Freeze rule) |
+| `task.offer` | S→D | **required** | **required** | `agentRef`, `session` (§1.3), `instruction` (absent on a prepared offer; may move into `sealed`, §2.5), `preparation?` (§2.0), `agentMemory?` (§2.2), `agentMemoryCommit?` (§2.2), `nativeSessions?` (§2.2), `homeAccess?` (§2.2), `requiredToolsets?`, `runtime?`, `harnessId?`, `dispatchSelection?` (see below), `terminalProjection?`, `limits?`, `egressPolicy?` (§2.1), `messageEgress?`; sealed branch also `sealing`, `sealed?`, `routineRef?` (§2.5) | An Agent dispatch, execution or prepared Execution targets a device that advertises every flag its fields need (Freeze rule) |
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
@@ -769,12 +770,18 @@ Each lane keeps its own Host method: `enqueueAgentOffer`,
 `enqueueAgentEgressOffer`, `enqueuePreparedOffer`, `submitAgentExecution` and
 their sealed counterparts `enqueueSealedAgentOffer`,
 `enqueueSealedAgentEgressOffer` and `submitSealedAgentExecution`. Every one
-sends a `task.offer`. The Host input payload is the wire payload: the Host
+sends a `task.offer`. Host policy values are resolved before the wire offer is persisted; the Host
 writes `session` itself (`{ mode: 'resume', sessionRef }` on the resume lanes,
 `{ mode: 'fresh' }` on the execution and prepared lanes), and each lane
 refuses a payload whose `session` does not match it. The offer read back
 (`readTaskOffer`, `tasks.offer`) has `type: 'task.offer'` and a payload equal
-to the one the Host submitted.
+to the resolved payload. `agentMemoryCommit: 'on-success-if-advertised'` resolves to
+`on-success` when the device advertises `agent-memory-commit-on-success`, otherwise
+it is omitted. `nativeSessions: { fromMs, toMs, ifAdvertised: true }` resolves to
+`{ fromMs, toMs }` when the device advertises `native-sessions`, otherwise it is
+omitted. Both use the authenticated durable device declaration at enqueue.
+`sameFrozenOffer` accepts the recorded resolution on replay without reading the
+current declaration; a recorded native-session window must still match the Host window.
 
 The policy has one exact `policyRevision`. Activity is `latest-value` with
 positive coalesce and event-byte bounds. Every event passes the same bounds;
@@ -1049,6 +1056,57 @@ one answer. The terminal does not report which mode ran. A daemon advertises
 `agent-memory-selection`, `agent-memory-read-if-admitted` and
 `agent-memory-read-write-if-admitted` whenever it has an Agent home, whatever
 its memory admission.
+
+**`nativeSessions: { fromMs, toMs }` selects native Pi session input for a dream
+([#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526)).** Both timestamps are
+integers and `fromMs <= toMs`. The strict offer validator admits the field only
+with a fresh session, `agentMemory: 'none'`, and `terminalProjection` absent or
+`{ mode: 'none' }`. It rejects any `agentMemoryCommit`, `homeAccess`, `preparation`,
+`requiredToolsets`, `messageEgress` or `harnessId`. The same rules apply to plain,
+sealed and Host input payloads, before conditional resolution. The wire-addition
+offer row requires the target device's `native-sessions` capability; a literal
+window has a strict gate, while the Host's `ifAdvertised: true` value resolves at
+enqueue as described in §2.1.
+
+The device switch `DaemonConfig.nativeSessions` defaults to `false`. Declaration
+requires that switch, macOS or Linux, `piByokLauncher.sessionDir`, and a Pi
+adapter declaring `PI_MEMORY_LANE`. Windows never declares it in 0.40. A device
+without the capability, a non-Pi selection, or a Pi adapter without the lane
+refuses before claim with `reason` and `code` both `native_sessions_unsupported`,
+non-retryably. This closed plaintext decline also applies when `task-output` is
+sealed, including when the owner disables the capability after Host enqueue.
+Its own `task.decline` wire row requires the server's `native-sessions`
+capability: this two-way gate advertises that the server understands both the
+V1 native-session input field and the decline code. The plain decline vocabulary
+remains open.
+
+After claim, the daemon renders within `min(10 s, remaining startup time)`.
+Every rendering failure fails the claimed task without starting the runtime.
+The instruction is device guidance, the single JSON data line, then the Host
+instruction; no intermediate file is written. `buildDreamInstruction` is unchanged.
+The lane uses a fresh in-memory Pi session and the device-owned `memory` grant.
+`PI_MEMORY_LANE.egress` suppresses all `task.progress`, sets completion `summary`
+to the empty string, and excludes `finalMessage` and result documents. Cancellation
+and timeout wait for RPC abort acknowledgement (or observed process exit) before
+reporting task end or terminating the process tree; an admitted IO drain is never
+interrupted by SIGKILL. The daemon sends no `compact` command to this lane.
+
+The host emits one local `{ type: 'byok_host_ready', sessionId }` receipt after
+session_start, before accepting prompts. Only memory-lane admission consumes it:
+exactly one receipt must match the authoritative native sessionId before the
+first prompt. The host asserts the scoped tool loadout independently.
+
+Argument summaries apply the same rules by tool name, including matching
+extension tools. Safety comes from the command-word allowlist and path rules;
+tool result content never enters the summary. The handoff ledger records session
+identity and lifecycle without tool confirmation sets.
+
+`redactSecrets` is exported by protocol and its schema-free `/constants` entry.
+It shares one rule list with `boundFailureReason`, including PEM blocks and
+`xox*-`, `glpat-`, `npm_` and `hf_` tokens. It redacts without truncating; failure
+reasons then apply their existing UTF-8 byte cap. SHA and UUID identifiers remain
+intact. Sensitive flag values and generic 24+ character mixed alphanumeric tokens
+are summary-renderer rules, not shared failure-reason rules.
 
 **`agentMemoryCommit: 'on-success'` keeps a writer's memory writes only when its
 task succeeds.** Without the field, writes take effect at once and stay. With
@@ -1693,8 +1751,11 @@ rule for every such field, and checks the rule against the sealed branch.
 
 **Fail closed.** A receiver never falls back to plaintext. A device that
 refuses sealed task input declines non-retryably with one of the closed codes
-`sealed_key_unavailable`, `sealed_open_failed`, `sealed_content_mac_mismatch`
-or `sealing_policy_mismatch` in `code`. These codes go only on the plaintext
+`sealed_key_unavailable`, `sealed_open_failed`, `sealed_content_mac_mismatch`,
+`sealing_policy_mismatch` or `native_sessions_unsupported` in `code`.
+`native_sessions_unsupported` identifies an unavailable native-session capability,
+including an owner switching it off after enqueue; it does not assert missing keys.
+These codes go only on the plaintext
 `task.decline`, and its `reason` is then the code itself. On the plaintext
 `task.decline`, each code is a value gate on the server flag.
 The sealed `task.decline` branch refuses them: a device that cannot open or

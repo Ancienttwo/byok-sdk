@@ -47,6 +47,7 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
     recordReplyState,
   } = composeStartTerminals(daemonScope, { sealedRun, activeJournal, journalIdentity, opened, record });
   const { deps } = composeStartRunnerDeps(daemonScope, {
+    capabilities,
     record, sendEnvelope, withReplyTransition, activeJournal, journalIdentity, recordReplyState,
     blobClient, opened, activePressureEngine, agentMemoryBackend,
   });

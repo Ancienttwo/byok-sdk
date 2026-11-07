@@ -68,7 +68,7 @@ export async function openPiRpcSession(cwd: string, session: string | undefined,
 
 /** The loadout view a scoped-session assertion needs; structural so tests can fake it. */
 export interface PiToolLoadoutSession {
-  getAllTools(): readonly { readonly name: string; readonly sourceInfo?: { readonly path?: string } }[];
+  getAllTools(): readonly { readonly name: string; readonly sourceInfo?: { readonly path?: string; readonly source?: string } }[];
   getActiveToolNames(): readonly string[];
 }
 
@@ -78,6 +78,11 @@ export async function runPiSessionRuntime(options: {
   provider?: string; model?: string;
   thinking?: CreateAgentSessionOptions['thinkingLevel'];
   tools?: string[]; excludeTools?: string[]; noTools?: 'all' | 'builtin';
+  customTools?: CreateAgentSessionOptions['customTools'];
+  /** Fixed, fresh memory-only lane; it cannot resume or replace a transcript. */
+  memoryLane?: ReturnType<typeof import('./pi-memory-lane').createPiMemoryLane>;
+  /** Called once after creation/assertion, before the RPC loop can accept a prompt. */
+  onSessionReady?: (session: PiToolLoadoutSession & { readonly sessionId: string }) => void;
   /** Pre-prompt registry assertion for a scoped session; throwing disposes and refuses to run. */
   assertToolLoadout?: (session: PiToolLoadoutSession) => void;
   /** Fresh SDK-owned resources directory. The original Pi directory remains the model/auth authority. */
@@ -153,7 +158,9 @@ export async function runPiSessionRuntime(options: {
     ...(options.session !== undefined && isAbsolute(options.session) ? [dirname(options.session)] : [])]);
   let sessionManager: SessionManager;
   try {
-    sessionManager = await openPiRpcSession(options.cwd, options.session, options.sessionDir ?? initialSettings.getSessionDir(), options.reject);
+    if (options.memoryLane !== undefined && (options.session !== undefined || options.sessionDir !== undefined)) options.reject('memory lane requires a fresh in-memory session');
+    sessionManager = options.memoryLane !== undefined ? SessionManager.inMemory(options.cwd)
+      : await openPiRpcSession(options.cwd, options.session, options.sessionDir ?? initialSettings.getSessionDir(), options.reject);
   } catch (error) { await releaseInitialDiscovery(); throw error; }
   const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
     if (cwd !== options.cwd || sessionManager.getCwd() !== options.cwd) options.reject('session replacement cannot change authorized cwd');
@@ -220,16 +227,14 @@ export async function runPiSessionRuntime(options: {
       cwd: options.cwd, agentDir, sessionManager, sessionStartEvent,
       modelRuntime: services.modelRuntime, settingsManager: services.settingsManager, resourceLoader: services.resourceLoader,
       model: resolved?.model, thinkingLevel: options.thinking ?? resolved?.thinkingLevel,
-      tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools,
+      tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools, customTools: options.customTools,
     });
     if (options.tools === undefined && options.noTools === undefined) resetResumedPiTools(created.session, services.settingsManager, options.cwd);
-    if (options.assertToolLoadout !== undefined) {
-      try {
-        options.assertToolLoadout(created.session);
-      } catch (error) {
-        created.session.dispose();
-        throw error;
-      }
+    // A replacement is visible to RPC while session_start is awaiting. Keep
+    // the ordinary scoped boundary established before it can become current.
+    if (options.memoryLane === undefined && options.assertToolLoadout !== undefined) {
+      try { options.assertToolLoadout(created.session); }
+      catch (error) { created.session.dispose(); throw error; }
     }
     // Without the settings default Pi would take the first provider that has
     // any key, including one only the environment supplies. A resumed session
@@ -246,12 +251,31 @@ export async function runPiSessionRuntime(options: {
     if (created.session.model && (options.thinking !== undefined || resolved?.thinkingLevel !== undefined)) {
       created.session.setThinkingLevel(created.session.thinkingLevel);
     }
+    // RPC awaits bindExtensions before attaching stdin. session_start can
+    // register/shadow tools, so the scope assertion belongs after that hook.
+    // Emit one readiness receipt per session start for memory-lane admission;
+    // assertion or emission failure disposes the session and fails the host.
+    const bindExtensions = created.session.bindExtensions.bind(created.session);
+    let ready = false;
+    created.session.bindExtensions = async (...args) => {
+      await bindExtensions(...args);
+      if (ready) return;
+      try {
+        options.assertToolLoadout?.(created.session);
+        options.onSessionReady?.(created.session);
+        ready = true;
+      } catch (error) {
+        created.session.dispose();
+        throw error;
+      }
+    };
     return { ...created, services, diagnostics: services.diagnostics };
   };
   let runtime: Awaited<ReturnType<typeof createAgentSessionRuntime>>;
   try {
     runtime = await createAgentSessionRuntime(createRuntime, { cwd: options.cwd, agentDir, sessionManager });
   } finally { await releaseInitialDiscovery(); }
+  options.memoryLane?.bindRuntime(runtime);
   if (options.sessionDir !== undefined) {
     // Native replacement opens/creates the next SessionManager BEFORE invoking
     // createRuntime. Guard that interval too, including foreign-directory

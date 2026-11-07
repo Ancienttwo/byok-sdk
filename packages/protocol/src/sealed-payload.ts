@@ -51,6 +51,7 @@ export const SEALED_DECLINE_CODES = [
   'sealed_open_failed',
   'sealed_content_mac_mismatch',
   'sealing_policy_mismatch',
+  'native_sessions_unsupported',
 ] as const;
 export type SealedDeclineCode = (typeof SEALED_DECLINE_CODES)[number];
 

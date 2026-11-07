@@ -445,6 +445,8 @@ const OFFER_FIELDS = {
   preparation: InputPreparationOfferBindingSchema.optional(),
   agentMemory: AgentMemorySelectionSchema.optional(),
   agentMemoryCommit: AgentMemoryCommitSchema.optional(),
+  nativeSessions: z.strictObject({ fromMs: z.number().int(), toMs: z.number().int() })
+    .refine(window => window.fromMs <= window.toMs, { message: 'nativeSessions requires fromMs <= toMs' }).optional(),
   homeAccess: AgentHomeAccessSchema.optional(),
   requiredToolsets: RequiredToolsetsSchema.optional(),
   runtime: RuntimeIdSchema.optional(),
@@ -472,6 +474,10 @@ type OfferRuleInput = {
   readonly egressPolicy?: unknown;
   readonly messageEgress?: unknown;
   readonly routineRef?: unknown;
+  readonly nativeSessions?: unknown;
+  readonly terminalProjection?: { readonly mode: string };
+  readonly requiredToolsets?: unknown;
+  readonly harnessId?: unknown;
 };
 
 /**
@@ -485,6 +491,7 @@ type OfferRuleInput = {
  * - A fresh or prepared offer carries an `egressPolicy`; `messageEgress` needs one.
  * - A `routineRef` names an execution, so it needs a fresh session.
  * - `agentMemoryCommit` needs a writer.
+ * - `nativeSessions` runs only a fresh memory-only task, without other tool or output lanes.
  */
 function offerRule(payload: OfferRuleInput, ctx: z.RefinementCtx, plaintext: boolean): void {
   const { instruction, session, preparation, agentMemory, agentMemoryCommit, homeAccess, egressPolicy, messageEgress, routineRef } = payload;
@@ -505,6 +512,16 @@ function offerRule(payload: OfferRuleInput, ctx: z.RefinementCtx, plaintext: boo
   }
   if (routineRef !== undefined && session.mode !== 'fresh') {
     ctx.addIssue({ code: 'custom', path: ['routineRef'], message: 'a routine occurrence is an execution, so it needs a fresh session' });
+  }
+  if (payload.nativeSessions !== undefined) {
+    if (session.mode !== 'fresh') ctx.addIssue({ code: 'custom', path: ['session'], message: 'nativeSessions needs a fresh session' });
+    if (agentMemory !== 'none') ctx.addIssue({ code: 'custom', path: ['agentMemory'], message: 'nativeSessions needs agentMemory none' });
+    if (payload.terminalProjection !== undefined && payload.terminalProjection.mode !== 'none') {
+      ctx.addIssue({ code: 'custom', path: ['terminalProjection'], message: 'nativeSessions forbids terminal projection' });
+    }
+    for (const field of ['agentMemoryCommit', 'homeAccess', 'preparation', 'requiredToolsets', 'messageEgress', 'harnessId'] as const) {
+      if (payload[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message: `nativeSessions forbids ${field}` });
+    }
   }
   if (agentMemoryCommit !== undefined && homeAccess === 'memory-reader') {
     ctx.addIssue({ code: 'custom', path: ['agentMemoryCommit'], message: 'agentMemoryCommit needs a writer; a memory-reader Attempt reads the live files' });

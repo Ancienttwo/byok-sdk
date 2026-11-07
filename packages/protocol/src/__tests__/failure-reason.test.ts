@@ -3,6 +3,7 @@ import {
   PROTOCOL_VERSION,
   TASK_FAIL_REASON_MAX_BYTES,
   boundFailureReason,
+  redactSecrets,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
@@ -52,11 +53,31 @@ describe('boundFailureReason (#1124)', () => {
     expect(out).toContain(expected);
   });
 
+  it.each([
+    ['-----BEGIN PRIVATE KEY-----', 'secret body', '-----END PRIVATE KEY-----'].join('\n'),
+    ['xoxb', '1'.repeat(12), '2'.repeat(12), 'a'.repeat(24)].join('-'), ['glpat', 'a1_-'.repeat(5)].join('-'),
+    ['xoxe', '1', 'aB1'.repeat(40)].join('-'),
+    ['npm', 'a1'.repeat(18)].join('_'), ['hf', 'aB'.repeat(17)].join('_'),
+  ])('redacts shared native session secret shape %s', secret => {
+    expect(redactSecrets(`before ${secret} after`)).toBe('before [redacted] after');
+    expect(boundFailureReason(`before ${secret} after`)).toBe('before [redacted] after');
+  });
+
+  it('redacts armor through the real end after marker-shaped header text', () => {
+    const input = 'before -----BEGIN PGP PRIVATE KEY BLOCK-----\nComment: -----END PGP PRIVATE KEY BLOCK-----\n\nsynthetic-key-body\n-----END PGP PRIVATE KEY BLOCK----- after';
+    expect(redactSecrets(input)).toBe('before [redacted] after');
+    expect(boundFailureReason(input)).toBe('before [redacted] after');
+    expect(redactSecrets('before -----BEGIN PGP PRIVATE KEY BLOCK-----\nComment: header\n-----END PGP PRIVATE KEY BLOCK-----\nsynthetic-key-body')).toBe('before [redacted]');
+  });
+
   it('leaves ordinary diagnostics and closed codes untouched', () => {
     for (const text of [
       'claude process exited (code=1, signal=null); stderr: error: unknown option --frobnicate',
       'task-runner failed; max_tokens: 4096 exceeded',
       'terminal_result_too_large',
+      'npm ERR! npm_config_cache is not writable', 'env npm_lifecycle_event=test',
+      'hf_hub_download raised 404', 'xoxo-love',
+      '1362bad39036ae286acbbcf31118ccadbc872a1b', TASK_ID,
       'daemon_interrupted',
       'runtime adapter contract violation during start',
       'https://api.example.com/v1/messages returned 503',

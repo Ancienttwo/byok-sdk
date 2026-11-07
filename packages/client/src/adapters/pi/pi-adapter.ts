@@ -1,3 +1,5 @@
+import { PI_MEMORY_LANE } from './memory-lane-contract';
+import { parsePiHostReadyEvent } from './host-ready';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from './pi-capabilities';
 import { parsePiAgentResources, INHERITED_PI_AGENT_RESOURCES, type PiAgentResources } from './agent-resources';
@@ -269,6 +271,7 @@ export class PiAdapter implements RuntimeAdapter {
     // scoped file tools enforce it. The prepared session has no native file
     // tools; its gate's scope floor asks for every counted tool call.
     fileScope: { lanes: ['rpc', 'prepared'] },
+    memoryLane: PI_MEMORY_LANE,
     // An exact `byok-profile` selection runs through the BYOK launcher.
     providerProfileBinding: true,
     capabilities: PI_RUNTIME_CAPABILITIES,
@@ -302,7 +305,7 @@ export class PiAdapter implements RuntimeAdapter {
     // Windows waits for validated parent-death Job Object recovery.
     // The durable worker re-resolves the scope on every spawn and swaps its
     // native file tools for the SDK scoped ones.
-    if (options.durableLane === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], fileScope: { lanes: ['durable'] }, capabilities: PI_DURABLE_RUNTIME_CAPABILITIES });
+    if (options.durableLane === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, memoryLane: undefined, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], fileScope: { lanes: ['durable'] }, capabilities: PI_DURABLE_RUNTIME_CAPABILITIES });
     validatePiByokLauncherConfig(options.byokLauncher);
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }
@@ -602,6 +605,12 @@ export class PiAdapter implements RuntimeAdapter {
               reason: 'prepared pi operation requires a resolved string instruction',
             });
           }
+          const memoryLane = startInput.memoryLane !== undefined;
+          if (memoryLane && (startInput.memoryLane!.mode !== 'memory' || startInput.manifest.sessionRef !== undefined
+            || startInput.memoryLane!.home.path !== startInput.manifest.lease?.canonicalHome
+            || Object.keys(startInput.mcpServers ?? {}).length > 0 || startInput.toolAuthorization !== undefined)) {
+            throw authorityFailure('invalid Pi memory-only launch');
+          }
           const resumeSessionId = startInput.manifest.sessionRef;
           if (startInput.sessionLease !== undefined && (startInput.sessionLease !== sessionLease || sessionLease?.sessionRef !== resumeSessionId)) {
             throw authorityFailure("Pi start requires this operation's exact session retention lease");
@@ -678,14 +687,15 @@ export class PiAdapter implements RuntimeAdapter {
               // IPC channel and refuses to start without it.
               credentialSource: runtimeLaunch.credentialSource,
               cwd: runtimeLaunch.sessionCwd,
-              agentUserContext: resources.userContext,
-              agentHome,
-              agentSkillPaths: resources.skillPaths,
-              agentExtensionPaths: resources.extensionPaths,
+              agentUserContext: memoryLane ? 'excluded' : resources.userContext,
+              agentHome: memoryLane ? startInput.manifest.lease!.canonicalHome : agentHome,
+              agentSkillPaths: memoryLane ? [] : resources.skillPaths,
+              agentExtensionPaths: memoryLane ? [] : resources.extensionPaths,
               toolAuthorization: gate?.config ?? null,
-              fileScope: gate?.fileScope === undefined ? null : serializeFileScopeGrant(gate.fileScope),
+              fileScope: memoryLane ? serializeFileScopeGrant(startInput.memoryLane!)
+                : gate?.fileScope === undefined ? null : serializeFileScopeGrant(gate.fileScope),
               mcp: {
-                mcpEnv,
+                mcpEnv: memoryLane ? {} : mcpEnv,
                 mcpServers: taskMcpServers,
                 observation: startInput.mcpToolsetTools ?? {},
                 // The servers start in the session cwd, as in OAR.
@@ -713,6 +723,16 @@ export class PiAdapter implements RuntimeAdapter {
               profileArgs: launcherArgs,
             });
           let rpc: PiRpcClient;
+          let readyCount = 0;
+          let readySessionId: string | undefined;
+          let readiness: Promise<void> = Promise.resolve();
+          let abortReceipt: Promise<void> | undefined;
+          const abortMemoryLane = (): Promise<void> => rpc.processExited ? Promise.resolve() : abortReceipt ??= (async () => {
+            try {
+              const response = await rpc.send({ type: 'abort' });
+              if (response.success === false) throw authorityFailure('Pi memory lane refused abort');
+            } catch (error) { if (!rpc.processExited) throw error; }
+          })();
           try {
             rpc = new PiRpcClient({
               command: launch.command,
@@ -720,6 +740,17 @@ export class PiAdapter implements RuntimeAdapter {
               cwd: runtimeLaunch.cwd,
               env: runtimeEnv,
               nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
+              ...(memoryLane ? { beforeDispose: abortMemoryLane } : {}),
+              onFrame: frame => {
+                if (!memoryLane || frame.type !== 'byok_host_ready') return;
+                // Only memory-lane admission consumes the pre-prompt receipt.
+                readiness = readiness.then(async () => {
+                  const event = parsePiHostReadyEvent(frame);
+                  readyCount++;
+                  readySessionId = event.sessionId;
+                });
+                void readiness.catch(() => undefined);
+              },
             });
           } catch (cause) {
             await disposePiStartup(undefined, scratch, cause);
@@ -735,17 +766,36 @@ export class PiAdapter implements RuntimeAdapter {
           let sessionRef: string;
           try {
             sessionRef = await resolveAuthoritativeSessionId(rpc);
+            await readiness;
+            if (memoryLane && (readyCount !== 1 || readySessionId !== sessionRef)) throw authorityFailure('memory_lane_tool_set_mismatch');
             if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
               throw authorityFailure('pi resumed a different authoritative session than requested');
             }
-            if (sessionDir !== undefined && sessionLease === undefined) await acquireSessionLease(sessionRef);
+            if (!memoryLane && sessionDir !== undefined && sessionLease === undefined) await acquireSessionLease(sessionRef);
           } catch (cause) {
             await disposePiStartup(rpc, scratch, cause);
             throw cause;
           }
           let response: PiRpcMessage;
           try {
-            response = await rpc.send({ type: 'prompt', message: startInput.instruction });
+            startInput.signal?.throwIfAborted();
+            let onAbort: (() => void) | undefined;
+            try {
+              const interrupted = new Promise<never>((_resolve, reject) => {
+                if (!memoryLane || startInput.signal === undefined) return;
+                onAbort = () => { void abortMemoryLane().then(
+                  () => reject(authorityFailure('Pi memory startup aborted')),
+                  reject,
+                ); };
+                startInput.signal.addEventListener('abort', onAbort, { once: true });
+                if (startInput.signal.aborted) onAbort();
+              });
+              response = await Promise.race([rpc.send({ type: 'prompt', message: startInput.instruction }), interrupted]);
+              if (memoryLane && startInput.signal?.aborted) {
+                await abortMemoryLane();
+                throw authorityFailure('Pi memory startup aborted');
+              }
+            } finally { if (onAbort !== undefined) startInput.signal?.removeEventListener('abort', onAbort); }
           } catch (cause) {
             const failure = startupExit(rpc);
             await disposePiStartup(rpc, scratch);
@@ -762,7 +812,7 @@ export class PiAdapter implements RuntimeAdapter {
             });
           }
 
-          return new PiSession(sessionRef, rpc, manifestSelection, scratch, undefined, mcpEventIdentities(startInput.mcpToolsetTools));
+          return new PiSession(sessionRef, rpc, manifestSelection, scratch, undefined, mcpEventIdentities(startInput.mcpToolsetTools), memoryLane ? abortMemoryLane : undefined);
         },
       },
     };
@@ -1257,6 +1307,7 @@ class PiSession implements Session {
     private readonly scratch: ExecutionScratch,
     private readonly hostContextWindow?: number,
     private readonly identities?: McpEventIdentities,
+    private readonly abortMemoryLane?: () => Promise<void>,
   ) {}
 
   get events(): AsyncIterable<AgentEvent> {
@@ -1350,6 +1401,7 @@ class PiSession implements Session {
   }
 
   async steer(text: string): Promise<void> {
+    if (this.abortMemoryLane !== undefined) throw authorityFailure('memory lane cannot steer');
     await this.rpc.send({ type: 'steer', message: text });
   }
 
@@ -1369,11 +1421,13 @@ class PiSession implements Session {
         'pi persistent session cannot change its authoritative BYOK provider/model selection',
       );
     }
+    if (this.abortMemoryLane !== undefined) throw authorityFailure('memory lane cannot follow up');
     await this.rpc.send({ type: 'prompt', message: task.instruction, streamingBehavior: 'followUp' });
   }
 
   async interrupt(): Promise<void> {
-    await abortPiRpcAndSettle(this.rpc);
+    if (this.abortMemoryLane !== undefined) await this.abortMemoryLane();
+    else await abortPiRpcAndSettle(this.rpc);
   }
 
   async close(): Promise<void> {

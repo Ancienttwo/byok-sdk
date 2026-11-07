@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fake ACP agent over stdio for offline adapter tests. It calls no model and
-// reads no login. Frame shapes follow OAR 6bdd273 tests/fixtures
+// reads no login. Frame shapes follow OAR 45488e7 tests/fixtures
 // (fake-acp-agent.mjs, fake-acp-grok.mjs: Grok 1.0.25 wire, Apache-2.0).
 //
 // argv: `--version` prints a version; `agent stdio --help` prints help;
@@ -43,7 +43,10 @@ if (args[0] === 'inspect') {
 const agy = args[0] === 'acp';
 if (args.at(-1) !== 'stdio' && !agy) { process.stderr.write(`unexpected argv ${JSON.stringify(args)}\n`); process.exit(64); }
 
-const SESSION = process.env.FAKE_ACP_SESSION_ID ?? 'fake-grok-session';
+let SESSION = process.env.FAKE_ACP_SESSION_ID ?? 'fake-grok-session';
+const sessionStore = process.env.FAKE_ACP_SESSION_STORE;
+const savedSession = () => sessionStore && existsSync(sessionStore) ? JSON.parse(readFileSync(sessionStore, 'utf8')) : undefined;
+let sessionSerial = 0;
 const log = (fact) => { if (process.env.FAKE_ACP_LOG) appendFileSync(process.env.FAKE_ACP_LOG, `${JSON.stringify(fact)}\n`); };
 log({ kind: 'start', argv: args, cwd: process.cwd(), env: process.env, pid: process.pid });
 
@@ -77,11 +80,31 @@ function promptText(params) {
   return typeof block?.text === 'string' ? block.text : '';
 }
 
+let opencodeModel;
 async function prompt(message) {
   const full = promptText(message.params);
   log({ kind: 'prompt', text: full });
   // The daemon may put rules before the task; the last line selects the scenario.
   const input = full.trim().split('\n').at(-1) ?? '';
+  if (input.startsWith('opencode-limit')) {
+    if (input === 'opencode-limit-after-output') text('already emitted');
+    if (input === 'opencode-limit-after-thought') update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking' } });
+    if (opencodeModel === 'fixture/first' || input === 'opencode-limit-always') {
+      const gate = process.env.FAKE_ACP_RATE_GATE;
+      while (gate && !existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
+      error(message.id, -32603, 'Rate limit exceeded'); return;
+    }
+    text('fallback reply'); result(message.id, { stopReason: 'end_turn' }); return;
+  }
+  if (input === 'opencode-child') {
+    const call = (child) => update({ sessionUpdate: 'tool_call', toolCallId: 'same-id', title: child ? 'execute' : 'shell', status: 'in_progress', rawInput: { code: 'host.lookup()' },
+      ...(child ? { _meta: { 'opencode/child-session': { id: 'native-child', parentID: SESSION, depth: 1 } } } : {}) });
+    call(false); call(true);
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'same-id', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'child result' } }], _meta: { 'opencode/child-session': { id: 'native-child', parentID: SESSION, depth: 1 } } });
+    update({ sessionUpdate: 'usage_update', used: 321, size: 1000 });
+    update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'child private text' }, _meta: { 'opencode/child-session': { id: 'native-child', parentID: SESSION, depth: 1 } } });
+    text('done'); result(message.id, { stopReason: 'end_turn' }); return;
+  }
   if (input === 'hold' || process.env.FAKE_ACP_HANG === '1') { pending.set(message.id, 'hold'); return; }
   if (input === 'hold-silent') { pending.set(message.id, 'silent'); return; }
   if (input === 'orphan-tool') {
@@ -155,10 +178,11 @@ async function prompt(message) {
   }
   // The second prompt of agy's steer answers the first at once; its own answer waits for FAKE_ACP_REPLY_GATE.
   if (input === 'steer-first') { pending.set(message.id, 'superseded'); return; }
-  if (input === 'steer-second') {
+  if (input === 'steer-second' || input === 'steer-fail') {
     for (const [id, kind] of [...pending]) if (kind === 'superseded') { pending.delete(id); result(id, answer()); }
     const gate = process.env.FAKE_ACP_REPLY_GATE;
     while (gate && !existsSync(path.join(gate, 'release'))) await new Promise((resolve) => setTimeout(resolve, 10));
+    if (input === 'steer-fail') { error(message.id, -32603, 'Internal error'); return; }
     text('steered');
     result(message.id, answer());
     return;
@@ -171,8 +195,8 @@ async function prompt(message) {
     return;
   }
   if (input === 'tool-inputs') {
-    update({ sessionUpdate: 'tool_call', toolCallId: 'call-long', title: 'run_terminal_command', status: 'pending', rawInput: { command: `echo ${'a'.repeat(12_000)}; git push origin main` } });
-    update({ sessionUpdate: 'tool_call', toolCallId: 'call-text', title: 'run_terminal_command', status: 'pending', rawInput: 'git push origin main' });
+    update({ sessionUpdate: 'tool_call', toolCallId: 'call-long', title: 'run_terminal_command', status: 'in_progress', rawInput: { command: `echo ${'a'.repeat(12_000)}; git push origin main` } });
+    update({ sessionUpdate: 'tool_call', toolCallId: 'call-text', title: 'run_terminal_command', status: 'in_progress', rawInput: 'git push origin main' });
     result(message.id, answer());
     return;
   }
@@ -204,6 +228,11 @@ async function prompt(message) {
     result(message.id, answer());
     return;
   }
+  if (input === 'opencode-terminal-hang') {
+    const created = await ask('terminal/create', { sessionId: SESSION, command: process.execPath, args: ['-e', 'setInterval(()=>{},1000)'], env: [] });
+    log({ kind: 'terminal', created });
+    pending.set(message.id, 'silent'); return;
+  }
   if (input === 'terminal' || input === 'terminal-hang' || input === 'terminal-compat') {
     // Grok sends one quoted shell line as `command` with no `args`.
     const command = input === 'terminal'
@@ -234,6 +263,7 @@ function request(message) {
     case 'initialize':
       log({ kind: 'initialize', params: message.params });
       if (process.env.FAKE_ACP_INITIALIZE === 'exit') process.exit(1);
+      if (process.env.FAKE_ACP_INITIALIZE === 'auth') { error(message.id, -32000, 'Authentication required'); return; }
       if (process.env.FAKE_ACP_INITIALIZE === 'error') { error(message.id, -32603, 'Internal error'); return; }
       result(message.id, {
         protocolVersion: 1,
@@ -250,15 +280,27 @@ function request(message) {
       result(message.id);
       return;
     case 'session/new':
+      if (sessionStore) {
+        SESSION = `ses_opencode_${process.pid}_${++sessionSerial}`;
+        writeFileSync(sessionStore, JSON.stringify({ id: SESSION, cwd: message.params.cwd }));
+      }
       log({ kind: 'open', method: message.method, params: message.params });
+      log({ kind: 'native-session', sessionId: SESSION });
       result(message.id, { sessionId: SESSION });
       return;
     case 'session/resume':
+      if (sessionStore && savedSession()?.id === message.params?.sessionId) SESSION = savedSession().id;
       log({ kind: 'open', method: message.method, params: message.params });
+      if (process.env.FAKE_ACP_REFUSE_RESUME === '1') { error(message.id, -32601, 'session/resume unavailable'); return; }
+      if (process.env.FAKE_ACP_OPENCODE === '1') text('historical replay');
       if (message.params?.sessionId !== SESSION) { error(message.id, -32603, 'session not found', { code: 'FS_NOT_FOUND' }); return; }
       result(message.id, {});
       return;
     case 'session/list':
+      if (sessionStore) {
+        const saved = savedSession();
+        result(message.id, { sessions: saved ? [{ sessionId: saved.id, cwd: saved.cwd }] : [] }); return;
+      }
       result(message.id, { sessions: process.env.FAKE_ACP_LISTED_CWD === undefined ? [] : [{ sessionId: SESSION, cwd: process.env.FAKE_ACP_LISTED_CWD }] });
       return;
     case 'session/set_model':
@@ -267,6 +309,14 @@ function request(message) {
       result(message.id, { _meta: { modelId: message.params?.modelId } });
       return;
     case 'session/set_config_option':
+      if (process.env.FAKE_ACP_OPENCODE === '1') {
+        log({ kind: 'config', params: message.params });
+        if (process.env.FAKE_ACP_REFUSE_MODEL === message.params?.value) { error(message.id, -32602, 'selected model unavailable'); return; }
+        opencodeModel = message.params?.value;
+        const configOptions = [{ id: 'model', name: 'Model', type: 'select', currentValue: process.env.FAKE_ACP_MODEL_READBACK ?? opencodeModel, options: [{ value: opencodeModel, name: opencodeModel }] }];
+        update({ sessionUpdate: 'config_option_update', configOptions });
+        result(message.id, { configOptions }); return;
+      }
       log({ kind: 'config', params: message.params });
       update({ sessionUpdate: 'config_option_update', configOptions: [{ id: message.params?.configId, currentValue: message.params?.value }] });
       result(message.id, {});

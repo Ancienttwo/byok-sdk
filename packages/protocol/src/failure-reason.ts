@@ -37,6 +37,19 @@ const RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [new RegExp(String.raw`(key|token|secret|passw(?:or)?d[\w.-]{0,64})(["']?${GAP}[:=]${GAP})${VALUE}`, 'gi'), `$1$2${REDACTED}`],
   // URL userinfo: `postgres://user:pass@host`, `https://token@host`.
   [/:\/\/[^\s/?#@]{1,256}@/g, `://${REDACTED}@`],
+  // Slack's OAuth examples use hyphenated alphanumeric bodies; 10 is a detection floor,
+  // not an authentication length guarantee: https://docs.slack.dev/authentication/installing-with-oauth/#using-tokens
+  [/\bxox[a-z]-[A-Za-z0-9-]{10,}/g, REDACTED],
+  // GitLab's documented PAT detector uses a 20-character body (including _ and -).
+  // https://docs.gitlab.com/user/application_security/secret_detection/pipeline/configure/#ignore-secrets
+  [/\bglpat-[A-Za-z0-9_-]{20,}/g, REDACTED],
+  // npm's registry API specifies exactly 36 alphanumeric characters after npm_.
+  // https://api-docs.npmjs.com/#tag/tokens/operation/deleteToken
+  [/\bnpm_[A-Za-z0-9]{36}\b/g, REDACTED],
+  // HF documents the prefix; its smolagents redactor uses this 30-character floor.
+  // https://huggingface.co/docs/hub/en/security-tokens
+  // https://huggingface.co/spaces/smolagents/ml-intern/blob/437a804086e1e479c806b64c04d79971c023ec94/agent/core/redact.py
+  [/\bhf_[A-Za-z0-9]{30,}\b/g, REDACTED],
   // Provider key shapes.
   [/\bsk-[A-Za-z0-9_-]{16,}/g, REDACTED],
   [/\bxai-[A-Za-z0-9_-]{16,}/g, REDACTED],
@@ -51,8 +64,41 @@ const RULES: ReadonlyArray<readonly [RegExp, string]> = [
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8');
 
-function redact(text: string): string {
-  let out = text;
+// Armor headers end at the blank line; an END-shaped comment is not a delimiter.
+// An incomplete or ambiguous block consumes the remainder rather than exposing it.
+function redactArmor(text: string): string {
+  const begin = /-----BEGIN ([A-Z0-9 ]{1,64})-----/g;
+  let result = '', cursor = 0, match: RegExpExecArray | null;
+  while ((match = begin.exec(text)) !== null) {
+    result += text.slice(cursor, match.index) + REDACTED;
+    const endMarker = `-----END ${match[1]}-----`;
+    let pos = begin.lastIndex, headers = false, body = false, end = text.length;
+    if (text[pos] === '\r') pos++;
+    if (text[pos] === '\n') {
+      pos++;
+      while (pos < text.length) {
+        const newline = text.indexOf('\n', pos);
+        const lineEnd = newline === -1 ? text.length : newline;
+        const line = text.slice(pos, lineEnd).replace(/\r$/, '');
+        if (!body) {
+          if (line === '') { body = true; pos = lineEnd + 1; continue; }
+          if (/^[A-Za-z][A-Za-z0-9-]*:/.test(line)) { headers = true; pos = lineEnd + 1; continue; }
+          if (headers) break;
+          body = true;
+        }
+        if (line.startsWith(endMarker)) { end = pos + endMarker.length; break; }
+        pos = lineEnd + 1;
+      }
+    }
+    cursor = end;
+    begin.lastIndex = end;
+  }
+  return result + text.slice(cursor);
+}
+
+/** Redact credential shapes without truncating diagnostics or ordinary SHA/UUID identifiers. */
+export function redactSecrets(text: string): string {
+  let out = redactArmor(text);
   for (const [pattern, replacement] of RULES) out = out.replace(pattern, replacement);
   return out;
 }
@@ -114,5 +160,5 @@ export function truncateUtf8(text: string, maxBytes: number, options: TruncateOp
  * bytes.
  */
 export function boundFailureReason(reason: string): string {
-  return truncateUtf8(redact(reason), TASK_FAIL_REASON_MAX_BYTES);
+  return truncateUtf8(redactSecrets(reason), TASK_FAIL_REASON_MAX_BYTES);
 }

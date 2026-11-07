@@ -3,6 +3,7 @@ import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, type FrozenExecutionInput, type FrozenSubmitPort,
   type Json } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
+import { dreamOf } from '@byok-sdk/example-bot-collaboration/dream';
 import { revisionOf, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { deliverCancels } from './intents';
@@ -291,7 +292,8 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
       // As K4 `publish`: each value is a projection row of this commit.
       outbox = [...published.keys()].map(id => ({ kind: 'projection', id }));
       await refuseStoredConflicts(client, scopeKey, turnId, 'handler_failed', outbox, published);
-    } else {
+    } else if (!dreamOf(state, turnId)) {
+      // Owned dreams bypass this parser: their result is device memory, and sync consumes the conclusion.
       // Not a key that K8 wrote. It must never settle as a success.
       if (!Object.hasOwn(state.turns, turnId)) throw new IntentOutcomeError(turnId, 'unknown_intent', 'No Bot Turn or Host intent has this key');
       // commitStored reads the committed intents before this row concludes, as L reads its ledger before the terminal transaction writes.

@@ -68,6 +68,26 @@ async function guardReason(run: () => Promise<unknown>): Promise<{ code: string;
 }
 
 describe('file-scope guard root resolution (#1061 slice 2)', () => {
+  it.skipIf(process.platform === 'win32')('memory limits targets to exact MEMORY.md and notes with existing link and internal guards', async () => {
+    const { home, identity } = await fixture();
+    await fs.mkdir(path.join(home, 'notes'));
+    await fs.writeFile(path.join(home, 'MEMORY.md'), 'memory');
+    await fs.writeFile(path.join(home, 'notes/x'), 'note');
+    await fs.symlink(path.join(home, 'MEMORY.md'), path.join(home, 'notes/link'));
+    await fs.writeFile(path.join(home, 'outside'), 'outside');
+    await fs.link(path.join(home, 'outside'), path.join(home, 'notes/hard'));
+    const grant = await resolveFileScopeGrant({ fileScope: { mode: 'memory' }, home: { path: home, identity }, attempt: { homeAccess: 'writer' } });
+    for (const target of ['MEMORY.md', 'notes/x', 'notes/new']) {
+      expect((await resolveFileScopeTarget({ grant, path: target, access: 'write', cwd: home })).root.id).toBe('home');
+    }
+    for (const [target, reason] of [
+      ['outside', 'outside_scope'], ['AGENTS.md', 'outside_scope'], ['.', 'outside_scope'],
+      ['memory.md', 'outside_scope'], ['Notes/x', 'outside_scope'], ['MEMORY.md/child', 'outside_scope'],
+      ['.byok/x', 'internal_path'], ['notes/.BYOK/x', 'internal_path'], ['notes/link', 'symlink'], ['notes/hard', 'hardlink'],
+    ]) {
+      expect(await guardReason(() => resolveFileScopeTarget({ grant, path: target!, access: 'write', cwd: home }))).toMatchObject({ reason });
+    }
+  });
   it('captures a real directory root and its dev+ino identity', async () => {
     const root = await canonicalTmpDir('byok-guard-root-');
     const grant = await grantWith(root);

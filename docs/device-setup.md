@@ -17,6 +17,13 @@ runtime as the OS user who will run the daemon. For a source checkout, run
 On Linux, the daemon needs the user's unlocked Secret Service session for
 pairing. Device credentials belong in OS credential storage, never this JSON.
 
+OpenCode keyless onboarding remains gated on native OS/line qualification.
+Installing its CLI or supplying `runtimes.opencode.models` does not enable it
+while the adapter advertises no platforms. Follow the
+[OpenCode qualification contract](adapter-capabilities.md#opencode-implementation-and-qualification-1538)
+and its native evidence before selecting it for a device; the SDK does not
+install, upgrade or switch release lines.
+
 For a complete local Host, start the [basic example](../examples/basic/README.md)
 with `bun run --filter @byok-sdk/example-basic dev`, then open
 `http://localhost:8787`. Its default product ID matches the examples below.
@@ -642,6 +649,7 @@ linked JSON schema for full array/union shapes and descriptions.
 <!-- generated:fields:start -->
 | Field | Tier | Shape |
 |-------|------|-------|
+| `nativeSessions` | advanced | boolean |
 | `nativeAssetRoot` | advanced | string |
 | `toolAuthorization` | advanced | object |
 | `toolAuthorization.default` | required when parent is set | "all" / "auto" |
@@ -803,6 +811,15 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.dsh.versionPolicy.allow` | advanced | array |
 | `runtimes.dsh.versionPolicy.warn` | advanced | array |
 | `runtimes.dsh.versionPolicy.block` | advanced | array |
+| `runtimes.opencode` | advanced | object |
+| `runtimes.opencode.models` | required when parent is set | array |
+| `runtimes.opencode.executable` | advanced | string |
+| `runtimes.opencode.versionPolicy` | advanced | object |
+| `runtimes.opencode.versionPolicy.qualifiedVersion` | required when parent is set | string |
+| `runtimes.opencode.versionPolicy.unqualified` | required when parent is set | "allow" / "block" / "warn" |
+| `runtimes.opencode.versionPolicy.allow` | advanced | array |
+| `runtimes.opencode.versionPolicy.warn` | advanced | array |
+| `runtimes.opencode.versionPolicy.block` | advanced | array |
 | `runtimes.agy` | advanced | object |
 | `runtimes.agy.home` | required when parent is set | string |
 | `runtimes.agy.model` | advanced | string |
@@ -933,6 +950,8 @@ Manifest transition: **0.39.0 → 0.39.0**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
+| opencode-native-runtime | additive | Opt-in OpenCodeAdapter (harnessId opencode) and runtimes.opencode.models select an explicit Host candidate through native ACP, refuse mismatching model readback, and retry once on a pre-output rate limit with a non-terminal error diagnostic model_switch record that is excluded from reply text. Startup failures retain their start phase and native classification. Native user context, MCP and transcript storage are inherited; all isolation guarantees are false. RuntimeDetectResult.rawVersion retains local probe output separately from normalized version. Platform canaries and task-scoped Host MCP qualification remain pending; no platform or default qualified version is advertised. [Migration](../docs/adapter-capabilities.md#opencode-implementation-and-qualification-1538) |
+| native-session-dream-device-wiring | additive | DaemonConfig.nativeSessions defaults off. Opted-in macOS/Linux devices with a Pi memory lane and sessionDir declare native-sessions; unsupported offers decline before claim. The daemon renders after claim, prepends sanitized JSON data, and runs the Pi memory-only in-memory lane without progress, summary text, finalMessage or result documents. Argument summaries apply the command-word allowlist and path rules by tool name; tool result content is excluded. The local byok_host_ready receipt contains only sessionId and is consumed only by memory-lane admission. Cancellation and startup disposal await the abort drain before terminating the process tree. [Migration](../docs/security.md#native-session-input) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

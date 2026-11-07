@@ -51,6 +51,7 @@ const K8_HOSTED_EXPORTS = Object.freeze({
   './team': './src/team.ts',
   './test-support': './src/commit-vectors.test-support.ts',
 });
+const K8_DREAM_EXPORTS = Object.freeze({ './dream': './src/dream.ts', './rules/priority': './src/rules/priority.ts' });
 // #1106: K4 moves into @byok-sdk/server/execution-core. The example keeps only
 // its daemon-backed test harness entry and a description that says so.
 const K4_EXPORTS = Object.freeze({ '.': './src/index.ts', './canonical': './src/canonical.ts', './test-support': './src/test-support.ts' });
@@ -314,6 +315,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     if (isDeepStrictEqual(before.exports, hosted) && isDeepStrictEqual(after.exports, { ...hosted, ...K8_MESSAGE_EXPORTS })) {
       after.exports = before.exports;
     }
+    // #1516: H imports the shared dreaming and priority rules; only this pair of exact additions is reviewed.
+    if (Object.keys(K8_DREAM_EXPORTS).every(key => before.exports?.[key] === undefined
+      && isDeepStrictEqual(after.exports?.[key], K8_DREAM_EXPORTS[key]))) {
+      for (const key of Object.keys(K8_DREAM_EXPORTS)) delete after.exports[key];
+    }
   } else if (path === 'examples/byok-mcp-server/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The MCP server example must stay private');
     // #1375: the routine calendar moved to protocol, so the core edge goes.
@@ -427,6 +433,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       const key = './sealed-payload';
       const entry = { types: './dist/sealed-payload/index.d.ts', import: './dist/sealed-payload/index.js' };
       if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
+      // #1515 isolates trusted system-tool resolution in one Node-only entry.
+      const systemTool = { types: './dist/system-tool.d.ts', node: { import: './dist/system-tool.js' } };
+      if (before.exports?.['./system-tool'] === undefined && isDeepStrictEqual(after.exports?.['./system-tool'], systemTool)) {
+        delete after.exports['./system-tool'];
+        qualify.push('packages/core');
+      }
     }
     if (path === 'packages/server/package.json'
       && before.description === SERVER_DESCRIPTION.from && after.description === SERVER_DESCRIPTION.to) {

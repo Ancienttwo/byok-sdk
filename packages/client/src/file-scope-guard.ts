@@ -11,6 +11,7 @@ import {
 import {
   FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS,
   type FileScopeGuardCode, type FileScopeGuardReason,
+  type MemoryFileScope,
 } from './file-scope-types';
 export {
   FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS,
@@ -93,7 +94,7 @@ export interface FileScopeRootGrant {
 
 /** The immutable grant an admitted offer hands to the scoped tools. */
 export interface FileScopeGrant {
-  readonly mode: 'home' | 'workspaces';
+  readonly mode: 'home' | 'workspaces' | 'memory';
   /** The canonical Agent home; never absent. Read+write for a writer, read-only for a memory reader. */
   readonly home: FileScopeRootGrant;
   /**
@@ -279,7 +280,7 @@ export type FileScopeAttempt =
   | { readonly homeAccess: 'memory-reader'; readonly cwd: string };
 
 export interface ResolveFileScopeGrantInput {
-  readonly fileScope: ToolFileScope;
+  readonly fileScope: ToolFileScope | MemoryFileScope;
   /** The canonical Agent home and the lease identity captured for this offer. */
   readonly home: { readonly path: string; readonly identity: FileScopeIdentity };
   readonly attempt: FileScopeAttempt;
@@ -288,7 +289,7 @@ export interface ResolveFileScopeGrantInput {
 }
 
 function digestGrant(
-  mode: 'home' | 'workspaces',
+  mode: FileScopeGrant['mode'],
   home: FileScopeRootGrant,
   run: FileScopeRootGrant | undefined,
   roots: readonly FileScopeRootGrant[],
@@ -330,6 +331,9 @@ export async function resolveFileScopeGrant(input: ResolveFileScopeGrantInput): 
   assertPlatform(platform);
   const io = input.io ?? nodeFileScopeIo;
   const { attempt } = input;
+  if (input.fileScope.mode === 'memory' && (platform === 'win32' || attempt.homeAccess !== 'writer')) {
+    throw new FileScopeGuardError('file_scope_unsupported', 'unsupported_platform');
+  }
   const home = await resolveRoot(
     { id: 'home', path: input.home.path, access: attempt.homeAccess === 'memory-reader' ? 'read' : 'write' },
     io,
@@ -565,6 +569,14 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
   const matched = matchRoot(allRoots, absolute);
   if (matched === undefined) throw fail('outside_scope');
   const { root } = matched;
+  const assertMemoryTarget = (target: string): void => {
+    if (input.grant.mode !== 'memory') return;
+    const rel = relativeInside(input.grant.home.path, target);
+    if (rel?.split(path.sep).some(segment => INTERNAL_SEGMENT.test(segment))) throw fail('internal_path');
+    const notesDirectory = rel === 'notes' && (input.kind === 'directory' || input.kind === 'entry');
+    if (rel !== 'MEMORY.md' && !notesDirectory && !rel?.startsWith('notes' + path.sep)) throw fail('outside_scope');
+  };
+  assertMemoryTarget(matched.path);
   if (input.access === 'write' && root.access !== 'write') throw fail('read_only', root.id, input.access);
 
   let rootStat;
@@ -611,6 +623,7 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
     throw new FileScopeGuardError('file_scope_unavailable', 'root_identity_changed', { rootId: root.id, access: root.access });
   }
   const canonicalTarget = path.join(canonicalExisting, ...segments.slice(existingCount));
+  assertMemoryTarget(canonicalTarget);
   // Aliases that only canonicalization reveals (case variants, short names) land here.
   if (internalPath(allRoots, canonicalTarget, root === run ? run : undefined)) throw fail('internal_path');
   const existingStat = targetStat ?? lastStat;
@@ -664,7 +677,7 @@ export interface FileScopeAudit {
   readonly homeAccess: ToolAuthorizationHomeAccess;
   readonly scope: {
     readonly source: 'host';
-    readonly mode: 'home' | 'workspaces';
+    readonly mode: FileScopeGrant['mode'];
     readonly digest: string;
   };
   /** Adoption only: every root id the grant covers, home first, then run when present. */
