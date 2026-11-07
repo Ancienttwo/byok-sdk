@@ -9,6 +9,13 @@ const window = { fromMs: 0, toMs: 1 };
 
 describe('buildDreamInstruction (#1475)', () => {
   it.each(vectors)('$name', ({ input, instruction }) => {
+    const actual = buildDreamInstruction(input);
+    expect(actual).toContain('Rewrite wrong or outdated facts in place as the current statement.');
+    expect(actual).toContain('Only when a later task might repeat the old mistake, keep one line: "changed on <day>, was <old>".');
+    expect(actual).toContain('Delete duplicate, one-off and no-longer-useful content.');
+    expect(actual).toContain('Keep one topic per page in notes/. Link related pages to each other with relative links.');
+    expect(actual).toContain('notes/index.md lists every page with a one-line summary.');
+    expect(actual).not.toContain('Mark a stale fact with the date it changed');
     expect(buildDreamInstruction(input)).toBe(instruction);
   });
 
