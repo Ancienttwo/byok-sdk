@@ -184,7 +184,7 @@ describe('daemon tool authorization', () => {
     ];
     calls.forEach(([callId, tool, rawInput], seq) => projection.consume({ seq, sessionId: 'root', agentPath: [], kind: 'frame', body: {
       events: [{ kind: 'tool_call_started', callId, tool, input: JSON.stringify(rawInput) }],
-      native: { update: { sessionUpdate: 'tool_call', toolCallId: callId, rawInput } },
+      native: { update: { sessionUpdate: 'tool_call', toolCallId: callId, status: 'in_progress', rawInput } },
     } }, event => { if (event.type === 'tool_use') adapter.sessions[0]!.queue.push(event); }, () => {}));
     await vi.waitFor(() => expect(reminders).toHaveLength(3));
     expect(reminders.map(r => [r.toolCallId, r.reasons])).toEqual([

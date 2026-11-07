@@ -1,3 +1,4 @@
+import { BufferedToolUse } from '../buffered-tool-use';
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
 import { runtimeFailureClassOf } from '../../runtime-failure';
 import type { AcpRecord } from '../../runtime/acp-session-runtime';
@@ -18,14 +19,7 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
 const count = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 
-/**
- * The opening update's native structured `rawInput` owns tool authorization;
- * anything but an object is an unknown input.
- */
-function nativeRawInput(body: Record<string, unknown> | undefined, callId: string): Record<string, unknown> | undefined {
-  const update = record(record(body?.native)?.update);
-  return update?.toolCallId === callId ? record(update.rawInput) : undefined;
-}
+
 
 /**
  * Root-session ACP records to `AgentEvent`s. It reads the runtime-neutral
@@ -43,6 +37,7 @@ function nativeRawInput(body: Record<string, unknown> | undefined, callId: strin
 export class GrokProjection {
   private text = '';
   private readonly tools = new Map<string, string>();
+  private readonly buffered = new BufferedToolUse();
   /** OAR reports this session's tokens cumulatively from open; each turn's usage is the difference. */
   private billed: Required<Pick<Tokens, 'input' | 'output'>> & Tokens = { input: 0, output: 0 };
   private pending?: Usage;
@@ -55,6 +50,16 @@ export class GrokProjection {
     const body = record(input.body);
     const events = body?.events;
     if (!Array.isArray(events)) return;
+    const update = record(record(body?.native)?.update);
+    const updateId = typeof update?.toolCallId === 'string' ? update.toolCallId : undefined;
+    const observe = () => {
+      if (updateId === undefined) return;
+      const raw = record(update?.rawInput);
+      const tool = this.tools.get(updateId);
+      const input = raw === undefined || tool === undefined ? raw : raw;
+      this.buffered.observe(updateId, input, update?.rawInput !== undefined, events.some(value => record(value)?.kind === 'tool_call_input') || ['in_progress', 'completed', 'failed', 'cancelled'].includes(String(update?.status)), emit);
+    };
+    if (!events.some(value => record(value)?.kind === 'tool_call_ended')) observe();
     // The prompt answer's frame lists `turn_ended` before its `usage`: end the turn after every other event.
     let ended: Record<string, unknown> | undefined;
     for (const value of events) {
@@ -69,14 +74,16 @@ export class GrokProjection {
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
           this.flush(emit);
           this.tools.set(event.callId, event.tool);
-          const raw = nativeRawInput(body, event.callId);
-          emit({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, ...(raw === undefined ? {} : { input: raw }) });
+          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: event.callId });
+          observe();
           break;
         }
         case 'tool_call_ended': {
           if (typeof event.callId !== 'string') break;
           this.flush(emit);
+          observe();
           const tool = this.tools.get(event.callId) ?? 'tool';
+          this.buffered.finish(event.callId, emit);
           this.tools.delete(event.callId);
           emit({
             type: 'tool_result', tool, toolCallId: event.callId,
@@ -129,6 +136,7 @@ export class GrokProjection {
 
   private endOpenTools(emit: (event: AgentEvent) => void, status: 'interrupted' | 'ended'): void {
     for (const [toolCallId, tool] of this.tools) {
+      this.buffered.finish(toolCallId, emit);
       emit({ type: 'tool_result', tool, toolCallId, output: { status, reason: 'closed at turn end; runtime did not report the call ended' } });
     }
     this.tools.clear();

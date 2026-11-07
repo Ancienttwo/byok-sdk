@@ -1,3 +1,4 @@
+import { BufferedToolUse } from '../buffered-tool-use';
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
 import type { DshRecord } from '../../runtime/dsh-session-runtime';
@@ -57,6 +58,7 @@ function messageText(native: unknown): string {
  */
 export class DshProjection {
   private readonly tools = new Map<string, string>();
+  private readonly buffered = new BufferedToolUse();
   private readonly billed = new Map<string, Tokens>();
   private pending?: Usage;
 
@@ -89,11 +91,13 @@ export class DshProjection {
         case 'tool_call_started':
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
           this.tools.set(event.callId, event.tool);
-          emit({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, input: toolInput(body?.native) });
+          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, input: toolInput(body?.native) });
+          this.buffered.observe(event.callId, undefined, false, true, emit);
           break;
         case 'tool_call_ended': {
           if (typeof event.callId !== 'string') break;
           const tool = this.tools.get(event.callId) ?? 'tool';
+          this.buffered.finish(event.callId, emit);
           this.tools.delete(event.callId);
           emit({
             type: 'tool_result', tool, toolCallId: event.callId,
@@ -121,6 +125,7 @@ export class DshProjection {
 
   private endTurn(turn: Record<string, unknown>, emit: (event: AgentEvent) => void, outcome: (turn: DshTurnOutcome) => void): void {
     for (const [toolCallId, tool] of this.tools) {
+      this.buffered.finish(toolCallId, emit);
       emit({ type: 'tool_result', tool, toolCallId, output: { status: turn.kind === 'aborted' ? 'interrupted' : 'ended', reason: 'closed at turn end; runtime did not report the call ended' } });
     }
     this.tools.clear();

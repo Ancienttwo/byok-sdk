@@ -1,3 +1,4 @@
+import { BufferedToolUse } from '../buffered-tool-use';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { AcpRecord } from '../../runtime/acp-session-runtime';
 import { runtimeFailureClassOf } from '../../runtime-failure';
@@ -9,6 +10,7 @@ export interface OpenCodeTurnOutcome { kind: 'completed' | 'aborted' | 'failed';
 /** Per-native-session state keeps v2 child call ids distinct; SDK events have no child graph field. */
 export class OpenCodeProjection {
   private readonly tools = new Map<string, string>();
+  private readonly buffered = new BufferedToolUse();
   output = false;
   constructor(private readonly root: string) {}
 
@@ -16,10 +18,20 @@ export class OpenCodeProjection {
     if (record.kind !== 'frame') return;
     const body = object(record.body);
     if (!Array.isArray(body?.events)) return;
-    for (const item of body.events) {
+    const events = body.events;
+    const root = record.sessionId === this.root && record.agentPath.length === 0;
+    const update = object(object(body.native)?.update);
+    const nativeId = typeof update?.toolCallId === 'string' ? update.toolCallId : undefined;
+    const updateId = nativeId === undefined ? undefined : root ? nativeId : `${record.sessionId}:${nativeId}`;
+    const observe = () => {
+      if (updateId === undefined) return;
+      this.buffered.observe(updateId, update?.rawInput, update?.rawInput !== undefined,
+        events.some(item => object(item)?.kind === 'tool_call_input') || ['in_progress', 'completed', 'failed', 'cancelled'].includes(String(update?.status)), emit);
+    };
+    observe();
+    for (const item of events) {
       const event = object(item);
       if (!event) continue;
-      const root = record.sessionId === this.root && record.agentPath.length === 0;
       const callId = typeof event.callId === 'string' ? (root ? event.callId : `${record.sessionId}:${event.callId}`) : undefined;
       switch (event.kind) {
         case 'text_delta':
@@ -35,8 +47,8 @@ export class OpenCodeProjection {
           this.output = true;
           if (callId === undefined || typeof event.tool !== 'string') break;
           this.tools.set(callId, event.tool);
-          const input = object(object(body.native)?.update)?.rawInput;
-          emit({ type: 'tool_use', tool: event.tool, toolCallId: callId, ...(input === undefined ? {} : { input }) });
+          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: callId });
+          observe();
           break;
         }
         case 'tool_call_ended': {
@@ -44,6 +56,7 @@ export class OpenCodeProjection {
           if (callId === undefined) break;
           const tool = this.tools.get(callId);
           if (tool === undefined) break;
+          this.buffered.finish(callId, emit);
           this.tools.delete(callId);
           emit({ type: 'tool_result', tool, toolCallId: callId, output: event.content,
             ...(event.result === 'failed' ? { isError: true } : {}) });

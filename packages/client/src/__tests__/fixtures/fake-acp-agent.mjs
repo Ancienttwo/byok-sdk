@@ -97,7 +97,7 @@ async function prompt(message) {
     text('fallback reply'); result(message.id, { stopReason: 'end_turn' }); return;
   }
   if (input === 'opencode-child') {
-    const call = (child) => update({ sessionUpdate: 'tool_call', toolCallId: 'same-id', title: child ? 'execute' : 'shell', status: 'pending', rawInput: { code: 'host.lookup()' },
+    const call = (child) => update({ sessionUpdate: 'tool_call', toolCallId: 'same-id', title: child ? 'execute' : 'shell', status: 'in_progress', rawInput: { code: 'host.lookup()' },
       ...(child ? { _meta: { 'opencode/child-session': { id: 'native-child', parentID: SESSION, depth: 1 } } } : {}) });
     call(false); call(true);
     update({ sessionUpdate: 'tool_call_update', toolCallId: 'same-id', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'child result' } }], _meta: { 'opencode/child-session': { id: 'native-child', parentID: SESSION, depth: 1 } } });
@@ -195,8 +195,8 @@ async function prompt(message) {
     return;
   }
   if (input === 'tool-inputs') {
-    update({ sessionUpdate: 'tool_call', toolCallId: 'call-long', title: 'run_terminal_command', status: 'pending', rawInput: { command: `echo ${'a'.repeat(12_000)}; git push origin main` } });
-    update({ sessionUpdate: 'tool_call', toolCallId: 'call-text', title: 'run_terminal_command', status: 'pending', rawInput: 'git push origin main' });
+    update({ sessionUpdate: 'tool_call', toolCallId: 'call-long', title: 'run_terminal_command', status: 'in_progress', rawInput: { command: `echo ${'a'.repeat(12_000)}; git push origin main` } });
+    update({ sessionUpdate: 'tool_call', toolCallId: 'call-text', title: 'run_terminal_command', status: 'in_progress', rawInput: 'git push origin main' });
     result(message.id, answer());
     return;
   }
