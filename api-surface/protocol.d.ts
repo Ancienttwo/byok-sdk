@@ -2044,6 +2044,8 @@ export declare const RUNTIME_QUOTA_SCOPES: readonly ['account', 'model'];
 /** Single value authority shared by schema validation and schema-free consumers. */
 export declare const PREPARED_AGENT_MEMORY_MODES: readonly ['none', 'read', 'read-write'];
 export declare function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number];
+/** The device admits native Pi session summaries in the memory-only dream lane. */
+export declare const NATIVE_SESSIONS_CAPABILITY: 'native-sessions';
 // ==== @byok-sdk/protocol dist/codec.d.ts ====
 import type { z } from 'zod';
 import { type Envelope } from './envelope';
@@ -2537,6 +2539,8 @@ export declare class EnvelopeValidationError extends ProtocolError {
  */
 /** Maximum UTF-8 bytes of a `task.fail` `reason` after normalization, truncation marker included. */
 export declare const TASK_FAIL_REASON_MAX_BYTES = 2048;
+/** Redact credential shapes without truncating diagnostics or ordinary SHA/UUID identifiers. */
+export declare function redactSecrets(text: string): string;
 export interface TruncateOptions {
     /** Size of a text, additive over its code points. Default: its UTF-8 bytes. */
     readonly measure?: (text: string) => number;
@@ -2605,6 +2609,11 @@ export declare function buildHandoffPack(turns: readonly HandoffTurn[], budgets:
 // ==== @byok-sdk/protocol dist/host-offer-input.d.ts ====
 import { z } from 'zod';
 import { type AgentMemoryCommit, type TaskOfferPlainPayload, type TaskOfferSealedPayload } from './messages';
+declare const nativeSessions: z.ZodOptional<z.ZodObject<{
+    fromMs: z.ZodNumber;
+    toMs: z.ZodNumber;
+    ifAdvertised: z.ZodOptional<z.ZodLiteral<true>>;
+}, z.core.$strict>>;
 export declare const HostOfferPlainPayloadSchema: z.ZodObject<{
     sealed: z.ZodOptional<z.ZodNever>;
     sealing: z.ZodOptional<z.ZodNever>;
@@ -2722,6 +2731,11 @@ export declare const HostOfferPlainPayloadSchema: z.ZodObject<{
         }, z.core.$strip>;
     }, z.core.$strict>]>>;
     agentMemoryCommit: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"on-success">, z.ZodLiteral<"on-success-if-advertised">]>>;
+    nativeSessions: z.ZodOptional<z.ZodObject<{
+        fromMs: z.ZodNumber;
+        toMs: z.ZodNumber;
+        ifAdvertised: z.ZodOptional<z.ZodLiteral<true>>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const HostOfferSealedPayloadSchema: z.ZodObject<{
     agentRef: z.ZodObject<{
@@ -2874,9 +2888,15 @@ export declare const HostOfferSealedPayloadSchema: z.ZodObject<{
     }, z.core.$strict>>;
     preparation: z.ZodOptional<z.ZodNever>;
     agentMemoryCommit: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"on-success">, z.ZodLiteral<"on-success-if-advertised">]>>;
+    nativeSessions: z.ZodOptional<z.ZodObject<{
+        fromMs: z.ZodNumber;
+        toMs: z.ZodNumber;
+        ifAdvertised: z.ZodOptional<z.ZodLiteral<true>>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
-type HostOfferPayload<T> = Omit<T, 'agentMemoryCommit'> & {
+type HostOfferPayload<T> = Omit<T, 'agentMemoryCommit' | 'nativeSessions'> & {
     agentMemoryCommit?: AgentMemoryCommit | 'on-success-if-advertised';
+    nativeSessions?: z.infer<typeof nativeSessions>;
 };
 export type HostOfferPlainPayload = HostOfferPayload<TaskOfferPlainPayload>;
 export type HostOfferSealedPayload = HostOfferPayload<TaskOfferSealedPayload>;
@@ -5079,6 +5099,10 @@ export declare const TaskOfferPlainPayloadSchema: z.ZodObject<{
         "read-write-if-admitted": "read-write-if-admitted";
     }>>;
     agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
+    nativeSessions: z.ZodOptional<z.ZodObject<{
+        fromMs: z.ZodNumber;
+        toMs: z.ZodNumber;
+    }, z.core.$strict>>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -5192,6 +5216,10 @@ export declare const TaskOfferSealedPayloadSchema: z.ZodObject<{
         "read-write-if-admitted": "read-write-if-admitted";
     }>>;
     agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
+    nativeSessions: z.ZodOptional<z.ZodObject<{
+        fromMs: z.ZodNumber;
+        toMs: z.ZodNumber;
+    }, z.core.$strict>>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -5359,6 +5387,10 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
         "read-write-if-admitted": "read-write-if-admitted";
     }>>;
     agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
+    nativeSessions: z.ZodOptional<z.ZodObject<{
+        fromMs: z.ZodNumber;
+        toMs: z.ZodNumber;
+    }, z.core.$strict>>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -5469,6 +5501,10 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
         "read-write-if-admitted": "read-write-if-admitted";
     }>>;
     agentMemoryCommit: z.ZodOptional<z.ZodLiteral<"on-success">>;
+    nativeSessions: z.ZodOptional<z.ZodObject<{
+        fromMs: z.ZodNumber;
+        toMs: z.ZodNumber;
+    }, z.core.$strict>>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -9163,7 +9199,7 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * MCP configuration.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-home-projection-host-revision", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", "agent-memory-commit-on-success", 'agent-message-draft', "sealed-payload-v1", "sealed-payload-v2", "sealed-output-ciphertext-ref", "runtime-failure-class", "runtime-quota-scope", "resident-memory-over-limit", "runtime-unavailable-cause"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-home-projection-host-revision", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", "agent-memory-commit-on-success", "native-sessions", 'agent-message-draft', "sealed-payload-v1", "sealed-payload-v2", "sealed-output-ciphertext-ref", "runtime-failure-class", "runtime-quota-scope", "resident-memory-over-limit", "runtime-unavailable-cause"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**

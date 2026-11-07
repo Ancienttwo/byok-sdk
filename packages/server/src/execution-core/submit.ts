@@ -22,8 +22,13 @@ export type FrozenOffer = NonNullable<Awaited<ReturnType<FrozenSubmitPort['offer
  */
 export function sameFrozenOffer(offer: FrozenOffer, input: FrozenExecutionInput): boolean {
   // Conditional policy accepts the recorded resolution, never today's device declaration.
-  const payload = input.payload.agentMemoryCommit === 'on-success-if-advertised'
+  let payload = input.payload.agentMemoryCommit === 'on-success-if-advertised'
     ? { ...input.payload, agentMemoryCommit: offer.payload.agentMemoryCommit } : input.payload;
+  if (payload.nativeSessions?.ifAdvertised === true) {
+    const { nativeSessions, ...rest } = payload;
+    payload = offer.payload.nativeSessions === undefined ? rest
+      : { ...rest, nativeSessions: { fromMs: nativeSessions.fromMs, toMs: nativeSessions.toMs } };
+  }
   return offer.taskId === input.taskId && offer.deviceId === input.deviceId && offer.type === 'task.offer'
     && canonical(offer.payload) === canonical(payload);
 }

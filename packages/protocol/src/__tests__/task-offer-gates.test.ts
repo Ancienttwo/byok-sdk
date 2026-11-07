@@ -13,6 +13,7 @@ import * as v4Release from 'byok-protocol-previous';
 
 import {
   AgentMemorySelectionSchema,
+  HostOfferPlainPayloadSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
   SEALED_PAYLOAD_CATEGORIES,
   SessionSelectionSchema,
@@ -113,5 +114,27 @@ describe('WIRE_ADDITIONS', () => {
       entry.rule === 'gated' && entry.kind === 'envelope' ? entry.capability : null,
     ]));
     expect(keys.filter((key, index) => keys.indexOf(key) !== index)).toEqual([]);
+  });
+});
+
+
+describe('native session offer admission (#1526)', () => {
+  const ordinary = v5Offers.find(p => p.agentMemoryCommit !== undefined && p.sealing === undefined)!;
+  const { agentMemoryCommit: _commit, ...base } = ordinary;
+  const native = { ...base, agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 } };
+  it.each([undefined, { mode: 'none' }])('admits a fresh memory-only offer with projection %j', terminalProjection => {
+    expect(TaskOfferPlainPayloadSchema.parse({ ...native, terminalProjection }).nativeSessions).toEqual({ fromMs: 1, toMs: 2 });
+    expect(requiredReceiverCapabilities('task.offer', native)).toContain('native-sessions');
+    expect(HostOfferPlainPayloadSchema.parse({ ...native, nativeSessions: { fromMs: 1, toMs: 2, ifAdvertised: true } }).nativeSessions).toEqual({ fromMs: 1, toMs: 2, ifAdvertised: true });
+  });
+  it.each([
+    ['session', { mode: 'resume', sessionRef: 's' }], ['agentMemory', 'read'], ['agentMemory', undefined],
+    ['terminalProjection', v5Offers.find(p => (p.terminalProjection as Json)?.mode === 'result-document')!.terminalProjection],
+    ...['agentMemoryCommit', 'homeAccess', 'preparation', 'requiredToolsets', 'messageEgress', 'harnessId'].map(field =>
+      [field, v5Offers.find(p => p[field] !== undefined)![field]]),
+  ])('refuses nativeSessions with %s=%j', (field, value) => {
+    const result = TaskOfferPlainPayloadSchema.safeParse({ ...native, [field as string]: value });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.some(issue => issue.path[0] === field)).toBe(true);
   });
 });
