@@ -94,7 +94,7 @@
     "build:agent-memory-helper": "node scripts/build-agent-memory-helper.mjs && node scripts/check-agent-memory-helper-build.mjs"
   },
   "optionalDependencies": {
-    "koffi": "3.2.0"
+    "koffi": "3.3.7"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",

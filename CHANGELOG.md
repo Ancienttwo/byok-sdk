@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Dependencies** — Upgrade Koffi from 3.2.0 to 3.3.7 in client and keys, including the pinned Windows x64 native asset (#1511). Rebuild packaged Windows native assets with `copySdkNativeAssets`; the exported native-asset metadata now identifies the new addon.
+
 - **Dependencies** — Upgrade the core encryption-test reference implementation `@hpke/core` from 1.9.0 to 1.10.0 (#1511).
 
 - **Dependencies** — Upgrade `@modelcontextprotocol/client` from 2.3.1 to 2.4.0 in the client and MCP server example (#1511).
