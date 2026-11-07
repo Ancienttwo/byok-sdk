@@ -8,9 +8,10 @@ import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
-import { testScratchOwner } from './fixtures/execution-scratch';
+import { testExecutionScratch, testScratchOwner } from './fixtures/execution-scratch';
 import { testIngressBudget } from './fixtures/activity-ingress';
-import { projectRuntimeBoundaryFailure } from '../runtime-failure';
+import { projectRuntimeBoundaryFailure, RuntimeDisposalFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
+import * as processTree from '../adapters/process-tree';
 import { OpenCodeAdapter } from '../adapters/opencode/opencode-adapter';
 import { OPENCODE_RUNTIME_CAPABILITIES } from '../adapters/opencode/opencode-capabilities';
 import { opencodeVersionToken } from '../adapters/opencode/opencode-version';
@@ -24,7 +25,7 @@ import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { validateRuntimeDetectResult } from '../runtime-detection';
-import type { Session } from '../types';
+import type { MessageDraftDelta, Session } from '../types';
 
 const fake = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
 const models = ['fixture/first', 'fixture/next', 'fixture/third'];
@@ -276,6 +277,45 @@ it('settles an opening budget kill before disposing the native session', async (
   expect(() => process.kill(started.pid, 0)).toThrow();
 });
 
+it('retries a halt whose cleanup failed before signalling without retaining its rejected exit receipt', async () => {
+  const box = setup();
+  const scratch = await testExecutionScratch();
+  const release = vi.fn(() => scratch.release());
+  const real = processTree.disposeOwnedProcessTree;
+  let blocked = true;
+  let owned: Parameters<typeof real>[0] | undefined;
+  const spy = vi.spyOn(processTree, 'disposeOwnedProcessTree').mockImplementation(async options => {
+    if (options.label === 'opencode acp') {
+      owned = options;
+      if (blocked) throw new RuntimeDisposalFailure({ stage: 'signal', reason: 'injected signal failure' });
+    }
+    return real(options);
+  });
+  const adapter = new OpenCodeAdapter({ models, maxRetainedBytes: 1, resolveBin: () => ({ command: fake, source: 'env' }) });
+  let error: unknown;
+  const opening = startPreparedOperation(adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env, scratch: { ...scratch, release } })
+    .catch(value => { error = value; });
+  try {
+    await vi.waitFor(() => expect(error).toBeInstanceOf(RuntimeStartupDisposalFailure), { timeout: 1000 });
+    expect(() => process.kill(owned!.child.pid!, 0)).not.toThrow();
+    expect(release).not.toHaveBeenCalled();
+    // External recovery closes the root while the transport's own cleanup still fails.
+    await real(owned!);
+    blocked = false;
+    await (error as RuntimeStartupDisposalFailure).retryDisposal();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(box.facts().some(fact => fact.kind === 'close')).toBe(false);
+    expect(() => process.kill(owned!.child.pid!, 0)).toThrow();
+  } finally {
+    blocked = false;
+    spy.mockRestore();
+    if (owned) await real(owned);
+    await opening;
+    if (error instanceof RuntimeStartupDisposalFailure) await error.retryDisposal().catch(() => {});
+    await scratch.release();
+  }
+});
+
 it('retries failed v1 prompt cleanup and shares concurrent and successful disposal', async () => {
   const box = setup();
   const owned = createOwnedTerminalSpawn();
@@ -338,6 +378,28 @@ it('emits dsh tool use when complete native arguments arrive', async () => {
     events: [{ kind: 'tool_call_started', callId: 'c', tool: 'shell' }],
   } } as never, event => events.push(event), () => {});
   expect(events).toEqual([{ type: 'tool_use', tool: 'shell', toolCallId: 'c', input: { command: 'sleep 600' } }]);
+});
+
+it.each(['aborted', 'failed', 'completed'])('drains pending ACP calls once with their latest input when a turn is %s', async kind => {
+  const { OpenCodeProjection } = await import('../adapters/opencode/projection');
+  const { GrokProjection } = await import('../adapters/grok/projection');
+  const { AgyProjection } = await import('../adapters/antigravity/projection');
+  for (const projection of [new OpenCodeProjection('root'), new GrokProjection('root'), new AgyProjection('root', new Map())]) {
+    const events: AgentEvent[] = [];
+    const emit = (event: AgentEvent | MessageDraftDelta) => { if (event.type !== 'message_draft_delta') events.push(event); };
+    const send = (update: object, derived: object[]) => projection.consume({ kind: 'frame', sessionId: 'root', agentPath: [], body: { native: { update }, events: derived } } as never, emit,
+      () => { expect(events.filter(event => event.type === 'tool_use')).toHaveLength(2); });
+    send({ toolCallId: 'pending', status: 'pending', rawInput: {} }, [{ kind: 'tool_call_started', callId: 'pending', tool: 'shell' }]);
+    const input = { command: 'pwd', cwd: '/repo' };
+    send({ toolCallId: 'pending', status: 'pending', rawInput: input }, []);
+    send({ toolCallId: 'running', status: 'in_progress', rawInput: input }, [{ kind: 'tool_call_started', callId: 'running', tool: 'shell' }]);
+    send({}, [{ kind: 'turn_ended', outcome: { kind } }]);
+    send({}, [{ kind: 'turn_ended', outcome: { kind } }]);
+    expect(events.filter(event => event.type === 'tool_use')).toEqual([
+      { type: 'tool_use', tool: 'shell', toolCallId: 'running', input },
+      { type: 'tool_use', tool: 'shell', toolCallId: 'pending', input },
+    ]);
+  }
 });
 
 it('flushes pending text before a directly completed ACP call', async () => {

@@ -77,6 +77,8 @@ export class OpenCodeProjection {
         }
         case 'turn_ended': {
           if (!root) break;
+          this.buffered.drain(emit);
+          this.tools.clear();
           const outcome = object(event.outcome);
           end(outcome?.kind === 'failed'
             ? { kind: 'failed', failure: runtimeFailureClassOf(outcome.failure), reason: typeof outcome.reason === 'string' ? outcome.reason : 'opencode turn failed', fromText: outcome.fromText === true }
