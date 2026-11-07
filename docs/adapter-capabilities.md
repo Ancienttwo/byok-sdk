@@ -49,6 +49,14 @@ replay tests do not advertise a platform. The compatibility floors are v1
 A Host can supply a version policy; unrecognized, below-floor and prerelease
 tokens still fail the executable compatibility gate.
 
+Native qualification results and the distinction between native CLI
+availability and adapter acceptance are recorded in the [PR 3 canary evidence](researches/2026-11-08-opencode-native-qualification.md).
+An installed CLI, matching model readback or passing replay suite alone does
+not enable onboarding. Every advertised OS/line combination needs completion,
+resume and cwd refusal, permission refusal, cancellation and disposal evidence,
+including no surviving `serve --service` process. A pre-output rate-limit
+fallback that cannot be provoked honestly stays covered by replay only.
+
 The Host supplies `runtimes.opencode.models`, an ordered list of native model
 ids, and optionally `executable`. There is no SDK model default, price check,
 model listing, automatic installation, upgrade or cross-major migration.
@@ -89,6 +97,9 @@ on npm and `https://opencode.ai/install`; v2 uses `@opencode/cli` and
 `~/.opencode/bin/opencode`; choose and retain one line. Native Windows npm
 command shims use the existing shell-free invocation resolver and owned job
 lifecycle. Neither a Linux nor WSL run qualifies native Windows.
+Current [upstream installation guidance](https://opencode.ai/docs/) recommends
+a standalone v2 Windows CLI binary and does not support Windows package managers.
+Retain the chosen line; do not overwrite a v1 installation to perform a v2 canary.
 
 ## Qualification notes
 

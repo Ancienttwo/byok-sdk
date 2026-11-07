@@ -17,6 +17,13 @@ runtime as the OS user who will run the daemon. For a source checkout, run
 On Linux, the daemon needs the user's unlocked Secret Service session for
 pairing. Device credentials belong in OS credential storage, never this JSON.
 
+OpenCode keyless onboarding remains gated on native OS/line qualification.
+Installing its CLI or supplying `runtimes.opencode.models` does not enable it
+while the adapter advertises no platforms. Follow the
+[OpenCode qualification contract](adapter-capabilities.md#opencode-implementation-and-qualification-1538)
+and its native evidence before selecting it for a device; the SDK does not
+install, upgrade or switch release lines.
+
 For a complete local Host, start the [basic example](../examples/basic/README.md)
 with `bun run --filter @byok-sdk/example-basic dev`, then open
 `http://localhost:8787`. Its default product ID matches the examples below.

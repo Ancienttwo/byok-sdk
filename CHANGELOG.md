@@ -4,6 +4,8 @@
 
 - **Added** — Opt-in `OpenCodeAdapter` (`harnessId: opencode`) runs native OpenCode v1/v2 with explicit Host model candidates, native model readback, one observable pre-output rate-limit fallback and owned process cleanup (#1538). It inherits user context, MCP configuration and native transcript storage. Platform and Host MCP qualification remain pending native canaries.
 
+- **Documentation** — Record [native OpenCode onboarding qualification evidence](docs/researches/2026-11-08-opencode-native-qualification.md) per OS and version line, with explicit model readback and process cleanup gates. Installation and replay coverage alone do not qualify a combination for dispatch (#1538).
+
 - **Added** — `AgyAdapter` supports steering an active turn ([#1492](https://github.com/Ancienttwo/byok-sdk/issues/1492)).
 
 - **Added** — K8 dreaming requests native session input for its dream window when the device advertises support; `dreaming.nativeSessions: false` disables the request ([#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526)).
