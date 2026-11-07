@@ -58,7 +58,7 @@ rate limit before text, reasoning or tool output, it retries once with the next
 candidate after reaping the first process tree, resuming the same admitted native
 session and verifying its model readback. It never creates a replacement
 session; an unsupported resume or model switch preserves the rate-limit failure.
-A `progress` event contains a
+A non-terminal `error` diagnostic event contains a
 JSON switch record with `event: "model_switch"`, `from`, `to` and
 `reason: "rate_limited"`. A second rate limit or any preceding output prevents
 another switch. Text-classified failure categories remain `unknown` in terminal
@@ -79,8 +79,9 @@ toolsets are rejected before launch until both lines pass qualification. Native
 user MCP remains inherited. V2 `execute` calls remain opaque without a proven
 native tool identity; the SDK never derives MCP names from code. Child call IDs
 carry the native child session id to avoid merging their calls with root calls.
-The SDK's flat event schema has no parent-graph field; no spawning-tool edge is
-invented. Usage fields are emitted only when OAR supplies native counters.
+Child-session text is excluded from root answer progress. The SDK's flat event
+schema has no parent-graph field; no spawning-tool edge is invented. Usage fields
+are emitted only when OAR supplies native counters.
 
 Install the chosen line as an operator action. OpenCode v1 uses `opencode-ai`
 on npm and `https://opencode.ai/install`; v2 uses `@opencode/cli` and

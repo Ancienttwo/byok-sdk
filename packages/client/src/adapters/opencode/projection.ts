@@ -25,7 +25,7 @@ export class OpenCodeProjection {
         case 'text_delta':
           if (typeof event.text === 'string' && event.text.length > 0) {
             this.output = true;
-            emit({ type: 'progress', text: event.text });
+            if (root) emit({ type: 'progress', text: event.text });
           }
           break;
         case 'reasoning':

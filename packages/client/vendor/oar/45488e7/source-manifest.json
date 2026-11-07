@@ -468,8 +468,8 @@
       "path": "runtimes/opencode/session.ts",
       "sourcePath": "packages/oar/src/runtimes/opencode/session.ts",
       "upstreamSha256": "177bdb2de8c2f2acb2732ec00bca50918d95a4d06c907ffeb527f37d62a3e551",
-      "vendoredSha256": "b69cde0001c3ff20c56252921742f84c47d55e94b6b5633d18b13e9db3a3ea3b",
-      "delta": "Inject SDK-owned line and terminal processes, explicit environment and hooks; require the probed release token; run bounded prompt configuration queries through the owned terminal seam without sealSession."
+      "vendoredSha256": "e0e6227ce2db995e44caf5a19187a496e75aa3929f620b7b5950d2a89969e1cd",
+      "delta": "Inject SDK-owned line and terminal processes, explicit environment and hooks; require the probed release token; run bounded prompt configuration queries through the owned terminal seam without sealSession. Clear the prompt-cleanup disposal cache on rejection so later disposal retries reclaim terminals, while concurrent and successful calls share the cached promise."
     },
     {
       "path": "runtimes/opencode/version.ts",

@@ -81,7 +81,11 @@ function withPromptCleanup(session: Session, cleanup: () => Promise<void>): Sess
       await cleanup();
     }
   };
-  return { ...session, dispose: async () => { disposal ??= release(); await disposal; } };
+  return { ...session, dispose: async () => {
+    // BYOK change: a failed reclaim must remain retryable; concurrent callers still share the in-flight release.
+    disposal ??= release().catch((error: unknown) => { disposal = undefined; throw error; });
+    await disposal;
+  } };
 }
 
 // BYOK: processes, environment and observation are owned by the SDK ACP bridge.

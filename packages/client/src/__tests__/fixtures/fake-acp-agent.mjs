@@ -102,6 +102,7 @@ async function prompt(message) {
     call(false); call(true);
     update({ sessionUpdate: 'tool_call_update', toolCallId: 'same-id', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'child result' } }], _meta: { 'opencode/child-session': { id: 'native-child', parentID: SESSION, depth: 1 } } });
     update({ sessionUpdate: 'usage_update', used: 321, size: 1000 });
+    update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'child private text' }, _meta: { 'opencode/child-session': { id: 'native-child', parentID: SESSION, depth: 1 } } });
     text('done'); result(message.id, { stopReason: 'end_turn' }); return;
   }
   if (input === 'hold' || process.env.FAKE_ACP_HANG === '1') { pending.set(message.id, 'hold'); return; }
@@ -227,6 +228,11 @@ async function prompt(message) {
     result(message.id, answer());
     return;
   }
+  if (input === 'opencode-terminal-hang') {
+    const created = await ask('terminal/create', { sessionId: SESSION, command: process.execPath, args: ['-e', 'setInterval(()=>{},1000)'], env: [] });
+    log({ kind: 'terminal', created });
+    pending.set(message.id, 'silent'); return;
+  }
   if (input === 'terminal' || input === 'terminal-hang' || input === 'terminal-compat') {
     // Grok sends one quoted shell line as `command` with no `args`.
     const command = input === 'terminal'
@@ -257,6 +263,7 @@ function request(message) {
     case 'initialize':
       log({ kind: 'initialize', params: message.params });
       if (process.env.FAKE_ACP_INITIALIZE === 'exit') process.exit(1);
+      if (process.env.FAKE_ACP_INITIALIZE === 'auth') { error(message.id, -32000, 'Authentication required'); return; }
       if (process.env.FAKE_ACP_INITIALIZE === 'error') { error(message.id, -32603, 'Internal error'); return; }
       result(message.id, {
         protocolVersion: 1,

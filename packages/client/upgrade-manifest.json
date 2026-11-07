@@ -18,7 +18,7 @@
     {
       "id": "opencode-native-runtime",
       "impact": "additive",
-      "summary": "Opt-in OpenCodeAdapter (harnessId opencode) and runtimes.opencode.models select an explicit Host candidate through native ACP, refuse mismatching model readback, and retry once on a pre-output rate limit with a progress model_switch record. Native user context, MCP and transcript storage are inherited; all isolation guarantees are false. RuntimeDetectResult.rawVersion retains local probe output separately from normalized version. Platform canaries and task-scoped Host MCP qualification remain pending; no platform or default qualified version is advertised.",
+      "summary": "Opt-in OpenCodeAdapter (harnessId opencode) and runtimes.opencode.models select an explicit Host candidate through native ACP, refuse mismatching model readback, and retry once on a pre-output rate limit with a non-terminal error diagnostic model_switch record that is excluded from reply text. Startup failures retain their start phase and native classification. Native user context, MCP and transcript storage are inherited; all isolation guarantees are false. RuntimeDetectResult.rawVersion retains local probe output separately from normalized version. Platform canaries and task-scoped Host MCP qualification remain pending; no platform or default qualified version is advertised.",
       "migration": "docs/adapter-capabilities.md#opencode-implementation-and-qualification-1538",
       "items": [
         "config:runtimes",

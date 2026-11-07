@@ -10,6 +10,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { projectRuntimeBoundaryFailure } from '../runtime-failure';
 import { OpenCodeAdapter } from '../adapters/opencode/opencode-adapter';
 import { OPENCODE_RUNTIME_CAPABILITIES } from '../adapters/opencode/opencode-capabilities';
 import { opencodeVersionToken } from '../adapters/opencode/opencode-version';
@@ -20,7 +21,7 @@ import { npmNodeShim } from './fixtures/npm-node-shim';
 import { check, defineRuntimeCases } from './runtime-contract/contract';
 import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/45488e7/runtimes/opencode/session';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
-import { spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
+import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { validateRuntimeDetectResult } from '../runtime-detection';
 import type { Session } from '../types';
@@ -98,8 +99,8 @@ for (const version of ['1.18.35', 'opencode v2.0.26']) {
       expect(session.sessionRef).toBe(published);
       expect(box.facts().filter(fact => fact.kind === 'native-session').map(fact => fact.sessionId)).toEqual([published]);
       expect(box.facts().filter(fact => fact.kind === 'open' && fact.method === 'session/resume').map(fact => fact.params.sessionId)).toEqual([published]);
-      const switchEvent = events.find(event => event.type === 'progress' && event.text.startsWith('{'));
-      expect(switchEvent?.type === 'progress' && JSON.parse(switchEvent.text)).toEqual({ event: 'model_switch', from: models[0], to: models[1], reason: 'rate_limited' });
+      const switchEvent = events.find(event => event.type === 'error');
+      expect(switchEvent?.type === 'error' && JSON.parse(switchEvent.message)).toEqual({ event: 'model_switch', from: models[0], to: models[1], reason: 'rate_limited' });
       expect(events).toContainEqual({ type: 'progress', text: 'fallback reply' });
       expect(box.facts().filter(fact => fact.kind === 'config').map(fact => fact.params.value)).toEqual(models.slice(0, 2));
     })],
@@ -130,6 +131,7 @@ it('keeps v2 child calls distinct and execute opaque, and emits only native usag
     { type: 'tool_use', tool: 'execute', toolCallId: 'native-child:same-id', input: { code: 'host.lookup()' } },
   ]);
   expect(events).toContainEqual({ type: 'usage', contextTokens: 321, contextWindow: 1000 });
+  expect(events.filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'done' }]);
 });
 
 it.each(['appendSystemPrompt', 'systemPrompt'] as const)('refuses v2 %s before launch', async option => {
@@ -222,7 +224,7 @@ it('keeps the admitted native identity in task.complete and persisted terminal e
     writeFileSync(gate, 'release');
     await vi.waitFor(() => expect(sent.some(envelope => envelope.type === 'task.complete')).toBe(true));
     const terminal = sent.find(envelope => envelope.type === 'task.complete')!;
-    expect(terminal.payload).toMatchObject({ sessionRef: published });
+    expect(terminal.payload).toMatchObject({ sessionRef: published, finalMessage: 'fallback reply' });
     expect(recorded).toHaveBeenCalledTimes(1);
     expect(recorded.mock.calls[0]![0].sessionRef).toBe(published);
     await expect(handoffs.get(recorded.mock.calls[0]![0])).resolves.toMatchObject({ sessionRef: published, terminalCause: 'complete' });
@@ -246,4 +248,52 @@ it.each([
   expect(session.sessionRef).toBe(admitted);
   expect(box.facts().filter(fact => fact.kind === 'native-session').map(fact => fact.sessionId)).toEqual([admitted]);
   expect(box.facts().filter(fact => fact.kind === 'prompt')).toHaveLength(1);
+});
+
+
+it('normalizes startup failures to start while retaining native classification', async () => {
+  for (const { env, category, failure } of [
+    { env: { FAKE_ACP_INITIALIZE: 'error' }, category: 'infrastructure', failure: 'unknown' },
+    { env: { FAKE_ACP_INITIALIZE: 'auth' }, category: 'authority', failure: 'auth' },
+    { env: { FAKE_ACP_MODEL_READBACK: 'fixture/wrong' }, category: 'authority', failure: 'unknown' },
+  ]) {
+    const box = setup('1.18.35', env as Record<string, string>);
+    const error = await box.start('hello').then(() => undefined, error => error);
+    expect(error).toMatchObject({ phase: 'start', category, failure: { class: failure } });
+    expect(projectRuntimeBoundaryFailure(error, 'start')).toMatchObject({ contractViolation: false, failure: { class: failure } });
+  }
+});
+
+it('retries failed v1 prompt cleanup and shares concurrent and successful disposal', async () => {
+  const box = setup();
+  const owned = createOwnedTerminalSpawn();
+  const gate = Promise.withResolvers<void>();
+  let terminal: ReturnType<typeof spawnOwnedTerminalProcess> | undefined;
+  let reclaims = 0;
+  const raw = await opencodeSession(spawnOwnedLineProcess, (command, args, options) => {
+    terminal = owned(command, args, options);
+    const current = terminal;
+    return { ...current, dispose: async () => {
+      reclaims += 1;
+      if (reclaims === 1) await gate.promise;
+      await current.dispose();
+    } };
+  }, { kind: 'available', via: 'executable', command: fake, version: '1.18.35' },
+  { cwd: box.cwd, env: box.env, appendSystemPrompt: 'required reader persona' });
+  try {
+    await raw.prompt('opencode-terminal-hang');
+    await vi.waitFor(() => expect(box.facts().some(fact => fact.kind === 'terminal')).toBe(true));
+    const concurrent = Promise.allSettled([raw.dispose(), raw.dispose()]);
+    await vi.waitFor(() => expect(reclaims).toBe(1));
+    gate.reject(new Error('temporary terminal reclaim failure'));
+    expect((await concurrent).map(result => result.status)).toEqual(['rejected', 'rejected']);
+    await raw.dispose();
+    expect(reclaims).toBe(2);
+    await raw.dispose();
+    expect(reclaims).toBe(2);
+  } finally {
+    gate.resolve();
+    await raw.dispose().catch(() => {});
+    await terminal?.dispose();
+  }
 });

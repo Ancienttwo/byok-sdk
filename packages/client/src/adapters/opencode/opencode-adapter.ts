@@ -1,7 +1,7 @@
 import type { spawn as nodeSpawn } from 'node:child_process';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { AsyncQueue } from '../../util/async-queue';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeDisposalFailure, runtimeFailureClassOf } from '../../runtime-failure';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeDisposalFailure, runtimeFailureClassOf, type RuntimeFailurePhase } from '../../runtime-failure';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
@@ -35,7 +35,7 @@ export interface OpenCodeAdapterOptions {
 }
 
 const authority = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
-const infrastructure = (reason: string) => new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason });
+const infrastructure = (reason: string, phase: RuntimeFailurePhase = 'run') => new RuntimeExecutionFailure({ phase, category: 'infrastructure', retry: 'non-retryable', reason });
 
 /** Native OpenCode ACP, addressed through harnessId `opencode`; never touches user configuration or login storage. */
 export class OpenCodeAdapter implements RuntimeAdapter {
@@ -107,10 +107,15 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     } catch (error) {
       try { await session.close(); }
       catch (disposal) { throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal }); }
-      if (isRuntimeExecutionFailure(error)) throw error;
+      if (isRuntimeExecutionFailure(error)) {
+        if (error.phase === 'start') throw error;
+        throw new RuntimeExecutionFailure({ phase: 'start', category: error.category, retry: error.retry, reason: error.message, failure: error.failure }, { cause: error });
+      }
       const acp = await import('#byok-acp-runtime');
       if (error instanceof acp.UnsupportedOptionError || error instanceof acp.SessionNotFoundError) throw authority(error.message);
-      throw infrastructure(error instanceof Error ? error.message : 'opencode start failed');
+      if (error instanceof acp.RuntimeFailureError) throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable',
+        reason: error.message, failure: { class: runtimeFailureClassOf(error.failure) } }, { cause: error });
+      throw infrastructure(error instanceof Error ? error.message : 'opencode start failed', 'start');
     }
   }
 }
@@ -242,7 +247,7 @@ class OpenCodeSession implements Session {
             throw failure(error);
           }
           if (this.closing || this.cancelled) return;
-          this.queue.push({ type: 'progress', text: JSON.stringify({ event: 'model_switch', from: this.options.models[0], to: this.options.models[1], reason: 'rate_limited' }) });
+          this.queue.push({ type: 'error', message: JSON.stringify({ event: 'model_switch', from: this.options.models[0], to: this.options.models[1], reason: 'rate_limited' }) });
           await this.prompt();
           await this.finish(1);
           return;
