@@ -81,6 +81,15 @@ function mapPiAssistantUsage(msg: PiRpcMessage): Extract<AgentEvent, { type: 'us
   };
 }
 
+/** Provider failure evidence belongs to the same assistant message as usage. */
+export function piAssistantError(msg: PiRpcMessage): string | undefined {
+  if (msg.type !== 'message_end') return undefined;
+  const message = msg.message as { role?: unknown; stopReason?: unknown; errorMessage?: unknown } | undefined;
+  if (message?.role !== 'assistant' || message.stopReason !== 'error') return undefined;
+  return typeof message.errorMessage === 'string' && message.errorMessage.length > 0
+    ? message.errorMessage : 'pi provider error';
+}
+
 /**
  * Map official Pi RPC frames into BYOK's runtime-neutral event contract.
  *
