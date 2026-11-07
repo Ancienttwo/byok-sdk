@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { HostOfferPlainPayloadSchema } from '@byok-sdk/protocol';
 import type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { HostLedger, hash, occurrenceIntentKey, setLifecycle, type ExecutionTemplate, type Routine } from '@byok-sdk/server/execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
@@ -37,8 +38,11 @@ function offlineDream(nativeSessions?: boolean, harnessOnly = false): AgentExecu
 it('freezes the default native session request with the dream window', () => {
   expect(offlineDream().payload.nativeSessions).toEqual({ fromMs: WINDOW_START, toMs: WINDOW_END, ifAdvertised: true });
 });
-it('promotes a harness-only Bot template with the native session request', () => {
-  expect(offlineDream(true, true).payload).toMatchObject({ harnessId: 'test-harness', nativeSessions: { fromMs: WINDOW_START, toMs: WINDOW_END, ifAdvertised: true } });
+it('promotes a valid harness-only Bot template without a native session request', () => {
+  const { payload } = offlineDream(undefined, true);
+  expect(payload.harnessId).toBe('test-harness');
+  expect(payload.nativeSessions).toBeUndefined();
+  expect(HostOfferPlainPayloadSchema.safeParse(payload).success).toBe(true);
 });
 async function open(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
   fixture ??= await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });

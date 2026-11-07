@@ -125,7 +125,7 @@ function chooseModel(policy: DreamPolicy, models: Readonly<Record<string, Execut
 function dreamExecution(base: ExecutionTemplate, bot: ExecutionTemplate, instruction: string, maxDurationMs: number, window: { fromMs: number; toMs: number }, nativeSessions: boolean): ExecutionTemplate {
   const { messageEgress: _egress, requiredToolsets: _toolsets, agentMemoryCommit: _commit, homeAccess: _home, preparation: _preparation, nativeSessions: _nativeSessions, ...payload } = base.payload;
   return { deviceId: bot.deviceId, payload: { ...payload, instruction, session: { mode: 'fresh' }, agentRef: bot.payload.agentRef, agentMemory: 'none',
-    limits: { ...payload.limits, maxDurationMs }, terminalProjection: { mode: 'none' }, ...(nativeSessions ? { nativeSessions: { ...window, ifAdvertised: true } } : {}) } };
+    limits: { ...payload.limits, maxDurationMs }, terminalProjection: { mode: 'none' }, ...(nativeSessions && payload.harnessId === undefined ? { nativeSessions: { ...window, ifAdvertised: true } } : {}) } };
 }
 /** The pack fills what `instructionMaxBytes` leaves after the fixed text of the instruction. */
 function dreamInstruction(rows: readonly (Turn | ContextTurn)[], window: { fromMs: number; toMs: number }, maxDurationMs: number, instructionMaxBytes: number): string {
