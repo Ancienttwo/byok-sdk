@@ -180,7 +180,10 @@ class OpenCodeSession implements Session {
         // OAR reaps a refused opening before rejecting it; that requested cleanup is not an execution exit.
         if (this.child === child && !this.ending && child.exitedOnItsOwn) this.halt(infrastructure('opencode acp exited'));
       }, error => { if (this.child === child) this.halt(error); });
-      return { ...child, onLine: handler => child.onLine(line => { if (!this.failure) handler(line); }) };
+      // ACP consumes exit notifications; owned disposal separately owns retryable
+      // quiescence failures, which must not permanently reject ACP's exit state.
+      const exited = new Promise<number | null>(resolve => child.onExit(resolve));
+      return { ...child, exited, onLine: handler => child.onLine(line => { if (!this.failure) handler(line); }) };
     }, (bin, args, opts) => {
       const spawnTerminal = createOwnedTerminalSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn });
       if (opts.shell) return spawnTerminal(bin, args, opts);
@@ -268,10 +271,14 @@ class OpenCodeSession implements Session {
       try {
         try { this.child?.observeDescendants(); }
         finally {
-          // A halt can kill during opening, before ACP observes the exit.
-          // Settle that exit before disposal can send session/close.
-          try { await this.haltExit; }
-          finally { await this.raw?.dispose(); }
+          if (this.haltExit !== undefined) {
+            // kill() can fail before signalling. Retry owned disposal before waiting
+            // for exit, and let its fresh receipt supersede a rejected exit receipt.
+            await this.child?.dispose();
+            await this.haltExit.catch(() => {});
+          }
+          // ACP must observe a halted process's exit before it can send session/close.
+          await this.raw?.dispose();
         }
       }
       finally { await this.child?.dispose(); }

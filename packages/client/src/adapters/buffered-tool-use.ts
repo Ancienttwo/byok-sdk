@@ -27,4 +27,8 @@ export class BufferedToolUse {
     this.observe(id, undefined, false, true, emit);
     this.calls.delete(id);
   }
+
+  drain(emit: (event: AgentEvent) => void): void {
+    for (const id of this.calls.keys()) this.finish(id, emit);
+  }
 }
