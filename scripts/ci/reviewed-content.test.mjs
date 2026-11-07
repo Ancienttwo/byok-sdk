@@ -693,6 +693,21 @@ test('#975 slice 5: the K8 manifest admits the switch entry only on top of the e
   f.base = git('rev-parse', 'HEAD').trim();
   f.write(path, { ...manifest, exports: { ...migrated, ...sw, ...lTestHost, ...message } });
   assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
+  // #1516: exactly the dream and priority entries together, preserving every earlier export.
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the message rule entry');
+  f.base = git('rev-parse', 'HEAD').trim();
+  const current = { ...migrated, ...sw, ...lTestHost, ...message };
+  const dreams = { './dream': './src/dream.ts', './rules/priority': './src/rules/priority.ts' };
+  f.write(path, { ...manifest, exports: { ...current, ...dreams } });
+  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
+  for (const changed of [
+    { ...current, './dream': './src/dream.ts' },
+    { ...current, ...dreams, './rules/priority': './src/host.ts' },
+    { ...current, ...dreams, './host': './src/host.ts' },
+  ]) {
+    f.write(path, { ...manifest, exports: changed });
+    assert.throws(() => selectImpact([path], f), /more than/);
+  }
 });
 
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
