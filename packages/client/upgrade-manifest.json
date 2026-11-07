@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "631c150e12d7cfd7f3f4882e8110eac9af7657b0c817fa43c88273075f75c6e1"
+    "snapshotSha256": "415011125c6ebd89b71745e56f89bc3395bfd6f62e987e315670b8dbb98be99e"
   },
   "configFields": {
     "status": "tracked",
@@ -74,15 +74,41 @@
         "export:@byok-sdk/client#sdkDistributionManifest",
         "export:@byok-sdk/client#sdkNativeAssetTargets"
       ]
+    },
+    {
+      "id": "linux-secret-service-store",
+      "impact": "additive",
+      "summary": "LinuxSecretServiceSecretStore adds Linux provider credential custody and the Pi provider launcher selects it on Linux (#1515). Secrets reach secret-tool on stdin only; unavailable Secret Service fails closed. Trusted system-tool resolution moves to the Node-only core/system-tool entry. The existing client SystemToolUnavailableError export re-exports the same core class with unchanged public shape; its declaration digest changes with the source move. Core root remains free of Node builtins.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1515",
+      "items": [
+        "entry:@byok-sdk/core/system-tool",
+        "export:@byok-sdk/client#SystemToolUnavailableError",
+        "export:@byok-sdk/core/system-tool#SystemToolHost",
+        "export:@byok-sdk/core/system-tool#SystemToolUnavailableError",
+        "export:@byok-sdk/core/system-tool#resolveSystemTool",
+        "export:@byok-sdk/core/system-tool#systemExecutable",
+        "export:@byok-sdk/keys#LinuxSecretServiceSecretStore",
+        "export:@byok-sdk/keys#LinuxSecretServiceSecretStoreOptions"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "entry:@byok-sdk/core/system-tool",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
     {
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=84817467889ca31d",
       "after": "K8 0.0.1 src-sha256=087f672853560d06",
       "entry": "k8-dream-compaction-veto"
+    },
+    {
+      "item": "export:@byok-sdk/client#SystemToolUnavailableError",
+      "change": "changed",
+      "entry": "linux-secret-service-store"
     },
     {
       "item": "export:@byok-sdk/client#sdkDistributionManifest",
@@ -128,6 +154,36 @@
       "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
       "change": "changed",
       "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/core/system-tool#SystemToolHost",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/core/system-tool#SystemToolUnavailableError",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/core/system-tool#resolveSystemTool",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/core/system-tool#systemExecutable",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/keys#LinuxSecretServiceSecretStore",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/keys#LinuxSecretServiceSecretStoreOptions",
+      "change": "added",
+      "entry": "linux-secret-service-store"
     },
     {
       "item": "export:@byok-sdk/protocol#AGENT_MEMORY_MAX_FILE_BYTES",

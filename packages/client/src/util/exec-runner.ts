@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { systemExecutable } from './system-tool';
+import { systemExecutable } from '@byok-sdk/core/system-tool';
 
 /**
  * Result of running an external command, regardless of its exit code.
@@ -57,7 +57,7 @@ export type Runner = (command: string, args: string[]) => Promise<RunResult>;
  *
  * A bare `command` is a system tool and starts from its trusted location,
  * never from `PATH`; one that has none rejects with
- * `SystemToolUnavailableError` (`./system-tool.ts`, #1304).
+ * `SystemToolUnavailableError` (`@byok-sdk/core/system-tool`, #1304).
  */
 export const defaultRunner: Runner = (command, args) =>
   new Promise((resolve, reject) => {

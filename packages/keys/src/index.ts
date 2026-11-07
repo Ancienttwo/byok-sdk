@@ -108,6 +108,9 @@ export {
 } from './macos-keychain';
 export type { MacOsKeychainSecretStoreOptions } from './macos-keychain';
 
+export { LinuxSecretServiceSecretStore } from './linux-secret-service';
+export type { LinuxSecretServiceSecretStoreOptions } from './linux-secret-service';
+
 export { WindowsCredentialManagerSecretStore } from './windows-credential-manager';
 export type { WindowsCredentialManagerSecretStoreOptions } from './windows-credential-manager';
 

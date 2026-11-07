@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed** — `@byok-sdk/keys` `runCommand` now returns exit code 127 on signal termination or a stdin error, instead of reporting exit code 1 for signal termination or crashing on a stdin error.
+
 - **Dependencies** — Upgrade the bundled `pi-web-access` extension from 0.45.0 to 0.47.0 (#1511), including optional search providers, proxy routing fixes, PDF text results, and platform-native temporary clone paths.
 
 - **Dependencies** — Upgrade Koffi from 3.2.0 to 3.3.7 in client and keys, including the pinned Windows x64 native asset (#1511). Rebuild packaged Windows native assets with `copySdkNativeAssets`; the exported native-asset metadata now identifies the new addon.
@@ -11,6 +13,8 @@
 - **Dependencies** — Upgrade `@modelcontextprotocol/client` from 2.3.1 to 2.4.0 in the client and MCP server example (#1511).
 
 - **Added** — `ByokServer.tasks.activity` and `tasks.approvalTimeline` expose the embedded server's tenant-bound cloud tails for direct ui-runtime replay, including activity cursor reads (#1513).
+
+- **Added** — `@byok-sdk/keys` provides `LinuxSecretServiceSecretStore` and the Pi provider launcher uses it on Linux (#1515). Secrets reach `secret-tool` through stdin; unavailable Secret Service fails closed. Client and keys share trusted tool resolution through the Node-only `@byok-sdk/core/system-tool` entry.
 
 - **Added** — `@byok-sdk/protocol` and its `/constants` entry export `AGENT_MEMORY_MAX_FILE_BYTES` (256 KiB) and `AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES` (512) for Host memory prechecks (#1507). The client uses these shared limits; validation behavior is unchanged.
 

@@ -1,4 +1,4 @@
-import { systemExecutable } from '../util/system-tool';
+import { systemExecutable } from '@byok-sdk/core/system-tool';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import * as path from 'node:path';

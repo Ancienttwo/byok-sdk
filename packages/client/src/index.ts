@@ -568,7 +568,7 @@ export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnviron
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 // #1304: a service-lifecycle or `icacls` step whose system tool has no trusted location rejects with this.
-export { SystemToolUnavailableError } from './util/system-tool';
+export { SystemToolUnavailableError } from '@byok-sdk/core/system-tool';
 
 export { PiAdapter } from './adapters/pi/pi-adapter';
 export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';

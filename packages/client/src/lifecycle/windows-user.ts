@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { defaultRunner, type Runner } from '../util/exec-runner';
-import { resolveSystemTool } from '../util/system-tool';
+import { resolveSystemTool } from '@byok-sdk/core/system-tool';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
 import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types';
 import { cmdQuote, generateWindowsUserLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath, serviceStateDir, ServiceUnitError } from './service-unit';

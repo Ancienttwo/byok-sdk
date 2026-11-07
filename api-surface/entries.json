@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2294336,
+      "budgetBytes": 2294429,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -22,12 +22,14 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -42,6 +44,7 @@
         "node:url",
         "node:util",
         "node:zlib",
+        "path",
         "zod"
       ],
       "lazyImports": [
@@ -68,6 +71,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -81,7 +85,8 @@
           "node:stream",
           "node:url",
           "node:util",
-          "node:zlib"
+          "node:zlib",
+          "path"
         ],
         "thirdParty": [
           "node:crypto"
@@ -115,7 +120,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 499783,
+      "budgetBytes": 499906,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -132,7 +137,9 @@
         "packages/client/dist/adapters/index.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol/constants",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -145,7 +152,8 @@
         "node:path",
         "node:stream",
         "node:url",
-        "node:util"
+        "node:util",
+        "path"
       ],
       "lazyImports": [
         "#byok-acp-runtime",
@@ -158,6 +166,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -170,7 +179,8 @@
           "node:path",
           "node:stream",
           "node:url",
-          "node:util"
+          "node:util",
+          "path"
         ],
         "thirdParty": []
       },
@@ -227,7 +237,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 123084,
+      "budgetBytes": 123349,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -245,12 +255,15 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/system-tool",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
         "node:net",
         "node:os",
         "node:path",
+        "path",
         "zod"
       ],
       "lazyImports": [],
@@ -261,12 +274,14 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
           "node:net",
           "node:os",
-          "node:path"
+          "node:path",
+          "path"
         ],
         "thirdParty": []
       },
@@ -437,7 +452,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 479062,
+      "budgetBytes": 479185,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -454,7 +469,9 @@
         "packages/client/dist/testing/index.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol/constants",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -467,7 +484,8 @@
         "node:path",
         "node:stream",
         "node:url",
-        "node:util"
+        "node:util",
+        "path"
       ],
       "lazyImports": [
         "#byok-acp-runtime",
@@ -480,6 +498,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -492,7 +511,8 @@
           "node:path",
           "node:stream",
           "node:url",
-          "node:util"
+          "node:util",
+          "path"
         ],
         "thirdParty": []
       },
@@ -567,7 +587,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Hermes session runtime; loaded only when starting an execution",
-      "budgetBytes": 22899,
+      "budgetBytes": 23164,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -584,11 +604,14 @@
         "packages/client/dist/adapters/hermes/hermes-session-runtime.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/system-tool",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
         "node:os",
-        "node:path"
+        "node:path",
+        "path"
       ],
       "lazyImports": [],
       "thirdParty": [],
@@ -596,11 +619,13 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
           "node:os",
-          "node:path"
+          "node:path",
+          "path"
         ],
         "thirdParty": []
       },
@@ -611,7 +636,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 537231,
+      "budgetBytes": 537346,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -628,6 +653,7 @@
         "packages/client/dist/bin/pi-runtime-host.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
@@ -642,6 +668,7 @@
         "@earendil-works/pi-durable/tools",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
+        "fs",
         "node:async_hooks",
         "node:child_process",
         "node:crypto",
@@ -656,6 +683,7 @@
         "node:string_decoder",
         "node:url",
         "node:util",
+        "path",
         "pi-web-access/dist/index.js",
         "typebox",
         "zod"
@@ -725,6 +753,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:async_hooks",
           "node:child_process",
           "node:crypto",
@@ -738,7 +767,8 @@
           "node:stream/promises",
           "node:string_decoder",
           "node:url",
-          "node:util"
+          "node:util",
+          "path"
         ],
         "thirdParty": [
           "assert",
@@ -835,12 +865,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 33,
+          "line": 34,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 33,
+          "line": 34,
           "rule": "opaque import()"
         },
         {
@@ -885,7 +915,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 495101,
+      "budgetBytes": 495216,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -902,6 +932,7 @@
         "packages/client/dist/bin/pi-runtime-host-sealed.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
@@ -1636,7 +1667,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1404,
+      "budgetBytes": 1542,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1713,11 +1744,50 @@
       ]
     }
   },
+  "@byok-sdk/core/system-tool": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Trusted system tools for Node hosts",
+      "budgetBytes": 1968,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/core/dist/system-tool.js",
+      "conditions": [
+        "node",
+        "import"
+      ],
+      "types": [
+        "packages/core/dist/system-tool.d.ts"
+      ],
+      "bareImports": [
+        "fs",
+        "path"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "fs",
+          "path"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
   "@byok-sdk/keys": {
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 235911,
+      "budgetBytes": 240716,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1735,6 +1805,7 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/system-tool",
         "child_process",
         "crypto",
         "fs",
@@ -2356,7 +2427,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2271623,
+      "budgetBytes": 2271690,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2371,12 +2442,14 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
+        "fs",
         "node:child_process",
         "node:crypto",
         "node:fs",
@@ -2392,6 +2465,7 @@
         "node:stream",
         "node:url",
         "node:util",
+        "path",
         "zod"
       ],
       "lazyImports": [
@@ -2417,6 +2491,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
+          "fs",
           "node:child_process",
           "node:crypto",
           "node:fs",
@@ -2431,7 +2506,8 @@
           "node:readline/promises",
           "node:stream",
           "node:url",
-          "node:util"
+          "node:util",
+          "path"
         ],
         "thirdParty": [
           "node:crypto"
@@ -2689,7 +2765,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 175886,
+      "budgetBytes": 181044,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2703,6 +2779,7 @@
       "types": [],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/system-tool",
         "child_process",
         "crypto",
         "fs",

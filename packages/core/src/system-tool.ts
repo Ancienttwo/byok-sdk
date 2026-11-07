@@ -2,7 +2,7 @@ import { statSync } from 'node:fs';
 import path from 'node:path';
 
 /**
- * Where each operating-system tool the client starts lives. A daemon's `PATH`
+ * Where each operating-system tool the SDK starts lives. A daemon's `PATH`
  * is whatever its launcher, a shell profile or an installer left there, so it
  * never names a system tool:
  *

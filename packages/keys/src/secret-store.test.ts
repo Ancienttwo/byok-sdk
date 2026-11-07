@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { runCommand, type CommandRunner } from './command-runner';
+import { LinuxSecretServiceSecretStore } from './linux-secret-service';
 import { ByokKeysError } from './errors';
 import {
   DEFAULT_SECRET_SERVICE_PREFIX,
@@ -10,6 +12,106 @@ import {
 
 const CANARY = 'sk-canary-secret-store-0001';
 const NUL = String.fromCodePoint(0);
+
+describe('Linux Secret Service', () => {
+  const name = 'model-openai-api-key';
+  const encoded = `byok-b64-v1:${Buffer.from(CANARY).toString('base64')}`;
+  const attrs = ['service', `com.byok.keys.${name}`, 'account', 'local-device'];
+  const result = (exitCode = 0, stdout = '', stderr = '') => ({ exitCode, stdout, stderr });
+  const store = (commandRunner: CommandRunner) => new LinuxSecretServiceSecretStore({ platform: 'linux', commandRunner });
+
+  it('rejects oversized encoded stdin before spawning, including the storage prefix bytes', async () => {
+    const runner = vi.fn<CommandRunner>().mockResolvedValue(result());
+    await expect(store(runner).set(name, 'x'.repeat(6144))).rejects.toMatchObject({ code: 'KEYCHAIN_SECRET_INVALID' });
+    const prefixed = new LinuxSecretServiceSecretStore({ platform: 'linux', commandRunner: runner, storagePrefix: 'é'.repeat(4095) });
+    await expect(prefixed.set(name, 'x')).rejects.toMatchObject({ code: 'KEYCHAIN_SECRET_INVALID' });
+    expect(runner).not.toHaveBeenCalled();
+    await store(runner).set(name, 'x'.repeat(6135));
+    expect(Buffer.byteLength(runner.mock.calls[0]![2]!)).toBe(8192);
+  });
+
+  it.runIf(process.platform !== 'win32')('refuses a signal-killed child as unavailable for lookup, clear and availability', async () => {
+    const subject = store(() => runCommand(process.execPath, ['-e', 'process.kill(process.pid, "SIGTERM")']));
+    expect(await Promise.allSettled([subject.get(name), subject.delete(name), subject.available()])).toMatchObject([
+      { status: 'rejected', reason: { code: 'KEYCHAIN_UNAVAILABLE' } },
+      { status: 'rejected', reason: { code: 'KEYCHAIN_UNAVAILABLE' } },
+      { status: 'fulfilled', value: false },
+    ]);
+  });
+
+  it('stores the encoded secret only on stdin, including scoped addresses', async () => {
+    const runner = vi.fn<CommandRunner>().mockResolvedValue(result());
+    await store(runner).scope('acct_00000000').set(name, CANARY);
+    expect(runner).toHaveBeenCalledWith('secret-tool', [
+      'store', `--label=com.byok.keys.scope.acct_00000000.${name}`,
+      'service', `com.byok.keys.scope.acct_00000000.${name}`, 'account', 'local-device',
+    ], encoded);
+    expect(JSON.stringify(runner.mock.calls[0]?.slice(0, 2))).not.toContain(CANARY);
+    expect(JSON.stringify(runner.mock.calls[0]?.slice(0, 2))).not.toContain(encoded);
+  });
+
+  it('looks up and decodes a present secret', async () => {
+    const runner = vi.fn<CommandRunner>().mockResolvedValue(result(0, `${encoded}\n`));
+    await expect(store(runner).get(name)).resolves.toBe(CANARY);
+    expect(runner).toHaveBeenCalledWith('secret-tool', ['lookup', ...attrs], undefined);
+  });
+
+  it('clears a present secret', async () => {
+    const runner = vi.fn<CommandRunner>().mockResolvedValue(result());
+    await expect(store(runner).delete(name)).resolves.toBe(true);
+    expect(runner).toHaveBeenCalledWith('secret-tool', ['clear', ...attrs], undefined);
+  });
+
+  it('treats empty exit 1 as absent for lookup and clear, with an available service', async () => {
+    const subject = store(vi.fn<CommandRunner>().mockResolvedValue(result(1)));
+    await expect(subject.get(name)).resolves.toBeUndefined();
+    await expect(subject.has(name)).resolves.toBe(false);
+    await expect(subject.delete(name)).resolves.toBe(false);
+    await expect(subject.available()).resolves.toBe(true);
+  });
+
+  it.each([result(127), result(1, '', CANARY), result(1, CANARY)])(
+    'fails closed on unavailable tooling or service without disclosing tool output (%#)', async (failure) => {
+      const subject = store(vi.fn<CommandRunner>().mockResolvedValue(failure));
+      for (const operation of [subject.get(name), subject.delete(name), subject.set(name, CANARY)]) {
+        const error = await operation.catch((error: unknown) => error);
+        expect(error).toMatchObject({ code: 'KEYCHAIN_UNAVAILABLE' });
+        expect(JSON.stringify(error)).not.toContain(CANARY);
+        expect(String(error)).not.toContain(CANARY);
+      }
+      await expect(subject.available()).resolves.toBe(false);
+    },
+  );
+
+  it('does not accept empty exit 1 from store', async () => {
+    await expect(store(vi.fn<CommandRunner>().mockResolvedValue(result(1))).set(name, CANARY))
+      .rejects.toMatchObject({ code: 'KEYCHAIN_UNAVAILABLE' });
+  });
+
+  it('sanitizes runner failures including trusted resolver failure', async () => {
+    const subject = store(async () => { throw new Error(CANARY); });
+    const error = await subject.get(name).catch((error: unknown) => error);
+    expect(error).toMatchObject({ code: 'KEYCHAIN_UNAVAILABLE' });
+    expect(error).not.toHaveProperty('cause');
+    expect(String(error)).not.toContain(CANARY);
+    await expect(subject.available()).resolves.toBe(false);
+  });
+
+  it('refuses other platforms before starting the runner', async () => {
+    const runner = vi.fn<CommandRunner>();
+    const subject = new LinuxSecretServiceSecretStore({ platform: 'darwin', commandRunner: runner });
+    await expect(subject.available()).resolves.toBe(false);
+    await expect(subject.get(name)).rejects.toMatchObject({ code: 'KEYCHAIN_UNAVAILABLE' });
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it.each(['unprefixed', 'byok-b64-v1:!!!', 'byok-b64-v1:'])(
+    'refuses malformed stored secrets (%s)', async (value) => {
+      await expect(store(vi.fn<CommandRunner>().mockResolvedValue(result(0, value))).get(name))
+        .rejects.toMatchObject({ code: 'KEYCHAIN_SECRET_DECODE_FAILED' });
+    },
+  );
+});
 
 describe('modelProviderSecretName', () => {
   it('derives the credential-store entry name from the profile ref', () => {

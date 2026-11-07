@@ -65,6 +65,11 @@ test('installed TypeScript AST distinguishes type syntax from runtime expression
 test('workspace values must be declared and lower-layer; type-only imports do not create runtime edges', t => {
   const f = fixture(t);
   f.pkg('core', { '@byok-sdk/cloud': 'workspace:*' }); f.pkg('cloud'); f.pkg('client');
+  const core = JSON.parse(readFileSync(path.join(f.root, 'packages/core/package.json'), 'utf8'));
+  core.exports['./leaf'] = {
+    types: './dist/leaf.d.ts', node: { import: './dist/leaf.js' }, default: './dist/missing.js',
+  };
+  f.write('packages/core/package.json', JSON.stringify(core));
   f.write('packages/core/src/index.ts', 'export const core = 1;');
   f.write('packages/core/src/leaf.ts', 'export const leaf = 1;');
   f.write('packages/cloud/src/index.ts', 'export const cloud = 1;');

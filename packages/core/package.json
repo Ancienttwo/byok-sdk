@@ -29,7 +29,13 @@
       "types": "./dist/sealed-payload/index.d.ts",
       "import": "./dist/sealed-payload/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./system-tool": {
+      "types": "./dist/system-tool.d.ts",
+      "node": {
+        "import": "./dist/system-tool.js"
+      }
+    }
   },
   "files": [
     "dist",
