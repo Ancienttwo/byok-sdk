@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "d2037259096f603c5b202c47aac0b87c0c57c1e4813e3391c13af41dc6f49e95"
+    "snapshotSha256": "cef2d5f917d169262590ba34b0ca53bf67276e25b0ddc26da230c07d30fcc98b"
   },
   "configFields": {
     "status": "tracked",
@@ -18,7 +18,7 @@
     {
       "id": "k8-dream-compaction-veto",
       "impact": "additive",
-      "summary": "K8 keeps a dream intent until its result syncs (#1490). botCompactVeto and the rule compactVeto now refuse a dream intent key with 'The dream result is not synced' until the sync closes that dream, so a compaction that names the key throws CompactVetoError and changes nothing. No Host code change: the caller retries after a later pass, as for a Turn K8 still reads.",
+      "summary": "K8 keeps a dream intent until its result syncs (#1490). botCompactVeto and the rule compactVeto now refuse a dream intent key with 'The dream result is not synced' until the sync closes that dream, so a compaction that names the key throws CompactVetoError and changes nothing. No Host code change: the caller retries after a later pass, as for a Turn K8 still reads. K8 sealed routine creation and resealing validate Host execution templates with HostOfferSealedPayloadSchema, accepting agentMemoryCommit: on-success-if-advertised (#1506). Hosts can use the conditional option in those templates; cloud enqueue still owns resolution and the device wire is unchanged.",
       "migration": "examples/bot-collaboration/README.md#compaction",
       "items": [
         "example:bot-collaboration"
@@ -50,7 +50,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=84817467889ca31d",
-      "after": "K8 0.0.1 src-sha256=12bd95552245d39c",
+      "after": "K8 0.0.1 src-sha256=087f672853560d06",
       "entry": "k8-dream-compaction-veto"
     },
     {
