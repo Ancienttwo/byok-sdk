@@ -845,7 +845,7 @@
         },
         {
           "file": "pi-web-access/dist/index.js",
-          "line": 26512,
+          "line": 27685,
           "rule": "opaque import()"
         },
         {
@@ -1110,7 +1110,7 @@
         },
         {
           "file": "pi-web-access/dist/index.js",
-          "line": 26512,
+          "line": 27685,
           "rule": "opaque import()"
         },
         {
