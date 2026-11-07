@@ -21,7 +21,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     readerAttempt, requiredToolsets, resolvedMcp, blobAbort,
   } = input;
   const offered = runtimeTaskInput(payload);
-  const requestedRuntime = payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime;
+  const requestedRuntime = payload.nativeSessions === undefined ? payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime : 'pi';
   const requiresAgentMemoryMcp = preparation === undefined && ordinaryMemoryMcp;
   const mcpToolApprovals = resolvedMcp?.ok ? resolvedMcp.mcpToolApprovals : undefined;
   let pick: PickResult;
@@ -43,6 +43,10 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     // classification (#1103 D6). An older server strips the nested field and
     // still records the code.
     decline(pick.reason, pick.retryable, pick.runtimeUnavailable === undefined ? undefined : 'runtime_unavailable', pick.runtimeUnavailable);
+    return undefined;
+  }
+  if (payload.nativeSessions !== undefined && pick.descriptor.memoryLane === undefined) {
+    decline('native_sessions_unsupported', false, 'native_sessions_unsupported');
     return undefined;
   }
   if (readerAttempt && pick.descriptor.capabilities.durableLane === true) {

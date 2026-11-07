@@ -100,6 +100,7 @@ export function observePreparedCall(
 }
 
 export interface ActiveTask {
+  readonly memoryLane?: typeof import('../../adapters/pi/memory-lane-contract').PI_MEMORY_LANE;
   taskId: string;
   /** Cancels every blob transfer owned by this task before its terminal path runs. */
   blobAbort: AbortController;

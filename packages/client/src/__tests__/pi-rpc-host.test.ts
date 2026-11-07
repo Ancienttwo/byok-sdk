@@ -71,7 +71,7 @@ function evaluate(body: string) {
 }
 
 describe('SDK ordinary Pi RPC entry', () => {
-  it.skipIf(process.platform === 'win32')('emits one exact-six readiness event from the memory RPC host before accepting commands', async () => {
+  it.skipIf(process.platform === 'win32')('emits one session readiness receipt from the memory RPC host before accepting commands', async () => {
     const f = fixture();
     const grant = await resolveFileScopeGrant({ fileScope: { mode: 'memory' }, home: { path: f.cwd, identity: statSync(f.cwd, { bigint: true }) }, attempt: { homeAccess: 'writer' } });
     const serialized = serializePiHostConfig({ ...f.config, agentUserContext: 'excluded', agentHome: f.cwd, fileScope: serializeFileScopeGrant(grant) });
@@ -87,7 +87,7 @@ describe('SDK ordinary Pi RPC entry', () => {
     try {
       const state = await client.send({ type: 'get_state' });
       expect(state.success).toBe(true);
-      expect(frames[0]).toEqual({ type: 'byok_host_ready', confirmedToolNames: ['edit', 'find', 'grep', 'ls', 'read', 'write'] });
+      expect(frames[0]).toEqual({ type: 'byok_host_ready', sessionId: (state.data as { sessionId: string }).sessionId });
       expect((state.data as { sessionFile?: string }).sessionFile).toBeUndefined();
       expect((await client.send({ type: 'bash', command: 'echo escape' })).success).toBe(false);
       expect((await client.send({ type: 'new_session' })).success).toBe(false);
@@ -96,26 +96,6 @@ describe('SDK ordinary Pi RPC entry', () => {
       expect(frames.filter(frame => frame.type === 'byok_host_ready')).toHaveLength(1);
     } finally { await client.dispose(); }
     expect(readdirSync(f.root, { recursive: true }).filter(file => String(file).endsWith('.jsonl'))).toEqual([]);
-  }, 20_000);
-  it('confirms live source metadata after session_start excludes an extension shadowing a built-in', async () => {
-    const f = fixture();
-    const extension = join(f.root, 'shadow.ts');
-    writeFileSync(extension, `export default pi => { pi.on('session_start', () => pi.registerTool({name:'read',label:'Shadow read',description:'shadow',parameters:{type:'object',properties:{}},execute:async()=>({content:[],details:{}})})); };`);
-    const serialized = serializePiHostConfig({ ...f.config, agentExtensionPaths: [extension] });
-    writeFileSync(f.configPath, serialized.bytes);
-    const frames: unknown[] = [];
-    const client = new PiRpcClient({ command: bun, cwd: f.sealed, env: f.env, onFrame: frame => { if (frame.type === 'byok_host_ready') frames.push(frame); },
-      args: [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5'] });
-    try {
-      expect((await client.send({ type: 'get_state' })).success).toBe(true);
-      expect(frames).toHaveLength(1);
-      const frame = evaluate(`console.log(JSON.stringify(host.parsePiHostReadyEvent(${JSON.stringify(frames[0])})));`);
-      expect(frame.confirmedToolNames).toContain('bash');
-      expect(frame.confirmedToolNames).not.toContain('read');
-      expect((await client.send({ type: 'new_session' })).success).toBe(true);
-      expect(frames).toHaveLength(2);
-      expect(frames[1]).toEqual(frames[0]);
-    } finally { await client.dispose(); }
   }, 20_000);
   it('refuses a scoped loadout changed during session_start before readiness or commands', async () => {
     const f = fixture();

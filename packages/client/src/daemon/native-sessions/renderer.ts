@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { CURRENT_SESSION_VERSION, SessionManager } from '@earendil-works/pi-coding-agent';
 import { parseSessionEntries, sessionFileName, type AgentSessionHandoff } from '../agent-session-handoff-store';
 import { isAgentSessionLedgerName, piSessionRefFromFileName } from '../retention/session-ledgers';
 import { argumentSummary, redactSummary } from './summary';
@@ -25,7 +24,7 @@ export interface NativeSessionsIO {
 }
 
 type Detail = 'aborted' | 'deadline' | 'ledger_limit' | 'read_limit' | 'session_directory'
-  | 'ledger_unreadable' | 'session_unreadable' | 'provenance_unavailable' | 'secret_detected';
+  | 'ledger_unreadable' | 'session_unreadable' | 'secret_detected';
 
 export class NativeSessionsUnavailableError extends Error {
   readonly retryable = false;
@@ -43,11 +42,6 @@ export interface NativeSessionsInput {
   /** Absolute startup deadline in epoch milliseconds; rendering also has its own 10 s cap. */
   readonly deadlineMs: number;
   readonly io: NativeSessionsIO;
-  /**
-   * One confirmed builtin-name set per recorded launch/resume, covering the whole session.
-   * Missing records grant no arguments. The authority reader must not infer source from names.
-   */
-  readonly readBuiltinToolSets?: (session: AgentSessionHandoff, signal: AbortSignal) => Promise<readonly ReadonlySet<string>[]>;
 }
 
 interface Projection { tool: string; arguments?: Record<string, string>; result: 'ok' | 'error' | 'none' }
@@ -285,6 +279,8 @@ async function render(input: NativeSessionsInput, signal: AbortSignal, deadlineM
     for (const _ledger of ledgers) skipped(new SkipFile('session_missing'));
     return empty();
   }
+  // Keep the ordinary daemon entry free of the Pi runtime until native input is read.
+  const { CURRENT_SESSION_VERSION, SessionManager } = await io('session_unreadable', () => import('@earendil-works/pi-coding-agent'));
   for (const ledger of ledgers) {
     check();
     try {
@@ -294,7 +290,6 @@ async function render(input: NativeSessionsInput, signal: AbortSignal, deadlineM
       if (!id) throw new SkipFile('id_mismatch');
       if (matches.length > 1) throw new SkipFile('ambiguous_session');
       if (matches.length === 0) throw new SkipFile('session_missing');
-      const sets = input.readBuiltinToolSets ? await io('provenance_unavailable', () => input.readBuiltinToolSets!(ledger, signal)) : [];
       const local = await withFile(matches[0]!, sessionDir, 'session_unreadable', async file => {
         const validateHeader = (value: unknown): void => {
           if (!record(value) || value.type !== 'session') throw new SkipFile();
@@ -332,7 +327,7 @@ async function render(input: NativeSessionsInput, signal: AbortSignal, deadlineM
               if (!record(part) || part.type !== 'toolCall') continue;
               if (typeof part.id !== 'string' || typeof part.name !== 'string' || !record(part.arguments)) throw new SkipFile();
               if (message.timestamp < input.window.fromMs || message.timestamp > input.window.toMs) continue;
-              const summary = sets.length > 0 && sets.every(set => set.has(part.name as string)) ? argumentSummary(part.name, part.arguments, home, ledger.cwd) : undefined;
+              const summary = argumentSummary(part.name, part.arguments, home, ledger.cwd);
               const projection: Projection = { tool: part.name, ...(summary ? { arguments: summary } : {}), result: 'none' };
               buffer.add({ at: message.timestamp, order: order++, id: part.id, projection, bytes: Buffer.byteLength(JSON.stringify(projection)) });
             }

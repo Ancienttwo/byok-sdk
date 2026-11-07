@@ -20,6 +20,8 @@ export interface PiRpcMessage {
 }
 
 export interface PiRpcClientOptions {
+  /** Memory-only IO must drain before process-tree termination can begin. */
+  beforeDispose?: () => Promise<void>;
   nativeAssetRoot?: string;
   command: string;
   args: string[];
@@ -222,7 +224,10 @@ export class PiRpcClient {
 
   dispose(): Promise<void> {
     if (!this.disposalAttempt) {
-      const attempt = disposeOwnedProcessTree(this.processTreeOptions());
+      const attempt = (async () => {
+        await this.options.beforeDispose?.();
+        await disposeOwnedProcessTree(this.processTreeOptions());
+      })();
       this.disposalAttempt = attempt.catch((error: unknown) => {
         this.disposalAttempt = undefined;
         throw error;

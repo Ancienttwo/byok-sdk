@@ -1,3 +1,6 @@
+import { renderNativeSessions, NativeSessionsUnavailableError } from '../native-sessions/renderer';
+import { nativeSessionsIO } from '../native-sessions/io';
+import { NATIVE_SESSIONS_GUIDANCE } from '../memory-guidance';
 import { requestApproval as requestTaskApproval } from './approvals';
 import type { ApprovalKind } from '../approvals';
 // `handleOffer` stages from the runtime launch to a started session: seal the
@@ -268,13 +271,14 @@ export interface OfferClaimInput
   readonly agentBinding: OfferWorkspace['agentBinding'];
   readonly blobAbort: AbortController;
   readonly payload: AcceptedOfferPayload;
+  readonly startupDeadline: number;
   readonly taskMcpServers: OfferRuntime['taskMcpServers'];
 }
 
 /** Claims the task, resolves its instruction and binds prepared Agent memory. */
 export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, input: OfferClaimInput) {
   const { taskId, decline, admissionWithdrawn, admission } = phase;
-  const { agentBinding, agentRef, pick, scratch, manifest, preparedLaunch, blobAbort, payload } = input;
+  const { agentBinding, agentRef, pick, scratch, manifest, preparedLaunch, blobAbort, payload, startupDeadline } = input;
   let { taskMcpServers } = input;
   // All semantic admission is now in `prepare()` and the frozen manifest.
   // Claim is the first externally visible commitment; instruction bytes and
@@ -381,6 +385,20 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
     return;
   }
 
+  if (payload.nativeSessions !== undefined) {
+    try {
+      const rendered = await renderNativeSessions({
+        home: agentBinding.resolution.canonicalHome, sessionDir: this['deps'].nativeSessions!.sessionDir,
+        window: payload.nativeSessions, signal: blobAbort.signal, deadlineMs: startupDeadline, io: nativeSessionsIO,
+      });
+      resolvedInstruction = `${NATIVE_SESSIONS_GUIDANCE}\n\n${rendered.jsonLine}\n\n${resolvedInstruction}`;
+    } catch (error) {
+      await this['failClaimedAgent'](taskId, error instanceof NativeSessionsUnavailableError
+        ? error.message : 'native_sessions_unavailable: session_unreadable', false, { binding: agentBinding, runtimeId: pick.descriptor.id });
+      return;
+    }
+  }
+
   if (preparedLaunch !== undefined && preparedLaunch.agentMemory !== 'none') {
     // Post-claim: a failure here is a truthful task failure, never a raw
     // throw that strands the claimed task. The finally below revokes any
@@ -468,8 +486,19 @@ async function startAndActivateRuntime(
   const fileScopeLane: ToolAuthorizationLane = pick.descriptor.capabilities.durableLane === true
     ? 'durable' : preparedLaunch === undefined ? 'rpc' : 'prepared';
   const fileScopeHomeAccess: ToolAuthorizationHomeAccess = readerAttempt ? 'memory-reader' : 'writer';
+  const nativeSessions = activation.payload.nativeSessions !== undefined;
+  let memoryGrant: FileScopeGrant | undefined;
+  if (nativeSessions) {
+    try {
+      memoryGrant = await resolveFileScopeGrant({ fileScope: { mode: 'memory' },
+        home: { path: agentBinding.resolution.canonicalHome, identity: agentBinding.lease.homeIdentity }, attempt: { homeAccess: 'writer' } });
+    } catch {
+      await this['failClaimedAgent'](taskId, 'native_sessions_unavailable: memory_scope', false, { binding: agentBinding, runtimeId: pick.descriptor.id });
+      return;
+    }
+  }
   let fileScopeGrant: FileScopeGrant | undefined;
-  if (toolAuthorization.fileScope !== undefined && !blobAbort.signal.aborted) {
+  if (!nativeSessions && toolAuthorization.fileScope !== undefined && !blobAbort.signal.aborted) {
     const audit = (event: FileScopeAudit): void => {
       this['deps'].onFileScopeAudit?.(Object.freeze(event));
     };
@@ -544,7 +573,7 @@ async function startAndActivateRuntime(
   }
   const residentMemoryRead = residentMemory?.kind === 'read' ? residentMemory : undefined;
   const effectiveToolAuthorization = toolAuthorizationMode(toolAuthorization, pick.descriptor.id);
-  const toolAuthorizationGate = effectiveToolAuthorization !== 'auto' ? undefined : createAutoToolAuthorizationGate({
+  const toolAuthorizationGate = nativeSessions || effectiveToolAuthorization !== 'auto' ? undefined : createAutoToolAuthorizationGate({
     workspace: manifest.workspace.workspaceDir,
     rules: toolAuthorization.rules,
     mcpIdentities: mcpEventIdentities(mcpToolsetTools),
@@ -603,6 +632,7 @@ async function startAndActivateRuntime(
       },
     } }),
     mcpEnv,
+    ...(memoryGrant === undefined ? {} : { memoryLane: memoryGrant }),
     ...(runtimeLaunch === undefined ? {} : { runtimeLaunch }),
     // The two lanes are mutually exclusive authority over the same bytes,
     // so they are two variants rather than one shape with an optional
@@ -668,6 +698,7 @@ async function startAndActivateRuntime(
         dispose: async () => { if (disposalFailure) await err.retryDisposal(); await scratch.release(); },
         ...(cancelled ? { settle: async () => {
           if (cancellationSettled) return;
+          if (nativeSessions && disposalFailure) await err.retryDisposal();
           // Retain startup ownership on a failed durable barrier, just as
           // active cancellation retains its owner until terminal evidence.
           await this['pendingMessageTasks'].get(taskId)?.outbox.revoke(taskId);
@@ -675,6 +706,11 @@ async function startAndActivateRuntime(
           cancellationSettled = true;
           this['pendingCancelled'].delete(taskId);
           this['addFinishedTaskId'](taskId);
+        } } : nativeSessions ? { settle: async () => {
+          if (disposalFailure) await err.retryDisposal();
+          await this['failClaimedAgent'](taskId,
+            this['stoppingOffers'] ? 'daemon shutting down during runtime startup' : errorMessage(err),
+            this['stoppingOffers'], { binding: agentBinding, runtimeId: pick.descriptor.id });
         } } : {}),
         release: async () => {
           if (held.agentMemoryCommitCopy === true) await settleAgentMemoryCommitCopy.call(this, taskId, agentBinding.lease);
@@ -710,7 +746,7 @@ async function startAndActivateRuntime(
       // it if a later attempt fails.
       if (disposalFailure && abortedStart === undefined) this['deps'].onRuntimeDisposalFailure?.({ taskId,
         runtimeId: pick.descriptor.id, stage: 'quiescence', reason: err.message });
-      if (!cancelled) {
+      if (!cancelled && !nativeSessions) {
         const reason = this['stoppingOffers'] ? 'daemon shutting down during runtime startup' : errorMessage(err);
         const retryable = this['stoppingOffers'];
         await this['failClaimedAgent'](taskId, reason, retryable, {

@@ -73,7 +73,7 @@ const offerRow = (field: string | undefined, capability: CapabilityFlag, value?:
  * server flag. The sealed branch shares every other row of its type, and a
  * field it moves or drops is absent from it, so sealing never removes a gate
  * that the same fields would need. A daemon-to-server sealed type that may
- * name its ciphertext blob is also gated on that field. The four sealed
+ * name its ciphertext blob is also gated on that field. The sealed
  * failure codes on the plaintext `task.decline` are value gates.
  */
 function sealedRows(): WireAddition[] {
@@ -187,6 +187,7 @@ export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   SEALED_DECLINE_CODE('sealed_open_failed'),
   SEALED_DECLINE_CODE('sealed_content_mac_mismatch'),
   SEALED_DECLINE_CODE('sealing_policy_mismatch'),
+  { kind: 'envelope', rule: 'gated', surface: 'task.decline', field: 'code', value: 'native_sessions_unsupported', capability: 'native-sessions', advertisedBy: 'server' },
 ] satisfies readonly WireAddition[]);
 
 /**

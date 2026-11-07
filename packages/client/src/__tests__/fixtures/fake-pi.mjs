@@ -429,3 +429,5 @@ async function handleCommand(msg) {
       });
   }
 }
+
+if (process.env.FAKE_PI_HOST_READY === '1') process.stdout.write(JSON.stringify({ type: 'byok_host_ready', sessionId }) + '\n');
