@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "df18395b9d471aed3289d646364d44dc337ea494565290dcd70628eae63327ed"
+    "snapshotSha256": "fad8cb379c54aab6e1dbbe95bea2165f55dd2aae8b1407d504082d2f812b1b62"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,32 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "native-session-sealed-decline",
+      "impact": "additive",
+      "summary": "native_sessions_unsupported is a closed, non-retryable plaintext task.decline reason/code on sealed-output tasks, including when the device owner disables native-session input after Host enqueue. Its own task.decline wire row uses the two-way native-sessions gate: an advertising server understands both the V1 native-session input field and the decline code. Plain declines retain their open vocabulary and use the same code. Existing sealed key and policy causes retain their meaning.",
+      "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
+      "items": [
+        "export:@byok-sdk/protocol#SEALED_DECLINE_CODES",
+        "export:@byok-sdk/protocol#SEALED_TASK_PLAIN_CODES",
+        "export:@byok-sdk/protocol#TaskDeclineCode",
+        "export:@byok-sdk/protocol#TaskDeclinePayloadSchema"
+      ]
+    },
+    {
+      "id": "native-session-dream-device-wiring",
+      "impact": "additive",
+      "summary": "DaemonConfig.nativeSessions defaults off. Opted-in macOS/Linux devices with a Pi memory lane and sessionDir declare native-sessions; unsupported offers decline before claim. The daemon renders after claim, prepends sanitized JSON data, and runs the Pi memory-only in-memory lane without progress, summary text, finalMessage or result documents. Argument summaries apply the command-word allowlist and path rules by tool name; tool result content is excluded. The local byok_host_ready receipt contains only sessionId and is consumed only by memory-lane admission. Cancellation and startup disposal await the abort drain before terminating the process tree.",
+      "migration": "docs/security.md#native-session-input",
+      "items": [
+        "config:nativeSessions",
+        "export:@byok-sdk/client#DaemonConfig",
+        "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client#RuntimeOperationStartInput",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client/adapters#RuntimeOperationStartInput"
+      ]
+    },
     {
       "id": "pi-memory-lane-audit-mode",
       "impact": "additive",
@@ -129,6 +155,12 @@
   ],
   "changes": [
     {
+      "item": "config:nativeSessions",
+      "change": "added",
+      "after": "optional schema-sha256=7cb541e84f226754",
+      "entry": "native-session-dream-device-wiring"
+    },
+    {
       "item": "entry:@byok-sdk/core/system-tool",
       "change": "added",
       "entry": "linux-secret-service-store"
@@ -141,6 +173,11 @@
       "entry": "k8-dream-compaction-veto"
     },
     {
+      "item": "export:@byok-sdk/client#DaemonConfig",
+      "change": "changed",
+      "entry": "native-session-dream-device-wiring"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonEvent",
       "change": "changed",
       "entry": "pi-memory-lane-audit-mode"
@@ -149,6 +186,16 @@
       "item": "export:@byok-sdk/client#DaemonRecord",
       "change": "changed",
       "entry": "pi-memory-lane-audit-mode"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "native-session-dream-device-wiring"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "native-session-dream-device-wiring"
     },
     {
       "item": "export:@byok-sdk/client#SystemToolUnavailableError",
@@ -164,6 +211,16 @@
       "item": "export:@byok-sdk/client#sdkNativeAssetTargets",
       "change": "changed",
       "entry": "koffi-native-assets-3-3-7"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "native-session-dream-device-wiring"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "native-session-dream-device-wiring"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentDispatchInput",
@@ -269,6 +326,26 @@
       "item": "export:@byok-sdk/protocol#NATIVE_SESSIONS_CAPABILITY",
       "change": "added",
       "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_DECLINE_CODES",
+      "change": "changed",
+      "entry": "native-session-sealed-decline"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_TASK_PLAIN_CODES",
+      "change": "changed",
+      "entry": "native-session-sealed-decline"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineCode",
+      "change": "changed",
+      "entry": "native-session-sealed-decline"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+      "change": "changed",
+      "entry": "native-session-sealed-decline"
     },
     {
       "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",

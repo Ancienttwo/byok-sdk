@@ -20,6 +20,7 @@
 
 - **Added** — `@byok-sdk/keys` provides `LinuxSecretServiceSecretStore` and the Pi provider launcher uses it on Linux (#1515). Secrets reach `secret-tool` through stdin; unavailable Secret Service fails closed. Client and keys share trusted tool resolution through the Node-only `@byok-sdk/core/system-tool` entry.
 
+- **Added** — Device opt-in native-session dream wiring: capability-gated Pi admission, bounded post-claim rendering, tool argument summaries bounded by the command-word allowlist and path rules, and in-memory memory-only execution. Sealed and plain declines use the same `native_sessions_unsupported` code when the capability is unavailable, including after enqueue. The lane suppresses progress and result text and drains cancellation before task end ([#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526)).
 - **Added** — Native-session dream input through the capability-gated `nativeSessions` offer window and Host `ifAdvertised` resolution; frozen replay preserves that resolution. Protocol exports shared `redactSecrets`, including PEM, Slack, GitLab, npm and Hugging Face token shapes ([#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526)).
 
 - **Added** — The hosted Bot example runs full dreaming through K8's shared rules, with per-scope configuration, success-only mark advancement and protection until result sync (#1516). H also shares K8's user-first priority for unsubmitted routine, bot_request and dream intents; device slot reservation is unchanged.

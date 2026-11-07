@@ -7,7 +7,7 @@ import { getAgentDir, type CreateAgentSessionOptions, type InlineExtension } fro
 import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import { PI_RPC_IPC_KEY_MARKER, receiveLauncherCredential } from '../adapters/pi/launcher-credential';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
-import { runPiSessionRuntime, type PiToolLoadoutSession } from './pi-session-runtime';
+import { runPiSessionRuntime } from './pi-session-runtime';
 export { openPiRpcSession } from './pi-session-runtime';
 import { webExtension } from './pi-extension-factories.js';
 import { loadPiSubagentsExtensions } from '../adapters/pi/subagents';
@@ -25,31 +25,12 @@ declare const __BYOK_PI_SUBAGENTS__: boolean;
 
 const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
-/** Local host readiness/provenance only. V4 owns any handoff-ledger persistence. */
-export interface PiHostReadyEvent {
-  readonly type: 'byok_host_ready';
-  readonly confirmedToolNames: readonly string[];
-}
+export { parsePiHostReadyEvent, type PiHostReadyEvent } from '../adapters/pi/host-ready';
+import type { PiHostReadyEvent } from '../adapters/pi/host-ready';
 
-export function parsePiHostReadyEvent(value: unknown): PiHostReadyEvent {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('invalid Pi host ready event');
-  const raw = value as Record<string, unknown>;
-  const names = raw.confirmedToolNames;
-  if (raw.type !== 'byok_host_ready' || Object.keys(raw).length !== 2 || !Array.isArray(names)
-    || names.some((name, index) => typeof name !== 'string' || name.length === 0 || (index > 0 && names[index - 1] >= name))) {
-    throw new TypeError('invalid Pi host ready event');
-  }
-  return Object.freeze({ type: 'byok_host_ready', confirmedToolNames: Object.freeze([...names]) });
-}
-
-export function createPiHostReady(session: PiToolLoadoutSession, sdkExtensionPaths: ReadonlySet<string> = new Set()): PiHostReadyEvent {
-  // Pi 1.5 getAllTools exposes the winning definition's sourceInfo, after
-  // extension shadowing. SDK inline factories have host-owned paths; a file
-  // extension named read/bash does not acquire builtin or SDK provenance.
-  const names = session.getAllTools().filter(({ sourceInfo }) => sourceInfo?.source === 'builtin'
-    || sourceInfo?.source === 'sdk'
-    || (sourceInfo?.source === 'inline' && sdkExtensionPaths.has(sourceInfo.path!))).map(tool => tool.name);
-  return Object.freeze({ type: 'byok_host_ready', confirmedToolNames: Object.freeze([...new Set(names)].sort()) });
+/** Readiness receipt consumed only by memory-lane admission. */
+export function createPiHostReady(session: { readonly sessionId: string }): PiHostReadyEvent {
+  return Object.freeze({ type: 'byok_host_ready', sessionId: session.sessionId });
 }
 
 export interface PiRpcHostConfig {
@@ -231,8 +212,8 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   // Capture before Pi redirects ordinary stdout to stderr. Replacements keep
   // this same JSONL writer, so their ready event remains on the RPC channel.
   const writeHostFrame = process.stdout.write.bind(process.stdout);
-  const ready = (paths?: ReadonlySet<string>) => (session: PiToolLoadoutSession): void => {
-    writeHostFrame(JSON.stringify(createPiHostReady(session, paths)) + '\n');
+  const ready = (session: { readonly sessionId: string }): void => {
+    writeHostFrame(JSON.stringify(createPiHostReady(session)) + '\n');
   };
   const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
@@ -270,7 +251,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
       resourceLoaderOptions: memoryLane.resourceLoaderOptions,
       ...(providerApiKey === undefined ? {} : { providerApiKey }),
       assertToolLoadout: assertPiMemoryToolLoadout,
-      onSessionReady: ready(),
+      onSessionReady: ready,
       initialModel: 'required', label: 'byok-pi-rpc', reject: fail,
     });
     return;
@@ -319,9 +300,6 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   };
   setToolAuthorizationGateEnv(childGate, join(dirname(args.configPath), 'tool-authorization.json'));
   if (config.toolAuthorization !== null) extensionFactories.push(createPiToolAuthorizationHook(config.toolAuthorization));
-  // Pi assigns these paths only to the factories supplied by this SDK host.
-  // User extensions are loaded by file path and cannot enter this set.
-  const sdkExtensionPaths = new Set(extensionFactories.map((input, index) => `<inline:${typeof input === 'function' ? index + 1 : input.name}>`));
   const agentHome = config.agentHome === null ? null : realpathSync(config.agentHome);
   let resourceAgentDir: string | undefined;
   if (config.agentUserContext === 'excluded') {
@@ -331,7 +309,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   }
   await runPiSessionRuntime({
     cwd: config.cwd, session: args.session, sessionDir,
-    onSessionReady: ready(sdkExtensionPaths),
+    onSessionReady: ready,
     provider: args.provider, model: args.model, thinking: args.thinking,
     ...(resourceAgentDir === undefined ? {} : { resourceAgentDir }),
     resourceLoaderOptions: {

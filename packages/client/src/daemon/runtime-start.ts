@@ -73,7 +73,8 @@ async function startSession(
     if (session) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        await Promise.race([Promise.resolve().then(() => session!.interrupt()).catch(() => undefined),
+        if (input.memoryLane !== undefined) await session.interrupt();
+        else await Promise.race([Promise.resolve().then(() => session!.interrupt()).catch(() => undefined),
           new Promise<void>(resolve => { timer = setTimeout(resolve, 1_000); timer.unref?.(); })]);
       } finally { if (timer) clearTimeout(timer); }
       return session.close();
@@ -113,6 +114,14 @@ async function startSession(
       throw error;
     });
     return await Promise.race([startup, aborted]);
+  } catch (error) {
+    if (input.memoryLane !== undefined && controller.signal.aborted && startup !== undefined) {
+      // This lane cannot publish a timeout while an unreturned session still writes.
+      await startup.catch(() => undefined);
+      try { await retryDisposal(); }
+      catch (cause) { throw new RuntimeStartupDisposalFailure(retryDisposal, { cause }); }
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
     signal.removeEventListener('abort', abort);

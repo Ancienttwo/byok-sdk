@@ -1,3 +1,4 @@
+import { PI_MEMORY_LANE } from '../../adapters/pi/memory-lane-contract';
 // `handleOffer` stage: hand the started session to an active task
 // (see ./support.ts for how a member module runs).
 import { AgentMessageDraftPublisher } from '../agent-message-draft';
@@ -65,6 +66,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   let active!: ActiveTask;
   active = {
     taskId,
+    ...(payload.nativeSessions === undefined ? {} : { memoryLane: PI_MEMORY_LANE }),
     blobAbort,
     egressEnabled: payload.egressPolicy !== undefined,
     adapter: pick.adapter,
@@ -90,6 +92,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     finalTextParts: [],
     batcher: new ProgressBatcher(
       (seq, events) => {
+        if (active.memoryLane?.egress.taskProgress === false) return;
         const projected = active.egressEnabled
           ? this['deps'].agentEgress?.projectLatestValue({
               agentRef: active.agentRef,

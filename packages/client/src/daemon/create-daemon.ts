@@ -108,6 +108,8 @@ export interface DaemonBranding {
 }
 
 export interface DaemonConfig {
+  /** Opt in to sanitized Pi session input sent to the device BYOK model. Default false. macOS/Linux only. */
+  nativeSessions?: boolean;
   /** Absolute native asset root for SDK-created runtime adapters. Custom adapters own their option. */
   nativeAssetRoot?: string;
   /**

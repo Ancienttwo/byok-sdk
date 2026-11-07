@@ -25,7 +25,7 @@ v1 只用现有记忆和 Host 历史，看不到工具层面的事实。v2 由�
 - 只读 SDK 为这个 Agent 记录的 Pi 会话：来源是 `.byok/runtime-sessions/` 中 `runtimeId` 为 `pi` 的 handoff ledger，以及 `piByokLauncher.sessionDir` 中对应 `sessionRef` 的文件。文件 header 的 id 和 cwd 必须与 ledger 一致，规则同 `openPiRpcSession`。
 - 窗口沿用 K8 的 `{ fromMs, toMs }`，设备不另存游标。
 - 只提取工具名、参数摘要、结果（`ok`、`error` 或 `none`，只看 `toolResult.isError`）。按 [#1526 的参数摘要裁定](https://github.com/Ancienttwo/byok-sdk/issues/1526)，bash 首行按空白切词，只取命令词及最多 2 个子命令词；每个词必须匹配 `^[a-z][a-z0-9-]{0,22}$`，遇到第一个不匹配的词就停。命令词不匹配时不带参数，只保留工具名和结果。read、write、edit、ls、find、grep 只取路径，改为相对 home 的写法；不取 pattern。
-- 只有按来源确认的 Pi 内置工具才带参数，不按名字认。MCP 和扩展工具不带参数。工具输出、用户和助手的正文、thinking、写入内容、图片和 compaction 一律不读。
+- 参数摘要按工具名应用同一规则，包括同名扩展工具；安全边界来自命令词 allowlist 和路径规则，不依赖工具来源。其他工具不带参数。工具输出、用户和助手的正文、thinking、写入内容、图片和 compaction 一律不读。
 - 最多 512 个 ledger，总读取 32 MiB，单文件只读尾部 8 MiB，单条记录最多 256 KiB，超出不缓冲。最多保留 2000 次调用、64 KiB；超出时保留最新调用，在 `omittedCalls` 中计数。
 - 渲染预算为 `min(10 s, 剩余的启动时间)`。流式解析，可被 abort 打断。
 
@@ -39,7 +39,7 @@ v1 只用现有记忆和 Host 历史，看不到工具层面的事实。v2 由�
 
 - 做梦在 Pi RPC 的 memory-only lane 运行，只提供 SDK 的六个文件工具。新的 file-scope grant 模式 `memory` 限定只能访问 `MEMORY.md` 和 `notes/`；现有 symlink、hardlink、`.byok` 和大小写检查继续生效。
 - 不提供 shell、网络、MCP、web、todo、subagent、用户扩展或 skills，也不读 Agent 指令文件。其他工具名直接拒绝，不发审批。
-- 第一个 prompt 之前断言工具集正好是这六个，否则不启动。
+- 第一个 prompt 之前断言工具集正好是这六个，否则不启动。host 在每次 session start 后发出一次 `{ type: 'byok_host_ready', sessionId }`；只有 memory-lane admission 消费这个 readiness receipt，要求恰好一个且 sessionId 与原生会话一致。
 - 会话使用 in-memory，不落盘，避免做梦会话进入后续摘要。
 - 摘要以一行 JSON 数据放入指令，顺序是设备 guidance、数据、Host 指令。不写文件，不改 `buildDreamInstruction`。
 - 超时或取消后不得出现迟到的记忆写入。

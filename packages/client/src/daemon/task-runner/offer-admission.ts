@@ -214,6 +214,12 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
  */
 export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extract<Envelope, { type: 'task.offer' }>, admission: OfferAdmissionTiming): boolean {
   const taskId = envelope.task_id;
+  if (envelope.payload.nativeSessions !== undefined
+    && !requiredReceiverCapabilities('task.decline', { code: 'native_sessions_unsupported' })
+      .every(flag => (this['deps'].getServerCapabilities?.() ?? []).includes(flag))) {
+    // Rejecting the handler keeps the mailbox cursor unadvanced for repair.
+    throw new Error('protocol violation: nativeSessions offer from a server without native-sessions');
+  }
   const advertised = this['deps'].advertisedCapabilities();
   const missing = requiredReceiverCapabilities('task.offer', envelope.payload).filter((flag) => !advertised.includes(flag));
   if (missing.length === 0) return false;
@@ -221,11 +227,13 @@ export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extr
   const { agentRef, sealing } = envelope.payload;
   console.error(`[byok/client] task.offer for task ${taskId} declined: this daemon does not advertise ${missing.join(', ')}`);
   if (sealing?.categories.includes('task-output') === true) {
-    this['declineSealedOffer'](taskId, admission, agentRef, 'sealed_key_unavailable');
+    this['declineSealedOffer'](taskId, admission, agentRef, missing.includes('native-sessions') ? 'native_sessions_unsupported' : 'sealed_key_unavailable');
     return true;
   }
   this['addStrictDeclinedTaskId'](taskId);
-  this['decline'](taskId, admission, `offer_capability_missing: this daemon does not advertise ${missing.join(', ')}`, false, agentRef);
+  this['decline'](taskId, admission, missing.includes('native-sessions') ? 'native_sessions_unsupported'
+    : `offer_capability_missing: this daemon does not advertise ${missing.join(', ')}`, false, agentRef,
+    missing.includes('native-sessions') ? 'native_sessions_unsupported' : undefined);
   return true;
 }
 

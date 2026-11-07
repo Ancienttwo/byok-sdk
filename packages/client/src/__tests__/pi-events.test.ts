@@ -6,7 +6,7 @@ import { RuntimeExecutionFailure } from '../runtime-failure';
 describe('mapPiMessageToAgentEvent', () => {
   it('recognizes host readiness without mapping it to task output', () => {
     expect(ROUTINE_PI_EVENT_TYPES.has('byok_host_ready')).toBe(true);
-    expect(mapPiMessageToAgentEvent({ type: 'byok_host_ready', confirmedToolNames: ['read'] })).toBeUndefined();
+    expect(mapPiMessageToAgentEvent({ type: 'byok_host_ready', sessionId: 'native-session' })).toBeUndefined();
   });
   it.each([
     { code: 'provider invented code', sequence: 2 },

@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2296784,
+      "budgetBytes": 2318257,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -54,6 +54,7 @@
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"
@@ -120,7 +121,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 500404,
+      "budgetBytes": 503449,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -452,7 +453,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 479683,
+      "budgetBytes": 482728,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1223,7 +1224,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 557761,
+      "budgetBytes": 557972,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1281,7 +1282,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 802809,
+      "budgetBytes": 803020,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1411,7 +1412,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 764550,
+      "budgetBytes": 764761,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1986,7 +1987,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 151888,
+      "budgetBytes": 152072,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2132,7 +2133,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 716546,
+      "budgetBytes": 716757,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2208,7 +2209,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 417534,
+      "budgetBytes": 417718,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2340,7 +2341,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 582492,
+      "budgetBytes": 582703,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2427,7 +2428,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2274045,
+      "budgetBytes": 2295512,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2474,6 +2475,7 @@
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite/node",
         "koffi",
         "node:http"

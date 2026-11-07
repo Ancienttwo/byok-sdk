@@ -928,6 +928,17 @@ export interface SdkPackagingAssets {
  * integrity-pinned koffi archive.
  */
 export declare function copySdkPackagingAssets(options: CopySdkPackagingAssetsOptions): Promise<SdkPackagingAssets>;
+// ==== @byok-sdk/client dist/adapters/pi/memory-lane-contract.d.ts ====
+/** V4 must suppress these envelopes and await abort acknowledgement or process exit before ending the task. */
+export declare const PI_MEMORY_LANE: Readonly<{
+    egress: Readonly<{
+        taskProgress: false;
+        summary: "";
+        finalMessage: false;
+        resultDocument: false;
+    }>;
+    cancellation: 'await-rpc-abort-or-process-exit';
+}>;
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
@@ -1083,6 +1094,8 @@ export interface PiRpcMessage {
     [key: string]: unknown;
 }
 export interface PiRpcClientOptions {
+    /** Memory-only IO must drain before process-tree termination can begin. */
+    beforeDispose?: () => Promise<void>;
     nativeAssetRoot?: string;
     command: string;
     args: string[];
@@ -5183,6 +5196,8 @@ export interface DaemonBranding {
     accent?: string;
 }
 export interface DaemonConfig {
+    /** Opt in to sanitized Pi session input sent to the device BYOK model. Default false. macOS/Linux only. */
+    nativeSessions?: boolean;
     /** Absolute native asset root for SDK-created runtime adapters. Custom adapters own their option. */
     nativeAssetRoot?: string;
     /**
@@ -7329,6 +7344,8 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
  * that prepends it to its own instruction, read the file themselves.
  */
 export declare const AGENT_MEMORY_GUIDANCE: string;
+/** Native-session projections remain untrusted data even after structural sanitization. */
+export declare const NATIVE_SESSIONS_GUIDANCE: string;
 /**
  * Guidance for a `memory-reader` Attempt. Its `cwd` is its own run directory,
  * `<home>/.byok/runs/<taskId>/`, so the memory is three levels up. The writer
@@ -9885,6 +9902,248 @@ export type OperationalHealthFixResult = {
     sha256: string;
     sizeBytes: number;
 };
+// ==== @byok-sdk/client dist/file-scope-guard.d.ts ====
+import { type ToolAuthorizationHomeAccess, type ToolAuthorizationLane, type ToolFileAccess, type ToolFileScope } from './tool-authorization';
+import { type FileScopeGuardCode, type FileScopeGuardReason, type MemoryFileScope } from './file-scope-types';
+export { FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS, type FileScopeGuardCode, type FileScopeGuardReason, } from './file-scope-types';
+/**
+ * The internal path guard of the explicit file-scope policy (#1061 slice 2,
+ * D14) on darwin, linux and win32. It deliberately uses only Node built-ins:
+ * `lstat`, `realpath.native`, `stat` dev+ino identity and `open` with
+ * `O_NOFOLLOW`. There is no native dependency, no descriptor-relative/openat
+ * helper and no /proc/self/fd use. On win32 `O_NOFOLLOW` is undefined, so an
+ * open follows a final symlink; the post-open fstat identity check still
+ * refuses it, and a scoped write opens without `O_TRUNC` (or with
+ * `O_CREAT | O_EXCL`) and truncates only after that check.
+ *
+ * This module is not a file-isolation boundary and does not sandbox
+ * bash/shell, MCP servers, user extensions or subagents. The six SDK-owned
+ * scoped file tools (read/write/edit/find/grep/ls) call the target guard
+ * immediately before IO, and the Pi host revalidates the serialized roots
+ * before creating a session; the scoped tools shadow the native Pi tools of
+ * the same name rather than leaving an unscoped path tool as a bypass. The
+ * check-then-open path is still not race-free against same-UID processes.
+ *
+ * On win32 (#1423) a target is checked in a fixed order before the shared
+ * checks: the win32 path syntax ({@link win32FileScopePath}), an lstat of every
+ * existing segment from the drive root (a symlink, junction or AppExecLink is
+ * `symlink`), then `realpath.native` of the deepest existing prefix, which
+ * expands 8.3 short names and returns the on-disk case. Every shared check then
+ * runs on that canonical path with byte comparison. A volume mount point
+ * presents as a directory and canonicalizes onto its own volume, so it is
+ * `outside_scope`, or `cross_device` by dev when that volume has no letter.
+ * A lstat or `realpath.native` failure names its reason only for a path
+ * confirmed inside a root; any other path is `outside_scope`. A drive root
+ * (`D:\`) is a root like `/`, and a root whose canonical path is a `\\` share
+ * (a mapped network drive) is refused.
+ * The Windows evidence is #1423 (PR-2a, run 41808217164).
+ */
+/** A filesystem identity captured once and rechecked before use. */
+export interface FileScopeIdentity {
+    readonly dev: bigint;
+    readonly ino: bigint;
+}
+/** The platform-neutral stat view this guard reasons about. */
+export interface FileScopeStat {
+    readonly dev: bigint;
+    readonly ino: bigint;
+    readonly nlink: bigint;
+    readonly kind: 'file' | 'directory' | 'symlink' | 'other';
+}
+/** The one opened-file view the O_NOFOLLOW check needs. */
+export interface FileScopeOpenFile {
+    stat(): Promise<FileScopeStat>;
+    close(): Promise<void>;
+}
+/**
+ * IO seam. Production always uses {@link nodeFileScopeIo}; tests inject a
+ * wrapper only to simulate an unreachable mount (cross-device) that cannot be
+ * mounted unprivileged in a unit test.
+ */
+export interface FileScopeIo {
+    lstat(filePath: string): Promise<FileScopeStat>;
+    stat(filePath: string): Promise<FileScopeStat>;
+    realpath(filePath: string): Promise<string>;
+    open(filePath: string, flags: number): Promise<FileScopeOpenFile>;
+}
+/** One validated root: `path` is canonical, `lexicalPath` is what the Host configured. */
+export interface FileScopeRootGrant {
+    readonly id: string;
+    readonly path: string;
+    readonly lexicalPath: string;
+    readonly identity: FileScopeIdentity;
+    readonly access: ToolFileAccess;
+}
+/** The immutable grant an admitted offer hands to the scoped tools. */
+export interface FileScopeGrant {
+    readonly mode: 'home' | 'workspaces' | 'memory';
+    /** The canonical Agent home; never absent. Read+write for a writer, read-only for a memory reader. */
+    readonly home: FileScopeRootGrant;
+    /**
+     * A memory reader's own run directory (`<home>/.byok/runs/<name>`, the
+     * reader lease's cwd), read+write. Present only for a memory reader; it is
+     * the one path under `.byok` that is not internal.
+     */
+    readonly run?: FileScopeRootGrant;
+    /** Explicit workspace roots only; home and run are carried separately. */
+    readonly roots: readonly FileScopeRootGrant[];
+    /** Stable digest over the canonical grant; audit/log only, never a wire value. */
+    readonly digest: string;
+}
+/**
+ * A typed file-scope failure. Root problems are `file_scope_unavailable`
+ * (authority could not be established), target violations are
+ * `file_scope_denied`, and unknown platforms are `file_scope_unsupported`.
+ * Messages name the root id, never a raw path.
+ */
+export declare class FileScopeGuardError extends Error {
+    readonly code: FileScopeGuardCode;
+    readonly reason: FileScopeGuardReason;
+    readonly rootId?: string;
+    readonly access?: ToolFileAccess;
+    constructor(code: FileScopeGuardCode, reason: FileScopeGuardReason, options?: {
+        readonly rootId?: string;
+        readonly access?: ToolFileAccess;
+        readonly cause?: unknown;
+    });
+}
+/** The one production {@link FileScopeIo}. */
+export declare const nodeFileScopeIo: FileScopeIo;
+/**
+ * The home access of this attempt. A writer owns the home read+write. A
+ * memory reader reads the home and writes only its run directory: the cwd of
+ * its reader lease, which on resume is the run directory the session handoff
+ * recorded, so it is never derived from the task id.
+ */
+export type FileScopeAttempt = {
+    readonly homeAccess: 'writer';
+} | {
+    readonly homeAccess: 'memory-reader';
+    readonly cwd: string;
+};
+export interface ResolveFileScopeGrantInput {
+    readonly fileScope: ToolFileScope | MemoryFileScope;
+    /** The canonical Agent home and the lease identity captured for this offer. */
+    readonly home: {
+        readonly path: string;
+        readonly identity: FileScopeIdentity;
+    };
+    readonly attempt: FileScopeAttempt;
+    readonly platform?: NodeJS.Platform;
+    readonly io?: FileScopeIo;
+}
+/** A stable digest of the configured policy only; usable before roots resolve or in a denial audit. */
+export declare function fileScopePolicyDigest(fileScope: ToolFileScope): string;
+/**
+ * Verify every configured root exists, is a real directory (not a symlink),
+ * canonicalizes under its canonical parent and still has the expected identity.
+ * The Agent home identity comes from the lease, never from cwd text; a memory
+ * reader's run root is resolved by the same rules.
+ */
+export declare function resolveFileScopeGrant(input: ResolveFileScopeGrantInput): Promise<FileScopeGrant>;
+/**
+ * What a checked target may be:
+ * - `file` (default): one regular file, the read/write/edit contract;
+ * - `directory`: one real directory, used before readdir;
+ * - `entry`: an existing name of either kind, used while discovering paths.
+ *   It still rejects symlinks, hard-linked files and outside paths but does not
+ *   open or read file content, so it makes no content claim.
+ */
+export type FileScopeTargetKind = 'file' | 'directory' | 'entry';
+/** One checked target: canonical path, matched root and whether it already exists. */
+export interface FileScopeTargetGrant {
+    readonly path: string;
+    readonly root: FileScopeRootGrant;
+    readonly access: ToolFileAccess;
+    readonly exists: boolean;
+    /** Present only when the target exists. */
+    readonly kind?: 'file' | 'directory';
+    readonly identity?: FileScopeIdentity;
+}
+export interface ResolveFileScopeTargetInput {
+    readonly grant: FileScopeGrant;
+    /** The model/runtime-supplied path; the caller must never trust it. */
+    readonly path: string;
+    readonly access: ToolFileAccess;
+    /** The runtime's current working directory; a relative path resolves against it. */
+    readonly cwd: string;
+    /** Default `file`; `directory`/`entry` are for discovery tools only. */
+    readonly kind?: FileScopeTargetKind;
+    readonly platform?: NodeJS.Platform;
+    readonly io?: FileScopeIo;
+    /** Overrides `os.homedir()` for a leading `~`; tests use a fixture home. */
+    readonly osHome?: string;
+}
+/**
+ * Check one target against a resolved grant. The scoped file tools call this
+ * primitive immediately before every fs operation; discovery tools pass
+ * `kind: 'directory'` before readdir and `kind: 'entry'` per discovered name.
+ *
+ * The check is canonical check-then-open for regular files: every existing
+ * segment is lstat'ed for symlinks, the nearest existing ancestor is
+ * canonicalized and contained, dev+ino and nlink are checked, and an existing
+ * regular file is opened with O_NOFOLLOW and rechecked with fstat. Entries are
+ * checked the same way but are not opened; regular files still reject hard
+ * links, while directories are not hard-link filtered. It is not race-free,
+ * and it is not an OS sandbox.
+ */
+export declare function resolveFileScopeTarget(input: ResolveFileScopeTargetInput): Promise<FileScopeTargetGrant>;
+/** Local file-scope audit (D12): deny and policy adoption are recorded; allow never is. */
+export interface FileScopeAudit {
+    readonly taskId: string;
+    readonly decision: 'deny' | 'policy-adoption';
+    readonly lane: ToolAuthorizationLane;
+    readonly homeAccess: ToolAuthorizationHomeAccess;
+    readonly scope: {
+        readonly source: 'host';
+        readonly mode: FileScopeGrant['mode'];
+        readonly digest: string;
+    };
+    /** Adoption only: every root id the grant covers, home first, then run when present. */
+    readonly rootIds?: readonly string[];
+    /** Denial only: the root that failed, when one was identified. */
+    readonly rootId?: string;
+    /** Denial only: the requested access, when one was identified. */
+    readonly access?: ToolFileAccess;
+    /** Denial only: the typed failure code. */
+    readonly code?: FileScopeGuardCode;
+    /** Denial only: the typed failure reason. */
+    readonly reason?: FileScopeGuardReason;
+    /** Denial only: the native tool name; never a path or content. */
+    readonly toolName?: string;
+    /** Denial only: the runtime's own call id, when it supplied one. */
+    readonly toolCallId?: string;
+}
+// ==== @byok-sdk/client dist/file-scope-types.d.ts ====
+/**
+ * The closed file-scope result vocabulary. It is deliberately separate from
+ * `file-scope-guard` so the loopback IPC and the adapter's grant serializer can
+ * import it without loading the guard's filesystem primitives.
+ *
+ * It also owns the six SDK tool names that are *inside* a scoped session's
+ * file boundary, so the per-task gate binding can brand the auto gate with the
+ * out-of-scope default-ask floor without importing the Pi/typebox tool
+ * implementations.
+ */
+/**
+ * Every native file tool a scoped ordinary RPC session replaces. read/write/edit
+ * mutate or read one target; find/grep/ls discover paths and text inside the
+ * same roots. The native Pi versions are shadowed, never left as a bypass.
+ */
+export declare const SCOPED_FILE_TOOL_NAMES: readonly ["read", "write", "edit", "find", "grep", "ls"];
+export type ScopedFileToolName = (typeof SCOPED_FILE_TOOL_NAMES)[number];
+/** Internal grant for the dreaming lane; not a Host-configurable file policy. */
+export interface MemoryFileScope {
+    readonly mode: 'memory';
+    readonly roots?: never;
+}
+export declare function isScopedFileToolName(value: string): value is ScopedFileToolName;
+/** The closed reasons the guard reports. */
+export type FileScopeGuardReason = 'outside_scope' | 'read_only' | 'symlink' | 'hardlink' | 'not_regular_file' | 'cross_device' | 'path_syntax' | 'cwd_outside_scope' | 'internal_path' | 'root_identity_changed' | 'unsupported_platform' | 'root_missing' | 'not_directory' | 'io_error';
+export type FileScopeGuardCode = 'file_scope_denied' | 'file_scope_unavailable' | 'file_scope_unsupported';
+/** Closed values the deny-audit channel may carry; anything else is rejected. */
+export declare const FILE_SCOPE_GUARD_REASONS: readonly FileScopeGuardReason[];
+export declare const FILE_SCOPE_GUARD_CODES: readonly FileScopeGuardCode[];
 // ==== @byok-sdk/client dist/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
@@ -14219,6 +14478,8 @@ export interface SessionEvidence {
  * capability authority again during admission, claim or start.
  */
 export interface RuntimeAdapterDescriptor {
+    /** Pi RPC memory-only execution contract; omission means unsupported. */
+    readonly memoryLane?: typeof import('./adapters/pi/memory-lane-contract').PI_MEMORY_LANE;
     readonly id: string;
     readonly capabilities: RuntimeCapabilities;
     /**
@@ -14455,6 +14716,8 @@ export interface RuntimeLaunchResources {
 }
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
+    /** Device-owned memory grant; never sourced from the offer. */
+    readonly memoryLane?: import('./file-scope-guard').FileScopeGrant;
     readonly scratch: ExecutionScratch;
     /** Exact local resource acquired by this operation before resume handoff validation; never serialized. */
     readonly sessionLease?: RuntimeSessionLease;

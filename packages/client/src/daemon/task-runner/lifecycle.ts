@@ -69,7 +69,8 @@ export async function interruptBounded(this: TaskRunner, active: ActiveTask, dra
   const configuredMs = this['deps'].shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
   const timeoutMs = capMs === undefined ? configuredMs : Math.min(configuredMs, capMs);
   const deadline = Date.now() + timeoutMs;
-  await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
+  if (active.memoryLane?.cancellation === 'await-rpc-abort-or-process-exit') await active.session.interrupt();
+  else await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
   // Close drains native stdio even if an ACK arrived before final usage, or
   // the adapter never supplies turn_end. Retain this SAME receipt for finish
   // to await/retry; a deadline is never proof of disposal.

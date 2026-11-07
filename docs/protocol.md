@@ -1068,6 +1068,39 @@ offer row requires the target device's `native-sessions` capability; a literal
 window has a strict gate, while the Host's `ifAdvertised: true` value resolves at
 enqueue as described in §2.1.
 
+The device switch `DaemonConfig.nativeSessions` defaults to `false`. Declaration
+requires that switch, macOS or Linux, `piByokLauncher.sessionDir`, and a Pi
+adapter declaring `PI_MEMORY_LANE`. Windows never declares it in 0.40. A device
+without the capability, a non-Pi selection, or a Pi adapter without the lane
+refuses before claim with `reason` and `code` both `native_sessions_unsupported`,
+non-retryably. This closed plaintext decline also applies when `task-output` is
+sealed, including when the owner disables the capability after Host enqueue.
+Its own `task.decline` wire row requires the server's `native-sessions`
+capability: this two-way gate advertises that the server understands both the
+V1 native-session input field and the decline code. The plain decline vocabulary
+remains open.
+
+After claim, the daemon renders within `min(10 s, remaining startup time)`.
+Every rendering failure fails the claimed task without starting the runtime.
+The instruction is device guidance, the single JSON data line, then the Host
+instruction; no intermediate file is written. `buildDreamInstruction` is unchanged.
+The lane uses a fresh in-memory Pi session and the device-owned `memory` grant.
+`PI_MEMORY_LANE.egress` suppresses all `task.progress`, sets completion `summary`
+to the empty string, and excludes `finalMessage` and result documents. Cancellation
+and timeout wait for RPC abort acknowledgement (or observed process exit) before
+reporting task end or terminating the process tree; an admitted IO drain is never
+interrupted by SIGKILL. The daemon sends no `compact` command to this lane.
+
+The host emits one local `{ type: 'byok_host_ready', sessionId }` receipt after
+session_start, before accepting prompts. Only memory-lane admission consumes it:
+exactly one receipt must match the authoritative native sessionId before the
+first prompt. The host asserts the scoped tool loadout independently.
+
+Argument summaries apply the same rules by tool name, including matching
+extension tools. Safety comes from the command-word allowlist and path rules;
+tool result content never enters the summary. The handoff ledger records session
+identity and lifecycle without tool confirmation sets.
+
 `redactSecrets` is exported by protocol and its schema-free `/constants` entry.
 It shares one rule list with `boundFailureReason`, including PEM blocks and
 `xox*-`, `glpat-`, `npm_` and `hf_` tokens. It redacts without truncating; failure
@@ -1718,8 +1751,11 @@ rule for every such field, and checks the rule against the sealed branch.
 
 **Fail closed.** A receiver never falls back to plaintext. A device that
 refuses sealed task input declines non-retryably with one of the closed codes
-`sealed_key_unavailable`, `sealed_open_failed`, `sealed_content_mac_mismatch`
-or `sealing_policy_mismatch` in `code`. These codes go only on the plaintext
+`sealed_key_unavailable`, `sealed_open_failed`, `sealed_content_mac_mismatch`,
+`sealing_policy_mismatch` or `native_sessions_unsupported` in `code`.
+`native_sessions_unsupported` identifies an unavailable native-session capability,
+including an owner switching it off after enqueue; it does not assert missing keys.
+These codes go only on the plaintext
 `task.decline`, and its `reason` is then the code itself. On the plaintext
 `task.decline`, each code is a value gate on the server flag.
 The sealed `task.decline` branch refuses them: a device that cannot open or

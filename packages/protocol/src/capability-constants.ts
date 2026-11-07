@@ -140,5 +140,9 @@ export function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREP
   return typeof value === 'string' && PREPARED_AGENT_MEMORY_MODES.some(mode => mode === value);
 }
 
-/** The device admits native Pi session summaries in the memory-only dream lane. */
+/**
+ * A device can run the native-session lane. A server understands the V1
+ * `nativeSessions` offer field, resolves `ifAdvertised` at enqueue, and accepts
+ * the `native_sessions_unsupported` decline code.
+ */
 export const NATIVE_SESSIONS_CAPABILITY = 'native-sessions' as const;

@@ -32,9 +32,9 @@ and contributes the command word and at most two subcommand words. Each word
 must match `^[a-z][a-z0-9-]{0,22}$`; the first non-matching word stops selection.
 If the command word fails, only the tool name and result remain.
 Read/write/edit/ls/find/grep contribute paths relative to home, never patterns.
-Arguments are included only for Pi built-ins identified by provenance,
-never by name alone. MCP and
-extension tools contribute no arguments. Tool output, user and assistant
+The same argument summary rules apply by tool name, including extension tools
+with matching names. Other tools contribute no arguments. Summary safety comes
+from the command-word allowlist and path rules. Tool output, user and assistant
 body text, thinking, written contents, images and compaction are never read
 as dream input.
 
@@ -59,6 +59,10 @@ exhausted budget fails with `native_sessions_unavailable: <closed detail>`;
 errors contain no raw session bytes. Streaming parsing is abortable and
 bounded as specified in ADR-050.
 
+The host emits one `{ type: 'byok_host_ready', sessionId }` per session start.
+Only memory-lane admission consumes this readiness receipt, requiring exactly one
+receipt whose sessionId matches the native session before the first prompt.
+
 The dream runs in a memory-only Pi RPC lane with exactly six SDK file tools:
 `read`, `write`, `edit`, `ls`, `find` and `grep`. The `memory` file-scope grant
 limits them to `MEMORY.md` and `notes/`, retaining symlink, hardlink, `.byok`
@@ -68,8 +72,9 @@ Other tool names are rejected directly without approval. The exact tool set
 is asserted before the first prompt. The session stays in memory, so it
 does not become future dream input. A single JSON line appears between
 device guidance and the Host instruction, without an intermediate file or
-a change to `buildDreamInstruction`. Timeout or cancellation must prevent
-late memory writes. The lane emits no `task.progress`, has an empty
+a change to `buildDreamInstruction`. Timeout or cancellation waits for the lane's abort acknowledgement (or process exit) before reporting task end. Process-tree
+termination also waits for that receipt, so admitted file IO drains without
+SIGKILL and no write remains after acknowledgement. The lane emits no `task.progress`, has an empty
 `summary`, no `finalMessage`, and permits no `result-document`.
 
 **The device switch `DaemonConfig.nativeSessions` is off by default. Turning

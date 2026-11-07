@@ -8,6 +8,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
   "x-byok-schemaVersion": 1,
   "type": "object",
   "properties": {
+    "nativeSessions": {
+      "type": "boolean"
+    },
     "nativeAssetRoot": {
       "type": "string"
     },

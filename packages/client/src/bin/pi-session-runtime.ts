@@ -82,7 +82,7 @@ export async function runPiSessionRuntime(options: {
   /** Fixed, fresh memory-only lane; it cannot resume or replace a transcript. */
   memoryLane?: ReturnType<typeof import('./pi-memory-lane').createPiMemoryLane>;
   /** Called once after creation/assertion, before the RPC loop can accept a prompt. */
-  onSessionReady?: (session: PiToolLoadoutSession) => void;
+  onSessionReady?: (session: PiToolLoadoutSession & { readonly sessionId: string }) => void;
   /** Pre-prompt registry assertion for a scoped session; throwing disposes and refuses to run. */
   assertToolLoadout?: (session: PiToolLoadoutSession) => void;
   /** Fresh SDK-owned resources directory. The original Pi directory remains the model/auth authority. */
@@ -252,8 +252,9 @@ export async function runPiSessionRuntime(options: {
       created.session.setThinkingLevel(created.session.thinkingLevel);
     }
     // RPC awaits bindExtensions before attaching stdin. session_start can
-    // register/shadow tools, so provenance and the scope assertion belong
-    // after that hook, not at createAgentSession's earlier registry snapshot.
+    // register/shadow tools, so the scope assertion belongs after that hook.
+    // Emit one readiness receipt per session start for memory-lane admission;
+    // assertion or emission failure disposes the session and fails the host.
     const bindExtensions = created.session.bindExtensions.bind(created.session);
     let ready = false;
     created.session.bindExtensions = async (...args) => {
