@@ -187,15 +187,19 @@ export function syncDreams(s: LedgerState, sync: DreamSync): boolean {
     const model = chooseModel(sync.policy, sync.models, bot.model, bot.execution.deviceId);
     if (!model) { skip(key, run, 'model_unavailable'); continue; }
     let rows: readonly (Turn | ContextTurn)[] = fresh;
+    let throughTurn = settled.at(-1)!.id;
     if (sync.historyMode) {
       const read = sync.history?.get(key);
       if (read === undefined) continue;
       if (read === null) { skip(key, run, 'history_unavailable'); continue; }
-      rows = settledAfter(read, record.throughTurn).filter(completed);
+      const readSettled = settledAfter(read, record.throughTurn);
+      rows = readSettled.filter(completed);
+      if (!rows.length) { skip(key, run, 'no_new_turns'); continue; }
+      throughTurn = readSettled.at(-1)!.id;
     }
     const window = { fromMs: Math.min(record.since, run.windowEnd), toMs: run.windowEnd };
     const instruction = dreamInstruction(rows, window, sync.policy.maxDurationMs, sync.instructionMaxBytes);
-    Object.assign(run, { template: model.template, fallback: model.fallback, throughTurn: settled.at(-1)!.id });
+    Object.assign(run, { template: model.template, fallback: model.fallback, throughTurn });
     promoteOccurrence(s, sync.tenant, key, dreamExecution(model.base ?? bot.execution, bot.execution, instruction, sync.policy.maxDurationMs));
     changed = true;
   }
