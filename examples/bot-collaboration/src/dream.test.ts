@@ -16,10 +16,14 @@ let fixture: TestHost | undefined, bot: BotCollaboration | undefined, clock = 0;
 afterEach(async () => { await bot?.close(); await fixture?.close(); bot = fixture = undefined; });
 const ZONE = 'Asia/Hong_Kong';
 const WINDOW_START = Date.UTC(2026, 0, 1), WINDOW_END = WINDOW_START + 1000;
-function offlineDream(nativeSessions?: boolean): AgentExecutionInput {
+function offlineDream(nativeSessions?: boolean, harnessOnly = false): AgentExecutionInput {
   const ledger = new HostLedger(':memory:', TENANT_A), models = { default: template('device') }, policy = dreamPolicy({ timeZone: ZONE, nativeSessions })!;
   ledger.transaction(s => {
     const state = stateOf(s.application); seedCollaboration(state); state.turns.t1!.status = 'succeeded';
+    if (harnessOnly) {
+      const { runtime: _runtime, ...payload } = state.team.bots.main!.execution.payload;
+      state.team.bots.main!.execution.payload = { ...payload, harnessId: 'test-harness' };
+    }
     reconcileDreamRoutines(s, policy, models, WINDOW_START);
     const routine = Object.values(s.routines)[0]!, key = 'dream-key';
     s.occurrences[key] = { key, routineId: routine.definition.id, definitionVersion: 1, trigger: { kind: 'scheduled', plannedAt: WINDOW_END },
@@ -32,6 +36,9 @@ function offlineDream(nativeSessions?: boolean): AgentExecutionInput {
 }
 it('freezes the default native session request with the dream window', () => {
   expect(offlineDream().payload.nativeSessions).toEqual({ fromMs: WINDOW_START, toMs: WINDOW_END, ifAdvertised: true });
+});
+it('promotes a harness-only Bot template with the native session request', () => {
+  expect(offlineDream(true, true).payload).toMatchObject({ harnessId: 'test-harness', nativeSessions: { fromMs: WINDOW_START, toMs: WINDOW_END, ifAdvertised: true } });
 });
 async function open(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
   fixture ??= await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });

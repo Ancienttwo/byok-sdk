@@ -123,7 +123,7 @@ function chooseModel(policy: DreamPolicy, models: Readonly<Record<string, Execut
 }
 /** The template's runtime and limits with the Bot's Agent, and none of what a Bot Turn offers. */
 function dreamExecution(base: ExecutionTemplate, bot: ExecutionTemplate, instruction: string, maxDurationMs: number, window: { fromMs: number; toMs: number }, nativeSessions: boolean): ExecutionTemplate {
-  const { messageEgress: _egress, requiredToolsets: _toolsets, agentMemoryCommit: _commit, homeAccess: _home, preparation: _preparation, harnessId: _harness, nativeSessions: _nativeSessions, ...payload } = base.payload;
+  const { messageEgress: _egress, requiredToolsets: _toolsets, agentMemoryCommit: _commit, homeAccess: _home, preparation: _preparation, nativeSessions: _nativeSessions, ...payload } = base.payload;
   return { deviceId: bot.deviceId, payload: { ...payload, instruction, session: { mode: 'fresh' }, agentRef: bot.payload.agentRef, agentMemory: 'none',
     limits: { ...payload.limits, maxDurationMs }, terminalProjection: { mode: 'none' }, ...(nativeSessions ? { nativeSessions: { ...window, ifAdvertised: true } } : {}) } };
 }
