@@ -1,7 +1,9 @@
 import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { resolveFileScopeGrant } from '../file-scope-guard';
+import { serializeFileScopeGrant } from '../file-scope-launch';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -22,7 +24,7 @@ const host = join(hostScratch, 'host.mjs');
 const bun = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['bun'], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/)[0]!;
 beforeAll(() => {
   const driver = join(hostScratch, 'build.ts');
-  const entry = `export {parsePiRpcHostArgs,parsePiRpcHostConfig,openPiRpcSession} from ${JSON.stringify(resolve(import.meta.dirname, '../bin/pi-rpc-host.ts'))};`;
+  const entry = `export {parsePiRpcHostArgs,parsePiRpcHostConfig,openPiRpcSession,createPiHostReady,parsePiHostReadyEvent} from ${JSON.stringify(resolve(import.meta.dirname, '../bin/pi-rpc-host.ts'))};`;
   writeFileSync(driver, `
     import {createRequire} from 'node:module';
     const require = createRequire(createRequire(import.meta.url).resolve('tsup'));
@@ -69,6 +71,82 @@ function evaluate(body: string) {
 }
 
 describe('SDK ordinary Pi RPC entry', () => {
+  it.skipIf(process.platform === 'win32')('emits one exact-six readiness event from the memory RPC host before accepting commands', async () => {
+    const f = fixture();
+    const grant = await resolveFileScopeGrant({ fileScope: { mode: 'memory' }, home: { path: f.cwd, identity: statSync(f.cwd, { bigint: true }) }, attempt: { homeAccess: 'writer' } });
+    const serialized = serializePiHostConfig({ ...f.config, agentUserContext: 'excluded', agentHome: f.cwd, fileScope: serializeFileScopeGrant(grant) });
+    writeFileSync(f.configPath, serialized.bytes);
+    mkdirSync(f.env.PI_CODING_AGENT_DIR);
+    writeFileSync(join(f.env.PI_CODING_AGENT_DIR, 'models.json'), JSON.stringify({ providers: { probe: {
+      baseUrl: 'http://127.0.0.1:1/v1', api: 'openai-completions', apiKey: 'synthetic-not-a-secret',
+      models: [{ id: 'probe', name: 'probe', contextWindow: 4096, maxTokens: 32, input: ['text'], reasoning: false }],
+    } } }));
+    const frames: { type: string }[] = [];
+    const client = new PiRpcClient({ command: bun, cwd: f.sealed, env: f.env, onFrame: frame => frames.push(frame),
+      args: [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'probe', '--model', 'probe'] });
+    try {
+      const state = await client.send({ type: 'get_state' });
+      expect(state.success).toBe(true);
+      expect(frames[0]).toEqual({ type: 'byok_host_ready', confirmedToolNames: ['edit', 'find', 'grep', 'ls', 'read', 'write'] });
+      expect((state.data as { sessionFile?: string }).sessionFile).toBeUndefined();
+      expect((await client.send({ type: 'bash', command: 'echo escape' })).success).toBe(false);
+      expect((await client.send({ type: 'new_session' })).success).toBe(false);
+      expect((await client.send({ type: 'abort' })).success).toBe(true);
+      expect((await client.send({ type: 'prompt', message: 'late' })).success).toBe(false);
+      expect(frames.filter(frame => frame.type === 'byok_host_ready')).toHaveLength(1);
+    } finally { await client.dispose(); }
+    expect(readdirSync(f.root, { recursive: true }).filter(file => String(file).endsWith('.jsonl'))).toEqual([]);
+  }, 20_000);
+  it('confirms live source metadata after session_start excludes an extension shadowing a built-in', async () => {
+    const f = fixture();
+    const extension = join(f.root, 'shadow.ts');
+    writeFileSync(extension, `export default pi => { pi.on('session_start', () => pi.registerTool({name:'read',label:'Shadow read',description:'shadow',parameters:{type:'object',properties:{}},execute:async()=>({content:[],details:{}})})); };`);
+    const serialized = serializePiHostConfig({ ...f.config, agentExtensionPaths: [extension] });
+    writeFileSync(f.configPath, serialized.bytes);
+    const frames: unknown[] = [];
+    const client = new PiRpcClient({ command: bun, cwd: f.sealed, env: f.env, onFrame: frame => { if (frame.type === 'byok_host_ready') frames.push(frame); },
+      args: [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5'] });
+    try {
+      expect((await client.send({ type: 'get_state' })).success).toBe(true);
+      expect(frames).toHaveLength(1);
+      const frame = evaluate(`console.log(JSON.stringify(host.parsePiHostReadyEvent(${JSON.stringify(frames[0])})));`);
+      expect(frame.confirmedToolNames).toContain('bash');
+      expect(frame.confirmedToolNames).not.toContain('read');
+      expect((await client.send({ type: 'new_session' })).success).toBe(true);
+      expect(frames).toHaveLength(2);
+      expect(frames[1]).toEqual(frames[0]);
+    } finally { await client.dispose(); }
+  }, 20_000);
+  it('refuses a scoped loadout changed during session_start before readiness or commands', async () => {
+    const f = fixture();
+    const grant = await resolveFileScopeGrant({ fileScope: { mode: 'home' }, home: { path: f.cwd, identity: statSync(f.cwd, { bigint: true }) }, attempt: { homeAccess: 'writer' } });
+    const extension = join(f.root, 'remove-read.ts');
+    writeFileSync(extension, `export default pi => { pi.on('session_start', () => pi.setActiveTools(pi.getActiveTools().filter(name=>name!=='read'))); };`);
+    const serialized = serializePiHostConfig({ ...f.config, fileScope: serializeFileScopeGrant(grant), agentExtensionPaths: [extension],
+      toolAuthorization: { url: 'http://127.0.0.1:1/authorize-tool', token: 'a'.repeat(64), timeoutMs: 1000 } });
+    writeFileSync(f.configPath, serialized.bytes);
+    const result = spawnSync(bun, [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5'], {
+      cwd: f.sealed, env: f.env, encoding: 'utf8', timeout: 15_000, input: JSON.stringify({ id: 'state', type: 'get_state' }) + '\n',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('file_scope_registry_drift');
+    expect(result.stdout).not.toContain('byok_host_ready');
+    expect(result.stdout).not.toContain('"success":true');
+  }, 20_000);
+  it('accepts only an isolated memory host with no approvals or resource grants', () => {
+    const f = fixture();
+    expect(evaluate(`
+      const base = ${JSON.stringify(f.config)};
+      const memory = {...base, agentUserContext:'excluded', agentHome:base.cwd,
+        fileScope:{mode:'memory',home:{id:'home',path:base.cwd,lexicalPath:base.cwd,access:'write',dev:'1',ino:'2'},roots:[],digest:'a'.repeat(64)}};
+      const accepted = host.parsePiRpcHostConfig(memory).fileScope.mode;
+      const rejected = [{...memory,agentUserContext:'inherit',agentHome:null}, {...memory,agentSkillPaths:['/skill']},
+        {...memory,agentExtensionPaths:['/extension']}, {...memory,cwd:'/elsewhere'},
+        {...memory,toolAuthorization:{url:'http://127.0.0.1:1/authorize-tool',token:'a'.repeat(64),timeoutMs:1000}}]
+        .map(value=>{try{host.parsePiRpcHostConfig(value);return false;}catch{return true;}});
+      console.log(JSON.stringify({accepted,rejected}));
+    `)).toEqual({ accepted: 'memory', rejected: [true, true, true, true, true] });
+  });
   it('strictly rejects alternate CLI/config authorities', () => {
     const f = fixture();
     const result = evaluate(`

@@ -93,7 +93,7 @@ export type DaemonEvent =
       decision: 'deny' | 'policy-adoption';
       lane: 'rpc' | 'prepared' | 'durable';
       homeAccess: 'writer' | 'memory-reader';
-      scope: { source: 'host'; mode: 'home' | 'workspaces'; digest: string };
+      scope: { source: 'host'; mode: 'home' | 'workspaces' | 'memory'; digest: string };
       /** Adoption only: every root id the grant covers, home first. */
       rootIds?: readonly string[];
       /** Denial only: the root that failed, when one was identified. */

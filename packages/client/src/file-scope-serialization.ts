@@ -23,7 +23,7 @@ export interface SerializedFileScopeRoot {
 }
 
 export interface SerializedFileScopeGrant {
-  readonly mode: 'home' | 'workspaces';
+  readonly mode: FileScopeGrant['mode'];
   /** `read` exactly when `run` is present (a memory reader); `write` otherwise. */
   readonly home: SerializedFileScopeRoot;
   /** A memory reader's run directory under `<home>/.byok/runs/`, always `write`. */
@@ -115,10 +115,11 @@ export function parseSerializedFileScopeGrant(
   if (!record(value) || Object.keys(value).some((key) => !['mode', 'home', 'run', 'roots', 'digest'].includes(key))) {
     fail('file scope grant must contain exactly mode, home, roots and digest, and run only for a memory reader');
   }
-  if (value.mode !== 'home' && value.mode !== 'workspaces') fail('file scope grant mode must be home or workspaces');
+  if (value.mode !== 'home' && value.mode !== 'workspaces' && value.mode !== 'memory') fail('file scope grant mode must be home, workspaces or memory');
   if (typeof value.digest !== 'string' || !SHA256.test(value.digest)) fail('file scope grant digest must be a sha256 hex string');
   const home = parseRoot(value.home, 'home', fail);
   const run = Object.hasOwn(value, 'run') ? parseRoot(value.run, 'run', fail) : undefined;
+  if (value.mode === 'memory' && run !== undefined) fail('memory grant must not carry a reader run root');
   if (home.id !== 'home') fail('file scope home root must be id "home"');
   if (home.access !== (run === undefined ? 'write' : 'read')) {
     fail('file scope home root must be read-only with a run root and writable without one');
@@ -130,7 +131,7 @@ export function parseSerializedFileScopeGrant(
     }
   }
   if (!Array.isArray(value.roots)) fail('file scope grant roots must be an array');
-  if (value.mode === 'home' && value.roots.length !== 0) fail('file scope grant with mode home must not carry workspace roots');
+  if (value.mode !== 'workspaces' && value.roots.length !== 0) fail('file scope grant with mode home or memory must not carry workspace roots');
   if (value.mode === 'workspaces' && value.roots.length === 0) fail('file scope grant with mode workspaces requires roots');
   if (value.roots.length > 32) fail('file scope grant must contain at most 32 workspace roots');
   const ids = new Set<string>();

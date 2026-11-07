@@ -6273,7 +6273,7 @@ export type DaemonRecord = Extract<DaemonEvent, {
     homeAccess: 'writer' | 'memory-reader';
     scope: {
         source: 'host';
-        mode: 'home' | 'workspaces';
+        mode: 'home' | 'workspaces' | 'memory';
         digest: string;
     };
     rootIds?: readonly string[];
@@ -7492,7 +7492,7 @@ export type DaemonEvent = ({
     homeAccess: 'writer' | 'memory-reader';
     scope: {
         source: 'host';
-        mode: 'home' | 'workspaces';
+        mode: 'home' | 'workspaces' | 'memory';
         digest: string;
     };
     /** Adoption only: every root id the grant covers, home first. */
