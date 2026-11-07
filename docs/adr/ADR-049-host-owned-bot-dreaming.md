@@ -44,7 +44,7 @@ appliesTo:
 
 **D6. K4 管队列。** K8 自己的 occurrence hook `bot-dream` 把 occurrence 记成待做梦，K8 的 sync 再决定跳过，或者把它提升进这个 Bot 的 FIFO。FIFO 位置、顶替和截止时间都由 K4 管。用户输入排在还没开始的做梦前面。正在跑的做梦不打断，用户输入最多等 `maxDurationMs`，默认 15 分钟。`dreams.open` 记下每个做梦 intent 的归属，所以它的终态到不了 Host intent handler。
 
-**D7. H 不跑做梦（B1）。** H 接受从 L 导入的 `bot-dream` 行，触发时直接结束 occurrence，结论是 `cancelled`，不跑任务，在 Bot 的做梦记录里写下 `H does not support dreaming yet`。
+**D7. H 跑完整做梦（B4，#1516）。** H 通过 K8 package exports 使用同一份 `dream.ts` 规则，默认开启；每个 scope 的 Host config 可配置 `dreaming` 或用 `false` 关闭。H 在 scope 事务中记录 occurrence、决定 promotion 并持久化结果。成功终态属于 dream，不经过 Bot outcome parser；后续 sync 从 intent conclusion 关闭 dream，只有成功推进 mark。Host history 在事务外读取，缺结果等待、失败记 skip，不回退到本地 Turn。`dreams.open` 在结果同步前保留，因此 #1500 的 compaction veto 同样适用；H 仍不压缩 routine intents。H 和 L 共用 `userFirst` 及后台 intent 集合，用户 Turn 在入队事务内越过同 Agent 尚未提交的 routine、bot_request 和 dream intent；H 的 device slot reservation 不在这次范围内。
 
 ## 3. 影响
 
@@ -73,7 +73,6 @@ appliesTo:
 
 ## 5. 延后
 
-- **H 上完整做梦（B4）：** 等 H 真要部署时再排。
 - **v2 设备原生会话已决定进入 0.40：** 设计与验收边界见 [ADR-050](ADR-050-dream-native-session-input.md)，不再适用原来的延后触发条件。
 
 ## 6. 取代

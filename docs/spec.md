@@ -4183,7 +4183,8 @@ K8 Bots dream by default. `BotCollaboration` gives each unarchived Bot with a
 usable template a daily routine, at 03:00 in `dreaming.timeZone`, or in the
 process's local zone when the routine is created. `dreaming: false` turns dreaming
 off for the whole Host. A routine runs only when the Bot completed a Turn since
-its last successful dream.
+its last successful dream. The first dream window starts when dreaming was set
+up for the Bot; older Turns of an upgraded ledger still go into its pack.
 
 A dream runs on the Bot's own device, because its memory home is there. Its
 template is the first name in `dreaming.models` that exists and is on that device,
@@ -4206,9 +4207,14 @@ or promotes it into the Bot's FIFO. K4 owns the FIFO position, supersede and
 deadline. User input goes ahead of a dream that has not started, and a running
 dream is not interrupted, so that input waits at most `maxDurationMs`.
 
-The hosted example concludes a `bot-dream` occurrence `cancelled` with no task and
-records why. Full dreaming on hosted and dreaming from device-native sessions are
-deferred.
+The hosted example runs the same dreaming rules through K8 package exports
+(#1516). Each scope's Host config controls `dreaming`, on by default. Its scope
+transaction persists the occurrence and promotion; a later sync records the
+intent conclusion, advancing the mark only on success. An open dream retains
+its compaction veto until that result syncs. H also uses K8's `userFirst` rule
+and autonomous intent set for queued, never-submitted work; device slot
+reservation remains outside this hosted change. Dreaming from device-native
+sessions is a separate workstream.
 
 ## Hosted mailbox hold (#410)
 

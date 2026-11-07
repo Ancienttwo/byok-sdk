@@ -353,13 +353,13 @@ export async function until<T>(check: () => Promise<T | undefined>, timeoutMs = 
  * instance that a test may kill and restart on the same port and storage dir, so the device reconnects to the new instance
  * and the clock keeps its alarm.
  */
-export async function openHome(options: Omit<WorkerOptions, 'persist'> = {}) {
+export async function openHome(options: Omit<WorkerOptions, 'persist'> = {}, dreaming?: HostConfig['dreaming']) {
   const substrate = await openSubstrate();
   const home = `worker-tenant-${randomUUID()}`;
   const persist = mkdtempSync(path.join(tmpdir(), 'hw-persist-'));
   let worker: WorkerInstance | undefined, device: DeviceProcess | undefined;
   try {
-    await substrate.provision(home, OWNER, { models: { default: template('pending', 'main') }, readOnlyToolsets: [] });
+    await substrate.provision(home, OWNER, { models: { default: template('pending', 'main') }, readOnlyToolsets: [], dreaming });
     worker = await startWorker(substrate, { ...options, persist });
     const { code } = await worker.admin<{ code: string }>('/host/pairing-code', { scope: home });
     device = await startDevice(worker.base, code);
@@ -383,7 +383,7 @@ export async function openHome(options: Omit<WorkerOptions, 'persist'> = {}) {
      */
     async bot() {
       const agentId = 'main', execution = template(device!.deviceId, agentId);
-      const token = await substrate.provision(home, OWNER, { models: { default: execution }, readOnlyToolsets: [] });
+      const token = await substrate.provision(home, OWNER, { models: { default: execution }, readOnlyToolsets: [], dreaming });
       await substrate.store.seed(home, state => {
         seedCollaboration(state);
         Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });

@@ -21,7 +21,7 @@ type RoutineRow = { id: string; definition: RoutineDefinition; pending: RoutineD
 type OccurrenceRow = { key: string; routine_id: string; definition_version: number; trigger_kind: Occurrence['trigger']['kind']; planned_at: string;
   recorded_at: string; next_at: string | null; execution_superseded: boolean; job: { summary?: Json } | null };
 type IntentRow = OccurrenceRow & { intent_key: string; ordinal: string; agent: string; input: FrozenExecutionInput; wait_until: string; tries: number;
-  retry: RetryPolicy; retry_until: string | null; cancel_reason: Intent['cancelReason'] | null };
+  retry: RetryPolicy; retry_until: string | null; cancel_reason: Intent['cancelReason'] | null; conclusion: Intent['conclusion'] | null };
 
 const OCCURRENCE_COLUMNS = `o.key, o.routine_id, o.definition_version, o.trigger_kind, o.planned_at::text, o.recorded_at::text, o.next_at::text,
   o.execution_superseded, o.job`;
@@ -47,9 +47,10 @@ function occurrence(row: OccurrenceRow, intentKey?: string): Occurrence {
 /**
  * Loads every routine of the scope in insertion order, and its open occurrences: one with no intent and no conclusion, or
  * one whose intent `occurrence:<key>` has no conclusion. A promoted occurrence keeps `conclusion IS NULL` for good (DDL D5),
- * so its intent decides whether it is open. The caller holds the scope lock.
+ * so its intent decides whether it is open. Named dreams also load settled intents until K8 syncs their results.
+ * The caller holds the scope lock.
  */
-export async function loadSlice(client: PoolClient, scopeKey: string): Promise<RoutineSlice> {
+export async function loadSlice(client: PoolClient, scopeKey: string, dreams: readonly string[] = []): Promise<RoutineSlice> {
   const state: LedgerState = { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {},
     outbox: {}, applied: {}, application: {}, scanWake: null };
   const routines = await client.query<RoutineRow>(`SELECT id, definition, pending, lifecycle, status, next_at::text, calendar_errors,
@@ -67,14 +68,16 @@ export async function loadSlice(client: PoolClient, scopeKey: string): Promise<R
     AND NOT EXISTS (SELECT 1 FROM intent i WHERE i.scope = o.scope AND i.key = ${INTENT_OF}) ORDER BY o.ordinal`, [scopeKey]);
   for (const row of unpromoted.rows) state.occurrences[JSON.parse(row.key) as string] = occurrence(row);
   const promoted = await client.query<IntentRow>(`SELECT ${OCCURRENCE_COLUMNS}, i.key AS intent_key, i.ordinal::text, i.agent, i.input, i.wait_until::text,
-    i.tries, i.retry, i.retry_until::text, i.cancel_reason FROM intent i JOIN occurrence o ON o.scope = i.scope AND o.key = ${OCCURRENCE_OF}
-    WHERE i.scope = $1 AND i.source = 'routine' AND i.conclusion IS NULL ORDER BY i.ordinal`, [scopeKey]);
+    i.tries, i.retry, i.retry_until::text, i.cancel_reason, i.conclusion FROM intent i JOIN occurrence o ON o.scope = i.scope AND o.key = ${OCCURRENCE_OF}
+    WHERE i.scope = $1 AND i.source = 'routine' AND (i.conclusion IS NULL OR o.key = ANY($2::text[])) ORDER BY i.ordinal`,
+    [scopeKey, dreams.map(storedKey)]);
   for (const row of promoted.rows) {
     const key = JSON.parse(row.intent_key) as string, { taskId, ...execution } = row.input;
-    state.occurrences[JSON.parse(row.key) as string] = occurrence(row, key);
+    const concluded = row.conclusion === null ? {} : { conclusion: row.conclusion };
+    state.occurrences[JSON.parse(row.key) as string] = { ...occurrence(row, key), ...concluded };
     // Only the fields that K4 routine rules read. H has no generations, so a tried row is inflight.
     state.intents[hash(key)] = { id: hash(key), key, source: 'routine', execution, waitUntil: Number(row.wait_until), retry: row.retry, agent: row.agent,
-      sequence: Number(row.ordinal), phase: row.tries === 0 ? 'queued' : 'inflight', generation: 0, taskId, notBefore: 0, attempts: row.tries,
+      sequence: Number(row.ordinal), phase: row.conclusion ? 'settled' : row.tries === 0 ? 'queued' : 'inflight', generation: 0, taskId, notBefore: 0, attempts: row.tries, ...concluded,
       occurrence: JSON.parse(row.key) as string, ...(row.retry_until === null ? {} : { retryUntil: Number(row.retry_until) }),
       ...(row.cancel_reason === null ? {} : { cancelReason: row.cancel_reason }) };
   }
@@ -104,7 +107,6 @@ export async function writeSlice(client: PoolClient, scopeKey: string, slice: Ro
     if (next && (next.payload !== undefined || next.dedupKey !== routineWakeKey(definition.id, definition.version, next.availableAt))) {
       throw new Error('A routine reservation differs from its stored slot');
     }
-    // A `bot-dream` row arrives only with an L import. H fires it as a concluded occurrence (`store.ts` fire).
     if (definition.hostOccurrence?.type !== BOT_ROUTINE && definition.hostOccurrence?.type !== BOT_DREAM && !definition.hostJob) {
       throw new Error('H runs only bot-routine, bot-dream and Host job routines');
     }

@@ -5,7 +5,7 @@ import { turnIntentRetired } from './compaction';
 import { concludeRoutineTurn, routineOccurrence, type BotRoutine } from './routines';
 import { dreamIntentIds } from './dream';
 import { syncTurn, type SyncFacts, type SyncOptions } from './rules/sync';
-import { userFirst } from './rules/priority';
+import { autonomousIntentIds, userFirst } from './rules/priority';
 import { cardCallDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, refuseRetired, retiredIdentity, settleCardCall, type AdmittedIds, type Command,
   type CommandPorts } from './rules/commands';
 import type { CommandRecord, CommitRequest, CommitResult } from './rules/commit';
@@ -60,8 +60,7 @@ export function retainInLedger(ledger: HostLedger, input: RetentionInput, limits
  */
 function prioritiseUser(s: LedgerState, state: ReturnType<typeof stateOf>, user: Intent): void {
   // K4 keys an intent by `hash(turn.id)`, so the priority rule compares intent ids, not Turn ids.
-  const autonomous = new Set(Object.values(state.turns)
-    .filter(turn => turn.source === 'routine' || turn.source === 'bot_request').map(turn => hash(turn.id)).concat(dreamIntentIds(state)));
+  const autonomous = autonomousIntentIds(Object.values(state.turns), dreamIntentIds(state));
   const plan = userFirst(Object.values(s.intents), user.id, autonomous, s.sequence);
   if (!plan) return;
   for (const { id, sequence } of plan.assignments) s.intents[id]!.sequence = sequence;

@@ -688,6 +688,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch import on real Postgres (#
     expect(await query(`SELECT 1 FROM ${table('scope')} WHERE scope = $1`, [storedKey(target)])).toEqual([]);
   });
 
+  it('discards an uncommitted L import with persisted dream state', async () => {
+    const scope = await plain(), dreams = { bots: { main: { since: NOW, throughTurn: 't1' } }, open: {} };
+    await store().seed(scope, state => { state.dreams = dreams; });
+    const { fromL } = await throughL(scope), target = `tenant:${randomUUID()}`;
+    await store().importScope(target, fromL, clock);
+    expect((await store().read(target)).dreams).toEqual(dreams);
+    expect(await query(`SELECT 1 FROM ${table('dream_state')} WHERE scope = $1`, [storedKey(target)])).toHaveLength(1);
+    await store().discardImport(target);
+    for (const name of ['dream_state', 'scope']) {
+      expect(await query(`SELECT 1 FROM ${table(name)} WHERE scope = $1`, [storedKey(target)])).toEqual([]);
+    }
+  });
+
   it('commits only the import of its digest, once, and discards only an uncommitted one', async () => {
     const scope = await plain();
     const { fromL } = await throughL(scope);

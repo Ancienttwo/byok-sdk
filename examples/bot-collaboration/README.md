@@ -482,7 +482,8 @@ new BotCollaboration(server, ledger, { ...options,
   state, so a history authority that lags can miss a Turn. A failed read skips that
   day. An authority that returns no rows gives an empty
   pack, so the dream only tidies memory. The pack fills what `instructionMaxBytes`
-  leaves after the fixed text.
+  leaves after the fixed text. The first dream window starts when dreaming was
+  set up for the Bot; older Turns of an upgraded ledger still go into its pack.
 - **Queue.** A dream joins the Bot's FIFO behind the Turns of its sync, and user
   input goes ahead of a dream that has not started (#1229). A running dream is not
   interrupted, so user input waits for it, at most `maxDurationMs` (default 15

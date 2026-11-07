@@ -51,8 +51,9 @@ const routineRow = async (home: Home, routineId: string) => (await home.substrat
   `SELECT definition, pending FROM "${home.substrate.hSchema}".routine WHERE scope = $1 AND id = $2`, [storedKey(home.home), storedKey(routineId)])).rows[0];
 
 describe.skipIf(!RUN)('the Worker submitter lanes (#953)', () => {
+  // Only the sealed routine's cadence is under test; the fixture disables daily dreaming.
   it('sends a sealed routine occurrence to submitSealedAgentExecution, not submit', async () => {
-    h = await openHome({ fault: 'drop-notify' });
+    h = await openHome({ fault: 'drop-notify' }, false);
     const { token, agentId } = await h.bot();
     const slot = nextSlot(), action = await sealedAction(h.device.deviceId, agentId, slot.schedule);
     const response = await ownerPost(h, '/host/sealed-routine', token, { botId: 'main', action });
@@ -72,7 +73,7 @@ describe.skipIf(!RUN)('the Worker submitter lanes (#953)', () => {
   }, SLOT_WAIT_MS + 120_000);
 
   it('reseals a sealed routine to version 2 through the owner route, and refuses any other caller with nothing written', async () => {
-    h = await openHome({ fault: 'drop-notify' });
+    h = await openHome({ fault: 'drop-notify' }, false);
     const { token, agentId } = await h.bot();
     const schedule = nextSlot().schedule, v1 = await sealedAction(h.device.deviceId, agentId, schedule);
     expect((await ownerPost(h, '/host/sealed-routine', token, { botId: 'main', action: v1 })).status).toBe(200);
@@ -100,7 +101,7 @@ describe.skipIf(!RUN)('the Worker submitter lanes (#953)', () => {
   });
 
   it('an untried intent that reaches its wait time ends in the submitter, and its Turn ends in the same pass', async () => {
-    h = await openHome({ fault: 'drop-notify' });
+    h = await openHome({ fault: 'drop-notify' }, false);
     const { token } = await h.bot();
     const { turnId } = await h.input(token, 'Never offered');
     expect(await h.intent(turnId)).toMatchObject({ tries: 0, conclusion: null });
