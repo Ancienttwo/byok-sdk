@@ -427,6 +427,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       const key = './sealed-payload';
       const entry = { types: './dist/sealed-payload/index.d.ts', import: './dist/sealed-payload/index.js' };
       if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
+      // #1515 isolates trusted system-tool resolution in one Node-only entry.
+      const systemTool = { types: './dist/system-tool.d.ts', node: { import: './dist/system-tool.js' } };
+      if (before.exports?.['./system-tool'] === undefined && isDeepStrictEqual(after.exports?.['./system-tool'], systemTool)) {
+        delete after.exports['./system-tool'];
+        qualify.push('packages/core');
+      }
     }
     if (path === 'packages/server/package.json'
       && before.description === SERVER_DESCRIPTION.from && after.description === SERVER_DESCRIPTION.to) {

@@ -244,7 +244,7 @@ test('result-helper close regression selects only its exact basic workspace path
   assert.throws(() => selectImpact(['examples/basic/goal-btw-close-other.test.ts']));
 });
 
-test('core sealed-payload subpath admits the exact addition only', t => {
+test('core sealed-payload and Node-only system-tool subpaths admit exact additions only', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-core-sealed-payload-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(join(cwd, 'packages/core'), { recursive: true });
@@ -271,6 +271,25 @@ test('core sealed-payload subpath admits the exact addition only', t => {
   const entry = selectImpact(['packages/core/tsup.config.ts']);
   assert.ok(entry.dirs.includes('packages/core'));
   assert.ok(entry.families.includes('npm-release-pack'));
+  const systemTool = structuredClone(baseline);
+  systemTool.exports['./system-tool'] = { types: './dist/system-tool.d.ts', node: { import: './dist/system-tool.js' } };
+  write(systemTool);
+  assert.ok(selectImpact(['packages/core/package.json'], context).dirs.includes('packages/core'));
+  for (const mutate of [
+    m => { m.exports['./system-tool'].node.import = './dist/other.js'; },
+    m => { m.exports['./system-tool'].default = './dist/system-tool.js'; },
+    m => { m.exports['.'].import = './dist/replaced.js'; },
+    m => { m.files = ['dist', 'src']; },
+    m => { m.scripts = { build: 'tsup' }; },
+  ]) {
+    const invalid = structuredClone(systemTool); mutate(invalid); write(invalid);
+    assert.throws(() => selectImpact(['packages/core/package.json'], context), /more than/);
+  }
+  const previous = structuredClone(systemTool);
+  previous.exports['./system-tool'].node.import = './dist/other.js';
+  write(previous); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'existing subpath');
+  write(systemTool);
+  assert.throws(() => selectImpact(['packages/core/package.json'], { cwd, base: git('rev-parse', 'HEAD').trim() }), /more than/);
 });
 
 test('keys pi-catalog subpath and its generator admit exact additions only', t => {
