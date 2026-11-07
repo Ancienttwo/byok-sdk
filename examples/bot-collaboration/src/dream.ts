@@ -28,8 +28,10 @@ export interface DreamingOptions {
   models?: readonly string[];
   /** Default `DEFAULT_DREAM_MAX_DURATION_MS`. */
   maxDurationMs?: number;
+  /** Request native session input when the device advertises it. Default true. This applies only to runtime templates: a harness template, like a device that does not advertise native sessions, receives no request and the dream runs without that input. */
+  nativeSessions?: boolean;
 }
-export interface DreamPolicy { timeZone?: string; models: readonly string[]; maxDurationMs: number }
+export interface DreamPolicy { timeZone?: string; models: readonly string[]; maxDurationMs: number; nativeSessions: boolean }
 const scheduleIn = (tz: string) => ({ minute: 0, hour: DREAM_HOUR, tz });
 const localZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 /** Checks the option once, at construction. `undefined`: dreaming is off. */
@@ -40,7 +42,7 @@ export function dreamPolicy(options: DreamingOptions | false | undefined): Dream
   if (!check.ok) throw new Error(`dreaming: ${check.code}: ${check.message}`);
   const maxDurationMs = time(options?.maxDurationMs ?? DEFAULT_DREAM_MAX_DURATION_MS);
   if (maxDurationMs < 1) throw new Error('dreaming: maxDurationMs must be positive');
-  return { ...(options?.timeZone === undefined ? {} : { timeZone: options.timeZone }), models: [...options?.models ?? []], maxDurationMs };
+  return { ...(options?.timeZone === undefined ? {} : { timeZone: options.timeZone }), models: [...options?.models ?? []], maxDurationMs, nativeSessions: options?.nativeSessions ?? true };
 }
 
 export type DreamSkip = 'superseded' | 'dreaming_off' | 'bot_archived' | 'bot_suspended' | 'device_unavailable' | 'bot_not_ready' | 'no_new_turns'
@@ -120,10 +122,10 @@ function chooseModel(policy: DreamPolicy, models: Readonly<Record<string, Execut
   return models[botModel] ? { template: botModel, fallback: true, base: undefined } : undefined;
 }
 /** The template's runtime and limits with the Bot's Agent, and none of what a Bot Turn offers. */
-function dreamExecution(base: ExecutionTemplate, bot: ExecutionTemplate, instruction: string, maxDurationMs: number): ExecutionTemplate {
-  const { messageEgress: _egress, requiredToolsets: _toolsets, agentMemoryCommit: _commit, homeAccess: _home, preparation: _preparation, ...payload } = base.payload;
+function dreamExecution(base: ExecutionTemplate, bot: ExecutionTemplate, instruction: string, maxDurationMs: number, window: { fromMs: number; toMs: number }, nativeSessions: boolean): ExecutionTemplate {
+  const { messageEgress: _egress, requiredToolsets: _toolsets, agentMemoryCommit: _commit, homeAccess: _home, preparation: _preparation, nativeSessions: _nativeSessions, ...payload } = base.payload;
   return { deviceId: bot.deviceId, payload: { ...payload, instruction, session: { mode: 'fresh' }, agentRef: bot.payload.agentRef, agentMemory: 'none',
-    limits: { ...payload.limits, maxDurationMs }, terminalProjection: { mode: 'none' } } };
+    limits: { ...payload.limits, maxDurationMs }, terminalProjection: { mode: 'none' }, ...(nativeSessions && payload.harnessId === undefined ? { nativeSessions: { ...window, ifAdvertised: true } } : {}) } };
 }
 /** The pack fills what `instructionMaxBytes` leaves after the fixed text of the instruction. */
 function dreamInstruction(rows: readonly (Turn | ContextTurn)[], window: { fromMs: number; toMs: number }, maxDurationMs: number, instructionMaxBytes: number): string {
@@ -196,7 +198,7 @@ export function syncDreams(s: LedgerState, sync: DreamSync): boolean {
     const window = { fromMs: Math.min(record.since, run.windowEnd), toMs: run.windowEnd };
     const instruction = dreamInstruction(rows, window, sync.policy.maxDurationMs, sync.instructionMaxBytes);
     Object.assign(run, { template: model.template, fallback: model.fallback, throughTurn: settled.at(-1)!.id });
-    promoteOccurrence(s, sync.tenant, key, dreamExecution(model.base ?? bot.execution, bot.execution, instruction, sync.policy.maxDurationMs));
+    promoteOccurrence(s, sync.tenant, key, dreamExecution(model.base ?? bot.execution, bot.execution, instruction, sync.policy.maxDurationMs, window, sync.policy.nativeSessions));
     changed = true;
   }
   return changed;
