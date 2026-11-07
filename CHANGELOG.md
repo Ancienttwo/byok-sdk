@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Added** — `AgyAdapter` supports steering an active turn ([#1492](https://github.com/Ancienttwo/byok-sdk/issues/1492)).
+
 - **Added** — K8 dreaming requests native session input for its dream window when the device advertises support; `dreaming.nativeSessions: false` disables the request ([#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526)).
 
 - **Fixed** — `@byok-sdk/keys` `runCommand` now returns exit code 127 on signal termination or a stdin error, instead of reporting exit code 1 for signal termination or crashing on a stdin error.
@@ -28,7 +30,7 @@
 
 - **Added** — Host enqueue inputs accept `agentMemoryCommit: 'on-success-if-advertised'` (#1506). Cloud and embedded server send `on-success` only when the device advertises `agent-memory-commit-on-success`; otherwise they omit the field. Frozen templates retain the option and replay against the recorded resolution. The device wire and strict `on-success` admission are unchanged.
 
-- Re-vendor OAR 0.92.0 (`packages/client/vendor/oar/6bdd273/`), replacing the 0.91.0 snapshot. Hosts see no change: the upstream Antigravity steer fix and the dsh task events do not reach an SDK surface.
+- Re-vendor OAR 0.92.0 (`packages/client/vendor/oar/6bdd273/`), replacing the 0.91.0 snapshot. The dsh task events do not reach an SDK surface.
 - Fixed dsh terminal usage omitting subagent tokens; token totals now include root and child sessions while context occupancy stays root-only.
 
 ## 0.39.0 — 2026-11-06 (published)

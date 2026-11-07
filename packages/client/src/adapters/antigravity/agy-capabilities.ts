@@ -9,10 +9,10 @@ import type { RuntimeCapabilities } from '../../types';
  * The SDK-owned OS home keeps user instructions and MCP servers out. agy
  * always persists its conversations there, and resume needs them. It refuses
  * an MCP entry with `env` or `headers`, so `mcpToolsets` covers only
- * credential-free entries. Steer exists natively but is not enabled.
+ * credential-free entries.
  */
 export const AGY_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
-  steer: false,
+  steer: true,
   resume: true,
   approvalInteractive: false,
   mcpToolsets: true,
