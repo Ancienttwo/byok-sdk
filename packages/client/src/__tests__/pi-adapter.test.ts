@@ -581,6 +581,16 @@ const __executionScratch = await testExecutionScratch();
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/did not yield an authoritative session id/);
   });
 
+  it('fails a provider error turn with redacted diagnostics and its usage', async () => {
+    const session = await startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_PROVIDER_ERROR: '1' }));
+    openSessions.push(session);
+    const events: Array<AgentEvent | MessageDraftDelta> = [];
+    const failure = await (async () => { for await (const event of session.events) { events.push(event); if (event.type === 'turn_end') break; } })().then(() => undefined, (error: unknown) => error);
+    expect(events).toContainEqual({ type: 'usage', inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    expect(events).not.toContainEqual({ type: 'turn_end' });
+    expect(failure).toMatchObject({ phase: 'run', failure: { class: 'unknown' }, message: '401 authentication_error: Authorization: [redacted]' });
+  });
+
   it('emits the native retry diagnostic, then terminates with typed semantic non-retryable failure', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_AUTO_RETRY_FAIL: '1' });

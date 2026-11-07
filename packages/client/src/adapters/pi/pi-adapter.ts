@@ -48,7 +48,8 @@ import { locateBundledPiAssets } from './todo-locale-assets';
 import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { runtimeExecutableFields } from '../runtime-executable';
-import { mapPiContextUsage, mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
+import { mapPiContextUsage, mapPiMessageToAgentEvent, piAssistantError, ROUTINE_PI_EVENT_TYPES } from './events';
+import { boundFailureReason } from '@byok-sdk/protocol/constants';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
 import { abortPiRpcAndSettle } from './interrupt-settlement';
 import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame';
@@ -1266,6 +1267,7 @@ class PiSession implements Session {
       [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
         const inner = rpc.events[Symbol.asyncIterator]();
         let terminalFailure: RuntimeExecutionFailure | undefined;
+        let providerError: string | undefined;
         return {
           async next(): Promise<IteratorResult<AgentEvent>> {
             for (;;) {
@@ -1319,6 +1321,16 @@ class PiSession implements Session {
                 return { value: mapPiContextUsage(stats?.success === false ? undefined : stats?.data, hostContextWindow), done: false };
               }
               const mapped = mapPiMessageToAgentEvent(value, session.identities);
+              if (value.type === 'message_end' && mapped?.type === 'usage') providerError = piAssistantError(value);
+              if (value.type === 'agent_end') {
+                if (value.willRetry === false && providerError !== undefined) {
+                  terminalFailure = new RuntimeExecutionFailure({
+                    phase: 'run', category: 'semantic', retry: 'non-retryable',
+                    reason: boundFailureReason(providerError),
+                  });
+                }
+                providerError = undefined;
+              }
               if (value.type === 'auto_retry_end' && value.success === false) {
                 terminalFailure = new RuntimeExecutionFailure({
                   phase: 'run',
