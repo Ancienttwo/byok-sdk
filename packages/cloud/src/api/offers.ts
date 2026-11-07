@@ -7,7 +7,6 @@ import {
   InputPreparationOfferBindingSchema,
   SessionSelectionSchema,
   createEnvelope,
-  requiredReceiverCapabilities,
   type AgentMessageServerContext,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from '../errors';
@@ -38,14 +37,12 @@ function assertResumeSession(payload: { readonly session?: unknown }): void {
 
 interface Dependencies {
   resolveOfferPayload: EnqueuePaths['resolveOfferPayload'];
-  assertAgentCapabilities: EnqueuePaths['assertAgentCapabilities'];
   enqueueTaskEnvelope: EnqueuePaths['enqueueTaskEnvelope'];
   agentMessageOfferWriter: EnqueuePaths['agentMessageOfferWriter'];
 }
 
 export function createOffersApi({
   resolveOfferPayload,
-  assertAgentCapabilities,
   enqueueTaskEnvelope,
   agentMessageOfferWriter,
 }: Dependencies): Pick<ByokCloud,
@@ -70,12 +67,12 @@ export function createOffersApi({
   ): Promise<EnqueuedOffer> {
     const { taskId } = input;
     assertResumeSession(input.payload);
-    const payload = await resolveOfferPayload(tenant, deviceId, lane.parse(input.payload));
+    const requested = lane.parse(input.payload);
     // A sealed instruction binds the task id, so cloud cannot mint one for it.
-    if (payload.sealed !== undefined && (typeof taskId !== 'string' || taskId === '')) {
+    if (requested.sealed !== undefined && (typeof taskId !== 'string' || taskId === '')) {
       throw new ByokCloudError('coordination_input_invalid', 'a sealed instruction needs its taskId');
     }
-    await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', payload));
+    const payload = await resolveOfferPayload(tenant, deviceId, requested, taskId);
     return enqueueTaskEnvelope(
       tenant,
       deviceId,
@@ -97,8 +94,7 @@ export function createOffersApi({
       // Parse the strict control payload before reserving a mailbox sequence.
       // A malformed/oversized AgentRef therefore cannot leave a durable
       // delivery row behind.
-      const payload = await resolveOfferPayload(tenant, deviceId, AgentOfferLaneSchema.parse(input.payload));
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', payload));
+      const payload = await resolveOfferPayload(tenant, deviceId, AgentOfferLaneSchema.parse(input.payload), input.taskId);
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
         createEnvelope('task.offer', payload, { id: messageId, taskId, seq }),
       );
@@ -109,8 +105,7 @@ export function createOffersApi({
       // Agent offer above is: a malformed preparation reference must not leave
       // a durable delivery row behind. A caller that tried to smuggle an
       // `instruction` or a resume session onto this lane is rejected here.
-      const payload = await resolveOfferPayload(tenant, deviceId, PreparedOfferLaneSchema.parse(input.payload));
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', payload));
+      const payload = await resolveOfferPayload(tenant, deviceId, PreparedOfferLaneSchema.parse(input.payload), input.taskId);
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
         createEnvelope('task.offer', payload, { id: messageId, taskId, seq }),
         agentMessageOfferWriter(deviceId, payload, input.agentMessageContext),
@@ -120,8 +115,7 @@ export function createOffersApi({
     async enqueueAgentEgressOffer(tenant, deviceId, input) {
       refuseSealedFields(input.payload, ['sealing', 'sealed'], 'enqueueSealedAgentEgressOffer');
       assertResumeSession(input.payload);
-      const payload = await resolveOfferPayload(tenant, deviceId, AgentEgressOfferLaneSchema.parse(input.payload));
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', payload));
+      const payload = await resolveOfferPayload(tenant, deviceId, AgentEgressOfferLaneSchema.parse(input.payload), input.taskId);
       const enqueued = await enqueueTaskEnvelope(
         tenant,
         deviceId,

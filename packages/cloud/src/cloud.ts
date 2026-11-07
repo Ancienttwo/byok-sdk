@@ -961,7 +961,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return { kind: 'control-plane', tenantId: tenant, operatorId };
   }
 
-  const enqueue = createEnqueuePaths({ root, controlPlane, options });
+  const taskReadsApi = createTaskReadsApi({ root, controlPlane, options, sameAgentRef });
+  const enqueue = createEnqueuePaths({ root, controlPlane, options, readTaskOffer: taskReadsApi.readTaskOffer });
 
   const maintenanceApi = createMaintenanceApi({ options, proofReceiptRetention });
 
@@ -997,8 +998,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   const taskCancellationApi = createTaskCancellationApi({ root, controlPlane, options });
 
   const taskAbandonmentApi = createTaskAbandonmentApi({ root, controlPlane });
-
-  const taskReadsApi = createTaskReadsApi({ root, controlPlane, options, sameAgentRef });
 
   const taskRedactionsApi = createTaskRedactionsApi({ root, controlPlane, options });
 

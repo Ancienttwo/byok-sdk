@@ -6,7 +6,7 @@ import {
   type AgentEgressPolicy,
   type AgentMemorySelection,
 } from '@byok-sdk/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
 
 /**
@@ -62,6 +62,33 @@ async function mailboxTypes(harness: CloudHarness, deviceId: string): Promise<st
 }
 
 describe('hosted per-task Agent memory selection (#614)', () => {
+  describe.each([
+    ['agentMemoryCommit', 'agent-memory-commit-on-success', { agentMemoryCommit: 'on-success-if-advertised' as const }],
+    ['nativeSessions', 'native-sessions', { nativeSessions: { fromMs: 1, toMs: 2, ifAdvertised: true as const } }],
+  ] as const)('%s recorded retry', (field, capability, conditional) => {
+    it.each([[false, false], [false, true], [true, false], [true, true]])(
+      'replays first admission (advertised=%s, capability changed=%s)', async (advertised, changed) => {
+        const capabilities = [...BASE_CAPABILITIES, AGENT_MEMORY_SELECTION_CAPABILITY];
+        const { harness, deviceId } = await deviceWith([...capabilities, ...(advertised ? [capability] : [])]);
+        const input = { taskId: `conditional-retry-${field}`, deviceId, payload: { instruction: 'dream', runtime: 'pi' as const,
+          terminalProjection: { mode: 'none' as const }, agentRef: AGENT_REF, session: { mode: 'fresh' as const },
+          egressPolicy: POLICY, agentMemory: 'none' as const, ...conditional } };
+        const append = vi.spyOn(harness.core.mailbox, 'append').mockRejectedValueOnce(new Error('injected append failure'));
+        await expect(harness.cloud.submitAgentExecution(TENANT_A, input)).rejects.toMatchObject({ code: 'task_offer_append_refused' });
+        const recorded = await harness.cloud.readTaskOffer(TENANT_A, input.taskId);
+        expect(recorded).toMatchObject({ delivered: false });
+        await harness.stores.devices.recordCapabilities(TENANT_A, {
+          deviceId, capabilities: [...capabilities, ...((advertised !== changed) ? [capability] : [])],
+        });
+        const readDevice = vi.spyOn(harness.stores.devices, 'get');
+        const retried = await harness.cloud.submitAgentExecution(TENANT_A, input);
+        expect(retried.envelope.payload).toEqual(recorded!.payload);
+        expect((await harness.cloud.readTaskOffer(TENANT_A, input.taskId))!.delivered).toBe(true);
+        expect(append).toHaveBeenCalledTimes(2);
+        expect(readDevice).not.toHaveBeenCalled();
+      });
+  });
+
   it.each([true, false])('resolves conditional commit at enqueue (advertised=%s)', async (advertised) => {
     const { harness, deviceId } = await deviceWith([...BASE_CAPABILITIES, ...(advertised ? ['agent-memory-commit-on-success'] : [])]);
     const payload = { instruction: 'plan only', runtime: 'codex' as const, terminalProjection: { mode: 'none' as const },
