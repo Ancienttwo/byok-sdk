@@ -1,15 +1,15 @@
 // Check source types across the private JS/declaration boundary.
 // The bridge exposes a smaller surface than the full OAR adapter.
 import type * as Bridge from '../../packages/client/src/runtime/codex-session-runtime.js';
-import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/6bdd273/runtimes/codex/session.js';
-import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/6bdd273/contracts/session.js';
-import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/6bdd273/runtimes/codex/app-server-client.js';
+import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/45488e7/runtimes/codex/session.js';
+import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/45488e7/contracts/session.js';
+import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/45488e7/runtimes/codex/app-server-client.js';
 import type { spawnOwnedLineProcess } from '../../packages/client/src/runtime/owned-line-process.js';
 import type { buildRuntimeEnvironment } from '../../packages/client/src/runtime/environment.js';
 import type { CodexProjection, CodexRecord } from '../../packages/client/src/adapters/codex/projection.js';
-import type { SessionNotFoundError as VendorSessionNotFoundError } from '../../packages/client/vendor/oar/6bdd273/contracts/session-not-found-error.js';
+import type { SessionNotFoundError as VendorSessionNotFoundError } from '../../packages/client/vendor/oar/45488e7/contracts/session-not-found-error.js';
 import type * as TreeBridge from '../../packages/client/src/runtime/oar-process-tree.js';
-import type * as VendorTree from '../../packages/client/vendor/oar/6bdd273/shared/executable/process-tree.js';
+import type * as VendorTree from '../../packages/client/vendor/oar/45488e7/shared/executable/process-tree.js';
 
 type Assert<T extends true> = T;
 type Equal<A, B> =
@@ -127,15 +127,15 @@ export type CheckTreeKill = Assert<Equal<typeof TreeBridge.killEntries, typeof V
 // The ACP bridge: one start signature for every vendored ACP runtime, with
 // the SDK-owned agent process, terminal processes and explicit environment.
 import type * as AcpBridge from '../../packages/client/src/runtime/acp-session-runtime.js';
-import type { StartAcpSession as VendorStartAcp, AcpSessionOptions, AcpSessionHooks } from '../../packages/client/vendor/oar/6bdd273/shared/acp/session.js';
-import type { SpawnAcpLineProcess } from '../../packages/client/vendor/oar/6bdd273/shared/acp/process.js';
-import type { SpawnAcpTerminal } from '../../packages/client/vendor/oar/6bdd273/shared/acp/terminal.js';
-import type { AdapterSession } from '../../packages/client/vendor/oar/6bdd273/contracts/session.js';
-import type { RuntimeFailureError as VendorRuntimeFailureError } from '../../packages/client/vendor/oar/6bdd273/contracts/runtime-failure-error.js';
-import type { UnsupportedOptionError as VendorUnsupportedOptionError } from '../../packages/client/vendor/oar/6bdd273/contracts/errors.js';
+import type { StartAcpSession as VendorStartAcp, AcpSessionOptions, AcpSessionHooks } from '../../packages/client/vendor/oar/45488e7/shared/acp/session.js';
+import type { SpawnAcpLineProcess } from '../../packages/client/vendor/oar/45488e7/shared/acp/process.js';
+import type { SpawnAcpTerminal } from '../../packages/client/vendor/oar/45488e7/shared/acp/terminal.js';
+import type { AdapterSession } from '../../packages/client/vendor/oar/45488e7/contracts/session.js';
+import type { RuntimeFailureError as VendorRuntimeFailureError } from '../../packages/client/vendor/oar/45488e7/contracts/runtime-failure-error.js';
+import type { UnsupportedOptionError as VendorUnsupportedOptionError } from '../../packages/client/vendor/oar/45488e7/contracts/errors.js';
 import type { spawnOwnedTerminalProcess } from '../../packages/client/src/runtime/owned-terminal-process.js';
-import type { grokSession as vendorGrokSession } from '../../packages/client/vendor/oar/6bdd273/runtimes/grok/session.js';
-import type { antigravitySession as vendorAntigravitySession } from '../../packages/client/vendor/oar/6bdd273/runtimes/antigravity/session.js';
+import type { grokSession as vendorGrokSession } from '../../packages/client/vendor/oar/45488e7/runtimes/grok/session.js';
+import type { antigravitySession as vendorAntigravitySession } from '../../packages/client/vendor/oar/45488e7/runtimes/antigravity/session.js';
 
 type AcpBridgeArgs = Parameters<AcpBridge.StartAcpSession>;
 type AcpBridgeOptions = Mutable<
@@ -198,9 +198,9 @@ export type CheckAcpEnv = Assert<Equal<Readonly<Awaited<ReturnType<typeof buildR
 // The failure bridge (#869): the vendored OAR failure tables, typed with the
 // protocol's class. The protocol enum and OAR's `FailureClass` are one set.
 import type * as FailureBridge from '../../packages/client/src/runtime/oar-failure-runtime.js';
-import type { codexFailure as vendorCodexFailure } from '../../packages/client/vendor/oar/6bdd273/runtimes/codex/failure.js';
-import type { failureFromStatus as vendorFailureFromStatus } from '../../packages/client/vendor/oar/6bdd273/shared/failure-class.js';
-import type { FailureClass } from '../../packages/client/vendor/oar/6bdd273/contracts/failure.js';
+import type { codexFailure as vendorCodexFailure } from '../../packages/client/vendor/oar/45488e7/runtimes/codex/failure.js';
+import type { failureFromStatus as vendorFailureFromStatus } from '../../packages/client/vendor/oar/45488e7/shared/failure-class.js';
+import type { FailureClass } from '../../packages/client/vendor/oar/45488e7/contracts/failure.js';
 import type { RuntimeFailureClass } from '../../packages/protocol/src/messages.js';
 
 export type CheckRuntimeFailureClass = Assert<Equal<RuntimeFailureClass, FailureClass>>;
@@ -215,8 +215,8 @@ export type CheckCodexFailureVendor = Assert<Assignable<typeof vendorCodexFailur
 // The dsh bridge: the vendored native runtime, narrowed to what the SDK calls.
 // 'queue' and 'withdraw' are omitted on purpose, as for Codex. The runtime reports steer; the vendored session always returns it for the qualified dsh.
 import type * as DshBridge from '../../packages/client/src/runtime/dsh-session-runtime.js';
-import type { dshSession as vendorDshSession, DshSessionHooks } from '../../packages/client/vendor/oar/6bdd273/runtimes/dsh/session.js';
-import type { DshLineProcess } from '../../packages/client/vendor/oar/6bdd273/runtimes/dsh/launch.js';
+import type { dshSession as vendorDshSession, DshSessionHooks } from '../../packages/client/vendor/oar/45488e7/runtimes/dsh/session.js';
+import type { DshLineProcess } from '../../packages/client/vendor/oar/45488e7/runtimes/dsh/launch.js';
 
 type VendorDshArgs = Parameters<typeof vendorDshSession>;
 type DshBridgeArgs = Parameters<typeof DshBridge.dshSession>;

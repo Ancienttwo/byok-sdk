@@ -19,9 +19,8 @@ const count = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 
 /**
- * The opening update's structured `rawInput`. OAR's derived `input` is capped
- * text, so a long field would hide the rest of the call from tool
- * authorization; anything but an object is an unknown input.
+ * The opening update's native structured `rawInput` owns tool authorization;
+ * anything but an object is an unknown input.
  */
 function nativeRawInput(body: Record<string, unknown> | undefined, callId: string): Record<string, unknown> | undefined {
   const update = record(record(body?.native)?.update);

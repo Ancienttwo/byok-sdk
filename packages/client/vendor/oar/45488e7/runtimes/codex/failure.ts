@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 6bdd273 to keep the text mark of a provider error body (Apache-2.0).
+// BYOK change: Modified from OAR 45488e7 to keep the text mark of a provider error body (Apache-2.0).
 import type { FailedTurn } from "../../contracts/session.js";
 import { failureFromErrorBody, failureFromStatus, type Classified } from "../../shared/failure-class.js";
 import { asNumber, asRecord } from "../../shared/json.js";

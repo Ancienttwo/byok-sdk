@@ -31,9 +31,8 @@ export function agyMcpEventIdentities(observation: McpToolsetToolObservation = {
 }
 
 /**
- * The opening update's structured `rawInput`. OAR's derived `input` is capped
- * text, so a long field would hide the rest of the call from tool
- * authorization; anything but an object is an unknown input.
+ * The opening update's native structured `rawInput` owns tool authorization;
+ * anything but an object is an unknown input.
  */
 function nativeRawInput(body: Record<string, unknown> | undefined, callId: string): Record<string, unknown> | undefined {
   const update = record(record(body?.native)?.update);

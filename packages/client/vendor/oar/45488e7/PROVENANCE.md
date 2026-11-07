@@ -1,8 +1,8 @@
-# OAR 6bdd273 private runtime fork
+# OAR 45488e7 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.92.0, fixed commit `6bdd2731dc3ce260db9b3e4804adbaaeca754d83`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.94.0, fixed commit `45488e745abc9e320da9adb2df851b249160c74e`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 112 source files plus LICENSE. Ninety-three source files keep upstream bytes. Nineteen source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the Codex goal-event projection, and the manual-compaction operation that the Codex session composes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options}.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok and Antigravity install, update, inventory, model-list and account-usage modules are not included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 113 source files plus LICENSE. Ninety-four source files keep upstream bytes. Nineteen source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the Codex goal-event projection, and the manual-compaction operation that the Codex session composes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options}.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok and Antigravity install, update, inventory, model-list and account-usage modules are not included.
 
 Upstream's native dsh runtime is selected through `runtimes/dsh/`: `bridge.ts`, `jobs.ts`, `mcp.ts`, `options.ts` and `projection.ts` keep upstream bytes, and `launch.ts`, `control.ts` and `session.ts` carry BYOK changes. `version.ts`, `install.ts`, `installation.ts`, `list-models.ts` and `index.ts` are not selected: the SDK adapter owns version reading, installation and model selection.
 
@@ -10,34 +10,36 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoritative release binding
 
-`@botiverse/oar@0.92.0` is the public npm release of this commit. Checked on
-2026-11-07:
+`@botiverse/oar@0.94.0` is the public npm release of this commit. Checked on
+2026-11-07 against coordinator-supplied registry metadata, tarball and
+attestation bundles, read offline:
 
-- The registry publishes `0.92.0` with tarball integrity
-  `sha512-wnuL3EniE2q01RvdJQkgM7adlOMLSeYxoWVLhm/fXOGTdS+AZaq3TU93dzGv7DMuU4D8IA/TdHTISWTfiPspmQ==`;
-  the downloaded tarball has sha512
-  `c27b8bdc49e2136ab4d51bdd25092033b69d94e30b49e631a1654b866fdf5ce193752f8065aab74d4f777731afec332e5380fc200fd37474c84964df88fb2999`
-  and its `package.json` declares `"name": "@botiverse/oar"`, `"version": "0.92.0"`.
-- Its SLSA v1 provenance attestation
-  (`https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.92.0`)
-  built `.github/workflows/release.yml` from
+- The tarball's `package.json` declares `@botiverse/oar` version `0.94.0`.
+  Its computed integrity equals the registry's `dist.integrity`:
+  `sha512-qkZ4QGtWI5igQlFbzUvCX4k4YpxKHLmWqI2Y06SxwGDT9G6EeoYLD7j91WBt5dmq6Ez4kwtL99+TR/Sb1zfPeg==`.
+  Its sha512 is
+  `aa4678406b562398a042515bcd4bc25f8938629c4a1cb996a88d98d3a4b1c060d3f46e847a860b0fb8fdd5606de5d9aae84cf8930b4bf7df9347f49bd737cf7a`.
+- Both the npm publish v0.1 statement and SLSA provenance v1 statement name
+  `pkg:npm/%40botiverse/oar@0.94.0` and bind that same sha512 subject digest.
+- The SLSA statement builds `.github/workflows/release.yml` from
   `git+https://github.com/botiverse/oar@refs/heads/main` at
-  `6bdd2731dc3ce260db9b3e4804adbaaeca754d83`, the same commit recorded here. Its subject digest is that sha512.
-- The annotated tag object `f7c958fcd656ab510a2bb2f58c8016c65755503b` of
-  `refs/tags/v0.92.0` dereferences to that commit, whose message is
-  `test(claude): distinguish built-in and unavailable plan checks (#674)`. The
-  version commit `chore: release v0.92.0 (#673)` is its parent, and #674 changes
-  only tests.
-- All 113 `upstreamSha256` values in `source-manifest.json` match the files at
-  that commit's tree.
+  `45488e745abc9e320da9adb2df851b249160c74e`. The registry metadata has no
+  `gitHead`; the source binding comes from this SLSA resolved dependency.
+  Attestations:
+  `https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.94.0`.
+- Upstream `packages/oar/package.json` at that commit declares `0.94.0`.
+  Annotated tag object `ee244a2f82bdf770e86cb3168f923cd096299275`
+  (`refs/tags/v0.94.0`) dereferences to it, with commit message
+  `chore: release v0.94.0 (#695)`.
+- All 114 `upstreamSha256` values match that commit's blobs. LICENSE is
+  byte-identical to the previous base. There is no root NOTICE file;
+  no brand assets enter the selected closure.
 
-The scheduled advisory scan therefore queries `@botiverse/oar@0.92.0` as an
-npm package-version, not the bare commit. `source-manifest.json` keeps the
-commit and records the release name, version, tarball integrity and provenance
-URL under `release`; the scanner refuses the release claim unless every field
-agrees with the vendored identity and commit. The query covers the released
-upstream base, not the nineteen local deltas, which OSV has no package identity
-for.
+`source-manifest.json` records the package identity, release integrity, source
+commit and attestation endpoint under `release`. The scheduled advisory scan
+therefore queries the upstream base as `@botiverse/oar@0.94.0`, not a bare
+commit. That npm identity covers the released upstream base, not the nineteen
+maintained BYOK deltas, which have no separate OSV package identity.
 
 ## Maintained deltas
 
@@ -781,3 +783,80 @@ The base changes from `0e9247014498697ed4aaada8a911de68936ffec9` to `6bdd2731dc3
 - `runtimes/dsh/projection.ts` and `jobs.ts` turn native `job/registered` and `job/settled` into `task_started` and `task_ended` events. `adapters/dsh/projection.ts` has no task case, so they stop at its `default: break`, as subagent tasks already do. No Host sees them.
 
 No SDK source other than vendor paths changes. Build assets copy this source to `dist/assets/provenance/oar/6bdd273/`.
+
+
+### 0.92.0 → 0.94.0 re-vendor
+
+Replace the complete `vendor/oar/6bdd273/` snapshot with `vendor/oar/45488e7/`,
+from `6bdd2731dc3ce260db9b3e4804adbaaeca754d83` to
+`45488e745abc9e320da9adb2df851b249160c74e`. The comparison covers every one of
+the previous manifest's 113 `sourcePath` values, including LICENSE and the
+contracts, observe, Codex, dsh and Grok files outside shared ACP.
+
+Seven selected upstream files changed; no selected path was deleted:
+
+- `runtimes/codex/item-detail.ts` projects native collaboration `tool` and
+  `prompt` fields as tool input, without reconstructing arguments from child ids.
+- `runtimes/codex/projection.ts` includes `collabAgentToolCall` as a tool item.
+- `shared/acp/profile.ts` moves `promptAcp` to `shared/acp/prompt.ts` and keeps
+  its upstream re-export.
+- `shared/acp/projection.ts` keeps complete tool input strings and JSON fields;
+  output still uses text extraction and the 10,000-character truncation.
+- `shared/acp/session.ts` imports `acpTakesImages` from the new prompt module.
+- `shared/acp/turns.ts` imports the prompt helpers and admits a steer only when
+  its native request is sent. An unsent steer does not keep its original turn
+  pending, and a rejected dispatch creates no native error frame or turn outcome.
+- `shared/same-directory.ts` uses `realpathSync.native` for Windows short names
+  and stored casing.
+
+The newly imported `shared/acp/prompt.ts` enters with upstream bytes. The final
+selection is 114 files: 113 sources plus LICENSE, with 94 sources retaining
+upstream bytes and 19 maintained. No OpenCode runtime or new external dependency
+enters. The SDK's exact `@agentclientprotocol/sdk` pin stays `1.4.0`; upstream
+keeps its `^1.4.0` range.
+
+All nineteen maintained files were three-way merged (base = upstream 0.92.0,
+ours = the previous vendor tree, theirs = upstream 0.94.0). Seventeen merge
+cleanly. Two need mechanical conflict resolution:
+
+| Maintained file | Merge result |
+| --- | --- |
+| `contracts/failure.ts` | Clean; BYOK delta retained |
+| `observe/events.ts` | Clean; BYOK delta retained |
+| `runtimes/codex/app-server-client.ts` | Clean; BYOK delta retained |
+| `runtimes/codex/failure.ts` | Clean; BYOK delta retained |
+| `runtimes/codex/open.ts` | Clean; BYOK delta retained |
+| `runtimes/codex/session.ts` | Clean; BYOK delta retained |
+| `runtimes/dsh/control.ts` | Clean; BYOK delta retained |
+| `runtimes/dsh/launch.ts` | Clean; BYOK delta retained |
+| `runtimes/dsh/session.ts` | Clean; BYOK delta retained |
+| `runtimes/grok/session.ts` | Clean; BYOK delta retained |
+| `shared/acp/client-app.ts` | Clean; BYOK delta retained |
+| `shared/acp/errors.ts` | Clean; BYOK delta retained |
+| `shared/acp/failure.ts` | Clean; BYOK delta retained |
+| `shared/acp/process.ts` | Clean; BYOK delta retained |
+| `shared/acp/session.ts` | Resolve prompt-helper import move while retaining injected SpawnAcpTerminal; keep SDK lifecycle in place of the deleted upstream wrapper |
+| `shared/acp/terminal.ts` | Clean; BYOK delta retained |
+| `shared/acp/turns.ts` | Take upstream prompt-helper move and steer guard; retain notification yield and descendant observation deltas |
+| `shared/executable/process-tree.ts` | Clean; BYOK delta retained |
+| `shared/failure-class.ts` | Clean; BYOK delta retained |
+
+The local #1533 steer guard is removed because upstream now implements it.
+Equivalence: after `await runtime.spawned`, both test
+`active !== state || state.abortRequested` and return
+`{ kind: "rejected", code: "no_active_turn", reason: "not_steerable: no active turn" }`.
+Upstream spells that response through `noActiveTurn()`. It additionally checks
+the same condition in `promptAcp`'s `beforeSend` callback, after the transport's
+second spawn wait and immediately before `agent.request`; admission is resolved
+only by the `sent` callback. This covers the same settlement/abort states and
+the later dispatch window without duplicate BYOK guards. The existing regression
+is extended to exercise settlement and interruption at both waits, retaining
+its request-count and single-turn-end assertions. The remaining BYOK deltas in
+`turns.ts` are unchanged: yield before failed-prompt frame reading and synchronous
+descendant observation before native cancel.
+
+The bridges, bridge comments and type checks, vendor typecheck, build assets,
+reviewed CI paths and current documentation all name `45488e7`. Historical
+identities in earlier re-vendor sections and research stay historical. Build
+assets copy the license, manifest and provenance to
+`dist/assets/provenance/oar/45488e7/`.

@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 6bdd273 to mark a failure class taken from error text (Apache-2.0).
+// BYOK change: Modified from OAR 45488e7 to mark a failure class taken from error text (Apache-2.0).
 /* oxlint-disable import/prefer-default-export -- the package exports names only. */
 import type { UtcInstant } from "./account-usage.js";
 
