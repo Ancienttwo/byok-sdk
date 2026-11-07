@@ -193,8 +193,8 @@ export function syncDreams(s: LedgerState, sync: DreamSync): boolean {
       if (read === undefined) continue;
       if (read === null) { skip(key, run, 'history_unavailable'); continue; }
       const readSettled = settledAfter(read, record.throughTurn);
-      if (!readSettled.length) { skip(key, run, 'no_new_turns'); continue; }
       rows = readSettled.filter(completed);
+      if (!rows.length) { skip(key, run, 'no_new_turns'); continue; }
       throughTurn = readSettled.at(-1)!.id;
     }
     const window = { fromMs: Math.min(record.since, run.windowEnd), toMs: run.windowEnd };

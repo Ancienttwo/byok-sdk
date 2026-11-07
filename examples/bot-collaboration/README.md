@@ -479,10 +479,10 @@ new BotCollaboration(server, ledger, { ...options,
   overtook is covered by a later dream. A blocked Turn does not stop the run; if it
   later completes, no dream covers it. With `BotOptions.history`, K8 reads the rows
   there with `turnId` set to the dream's intent key. The mark advances only through
-  the settled rows that history returned. A failed read skips that day; no settled
-  rows after the mark skips it with `no_new_turns`, leaving the mark unchanged.
-  A Bot whose history authority never returns rows never dreams. The pack fills
-  what `instructionMaxBytes` leaves after the fixed text.
+  the settled rows that history returned. A failed read skips that day; no completed
+  row read after the mark skips it with `no_new_turns`, leaving the mark unchanged,
+  just as in K8-state mode. A Bot whose history authority never returns completed
+  rows never dreams. The pack fills what `instructionMaxBytes` leaves after the fixed text.
 - **Queue.** A dream joins the Bot's FIFO behind the Turns of its sync, and user
   input goes ahead of a dream that has not started (#1229). A running dream is not
   interrupted, so user input waits for it, at most `maxDurationMs` (default 15
