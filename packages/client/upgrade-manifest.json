@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.39.0",
-    "snapshotSha256": "fbe0f3428a6031ddafd63c391edb4d5c02e6501b355a6be46684f6b9c0b2624c"
+    "snapshotSha256": "631c150e12d7cfd7f3f4882e8110eac9af7657b0c817fa43c88273075f75c6e1"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "embedded-server-activity-reads",
+      "impact": "additive",
+      "summary": "ByokServer.tasks.activity(taskId, { after? }) and tasks.approvalTimeline(taskId) return the embedded server's tenant-bound ActivityTail and ApprovalTimelineTail for direct ui-runtime replay (#1513). Both reuse cloud reads and return undefined when no tail is retained; activity reads preserve cloud cursor validation. No wire or store format changes.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1513",
+      "items": [
+        "export:@byok-sdk/server#ByokServer"
+      ]
+    },
     {
       "id": "k8-dream-compaction-veto",
       "impact": "additive",
@@ -159,6 +168,11 @@
       "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES",
       "change": "added",
       "entry": "protocol-memory-limits"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServer",
+      "change": "changed",
+      "entry": "embedded-server-activity-reads"
     },
     {
       "item": "export:@byok-sdk/server/execution-core#SealedAgentExecutionInput",

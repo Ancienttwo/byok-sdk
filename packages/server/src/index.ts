@@ -21,6 +21,9 @@ import {
   TASK_ATTEMPT_ACTIVE_STATUSES,
   TASK_ATTEMPT_STATUSES,
   pendingApproval,
+  type ActivityReadOptions,
+  type ActivityTail,
+  type ApprovalTimelineTail,
   type ByokCloud,
   type AgentExecutionInput,
   type AgentMemoryIntentNoticeInput,
@@ -244,6 +247,18 @@ export interface ByokServer {
     approve(taskId: string, opts?: { approvalId?: string }): Promise<void>;
     /** Reject the task's pending approval; the same decision and refusals as {@link TaskHandle.reject}. */
     reject(taskId: string, reason?: string, opts?: { approvalId?: string }): Promise<void>;
+    /**
+     * Read this tenant's bounded activity tail, directly consumable by
+     * ui-runtime's `replayTimeline`. `after` is the cloud activity cursor,
+     * distinct from the `tasks.events` cursor; cloud cursor errors propagate.
+     * Without `after`, returns undefined when no tail is retained.
+     */
+    activity(taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
+    /**
+     * Read this tenant's bounded approval timeline for ui-runtime's
+     * `replayApprovalTimeline`; undefined when no timeline is retained.
+     */
+    approvalTimeline(taskId: string): Promise<ApprovalTimelineTail | undefined>;
     /**
      * Follow one task: its state, the pending approval request, and its Agent
      * progress and artifacts, read from the durable stores — the same reads as
@@ -858,6 +873,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       },
       approve(taskId, opts) { return approvePendingApproval({ tenant, cloud, relay }, taskId, opts); },
       reject(taskId, reason, opts) { return rejectPendingApproval({ tenant, cloud, relay }, taskId, reason, opts); },
+      activity(taskId, options) { return cloud.readActivity(tenant, taskId, options); },
+      approvalTimeline(taskId) { return cloud.readApprovalTimeline(tenant, taskId); },
       events(taskId, options) { return readTaskEvents(eventDeps, taskId, options); },
       async get(taskId: string): Promise<TaskSnapshot | undefined> {
         const attempt = await cloud.readTaskAttempt(tenant, taskId);
