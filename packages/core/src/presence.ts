@@ -34,7 +34,11 @@ export interface PresenceRuntimeCapabilities {
   readonly durableLane?: boolean;
   readonly preparedLane?: boolean;
   readonly isolation?: {
-    readonly userContext?: boolean;
+    readonly userInstructions?: boolean;
+    readonly userOutputStyle?: boolean;
+    readonly userMemory?: boolean;
+    readonly userSkills?: boolean;
+    readonly userHookContext?: boolean;
     readonly userMcpServers?: boolean;
     readonly sessionPersistence?: boolean;
   };
@@ -66,7 +70,7 @@ export function freezePresenceRuntimeFact(runtime: PresenceRuntimeFact): Presenc
       capabilities: Object.freeze({
         ...definedFlags(capabilities, ['steer', 'resume', 'approvalInteractive', 'mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane']),
         ...(capabilities.isolation === undefined ? {} : {
-          isolation: Object.freeze(definedFlags(capabilities.isolation, ['userContext', 'userMcpServers', 'sessionPersistence'])),
+          isolation: Object.freeze(definedFlags(capabilities.isolation, ['userInstructions', 'userOutputStyle', 'userMemory', 'userSkills', 'userHookContext', 'userMcpServers', 'sessionPersistence'])),
         }),
       }),
     }),

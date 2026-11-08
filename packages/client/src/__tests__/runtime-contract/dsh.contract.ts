@@ -7,6 +7,7 @@ import { OWNED_TREE_OBSERVE_MS } from '../../adapters/process-tree';
 import { classifyToolCall } from '../../tool-authorization';
 import { dshEnvironment } from '../../adapters/dsh/dsh-profile';
 import { QUALIFIED_DSH_VERSION } from '../../adapters/dsh/dsh-version';
+import { DSH_ABSENT_ISOLATION_SOURCES } from '../../adapters/dsh/dsh-capabilities';
 import { setLoginShellSnapshotSource } from '../../login-shell-environment';
 import { TEST_LOGIN_SHELL_SNAPSHOT } from '../fixtures/runtime-env';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
@@ -349,11 +350,15 @@ defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVer
   'instructions.project': check(async () => {
     expect((await contractTurn()).provider.saw(PROJECT_MARKER)).toBe(true);
   }),
-  'isolation.userContext': check(async () => {
+  'isolation.userInstructions': check(async () => {
     const { provider } = await contractTurn();
     expect(provider.saw(USER_MARKER), '~/.dsh/AGENTS.md').toBe(false);
     expect(provider.saw(SKILL_MARKER), '~/.dsh/skills and ~/.agents/skills').toBe(false);
   }),
+  'isolation.userOutputStyle': skip('dsh descriptor does not advertise isolation.userOutputStyle yet (#1574)'),
+  'isolation.userMemory': skip('dsh descriptor does not advertise isolation.userMemory yet (#1574)'),
+  'isolation.userSkills': skip('dsh descriptor does not advertise isolation.userSkills yet (#1574)'),
+  'isolation.userHookContext': skip('dsh descriptor does not advertise isolation.userHookContext yet (#1574)'),
   'isolation.userMcp': check(async () => {
     expect((await contractTurn()).userSpawned).toBe(false);
   }),
@@ -361,7 +366,7 @@ defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVer
   drafts: notAdvertised(descriptor, 'messageDraft'),
   'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
   'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await closed(); await sigkilled(); await background(); await steered(); await toolInput(); }),
-});
+}, DSH_ABSENT_ISOLATION_SOURCES);
 
 defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersion})`, {
   'dsh.turnEnd': ['a background subagent and a background job do not outlive the turn', check(async () => {

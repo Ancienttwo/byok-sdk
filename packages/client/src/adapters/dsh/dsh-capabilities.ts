@@ -1,4 +1,4 @@
-import type { RuntimeCapabilities } from '../../types';
+import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types';
 
 /**
  * What the dsh adapter can do: the one authority for its descriptor, the wire
@@ -19,5 +19,11 @@ export const DSH_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   mcpToolsets: true,
   messageDraft: false,
   preparedLane: false,
-  isolation: Object.freeze({ userContext: true, userMcpServers: true, sessionPersistence: false }),
+  isolation: Object.freeze({
+    userInstructions: true, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false,
+    userMcpServers: true, sessionPersistence: false,
+  }),
 });
+
+/** Isolation sources the qualified dsh has none of, with evidence; the contract plan marks each `absent`. */
+export const DSH_ABSENT_ISOLATION_SOURCES: RuntimeIsolationAbsentSources = Object.freeze({});

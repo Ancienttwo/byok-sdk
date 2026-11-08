@@ -19,7 +19,7 @@ import {
  */
 
 const helloBase = {
-  protocolVersions: [5],
+  protocolVersions: [6],
   capabilities: ['runtime-unavailable-cause'],
   deviceId: 'device-1',
   productId: 'product-1',

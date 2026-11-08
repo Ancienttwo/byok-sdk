@@ -108,7 +108,8 @@ describe('pending-mailbox wire-major fence (substrate-free)', () => {
   it.each([
     ['v2', cancelEnvelope(2)],
     ['v1', cancelEnvelope(1)],
-    ['v4', cancelEnvelope(PROTOCOL_VERSION + 1)],
+    ['retired v5', cancelEnvelope(5)],
+    ['next major', cancelEnvelope(PROTOCOL_VERSION + 1)],
     ['string major', cancelEnvelope(String(PROTOCOL_VERSION))],
     ['no major', cancelEnvelope(undefined)],
     ['broken json', 'broken json'],

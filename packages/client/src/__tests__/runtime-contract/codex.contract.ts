@@ -3,6 +3,7 @@ import path from 'node:path';
 import { expect } from 'vitest';
 import { CodexAdapter, type CodexAdapterOptions } from '../../adapters/codex/codex-adapter';
 import { QUALIFIED_CODEX_VERSION } from '../../adapters/codex/codex-version';
+import { CODEX_ABSENT_ISOLATION_SOURCES } from '../../adapters/codex/codex-capabilities';
 import {
   baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
   expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, writeSubmitResultServer,
@@ -88,7 +89,11 @@ defineRuntimeContract(`codex runtime contract (${target.mode} ${target.expectedV
     const { provider } = await excluded();
     expect(provider.saw(PROJECT_MARKER)).toBe(true);
   }),
-  'isolation.userContext': skip('Codex has no per-process switch for the user AGENTS.md; the adapter documents that it applies (docs/adapter-capabilities.md)'),
+  'isolation.userInstructions': skip('Codex has no per-process switch for the user AGENTS.md; the adapter documents that it applies (docs/adapter-capabilities.md)'),
+  'isolation.userOutputStyle': notAdvertised(descriptor, 'isolation.userOutputStyle'),
+  'isolation.userMemory': notAdvertised(descriptor, 'isolation.userMemory'),
+  'isolation.userSkills': notAdvertised(descriptor, 'isolation.userSkills'),
+  'isolation.userHookContext': notAdvertised(descriptor, 'isolation.userHookContext'),
   'isolation.userMcp': check(async () => {
     expect((await inherited()).userSpawned, 'positive control: inherited user MCP server starts').toBe(true);
     expect((await excluded()).userSpawned).toBe(false);
@@ -99,4 +104,4 @@ defineRuntimeContract(`codex runtime contract (${target.mode} ${target.expectedV
   }),
   'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
   'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); }),
-});
+}, CODEX_ABSENT_ISOLATION_SOURCES);

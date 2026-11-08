@@ -4,6 +4,7 @@ import path from 'node:path';
 import { beforeAll, expect } from 'vitest';
 import { HermesAdapter, type HermesModelSelection } from '../../adapters/hermes/hermes-adapter';
 import { hermesVersionLine, QUALIFIED_HERMES_VERSION } from '../../adapters/hermes/hermes-version';
+import { HERMES_ABSENT_ISOLATION_SOURCES } from '../../adapters/hermes/hermes-capabilities';
 import {
   baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
   expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, withProcessEnv, writeSubmitResultServer,
@@ -130,9 +131,13 @@ defineRuntimeContract(`hermes runtime contract (${target.mode} ${target.expected
   'instructions.project': check(async () => {
     expect((await contractTurn()).provider.saw(PROJECT_MARKER)).toBe(true);
   }, FIRST_DETECT_MS),
-  'isolation.userContext': check(async () => {
+  'isolation.userInstructions': check(async () => {
     expect((await contractTurn()).provider.saw(USER_MARKER)).toBe(false);
   }, FIRST_DETECT_MS),
+  'isolation.userOutputStyle': skip('hermes descriptor does not advertise isolation.userOutputStyle yet (#1575)'),
+  'isolation.userMemory': skip('hermes descriptor does not advertise isolation.userMemory yet (#1575)'),
+  'isolation.userSkills': skip('hermes descriptor does not advertise isolation.userSkills yet (#1575)'),
+  'isolation.userHookContext': skip('hermes descriptor does not advertise isolation.userHookContext yet (#1575)'),
   'isolation.userMcp': check(async () => {
     expect((await contractTurn()).userSpawned).toBe(false);
   }, FIRST_DETECT_MS),
@@ -149,4 +154,4 @@ defineRuntimeContract(`hermes runtime contract (${target.mode} ${target.expected
     { phase: 'turn', target: 'hermes-agent.nousresearch.com:443', reason: 'Hermes model catalog (hermes_cli/model_catalog.py DEFAULT_CATALOG_URL), refetched every turn; follow-up to #1103' },
     { phase: 'turn', target: 'raw.githubusercontent.com:443', reason: 'Hermes model catalog fallback (DEFAULT_CATALOG_FALLBACK_URLS) after the primary is refused; follow-up to #1103' },
   ]),
-});
+}, HERMES_ABSENT_ISOLATION_SOURCES);

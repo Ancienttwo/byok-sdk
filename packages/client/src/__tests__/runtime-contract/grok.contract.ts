@@ -3,6 +3,7 @@ import path from 'node:path';
 import { expect } from 'vitest';
 import { GrokAdapter, type GrokAdapterOptions } from '../../adapters/grok/grok-adapter';
 import { QUALIFIED_GROK_VERSION } from '../../adapters/grok/grok-version';
+import { GROK_ABSENT_ISOLATION_SOURCES } from '../../adapters/grok/grok-capabilities';
 import {
   baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
   expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, writeSubmitResultServer,
@@ -95,7 +96,11 @@ defineRuntimeContract(`grok runtime contract (${target.mode} ${target.expectedVe
   'instructions.project': check(async () => {
     expect((await excluded()).provider.saw(PROJECT_MARKER)).toBe(true);
   }),
-  'isolation.userContext': skip('Grok has no per-process switch for $GROK_HOME/AGENTS.md, $GROK_HOME/rules/ or [paths] extra_rule_dirs; compatInstructions turns off only the Claude and Cursor sources (docs/adapter-capabilities.md)'),
+  'isolation.userInstructions': skip('Grok has no per-process switch for $GROK_HOME/AGENTS.md, $GROK_HOME/rules/ or [paths] extra_rule_dirs; compatInstructions turns off only the Claude and Cursor sources (docs/adapter-capabilities.md)'),
+  'isolation.userOutputStyle': notAdvertised(descriptor, 'isolation.userOutputStyle'),
+  'isolation.userMemory': notAdvertised(descriptor, 'isolation.userMemory'),
+  'isolation.userSkills': notAdvertised(descriptor, 'isolation.userSkills'),
+  'isolation.userHookContext': notAdvertised(descriptor, 'isolation.userHookContext'),
   'isolation.userMcp': check(async () => {
     expect((await inherited()).userSpawned, 'positive control: inherited Claude-compatible MCP server starts').toBe(true);
     expect((await excluded()).userSpawned).toBe(false);
@@ -108,4 +113,4 @@ defineRuntimeContract(`grok runtime contract (${target.mode} ${target.expectedVe
   'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); }, [
     { phase: 'turn', target: 'cli-chat-proxy.grok.com:443', reason: 'Grok syncs its workspace, bundle and experiments with xAI whatever the model provider (GROK_CLI_CHAT_PROXY_BASE_URL); follow-up to #1103' },
   ]),
-});
+}, GROK_ABSENT_ISOLATION_SOURCES);

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "9b9ab39dbac29f003a3b01df9f19ec203b1f977341552287e2917cb87850daa0"
+    "snapshotSha256": "156df6a96446c6de48e24744f1e8ac26fc22adf835b363026f52f9468c92b94f"
   },
   "configFields": {
     "status": "tracked",
@@ -24,9 +24,39 @@
         "export:@byok-sdk/keys#ProviderProfileStoreMigration",
         "export:@byok-sdk/keys#migrateProviderProfileStore"
       ]
+    },
+    {
+      "id": "wire-v6-isolation-sources",
+      "impact": "breaking",
+      "summary": "The envelope wire is v6 (PROTOCOL_VERSION = 6). The runtime capability isolation.userContext is removed and split into one bit per source a runtime can keep out: userInstructions, userOutputStyle, userMemory, userSkills and userHookContext, beside the unchanged userMcpServers and sessionPersistence, in RuntimeCapabilitiesSchema, so on conn.hello runtimes and harnesses, task.claim, presence, PresenceRuntimeCapabilities and RuntimeIsolationCapabilities. There is no derived userContext field and no v5 reader: a pending v5 row stops startup with SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED or DaemonJournalProtocolUnsupportedError and is left unchanged, and a v5 conn.hello is refused with hello_protocol_version_unsupported. Rebuild local stores, then start the server side and the daemons together.",
+      "migration": "docs/migrations/wire-v6-isolation-sources.md#shape",
+      "items": [
+        "export:@byok-sdk/client#RuntimeIsolationCapabilities",
+        "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+        "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+        "export:@byok-sdk/protocol#HarnessInfoSchema",
+        "export:@byok-sdk/protocol#HarnessInventorySchema",
+        "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+        "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+        "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+        "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+        "export:@byok-sdk/protocol#RuntimeInfoSchema",
+        "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+        "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/client#RuntimeIsolationCapabilities",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
     {
       "item": "export:@byok-sdk/keys#ProviderProfileStoreMigration",
       "change": "added",
@@ -36,6 +66,56 @@
       "item": "export:@byok-sdk/keys#migrateProviderProfileStore",
       "change": "added",
       "entry": "keys-profile-store-migration"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessInfoSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessInventorySchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeInfoSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
     }
   ]
 }
