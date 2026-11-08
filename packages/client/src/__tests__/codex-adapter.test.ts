@@ -136,7 +136,7 @@ describe('Codex persistent app-server adapter', () => {
       mcpToolsets: true,
       messageDraft: true,
       preparedLane: false,
-      isolation: { userContext: false, userMcpServers: true, sessionPersistence: false },
+      isolation: { userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: false },
     });
     // Codex reads MCP tools itself; the daemon takes no tools/list observation for it.
     expect(adapter().descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
