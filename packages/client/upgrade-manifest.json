@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "9b9ab39dbac29f003a3b01df9f19ec203b1f977341552287e2917cb87850daa0"
+    "snapshotSha256": "12b96a410da20ec56c1e7b05943024d675e12b3f4e420cc258425d46367bdbef"
   },
   "configFields": {
     "status": "tracked",
@@ -24,9 +24,35 @@
         "export:@byok-sdk/keys#ProviderProfileStoreMigration",
         "export:@byok-sdk/keys#migrateProviderProfileStore"
       ]
+    },
+    {
+      "id": "store-migration-required-verdict",
+      "impact": "additive",
+      "summary": "A store precheck can report migration-required: the candidate opens the store after its explicit migration. inspectProviderProfileStore reports it for a profile store with an earlier provider_kind CHECK set. A service installation runs the Host's new migrate program after the store snapshot, then the precheck again; without migrate the upgrade fails with store_migration_required, and a failed migration restores the snapshot (store_migration_failed). A precheck exits 2 only for new-path-repair or rejected.",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#stores",
+      "items": [
+        "export:@byok-sdk/client#ServiceInstallationErrorCode",
+        "export:@byok-sdk/client#ServiceInstallationOptions",
+        "export:@byok-sdk/core#StoreCompatibilityVerdict"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
+    },
+    {
+      "item": "export:@byok-sdk/core#StoreCompatibilityVerdict",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
+    },
     {
       "item": "export:@byok-sdk/keys#ProviderProfileStoreMigration",
       "change": "added",

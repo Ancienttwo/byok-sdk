@@ -2557,9 +2557,12 @@ import type { StoreCompatibility } from '@byok-sdk/core';
  * process that writes the store first: a file that changes while it is copied
  * fails the check rather than yielding a verdict about a torn copy.
  *
- * A store created by a different schema (`PROVIDER_STORE_SCHEMA_STALE`) is
- * `new-path-repair`: provision a separate current-schema store. Any other
- * refusal is `rejected`.
+ * When the open refuses the store as stale (`PROVIDER_STORE_SCHEMA_STALE`),
+ * {@link migrateProviderProfileStore} runs on the same copy. A migration that
+ * leaves a store this build opens is `migration-required`: the Host runs the
+ * migration before it opens the store. A store the migration refuses as stale
+ * is `new-path-repair`, carrying the migration's code and reason: provision a
+ * separate current-schema store. Any other refusal is `rejected`.
  */
 export declare function inspectProviderProfileStore(path: string): Promise<StoreCompatibility>;
 // ==== @byok-sdk/keys dist/truth-profile-store.d.ts ====
