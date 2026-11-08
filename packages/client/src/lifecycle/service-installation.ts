@@ -674,6 +674,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       const previous = await readPointer('previous');
       const kept = previous === undefined ? {} : { previous };
 
+      // A failed attempt after its snapshot leaves snapshots/<to>. Remove it
+      // before the intent: recover() restores any snapshot it finds for `to`,
+      // and an old one would overwrite what `from` wrote since.
+      await fs.rm(path.join(snapshotsDir, to), { recursive: true, force: true });
       // Write-ahead: the service may be stopped from here on, so the intent
       // must be on disk before the stop. A death between this write and the
       // switch leaves recover() a pending receipt to finish or roll back;

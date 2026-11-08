@@ -367,6 +367,12 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     const migrating = (verdict: string) => installationOver(fakeLifecycle(), {
       migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, verdict] }),
     });
+    /** A retry that stops before its own snapshot leaves no snapshot of the failed attempt for recover() to restore. */
+    const expectRetryLeavesNoSnapshot = async (): Promise<void> => {
+      await verdicts('rejected');
+      await expect(installation.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE }))).rejects.toMatchObject({ code: 'store_rejected' });
+      await expect(fs.access(path.join(installRoot, 'snapshots', '2.0.0'))).rejects.toThrow();
+    };
 
     it('migrates a migration-required store after the snapshot and switches', async () => {
       installation = migrating('accepted');
@@ -392,6 +398,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await pointer('current')).toBe('1.0.0');
       expect([await fs.readFile(db, 'utf8'), await fs.readFile(`${db}-wal`, 'utf8')]).toEqual(['v1 data', 'v1 wal']);
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_required' });
+      await expectRetryLeavesNoSnapshot();
     });
 
     it('a migration that leaves a store the candidate does not accept is store_migration_failed, with the snapshot restored', async () => {
@@ -404,6 +411,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await pointer('current')).toBe('1.0.0');
       expect([await fs.readFile(db, 'utf8'), await fs.readFile(`${db}-wal`, 'utf8')]).toEqual(['v1 data', 'v1 wal']);
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_failed' });
+      await expectRetryLeavesNoSnapshot();
     });
 
     it('a death after the migration and before the switch leaves recover() the snapshot to restore', async () => {
