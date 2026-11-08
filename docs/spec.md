@@ -312,7 +312,7 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-A version bump does not authorize publish. The current aligned release is `0.40.0` (source candidate); publication requires separate
+A version bump does not authorize publish. The current aligned release is `0.40.0`; publication requires separate
 release authorization and registry readback. The packed and published keys
 `@byok-sdk/core` edge must be the exact current release, `0.40.0`, proven from
 an isolated standard npm install rather than the workspace graph.
@@ -325,9 +325,9 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
-0.40.0 is a MINOR source candidate under the general policy above. It keeps
-wire v5 and adds no Postgres migration or SQLite schema change. See the
-[0.40.0 release notes](releases/v0.40.0.md). Publication remains pending.
+0.40.0 is a MINOR release under the general policy above. It keeps
+wire v5 and adds no `deploy/sql` migration or SQLite schema change; the hosted Bot example adds a `dream_state` table through its own store migration. See the
+[0.40.0 release notes](releases/v0.40.0.md). All nine packages were published on 2026-11-08; registry readback passed.
 
 0.39.0 is a MINOR under the general policy above, with no exception. It keeps
 wire v5. The upgrade manifest from 0.38.0 holds 8 breaking entries and 5
@@ -417,8 +417,8 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-The registry read of 2026-11-06 (UTC) reports `latest` 0.39.0 for all nine
-packages. The earlier published versions are 0.38.0, 0.37.0, 0.36.0, 0.35.0, 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
+The registry read of 2026-11-08 (UTC) reports `latest` 0.40.0 for all nine
+packages. The earlier published versions are 0.39.0, 0.38.0, 0.37.0, 0.36.0, 0.35.0, 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
 0.30.0, 0.29.0, 0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for
 0.28.0 / keys 0.13.0, 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22
 (UTC) for 0.28.2 and 0.28.3, 2026-10-23 (UTC) for 0.29.0, 2026-10-24 (UTC)
