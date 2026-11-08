@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.40.0 — 2026-11-08 (source candidate)
+
+0.40.0 is a MINOR source candidate for all nine public packages. It keeps wire v5. There is no new `deploy/sql` migration; the hosted Bot example adds a `dream_state` table through its own store migration. The upgrade manifest has one breaking change (the Koffi 3.3.7 native-asset literals) and eleven additive entries. ACP `tool_use` events now wait for settled input. See the [release notes](docs/releases/v0.40.0.md) and [Host upgrade checklist](docs/releases/host-upgrade-0.40.0.md). Publication and platform acceptance remain separate.
+
 - **Changed** — ACP adapter `tool_use` events wait until the tool input is settled (#1542).
 
 - **Added** — Opt-in `OpenCodeAdapter` (`harnessId: opencode`) runs native OpenCode v1/v2 with explicit Host model candidates, native model readback, one observable pre-output rate-limit fallback and owned process cleanup (#1538). It inherits user context, MCP configuration and native transcript storage. Platform and Host MCP qualification remain pending native canaries.
@@ -39,7 +43,7 @@
 
 - **Fixed (client; #1543)** — Pi provider errors now fail the turn with a redacted diagnostic while preserving usage.
 - **Fixed (client)** — Memory writer guidance, including the exported `AGENT_MEMORY_GUIDANCE`, now states the copy limits and, for fresh and resumed ordinary `on-success` writers, that writes are kept only on success.
-- **Changed** — Re-vendor OAR 0.94.0 (`packages/client/vendor/oar/45488e7/`), replacing the complete 0.92.0 snapshot. Follow upstream steer dispatch admission and preserve SDK process, environment and permission ownership (#1538).
+- **Changed** — Re-vendor OAR 0.94.0 (`packages/client/vendor/oar/45488e7/`), replacing the complete 0.91.0 snapshot shipped in 0.39.0. Follow upstream steer dispatch admission and preserve SDK process, environment and permission ownership (#1538).
 - Fixed dsh terminal usage omitting subagent tokens; token totals now include root and child sessions while context occupancy stays root-only.
 
 ## 0.39.0 — 2026-11-06 (published)

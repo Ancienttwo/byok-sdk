@@ -312,9 +312,9 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-A version bump does not authorize publish. The current aligned release is `0.39.0`; publication requires separate
+A version bump does not authorize publish. The current aligned release is `0.40.0` (source candidate); publication requires separate
 release authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.39.0`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.40.0`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -324,6 +324,10 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.40.0 is a MINOR source candidate under the general policy above. It keeps
+wire v5 and adds no Postgres migration or SQLite schema change. See the
+[0.40.0 release notes](releases/v0.40.0.md). Publication remains pending.
 
 0.39.0 is a MINOR under the general policy above, with no exception. It keeps
 wire v5. The upgrade manifest from 0.38.0 holds 8 breaking entries and 5
