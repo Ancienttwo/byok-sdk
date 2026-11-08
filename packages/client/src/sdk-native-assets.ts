@@ -21,25 +21,17 @@ export interface CopySdkNativeAssetsOptions {
   readonly outDir: string;
   readonly platform: 'win32' | 'darwin';
   readonly arch: 'x64' | 'arm64';
+  /** Absolute path to a local copy of the pinned Koffi tgz (for example a CI cache). The same integrity and addon checks apply and nothing is fetched. */
+  readonly archivePath?: string;
 }
 function absoluteRoot(root: string): string {
   if (typeof root !== 'string' || !path.isAbsolute(root) || /[\0\r\n]/u.test(root)) throw new Error('SDK native asset root must be an absolute directory');
   return root;
 }
-/** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
-export async function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]> {
-  const root = absoluteRoot(options.outDir);
-  if (!['win32', 'darwin'].includes(options.platform) || !['x64', 'arm64'].includes(options.arch)
-    || (options.platform === 'win32' && options.arch !== 'x64')) throw new Error('SDK native assets: unsupported target');
-  const present = await fs.readdir(root).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; return []; });
-  if (present.length) throw new Error('SDK native assets require a new or empty output directory');
-  if (options.platform === 'darwin') {
-    const files = await copyAgentMemoryHelperAssets({ outDir: path.join(root, 'agent-memory-fs') });
-    return Object.freeze(files.map(file => `agent-memory-fs/${file}`));
-  }
+const maxArchiveBytes = 8 * 1024 * 1024;
+async function downloadArchive(): Promise<Buffer> {
   const response = await fetch(KOFFI.url, { signal: AbortSignal.timeout(30_000), redirect: 'error' });
   if (!response.ok) throw new Error(`SDK native asset download failed: ${response.status}`);
-  const maxArchiveBytes = 8 * 1024 * 1024;
   if (Number(response.headers.get('content-length')) > maxArchiveBytes) {
     await response.body?.cancel(); throw new Error('SDK native asset archive exceeds size limit');
   }
@@ -55,7 +47,25 @@ export async function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): 
       chunks.push(Buffer.from(value));
     }
   } finally { reader.releaseLock(); }
-  const archive = Buffer.concat(chunks, length);
+  return Buffer.concat(chunks, length);
+}
+async function readArchive(archivePath: string): Promise<Buffer> {
+  if (typeof archivePath !== 'string' || !path.isAbsolute(archivePath)) throw new Error('SDK native asset archivePath must be an absolute file path');
+  if ((await fs.stat(archivePath)).size > maxArchiveBytes) throw new Error('SDK native asset archive exceeds size limit');
+  return fs.readFile(archivePath);
+}
+/** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
+export async function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]> {
+  const root = absoluteRoot(options.outDir);
+  if (!['win32', 'darwin'].includes(options.platform) || !['x64', 'arm64'].includes(options.arch)
+    || (options.platform === 'win32' && options.arch !== 'x64')) throw new Error('SDK native assets: unsupported target');
+  const present = await fs.readdir(root).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; return []; });
+  if (present.length) throw new Error('SDK native assets require a new or empty output directory');
+  if (options.platform === 'darwin') {
+    const files = await copyAgentMemoryHelperAssets({ outDir: path.join(root, 'agent-memory-fs') });
+    return Object.freeze(files.map(file => `agent-memory-fs/${file}`));
+  }
+  const archive = options.archivePath === undefined ? await downloadArchive() : await readArchive(options.archivePath);
   if (`sha512-${createHash('sha512').update(archive).digest('base64')}` !== KOFFI.integrity) throw new Error('SDK native asset archive integrity mismatch');
   const tar = gunzipSync(archive, { maxOutputLength: 8 * 1024 * 1024 });
   const selected = new Map<string, Buffer>();

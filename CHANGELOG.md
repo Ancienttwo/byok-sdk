@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Added (client; #1567)** — `copySdkNativeAssets` accepts an optional absolute `archivePath` to a local copy of the pinned Koffi tgz, such as a CI cache. It runs the same SHA-512 integrity and addon SHA-256 checks and never calls `fetch`. Without it, behavior is unchanged.
+
 - **Fixed (client; #1549)** — Daemon-local completion events, `Daemon.tasks()` terminal state and execution records now wait for the first finalization attempt to settle, after this task's writes to the agent home (including resident-memory restore) are done on successful finalization, up to about 1s later than before. Failed attempts still emit local completion signals without waiting for a retry. Wire and cloud completion signals, including `TaskHandle.result()` and `TaskHandle.events()`, are unchanged.
 
 ## 0.40.0 — 2026-11-08 (published)
