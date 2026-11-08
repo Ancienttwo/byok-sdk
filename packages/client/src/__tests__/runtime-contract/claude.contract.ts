@@ -18,6 +18,8 @@ const PROJECT_MARKER = 'BYOK-CONTRACT-CLAUDE-PROJECT-3a9d';
 const USER_MARKER = 'BYOK-CONTRACT-CLAUDE-USER-b42f';
 const ANCESTOR_MARKER = 'BYOK-CONTRACT-CLAUDE-ANCESTOR-7c20';
 const OUTPUT_STYLE_MARKER = 'BYOK-CONTRACT-CLAUDE-OUTPUT-STYLE-5e81';
+const AGENT_STYLE_MARKER = 'BYOK-CONTRACT-CLAUDE-AGENT-STYLE-91c4';
+const MEMORY_MARKER = 'BYOK-CONTRACT-CLAUDE-MEMORY-d3a6';
 /** The system-prompt section Claude adds for any output style other than the default, as JSON in the raw body. */
 const OUTPUT_STYLE_SECTION = JSON.stringify('according to your "Output Style"').slice(1, -1);
 
@@ -61,7 +63,7 @@ const submitThroughToolSearch: ProviderScript = request => {
  * Agent home, a user CLAUDE.md, output style and MCP server in the Claude
  * config directory. `excluded` turns on both Agent isolation options.
  */
-async function turn(mode: 'inherit' | 'excluded') {
+async function turn(mode: 'inherit' | 'excluded', agentStyle = false) {
   const box = await createSandbox(`claude-${mode}`);
   const recorder = await fileEgress();
   const provider = await startLoopbackProvider('anthropic-messages', submitThroughToolSearch);
@@ -73,10 +75,17 @@ async function turn(mode: 'inherit' | 'excluded') {
     const host = await writeSubmitResultServer(box.root, receipt);
     const user = await writeSubmitResultServer(box.root, userReceipt, 'user_tool');
     await fs.writeFile(path.join(config, 'CLAUDE.md'), `# User\n\n${USER_MARKER}\n`);
-    await fs.mkdir(path.join(config, 'output-styles'));
-    await fs.writeFile(path.join(config, 'output-styles', 'contract.md'), `---\nname: contract\ndescription: contract\n---\n${OUTPUT_STYLE_MARKER}\n`);
-    await fs.writeFile(path.join(config, 'settings.json'), JSON.stringify({ outputStyle: 'contract' }));
+    // The Agent home's own style replaces the user's, so the two never share a turn.
+    const styleRoot = agentStyle ? path.join(box.workspace, '.claude') : config;
+    const styleName = agentStyle ? 'agent' : 'contract';
+    await fs.mkdir(path.join(styleRoot, 'output-styles'), { recursive: true });
+    await fs.writeFile(path.join(styleRoot, 'output-styles', `${styleName}.md`), `---\nname: ${styleName}\ndescription: ${styleName}\n---\n${agentStyle ? AGENT_STYLE_MARKER : OUTPUT_STYLE_MARKER}\n`);
+    await fs.writeFile(path.join(styleRoot, 'settings.json'), JSON.stringify({ outputStyle: styleName }));
     await fs.writeFile(path.join(config, '.claude.json'), JSON.stringify({ mcpServers: { usermcp: { type: 'stdio', command: user.command, args: user.args } } }));
+    // Claude keys a project's memory directory by its path with every non-alphanumeric character replaced by `-`.
+    const memory = path.join(config, 'projects', (await fs.realpath(box.workspace)).replace(/[^a-zA-Z0-9]/g, '-'), 'memory');
+    await fs.mkdir(memory, { recursive: true });
+    await fs.writeFile(path.join(memory, 'MEMORY.md'), `- ${MEMORY_MARKER}\n`);
     await fs.writeFile(path.join(box.workspace, 'CLAUDE.md'), `# Project\n\n${PROJECT_MARKER}\n`);
     await fs.writeFile(path.join(box.root, 'CLAUDE.md'), `# Ancestor\n\n${ANCESTOR_MARKER}\n`);
     const options: ClaudeAdapterOptions = mode === 'excluded' ? { agentUserContext: 'excluded', agentSessionPersistence: 'disabled' } : {};
@@ -119,6 +128,8 @@ async function gateTurn() {
 
 const excluded = once(() => turn('excluded'));
 const inherited = once(() => turn('inherit'));
+const agentStyled = once(() => turn('excluded', true));
+const agentStyledInherited = once(() => turn('inherit', true));
 const gated = once(gateTurn);
 const descriptor = adapter().descriptor;
 
@@ -148,17 +159,24 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
   'isolation.userInstructions': check(async () => {
     expect((await inherited()).provider.saw(USER_MARKER), 'positive control: inherited user CLAUDE.md reaches the model').toBe(true);
     expect((await excluded()).provider.saw(USER_MARKER)).toBe(false);
+    // Under excluded only the Agent home's instruction file remains, as for Pi.
+    expect((await excluded()).provider.saw(ANCESTOR_MARKER)).toBe(false);
+  }),
+  'isolation.userOutputStyle': check(async () => {
     expect((await inherited()).provider.saw(OUTPUT_STYLE_MARKER), 'positive control: inherited user output style reaches the model').toBe(true);
     expect((await inherited()).provider.saw(OUTPUT_STYLE_SECTION), 'positive control: inherited output style section').toBe(true);
     expect((await excluded()).provider.saw(OUTPUT_STYLE_MARKER)).toBe(false);
     expect((await excluded()).provider.saw(OUTPUT_STYLE_SECTION)).toBe(false);
-    // Under excluded only the Agent home's instruction file remains, as for Pi.
-    expect((await excluded()).provider.saw(ANCESTOR_MARKER)).toBe(false);
+    expect((await agentStyledInherited()).provider.saw(AGENT_STYLE_MARKER), 'positive control: the Agent home style reaches the model when inherited').toBe(true);
+    // The flag-layer `outputStyle: "default"` outranks the Agent home's own settings, so excluded drops its style too.
+    expect((await agentStyled()).provider.saw(AGENT_STYLE_MARKER)).toBe(false);
   }),
-  'isolation.userOutputStyle': skip('claude descriptor does not advertise isolation.userOutputStyle yet (#1574)'),
-  'isolation.userMemory': skip('claude descriptor does not advertise isolation.userMemory yet (#1574)'),
-  'isolation.userSkills': skip('claude descriptor does not advertise isolation.userSkills yet (#1574)'),
-  'isolation.userHookContext': skip('claude descriptor does not advertise isolation.userHookContext yet (#1574)'),
+  'isolation.userMemory': check(async () => {
+    expect((await inherited()).provider.saw(MEMORY_MARKER), 'positive control: inherited auto memory reaches the model').toBe(true);
+    expect((await excluded()).provider.saw(MEMORY_MARKER)).toBe(false);
+  }),
+  'isolation.userSkills': skip('claude loads skills, commands and subagents from the config directory under excluded; the descriptor declares userSkills false (docs/researches/2026-10-24-871-873-claude-agent-user-context.md)'),
+  'isolation.userHookContext': skip('claude runs user and plugin hooks under excluded; the descriptor declares userHookContext false (docs/researches/2026-10-24-871-873-claude-agent-user-context.md)'),
   'isolation.userMcp': check(async () => {
     expect((await inherited()).userSpawned, 'positive control: inherited user MCP server starts').toBe(true);
     expect((await excluded()).userSpawned).toBe(false);
