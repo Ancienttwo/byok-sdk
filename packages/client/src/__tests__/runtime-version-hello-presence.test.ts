@@ -80,8 +80,6 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
     const hello = await server.waitFor((event) => event.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
 
-    expect(hello.payload.capabilities).toContain('runtime-unavailable-cause');
-
     const runtimes = new Map((hello.payload.runtimes ?? []).map((runtime) => [runtime.id, runtime]));
     expect(runtimes.get('pi')?.versionPolicy).toEqual(ALLOW);
     expect(runtimes.get('codex')?.versionPolicy).toEqual(WIRE_BLOCK);
@@ -103,7 +101,7 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
     expect(hello.payload.runtimeUnavailable?.some((entry) => entry.cause === 'version_blocked')).toBe(false);
   });
 
-  it('publishes the same projection on presence and keeps the RuntimeId domain', async () => {
+  it('publishes the same projection on presence, with harness ids in runtimeUnavailable', async () => {
     await startDaemon();
     const hello = await server.waitFor((event) => event.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
@@ -135,8 +133,7 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
     const body = bodies[0]!;
     expect((body.runtimes as Array<{ id: string; versionPolicy?: unknown }>).map((runtime) => [runtime.id, runtime.versionPolicy]))
       .toEqual([['pi', ALLOW], ['codex', WIRE_BLOCK]]);
-    // harness ids (grok/hermes/zeta) never enter presence; claude's typed
-    // failure does, because it is a built-in runtime.
-    expect(body.runtimeUnavailable).toEqual([{ id: 'claude', cause: 'not_installed', retryable: true }]);
+    // Presence runtimes stay built-in; runtimeUnavailable is the conn.hello list, harness ids included.
+    expect(body.runtimeUnavailable).toEqual(hello.payload.runtimeUnavailable);
   });
 });

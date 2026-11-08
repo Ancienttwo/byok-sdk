@@ -359,7 +359,7 @@ export async function fail(this: TaskRunner, taskId: string, reason: string, ret
         return createEnvelope('task.fail', {
           reason,
           retryable,
-          ...this['failurePayload'](failure),
+          failure: failure,
           ...this['terminalInferenceUsagePayload'](active),
           ...this['preparedObservationPayload'](active),
           ...this['agentTerminalPayload'](active),
@@ -369,7 +369,7 @@ export async function fail(this: TaskRunner, taskId: string, reason: string, ret
     return;
   }
   this['deps'].send(createEnvelope('task.fail', {
-    reason, retryable, ...this['failurePayload'](failure), ...terminalIdentity(this['claimedHarnesses'].get(taskId)),
+    reason, retryable, failure: failure, ...terminalIdentity(this['claimedHarnesses'].get(taskId)),
   }, { taskId }));
   await this['finish'](taskId);
 }
@@ -413,7 +413,7 @@ export async function failClaimedAgent(
   // adapter ran. The exact wire envelope stays here; it is never re-selected.
   this['deps'].send(createEnvelope(
     'task.fail',
-    { reason, retryable, ...this['failurePayload'](failure), ...terminalIdentity(context.runtimeId, agentRef) },
+    { reason, retryable, failure: failure, ...terminalIdentity(context.runtimeId, agentRef) },
     { taskId },
   ));
   return result.ok;

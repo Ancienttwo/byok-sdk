@@ -119,7 +119,6 @@ export const INBOUND_REFUSAL_REASONS = [
   'device_not_eligible',
   // conn.hello capability snapshot
   'hello_device_mismatch',
-  'hello_harnesses_without_capability',
   'hello_protocol_version_unsupported',
   'hello_product_mismatch',
   'hello_capabilities_not_recorded',
@@ -597,9 +596,6 @@ async function applyInboundGate(
   // cloud path that admits the target capability; presence is not consulted.
   if (envelope.type === 'conn.hello') {
     if (envelope.payload.deviceId !== deviceId) return refuse('hello_device_mismatch');
-    if (envelope.payload.harnesses !== undefined && !envelope.payload.capabilities.includes('custom-harness')) {
-      return refuse('hello_harnesses_without_capability');
-    }
     if (!envelope.payload.protocolVersions.includes(PROTOCOL_VERSION)) return refuse('hello_protocol_version_unsupported');
     const device = await stores.devices.get(deviceId);
     if (device === undefined || device.revoked) return refuse('device_not_eligible');
@@ -727,8 +723,7 @@ async function applyInboundGate(
     if (attempt.ownerDeviceId !== undefined && (harnessId !== undefined || attempt.claimedHarnessId !== undefined)
       && harnessId !== attempt.claimedHarnessId) return refuse('claim_harness_mismatch');
     const device = await stores.devices.get(deviceId);
-    if (harnessId !== undefined && (!device?.capabilities?.includes('custom-harness')
-      || !device.harnesses?.some(harness => harness.id === harnessId))) return refuse('claim_harness_unavailable');
+    if (harnessId !== undefined && device?.harnesses?.some(harness => harness.id === harnessId) !== true) return refuse('claim_harness_unavailable');
     const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
     const offer = await stores.receipts.get(`task-offer:${messageId}`);
     // Redaction and the archive (#1120) leave the offer a tombstone. Only an

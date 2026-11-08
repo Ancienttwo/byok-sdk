@@ -26,7 +26,6 @@
  */
 import {
   BYOK_PRESENCE_PATH,
-  RUNTIME_IDS,
   type RuntimeInfo,
   type RuntimeUnavailableEntry,
   type ToolsetId,
@@ -193,7 +192,6 @@ export class PresencePublisher {
               ? {}
               : {
                   runtimeUnavailable: this.opts.runtimeUnavailable
-                    .filter(({ id }) => (RUNTIME_IDS as readonly string[]).includes(id))
                     .map(({ id, cause, retryable }) => ({ id, cause, retryable })),
                 }),
           }),

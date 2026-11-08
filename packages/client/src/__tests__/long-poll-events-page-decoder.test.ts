@@ -6,8 +6,7 @@ import { createTestDeviceStore } from './fixtures/device-credentials';
  * with (the schema failure rides in `cause`) and ends the loop generation
  * without handing anything to `onEnvelope`. The cursor's safe-nonnegative and
  * no-regression checks stay client-local. An unknown entry inside a valid page
- * still stalls only its own sequence. `global.fetch` is mocked, as in
- * `long-poll-validation-stall.test.ts`.
+ * still stalls only its own sequence. `global.fetch` is mocked.
  */
 import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { FRESH_OFFER } from './fixtures/fresh-offer';

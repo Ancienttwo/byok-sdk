@@ -110,9 +110,8 @@ describe('daemon lifecycle (#391)', () => {
     expect(lifecycles).toEqual([{ phase: 'running', connection: 'connecting' }, OPEN_LIFECYCLE]);
   });
 
-  it('sends a reliable record held for capability_missing after a reconnect, without a restart', async () => {
+  it('sends an unacknowledged reliable record again after a reconnect, without a restart', async () => {
     server = await TestServer.start();
-    server.setAckCapabilities([]);
     const hostStorageRoot = await tmpDir('byok-lifecycle-home-');
     const agentRef = { agentId: 'lifecycle-egress-agent', profileRevision: 'profile-r1' } as const;
     const taskId = 'lifecycle-egress-task';
@@ -156,30 +155,23 @@ describe('daemon lifecycle (#391)', () => {
       payload: { status: 'held-until-the-server-acks' },
     });
     if (!appended.ok) throw new Error(`unexpected reliable egress refusal: ${appended.reason}`);
-    // The server does not advertise the ack capability: the record is held,
-    // durable and unsent.
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(server.received.filter((envelope) => envelope.type === 'agent.egress.reliable')).toHaveLength(0);
+    const isRecord = (envelope: Envelope): boolean =>
+      envelope.type === 'agent.egress.reliable' && envelope.payload.eventId === appended.record.eventId;
+    // The server never acks it, so the record stays durable and pending.
+    const first = await server.waitFor(isRecord);
     expect(daemon.status().egress.reliable.pendingEvents).toBe(1);
 
-    // Break the session; the server gains the capability while the daemon is
-    // reconnecting.
     const hellosBeforeBreak = hellos().length;
     server.setFailEventsPolls(true);
     await vi.waitFor(() => expect(daemon!.status().lifecycle).toEqual({ phase: 'running', connection: 'connecting' }));
-    server.setAckCapabilities(['agent-egress-reliable-ack']);
     server.setFailEventsPolls(false);
 
-    const reliable = await server.waitFor((envelope) =>
-      envelope.type === 'agent.egress.reliable' && envelope.payload.eventId === appended.record.eventId,
-    );
-    expect(reliable.type).toBe('agent.egress.reliable');
-    // It went out on a later session of the same run, after a reconnect's
-    // fresh hello (a hello already in flight when the capability changed may
-    // be the one whose answer carries it).
+    const resent = await server.waitFor((envelope) => isRecord(envelope) && envelope !== first);
+    expect(resent.id).toBe(first.id);
+    // It went out on a later session of the same run, after a reconnect's fresh hello.
     expect(hellos().length).toBeGreaterThan(hellosBeforeBreak);
     const firstReconnectHello = hellos()[hellosBeforeBreak]!;
-    expect(server.received.indexOf(firstReconnectHello)).toBeLessThan(server.received.indexOf(reliable));
+    expect(server.received.indexOf(firstReconnectHello)).toBeLessThan(server.received.indexOf(resent));
   });
 
   it('a start failure that is not a halt is a crash: start() throws it and operational health records a lifecycle failure (#394)', async () => {

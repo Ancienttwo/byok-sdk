@@ -14,8 +14,8 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
 /**
- * Issue #698: each reconnect advertises `agent-egress-reliable-ack` again, and
- * the daemon then dispatches every held reliable record again. Each dispatch
+ * Issue #698: each reconnect opens the session again, and the daemon then
+ * dispatches every held reliable record again. Each dispatch
  * built a new envelope id, so the #693 id skip in `ConnectionManager.send` did
  * not stop it: on a flapping route (handshake accepted, every other post
  * refused) each reconnect queued one more copy of each held record. At most one
@@ -52,8 +52,6 @@ const eventIds = ['6a1d9f0e-1b7c-4e5a-8f3d-2c4b6a8e0d11', '7b2e0a1f-2c8d-4f6b-9a
 describe('one pending copy of each held reliable record across reconnects (#698)', () => {
   it('keeps one queued copy per record while a flapping route reconnects, then retires each on its ack', async () => {
     server = await TestServer.start();
-    // No ack capability yet: published records are held, durable and unsent.
-    server.setAckCapabilities([]);
     const adapter = new StubRuntimeAdapter('pi');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
@@ -84,17 +82,6 @@ describe('one pending copy of each held reliable record across reconnects (#698)
     await server.waitFor((envelope) => envelope.type === 'task.complete' && envelope.task_id === taskId);
     await vi.waitFor(() => expect(daemon!.status().activeTaskCount).toBe(0));
 
-    const records: AgentReliableEgressRecord[] = [];
-    for (const eventId of eventIds) {
-      const appended = await daemon.publishReliableAgentEgress!({
-        agentRef, sessionRef, runtimeId: 'pi', taskId, eventId, payload: { held: eventId },
-      });
-      if (!appended.ok) throw new Error(`unexpected reliable egress refusal: ${appended.reason}`);
-      records.push(appended.record);
-    }
-    expect(daemon.status().egress.reliable.pendingEvents).toBe(eventIds.length);
-    expect(server.received.filter(isReliable)).toHaveLength(0);
-
     // A flapping route: each handshake is accepted, and every other post is refused.
     let flapping = true;
     const refusedPosts: ReliableEnvelope[][] = [];
@@ -109,8 +96,17 @@ describe('one pending copy of each held reliable record across reconnects (#698)
       return undefined; // a route failure: the drain keeps the batch and the session reconnects
     });
     const hellosBeforeFlap = hellos();
-    // From now on, every handshake answer advertises the ack capability again.
-    server.setAckCapabilities(['agent-egress-reliable-ack']);
+    const records: AgentReliableEgressRecord[] = [];
+    for (const eventId of eventIds) {
+      const appended = await daemon.publishReliableAgentEgress!({
+        agentRef, sessionRef, runtimeId: 'pi', taskId, eventId, payload: { held: eventId },
+      });
+      if (!appended.ok) throw new Error(`unexpected reliable egress refusal: ${appended.reason}`);
+      records.push(appended.record);
+    }
+    expect(daemon.status().egress.reliable.pendingEvents).toBe(eventIds.length);
+    expect(server.received.filter(isReliable)).toHaveLength(0);
+
     await vi.waitFor(() => expect(refusedPosts.length).toBeGreaterThanOrEqual(6), { timeout: 5_000 });
     expect(hellos() - hellosBeforeFlap).toBeGreaterThanOrEqual(5);
 

@@ -102,7 +102,6 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
     resolveBlobText: (blobRef, signal) => blobClient.resolveInstruction(blobRef, { signal }),
   });
 
-  capabilities.push('custom-harness');
   // #654 E2d-3: sealed task content needs this run's verified member. The
   // object exists before the restart replay, and its keyring holds no key
   // until the member is ready, so a recovered sealed terminal is sealed or
@@ -122,14 +121,6 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
     blobs: {
       download: (ref) => blobClient.downloadBlob(ref, { signal: daemonState.blobLifecycleAbort?.signal }),
       upload: (ciphertext) => daemonState.sealedUploads!.uploadArtifact(ciphertext, 'application/octet-stream'),
-    },
-    // Between sessions, and while a start is under way, the next
-    // session's flags are unknown. Once the daemon stopped, halted or
-    // crashed with no start under way, no session will advertise any.
-    serverCapabilities: () => {
-      if (daemonState.lifecycle.phase === 'halted' || daemonState.lifecycle.phase === 'crashed') return [];
-      if (daemonState.lifecycle.phase === 'running') return daemonState.connection?.isOpen() === true ? daemonState.connection.getServerCapabilities() : undefined;
-      return daemonState.startInProgress ? undefined : [];
     },
   });
   sealedRun.sealedTasks = opened;

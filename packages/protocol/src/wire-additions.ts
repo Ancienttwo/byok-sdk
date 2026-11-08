@@ -2,9 +2,8 @@
  * The one table of receiver-capability gates and wire additions
  * (docs/protocol.md "Freeze rule").
  *
- * A v4 change takes exactly one of three paths: a version bump, a gated
- * addition, or a strip-safe addition. Envelope and HTTP rows have explicit
- * kinds. The last two are declared here.
+ * A change takes exactly one of three paths: a version bump, a gated
+ * addition, or a strip-safe addition. Gated additions are declared here.
  *
  * - `gated`: the sender must not emit the surface unless the receiver
  *   durably advertised `capability`. A field entry applies when the payload
@@ -13,8 +12,6 @@
  *   field, for example `sealed.ciphertextRef`. A type entry applies to every
  *   message of that type. Server-to-daemon surfaces
  *   are gated by a device flag, daemon-to-server surfaces by a server flag.
- * - `strip-safe`: an optional field an older receiver drops without changing
- *   what it executes or acknowledges.
  *
  * v3 baseline: every v3 decoder reads every surface v2 had, so the v2
  * strip-safe rows and the v2 `result-document` gate are gone. The device
@@ -30,6 +27,13 @@
  * v4 release has been published yet, so no published decoder proves these rows
  * across releases.
  *
+ * v6 baseline: every v6 server reads every daemon-to-server surface and every
+ * v6 daemon reads every offer field that v5 gated on a flag both sides always
+ * advertised, so the server-flag rows, the `custom-harness` and
+ * `terminal-projection-selection` offer rows and every strip-safe row are
+ * gone. The rows left name device flags that a daemon advertises only when it
+ * is configured for them.
+ *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in
  * another. This module imports no runtime code except the plain-data split
@@ -39,25 +43,15 @@ import type { MessageType } from './messages';
 import { SEALED_CATEGORY_CAPABILITY, SEALED_SPLIT_TABLE, type SealableMessageType, type SealedSplitEntry } from './sealed-split-table';
 import type { CapabilityFlag } from './version';
 
-type HttpWireSurface =
-  | 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse'
-  | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse'
-  | 'PresencePublishRequest';
-
-export type WireAddition =
-  | {
-      readonly kind: 'envelope';
-      readonly rule: 'gated';
-      readonly surface: MessageType;
-      readonly field?: string;
-      readonly value?: string;
-      readonly capability: CapabilityFlag;
-      readonly advertisedBy: 'device' | 'server';
-    }
-  | { readonly kind: 'envelope'; readonly rule: 'strip-safe'; readonly surface: MessageType; readonly field: string }
-  | { readonly kind: 'http'; readonly rule: 'strip-safe'; readonly surface: HttpWireSurface; readonly field: string };
-
-const MATRIX_FIELDS = ['toolAuthorizationAuto', 'durableLane', 'preparedLane', 'isolation'] as const;
+export interface WireAddition {
+  readonly kind: 'envelope';
+  readonly rule: 'gated';
+  readonly surface: MessageType;
+  readonly field?: string;
+  readonly value?: string;
+  readonly capability: CapabilityFlag;
+  readonly advertisedBy: 'device' | 'server';
+}
 
 const offerRow = (field: string | undefined, capability: CapabilityFlag, value?: string): WireAddition => ({
   kind: 'envelope', rule: 'gated', surface: 'task.offer',
@@ -66,25 +60,18 @@ const offerRow = (field: string | undefined, capability: CapabilityFlag, value?:
 });
 
 /**
- * Sealed payload (#654, #1045), one table entry at a time: the marker of each
- * sealed branch is gated on its category's flag (`sealed-payload-v1` for task
- * input and output, `sealed-payload-v2` for Agent messages), a
- * server-to-daemon type on the device flag, a daemon-to-server type on the
- * server flag. The sealed branch shares every other row of its type, and a
- * field it moves or drops is absent from it, so sealing never removes a gate
- * that the same fields would need. A daemon-to-server sealed type that may
- * name its ciphertext blob is also gated on that field. The sealed
- * failure codes on the plaintext `task.decline` are value gates.
+ * Sealed payload (#654, #1045): the marker of each server-to-daemon sealed
+ * branch is gated on its category's device flag. The sealed branch shares
+ * every other row of its type, and a field it moves or drops is absent from
+ * it, so sealing never removes a gate that the same fields would need.
+ * A daemon-to-server sealed branch needs no flag: the server accepts it by the
+ * task's frozen `sealing`.
  */
 function sealedRows(): WireAddition[] {
-  return (Object.keys(SEALED_SPLIT_TABLE) as SealableMessageType[]).flatMap((surface) => {
+  return (Object.keys(SEALED_SPLIT_TABLE) as SealableMessageType[]).flatMap((surface): WireAddition[] => {
     const entry: SealedSplitEntry = SEALED_SPLIT_TABLE[surface];
-    const advertisedBy = entry.category === 'task-input' ? 'device' : 'server';
-    const byReference: WireAddition[] = advertisedBy === 'server' && entry.inlineOnly !== true
-      ? [{ kind: 'envelope', rule: 'gated', surface, field: 'sealed.ciphertextRef', capability: 'sealed-output-ciphertext-ref', advertisedBy }]
-      : [];
-    const capability = SEALED_CATEGORY_CAPABILITY[entry.category];
-    return [{ kind: 'envelope', rule: 'gated', surface, field: entry.marker, capability, advertisedBy }, ...byReference];
+    if (entry.category !== 'task-input') return [];
+    return [{ kind: 'envelope', rule: 'gated', surface, field: entry.marker, capability: SEALED_CATEGORY_CAPABILITY[entry.category], advertisedBy: 'device' }];
   });
 }
 
@@ -98,8 +85,6 @@ const SEALED_V2_ROWS: readonly WireAddition[] = [
   offerRow('sealing.categories', 'sealed-payload-v2', 'memory-projection'),
   { kind: 'envelope', rule: 'gated', surface: 'agent.message.disposition', field: 'contentMac', capability: 'sealed-payload-v2', advertisedBy: 'device' },
 ];
-const SEALED_DECLINE_CODE = (value: string): WireAddition =>
-  ({ kind: 'envelope', rule: 'gated', surface: 'task.decline', field: 'code', value, capability: 'sealed-payload-v1', advertisedBy: 'server' });
 
 const PLAIN_ROWS: readonly WireAddition[] = [
   // Server to daemon: the offer. Every offer binds an Agent; each optional
@@ -108,9 +93,7 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   offerRow(undefined, 'agent-home-contract'),
   offerRow('dispatchSelection', 'dispatch-selection'),
   offerRow('requiredToolsets', 'toolset-selection'),
-  offerRow('terminalProjection', 'terminal-projection-selection'),
   offerRow('homeAccess', 'agent-home-readers'),
-  offerRow('harnessId', 'custom-harness'),
   offerRow('agentMemory', 'agent-memory-selection'),
   offerRow('agentMemory', 'agent-memory-read-if-admitted', 'read-if-admitted'),
   offerRow('agentMemory', 'agent-memory-read-write-if-admitted', 'read-write-if-admitted'),
@@ -136,58 +119,12 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   { kind: 'envelope', rule: 'gated', surface: 'provider.provisioning.available', capability: 'provider-provisioning.v1', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'agent.memory.intent.available', capability: 'agent-memory-intent.v1', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'e2ee.key_package.available', capability: 'sealed-payload-v1', advertisedBy: 'device' },
-  // One optional runtime capability, shared by discovery and the claim snapshot.
-  { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.messageDraft' },
-  { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.messageDraft' },
-  { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.messageDraft' },
-  // The capability matrix (#1103): discovery data on the same runtime capability object.
-  ...MATRIX_FIELDS.flatMap((field): WireAddition[] => [
-    { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: `runtimes[].capabilities.${field}` },
-    { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: `harnesses[].capabilities.${field}` },
-    { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: `capabilities.${field}` },
-  ]),
-  // Version policy and runtime-unavailable discovery (#1103 B2b). All are
-  // strip-safe: an older receiver drops them, and absence means unknown — it
-  // must never be read as `allow` or `available`. Presence keeps the built-in
-  // runtime identity domain; harness policy travels only on conn.hello.
-  { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].versionPolicy' },
-  { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].versionPolicy' },
-  { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimeUnavailable' },
-  { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimes[].versionPolicy' },
-  { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimeUnavailable' },
-  // Presence carries the conn.hello capability matrix (#1103); a published cloud drops it.
-  { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimes[].capabilities' },
-  // Optional MCP event identity is observability only; older receivers may omit it.
-  { kind: 'envelope', rule: 'strip-safe', surface: 'task.progress', field: 'events[].mcp' },
-  // Daemon to server.
-  { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.fail', field: 'failure', capability: 'runtime-failure-class', advertisedBy: 'server' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.fail', field: 'failure.scope', capability: 'runtime-quota-scope', advertisedBy: 'server' },
-  // A writer terminal's over-limit MEMORY.md (#1439). The sealed terminal
-  // branches are strict, so an older server would refuse the whole terminal.
-  ...(['task.complete', 'task.fail', 'task.cancelled'] as const).map((surface): WireAddition => (
-    { kind: 'envelope', rule: 'gated', surface, field: 'residentMemoryOverLimit', capability: 'resident-memory-over-limit', advertisedBy: 'server' })),
-  // Typed pre-claim runtime-unavailable cause (#1103 B2a). An older server
-  // drops the nested field and still records the open `runtime_unavailable`
-  // code; the cause never changes what the receiver executes.
-  { kind: 'envelope', rule: 'strip-safe', surface: 'task.decline', field: 'runtimeUnavailable' },
-  // Relative token lifetime (#1114). A published device drops it and keeps
-  // reading `expiresAt`, which the Host still sends.
-  { kind: 'http', rule: 'strip-safe', surface: 'TokenResponse', field: 'expiresIn' },
-  // Relative token lifetime (#1114), as on the token response; a published
-  // device drops it.
-  { kind: 'http', rule: 'strip-safe', surface: 'PairResponse', field: 'expiresIn' },
 ];
 
 export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   ...PLAIN_ROWS,
   ...sealedRows(),
   ...SEALED_V2_ROWS,
-  SEALED_DECLINE_CODE('sealed_key_unavailable'),
-  SEALED_DECLINE_CODE('sealed_open_failed'),
-  SEALED_DECLINE_CODE('sealed_content_mac_mismatch'),
-  SEALED_DECLINE_CODE('sealing_policy_mismatch'),
-  { kind: 'envelope', rule: 'gated', surface: 'task.decline', field: 'code', value: 'native_sessions_unsupported', capability: 'native-sessions', advertisedBy: 'server' },
 ] satisfies readonly WireAddition[]);
 
 /**
@@ -199,7 +136,7 @@ export function requiredReceiverCapabilities(type: MessageType, payload: unknown
   const fields = payload !== null && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
   const required: CapabilityFlag[] = [];
   for (const entry of WIRE_ADDITIONS) {
-    if (entry.kind !== 'envelope' || entry.rule !== 'gated' || entry.surface !== type) continue;
+    if (entry.surface !== type) continue;
     if (entry.field !== undefined) {
       const value = entry.field.split('.').reduce<unknown>(
         (parent, segment) => (parent !== null && typeof parent === 'object' ? (parent as Record<string, unknown>)[segment] : undefined),

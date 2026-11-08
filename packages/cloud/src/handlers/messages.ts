@@ -51,7 +51,6 @@ import { authenticateDevice, rateLimited, readBoundedJsonBody, type DeviceRouteD
 /** Coarse wire vocabulary deliberately hides task existence and identity bindings. */
 const WIRE_REFUSAL_REASONS = {
   task_id_missing: 'payload_invalid',
-  hello_harnesses_without_capability: 'payload_invalid',
   content_receipt_event_request_mismatch: 'payload_invalid',
   claim_harness_and_runtime_conflict: 'payload_invalid',
   recovery_report_invalid: 'payload_invalid',

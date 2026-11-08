@@ -64,7 +64,7 @@ import { createByokServer } from '@byok-sdk/server';
 
 const CLOUD_ORIGIN = 'http://cloud.test';
 const AGENT_MESSAGE_CAPABILITIES = [
-  'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'agent-message-egress', 'terminal-projection-selection',
+  'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'agent-message-egress',
 ];
 const MESSAGE_CONTEXT = { destinationBinding: 'conversation', freshnessCursor: 'turn' };
 

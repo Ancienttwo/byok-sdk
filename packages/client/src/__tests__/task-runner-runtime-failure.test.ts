@@ -62,7 +62,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     await start(adapter);
     await offer('typed-start-infrastructure');
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'typed-start-infrastructure');
-    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'runtime process could not be spawned', retryable: true });
+    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'runtime process could not be spawned', retryable: true, failure: { class: 'unknown' } });
   });
 
   it('projects typed run semantic failure as non-retryable after forwarding diagnostics', async () => {
@@ -80,7 +80,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     }));
 
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'typed-run-semantic');
-    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'runtime reported terminal task failure', retryable: false });
+    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'runtime reported terminal task failure', retryable: false, failure: { class: 'unknown' } });
     const progress = await server.waitFor((event) => event.type === 'task.progress' && event.task_id === 'typed-run-semantic');
     expect(progress.payload).toMatchObject({ events: [{ type: 'error', message: 'provider diagnostic' }] });
   });
@@ -120,6 +120,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef,
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.run,
       retryable: false,
+      failure: { class: 'unknown' },
     });
     expect(JSON.stringify(failed.payload)).not.toContain('temporary timeout');
     expect(diagnostic).toHaveBeenCalledOnce();
@@ -139,31 +140,14 @@ describe('TaskRunner typed runtime failure projection', () => {
     expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef,
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.run,
       retryable: false,
+      failure: { class: 'unknown' },
     });
     expect(diagnostic).toHaveBeenCalledOnce();
     diagnostic.mockRestore();
   });
 
   describe('the runtime failure class (#869)', () => {
-    it('sends the adapter\'s class and resetsAt to a server that advertises runtime-failure-class', async () => {
-      server.setAckCapabilities(['runtime-failure-class']);
-      const adapter = new StubRuntimeAdapter('pi');
-      await start(adapter);
-      await offer('class-run');
-      await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'class-run');
-      adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
-        phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'usage limit',
-        failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' },
-      }));
-      const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-run');
-      expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'usage limit', retryable: false, failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' } });
-    });
-
-    it.each([
-      [['runtime-failure-class', 'runtime-quota-scope'], { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' }],
-      [['runtime-failure-class'], { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' }],
-    ])('sends a quota scope only to a server that advertises runtime-quota-scope (#1271, flags %j)', async (flags, expected) => {
-      server.setAckCapabilities(flags);
+    it('sends the adapter\'s class, resetsAt and quota scope (#1271)', async () => {
       const adapter = new StubRuntimeAdapter('pi');
       await start(adapter);
       await offer('scope-run');
@@ -173,38 +157,7 @@ describe('TaskRunner typed runtime failure projection', () => {
         failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' },
       }));
       const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'scope-run');
-      expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'weekly limit', retryable: false, failure: expected });
-    });
-
-    it('sends unknown for a start failure with no class and for a failure the daemon makes', async () => {
-      server.setAckCapabilities(['runtime-failure-class']);
-      const adapter = new StubRuntimeAdapter('pi');
-      adapter.startError = new RuntimeExecutionFailure({ phase: 'start', category: 'infrastructure', retry: 'retryable', reason: 'spawn failed' });
-      const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-      await start(adapter);
-      await offer('class-start');
-      const started = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-start');
-      expect(started.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'spawn failed', retryable: true, failure: { class: 'unknown' } });
-
-      adapter.startError = undefined;
-      await offer('class-contract');
-      await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'class-contract');
-      adapter.sessions.at(-1)!.endAbruptly();
-      const violated = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-contract');
-      expect(violated.payload).toEqual({ agentRef: echoedTestAgentRef, reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.run, retryable: false, failure: { class: 'unknown' } });
-      diagnostic.mockRestore();
-    });
-
-    it('sends no class to a server that does not advertise the flag', async () => {
-      const adapter = new StubRuntimeAdapter('pi');
-      await start(adapter);
-      await offer('class-old-server');
-      await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'class-old-server');
-      adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
-        phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'login expired', failure: { class: 'auth' },
-      }));
-      const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-old-server');
-      expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'login expired', retryable: false });
+      expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'weekly limit', retryable: false, failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' } });
     });
   });
 });

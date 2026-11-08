@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "156df6a96446c6de48e24744f1e8ac26fc22adf835b363026f52f9468c92b94f"
+    "snapshotSha256": "48c8bdb52684253c1b2c5c89925d5801f797824abd8a010d04326851105e73d4"
   },
   "configFields": {
     "status": "tracked",
@@ -44,6 +44,45 @@
         "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
         "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION"
       ]
+    },
+    {
+      "id": "wire-v6-retired-gates",
+      "impact": "breaking",
+      "summary": "Wire v6 retires every v5 gate that both sides always advertised. The server flags agent-message-draft, runtime-failure-class, runtime-quota-scope, resident-memory-over-limit, sealed-output-ciphertext-ref and mailbox-read-ahead are gone, the sealed and native-sessions decline codes need no flag, and the reference server advertises no server flag (CLOUD_PROTOCOL_CAPABILITIES is empty): every daemon-to-server surface is baseline, and the server accepts a sealed one by the task's frozen sealing. The device flags custom-harness, terminal-projection-selection, blob-upload and runtime-unavailable-cause are gone, so an offer with harnessId or terminalProjection needs no flag and conn.hello harnesses no longer need custom-harness (the refusal hello_harnesses_without_capability is removed). Their constants leave CAPABILITY_FLAGS and @byok-sdk/protocol. WIRE_ADDITIONS has no strip-safe rows and WireAddition is the gated row only. Device flags a daemon advertises by configuration, such as agent-home-contract, agent-egress-reliable-ack, native-sessions and sealed-payload-v1, still gate. Presence runtimeUnavailable takes a custom harness id, like conn.hello. A Host that tested for a retired flag drops the check; upgrade server and daemons together.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1573",
+      "items": [
+        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#CUSTOM_HARNESS_CAPABILITY",
+        "export:@byok-sdk/protocol#MAILBOX_READ_AHEAD_CAPABILITY",
+        "export:@byok-sdk/protocol#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+        "export:@byok-sdk/protocol#RUNTIME_FAILURE_CLASS_CAPABILITY",
+        "export:@byok-sdk/protocol#RUNTIME_QUOTA_SCOPE_CAPABILITY",
+        "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY",
+        "export:@byok-sdk/protocol#SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY",
+        "export:@byok-sdk/protocol#TERMINAL_PROJECTION_SELECTION_CAPABILITY",
+        "export:@byok-sdk/protocol#WireAddition",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#CUSTOM_HARNESS_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#MAILBOX_READ_AHEAD_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#RUNTIME_FAILURE_CLASS_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#RUNTIME_QUOTA_SCOPE_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#TERMINAL_PROJECTION_SELECTION_CAPABILITY"
+      ]
+    },
+    {
+      "id": "token-lifetime-expires-in",
+      "impact": "breaking",
+      "summary": "TokenResponse and PairResponse carry the token lifetime only as expiresIn, now required. TokenResponse.expiresAt is removed (TokenResponseSchema strips it unread), the server no longer sends it or the pair refreshHint, and MintedAccessToken has no expiresAt. A daemon refuses a token or pair response without expiresIn and keeps its prior credential. A Host with its own auth plane returns expiresIn from mintAccessToken.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1573",
+      "items": [
+        "export:@byok-sdk/cloud#MintedAccessToken",
+        "export:@byok-sdk/protocol#PairResponseSchema",
+        "export:@byok-sdk/protocol#TokenResponseSchema"
+      ]
     }
   ],
   "changes": [
@@ -51,6 +90,16 @@
       "item": "export:@byok-sdk/client#RuntimeIsolationCapabilities",
       "change": "changed",
       "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+      "change": "changed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#MintedAccessToken",
+      "change": "changed",
+      "entry": "token-lifetime-expires-in"
     },
     {
       "item": "export:@byok-sdk/core#PresenceRuntimeCapabilities",
@@ -68,6 +117,16 @@
       "entry": "keys-profile-store-migration"
     },
     {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CUSTOM_HARNESS_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
       "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
       "change": "changed",
       "entry": "wire-v6-isolation-sources"
@@ -83,6 +142,11 @@
       "entry": "wire-v6-isolation-sources"
     },
     {
+      "item": "export:@byok-sdk/protocol#MAILBOX_READ_AHEAD_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
       "item": "export:@byok-sdk/protocol#MessagesSendRequestSchema",
       "change": "changed",
       "entry": "wire-v6-isolation-sources"
@@ -93,9 +157,34 @@
       "entry": "wire-v6-isolation-sources"
     },
     {
+      "item": "export:@byok-sdk/protocol#PairResponseSchema",
+      "change": "changed",
+      "entry": "token-lifetime-expires-in"
+    },
+    {
       "item": "export:@byok-sdk/protocol#PresencePublishRequestSchema",
       "change": "changed",
       "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RUNTIME_FAILURE_CLASS_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RUNTIME_QUOTA_SCOPE_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
     },
     {
       "item": "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
@@ -108,14 +197,79 @@
       "entry": "wire-v6-isolation-sources"
     },
     {
+      "item": "export:@byok-sdk/protocol#SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TERMINAL_PROJECTION_SELECTION_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
       "change": "changed",
       "entry": "wire-v6-isolation-sources"
     },
     {
+      "item": "export:@byok-sdk/protocol#TokenResponseSchema",
+      "change": "changed",
+      "entry": "token-lifetime-expires-in"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#WireAddition",
+      "change": "changed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CUSTOM_HARNESS_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#MAILBOX_READ_AHEAD_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
       "item": "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION",
       "change": "changed",
       "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RUNTIME_FAILURE_CLASS_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RUNTIME_QUOTA_SCOPE_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#TERMINAL_PROJECTION_SELECTION_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
     }
   ]
 }

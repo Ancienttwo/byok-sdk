@@ -193,7 +193,7 @@ export const RuntimeUnavailableEntrySchema = z.object({
 export type RuntimeUnavailableEntry = z.infer<typeof RuntimeUnavailableEntrySchema>;
 
 /** Bounded, unique by id: 16 entries are more runtimes than one daemon hosts. */
-const RuntimeUnavailableListSchema = z.array(RuntimeUnavailableEntrySchema).max(16)
+export const RuntimeUnavailableListSchema = z.array(RuntimeUnavailableEntrySchema).max(16)
   .refine(values => new Set(values.map(value => value.id)).size === values.length, 'duplicate runtime-unavailable identity');
 
 /** Maximum logical toolsets one daemon may advertise as locally configured. */
