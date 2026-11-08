@@ -1,6 +1,6 @@
 # Host upgrade to 0.40.0
 
-Use this checklist for a Host moving from 0.39.0 to the planned 0.40.0 MINOR train. Earlier Hosts must first apply the [0.39.0 checklist](host-upgrade-0.39.0.md) and its predecessors. This guide describes train head `d4adc2321726a9a33fb9f260bc965357060d62fb`, using the Unreleased CHANGELOG and `packages/client/upgrade-manifest.json`. The manifest still targets 0.39.0; the release commit, final manifest, tag and publication remain pending. Recheck them before upgrading and pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
+Use this checklist for a Host moving from 0.39.0 to 0.40.0. Earlier Hosts must first apply the [0.39.0 checklist](host-upgrade-0.39.0.md) and its predecessors. The source base is `f3eabd041`; pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
 
 ## Required Host actions
 
@@ -21,9 +21,9 @@ Pi's memory-lane admission consumes exactly one local `{ type: 'byok_host_ready'
 
 ## Optional OpenCode adoption
 
-`OpenCodeAdapter` (`harnessId: 'opencode'`) is opt-in. No OS/version line or default version is qualified yet, and task-scoped Host MCP qualification also awaits native canaries. Check the [qualification evidence](../researches/2026-11-08-opencode-native-qualification.md) for the intended combination before offering dispatch. Configure explicit Host model candidates in `runtimes.opencode.models`; the adapter verifies native session model readback, rejects mismatches, and retries once with the next candidate on a pre-output rate limit, recording a non-terminal `model_switch` diagnostic. It does not switch after output starts.
+`OpenCodeAdapter` (`harnessId: 'opencode'`) is opt-in. The platform list is empty, so OpenCode has no qualified native platform in this release; task-scoped Host MCP qualification also awaits native canaries. Check the [qualification evidence](../researches/2026-11-08-opencode-native-qualification.md) for the intended combination before offering dispatch. Configure explicit Host model candidates in `runtimes.opencode.models`; the adapter verifies native session model readback, rejects mismatches, and retries once with the next candidate on a pre-output rate limit, recording a non-terminal `model_switch` diagnostic. It does not switch after output starts.
 
-OpenCode inherits native user context, MCP configuration and transcript storage; all isolation guarantees are false. Assess those exposures before opting in. The SDK runs the official CLI directly without a gateway or injected credentials.
+OpenCode inherits native user context, MCP configuration and transcript storage; all isolation guarantees are false. Assess those exposures before opting in. The SDK runs the official CLI directly without a gateway or injected credentials. Models that need a key, including OpenCode Go, cannot run through the SDK in this release because the adapter has no SDK credential delivery yet ([#1547](https://github.com/Ancienttwo/byok-sdk/issues/1547)).
 
 ## Other Host-visible changes
 

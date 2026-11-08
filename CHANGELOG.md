@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.40.0 — 2026-11-08 (source candidate)
+
+0.40.0 is a MINOR source candidate for all nine public packages. It keeps wire v5 and adds no Postgres or SQLite migration. See the [release notes](docs/releases/v0.40.0.md) and [Host upgrade checklist](docs/releases/host-upgrade-0.40.0.md). Publication and platform acceptance remain separate.
+
 - **Changed** — ACP adapter `tool_use` events wait until the tool input is settled (#1542).
 
 - **Added** — Opt-in `OpenCodeAdapter` (`harnessId: opencode`) runs native OpenCode v1/v2 with explicit Host model candidates, native model readback, one observable pre-output rate-limit fallback and owned process cleanup (#1538). It inherits user context, MCP configuration and native transcript storage. Platform and Host MCP qualification remain pending native canaries.
