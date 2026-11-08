@@ -167,9 +167,11 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
     expect((await inherited()).provider.saw(OUTPUT_STYLE_SECTION), 'positive control: inherited output style section').toBe(true);
     expect((await excluded()).provider.saw(OUTPUT_STYLE_MARKER)).toBe(false);
     expect((await excluded()).provider.saw(OUTPUT_STYLE_SECTION)).toBe(false);
+    expect((await excluded()).provider.saw(PROJECT_MARKER), 'positive control: the Agent home is still read under excluded').toBe(true);
     expect((await agentStyledInherited()).provider.saw(AGENT_STYLE_MARKER), 'positive control: the Agent home style reaches the model when inherited').toBe(true);
     // The flag-layer `outputStyle: "default"` outranks the Agent home's own settings, so excluded drops its style too.
     expect((await agentStyled()).provider.saw(AGENT_STYLE_MARKER)).toBe(false);
+    expect((await agentStyled()).provider.saw(PROJECT_MARKER), 'positive control: the Agent home is still read under excluded').toBe(true);
   }),
   'isolation.userMemory': check(async () => {
     expect((await inherited()).provider.saw(MEMORY_MARKER), 'positive control: inherited auto memory reaches the model').toBe(true);
@@ -194,7 +196,7 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
     expect(summaries.some(summary => summary.includes(outside))).toBe(true);
     expect(written).toBe(false);
   }),
-  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await gated(); }, [
+  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await agentStyled(); await agentStyledInherited(); await gated(); }, [
     { phase: 'detect', target: 'api.anthropic.com:443', reason: '`claude auth status` checks an ANTHROPIC_API_KEY with Anthropic' },
   ]),
 }, CLAUDE_ABSENT_ISOLATION_SOURCES);
