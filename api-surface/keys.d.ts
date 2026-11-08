@@ -596,8 +596,8 @@ export type { SecretScope } from './secret-scope';
 export { InMemoryProviderProfileStore } from './profile-store';
 export type { ProviderProfileStore } from './profile-store';
 export { isSqliteAvailable, loadSqliteModule, openSqliteDatabase, secureSqliteFilePermissions, } from './sqlite-support';
-export { SqliteProviderProfileStore } from './sqlite-profile-store';
-export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
+export { SqliteProviderProfileStore, migrateProviderProfileStore } from './sqlite-profile-store';
+export type { ProviderProfileStoreMigration, SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
 export { inspectProviderProfileStore } from './store-compatibility';
 export { PROVIDER_PROFILE_TRUTH_RECORD_KEY, TruthStoreProviderProfileStore, } from './truth-profile-store';
 export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store';
@@ -2459,6 +2459,29 @@ export declare class SqliteProviderProfileStore implements ProviderProfileStore 
     recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean>;
     setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile>;
 }
+/** What {@link migrateProviderProfileStore} did to the store. */
+export type ProviderProfileStoreMigration = 'migrated' | 'unchanged';
+/** Test-only seam: `afterCopy` runs inside the migration transaction, after the rows are copied. */
+export interface ProviderProfileStoreMigrationFaults {
+    afterCopy?(): void;
+}
+/**
+ * One-shot migration of a store whose `provider_profile` table carries an
+ * earlier `provider_kind` CHECK set; SQLite cannot alter a CHECK in place.
+ *
+ * Call it explicitly, with no other connection open, before opening the store
+ * with this version; opening never migrates. Under SQLite's exclusive write
+ * lock, one transaction rebuilds the table from the current schema, copies
+ * every row verbatim (the profile ref names the credential-store secret, which
+ * is never read), verifies count and content, and recreates the index. The
+ * custody tables hold no provider kind and must already be current.
+ *
+ * Any other difference or failure rolls back and throws
+ * `PROVIDER_STORE_SCHEMA_STALE`. A current store, or no store, is `'unchanged'`.
+ */
+export declare function migrateProviderProfileStore(path: string): ProviderProfileStoreMigration;
+/** {@link migrateProviderProfileStore} with its test-only fault seam. */
+export declare function runProviderProfileStoreMigration(path: string, faults?: ProviderProfileStoreMigrationFaults): ProviderProfileStoreMigration;
 // ==== @byok-sdk/keys dist/sqlite-support.d.ts ====
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 export type SqliteOpenStep = 'after-open' | 'after-wal' | 'after-synchronous';

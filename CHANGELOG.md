@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Added (keys; #1562)** — `migrateProviderProfileStore(path)` migrates a SQLite profile store whose `provider_kind` CHECK set comes from an earlier version, in one transaction that keeps every profile row and its credential-store key reference, so users do not re-enter keys. The Host calls it before opening the store; opening never migrates. Any other schema difference or failure rolls back and throws `PROVIDER_STORE_SCHEMA_STALE`. See the [Host upgrade checklist](docs/releases/host-upgrade-0.41.0.md#stores).
+
 - **Fixed (client; #1549)** — Daemon-local completion events, `Daemon.tasks()` terminal state and execution records now wait for the first finalization attempt to settle, after this task's writes to the agent home (including resident-memory restore) are done on successful finalization, up to about 1s later than before. Failed attempts still emit local completion signals without waiting for a retry. Wire and cloud completion signals, including `TaskHandle.result()` and `TaskHandle.events()`, are unchanged.
 
 ## 0.40.0 — 2026-11-08 (published)

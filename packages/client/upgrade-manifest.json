@@ -7,13 +7,35 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "5c101efe75dd23439980ffa563e336243e14ef3433b2782076edff60760b7d27"
+    "snapshotSha256": "9b9ab39dbac29f003a3b01df9f19ec203b1f977341552287e2917cb87850daa0"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "keys-profile-store-migration",
+      "impact": "additive",
+      "summary": "migrateProviderProfileStore migrates a keys SQLite profile store with an earlier provider_kind CHECK set in one transaction, keeping profiles and credential-store key references. Call it before opening the store; opening never migrates.",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#stores",
+      "items": [
+        "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+        "export:@byok-sdk/keys#migrateProviderProfileStore"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+      "change": "added",
+      "entry": "keys-profile-store-migration"
+    },
+    {
+      "item": "export:@byok-sdk/keys#migrateProviderProfileStore",
+      "change": "added",
+      "entry": "keys-profile-store-migration"
+    }
+  ]
 }
