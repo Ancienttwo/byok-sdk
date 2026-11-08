@@ -3011,7 +3011,11 @@ export declare const PresencePublishRequestSchema: z.ZodObject<{
             durableLane: z.ZodOptional<z.ZodBoolean>;
             preparedLane: z.ZodOptional<z.ZodBoolean>;
             isolation: z.ZodOptional<z.ZodObject<{
-                userContext: z.ZodOptional<z.ZodBoolean>;
+                userInstructions: z.ZodOptional<z.ZodBoolean>;
+                userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+                userMemory: z.ZodOptional<z.ZodBoolean>;
+                userSkills: z.ZodOptional<z.ZodBoolean>;
+                userHookContext: z.ZodOptional<z.ZodBoolean>;
                 userMcpServers: z.ZodOptional<z.ZodBoolean>;
                 sessionPersistence: z.ZodOptional<z.ZodBoolean>;
             }, z.core.$strip>>;
@@ -3133,7 +3137,7 @@ export declare const MESSAGES_SEND_MAX_BODY_BYTES: number;
  */
 export declare const MessagesSendRequestSchema: z.ZodObject<{
     messages: z.ZodArray<z.ZodObject<{
-        v: z.ZodLiteral<5>;
+        v: z.ZodLiteral<6>;
         id: z.ZodUUID;
     }, z.core.$loose>>;
 }, z.core.$strip>;
@@ -4718,7 +4722,11 @@ export declare const RuntimeCapabilitiesSchema: z.ZodObject<{
     durableLane: z.ZodOptional<z.ZodBoolean>;
     preparedLane: z.ZodOptional<z.ZodBoolean>;
     isolation: z.ZodOptional<z.ZodObject<{
-        userContext: z.ZodOptional<z.ZodBoolean>;
+        userInstructions: z.ZodOptional<z.ZodBoolean>;
+        userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+        userMemory: z.ZodOptional<z.ZodBoolean>;
+        userSkills: z.ZodOptional<z.ZodBoolean>;
+        userHookContext: z.ZodOptional<z.ZodBoolean>;
         userMcpServers: z.ZodOptional<z.ZodBoolean>;
         sessionPersistence: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
@@ -4762,7 +4770,11 @@ export declare const RuntimeInfoSchema: z.ZodObject<{
         durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
-            userContext: z.ZodOptional<z.ZodBoolean>;
+            userInstructions: z.ZodOptional<z.ZodBoolean>;
+            userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+            userMemory: z.ZodOptional<z.ZodBoolean>;
+            userSkills: z.ZodOptional<z.ZodBoolean>;
+            userHookContext: z.ZodOptional<z.ZodBoolean>;
             userMcpServers: z.ZodOptional<z.ZodBoolean>;
             sessionPersistence: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
@@ -4793,7 +4805,11 @@ export declare const HarnessInfoSchema: z.ZodObject<{
         durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
-            userContext: z.ZodOptional<z.ZodBoolean>;
+            userInstructions: z.ZodOptional<z.ZodBoolean>;
+            userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+            userMemory: z.ZodOptional<z.ZodBoolean>;
+            userSkills: z.ZodOptional<z.ZodBoolean>;
+            userHookContext: z.ZodOptional<z.ZodBoolean>;
             userMcpServers: z.ZodOptional<z.ZodBoolean>;
             sessionPersistence: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
@@ -4821,7 +4837,11 @@ export declare const HarnessInventorySchema: z.ZodArray<z.ZodObject<{
         durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
-            userContext: z.ZodOptional<z.ZodBoolean>;
+            userInstructions: z.ZodOptional<z.ZodBoolean>;
+            userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+            userMemory: z.ZodOptional<z.ZodBoolean>;
+            userSkills: z.ZodOptional<z.ZodBoolean>;
+            userHookContext: z.ZodOptional<z.ZodBoolean>;
             userMcpServers: z.ZodOptional<z.ZodBoolean>;
             sessionPersistence: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
@@ -4923,7 +4943,11 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             durableLane: z.ZodOptional<z.ZodBoolean>;
             preparedLane: z.ZodOptional<z.ZodBoolean>;
             isolation: z.ZodOptional<z.ZodObject<{
-                userContext: z.ZodOptional<z.ZodBoolean>;
+                userInstructions: z.ZodOptional<z.ZodBoolean>;
+                userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+                userMemory: z.ZodOptional<z.ZodBoolean>;
+                userSkills: z.ZodOptional<z.ZodBoolean>;
+                userHookContext: z.ZodOptional<z.ZodBoolean>;
                 userMcpServers: z.ZodOptional<z.ZodBoolean>;
                 sessionPersistence: z.ZodOptional<z.ZodBoolean>;
             }, z.core.$strip>>;
@@ -4950,7 +4974,11 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             durableLane: z.ZodOptional<z.ZodBoolean>;
             preparedLane: z.ZodOptional<z.ZodBoolean>;
             isolation: z.ZodOptional<z.ZodObject<{
-                userContext: z.ZodOptional<z.ZodBoolean>;
+                userInstructions: z.ZodOptional<z.ZodBoolean>;
+                userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+                userMemory: z.ZodOptional<z.ZodBoolean>;
+                userSkills: z.ZodOptional<z.ZodBoolean>;
+                userHookContext: z.ZodOptional<z.ZodBoolean>;
                 userMcpServers: z.ZodOptional<z.ZodBoolean>;
                 sessionPersistence: z.ZodOptional<z.ZodBoolean>;
             }, z.core.$strip>>;
@@ -6349,7 +6377,11 @@ export declare const TaskClaimPayloadSchema: z.ZodObject<{
         durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
-            userContext: z.ZodOptional<z.ZodBoolean>;
+            userInstructions: z.ZodOptional<z.ZodBoolean>;
+            userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+            userMemory: z.ZodOptional<z.ZodBoolean>;
+            userSkills: z.ZodOptional<z.ZodBoolean>;
+            userHookContext: z.ZodOptional<z.ZodBoolean>;
             userMcpServers: z.ZodOptional<z.ZodBoolean>;
             sessionPersistence: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
@@ -9131,12 +9163,21 @@ export type TerminalProjectionSelection = z.infer<typeof TerminalProjectionSelec
 export declare const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
 /**
- * Wire protocol version. Every v5 change is a version bump, a gated addition
+ * Wire protocol version. Every v6 change is a version bump, a gated addition
  * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
  * one statement of the rule, and `src/wire-additions.ts`, which declares the
- * receiver-capability gates and additions. No v5 release has been published
- * yet, so `src/__tests__/compat.test.ts` has no published v5 decoder to prove
+ * receiver-capability gates and additions. No v6 release has been published
+ * yet, so `src/__tests__/compat.test.ts` has no published v6 decoder to prove
  * additions against; cross-release gates stay unproven until one exists.
+ *
+ * v6 splits the runtime capability `isolation.userContext` into one bit per
+ * source a runtime can keep out: `userInstructions`, `userOutputStyle`,
+ * `userMemory`, `userSkills` and `userHookContext`, beside the unchanged
+ * `userMcpServers` and `sessionPersistence`, on `conn.hello` runtimes and
+ * harnesses, `task.claim` and presence. `userContext` is gone with no derived
+ * field. A v5 envelope is rejected; there is no v5 reader. Stores that still
+ * hold v5 rows refuse to start; rebuild them, then upgrade server and client
+ * together.
  *
  * v5 renames the runtime capability `durablePi` to `durableLane`, beside
  * `preparedLane`, on `conn.hello` runtimes and harnesses, `task.claim` and
@@ -9177,7 +9218,7 @@ export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
  */
-export declare const PROTOCOL_VERSION = 5;
+export declare const PROTOCOL_VERSION = 6;
 /**
  * The device runs `homeAccess: 'memory-reader'` Agent offers: each reader
  * Attempt gets its own run directory under the Agent home, and readers are

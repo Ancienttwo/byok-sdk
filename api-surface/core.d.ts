@@ -1805,7 +1805,11 @@ export interface PresenceRuntimeCapabilities {
     readonly durableLane?: boolean;
     readonly preparedLane?: boolean;
     readonly isolation?: {
-        readonly userContext?: boolean;
+        readonly userInstructions?: boolean;
+        readonly userOutputStyle?: boolean;
+        readonly userMemory?: boolean;
+        readonly userSkills?: boolean;
+        readonly userHookContext?: boolean;
         readonly userMcpServers?: boolean;
         readonly sessionPersistence?: boolean;
     };
