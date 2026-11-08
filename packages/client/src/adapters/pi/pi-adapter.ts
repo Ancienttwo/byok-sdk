@@ -290,7 +290,7 @@ export class PiAdapter implements RuntimeAdapter {
         : { adapterOption: options.versionPolicy }),
     }).policy;
     this.agentResources = parsePiAgentResources({
-      userContext: options.agentUserContext === undefined ? 'inherit' : options.agentUserContext,
+      agentUserContext: options.agentUserContext === undefined ? 'inherit' : options.agentUserContext,
       skillPaths: options.agentSkillPaths === undefined ? [] : options.agentSkillPaths,
       extensionPaths: options.agentExtensionPaths === undefined ? [] : options.agentExtensionPaths,
     });
@@ -526,7 +526,7 @@ export class PiAdapter implements RuntimeAdapter {
           if (runtimeLaunch.kind !== (this.options.durableLane === true ? 'pi-durable' : startInput.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc')) throw authorityFailure('Pi start lane differs from runtime launch');
           if (runtimeLaunch.sessionCwd !== startInput.manifest.cwd) throw authorityFailure('Pi runtime session cwd differs from manifest');
           const resources = startInput.manifest.agentRef === undefined ? INHERITED_PI_AGENT_RESOURCES : this.agentResources;
-          if ((resources.userContext === 'excluded' || resources.skillPaths.length > 0 || resources.extensionPaths.length > 0) && runtimeLaunch.kind !== 'pi-rpc') {
+          if ((resources.agentUserContext === 'excluded' || resources.skillPaths.length > 0 || resources.extensionPaths.length > 0) && runtimeLaunch.kind !== 'pi-rpc') {
             throw authorityFailure('Pi Agent resources are supported only by the ordinary RPC lane');
           }
           parsePiMcpEnvironment(startInput.mcpEnv);
@@ -637,7 +637,7 @@ export class PiAdapter implements RuntimeAdapter {
             // Excluded user context keeps only the Agent home's instruction
             // files, so the home must be the lease's sealed canonical home.
             let agentHome: string | null = null;
-            if (resources.userContext === 'excluded') {
+            if (resources.agentUserContext === 'excluded') {
               const lease = startInput.manifest.lease;
               const home = lease?.canonicalHome;
               if (!home || !lease.leaseId || !path.isAbsolute(home) || path.resolve(home) !== home) {
@@ -687,7 +687,7 @@ export class PiAdapter implements RuntimeAdapter {
               // IPC channel and refuses to start without it.
               credentialSource: runtimeLaunch.credentialSource,
               cwd: runtimeLaunch.sessionCwd,
-              agentUserContext: memoryLane ? 'excluded' : resources.userContext,
+              agentUserContext: memoryLane ? 'excluded' : resources.agentUserContext,
               agentHome: memoryLane ? startInput.manifest.lease!.canonicalHome : agentHome,
               agentSkillPaths: memoryLane ? [] : resources.skillPaths,
               agentExtensionPaths: memoryLane ? [] : resources.extensionPaths,
