@@ -280,6 +280,10 @@ parent walk. Under `excluded` an Agent task starts with:
 - In the same file, `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY` set to `1`. The flag
   layer outranks a user `settings.json` `env` block. The process variable and
   `autoMemoryEnabled: false` do not (probed).
+- In the same file, `outputStyle` set to `default`. It outranks a user
+  `outputStyle`, so neither the style file's text nor the system-prompt
+  section that refers to an output style reaches the model (probed on
+  2.1.319, #1564).
 - `--setting-sources` untouched. The user's settings, deny rules, hooks,
   `apiKeyHelper`, model and env still apply (probed for deny rules, a hook,
   model and env).
@@ -294,9 +298,23 @@ it and resumed with it still carried the user instruction files and the auto
 memory in its first history message. A Host that turns the option on should
 start fresh Agent sessions (drop `sessionRef`).
 
-Under `excluded` these still load: the user's skills, commands, subagents and
-output styles; installed plugins' skills and hooks; managed policy, including
-a managed `CLAUDE.md`, which cannot be excluded.
+Under `excluded` these still load and can reach the model (probed on 2.1.319,
+#1564):
+
+- Output of the user's hooks that add context, such as SessionStart and
+  UserPromptSubmit. Hooks merge across setting layers, so the flag layer
+  cannot remove one event's hooks, and `allowManagedHooksOnly` takes effect
+  only in managed policy. Dropping the `user` setting source also drops the
+  guard hooks, such as PreToolUse, and the deny rules (see above);
+  `disableAllHooks`, `--bare` and `--safe-mode` drop every hook (from the
+  help text; not probed).
+- The user's skills: their names, and depending on the frontmatter their
+  descriptions, appear in the skill listing.
+- The user's commands and subagents, installed plugins' skills and hooks, and
+  managed policy, including a managed `CLAUDE.md`, which cannot be excluded.
+
+The `isolation.userContext` capability bit does not yet describe these
+sources; splitting it is tracked separately.
 
 On Windows the adapter writes the same patterns, and fixture tests cover a
 win32 home. No Claude on Windows was probed: drive-letter case, `\\?\` paths and

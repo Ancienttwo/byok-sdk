@@ -124,7 +124,10 @@ leave the map out.
 The SQLite profile schema changes in this candidate. Existing stores are
 rejected and preserved: explicitly provision a separate current-schema store
 after reviewing the old configuration. Do not delete an old store or infer its
-missing model settings. No live-store conversion is performed by the SDK.
+missing model settings. Opening a store never converts it. The Host's explicit
+`migrateProviderProfileStore(path)` call converts only a store whose sole
+difference is an earlier `provider_kind` CHECK set; see the
+[0.41.0 Host upgrade checklist](../../docs/releases/host-upgrade-0.41.0.md#stores).
 
 Key-based BYOK: a validated provider profile, credential-backed auth headers, and
 direct transports to OpenAI-compatible and Anthropic providers.
