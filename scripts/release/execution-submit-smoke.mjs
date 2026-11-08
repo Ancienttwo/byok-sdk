@@ -590,7 +590,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
     assert.equal(helloAnswer.accepted, 1);
     assert.deepEqual(helloAnswer.outcomes, [{ id: helloEnvelope.id, outcome: 'accepted' }]);
     assert.deepEqual(helloAnswer.ingress, { activityMaxEvents: 50, activityMaxBytes: 65_536 });
-    assert.ok(helloAnswer.capabilities.includes('agent-message-egress'), 'the handshake answer advertises agent-message-egress');
+    assert.deepEqual(helloAnswer.capabilities, [], 'wire v6 advertises no server flag');
     const embeddedSubmit = (taskId) => embedded.executions.submit(recurringInput(taskId, embeddedPaired.deviceId, `resolve embedded ${taskId}`, agentRef));
 
     // Accepted, end-to-end on the embedded surface.

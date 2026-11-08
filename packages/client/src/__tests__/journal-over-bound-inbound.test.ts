@@ -128,7 +128,7 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
     server.send(big);
 
     const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'big-sealed');
-    expect(decline.payload).toEqual({ reason: DECLINE_REASON, retryable: false, agentRef: payload.agentRef });
+    expect(decline.payload).toEqual({ reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false, agentRef: payload.agentRef });
     await vi.waitFor(async () => expect(await cursor()).toBe(big.seq), EVENTUAL_STATE_BUDGET_MS);
   });
 
