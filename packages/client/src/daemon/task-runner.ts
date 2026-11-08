@@ -220,7 +220,8 @@ export interface TaskRunnerDeps {
   }) => void;
   /**
    * Local-only diagnostic: one {@link ExecutionRecord} per started execution,
-   * after `Session.close()` and the terminal commit. It never changes the
+   * after the first terminal finalization attempt settles, including failure.
+   * It never changes the
    * terminal, its retryability or any retry decision. A throwing callback is
    * logged and ignored.
    */

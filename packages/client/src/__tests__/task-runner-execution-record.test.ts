@@ -159,7 +159,7 @@ describe('TaskRunner execution record', () => {
     }]);
   });
 
-  it('publishes once, only after Session.close() and the terminal commit', async () => {
+  it('publishes once after the first finalization attempt settles, even if close fails', async () => {
     const commitGate = deferred();
     const awaitTerminalCommit = vi.fn(() => commitGate.promise);
     const onRuntimeDisposalFailure = vi.fn();
@@ -175,11 +175,11 @@ describe('TaskRunner execution record', () => {
     expect(terminals().map(envelope => envelope.type)).toEqual(['task.complete']);
     expect(runner.activeTaskCount).toBe(1);
     expect(awaitTerminalCommit).not.toHaveBeenCalled();
-    expect(records).toEqual([]);
+    expect(records).toEqual([{ taskId: TASK_ID, terminal: 'complete', status: 'complete', source: 'event-stream', gaps: [] }]);
 
     const retry = runner.retryTerminalFinalization(TASK_ID);
     await vi.waitFor(() => expect(awaitTerminalCommit).toHaveBeenCalledTimes(1));
-    expect(records).toEqual([]);
+    expect(records).toEqual([{ taskId: TASK_ID, terminal: 'complete', status: 'complete', source: 'event-stream', gaps: [] }]);
     commitGate.resolve();
     await retry;
     expect(runner.activeTaskCount).toBe(0);

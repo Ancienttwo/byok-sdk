@@ -1,7 +1,7 @@
 import { testScratchRoot, testScratchOwner } from "./fixtures/execution-scratch";
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -332,6 +332,81 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     expect(audit).toContain('"taskId":"restored-writer"');
     expect(audit).toContain(`"byteCount":${size},"outcome":"restored"`);
     expect(audit).not.toContain('overrun');
+  });
+
+  itWithMemoryFilesystem('does not write MEMORY.md after the completion signals when finalization is slow (#1549)', async () => {
+    const harness = await start();
+    const home = await harness.home('completion-order');
+    const memory = path.join(home, 'MEMORY.md');
+    await fs.mkdir(path.join(home, 'notes'), { recursive: true });
+    await fs.writeFile(memory, 'as it started\n');
+    offer('completion-order', 'completion-order');
+    await claimed('completion-order');
+    await fs.writeFile(memory, 'x'.repeat(8193));
+
+    const prototype = TaskRunner.prototype as unknown as {
+      quiesceAndSnapshotAgentMemory(active: unknown): Promise<void>;
+    };
+    const snapshot = prototype.quiesceAndSnapshotAgentMemory;
+    vi.spyOn(prototype, 'quiesceAndSnapshotAgentMemory').mockImplementation(async function (this: typeof prototype, active) {
+      // Hold the real restore after Session.close(), without changing its writes.
+      await new Promise(resolve => setTimeout(resolve, 250));
+      await snapshot.call(this, active);
+    });
+    const stamp = () => {
+      const { ino, size, mtimeNs } = statSync(memory, { bigint: true });
+      return { ino, size, mtimeNs, hasFinalContent: readFileSync(memory, 'utf8') === 'as it started\n' };
+    };
+    const signals = new Map<string, ReturnType<typeof stamp>>();
+    const unsubscribe = harness.daemon.subscribe(event => {
+      if ((event.kind === 'completed' || event.kind === 'execution-record') && event.taskId === 'completion-order') {
+        signals.set(event.kind, stamp());
+        if (event.kind === 'completed' && harness.daemon.tasks().find(task => task.taskId === event.taskId)?.state === 'Complete') {
+          signals.set('Daemon.tasks()', stamp());
+        }
+      }
+    });
+    try {
+      await complete(harness, 0, 'completion-order');
+      await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'home finalization');
+      await waitUntil(() => signals.size === 3, 'completion callbacks');
+      expect(await fs.readFile(memory, 'utf8')).toBe('as it started\n');
+      expect(Object.fromEntries(signals)).toEqual(Object.fromEntries([...signals.keys()].map(kind => [kind, stamp()])));
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('emits local completion signals after a failed first finalization attempt without waiting for its retry (#1549)', async () => {
+    const harness = await start();
+    offer('failed-finalization', 'failed-finalization');
+    await claimed('failed-finalization');
+    const session = harness.pi.sessions[0]!;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const close = session.close.bind(session);
+    const closeAttempt = vi.spyOn(session, 'close')
+      .mockRejectedValueOnce(new Error('first finalization close failed'))
+      .mockImplementationOnce(async () => { await gate; await close(); });
+    const signals: string[] = [];
+    const unsubscribe = harness.daemon.subscribe(event => {
+      if ((event.kind === 'completed' || event.kind === 'execution-record') && event.taskId === 'failed-finalization') {
+        signals.push(event.kind);
+      }
+    });
+    try {
+      await complete(harness, 0, 'failed-finalization');
+      await waitUntil(() => closeAttempt.mock.calls.length === 2, 'the automatic retry to enter close');
+      await waitUntil(() => signals.length === 2, 'local signals from the failed attempt');
+      expect(signals).toEqual(['completed', 'execution-record']);
+      expect(harness.daemon.tasks().find(task => task.taskId === 'failed-finalization')?.state).toBe('Complete');
+      expect(harness.daemon.status().agentHomeExecution.activeAttempts).toBe(1);
+    } finally {
+      release();
+      session.close = close;
+      await harness.daemon.stop();
+      unsubscribe();
+    }
   });
 
   itWithMemoryFilesystem.each([

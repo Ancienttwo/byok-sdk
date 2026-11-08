@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1549)** — Daemon-local completion events, `Daemon.tasks()` terminal state and execution records now wait for the first finalization attempt to settle, after this task's writes to the agent home (including resident-memory restore) are done on successful finalization, up to about 1s later than before. Failed attempts still emit local completion signals without waiting for a retry. Wire and cloud completion signals, including `TaskHandle.result()` and `TaskHandle.events()`, are unchanged.
+
 ## 0.40.0 — 2026-11-08 (published)
 
 0.40.0 is a MINOR release for all nine public packages. It keeps wire v5. There is no new `deploy/sql` migration; the hosted Bot example adds a `dream_state` table through its own store migration. The released [upgrade manifest](packages/client/upgrade-history/0.39.0-0.40.0.json) has one breaking change (the Koffi 3.3.7 native-asset literals) and eleven additive entries. ACP `tool_use` events now wait for settled input. See the [release notes](docs/releases/v0.40.0.md) and [Host upgrade checklist](docs/releases/host-upgrade-0.40.0.md). All nine packages were published on 2026-11-08 with npm `latest` at 0.40.0 and readback passed. The release commit is `34836e0d1`; tag `v0.40.0` and the GitHub Release point to it. Publication does not establish platform or production acceptance.
