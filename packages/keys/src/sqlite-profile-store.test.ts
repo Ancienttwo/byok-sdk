@@ -415,6 +415,25 @@ describe.skipIf(!sqliteReady)('migrateProviderProfileStore', () => {
     expect(readFileSync(databasePath)).toEqual(bytes);
   });
 
+  it('fails closed when a custody table differs from the current schema', async () => {
+    await createEarlierKindSetStore();
+    const raw = openSqliteDatabase(databasePath);
+    raw.exec(`
+      ALTER TABLE provider_custody_watermark RENAME TO earlier;
+      CREATE TABLE provider_custody_watermark (profile_ref TEXT PRIMARY KEY, operation_generation INTEGER NOT NULL);
+      INSERT INTO provider_custody_watermark SELECT * FROM earlier;
+      DROP TABLE earlier;
+    `);
+    raw.close();
+    const before = schemaOf(databasePath);
+
+    let thrown: unknown;
+    try { migrateProviderProfileStore(databasePath); } catch (error) { thrown = error; }
+    expect((thrown as ByokKeysError).code).toBe('PROVIDER_STORE_SCHEMA_STALE');
+
+    expect(schemaOf(databasePath)).toEqual(before);
+  });
+
   it('fails closed on a difference other than an earlier provider_kind set', async () => {
     const store = new SqliteProviderProfileStore({ path: databasePath });
     await store.save(profile('openai'));

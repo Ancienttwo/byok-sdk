@@ -2476,8 +2476,11 @@ export interface ProviderProfileStoreMigrationFaults {
  * is never read), verifies count and content, and recreates the index. The
  * custody tables hold no provider kind and must already be current.
  *
- * Any other difference or failure rolls back and throws
- * `PROVIDER_STORE_SCHEMA_STALE`. A current store, or no store, is `'unchanged'`.
+ * `PROVIDER_STORE_SCHEMA_STALE` means any other difference, or a copy that did
+ * not verify: the store cannot be migrated and needs a new store. Any other
+ * error (such as `SQLITE_BUSY`) is operational: the transaction rolled back,
+ * the store is unchanged, and the call can be retried once other processes
+ * are closed. A current store, or no store, is `'unchanged'`.
  */
 export declare function migrateProviderProfileStore(path: string): ProviderProfileStoreMigration;
 /** {@link migrateProviderProfileStore} with its test-only fault seam. */
