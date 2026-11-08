@@ -10,6 +10,8 @@ Use this checklist for a Host moving from 0.40.0 to 0.41.0. Earlier Hosts must f
 2. In the single process that starts first, call `migrateProviderProfileStore(path)` before any process opens the store. It returns `'migrated'` after a rebuild and `'unchanged'` for a current store or a missing file. The call takes the exclusive write lock even on a current store. It fails with `SQLITE_BUSY` only while another process is writing; an idle connection does not block it, which is why step 1 is required.
 3. Open `SqliteProviderProfileStore` with this version.
 
+`inspectProviderProfileStore(path)` reports such a store as `migration-required`. A Host that upgrades through `createServiceInstallation` lists the store in its precheck and supplies a `migrate(versionDir)` program that calls the candidate's `migrateProviderProfileStore(path)`. The installation runs it after the store snapshot and before the switch, then runs the precheck again; a failed migration restores the snapshot and restarts the old version (`store_migration_failed`). Without `migrate`, the upgrade stops with `store_migration_required` and the store is unchanged.
+
 The migration runs in one SQLite transaction under the exclusive write lock. It copies every profile row verbatim, including the profile ref that names the provider key in the credential store, and the enabled state. Keys stay in the credential store and users do not re-enter them. Custody rows stay in place. The call fails in two ways, and both leave the store as it was:
 
 - `PROVIDER_STORE_SCHEMA_STALE`: the store has another schema difference, or the copied rows did not verify. It cannot be migrated; keep it, provision a separate current-schema store and re-enter keys.

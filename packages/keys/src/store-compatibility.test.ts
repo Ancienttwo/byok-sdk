@@ -24,7 +24,7 @@ interface UpgradeManifest {
 
 const index = JSON.parse(readFileSync(join(FIXTURES, 'index.json'), 'utf8')) as FixtureIndex;
 const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8')) as UpgradeManifest;
-const ACCEPTANCE_VERDICT: Record<string, string> = { accept: 'accepted', 'new-path-repair': 'new-path-repair', reject: 'rejected' };
+const ACCEPTANCE_VERDICT: Record<string, string> = { accept: 'accepted', migrate: 'migration-required', 'new-path-repair': 'new-path-repair', reject: 'rejected' };
 
 const scratch: string[] = [];
 afterEach(() => {
@@ -86,6 +86,23 @@ describeSqlite('inspectProviderProfileStore', () => {
     database.exec("CREATE TABLE provider_profile (profile_ref TEXT PRIMARY KEY, provider_kind TEXT NOT NULL CHECK (provider_kind IN ('openai')));");
     database.close();
     expect(await inspectProviderProfileStore(file)).toMatchObject({ verdict: 'new-path-repair', code: 'PROVIDER_STORE_SCHEMA_STALE' });
+  });
+
+  it('reports a store with an earlier provider_kind CHECK set as migration-required, and leaves it unchanged', async () => {
+    const directory = tempDir();
+    const file = join(directory, 'profiles.db');
+    await new SqliteProviderProfileStore({ path: file }).close();
+    const { DatabaseSync } = loadSqliteModule();
+    const database = new DatabaseSync(file);
+    const { sql } = database.prepare("SELECT sql FROM sqlite_master WHERE name = 'provider_profile'").get() as { sql: string };
+    const earlier = sql.replace("'groq', ", '');
+    expect(earlier).not.toBe(sql);
+    database.exec(`DROP INDEX provider_profile_one_enabled; DROP TABLE provider_profile; ${earlier};`);
+    database.exec('CREATE UNIQUE INDEX provider_profile_one_enabled ON provider_profile(kind) WHERE enabled = 1;');
+    database.close();
+    const before = directoryState(directory);
+    expect(await inspectProviderProfileStore(file)).toMatchObject({ verdict: 'migration-required' });
+    expect(directoryState(directory)).toEqual(before);
   });
 
   it('rejects a damaged file', async () => {

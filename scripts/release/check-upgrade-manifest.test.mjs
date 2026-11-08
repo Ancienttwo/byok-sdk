@@ -195,6 +195,10 @@ test('bumping a store format version demands an entry with an acceptance policy'
   assert.match(f.gate().output, /a changed store needs acceptance/);
   f.entries([{ ...entry, acceptance: 'new-path-repair' }]);
   assert.match(f.gate().output, /acceptance new-path-repair makes the entry breaking/);
+  f.entries([{ ...entry, acceptance: 'migrate' }]);
+  assert.match(f.gate().output, /acceptance migrate makes the entry breaking/);
+  f.entries([{ ...entry, impact: 'breaking', acceptance: 'migrate' }]);
+  assert.doesNotMatch(f.gate().output, /acceptance/);
   f.entries([{ ...entry, impact: 'breaking', acceptance: 'new-path-repair' }]);
   assert.equal(f.gate('--write').status, 0);
   const manifest = JSON.parse(readFileSync(path.join(f.root, MANIFEST_PATH), 'utf8'));

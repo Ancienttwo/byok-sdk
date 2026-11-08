@@ -469,7 +469,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 
 | Import / command | Purpose | Third-party dependencies | Zod | Budget |
 | --- | --- | --- | --- | ---: |
-| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2341209 B |
+| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2342195 B |
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 523344 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 74684 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 123349 B |
@@ -494,7 +494,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1542 B |
 | `@byok-sdk/core/sealed-payload` | Sealed payload v1 byte rules | `zod` | allowed | 160958 B |
 | `@byok-sdk/core/system-tool` | Trusted system tools for Node hosts | — | forbidden | 1968 B |
-| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 243870 B |
+| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 244495 B |
 | `@byok-sdk/keys/model-route` | Headless Pi model route: choices, linkage, field errors and submission | `zod` | allowed | 307348 B |
 | `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1607 B |
 | `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 280428 B |
@@ -508,7 +508,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1761 B |
 | `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 583618 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1215 B |
-| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2318450 B |
+| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2319590 B |
 | `bin:byok-agent-memory-mcp` | Agent memory MCP helper | — | forbidden | 46798 B |
 | `bin:byok-agent-message-mcp` | Agent message MCP helper | — | forbidden | 46802 B |
 | `bin:byok-agent-result-mcp` | Task-bound structured outcome MCP helper | — | forbidden | 46798 B |

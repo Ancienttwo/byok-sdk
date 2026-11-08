@@ -29,6 +29,15 @@ const PRECHECK = [
   "process.exit(stores.some((s) => s.verdict === 'new-path-repair' || s.verdict === 'rejected') ? 2 : 0);",
 ].join('\n');
 
+/** Rewrites the store, then sets every verdict in `<root>/verdicts.json` to the given one, as the next precheck reports it. */
+const MIGRATE = [
+  "const fs = require('node:fs');",
+  'const [verdictsPath, db, verdict] = process.argv.slice(2);',
+  "fs.writeFileSync(db, 'migrated data');",
+  'const stores = JSON.parse(fs.readFileSync(verdictsPath, "utf8"));',
+  'fs.writeFileSync(verdictsPath, JSON.stringify(stores.map((s) => ({ ...s, verdict }))));',
+].join('\n');
+
 let root: string;
 let storeDir: string;
 let installRoot: string;
@@ -354,6 +363,68 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
     expect(events.at(-1)).toBe('uninstall');
   });
+  describe('store migration (#1577): migrate runs after the snapshot, and every failure restores it', () => {
+    const migrating = (verdict: string) => installationOver(fakeLifecycle(), {
+      migrate: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'migrate.cjs'), path.join(root, 'verdicts.json'), db, verdict] }),
+    });
+
+    it('migrates a migration-required store after the snapshot and switches', async () => {
+      installation = migrating('accepted');
+      await installation.install(await payload('1.0.0'));
+      await verdicts('migration-required');
+      events = [];
+      const receipt = await installation.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE }));
+      expect(receipt).toMatchObject({ state: 'switched', from: '1.0.0', to: '2.0.0', stores: [{ verdict: 'accepted', path: db }] });
+      expect(events).toEqual(['stop', 'start', 'health 2.0.0']);
+      expect(await fs.readFile(db, 'utf8')).toBe('migrated data');
+      // The snapshot holds the store as it was before the migration rewrote it.
+      expect(await fs.readFile(path.join(installRoot, 'snapshots', '2.0.0', '0'), 'utf8')).toBe('v1 data');
+    });
+
+    it('without migrate, a migration-required store is store_migration_required and the store is unchanged', async () => {
+      await installation.install(await payload('1.0.0'));
+      await verdicts('migration-required');
+      events = [];
+      await expect(installation.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE }))).rejects.toMatchObject({
+        code: 'store_migration_required', stores: [{ verdict: 'migration-required', path: db }],
+      });
+      expect(events).toEqual(['stop', 'start']);
+      expect(await pointer('current')).toBe('1.0.0');
+      expect([await fs.readFile(db, 'utf8'), await fs.readFile(`${db}-wal`, 'utf8')]).toEqual(['v1 data', 'v1 wal']);
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_required' });
+    });
+
+    it('a migration that leaves a store the candidate does not accept is store_migration_failed, with the snapshot restored', async () => {
+      installation = migrating('migration-required');
+      await installation.install(await payload('1.0.0'));
+      await verdicts('migration-required');
+      events = [];
+      await expect(installation.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE }))).rejects.toMatchObject({ code: 'store_migration_failed' });
+      expect(events).toEqual(['stop', 'start']);
+      expect(await pointer('current')).toBe('1.0.0');
+      expect([await fs.readFile(db, 'utf8'), await fs.readFile(`${db}-wal`, 'utf8')]).toEqual(['v1 data', 'v1 wal']);
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_migration_failed' });
+    });
+
+    it('a death after the migration and before the switch leaves recover() the snapshot to restore', async () => {
+      installation = migrating('accepted');
+      await installation.install(await payload('1.0.0'));
+      await verdicts('migration-required');
+      const rename = failRename((destination) => destination === path.join(installRoot, 'previous'));
+      try {
+        await expect(installation.upgrade(await payload('2.0.0', { 'migrate.cjs': MIGRATE }))).rejects.toThrow('injected rename I/O failure');
+      } finally {
+        rename.restore();
+      }
+      expect(rename.fired()).toBe(true);
+      expect(await installation.receipt()).toMatchObject({ state: 'pending', from: '1.0.0', to: '2.0.0' });
+      expect(await fs.readFile(db, 'utf8')).toBe('migrated data');
+      expect(await installation.recover()).toMatchObject({ state: 'rolled-back', code: 'upgrade_pending', from: '1.0.0', to: '2.0.0' });
+      expect(await pointer('current')).toBe('1.0.0');
+      expect([await fs.readFile(db, 'utf8'), await fs.readFile(`${db}-wal`, 'utf8')]).toEqual(['v1 data', 'v1 wal']);
+    });
+  });
+
   describe('crash consistency: every rename may fail, and recover() resolves what it leaves', () => {
     it('recovery survives an interrupted restore receipt commit', async () => {
       await installation.install(await payload('1.0.0'));

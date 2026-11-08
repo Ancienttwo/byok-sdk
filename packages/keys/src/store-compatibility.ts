@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import type { StoreCompatibility } from '@byok-sdk/core';
 import { ByokKeysError } from './errors';
-import { SqliteProviderProfileStore } from './sqlite-profile-store';
+import { migrateProviderProfileStore, SqliteProviderProfileStore, type ProviderProfileStoreMigration } from './sqlite-profile-store';
 import { loadSqliteModule } from './sqlite-support';
 
 /** A SQLite store is its main file plus a WAL or a hot rollback journal. `-shm` is rebuilt from the WAL. */
@@ -19,9 +19,12 @@ const SQLITE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
  * process that writes the store first: a file that changes while it is copied
  * fails the check rather than yielding a verdict about a torn copy.
  *
- * A store created by a different schema (`PROVIDER_STORE_SCHEMA_STALE`) is
- * `new-path-repair`: provision a separate current-schema store. Any other
- * refusal is `rejected`.
+ * When the open refuses the store as stale (`PROVIDER_STORE_SCHEMA_STALE`),
+ * {@link migrateProviderProfileStore} runs on the same copy. A migration that
+ * leaves a store this build opens is `migration-required`: the Host runs the
+ * migration before it opens the store. A store the migration refuses as stale
+ * is `new-path-repair`, carrying the migration's code and reason: provision a
+ * separate current-schema store. Any other refusal is `rejected`.
  */
 export async function inspectProviderProfileStore(path: string): Promise<StoreCompatibility> {
   const file = resolve(path);
@@ -32,21 +35,54 @@ export async function inspectProviderProfileStore(path: string): Promise<StoreCo
   const directory = mkdtempSync(join(tmpdir(), 'byok-store-check-'));
   try {
     const copy = copyStoreFiles(file, directory);
+    const refusal = await openRefusal(copy);
+    if (refusal === undefined) return { store: 'keys-profile-store', path: file, verdict: 'accepted', reason: 'This build opens the store' };
+    if (!isSchemaStale(refusal)) return refused(file, refusal);
+    let migration: ProviderProfileStoreMigration;
     try {
-      await new SqliteProviderProfileStore({ path: copy }).close();
+      migration = migrateProviderProfileStore(copy);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      if (error instanceof ByokKeysError) {
-        const verdict = error.code === 'PROVIDER_STORE_SCHEMA_STALE' ? 'new-path-repair' : 'rejected';
-        return { store: 'keys-profile-store', path: file, verdict, code: error.code, reason };
-      }
-      const code = (error as { code?: unknown } | null)?.code;
-      return { store: 'keys-profile-store', path: file, verdict: 'rejected', ...(typeof code === 'string' ? { code } : {}), reason };
+      return refused(file, error);
     }
-    return { store: 'keys-profile-store', path: file, verdict: 'accepted', reason: 'This build opens the store' };
+    if (migration === 'unchanged') return refused(file, refusal);
+    const migratedRefusal = await openRefusal(copy);
+    if (migratedRefusal !== undefined) return refused(file, migratedRefusal);
+    return {
+      store: 'keys-profile-store',
+      path: file,
+      verdict: 'migration-required',
+      reason: 'This build opens the store after migrateProviderProfileStore migrates it',
+    };
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+}
+
+/** The error the store's own writable open throws on `file`, or `undefined` when it opens. */
+async function openRefusal(file: string): Promise<unknown> {
+  try {
+    await new SqliteProviderProfileStore({ path: file }).close();
+    return undefined;
+  } catch (error) {
+    return error;
+  }
+}
+
+function isSchemaStale(error: unknown): boolean {
+  return error instanceof ByokKeysError && error.code === 'PROVIDER_STORE_SCHEMA_STALE';
+}
+
+/** `new-path-repair` for a stale schema, `rejected` for any other refusal, with the code and reason the store reported. */
+function refused(file: string, error: unknown): StoreCompatibility {
+  const reason = error instanceof Error ? error.message : String(error);
+  const code = error instanceof ByokKeysError ? error.code : (error as { code?: unknown } | null)?.code;
+  return {
+    store: 'keys-profile-store',
+    path: file,
+    verdict: isSchemaStale(error) ? 'new-path-repair' : 'rejected',
+    ...(typeof code === 'string' ? { code } : {}),
+    reason,
+  };
 }
 
 function statOrUndefined(file: string): Stats | undefined {

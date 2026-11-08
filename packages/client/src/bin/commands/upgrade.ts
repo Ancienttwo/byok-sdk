@@ -5,7 +5,7 @@ import { inspectDaemonStores } from '../../diagnostics/store-compatibility';
 import { checkUpgradeFrom } from '../../lifecycle/upgrade-from';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../official-release';
 
-/** Exit code when the check ran and at least one store would not be opened as it is. */
+/** Exit code when the check ran and at least one store is `new-path-repair` or `rejected`. */
 export const UPGRADE_CHECK_REFUSED_EXIT_CODE = 2;
 
 export interface UpgradeStoreCheckOptions {
@@ -16,12 +16,13 @@ export interface UpgradeStoreCheckOptions {
 
 /**
  * `byok-agent upgrade check --store`: run by the candidate build before a
- * switch, it reports per daemon store whether this build accepts it, needs a
- * new path and pairing (`new-path-repair`), or refuses it (`rejected`).
- * Read-only: every store is opened only as a private temporary copy.
+ * switch, it reports per daemon store whether this build accepts it, opens it
+ * only after its migration (`migration-required`), needs a new path and
+ * pairing (`new-path-repair`), or refuses it (`rejected`). Read-only: every
+ * store is opened only as a private temporary copy.
  *
- * Returns the process exit code: 0 when every store is `accepted` or `absent`,
- * {@link UPGRADE_CHECK_REFUSED_EXIT_CODE} otherwise. A failure to check throws.
+ * Returns the process exit code: {@link UPGRADE_CHECK_REFUSED_EXIT_CODE} when a
+ * store is `new-path-repair` or `rejected`, 0 otherwise. A failure to check throws.
  */
 export async function runUpgradeStoreCheckCommand(options: UpgradeStoreCheckOptions): Promise<number> {
   const log = options.log ?? ((line: string) => console.log(line));
@@ -31,10 +32,13 @@ export async function runUpgradeStoreCheckCommand(options: UpgradeStoreCheckOpti
   } else {
     log(`byok-agent ${OFFICIAL_LOCAL_AGENT_RELEASE.version} store check`);
     for (const store of stores) log(formatStore(store));
+    if (stores.some((store) => store.verdict === 'migration-required')) {
+      log('Run this build\'s store migration before it opens a migration-required store.');
+    }
   }
-  return stores.every((store) => store.verdict === 'accepted' || store.verdict === 'absent')
-    ? 0
-    : UPGRADE_CHECK_REFUSED_EXIT_CODE;
+  return stores.some((store) => store.verdict === 'new-path-repair' || store.verdict === 'rejected')
+    ? UPGRADE_CHECK_REFUSED_EXIT_CODE
+    : 0;
 }
 
 /**
