@@ -5,39 +5,43 @@ the M1-2 (server) and M1-3 (client) implementers — the schemas in
 `packages/protocol/src/` are authoritative; this document explains the rules
 those schemas encode and why.
 
-Status: wire version `v:5`, **FROZEN**. The pi, claude, and codex runtime
+Status: wire version `v:6`, **FROZEN**. The pi, claude, and codex runtime
 adapters have all exercised the wire (M2); every M1/M2 protocol gap identified
 along the way has been closed in place. From this point forward, this
 document and the schemas in `packages/protocol/src/` describe a closed
 contract — see "Freeze rule" immediately below for exactly what "frozen"
 does and doesn't allow.
 
-Only wire major `5` is currently supported. v5 renames one field: the runtime
-capability `durablePi` is `durableLane` (the durable worker lane, Pi today) in
-`RuntimeCapabilities`, so on `conn.hello` runtimes and harnesses, on
-`task.claim` and in presence. Every other v4 shape is unchanged. A rename
-narrows a shipped shape: a v4 reader would strip `durableLane` and a v5 reader
-`durablePi`, so the durable lane would silently disappear between mixed
-peers. That is why it is a major (Freeze rule, path 1).
+Only wire major `6` is currently supported. v6 splits one field: the runtime
+capability `isolation.userContext` in `RuntimeCapabilities` is replaced by one
+bit per source of user-level context a runtime can keep out
+(`userInstructions`, `userOutputStyle`, `userMemory`, `userSkills`,
+`userHookContext`), beside the unchanged `userMcpServers` and
+`sessionPersistence`, so on `conn.hello` runtimes and harnesses, on
+`task.claim` and in presence. Every other v5 shape is unchanged. Removing a
+field narrows a shipped shape: a v5 reader would strip the new bits and a v6
+reader `userContext`, so mixed peers would silently lose the isolation facts.
+That is why it is a major (Freeze rule, path 1). There is no derived
+`userContext` field.
 
-There is no v4 reader and no capability negotiation between v4 and v5. Every
-envelope must carry major `5`. **Drain before upgrading**, exactly as for the
-v3 → v4 cut below: stop new submissions, let every pending mailbox row be
-processed and acknowledged, every in-flight execution reach a terminal, and
-every daemon pending terminal be acknowledged by the server. Then upgrade the
-server side (embedded server, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`)
-and the daemons together. A v4 daemon is refused at the version boundary and
-receives no v5 offer; a `conn.hello` whose `protocolVersions` omits `5` is
-refused with `hello_protocol_version_unsupported`. A v5 daemon cannot use a
-v4 server. The startup checks refuse a pending v4 row: the embedded server
+There is no v5 reader and no capability negotiation between v5 and v6. Every
+envelope must carry major `6`. A v5 daemon is refused at the version boundary
+and receives no v6 offer; a `conn.hello` whose `protocolVersions` omits `6` is
+refused with `hello_protocol_version_unsupported`. A v6 daemon cannot use a
+v5 server. The startup checks refuse a pending v5 row: the embedded server
 ([SQLite startup check](#sqlite-startup-check-for-wire-major-upgrades)), the
 hosted data plane (`POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`) and the daemon
 journal (`DaemonJournalProtocolUnsupportedError`). Retained `acked` and
-`expired` rows do not block startup. Nothing rewrites v4 bytes: a hosted
-terminal receipt stored by a v4 build no longer decodes, so a result read of
-a task that ended before the cut fails with `terminal_receipt_unreadable`. The
-Host steps are in [the wire v5 migration](migrations/wire-v5-durable-lane.md).
-0.33.0 is the last v4 release.
+`expired` rows do not block startup. There is no drain or upgrade-precheck
+tool for this cut: rebuild a local store that still refuses, then upgrade the
+server side and the daemons together. The wire facts are in
+[the wire v6 migration](migrations/wire-v6-isolation-sources.md). 0.40.0 is
+the last v5 release.
+
+History: v5 renamed one field: the runtime capability `durablePi` became
+`durableLane` (the durable worker lane, Pi today). Its Host steps are in
+[the wire v5 migration](migrations/wire-v5-durable-lane.md). 0.33.0 is the
+last v4 release.
 
 History: v4 completed the Agent-only cutover (ADR-034) and removed the
 approval paths kept for peers that predate approval ids:
@@ -122,12 +126,12 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 ## Freeze rule
 
-`PROTOCOL_VERSION` is `5`. Every v5 change takes exactly one of three paths.
+`PROTOCOL_VERSION` is `6`. Every v6 change takes exactly one of three paths.
 Compatibility is decided by `packages/protocol/src/__tests__/compat.test.ts`,
-not by author judgment. 0.34.0, the first v5 release, is published, but no
-published v5 decoder is pinned as an oracle yet: until one is, the suite
-proves v5 self-consistency only and cross-release gates are unproven (see the
-evidence list below).
+not by author judgment. No v6 release is published yet, so no published v6
+decoder is pinned as an oracle: until one is, the suite proves v6
+self-consistency only and cross-release gates are unproven (see the evidence
+list below).
 
 1. **Version bump.** Bump `PROTOCOL_VERSION`; server and client upgrade
    together under "Server supports N and N-1" below. This is the only path
@@ -177,32 +181,43 @@ evidence list below).
   shipped and read-only. The current decoder rejects every v4 envelope line at the
   version boundary, and the v4 HTTP lines that carry envelopes too. Rewriting
   only the version is not an upgrade: v5 renamed `durablePi`.
-- **v5 self-consistency.** `golden/v5.envelopes.ndjson` and
-  `golden/v5.http.ndjson` start from the v4 corpora with `v` and `durablePi`
-  rewritten, and are append-only. The current decoder reads every
+- **Retired v5 evidence (negative oracle).** `golden/v5.envelopes.ndjson`,
+  `golden/v5.http.ndjson` and the v5 registry `golden/v5.releases.json`
+  (0.34.0 through 0.40.0) are byte-identical to what the last v5 release
+  shipped and read-only. The current decoder rejects every v5 envelope line at
+  the version boundary, and the v5 HTTP lines that carry envelopes too.
+  Rewriting only the version is not an upgrade: v6 removed
+  `isolation.userContext`.
+- **v6 self-consistency.** `golden/v6.envelopes.ndjson` and
+  `golden/v6.http.ndjson` start from the v5 corpora with `v` rewritten and
+  `isolation.userContext` renamed `userInstructions`, plus lines that carry
+  the new isolation bits, and are append-only. The current decoder reads every
   line back to the committed JSON, and the current HTTP decoders read every
   literal body to its independently authored value (messages responses must
-  account for their `batchLength`). The v5 corpus carries every message type,
+  account for their `batchLength`). The v6 corpus carries every message type,
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
-  and an `approvalId` on every approval request and decision. `golden/v5.releases.json` registers the published 0.34.0 corpus,
-  the first v5 release, and the same corpus for the published 0.35.0, 0.36.0 and 0.37.0, the published 0.38.0 with one more envelope line, and the published 0.39.0 with eight more, and the published 0.40.0 with three more; 0.33.0 is the last v4 release. It has no `floor`. Each registered v5 entry pins both corpus
-  prefixes, and the lines it covers are immutable.
+  and an `approvalId` on every approval request and decision.
+  `golden/v6.releases.json` registers no release yet and has no `floor`. Each
+  registered v6 entry will pin both corpus prefixes, and the lines it covers
+  are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
-  published 0.33.0 registry tarball, the last v4 release. It rejects every v5
-  corpus line and a v5 `conn.hello`: a v4 peer cannot read v5 bytes. Nothing it
-  produces is v5 evidence, and it never enters the v5 registry. Its
-  `requiredReceiverCapabilities` derives, for every v4 `task.offer` line that
+  published 0.40.0 registry tarball, the last v5 release. It rejects every v6
+  corpus line and a v6 `conn.hello`: a v5 peer cannot read v6 bytes. Nothing it
+  produces is v6 evidence, and it never enters the v6 registry. Its
+  `requiredReceiverCapabilities` derives, for every v5 `task.offer` line that
   release shipped, the same flags as the current table (`task-offer-gates.test.ts`).
 
-No test runs a published v5 decoder yet, so the gated and strip-safe
-declarations are not proven against a released v5 decoder. That evidence
-starts when a published v5 release (0.34.0 or later) is pinned as an
-oracle.
+No test runs a published v6 decoder yet, so the gated and strip-safe
+declarations are not proven against a released v6 decoder. That evidence
+starts when a published v6 release is pinned as an oracle.
 
-The v5 table is the v4 table: the rename touches no gate. `durableLane`
-replaces `durablePi` among the runtime capability matrix fields, which are
-strip-safe.
+The v6 table is the v5 table: the isolation split touches no gate. The new
+isolation bits replace `userContext` among the runtime capability matrix
+fields, which are strip-safe.
+
+History: the v5 table was the v4 table: the `durableLane` rename touched no
+gate.
 
 History: v4 started from the v3 table minus the server `approval_resolved` gate (every
 v4 server reads `task.approval_resolved`) and minus the rows of the removed
@@ -312,7 +327,7 @@ extends the earlier official-Pi exception to input-preparation v8. The strict
 preparation request, receipt binding and the prepared offer require explicit
 `agentMemory: 'none' | 'read' | 'read-write'`. `INPUT_PREPARATION_WIRE_VERSION` and
 record schema were 8 at that cut; admission requires `agent-input-preparation-v8`. The outer
-envelope was then v1 (it is v5 now). Binding and observation digests use domain v2. This is a paired
+envelope was then v1 (it is v6 now). Binding and observation digests use domain v2. This is a paired
 upgrade, with no old reader, mode default or dual token. Drain pre-cut preparation
 requests and prepared Executions first. The exception does not change unrelated
 strict messages; downstream deployment is separate from this source cut.
@@ -326,8 +341,8 @@ protocol version common to its own supported set and the daemon's
 immediately-prior major version so a fleet of daemons can roll forward
 without a hard cutover. (The v1 → v2 cut deliberately has no N-1 reader:
 the server accepts only `v:2`, so server and client upgrade together. The
-v2 → v3, v3 → v4 and v4 → v5 cuts are the same: the server accepted only
-`v:3`, then only `v:4`, and now only `v:5`.)
+v2 → v3, v3 → v4, v4 → v5 and v5 → v6 cuts are the same: the server
+accepted only `v:3`, then only `v:4`, then only `v:5`, and now only `v:6`.)
 
 **The observability-vs-control asymmetry.** Unknown is TOLERATED for
 observability data, but FAIL-CLOSED for control/security data:
@@ -3870,7 +3885,8 @@ same flag. §1.3.1 states its rules.
 ```
 { steer?, resume?, approvalInteractive?, mcpToolsets?, messageDraft?,
   toolAuthorizationAuto?, durableLane?, preparedLane?,
-  isolation?: { userContext?, userMcpServers?, sessionPersistence? } }
+  isolation?: { userInstructions?, userOutputStyle?, userMemory?, userSkills?,
+               userHookContext?, userMcpServers?, sessionPersistence? } }
 ```
 
 The fields from `toolAuthorizationAuto` on are the capability matrix (#1103),
@@ -4129,8 +4145,8 @@ a normal slow turn.
 
 Compatibility between releases is decided by
 `packages/protocol/src/__tests__/compat.test.ts` (see "Freeze rule"; until a
-v5 release is published it proves v5 self-consistency and that the last v4
-release rejects v5 bytes). It replaces the hand-built
+v6 release is published it proves v6 self-consistency and that the last v5
+release rejects v6 bytes). It replaces the hand-built
 future-peer simulation this section used to describe. What remains below is
 the receiver policy that the suite and the behavioural tests rely on: which
 unknowns a current receiver tolerates and which it refuses. Four scenarios,
@@ -4165,8 +4181,8 @@ each with its real evidence:
    through the real end-to-end `decodeEnvelope` entrypoint (not just the
    isolated payload schema) to close the loop.
 4. **Handshake version negotiation: a daemon advertising a set that contains
-   the server's single `PROTOCOL_VERSION` (today `5`) agrees on it; a set
-   without it (e.g. `[4]`) gets a clean, typed failure, not a hang.** The
+   the server's single `PROTOCOL_VERSION` (today `6`) agrees on it; a set
+   without it (e.g. `[5]`) gets a clean, typed failure, not a hang.** The
    schema half (`conn.hello.protocolVersions` accepts a set that overlaps the
    server's version and a disjoint one; the schema never referees
    negotiation) is in `version-negotiation-drill.test.ts`. The negotiated version is selected at
@@ -4174,7 +4190,7 @@ each with its real evidence:
    single `PROTOCOL_VERSION`; a disjoint set is rejected before any task
    message is accepted. The real integration test exercises the rejection
    path and a timeout race, so incompatibility is observable rather than a
-   hanging request. The v1 → v2, v2 → v3, v3 → v4 and v4 → v5 cuts have no N-1 reader, so the "highest common
+   hanging request. The v1 → v2, v2 → v3, v3 → v4, v4 → v5 and v5 → v6 cuts have no N-1 reader, so the "highest common
    version across an N/N-1 range" policy remains future work.
 
 **Adjacent honest note (gatekeeper advisory, docs-only, no code change): an
@@ -4293,13 +4309,14 @@ Older consumers ignore these optional fields.
 ## SQLite startup check for wire-major upgrades
 
 The embedded server checks every pending mailbox row when it opens SQLite.
-A major other than the current `PROTOCOL_VERSION` (5), a missing major, or
+A major other than the current `PROTOCOL_VERSION` (6), a missing major, or
 malformed JSON causes `SqliteSchemaError` with code
 `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. SQLite schema version 5 alone does not
-prove that the pending wire rows use v5. Retained `acked` and `expired` rows
+prove that the pending wire rows use v6. Retained `acked` and `expired` rows
 do not block startup. The check does not change or retire mailbox rows.
-Stored v3 and v4 receipts are not migrated. A store a v3 build wrote is not
-supported; a store a v4 build wrote opens once no pending v4 row is left.
+Stored v3, v4 and v5 receipts are not migrated. A store a v3 build wrote is
+not supported; a store a v4 or v5 build wrote opens once no pending row of
+that major is left.
 
 Before upgrading, stop new dispatch and let the previous server and clients
 finish and acknowledge their pending rows. On an offline copy, check:
@@ -4309,7 +4326,7 @@ SELECT tenant_id, device_id, seq, message_id
 FROM mailbox_message
 WHERE state = 'pending'
   AND CASE WHEN json_valid(body)
-    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 5
+    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 6
     ELSE 1 END;
 ```
 
