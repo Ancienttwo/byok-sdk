@@ -1,4 +1,4 @@
-import type { RuntimeCapabilities } from '../../types';
+import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types';
 
 /** Native user configuration and transcripts are inherited. Host MCP toolsets await qualification. */
 export const OPENCODE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
@@ -8,5 +8,8 @@ export const OPENCODE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze(
   mcpToolsets: false,
   messageDraft: false,
   preparedLane: false,
-  isolation: Object.freeze({ userContext: false, userMcpServers: false, sessionPersistence: false }),
+  isolation: Object.freeze({
+    userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false,
+    userMcpServers: false, sessionPersistence: false,
+  }),
 });

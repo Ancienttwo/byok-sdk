@@ -121,8 +121,13 @@ export const RuntimeCapabilitiesSchema = z.object({
   /** The durable worker lane (Pi today). */
   durableLane: z.boolean().optional(),
   preparedLane: z.boolean().optional(),
+  /** Each bit names one source of user-level context the runtime can keep out (v6). */
   isolation: z.object({
-    userContext: z.boolean().optional(),
+    userInstructions: z.boolean().optional(),
+    userOutputStyle: z.boolean().optional(),
+    userMemory: z.boolean().optional(),
+    userSkills: z.boolean().optional(),
+    userHookContext: z.boolean().optional(),
     userMcpServers: z.boolean().optional(),
     sessionPersistence: z.boolean().optional(),
   }).optional(),

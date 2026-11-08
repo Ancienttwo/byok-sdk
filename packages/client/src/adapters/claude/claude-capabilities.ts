@@ -1,4 +1,4 @@
-import type { RuntimeCapabilities } from '../../types';
+import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types';
 
 /**
  * What the Claude adapter can do: the one authority for its descriptor, the
@@ -14,5 +14,11 @@ export const CLAUDE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   mcpToolsets: true,
   messageDraft: true,
   preparedLane: false,
-  isolation: Object.freeze({ userContext: true, userMcpServers: true, sessionPersistence: true }),
+  isolation: Object.freeze({
+    userInstructions: true, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false,
+    userMcpServers: true, sessionPersistence: true,
+  }),
 });
+
+/** Isolation sources the qualified claude has none of, with evidence; the contract plan marks each `absent`. */
+export const CLAUDE_ABSENT_ISOLATION_SOURCES: RuntimeIsolationAbsentSources = Object.freeze({});

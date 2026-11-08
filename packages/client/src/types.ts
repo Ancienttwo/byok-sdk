@@ -121,13 +121,32 @@ export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unav
  * the SDK makes no such guarantee for this runtime (#1103).
  */
 export interface RuntimeIsolationCapabilities {
-  /** User-level instructions (a user `CLAUDE.md`, `AGENTS.md` or rules) can be kept out. */
-  readonly userContext: boolean;
+  /** User-level instruction files (a user `CLAUDE.md`, `AGENTS.md` or rules) can be kept out. */
+  readonly userInstructions: boolean;
+  /** The output style the user configured for the runtime can be kept out. */
+  readonly userOutputStyle: boolean;
+  /** The runtime's user-level memory store can be kept out. */
+  readonly userMemory: boolean;
+  /** Skills the user installed for the runtime, including their names and descriptions, can be kept out. */
+  readonly userSkills: boolean;
+  /** Context that user-configured hooks add to the model (for example SessionStart output) can be kept out. */
+  readonly userHookContext: boolean;
   /** MCP servers the user configured for the runtime can be kept out. */
   readonly userMcpServers: boolean;
   /** The runtime's own transcript store can be turned off. */
   readonly sessionPersistence: boolean;
 }
+
+/** The isolation bits that name one source of user-level context. */
+export type RuntimeIsolationSource = 'userInstructions' | 'userOutputStyle' | 'userMemory' | 'userSkills' | 'userHookContext';
+
+/**
+ * An adapter's evidence-backed absent declarations: for each source the
+ * qualified runtime does not have, the qualified source location or official
+ * docs link that shows it. Such a bit may be `true` without a contract check;
+ * the contract plan marks the case `absent` with the same evidence.
+ */
+export type RuntimeIsolationAbsentSources = Readonly<Partial<Record<RuntimeIsolationSource, string>>>;
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
@@ -705,7 +724,11 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
       ...(descriptor.capabilities.preparedLane === undefined ? {} : { preparedLane: descriptor.capabilities.preparedLane === true }),
       ...(descriptor.capabilities.isolation === undefined ? {} : {
         isolation: Object.freeze({
-          userContext: descriptor.capabilities.isolation.userContext === true,
+          userInstructions: descriptor.capabilities.isolation.userInstructions === true,
+          userOutputStyle: descriptor.capabilities.isolation.userOutputStyle === true,
+          userMemory: descriptor.capabilities.isolation.userMemory === true,
+          userSkills: descriptor.capabilities.isolation.userSkills === true,
+          userHookContext: descriptor.capabilities.isolation.userHookContext === true,
           userMcpServers: descriptor.capabilities.isolation.userMcpServers === true,
           sessionPersistence: descriptor.capabilities.isolation.sessionPersistence === true,
         }),
