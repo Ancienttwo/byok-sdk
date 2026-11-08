@@ -31,7 +31,7 @@ OpenCode inherits native user context, MCP configuration and transcript storage;
 - Enqueue `agentMemoryCommit: 'on-success-if-advertised'` to resolve the commit from device capability instead of platform inference. Literal `on-success` retains its strict gate; frozen templates retain the recorded resolution. Protocol exports the shared Host offer schemas and payload types.
 - Use protocol or `@byok-sdk/protocol/constants` exports `AGENT_MEMORY_MAX_FILE_BYTES` (256 KiB), `AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES` (512), and `redactSecrets` for Host prechecks and shared redaction. Existing memory validation is unchanged.
 - `DaemonEvent` and `DaemonRecord` can report file-scope audit mode `memory` for the internal Pi dreaming lane; Host-configurable policies remain `home` or `workspaces`.
-- `AgyAdapter` supports steer on an active turn. Handle a refused steer as an infrastructure error. Vendored OAR moves from 0.92.0 to 0.94.0.
+- `AgyAdapter` supports steer on an active turn. Handle a refused steer as an infrastructure error. Vendored OAR moves from 0.91.0 to 0.94.0.
 - Pi provider errors fail the turn with a redacted diagnostic while preserving usage. dsh terminal usage now includes subagent tokens; context occupancy remains root-only. `@byok-sdk/keys` `runCommand` returns exit code 127 for signal termination or stdin errors.
 - `pi-web-access` moves from 0.45.0 to 0.47.0, including optional search providers, proxy fixes, PDF text results and native temporary clone paths. `@hpke/core` moves from 1.9.0 to 1.10.0 for encryption tests, and `@modelcontextprotocol/client` from 2.3.1 to 2.4.0 in client and the MCP server example. Revalidate integrations that depend on these behaviors.
 

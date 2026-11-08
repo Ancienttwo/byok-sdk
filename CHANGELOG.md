@@ -43,7 +43,7 @@
 
 - **Fixed (client; #1543)** — Pi provider errors now fail the turn with a redacted diagnostic while preserving usage.
 - **Fixed (client)** — Memory writer guidance, including the exported `AGENT_MEMORY_GUIDANCE`, now states the copy limits and, for fresh and resumed ordinary `on-success` writers, that writes are kept only on success.
-- **Changed** — Re-vendor OAR 0.94.0 (`packages/client/vendor/oar/45488e7/`), replacing the complete 0.92.0 snapshot. Follow upstream steer dispatch admission and preserve SDK process, environment and permission ownership (#1538).
+- **Changed** — Re-vendor OAR 0.94.0 (`packages/client/vendor/oar/45488e7/`), replacing the complete 0.91.0 snapshot shipped in 0.39.0. Follow upstream steer dispatch admission and preserve SDK process, environment and permission ownership (#1538).
 - Fixed dsh terminal usage omitting subagent tokens; token totals now include root and child sessions while context occupancy stays root-only.
 
 ## 0.39.0 — 2026-11-06 (published)
