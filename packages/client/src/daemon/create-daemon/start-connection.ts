@@ -1,8 +1,9 @@
 import { ConnectionManager } from '../connection-manager';
 import { toJournalEnvelopeRecord, terminalKindOf } from './support';
 import { JournalRecordTooLargeError, journalHash } from '../journal/journal';
-import { createEnvelope, decodeEnvelope, encodeEnvelope, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope, encodeEnvelope, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, type Envelope } from '@byok-sdk/protocol';
 import { terminalIdentity } from '../terminal-identity';
+import { hostFor } from '../task-runner/host';
 import type { DaemonScope } from './scope';
 import type { StartRun } from './start-run';
 import type { StartLanes } from './start-lanes';
@@ -136,6 +137,21 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
       if (envelopes.some((envelope) => terminalKindOf(envelope.type) !== undefined)) overrides.executionRecoveryFault?.('outbound:before-post');
     },
     onOutboundSettled: async (settlements) => {
+      const publishLocal = (envelope: Envelope, publish: () => void): void => {
+        const runner = daemonState.runner;
+        // An automatic retry can replace the receipt before the transport ACK.
+        // The execution record retains the fact that the first attempt settled.
+        if (terminalKindOf(envelope.type) === undefined || envelope.task_id === undefined || runner === undefined
+          || runner['tasks'].get(envelope.task_id)?.executionRecordPublished === true) {
+          publish();
+          return;
+        }
+        const receipt = hostFor(runner).terminalReceipt(envelope.task_id);
+        // Join only the existing attempt, including failure. Delivery and other
+        // tasks' observations must not wait for this home's finalization.
+        if (receipt === undefined) publish();
+        else void receipt.then(publish, publish);
+      };
       // All terminal fsyncs must succeed before publishing any observation.
       // A retry after a partial local write can repeat the idempotent journal
       // operation, without double-counting an earlier part of this batch.
@@ -154,7 +170,8 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
       for (const settlement of settlements) {
         const { envelope } = settlement;
         outbound[settlement.outcome] += 1;
-        if (settlement.outcome !== 'rejected') { observer.handleOutboundEnvelope(sealedRun.sealedTasks?.plainOf(envelope) ?? envelope); continue; }
+        const plain = sealedRun.sealedTasks?.plainOf(envelope) ?? envelope;
+        if (settlement.outcome !== 'rejected') { publishLocal(envelope, () => observer.handleOutboundEnvelope(plain)); continue; }
         const rejection = {
           envelopeId: envelope.id, type: envelope.type,
           ...(envelope.task_id === undefined ? {} : { taskId: envelope.task_id }),
@@ -163,7 +180,7 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
         outbound.rejectedByReason[rejection.reason] = (outbound.rejectedByReason[rejection.reason] ?? 0) + 1;
         if (rejection.terminal) outbound.rejectedTerminals += 1;
         outbound.lastRejection = rejection;
-        observer.noteOutboundRejected(sealedRun.sealedTasks?.plainOf(envelope) ?? envelope, rejection);
+        publishLocal(envelope, () => observer.noteOutboundRejected(plain, rejection));
       }
     },
     onStateChange: (state) => {

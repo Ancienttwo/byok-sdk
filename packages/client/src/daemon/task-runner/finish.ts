@@ -221,10 +221,15 @@ export function beginTerminal(this: TaskRunner, active: ActiveTask, plan: Termin
 /** Home admission waits on this receipt; it ends when cleanup or a failed barrier does. */
 function trackFinalization(this: TaskRunner, taskId: string, receipt: Promise<boolean>): void {
   this['finalizationAttempts'].set(taskId, receipt);
-  const clear = (): void => {
+  const active = this['tasks'].get(taskId);
+  const intent = hostFor(this).terminalIntent(taskId);
+  const settled = (): void => {
     if (this['finalizationAttempts'].get(taskId) === receipt) this['finalizationAttempts'].delete(taskId);
+    // The first attempt is the diagnostic boundary even if close/commit failed.
+    // Retain its intent: successful cleanup removes it before this callback.
+    if (active !== undefined) this['publishExecutionRecord'](active, intent?.envelope);
   };
-  void receipt.then(clear, clear);
+  void receipt.then(settled, settled);
 }
 
 /**
@@ -456,7 +461,6 @@ async function finishTaskCleanup(this: TaskRunner, taskId: string, envelope: Env
   }
   active.batcher.stop();
   active.messageDraft?.stop();
-  this['publishExecutionRecord'](active, envelope);
   const agentRef = active.agentRef;
   const handoff = active.agentHandoff;
   // Session.close() is the adapter quiescence receipt. Capture only after it,
