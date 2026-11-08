@@ -10,6 +10,7 @@ const GLOB_SYNTAX = /[()[\]{}*?!@+|^$]/g;
 
 export interface ClaudeAgentUserContextSettings {
   readonly claudeMdExcludes: readonly string[];
+  readonly outputStyle: 'default';
   readonly env: { readonly CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
 }
 
@@ -20,7 +21,8 @@ export interface ClaudeAgentUserContextSettings {
  * instruction files of every directory strictly above the Agent home (Claude's
  * walk stops before the filesystem root). Everything at and below the home
  * stays. Auto memory is turned off in the flag-layer `env`, the one place that
- * outranks a user `settings.json` `env` block.
+ * outranks a user `settings.json` `env` block. The flag-layer `outputStyle`
+ * outranks the user's, so a user output style adds no instructions.
  */
 export function claudeAgentUserContextSettings(
   manifest: Pick<RuntimeOperationManifest, 'cwd' | 'lease'>,
@@ -55,5 +57,5 @@ export function claudeAgentUserContextSettings(
   for (let dir = p.dirname(home); p.dirname(dir) !== dir; dir = p.dirname(dir)) {
     excludes.push(file(dir, 'CLAUDE.md'), file(dir, 'CLAUDE.local.md'), file(dir, '.claude', 'CLAUDE.md'), rules(p.join(dir, '.claude', 'rules')));
   }
-  return { claudeMdExcludes: [...new Set(excludes)], env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } };
+  return { claudeMdExcludes: [...new Set(excludes)], outputStyle: 'default', env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } };
 }

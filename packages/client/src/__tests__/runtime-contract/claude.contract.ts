@@ -16,6 +16,9 @@ const adapter = (options: ClaudeAdapterOptions = {}) => new ClaudeAdapter({ reso
 const PROJECT_MARKER = 'BYOK-CONTRACT-CLAUDE-PROJECT-3a9d';
 const USER_MARKER = 'BYOK-CONTRACT-CLAUDE-USER-b42f';
 const ANCESTOR_MARKER = 'BYOK-CONTRACT-CLAUDE-ANCESTOR-7c20';
+const OUTPUT_STYLE_MARKER = 'BYOK-CONTRACT-CLAUDE-OUTPUT-STYLE-5e81';
+/** The system-prompt section Claude adds for any output style other than the default, as JSON in the raw body. */
+const OUTPUT_STYLE_SECTION = JSON.stringify('according to your "Output Style"').slice(1, -1);
 
 /** Claude Code's own `--version` text: `2.1.312 (Claude Code)`. */
 const identifies = (version: string, expected: string) => /^(\S+) \(Claude Code\)$/.exec(version.trim())?.[1] === expected;
@@ -54,8 +57,8 @@ const submitThroughToolSearch: ProviderScript = request => {
 
 /**
  * One contract turn as an Agent task: a Host MCP server, a CLAUDE.md in the
- * Agent home, a user CLAUDE.md and a user MCP server in the Claude config
- * directory. `excluded` turns on both Agent isolation options.
+ * Agent home, a user CLAUDE.md, output style and MCP server in the Claude
+ * config directory. `excluded` turns on both Agent isolation options.
  */
 async function turn(mode: 'inherit' | 'excluded') {
   const box = await createSandbox(`claude-${mode}`);
@@ -69,6 +72,9 @@ async function turn(mode: 'inherit' | 'excluded') {
     const host = await writeSubmitResultServer(box.root, receipt);
     const user = await writeSubmitResultServer(box.root, userReceipt, 'user_tool');
     await fs.writeFile(path.join(config, 'CLAUDE.md'), `# User\n\n${USER_MARKER}\n`);
+    await fs.mkdir(path.join(config, 'output-styles'));
+    await fs.writeFile(path.join(config, 'output-styles', 'contract.md'), `---\nname: contract\ndescription: contract\n---\n${OUTPUT_STYLE_MARKER}\n`);
+    await fs.writeFile(path.join(config, 'settings.json'), JSON.stringify({ outputStyle: 'contract' }));
     await fs.writeFile(path.join(config, '.claude.json'), JSON.stringify({ mcpServers: { usermcp: { type: 'stdio', command: user.command, args: user.args } } }));
     await fs.writeFile(path.join(box.workspace, 'CLAUDE.md'), `# Project\n\n${PROJECT_MARKER}\n`);
     await fs.writeFile(path.join(box.root, 'CLAUDE.md'), `# Ancestor\n\n${ANCESTOR_MARKER}\n`);
@@ -141,6 +147,10 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
   'isolation.userContext': check(async () => {
     expect((await inherited()).provider.saw(USER_MARKER), 'positive control: inherited user CLAUDE.md reaches the model').toBe(true);
     expect((await excluded()).provider.saw(USER_MARKER)).toBe(false);
+    expect((await inherited()).provider.saw(OUTPUT_STYLE_MARKER), 'positive control: inherited user output style reaches the model').toBe(true);
+    expect((await inherited()).provider.saw(OUTPUT_STYLE_SECTION), 'positive control: inherited output style section').toBe(true);
+    expect((await excluded()).provider.saw(OUTPUT_STYLE_MARKER)).toBe(false);
+    expect((await excluded()).provider.saw(OUTPUT_STYLE_SECTION)).toBe(false);
     // Under excluded only the Agent home's instruction file remains, as for Pi.
     expect((await excluded()).provider.saw(ANCESTOR_MARKER)).toBe(false);
   }),

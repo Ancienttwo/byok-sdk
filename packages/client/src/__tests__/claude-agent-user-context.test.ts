@@ -21,7 +21,7 @@ describe('claudeAgentUserContextSettings', () => {
 
   it('excludes the config directory and every parent of a POSIX home, but nothing at or below the home', () => {
     const settings = claudeAgentUserContextSettings({ lease: lease(home), cwd: home }, { HOME: '/Users/u' }, 'darwin', unusedHomedir, same);
-    expect(settings).toEqual({ claudeMdExcludes: expected, env: AUTO_MEMORY_OFF });
+    expect(settings).toEqual({ claudeMdExcludes: expected, outputStyle: 'default', env: AUTO_MEMORY_OFF });
     expect(settings.claudeMdExcludes.some(pattern => pattern.startsWith(`${home}/`))).toBe(false);
     // Claude's walk stops before the root.
     expect(settings.claudeMdExcludes.some(pattern => /^\/[^/]+$/.test(pattern) || pattern.startsWith('/.claude'))).toBe(false);
@@ -114,6 +114,7 @@ describe('claudeAgentUserContextSettings', () => {
         'C:/Users/u/CLAUDE.md', 'C:/Users/u/CLAUDE.local.md',
         ...parent('C:/Users'),
       ],
+      outputStyle: 'default',
       env: AUTO_MEMORY_OFF,
     });
   });
