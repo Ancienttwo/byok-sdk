@@ -303,10 +303,11 @@ Under `excluded` these still load and can reach the model (probed on 2.1.319,
 
 - Output of the user's hooks that add context, such as SessionStart and
   UserPromptSubmit. Hooks merge across setting layers, so the flag layer
-  cannot remove one event's hooks. Dropping the `user` setting source would
-  also remove guard hooks such as PreToolUse and the user's deny rules
-  (probed), and so would `disableAllHooks`, `--bare` and `--safe-mode` for
-  the hooks (from the help text; not probed).
+  cannot remove one event's hooks, and `allowManagedHooksOnly` takes effect
+  only in managed policy. Dropping the `user` setting source also drops the
+  guard hooks, such as PreToolUse, and the deny rules (see above);
+  `disableAllHooks`, `--bare` and `--safe-mode` drop every hook (from the
+  help text; not probed).
 - The user's skills: their names, and depending on the frontmatter their
   descriptions, appear in the skill listing.
 - The user's commands and subagents, installed plugins' skills and hooks, and
