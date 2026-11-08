@@ -7,7 +7,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ByokKeysError } from './errors';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import type { ModelProviderProfile } from './provider-profile';
-import { SqliteProviderProfileStore } from './sqlite-profile-store';
+import {
+  SqliteProviderProfileStore,
+  migrateProviderProfileStore,
+  runProviderProfileStoreMigration,
+} from './sqlite-profile-store';
 import { isSqliteAvailable, openSqliteDatabase } from './sqlite-support';
 
 // node:sqlite requires Node 22.5+, and shipped behind --experimental-sqlite
@@ -333,5 +337,116 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
       'provider_kind',
       'updated_at',
     ]);
+  });
+});
+
+describe.skipIf(!sqliteReady)('migrateProviderProfileStore', () => {
+  const schemaOf = (path: string) => {
+    const reader = openSqliteDatabase(path, { readOnly: true });
+    try {
+      return {
+        schema: reader.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all(),
+        profiles: reader.prepare('SELECT * FROM provider_profile ORDER BY profile_ref').all(),
+        watermarks: reader.prepare('SELECT * FROM provider_custody_watermark').all(),
+      };
+    } finally { reader.close(); }
+  };
+
+  /** A store this version wrote, rebuilt with the narrower CHECK set of a version that lacked `groq`. */
+  const createEarlierKindSetStore = async (): Promise<void> => {
+    const store = new SqliteProviderProfileStore({ path: databasePath });
+    await store.save(profile('openai', { enabled: false }));
+    await store.save(profile('deepseek', { base_url: 'https://api.deepseek.com' }));
+    await store.close();
+    const raw = openSqliteDatabase(databasePath);
+    const { sql } = raw.prepare("SELECT sql FROM sqlite_master WHERE name = 'provider_profile'").get() as { sql: string };
+    const earlier = sql.replace("'groq', ", '');
+    expect(earlier).not.toBe(sql);
+    raw.exec(`
+      INSERT INTO provider_custody_watermark (profile_ref, operation_generation) VALUES ('deepseek', 3);
+      ALTER TABLE provider_profile RENAME TO earlier;
+      ${earlier};
+      INSERT INTO provider_profile SELECT * FROM earlier;
+      DROP TABLE earlier;
+      CREATE UNIQUE INDEX provider_profile_one_enabled ON provider_profile(kind) WHERE enabled = 1;
+    `);
+    raw.close();
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
+  };
+
+  it('migrates an earlier provider_kind set and keeps profiles, enabled state and custody rows', async () => {
+    await createEarlierKindSetStore();
+    const before = schemaOf(databasePath);
+
+    expect(migrateProviderProfileStore(databasePath)).toBe('migrated');
+
+    const after = schemaOf(databasePath);
+    expect(after.profiles).toEqual(before.profiles);
+    expect(after.watermarks).toEqual(before.watermarks);
+    const reader = new SqliteProviderProfileStore({ path: databasePath, readOnly: true });
+    expect((await reader.getEnabled())?.profile_ref).toBe('deepseek');
+    await reader.close();
+    const store = new SqliteProviderProfileStore({ path: databasePath });
+    await store.save(profile('groq', { base_url: 'https://api.groq.com/openai/v1', enabled: false }));
+    expect((await store.list()).map((entry) => entry.profile_ref)).toEqual(['deepseek', 'groq', 'openai']);
+    await store.close();
+  });
+
+  it('rolls back an injected copy failure and leaves the earlier store unchanged', async () => {
+    await createEarlierKindSetStore();
+    const before = schemaOf(databasePath);
+
+    expect(() => runProviderProfileStoreMigration(databasePath, {
+      afterCopy: () => { throw new Error('injected copy failure'); },
+    })).toThrow('injected copy failure');
+
+    expect(schemaOf(databasePath)).toEqual(before);
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
+  });
+
+  it('leaves a current-schema store untouched', async () => {
+    const store = new SqliteProviderProfileStore({ path: databasePath });
+    await store.save(profile('openai'));
+    await store.close();
+    const bytes = readFileSync(databasePath);
+
+    expect(migrateProviderProfileStore(databasePath)).toBe('unchanged');
+
+    expect(readFileSync(databasePath)).toEqual(bytes);
+  });
+
+  it('fails closed when a custody table differs from the current schema', async () => {
+    await createEarlierKindSetStore();
+    const raw = openSqliteDatabase(databasePath);
+    raw.exec(`
+      ALTER TABLE provider_custody_watermark RENAME TO earlier;
+      CREATE TABLE provider_custody_watermark (profile_ref TEXT PRIMARY KEY, operation_generation INTEGER NOT NULL);
+      INSERT INTO provider_custody_watermark SELECT * FROM earlier;
+      DROP TABLE earlier;
+    `);
+    raw.close();
+    const before = schemaOf(databasePath);
+
+    let thrown: unknown;
+    try { migrateProviderProfileStore(databasePath); } catch (error) { thrown = error; }
+    expect((thrown as ByokKeysError).code).toBe('PROVIDER_STORE_SCHEMA_STALE');
+
+    expect(schemaOf(databasePath)).toEqual(before);
+  });
+
+  it('fails closed on a difference other than an earlier provider_kind set', async () => {
+    const store = new SqliteProviderProfileStore({ path: databasePath });
+    await store.save(profile('openai'));
+    await store.close();
+    const raw = openSqliteDatabase(databasePath);
+    raw.exec('ALTER TABLE provider_profile DROP COLUMN pi_model');
+    raw.close();
+    const before = schemaOf(databasePath);
+
+    let thrown: unknown;
+    try { migrateProviderProfileStore(databasePath); } catch (error) { thrown = error; }
+    expect((thrown as ByokKeysError).code).toBe('PROVIDER_STORE_SCHEMA_STALE');
+
+    expect(schemaOf(databasePath)).toEqual(before);
   });
 });
