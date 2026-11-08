@@ -31,10 +31,14 @@ function main(argv) {
   if (mode === 'snapshot') {
     const directory = realpathSync(os.tmpdir());
     const directories = [{ directory, prefix: LEAK_PREFIX }];
-    // globalSetup uses /tmp on POSIX to keep socket paths short. Check its
-    // run roots too when the caller's original TMPDIR is somewhere else.
+    // globalSetup uses /tmp on POSIX to keep socket paths short. Check that
+    // fixed root too when the caller's original TMPDIR is somewhere else. The
+    // whole `byok-` prefix, not just the `byok-t-` run roots: the long-path
+    // socket fallbacks (`byok-<store hash>`, `byok-store-mutex-<store hash>`)
+    // and the scratch fallback (`byok-scratch-<store hash>`) write there by
+    // design, so a leak check naming only the run roots reported those clean.
     if (process.platform !== 'win32' && realpathSync('/tmp') !== directory) {
-      directories.push({ directory: realpathSync('/tmp'), prefix: 'byok-t-' });
+      directories.push({ directory: realpathSync('/tmp'), prefix: LEAK_PREFIX });
     }
     const snapshot = directories.map(({ directory, prefix }) => ({ directory, prefix, entries: listEntries(directory, prefix) }));
     writeFileSync(file, JSON.stringify(snapshot));

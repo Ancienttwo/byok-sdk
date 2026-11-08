@@ -4,6 +4,7 @@ import { createConnection, createServer, type Server, type Socket } from 'node:n
 import path from 'node:path';
 import { sameContent } from './file-state';
 import { ensureSecureDir } from './secure-dir';
+import { reclaimSocketFallbackDirectory } from './socket-fallback-directory';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
@@ -432,14 +433,15 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexL
     await clearStaleStoreMutexSocket(endpoint, identity);
   }
   const server: Server = createServer((socket) => endOwnershipProbe(socket, `${STORE_MUTEX_ID_PREFIX}${identity}\n`));
-  try {
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(endpoint, () => {
-        server.removeListener('error', reject);
-        resolve();
-      });
+  const listen = (): Promise<void> => new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(endpoint, () => {
+      server.removeListener('error', reject);
+      resolve();
     });
+  });
+  try {
+    await listen();
   } catch (err) {
     // Someone else owns this store's endpoint: a live holder, or the loser's
     // half of a race against the stale-socket unlink just above. Either way
@@ -447,7 +449,16 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexL
     // never walk to a second address, which is what would let two processes
     // run the stale-owner/reclaim sequence against the same pathnames.
     if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new DaemonOwnerActiveError('unknown');
-    throw err;
+    // `ENOENT` is the restart race instead, not a contended store: a closing
+    // holder reclaimed the fallback directory between the `ensureSecureDir`
+    // above and this `listen` (see `util/socket-fallback-directory.ts`).
+    // Rebuild it and retry once; a second `ENOENT` is a real failure.
+    if (isPipe || (err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    const retryDir = path.dirname(endpoint);
+    await ensureSecureDir(retryDir);
+    await assertOwnedPrivateDir(retryDir);
+    await clearStaleStoreMutexSocket(endpoint, identity);
+    await listen();
   }
   // The socket file's own mode, on top of the 0700 directory that already
   // gates traversal to it — same post-bind tightening `bindControlEndpoint`
@@ -464,7 +475,14 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexL
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
       // A pipe has no file to remove; a Unix socket does, and leaving it
       // behind would cost the next acquire a probe round-trip to prove stale.
-      if (!isPipe) await fs.rm(endpoint, { force: true }).catch(() => undefined);
+      if (!isPipe) {
+        await fs.rm(endpoint, { force: true }).catch(() => undefined);
+        // Same housekeeping `control-server.ts`'s `close()` does: the
+        // long-path branch nests this lock one level below a fixed short root
+        // in a directory keyed by the store alone, so leaving it behind keeps
+        // one directory per store for the life of the machine.
+        await reclaimSocketFallbackDirectory(endpoint);
+      }
     },
   };
 }

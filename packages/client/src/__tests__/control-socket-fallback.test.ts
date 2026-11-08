@@ -112,3 +112,40 @@ describe('control socket fallback: a fixed root, immune to TMPDIR', () => {
     });
   });
 });
+
+describe('control socket fallback: the directory it binds in does not outlive the daemon', () => {
+  it('G: close() removes the fallback directory, not just the socket inside it', async () => {
+    if (process.platform === 'win32') return; // a pipe leaves no directory behind
+    const storeDir = await tooLongStoreDir();
+    const endpoint = controlSocketPath(storeDir);
+    const fallbackDir = path.dirname(endpoint);
+    expect(fallbackDir).not.toBe(storeDir); // the branch under test actually ran
+
+    const handle = await startControlServer({ storeDir, productId: 'acme', methods: pingMethods() });
+    expect(await fs.stat(fallbackDir).then((s) => s.isDirectory())).toBe(true);
+
+    await handle.close();
+    // One directory per store used to survive every daemon it ever hosted:
+    // unlinking the socket left the 0700 parent behind, keyed by the store, so
+    // a machine accumulated one per store that took the long-path branch.
+    await expect(fs.stat(fallbackDir)).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 60_000);
+
+  it('H: a store that itself lives under /tmp keeps its own directory', async () => {
+    if (process.platform === 'win32') return;
+    // Reclamation is scoped to a fallback DIRECTORY, not to anything a close
+    // happens to see one level under /tmp. A store that lives there itself
+    // binds its control socket directly inside it, and ordinary teardown must
+    // never turn into store deletion.
+    const storeDir = `/tmp/byok-${'0'.repeat(16)}`;
+    await fs.mkdir(storeDir, { recursive: true, mode: 0o700 });
+    dirsToRemove.push(storeDir);
+    const sentinel = path.join(storeDir, 'device.json');
+    await fs.writeFile(sentinel, '{}');
+
+    const handle = await startControlServer({ storeDir, productId: 'acme', methods: pingMethods() });
+    expect(path.dirname(handle.endpoint)).toBe(storeDir); // short path: no fallback at all
+    await handle.close();
+    await expect(fs.readFile(sentinel, 'utf8')).resolves.toBe('{}');
+  }, 60_000);
+});
