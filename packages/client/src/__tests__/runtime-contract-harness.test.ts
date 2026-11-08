@@ -2,9 +2,10 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { freezeRuntimeAdapterDescriptor, type RuntimeAdapterDescriptor, type RuntimeCapabilities, type RuntimeDetectResult } from '../types';
+import { freezeRuntimeAdapterDescriptor, type RuntimeAdapterDescriptor, type RuntimeCapabilities, type RuntimeDetectResult, type RuntimeIsolationCapabilities } from '../types';
 import {
   CONTRACT_CASES,
+  absent,
   assertContractPlan,
   assertRuntimeCases,
   contractMode,
@@ -40,6 +41,11 @@ const skipEveryCase = (): ContractPlan => Object.fromEntries(
   Object.keys(CONTRACT_CASES).map((id) => [id, { skip: 'fixture case' }]),
 ) as unknown as ContractPlan;
 
+const isolation = (bits: Partial<RuntimeIsolationCapabilities>): RuntimeIsolationCapabilities => ({
+  userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false,
+  userMcpServers: false, sessionPersistence: false, ...bits,
+});
+
 const descriptor = (capabilities: Partial<RuntimeCapabilities> = {}): RuntimeAdapterDescriptor =>
   freezeRuntimeAdapterDescriptor({
     id: 'fixture-runtime',
@@ -49,18 +55,18 @@ const descriptor = (capabilities: Partial<RuntimeCapabilities> = {}): RuntimeAda
 
 describe('runtime contract plan admission', () => {
   it('admits a complete plan whose every case is explicitly skipped with a reason', () => {
-    expect(() => assertContractPlan(descriptor(), skipEveryCase())).not.toThrow();
+    expect(() => assertContractPlan(descriptor(), skipEveryCase(), {})).not.toThrow();
   });
 
   it('refuses a plan that omits a case instead of running a smaller suite', () => {
     const plan: Record<string, unknown> = { ...skipEveryCase() };
     delete plan['detect.version'];
-    expect(() => assertContractPlan(descriptor(), plan as unknown as ContractPlan)).toThrow(/missing the detect\.version case/);
+    expect(() => assertContractPlan(descriptor(), plan as unknown as ContractPlan, {})).toThrow(/missing the detect\.version case/);
   });
 
   it('refuses a skip with no reason', () => {
     const plan = { ...skipEveryCase(), drafts: { skip: '   ' } };
-    expect(() => assertContractPlan(descriptor(), plan)).toThrow(/skip needs a reason/);
+    expect(() => assertContractPlan(descriptor(), plan, {})).toThrow(/skip needs a reason/);
   });
 
   it('refuses a runtime case skipped with no reason', () => {
@@ -71,12 +77,41 @@ describe('runtime contract plan admission', () => {
     ['mcp.submitResult', { mcpToolsets: true }],
     ['drafts', { messageDraft: true }],
     ['gate.auto', { toolAuthorizationAuto: true }],
-    ['isolation.userContext', { isolation: { userContext: true, userMcpServers: false, sessionPersistence: false } }],
-    ['isolation.userMcp', { isolation: { userContext: false, userMcpServers: true, sessionPersistence: false } }],
-    ['isolation.sessionPersistence', { isolation: { userContext: false, userMcpServers: false, sessionPersistence: true } }],
+    ['isolation.userInstructions', { isolation: isolation({ userInstructions: true }) }],
+    ['isolation.userOutputStyle', { isolation: isolation({ userOutputStyle: true }) }],
+    ['isolation.userMemory', { isolation: isolation({ userMemory: true }) }],
+    ['isolation.userSkills', { isolation: isolation({ userSkills: true }) }],
+    ['isolation.userHookContext', { isolation: isolation({ userHookContext: true }) }],
+    ['isolation.userMcp', { isolation: isolation({ userMcpServers: true }) }],
+    ['isolation.sessionPersistence', { isolation: isolation({ sessionPersistence: true }) }],
   ] as const)('refuses to skip %s when the descriptor advertises it', (id, capabilities) => {
     const plan = { ...skipEveryCase(), [id]: { skip: 'hiding an advertised capability' } } as ContractPlan;
-    expect(() => assertContractPlan(descriptor(capabilities), plan)).toThrow(/advertised by the descriptor and cannot be skipped/);
+    expect(() => assertContractPlan(descriptor(capabilities), plan, {})).toThrow(/advertised by the descriptor and cannot be skipped/);
+  });
+
+  describe('absent isolation sources', () => {
+    const evidence = 'https://example.invalid/runtime/docs#no-memory';
+    const memoryTrue = descriptor({ isolation: isolation({ userMemory: true }) });
+    const plan = { ...skipEveryCase(), 'isolation.userMemory': absent(evidence) };
+    const checked = { ...skipEveryCase(), 'isolation.userMemory': { run: async () => {} } };
+
+    it('admits an advertised source whose plan entry and record name the same evidence', () => {
+      expect(() => assertContractPlan(memoryTrue, plan, { userMemory: evidence })).not.toThrow();
+    });
+
+    it.each([
+      ['an absent plan entry with no record entry', plan, {}, /must be the userMemory entry/],
+      ['an absent plan entry whose evidence differs from the record', plan, { userMemory: 'https://example.invalid/other' }, /must be the userMemory entry/],
+      ['a record entry whose case is a check', checked, { userMemory: evidence }, /so the isolation\.userMemory case must be declared absent/],
+      ['blank evidence in both the plan and the record', { ...skipEveryCase(), 'isolation.userMemory': absent(' ') }, { userMemory: ' ' }, /must be the userMemory entry/],
+      ['an absent declaration on a case that is not an isolation source', { ...checked, 'isolation.userMcp': absent(evidence) }, {}, /not an isolation source/],
+    ] as const)('refuses %s', (_label, candidate, record, error) => {
+      expect(() => assertContractPlan(memoryTrue, candidate as ContractPlan, record)).toThrow(error);
+    });
+
+    it('refuses an absent declaration on a source the descriptor does not advertise', () => {
+      expect(() => assertContractPlan(descriptor(), plan, { userMemory: evidence })).toThrow(/descriptor must advertise userMemory/);
+    });
   });
 });
 

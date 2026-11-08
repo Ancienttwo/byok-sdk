@@ -3,6 +3,7 @@ import path from 'node:path';
 import { expect } from 'vitest';
 import { PiAdapter, type PiAdapterOptions } from '../../adapters/pi/pi-adapter';
 import { readClientPiRuntimePin } from '../../adapters/pi/client-manifest';
+import { PI_ABSENT_ISOLATION_SOURCES } from '../../adapters/pi/pi-capabilities';
 import { createAutoToolAuthorizationGate } from '../../tool-authorization';
 import {
   baseEnv, check, contractMode, createSandbox, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
@@ -54,8 +55,8 @@ async function agentDirFor(home: string, baseUrl: string): Promise<string> {
  * daemon does before Pi registers its tools), the Agent home AGENTS.md, and a
  * user AGENTS.md in Pi's agent directory.
  */
-async function turn(userContext: 'inherit' | 'excluded') {
-  const box = await createSandbox(`pi-${userContext}`);
+async function turn(agentUserContext: 'inherit' | 'excluded') {
+  const box = await createSandbox(`pi-${agentUserContext}`);
   const recorder = await fileEgress();
   const provider = await startLoopbackProvider('openai-chat', callOnceThenReply(mcpTool('host', 'submit_result'), { summary: 'runtime contract' }));
   try {
@@ -66,7 +67,7 @@ async function turn(userContext: 'inherit' | 'excluded') {
     const receipt = path.join(box.root, 'host.jsonl');
     const mcpServers = { host: await writeSubmitResultServer(box.root, receipt) };
     const env = { ...baseEnv(box.home), PI_CODING_AGENT_DIR: agentDir, ...recorder.env };
-    const events = await runTurn(turnAdapter({ agentUserContext: userContext }), 'Call the submit_result tool, then finish.', {
+    const events = await runTurn(turnAdapter({ agentUserContext }), 'Call the submit_result tool, then finish.', {
       workspaceDir: box.workspace, agentHome: box.workspace, env, mcpServers, mcpToolsetTools: await observeServers(mcpServers, env),
     });
     return { events, provider, calls: await readReceipt(receipt) };
@@ -131,12 +132,16 @@ if (mode === 'latest') {
       expect((await excluded()).provider.saw(PROJECT_MARKER)).toBe(true);
     }),
     // Under excluded only the Agent home's instruction file remains, as for Claude.
-    'isolation.userContext': check(async () => {
+    'isolation.userInstructions': check(async () => {
       expect((await inherited()).provider.saw(USER_MARKER), 'positive control: the inherited agent-directory AGENTS.md reaches the model').toBe(true);
       expect((await inherited()).provider.saw(ANCESTOR_MARKER), 'positive control: the inherited ancestor AGENTS.md reaches the model').toBe(true);
       expect((await excluded()).provider.saw(USER_MARKER)).toBe(false);
       expect((await excluded()).provider.saw(ANCESTOR_MARKER)).toBe(false);
     }),
+    'isolation.userOutputStyle': skip('pi descriptor does not advertise isolation.userOutputStyle yet (#1576)'),
+    'isolation.userMemory': skip('pi descriptor does not advertise isolation.userMemory yet (#1576)'),
+    'isolation.userSkills': skip('pi descriptor does not advertise isolation.userSkills yet (#1576)'),
+    'isolation.userHookContext': skip('pi descriptor does not advertise isolation.userHookContext yet (#1576)'),
     'isolation.userMcp': skip('Pi has no user MCP configuration; it registers only the task servers the daemon observed'),
     'isolation.sessionPersistence': skip('the Pi adapter has no session persistence option; resume relies on the Agent home session store'),
     drafts: check(async () => {
@@ -149,5 +154,5 @@ if (mode === 'latest') {
       expect(written).toBe(false);
     }),
     'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await gated(); }),
-  });
+  }, PI_ABSENT_ISOLATION_SOURCES);
 }

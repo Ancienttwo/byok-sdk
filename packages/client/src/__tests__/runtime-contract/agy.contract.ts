@@ -5,6 +5,7 @@ import { expect } from 'vitest';
 import { AgyAdapter, type AgyAdapterOptions } from '../../adapters/antigravity/agy-adapter';
 import { agyAdapterWithEndpoint } from '../../adapters/antigravity/agy-endpoint';
 import { QUALIFIED_AGY_VERSION } from '../../adapters/antigravity/agy-version';
+import { AGY_ABSENT_ISOLATION_SOURCES } from '../../adapters/antigravity/agy-capabilities';
 import type { Session } from '../../types';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 import {
@@ -160,10 +161,14 @@ defineRuntimeContract(`agy runtime contract (${target.mode} ${target.expectedVer
   'instructions.project': check(async () => {
     expect((await userTurn()).provider.saw(PROJECT_MARKER)).toBe(true);
   }),
-  'isolation.userContext': check(async () => {
+  'isolation.userInstructions': check(async () => {
     expect((await ownedTurn()).provider.saw(USER_MARKER), 'positive control: GEMINI.md in the home agy reads reaches the model').toBe(true);
     expect((await userTurn()).provider.saw(USER_MARKER)).toBe(false);
   }),
+  'isolation.userOutputStyle': skip('agy descriptor does not advertise isolation.userOutputStyle yet (#1575)'),
+  'isolation.userMemory': skip('agy descriptor does not advertise isolation.userMemory yet (#1575)'),
+  'isolation.userSkills': skip('agy descriptor does not advertise isolation.userSkills yet (#1575)'),
+  'isolation.userHookContext': skip('agy descriptor does not advertise isolation.userHookContext yet (#1575)'),
   'isolation.userMcp': check(async () => {
     expect((await ownedTurn()).provider.saw('usermcp'), 'positive control: a server in the home agy reads is offered').toBe(true);
     const user = await userTurn();
@@ -179,7 +184,7 @@ defineRuntimeContract(`agy runtime contract (${target.mode} ${target.expectedVer
     // agy holds only the session token, so a request carrying the key came through the local proxy.
     expect(new Set(provider.requests.map(request => request.apiKey))).toEqual(new Set([REAL_KEY]));
   }),
-});
+}, AGY_ABSENT_ISOLATION_SOURCES);
 
 defineRuntimeCases(`agy runtime contract: agy cases (${target.mode} ${target.expectedVersion})`, {
   'agy.keyIsolation': ['the real key reaches the provider through the proxy, never the model\'s shell or a stdio MCP server', check(async () => {

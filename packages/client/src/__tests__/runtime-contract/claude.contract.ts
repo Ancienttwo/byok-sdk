@@ -3,10 +3,11 @@ import path from 'node:path';
 import { expect } from 'vitest';
 import { ClaudeAdapter, type ClaudeAdapterOptions } from '../../adapters/claude/claude-adapter';
 import { QUALIFIED_CLAUDE_VERSION } from '../../adapters/claude/claude-version';
+import { CLAUDE_ABSENT_ISOLATION_SOURCES } from '../../adapters/claude/claude-capabilities';
 import { createAutoToolAuthorizationGate } from '../../tool-authorization';
 import {
   baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
-  expectDetectedVersion, fileEgress, once, readReceipt, runTurn, spawned, writeSubmitResultServer,
+  expectDetectedVersion, fileEgress, once, readReceipt, runTurn, skip, spawned, writeSubmitResultServer,
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript, type ProviderTool } from './loopback';
 
@@ -144,7 +145,7 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
   'instructions.project': check(async () => {
     expect((await excluded()).provider.saw(PROJECT_MARKER)).toBe(true);
   }),
-  'isolation.userContext': check(async () => {
+  'isolation.userInstructions': check(async () => {
     expect((await inherited()).provider.saw(USER_MARKER), 'positive control: inherited user CLAUDE.md reaches the model').toBe(true);
     expect((await excluded()).provider.saw(USER_MARKER)).toBe(false);
     expect((await inherited()).provider.saw(OUTPUT_STYLE_MARKER), 'positive control: inherited user output style reaches the model').toBe(true);
@@ -154,6 +155,10 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
     // Under excluded only the Agent home's instruction file remains, as for Pi.
     expect((await excluded()).provider.saw(ANCESTOR_MARKER)).toBe(false);
   }),
+  'isolation.userOutputStyle': skip('claude descriptor does not advertise isolation.userOutputStyle yet (#1574)'),
+  'isolation.userMemory': skip('claude descriptor does not advertise isolation.userMemory yet (#1574)'),
+  'isolation.userSkills': skip('claude descriptor does not advertise isolation.userSkills yet (#1574)'),
+  'isolation.userHookContext': skip('claude descriptor does not advertise isolation.userHookContext yet (#1574)'),
   'isolation.userMcp': check(async () => {
     expect((await inherited()).userSpawned, 'positive control: inherited user MCP server starts').toBe(true);
     expect((await excluded()).userSpawned).toBe(false);
@@ -174,4 +179,4 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
   'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await gated(); }, [
     { phase: 'detect', target: 'api.anthropic.com:443', reason: '`claude auth status` checks an ANTHROPIC_API_KEY with Anthropic' },
   ]),
-});
+}, CLAUDE_ABSENT_ISOLATION_SOURCES);
