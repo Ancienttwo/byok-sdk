@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## 0.40.0 — 2026-11-08 (source candidate)
+## 0.40.0 — 2026-11-08 (published)
 
-0.40.0 is a MINOR source candidate for all nine public packages. It keeps wire v5. There is no new `deploy/sql` migration; the hosted Bot example adds a `dream_state` table through its own store migration. The upgrade manifest has one breaking change (the Koffi 3.3.7 native-asset literals) and eleven additive entries. ACP `tool_use` events now wait for settled input. See the [release notes](docs/releases/v0.40.0.md) and [Host upgrade checklist](docs/releases/host-upgrade-0.40.0.md). Publication and platform acceptance remain separate.
+0.40.0 is a MINOR release for all nine public packages. It keeps wire v5. There is no new `deploy/sql` migration; the hosted Bot example adds a `dream_state` table through its own store migration. The released [upgrade manifest](packages/client/upgrade-history/0.39.0-0.40.0.json) has one breaking change (the Koffi 3.3.7 native-asset literals) and eleven additive entries. ACP `tool_use` events now wait for settled input. See the [release notes](docs/releases/v0.40.0.md) and [Host upgrade checklist](docs/releases/host-upgrade-0.40.0.md). All nine packages were published on 2026-11-08 with npm `latest` at 0.40.0 and readback passed. The release commit is `34836e0d1`; tag `v0.40.0` and the GitHub Release point to it. Publication does not establish platform or production acceptance.
 
 - **Changed** — ACP adapter `tool_use` events wait until the tool input is settled (#1542).
 

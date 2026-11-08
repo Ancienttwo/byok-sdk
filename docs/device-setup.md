@@ -946,12 +946,10 @@ their source contract rather than being assigned invented release versions:
   [the shared approval path](security.md#3-shared-approval-path).
 
 <!-- generated:migrations:start -->
-Manifest transition: **0.39.0 → 0.40.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
+Manifest transition: **0.40.0 → 0.40.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
-| opencode-native-runtime | additive | Opt-in OpenCodeAdapter (harnessId opencode) and runtimes.opencode.models select an explicit Host candidate through native ACP, refuse mismatching model readback, and retry once on a pre-output rate limit with a non-terminal error diagnostic model_switch record that is excluded from reply text. Startup failures retain their start phase and native classification. Native user context, MCP and transcript storage are inherited; all isolation guarantees are false. RuntimeDetectResult.rawVersion retains local probe output separately from normalized version. Platform canaries and task-scoped Host MCP qualification remain pending; no platform or default qualified version is advertised. [Migration](../docs/adapter-capabilities.md#opencode-implementation-and-qualification-1538) |
-| native-session-dream-device-wiring | additive | DaemonConfig.nativeSessions defaults off. Opted-in macOS/Linux devices with a Pi memory lane and sessionDir declare native-sessions; unsupported offers decline before claim. The daemon renders after claim, prepends sanitized JSON data, and runs the Pi memory-only in-memory lane without progress, summary text, finalMessage or result documents. Argument summaries apply the command-word allowlist and path rules by tool name; tool result content is excluded. The local byok_host_ready receipt contains only sessionId and is consumed only by memory-lane admission. Cancellation and startup disposal await the abort drain before terminating the process tree. [Migration](../docs/security.md#native-session-input) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

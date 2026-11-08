@@ -6,7 +6,7 @@ import { documentationChecks } from './documentation-checks.mjs';
 import { resolveScriptChecks, scriptTestInputs } from './script-test-inputs.mjs';
 
 // #1316: the archived upgrade manifests, one exact path each.
-const UPGRADE_HISTORY_FILES = new Set(['0.31.0-0.32.0', '0.32.0-0.33.0', '0.33.0-0.34.0', '0.34.0-0.35.0', '0.35.0-0.36.0', '0.36.0-0.37.0', '0.37.0-0.38.0', '0.38.0-0.39.0'].map(name => `packages/client/upgrade-history/${name}.json`));
+const UPGRADE_HISTORY_FILES = new Set(['0.31.0-0.32.0', '0.32.0-0.33.0', '0.33.0-0.34.0', '0.34.0-0.35.0', '0.35.0-0.36.0', '0.36.0-0.37.0', '0.37.0-0.38.0', '0.38.0-0.39.0', '0.39.0-0.40.0'].map(name => `packages/client/upgrade-history/${name}.json`));
 
 // Reviewed workspace graph; the contract test detects manifest drift.
 export const workspaceGraph = {

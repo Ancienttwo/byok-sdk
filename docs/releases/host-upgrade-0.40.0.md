@@ -1,6 +1,6 @@
 # Host upgrade to 0.40.0
 
-Use this checklist for a Host moving from 0.39.0 to 0.40.0. Earlier Hosts must first apply the [0.39.0 checklist](host-upgrade-0.39.0.md) and its predecessors. The source base is `f3eabd041`; pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
+Use this checklist for a Host moving from 0.39.0 to 0.40.0. Earlier Hosts must first apply the [0.39.0 checklist](host-upgrade-0.39.0.md) and its predecessors. The source base is `f3eabd041`; the release commit is `34836e0d19f0ee95f2a7c84a6afdc8de8ba1df5a`, and tag `v0.40.0` points to it. All nine packages are published on npm `latest`. Pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
 
 ## Required Host actions
 
@@ -39,7 +39,8 @@ OpenCode inherits native user context, MCP configuration and transcript storage;
 
 The train adds capability-gated native-session offer and decline wire rows; the conditional memory-commit option itself leaves the device wire unchanged. The embedded activity reads add no store format change. The train has no new `deploy/sql` migration; H's example store migration above is separate. Check the final release's wire, store, migration and rollback boundaries before use.
 
-- [ ] Record the release commit, tag, final manifest and publication; review every final breaking entry and pin the release graph.
+- [x] Release commit, tag and publication recorded; the release manifest is archived.
+- [ ] Review every final breaking entry and pin the release graph.
 - [ ] Apply the backup, stop, precheck, smoke and rollback gates in the [0.39.0 checklist](host-upgrade-0.39.0.md#checklist), adjusted to the final 0.40.0 authorities.
 - [ ] Walk affected flows on each target platform, including Windows packaged native assets, Linux Secret Service, and dreaming where enabled.
 - OpenCode cannot be enabled in this release: its platform list is empty. Qualification requires a later release to add platforms; task-scoped Host MCP is also unqualified.

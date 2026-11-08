@@ -1,0 +1,464 @@
+{
+  "schemaVersion": 1,
+  "package": "@byok-sdk/client",
+  "from": {
+    "version": "0.39.0",
+    "snapshotSha256": "7015d7becb242fcec86c3470deb685c10d93898dba281ddaa2aea06399024dff"
+  },
+  "to": {
+    "version": "0.40.0",
+    "snapshotSha256": "5c101efe75dd23439980ffa563e336243e14ef3433b2782076edff60760b7d27"
+  },
+  "configFields": {
+    "status": "tracked",
+    "source": "packages/client/daemon-config.schema.json",
+    "owner": "#1094"
+  },
+  "entries": [
+    {
+      "id": "opencode-native-runtime",
+      "impact": "additive",
+      "summary": "Opt-in OpenCodeAdapter (harnessId opencode) and runtimes.opencode.models select an explicit Host candidate through native ACP, refuse mismatching model readback, and retry once on a pre-output rate limit with a non-terminal error diagnostic model_switch record that is excluded from reply text. Startup failures retain their start phase and native classification. Native user context, MCP and transcript storage are inherited; all isolation guarantees are false. RuntimeDetectResult.rawVersion retains local probe output separately from normalized version. Platform canaries and task-scoped Host MCP qualification remain pending; no platform or default qualified version is advertised.",
+      "migration": "docs/adapter-capabilities.md#opencode-implementation-and-qualification-1538",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#OpenCodeAdapter",
+        "export:@byok-sdk/client#OpenCodeAdapterOptions",
+        "export:@byok-sdk/client#RuntimeDetectResult",
+        "export:@byok-sdk/client/adapters#OpenCodeAdapter",
+        "export:@byok-sdk/client/adapters#OpenCodeAdapterOptions",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+        "export:@byok-sdk/client/adapters#RuntimeDetectResult"
+      ]
+    },
+    {
+      "id": "native-session-sealed-decline",
+      "impact": "additive",
+      "summary": "native_sessions_unsupported is a closed, non-retryable plaintext task.decline reason/code on sealed-output tasks, including when the device owner disables native-session input after Host enqueue. Its own task.decline wire row uses the two-way native-sessions gate: an advertising server understands both the V1 native-session input field and the decline code. Plain declines retain their open vocabulary and use the same code. Existing sealed key and policy causes retain their meaning.",
+      "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
+      "items": [
+        "export:@byok-sdk/protocol#SEALED_DECLINE_CODES",
+        "export:@byok-sdk/protocol#SEALED_TASK_PLAIN_CODES",
+        "export:@byok-sdk/protocol#TaskDeclineCode",
+        "export:@byok-sdk/protocol#TaskDeclinePayloadSchema"
+      ]
+    },
+    {
+      "id": "native-session-dream-device-wiring",
+      "impact": "additive",
+      "summary": "DaemonConfig.nativeSessions defaults off. Opted-in macOS/Linux devices with a Pi memory lane and sessionDir declare native-sessions; unsupported offers decline before claim. The daemon renders after claim, prepends sanitized JSON data, and runs the Pi memory-only in-memory lane without progress, summary text, finalMessage or result documents. Argument summaries apply the command-word allowlist and path rules by tool name; tool result content is excluded. The local byok_host_ready receipt contains only sessionId and is consumed only by memory-lane admission. Cancellation and startup disposal await the abort drain before terminating the process tree.",
+      "migration": "docs/security.md#native-session-input",
+      "items": [
+        "config:nativeSessions",
+        "export:@byok-sdk/client#DaemonConfig",
+        "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client#RuntimeOperationStartInput",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client/adapters#RuntimeOperationStartInput"
+      ]
+    },
+    {
+      "id": "pi-memory-lane-audit-mode",
+      "impact": "additive",
+      "summary": "DaemonEvent and DaemonRecord file-scope audit modes include memory for the internal Pi dreaming lane (#1526). The lane restricts file access to MEMORY.md and notes, disables other tools and instruction resources, and uses an in-memory session. Host-configurable file-scope policies remain home or workspaces; daemon offer wiring is a separate slice.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1526",
+      "items": [
+        "export:@byok-sdk/client#DaemonEvent",
+        "export:@byok-sdk/client#DaemonRecord"
+      ]
+    },
+    {
+      "id": "embedded-server-activity-reads",
+      "impact": "additive",
+      "summary": "ByokServer.tasks.activity(taskId, { after? }) and tasks.approvalTimeline(taskId) return the embedded server's tenant-bound ActivityTail and ApprovalTimelineTail for direct ui-runtime replay (#1513). Both reuse cloud reads and return undefined when no tail is retained; activity reads preserve cloud cursor validation. No wire or store format changes.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1513",
+      "items": [
+        "export:@byok-sdk/server#ByokServer"
+      ]
+    },
+    {
+      "id": "k8-dream-compaction-veto",
+      "impact": "additive",
+      "summary": "K8 and H retain dream intents until their results sync (#1490), using compactVeto to refuse compaction while dreams.open owns the occurrence. H now runs full dreaming through K8 package exports (#1516), with per-scope configuration, shared model selection, instruction and pack limits, skip reasons and success-only mark advancement. H stores dream state outside the bounded frame in one dream_state row per scope; store.migrate() creates the table. H and L share userFirst and the autonomous intent set for routine Turns, bot_request Turns and dreams; H does not add device slot reservation. The obsolete recordUnsupportedDream helper and DREAM_UNSUPPORTED_ON_H export are removed with the unsupported H path. K8 sealed routine creation and resealing validate Host templates with HostOfferSealedPayloadSchema, accepting agentMemoryCommit: on-success-if-advertised (#1506); cloud enqueue owns resolution and the device wire is unchanged. With BotOptions.history, the dream mark advances only through settled history rows actually read. No completed row read after the mark skips that day with no_new_turns and leaves the mark unchanged, just as in K8-state mode; a Bot whose history authority never returns completed rows never dreams. Hosts vendoring K8 should copy the updated example.",
+      "migration": "examples/bot-collaboration/README.md#compaction",
+      "items": [
+        "example:bot-collaboration"
+      ]
+    },
+    {
+      "id": "agent-memory-commit-if-advertised",
+      "impact": "additive",
+      "summary": "Host enqueue inputs accept agentMemoryCommit: on-success-if-advertised (#1506). Cloud and embedded server resolve it from the durable device capability declaration before enqueue: on-success when agent-memory-commit-on-success is advertised, otherwise the field is omitted. Literal on-success keeps its strict capability gate. K4 templates retain the Host option and compare replay against the recorded resolution without reading current capabilities. The shared HostOfferPlainPayloadSchema and HostOfferSealedPayloadSchema and their payload types are exported by protocol; the device wire is unchanged. Hosts can replace platform inference with this fixed template option. Native-session dream input (#1526) uses the same Host schemas and enqueue resolution: nativeSessions { fromMs, toMs, ifAdvertised: true } sends only the window when native-sessions is advertised, otherwise omits it. Host and wire admission require a fresh session, agentMemory none, no terminal projection, and no commit, homeAccess, preparation, requiredToolsets, messageEgress or harnessId. Frozen replay compares the original window with the recorded resolution without re-reading capabilities.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1506",
+      "items": [
+        "export:@byok-sdk/cloud#AgentDispatchInput",
+        "export:@byok-sdk/cloud#AgentEgressDispatchInput",
+        "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+        "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+        "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+        "export:@byok-sdk/protocol#HostOfferPlainPayload",
+        "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#HostOfferSealedPayload",
+        "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+        "export:@byok-sdk/server/execution-core#SealedAgentExecutionInput"
+      ]
+    },
+    {
+      "id": "protocol-memory-limits",
+      "impact": "additive",
+      "summary": "Protocol and its constants entry export AGENT_MEMORY_MAX_FILE_BYTES (256 KiB) and AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES (512) for Host memory prechecks (#1507). The client imports the same limits from protocol and removes both declarations from its reachable internal daemon/agent-memory declaration file; no client package entry exported these names. Existing validation behavior is unchanged.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1507",
+      "items": [
+        "export:@byok-sdk/protocol#AGENT_MEMORY_MAX_FILE_BYTES",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES",
+        "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_FILE_BYTES",
+        "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES"
+      ]
+    },
+    {
+      "id": "koffi-native-assets-3-3-7",
+      "impact": "breaking",
+      "summary": "Koffi moves from 3.2.0 to 3.3.7. sdkNativeAssetTargets and sdkDistributionManifest change the exported Windows x64 native asset version, URL, integrity and SHA256 literals. Hosts must rebuild their packaged Windows native assets with copySdkNativeAssets and update any literal-pinned metadata; the supported SDK target set and signing policy are unchanged.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1511",
+      "items": [
+        "export:@byok-sdk/client#sdkDistributionManifest",
+        "export:@byok-sdk/client#sdkNativeAssetTargets"
+      ]
+    },
+    {
+      "id": "linux-secret-service-store",
+      "impact": "additive",
+      "summary": "LinuxSecretServiceSecretStore adds Linux provider credential custody and the Pi provider launcher selects it on Linux (#1515). Secrets reach secret-tool on stdin only; unavailable Secret Service fails closed. Trusted system-tool resolution moves to the Node-only core/system-tool entry. The existing client SystemToolUnavailableError export re-exports the same core class with unchanged public shape; its declaration digest changes with the source move. Core root remains free of Node builtins.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1515",
+      "items": [
+        "entry:@byok-sdk/core/system-tool",
+        "export:@byok-sdk/client#SystemToolUnavailableError",
+        "export:@byok-sdk/core/system-tool#SystemToolHost",
+        "export:@byok-sdk/core/system-tool#SystemToolUnavailableError",
+        "export:@byok-sdk/core/system-tool#resolveSystemTool",
+        "export:@byok-sdk/core/system-tool#systemExecutable",
+        "export:@byok-sdk/keys#LinuxSecretServiceSecretStore",
+        "export:@byok-sdk/keys#LinuxSecretServiceSecretStoreOptions"
+      ]
+    },
+    {
+      "id": "native-session-dream-offer",
+      "impact": "additive",
+      "summary": "Offers admit nativeSessions { fromMs, toMs } with integer bounds and fromMs <= toMs (#1526), gated by native-sessions. Both plain and sealed offers require a fresh session, agentMemory none and terminalProjection absent or none; agentMemoryCommit, homeAccess, preparation, requiredToolsets, messageEgress and harnessId are forbidden. Hosts may request ifAdvertised: true to omit the field on devices without this capability. Existing offers without nativeSessions are unchanged.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1526",
+      "items": [
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#NATIVE_SESSIONS_CAPABILITY",
+        "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#NATIVE_SESSIONS_CAPABILITY"
+      ]
+    },
+    {
+      "id": "shared-secret-redaction",
+      "impact": "additive",
+      "summary": "Protocol and its constants entry export redactSecrets without truncation (#1526). The shared failure-reason rule list adds PEM blocks and xox*-, glpat-, npm_ and hf_ token shapes. boundFailureReason continues to use the same rules before its existing byte cap; SHA and UUID diagnostics remain intact. Summary-only sensitive flag and generic mixed-token rules are not part of this export.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1526",
+      "items": [
+        "export:@byok-sdk/protocol#redactSecrets",
+        "export:@byok-sdk/protocol/constants#redactSecrets"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "config:nativeSessions",
+      "change": "added",
+      "after": "optional schema-sha256=7cb541e84f226754",
+      "entry": "native-session-dream-device-wiring"
+    },
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=f94f04553cc5444a",
+      "after": "optional schema-sha256=bef6a1db2b3b066f",
+      "entry": "opencode-native-runtime"
+    },
+    {
+      "item": "entry:@byok-sdk/core/system-tool",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=84817467889ca31d",
+      "after": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
+      "entry": "k8-dream-compaction-veto"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfig",
+      "change": "changed",
+      "entry": "native-session-dream-device-wiring"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEvent",
+      "change": "changed",
+      "entry": "pi-memory-lane-audit-mode"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonRecord",
+      "change": "changed",
+      "entry": "pi-memory-lane-audit-mode"
+    },
+    {
+      "item": "export:@byok-sdk/client#OpenCodeAdapter",
+      "change": "added",
+      "entry": "opencode-native-runtime"
+    },
+    {
+      "item": "export:@byok-sdk/client#OpenCodeAdapterOptions",
+      "change": "added",
+      "entry": "opencode-native-runtime"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "native-session-dream-device-wiring"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "opencode-native-runtime"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "native-session-dream-device-wiring"
+    },
+    {
+      "item": "export:@byok-sdk/client#SystemToolUnavailableError",
+      "change": "changed",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkDistributionManifest",
+      "change": "changed",
+      "entry": "koffi-native-assets-3-3-7"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkNativeAssetTargets",
+      "change": "changed",
+      "entry": "koffi-native-assets-3-3-7"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#OpenCodeAdapter",
+      "change": "added",
+      "entry": "opencode-native-runtime"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#OpenCodeAdapterOptions",
+      "change": "added",
+      "entry": "opencode-native-runtime"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "native-session-dream-device-wiring"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "opencode-native-runtime"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "opencode-native-runtime"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "native-session-dream-device-wiring"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentDispatchInput",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentEgressDispatchInput",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ByokCloud",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/core/system-tool#SystemToolHost",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/core/system-tool#SystemToolUnavailableError",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/core/system-tool#resolveSystemTool",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/core/system-tool#systemExecutable",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/keys#LinuxSecretServiceSecretStore",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/keys#LinuxSecretServiceSecretStoreOptions",
+      "change": "added",
+      "entry": "linux-secret-service-store"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_MAX_FILE_BYTES",
+      "change": "added",
+      "entry": "protocol-memory-limits"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES",
+      "change": "added",
+      "entry": "protocol-memory-limits"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferPlainPayload",
+      "change": "added",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+      "change": "added",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferSealedPayload",
+      "change": "added",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+      "change": "added",
+      "entry": "agent-memory-commit-if-advertised"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#NATIVE_SESSIONS_CAPABILITY",
+      "change": "added",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_DECLINE_CODES",
+      "change": "changed",
+      "entry": "native-session-sealed-decline"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_TASK_PLAIN_CODES",
+      "change": "changed",
+      "entry": "native-session-sealed-decline"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineCode",
+      "change": "changed",
+      "entry": "native-session-sealed-decline"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+      "change": "changed",
+      "entry": "native-session-sealed-decline"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+      "change": "changed",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#redactSecrets",
+      "change": "added",
+      "entry": "shared-secret-redaction"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_FILE_BYTES",
+      "change": "added",
+      "entry": "protocol-memory-limits"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES",
+      "change": "added",
+      "entry": "protocol-memory-limits"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#NATIVE_SESSIONS_CAPABILITY",
+      "change": "added",
+      "entry": "native-session-dream-offer"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#redactSecrets",
+      "change": "added",
+      "entry": "shared-secret-redaction"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServer",
+      "change": "changed",
+      "entry": "embedded-server-activity-reads"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#SealedAgentExecutionInput",
+      "change": "changed",
+      "entry": "agent-memory-commit-if-advertised"
+    }
+  ]
+}

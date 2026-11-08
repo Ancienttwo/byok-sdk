@@ -77,9 +77,9 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The current source candidate is 0.40.0 for all nine packages, keys included.
-Publication remains pending; see the [release notes](../../docs/releases/v0.40.0.md).
-The registry read of 2026-11-06 (UTC) reports `latest` 0.39.0 for all nine packages.
+The current release is 0.40.0 for all nine packages, keys included.
+See the [release notes](../../docs/releases/v0.40.0.md).
+The registry read of 2026-11-08 (UTC) reports `latest` 0.40.0 for all nine packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -94,10 +94,10 @@ dependencies consistent.
 A release set contains eight aligned packages plus keys: nine packages. From
 0.28.2 all nine carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.39.0 for all nine packages on 2026-11-06 (UTC).
+the dist-tag `latest`, observed at 0.40.0 for all nine packages on 2026-11-08 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the prior `latest` for all nine packages. It records 0.39.0, the prior published release.
+records the prior `latest` for all nine packages. It still records 0.39.0, the baseline for this publication, not the current registry.
 This train has no first publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
