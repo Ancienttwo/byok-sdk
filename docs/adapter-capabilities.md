@@ -326,8 +326,10 @@ Under `excluded` these still load and can reach the model:
 Claude declares `userInstructions`, `userOutputStyle` and `userMemory` for
 `excluded`. The runtime contract suite checks each at the qualified 2.1.312
 with a marker that appears when inherited and is absent under `excluded`: a
-user `CLAUDE.md` and rules, a user `outputStyle`, and auto memory in
-`<config>/projects/<cwd key>/memory/MEMORY.md`. The Agent home's own
+user `<config>/CLAUDE.md`, a user `outputStyle`, and auto memory in
+`<config>/projects/<cwd key>/memory/MEMORY.md`. A `CLAUDE.md` in a parent of
+the Agent home is also asserted absent under `excluded`. No case covers the
+user `rules/` directory. The Agent home's own
 `.claude/settings.json` `outputStyle` is kept out too, because the flag
 layer's `outputStyle: "default"` outranks it; the suite pins that.
 `userSkills` and `userHookContext` are `no`, for the sources listed above.
@@ -565,7 +567,8 @@ that appear when inherited and are absent under `excluded`:
 `userOutputStyle` and `userMemory` read `yes (no source)`: Pi 1.5.0 has a fixed
 system-prompt preamble with no style setting (themes only color the UI and the
 HTML export), and no native memory. The same cases show that Host-authorized
-`agentSkillPaths` and `agentExtensionPaths` reach the model in both modes. Pi
+`agentSkillPaths` and `agentExtensionPaths` still reach the model under
+`excluded`. Pi
 has no user MCP configuration and no transcript switch, so `userMcpServers`
 and `sessionPersistence` are `no`. The durable lane declares no isolation bit,
 because Agent resources run only on the RPC lane (#1197).
@@ -804,11 +807,25 @@ launch arguments and environment. They do not
 prove an installed CLI's entire prompt contains no user rules. No provider
 ran, and no global configuration changed.
 
-The [runtime contract suite](runtime-contract.md) now runs the live check for
-every isolation bit an adapter declares `yes`: a synthetic user marker reaches
-the model in an inherited positive control and is absent from the Agent task,
-against a loopback provider at the qualified version. A `no` bit carries no
-guarantee, and the sources this section lists for it still reach the model.
+The [runtime contract suite](runtime-contract.md) binds every isolation bit an
+adapter declares `yes` to one of two things, against a loopback provider at the
+qualified version:
+
+- A live case. For a user-context bit, a synthetic marker in the user source
+  is absent from the Agent task, and a positive control shows the marker does
+  reach the model. The control differs by lane: Claude and Pi run the same
+  adapter with the user context inherited; agy and dsh put the marker in the
+  adapter's own home; Hermes, which has no inherit mode, runs the same binary
+  outside the adapter on a user home. `userMcpServers` is checked by whether a
+  user MCP server starts (Claude, Codex, Grok and agy with a positive control,
+  dsh and Hermes without), and `sessionPersistence` by whether a transcript is
+  written.
+- An absent declaration, `yes (no source)`: no live case runs, and the
+  evidence is the adapter's absent-sources record (Pi `userOutputStyle` and
+  `userMemory`, dsh `userMemory`, agy `userOutputStyle`).
+
+A `no` bit carries no guarantee, and the sources this section lists for it
+still reach the model.
 Only Hermes and ordinary Pi declare all five user-context bits, so a Host that
 needs an “Agent home only” session reads all five bits of the runtime it
 dispatches to. The cases do not cover resume behavior or credential discovery,
