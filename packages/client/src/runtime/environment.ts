@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loginShellSnapshot, type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
+import { PI_PROVIDER_ENV_KEY_NAMES } from '../adapters/pi/pi-provider-env.generated';
 
 /**
  * The environment of every child process of a task: the runtime CLI and the
@@ -150,6 +151,12 @@ const WINDOWS_SESSION_NAMES: readonly string[] = [
   'CODEX_HOME',
   'CLAUDE_CONFIG_DIR',
   'PI_CODING_AGENT_DIR',
+];
+
+/** Canonical spellings for names the SDK reads; this does not admit any name. */
+const WINDOWS_CANONICAL_NAMES: readonly string[] = [
+  ...WINDOWS_SESSION_NAMES,
+  ...PI_PROVIDER_ENV_KEY_NAMES,
 ];
 
 /**
@@ -587,9 +594,9 @@ export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput)
       if (value === undefined || !admitted(name)) continue;
       if (matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive)) denied.add(name);
       else {
-        // Use the session list's spelling for SDK reads as well as child lookups.
+        // Use canonical names for SDK reads as well as child lookups.
         // Prefix entries (LC_*, XDG_*) canonicalize the whole name to upper case.
-        const pattern = caseInsensitive ? WINDOWS_SESSION_NAMES.find((pattern) => matchesPattern(name, pattern, true)) : undefined;
+        const pattern = caseInsensitive ? WINDOWS_CANONICAL_NAMES.find((pattern) => matchesPattern(name, pattern, true)) : undefined;
         let canonical = name;
         if (pattern !== undefined) canonical = pattern.endsWith('*') ? name.toUpperCase() : pattern;
         if (!Object.hasOwn(result, canonical)) result[canonical] = value;

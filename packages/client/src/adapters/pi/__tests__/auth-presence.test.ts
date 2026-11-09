@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { PI_PROVIDER_ENV_KEY_NAMES } from '../pi-provider-env.generated';
 import { probePiAuthPresent, resolvePiAgentDir } from '../auth-presence';
 import { PiAdapter } from '../pi-adapter';
+import { composeRuntimeEnvironment } from '../../../runtime/environment';
 
 const FAKE_PI = fileURLToPath(new URL('../../../__tests__/fixtures/fake-pi.mjs', import.meta.url));
 /** A product Pi asset root that holds the SDK asset manifest: the built package assets. */
@@ -41,6 +42,14 @@ describe('resolvePiAgentDir', () => {
 });
 
 describe('probePiAuthPresent', () => {
+  test('win32: a mixed-case passed provider key reaches the probe under its canonical name (#1615)', async () => {
+    const live = { Openai_Api_Key: SECRET, Gemini_Api_Key: SECRET, Acme_Token: 'custom', PI_CODING_AGENT_DIR: agentDir };
+    const { env, report } = composeRuntimeEnvironment({ policy: { base: 'allowlist', pass: ['OPENAI_API_KEY', 'Acme_Token', 'PI_CODING_AGENT_DIR'] }, live, platform: 'win32' });
+    await expect(probePiAuthPresent(env)).resolves.toBe(true);
+    expect(env).toEqual({ OPENAI_API_KEY: SECRET, Acme_Token: 'custom', PI_CODING_AGENT_DIR: agentDir, NO_PROXY: '127.0.0.1,localhost' });
+    expect(report.names).toContainEqual({ name: 'OPENAI_API_KEY', source: 'pass' });
+  });
+
   test('a provider credential env-var name is enough, without any file', async () => {
     await expect(probe({ ZAI_API_KEY: '' })).resolves.toBe(true);
     await expect(probe()).resolves.toBe(false);
