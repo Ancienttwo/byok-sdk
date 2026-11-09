@@ -57,11 +57,11 @@ The package needs Node 24.22.1 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the current stable release, 0.40.0.
+The following install example names the 0.41.0 source candidate, pending publication.
 Use an installed package to verify the consumer path.
 
 ~~~sh
-npm install @byok-sdk/cloud-do@0.40.0
+npm install @byok-sdk/cloud-do@0.41.0
 npm install --save-dev @cloudflare/workers-types
 ~~~
 

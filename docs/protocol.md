@@ -191,10 +191,10 @@ list below).
 - **v6 self-consistency.** `golden/v6.envelopes.ndjson` and
   `golden/v6.http.ndjson` start from the v5 corpora with `v` rewritten and
   `isolation.userContext` renamed `userInstructions`, plus lines that carry
-  the new isolation bits. While `golden/v6.releases.json` registers no
-  release, a line may still be edited in place: the presence line
+  the new isolation bits. Before `golden/v6.releases.json` registered a
+  release, a line could still be edited in place: the presence line
   (`v6.http.ndjson:21`) carries the new bits that way, and #1573 rewrote the
-  `TokenResponse` lines to `{ accessToken, expiresIn }`. Once a v6 release is
+  `TokenResponse` lines to `{ accessToken, expiresIn }`. With 0.41.0
   registered, the corpora are append-only. The current decoder reads every
   line back to the committed JSON, and the current HTTP decoders read every
   literal body to its independently authored value (messages responses must
@@ -202,9 +202,9 @@ list below).
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
   and an `approvalId` on every approval request and decision.
-  `golden/v6.releases.json` registers no release yet and has no `floor`. Each
-  registered v6 entry will pin both corpus prefixes, and the lines it covers
-  are immutable.
+  `golden/v6.releases.json` registers the 0.41.0 candidate, the first v6
+  release, and has no `floor`. Each registered v6 entry pins both corpus
+  prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.40.0 registry tarball, the last v5 release. It rejects every v6
   corpus line and a v6 `conn.hello`: a v5 peer cannot read v6 bytes. Nothing it
