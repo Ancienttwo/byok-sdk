@@ -2,13 +2,30 @@ import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import { formatToolAuthorizationDenial } from '../../tool-authorization';
 import { requestToolAuthorization, type ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc';
 
+/** pi-subagents' hidden workflow-child approval tool; it starts nothing itself. */
+const PI_SUBAGENT_LAUNCH_TOOL = 'subagent_launch';
+const UNADMITTED_LAUNCH = 'tool_authorization_denied: subagent_launch is admitted only as the workflow child check of an allowed subagent call';
+
 /**
  * Pi's `tool_call` hook runs before execution; a block becomes the tool's error
  * result. In a native subagent child it names the child session as the agent.
+ *
+ * pi-subagents asks `subagent_launch` before each workflow child starts, as a
+ * nested call of the `subagent` call that runs the workflow (also after an
+ * async `subagent` call returned). The model can reach the same name through
+ * `tool_search` or a codemode script, so the name proves nothing (#1511).
+ * Pi sets `parentToolCallId` on a nested call itself. Only a call whose parent
+ * is a `subagent` call this session's gate allowed reaches the gate, which
+ * judges it with its floor and ask rules; every other one is refused here.
  */
 export function createPiToolAuthorizationHook(config: ToolAuthorizationIpcConfig, options: { subagentChild?: boolean } = {}): ExtensionFactory {
   return (pi) => {
+    const allowedSubagentCalls = new Set<string>();
+    pi.on('session_shutdown', () => { allowedSubagentCalls.clear(); });
     pi.on('tool_call', async (event, context) => {
+      if (event.toolName === PI_SUBAGENT_LAUNCH_TOOL && !(event.parentToolCallId !== undefined && allowedSubagentCalls.has(event.parentToolCallId))) {
+        return { block: true, reason: UNADMITTED_LAUNCH };
+      }
       const verdict = await requestToolAuthorization(config, {
         toolCallId: event.toolCallId,
         toolName: event.toolName,
@@ -18,6 +35,7 @@ export function createPiToolAuthorizationHook(config: ToolAuthorizationIpcConfig
         ...(options.subagentChild ? { nativeAgentId: `pi-subagent:${context.sessionManager.getSessionId()}` } : {}),
       });
       if (verdict.decision === 'deny') return { block: true, reason: formatToolAuthorizationDenial(verdict) };
+      if (event.toolName === 'subagent') allowedSubagentCalls.add(event.toolCallId);
       return undefined;
     });
   };

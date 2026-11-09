@@ -4035,6 +4035,24 @@ to bind its extensions and the launch is rejected. pi-subagents refuses an
 external-cli, external-job or machine placement before it starts, because those
 runners cannot load the gate. Under `all` the host registers nothing.
 
+Before each workflow child starts, pi-subagents calls its hidden
+`subagent_launch` tool from inside the `subagent` call that runs the workflow,
+including an async workflow after that call returned. The call starts nothing.
+The model can reach the same name through `tool_search` or a codemode script,
+so the name alone proves nothing (#1511). Pi marks a call made by another tool
+with `parentToolCallId`, which the model never supplies. Under `auto`, each
+session's gate hook remembers the `subagent` calls the gate allowed, until
+`session_shutdown`. It refuses any `subagent_launch` whose parent is not one of
+them with `tool_authorization_denied`, before it reaches the gate: no parent,
+a parent that is not `subagent` (codemode), a denied or still-pending
+`subagent` call, or a parent from before the shutdown. An admitted launch goes
+to the gate like other calls. The gate checks the child `cwd` as a write
+target, so a sensitive path stays at the floor and a cwd outside the workspace
+asks. `alwaysAsk` rules apply; `allowWithoutAsking` rules never match
+`subagent_launch`, so a Host rule can make the launch stricter but never looser.
+A Host with only `subagent` rules gets one ask per `subagent` call, not one per
+child.
+
 A single-file product offers foreground subagents only. `copyPiRuntimeAssets`
 writes `pi-subagents/` into the Pi asset root: the client's exact pi-subagents
 package with the closure of its runtime dependencies in its own `node_modules`,

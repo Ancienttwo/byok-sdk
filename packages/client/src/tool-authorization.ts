@@ -574,6 +574,8 @@ export function classifyToolCall(
   // Codex projects one native file operation as a batch, including move destinations.
   // Normalize here so auto decisions and all-mode reminders share the same path checks.
   const paths = PATH_KEYS.map(key => ({ path: call.input[key], mutating: MUTATING_TOOLS.has(call.toolName.toLowerCase()) }));
+  // A Pi workflow child launch: its cwd is where the child will write.
+  if (call.toolName === 'subagent_launch') paths.push({ path: call.input.cwd, mutating: true });
   if (call.toolName === 'file_change' && Array.isArray(call.input.changes)) {
     for (const change of call.input.changes) {
       if (change === null || typeof change !== 'object' || Array.isArray(change)) continue;
@@ -600,6 +602,8 @@ export function classifyToolCall(
     for (const { id, match } of entries ?? []) {
       if (!MATCH_KEYS.some(key => match[key] !== undefined)) continue;
       if (allow && (!simpleCommand || !floorCertain)) continue;
+      // pi-subagents' subagent_launch shares its name with a model-reachable call (#1511): no rule loosens it.
+      if (allow && call.toolName === 'subagent_launch') continue;
       if (match.toolName !== undefined && match.toolName !== call.toolName) continue;
       if (match.commandGlob !== undefined && (command === undefined || (!oversizedCommand && !matchGlob(command, match.commandGlob, false)))) continue;
       if (match.mcpServer !== undefined && (call.mcp === undefined || !matchGlob(call.mcp.server, match.mcpServer, false))) continue;
