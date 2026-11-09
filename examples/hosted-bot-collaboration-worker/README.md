@@ -78,6 +78,74 @@ owner principal and H Host config. It stands in for a product's own user and dev
 the rows it needs, each once: H awaits `host(scope)` and the entry's `owner(scope)`, and the owner's token is looked up
 by its hash.
 
+## Running a device
+
+`device-runner` is a private example CLI in this checkout. Build the workspace at the same commit used for the Host
+(`bun ci`, then `bun run build` from the repository root). Use Node satisfying the client's `engines` requirement.
+Run one runner per dedicated OS user on each device. The Host must already have a provisioned scope and supply a fresh
+pairing code from `POST /host/pairing-code`; the device needs only the Host URL and that code, never the operator bearer.
+
+macOS, from the repository root (replace the two placeholders locally):
+
+```sh
+cd examples/hosted-bot-collaboration-worker
+npm run --silent device-runner -- \
+  --server-url 'https://HOST.workers.dev' \
+  --pairing-code 'PAIRING_CODE' \
+  --root "$HOME/byok-worker-device" \
+  --runtime stub
+```
+
+Windows PowerShell, from the repository root:
+
+```powershell
+Set-Location examples/hosted-bot-collaboration-worker
+npm run --silent device-runner -- `
+  --server-url 'https://HOST.workers.dev' `
+  --pairing-code 'PAIRING_CODE' `
+  --root "$env:USERPROFILE\byok-worker-device" `
+  --runtime stub
+```
+
+Use the same root for that device's enrollment and Agent homes. The runner uses the SDK's OS machine identity probe
+and OS credential custody: the user's macOS Keychain or Windows Credential Manager. It supplies no synthetic identity
+or in-memory credential backend. A locked or unavailable credential store fails the run. A different root does not
+create a second physical machine identity, and the SDK refuses a store not bound to the existing enrollment. Use the
+dedicated user's original root; this CLI does not implicitly replace another store's enrollment.
+
+Stdout is JSON lines, suitable for capturing through an operator's remote terminal (`hc run` / `hc exec`):
+
+```jsonl
+{"type":"ready","deviceId":"device-id","runtime":"stub"}
+{"type":"started","taskId":"task-id","agentId":"agent-a","runtime":"stub"}
+{"type":"finished","taskId":"task-id","runtime":"stub"}
+```
+
+`ready` means the Host accepted this run's `conn.hello`. In stub mode, send a JSON line on stdin for each result after
+`started`, using its task id and the result document required by the Host's template. For the collaboration example:
+
+```jsonl
+{"type":"finish","taskId":"task-id","document":{"delegate":[{"to":"agent-b","request":"Check the totals"}]}}
+```
+
+B's reply and A's report can finish with `"document":{}`. Stub `finished` acknowledges result submission to the local
+session, as the IPC fixture does; read the Host's settled Turn to establish completion. Every stdout event carries
+`runtime` so synthetic evidence stays separate from real-runtime evidence. Credentials, pairing codes, result documents
+and raw SDK errors are omitted from the event output. Operational SDK diagnostics and a generic CLI failure go to stderr.
+Keep pairing-code argv and remote-terminal history private; do not paste them into evidence.
+
+For an explicitly approved real-runtime run, change only `--runtime stub` to `--runtime real` in the commands above.
+That selects the SDK's bundled runtime adapters (Pi, Claude and Codex); the Host's execution template selects the
+runtime and model, and the runtime must already be installed and authenticated on the device. The runner makes no
+model call during setup. A real task completes through its runtime, and `finished` follows the daemon's completed
+event. Stdin `finish` is rejected in real mode. Failures and cancellations emit an `error` event with fixed text.
+This CLI does not grant approval for model calls or establish cross-device acceptance evidence.
+
+Send `{"type":"stop"}` on stdin, close stdin, or press Ctrl-C to stop and release the daemon. SIGTERM also stops it.
+Keep stdin open while driving the Host from another terminal. Malformed arguments or commands exit nonzero without
+echoing their contents. The original `device.child.ts` remains the test-only IPC entry with synthetic identities and
+in-memory custody; both entries share task and event logic in `device-session.ts`.
+
 ## Tests
 
 The suites need the substrate of `docker-compose.test.yml` and an opt-in, because they start `wrangler dev`:
@@ -117,7 +185,9 @@ a failure (`src/ci.test.ts` pins that step). Each run has its own Postgres role 
 - `two-devices.test.ts`: two device processes, each with its own pairing, store dir and Agent home. Bot A on device 1
   delegates to Bot B on device 2; B's reply answers the delegation; A's report Turn runs on device 1. Each Turn runs once
   on its Bot's device, with one outcome and one reply record. Also an instance destroyed after the consumer committed a
-  reply: the decision and its record stay.
+  reply: the decision and its record stay. The same file tests runner argument/command validation, shutdown and real
+  adapter event forwarding without a model call. Its local runner case drives stdin/stdout against the Worker Host,
+  checks an OS-derived machine id and uses a disposable macOS keychain (in-memory test custody on other platforms).
 
 A kill is SIGKILL to wrangler and workerd with no grace, so nothing in the Worker runs after it. A restart of the same
 scope keeps the local storage dir (`--persist-to`), so the clock keeps its alarm, as Durable Object storage does on

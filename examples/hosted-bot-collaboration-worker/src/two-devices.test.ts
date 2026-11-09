@@ -8,9 +8,17 @@
  * accepts, answers the delegation, and A's report Turn runs on device 1.
  */
 import { randomUUID } from 'node:crypto';
-import { access, readdir } from 'node:fs/promises';
+import { access, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { PassThrough } from 'node:stream';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import * as client from '@byok-sdk/client';
+import * as runtimeAdapters from '@byok-sdk/client/adapters';
+import { createTestKeychain } from '../../../scripts/testing/macos-keychain.mjs';
+import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { createDeviceSession, deviceConfig, type DeviceEvent } from './device-session.js';
+import { runDeviceRunner, runnerCommand, runnerOptions } from './device-runner.js';
 import { hash, taskId, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
@@ -18,6 +26,112 @@ import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout
 import { openSubstrate, RUN, startDevice, startWorker, until, type DeviceProcess, type Substrate, type WorkerInstance } from './worker.test-support';
 
 const OWNER = { id: 'owner', kind: 'human' } as const;
+const runnerArgs = ['--server-url', 'http://127.0.0.1:1234', '--pairing-code', 'test-pairing-secret', '--root', '/tmp/runner', '--runtime', 'stub'];
+
+describe('device runner boundaries', () => {
+  it.each(['stub', 'real'])('selects %s explicitly and leaves OS identity and custody to the SDK', runtime => {
+    const options = runnerOptions([...runnerArgs.slice(0, -1), runtime]);
+    expect(options.runtime).toBe(runtime);
+    expect(options.config).toMatchObject({ storeDir: path.resolve('/tmp/runner/sdk'), agentHome: { hostStorageRoot: path.resolve('/tmp/runner/homes') } });
+    expect(options.config).not.toHaveProperty('machineId');
+    expect(options.config).not.toHaveProperty('deviceCredentials');
+  });
+  it.each([
+    [], [...runnerArgs.slice(0, -1), 'unknown'], [...runnerArgs, '--unknown', 'secret'],
+    ['--server-url', 'invalid', ...runnerArgs.slice(2)],
+    ...['ftp://host', 'https://user:secret@host', 'https://host/?secret=x', 'https://host/#secret'].map(url => ['--server-url', url, ...runnerArgs.slice(2)]),
+  ].map(args => ({ args })))('rejects missing, unsupported or credential-bearing arguments (%#)', ({ args }) => {
+    expect(() => runnerOptions(args)).toThrow();
+  });
+  it.each(['invalid secret', 'null', '{}', '{"type":"pair","code":"secret"}', '{"type":"finish","taskId":"x"}', '{"type":"stop","secret":"x"}'])
+    ('rejects malformed or unsupported stdin commands (%#)', line => { expect(() => runnerCommand(line)).toThrow(); });
+
+  it('forwards real adapter hooks and reports only task metadata, without running a model', async () => {
+    let listener!: client.DaemonEventListener;
+    let wrapped!: client.RuntimeAdapter;
+    const send = vi.fn();
+    const lease = vi.fn(), launch = vi.fn(), start = vi.fn(async () => ({ sessionRef: 'session' }));
+    const operation = { acquireSessionLease: lease, resolveRuntimeLaunch: launch, start };
+    const adapter = { descriptor: { id: 'pi' }, detect: vi.fn(), runtimeEnvironment: vi.fn(), projectMcpEnvironment: vi.fn(),
+      prepare: vi.fn(async () => ({ kind: 'prepared', operation })) } as unknown as client.RuntimeAdapter;
+    const factory = vi.spyOn(runtimeAdapters, 'createRuntimeAdapters').mockReturnValue([adapter]);
+    const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => {
+      wrapped = adapters[0]!;
+      return { subscribe: (callback: client.DaemonEventListener) => { listener = callback; return () => {}; }, stop: vi.fn() } as unknown as client.Daemon;
+    });
+    try {
+      const device = createDeviceSession(deviceConfig('http://localhost', '/tmp/real-runner'), 'real', send);
+      expect(factory).toHaveBeenCalledWith({});
+      await wrapped.detect(); await wrapped.runtimeEnvironment(); wrapped.projectMcpEnvironment!({});
+      const prepared = await wrapped.prepare({} as client.RuntimeAdapterPrepareInput);
+      if (prepared.kind !== 'prepared') throw new Error('expected prepared');
+      await prepared.operation.acquireSessionLease!('session');
+      await prepared.operation.resolveRuntimeLaunch!({} as never);
+      await prepared.operation.start({ manifest: { taskId: 'task', agentRef: { agentId: 'agent' } } } as client.RuntimeOperationStartInput);
+      expect(lease.mock.contexts[0]).toBe(operation);
+      expect(launch.mock.contexts[0]).toBe(operation);
+      expect(start.mock.contexts[0]).toBe(operation);
+      listener({ kind: 'completed', taskId: 'task', ts: '', summary: 'secret', sessionRef: 'secret' });
+      listener({ kind: 'failed', taskId: 'task', ts: '', reason: 'secret', retryable: false });
+      listener({ kind: 'cancelled', taskId: 'task', ts: '', reason: 'secret' });
+      expect(send.mock.calls.map(([event]) => event)).toEqual([{ type: 'started', taskId: 'task', agentId: 'agent' },
+        { type: 'finished', taskId: 'task' }, ...Array(2).fill({ type: 'error', message: 'runtime task did not complete' })]);
+      await expect(device.finish('task', {})).rejects.toThrow('only available with the stub');
+      vi.mocked(adapter.prepare).mockResolvedValueOnce({ kind: 'reject', reason: 'refused', retryable: false });
+      expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'refused', retryable: false });
+      await device.stop();
+    } finally { compose.mockRestore(); factory.mockRestore(); }
+  });
+
+  it.each(['connecting', 'halted', 'crashed', 'timeout'])('waits for the SDK ready fact or fails on %s', async phase => {
+    let reads = 0;
+    const daemon = { subscribe: () => () => {}, pair: vi.fn(async () => ({ deviceId: 'device' })), start: vi.fn(), stop: vi.fn(),
+      status: () => ({ lifecycle: phase === 'connecting' ? { phase: 'running', connection: ++reads > 1 ? 'open' : 'connecting' }
+        : { phase: phase === 'timeout' ? 'running' : phase, connection: 'connecting' } }),
+    } as unknown as client.Daemon;
+    const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockReturnValue(daemon);
+    const send = vi.fn();
+    vi.useFakeTimers();
+    try {
+      const device = createDeviceSession(deviceConfig('http://localhost', '/tmp/ready-runner'), 'stub', send);
+      const paired = device.pair('secret');
+      const assertion = phase === 'connecting' ? expect(paired).resolves.toBeUndefined() : expect(paired).rejects.toThrow('did not become ready');
+      await vi.advanceTimersByTimeAsync(30_025);
+      await assertion;
+      expect(send.mock.calls).toEqual(phase === 'connecting' ? [[{ type: 'ready', deviceId: 'device' }]] : []);
+      await expect(device.finish('missing-task', {})).rejects.toThrow('no runtime session');
+      await device.stop();
+    } finally { vi.useRealTimers(); compose.mockRestore(); }
+  });
+
+  it.each(['stop', 'eof', 'signal', 'pre-aborted', 'invalid', 'halt', 'crash', 'pair-failure'])('stops and releases the runner on %s', async ending => {
+    const input = new PassThrough(), output = new PassThrough(), controller = new AbortController();
+    let listener!: client.DaemonEventListener;
+    const finish = vi.fn(), stop = vi.fn(), unsubscribe = vi.fn();
+    let paired!: () => void;
+    const ready = new Promise<void>(resolve => { paired = resolve; });
+    const pair = vi.fn(async () => { paired(); if (ending === 'pair-failure') throw new Error('pairing-secret'); });
+    if (ending === 'pre-aborted') controller.abort();
+    const running = runDeviceRunner(runnerArgs, input, output, controller.signal, (() => ({ pair, finish, stop,
+      daemon: { subscribe: (callback: client.DaemonEventListener) => { listener = callback; return unsubscribe; } },
+    })) as unknown as typeof createDeviceSession);
+    const settled = expect(running);
+    if (ending !== 'pre-aborted') await ready;
+    else expect(pair).not.toHaveBeenCalled();
+    if (ending === 'stop') input.write('{"type":"finish","taskId":"task","document":{}}\n{"type":"stop"}\n');
+    if (ending === 'eof') input.end();
+    if (ending === 'signal') controller.abort();
+    if (ending === 'invalid') input.write('secret invalid JSON\n');
+    if (ending === 'halt' || ending === 'crash') listener({ kind: 'lifecycle', ts: '', lifecycle: ending === 'halt'
+      ? { phase: 'halted', reason: 'device_revoked' } : { phase: 'crashed' } } as client.DaemonEvent);
+    if (['invalid', 'halt', 'crash', 'pair-failure'].includes(ending)) await settled.rejects.toThrow();
+    else await settled.resolves.toBeUndefined();
+    if (ending === 'stop') expect(finish).toHaveBeenCalledWith('task', {});
+    expect(stop).toHaveBeenCalledOnce();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    input.destroy(); output.destroy();
+  });
+});
 
 /** A Bot template with the K8 reply contract (K8 team.test-support.ts): each Turn's reply is a required Agent message. */
 function replying(deviceId: string, agentId: string): ExecutionTemplate {
@@ -130,6 +244,65 @@ describe.skipIf(!RUN)('two device processes against one Worker H Host (#794 D3)'
     await until(async () => (await pass(), (await state()).turns[turnId]?.status === 'succeeded' || undefined));
     expect((await commands()).filter(id => id.startsWith(`${task}:`))).toEqual(committed);
     expect((await commands()).filter(id => id === task)).toHaveLength(1);
+  });
+
+  it('runs the JSON-lines stub runner with SDK machine identity and disposable custody against the local Host', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'hw-runner-'));
+    const keychain = process.platform === 'darwin' ? await createTestKeychain() : undefined;
+    const input = new PassThrough(), output = new PassThrough();
+    let printed = '';
+    output.on('data', chunk => { printed += chunk.toString(); });
+    const events = () => printed.trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as DeviceEvent & { runtime: string });
+    const runnerScope = `runner-${randomUUID()}`;
+    const args = ['--server-url', worker!.base, '--root', root, '--runtime', 'stub'];
+    await substrate.provision(runnerScope, OWNER, { models: { default: template('pending', 'main') }, readOnlyToolsets: [] });
+    const { code } = await worker!.admin<{ code: string }>('/host/pairing-code', { scope: runnerScope });
+    const running = runDeviceRunner([...args, '--pairing-code', code], input, output, new AbortController().signal,
+      (config, runtime, send) => {
+        expect(config.machineId).toBeUndefined();
+        expect(config.deviceCredentials).toBeUndefined();
+        return keychain ? createDeviceSession({ ...config, deviceCredentials: { macosKeychainPath: keychain.path } }, runtime, send)
+          : createDeviceSession(config, runtime, send, { deviceCredentials: new InMemoryDeviceCredentialStore() });
+      });
+    // Attach failure handling before polling so a startup failure cannot become an unhandled rejection.
+    let failure: unknown;
+    void running.catch(error => { failure = error; });
+    try {
+      const ready = await until(async () => {
+        if (failure) throw failure;
+        return events().find(event => event.type === 'ready');
+      });
+      if (ready.type !== 'ready') throw new Error('expected ready');
+      const deviceId = ready.deviceId;
+      expect((await substrate.pool.query<{ machine_id: string }>(`SELECT machine_id FROM "${substrate.sdkSchema}".device WHERE device_id = $1`, [deviceId])).rows[0]?.machine_id)
+        .toMatch(/^[a-f0-9]{64}$/u);
+      await substrate.store.bindDevice(runnerScope, deviceId);
+      const execution = replying(deviceId, 'main');
+      const runnerToken = await substrate.provision(runnerScope, OWNER, { models: { default: execution }, readOnlyToolsets: [] });
+      await substrate.store.seed(runnerScope, state => {
+        seedCollaboration(state);
+        Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+        state.team.bots.main!.execution = execution;
+      });
+      const response = await worker!.input(runnerToken, 'main', randomUUID(), 'Answer directly');
+      const { turnId } = await response.json() as { turnId: string };
+      const task = taskId(turnId, 0);
+      await until(async () => (await pass(), events().find(event => event.type === 'started' && event.taskId === task)));
+      input.write(JSON.stringify({ type: 'finish', taskId: task, document: {} }) + '\n');
+      await until(async () => events().find(event => event.type === 'finished' && event.taskId === task));
+      await until(async () => (await pass(), (await substrate.store.read(runnerScope)).turns[turnId]?.status === 'succeeded' || undefined));
+      input.write('{"type":"stop"}\n');
+      await running;
+      expect(events()).toEqual([{ type: 'ready', deviceId, runtime: 'stub' },
+        { type: 'started', taskId: task, agentId: 'main', runtime: 'stub' }, { type: 'finished', taskId: task, runtime: 'stub' }]);
+      expect(printed).not.toContain(code);
+      expect(printed).not.toMatch(/privateKey|accessToken|refreshToken/u);
+    } finally {
+      input.end();
+      await running.catch(() => {});
+      await keychain?.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   async function restart(options: Parameters<typeof startWorker>[1] = {}) {
