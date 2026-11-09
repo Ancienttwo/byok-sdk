@@ -169,7 +169,7 @@ await registry.configure({
 gateway turns that session id into the `x-opencode-session` header that
 OpenCode Go requires, so every request of one Pi session carries the same
 OpenCode session. The prepared runtime entry refuses this compat key, so this
-profile runs on the `pi-rpc` lane.
+profile does not run on `pi-prepared`. The recorded run used `pi-rpc`.
 
 The direct `opencode-go` vendor profile currently has a reasoning replay
 defect, see [#1586](https://github.com/Ancienttwo/byok-sdk/issues/1586).

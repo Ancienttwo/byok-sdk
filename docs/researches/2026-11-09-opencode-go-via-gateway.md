@@ -25,7 +25,11 @@ afterwards, together with its temporary directories.
    prefix. `base_url` pointed at a loopback recorder that forwarded every
    request unchanged to `127.0.0.1:3425`. The recorder kept only header
    names, the first 8 characters of session headers, `reasoning_effort`, and
-   the names and lengths of reasoning fields in assistant messages.
+   the names and lengths of reasoning fields in assistant messages. A
+   request to also log the request's `thinking` field arrived after run 2
+   had finished, so that field was not recorded. The case it would have
+   told apart, a request that never enabled thinking, did not come up:
+   run 2 returned reasoning.
 3. The key check was `checkProviderKey`, with the key read back from the
    keychain.
 4. The Pi session ran on the `pi-rpc` lane: `PiAdapter` with a
@@ -98,7 +102,6 @@ Run 1 quota: key check 66 input / 27 output (21 reasoning); Pi requests
 ## Key-leak check
 
 The diff, this record, the PR body and the issue comments were searched
-for the exact gateway key value. The local key is not high-entropy: it is
-spelled the same as a word the docs must use. Every match is that word in
-prose. No match is in a credential position, such as a header, a `configure`
-argument or a recorded value.
+for the exact gateway key value. Every match is in prose. No match is in a
+credential position, such as a header, a `configure` argument or a recorded
+value.
