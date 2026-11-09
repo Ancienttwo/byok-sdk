@@ -415,8 +415,10 @@ Agent home (`lease.canonicalHome`):
   to `<Agent home>/.byok/codex/archived_sessions`. Each execution has a fresh
   `codex-home`, and a resume finds the thread through the rollout in this
   store, so a later task of the same Agent resumes its thread. The user's
-  thread store is never linked: an excluded task cannot resume, list or read
-  the user's threads. The store is the `agent-runtime-sessions` retention class
+  thread store is never linked: Codex cannot resume or list the user's
+  threads. The adapter creates the store only through real directories inside
+  the Agent home, and refuses the start when `.byok`, `.byok/codex` or the
+  store is a symbolic link. The store is the `agent-runtime-sessions` retention class
   ([storage layout](host-local-storage-layout.md)). It is unbounded: each
   Agent's rollouts accumulate until the Host removes the Agent home, as they
   did in the user's `CODEX_HOME` before.
@@ -449,7 +451,9 @@ without following the links.
 
 The start fails as a non-retryable `authority` failure when:
 
-- The task has no sealed Agent home for its thread store.
+- The task has no sealed Agent home for its thread store, or its store path is
+  not a real directory inside the Agent home (for example a symbolic link an
+  earlier task left there). Reason: `codex Agent user context exclusion refused: the Agent home thread store is not a real directory inside the Agent home`.
 - Codex's effective `cli_auth_credentials_store` (from `config/read`) is not
   `file`. A keyring entry is keyed by the `CODEX_HOME` path, so the SDK home
   would not find the login, and a keyring save deletes `auth.json`, which is the

@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../../agent-home';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 
 const PREFIX = 'codex Agent user context exclusion refused';
@@ -74,8 +75,11 @@ export async function createCodexAgentHome(env: Readonly<Record<string, string |
     if (stat !== undefined) await link(target, name, stat.isDirectory() ? 'dir' : 'file');
   }
   for (const name of AGENT_STORE) {
-    const target = path.join(agentHome, '.byok', 'codex', name);
-    await fs.mkdir(target, { recursive: true, mode: 0o700 });
+    // The Agent can write in its home: every component down to the store must be a real directory inside it.
+    const target = await ensureDirectoryNoSymlink(agentHome, path.join(agentHome, '.byok', 'codex', name)).catch((error: unknown) => {
+      if (error instanceof AgentHomeResolutionError) throw refuse('the Agent home thread store is not a real directory inside the Agent home');
+      throw error;
+    });
     await link(target, name, 'dir');
   }
   return home;

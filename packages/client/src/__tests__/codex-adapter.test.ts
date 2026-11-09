@@ -856,16 +856,29 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
       message: 'codex Agent user context exclusion refused: cli_auth_credentials_store is keyring; an SDK-owned CODEX_HOME supports file credentials only' });
   });
 
-  it.each([
+  const refusals: ReadonlyArray<readonly [reason: string, prepare: (user: string, home: string) => Promise<unknown>, agentHome: string | undefined]> = [
     ['the task has no sealed Agent home for its thread store', async () => {}, undefined],
     ['the user CODEX_HOME does not exist', async (user: string) => fs.rm(user, { recursive: true }), 'agent-home'],
     ['the user CODEX_HOME has no auth.json; log in to Codex with file credentials first', async (user: string) => fs.rm(path.join(user, 'auth.json')), 'agent-home'],
-  ])('refuses when %s', async (reason, remove, agentHome) => {
+    // An earlier task may have redirected its own store to the user's thread store.
+    ...[['.byok', 'codex'], ['.byok', 'codex', 'sessions'], ...(process.platform === 'darwin' ? [['.BYOK', 'codex']] : [])].map(at => [
+      'the Agent home thread store is not a real directory inside the Agent home',
+      async (user: string, home: string) => {
+        await fs.mkdir(path.join(user, 'sessions'));
+        await fs.mkdir(path.join(home, ...at.slice(0, -1)), { recursive: true });
+        await fs.symlink(at.length === 3 ? path.join(user, 'sessions') : user, path.join(home, ...at), 'dir');
+      },
+      'agent-home',
+    ] as const),
+  ];
+  it.each(refusals)('refuses when %s', async (reason, remove, agentHome) => {
     const user = await userHome();
-    await remove(user);
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-sdk-'));
+    const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-sdk-')));
     dirs.push(dir);
-    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, agentHome && path.join(dir, agentHome))).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable',
+    const home = agentHome && path.join(dir, agentHome);
+    if (home !== undefined) await fs.mkdir(home);
+    await remove(user, home!);
+    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, home)).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable',
       message: `codex Agent user context exclusion refused: ${reason}` });
   });
 
