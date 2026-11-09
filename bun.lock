@@ -7,7 +7,6 @@
       "devDependencies": {
         "@types/node": "^24",
         "acorn": "8.19.0",
-        "byok-protocol-v6-baseline": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.41.0.tgz",
         "sigstore": "5.0.1",
         "tsup": "^9.0.0",
         "typescript": "^7.0.2",
@@ -335,6 +334,7 @@
       },
       "devDependencies": {
         "byok-protocol-previous": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.40.0.tgz",
+        "byok-protocol-v6-baseline": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.41.0.tgz",
       },
     },
     "packages/server": {

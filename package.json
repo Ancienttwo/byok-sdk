@@ -36,7 +36,6 @@
     "check:capability-matrix": "node scripts/docs/capability-matrix.mjs"
   },
   "devDependencies": {
-    "byok-protocol-v6-baseline": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.41.0.tgz",
     "@types/node": "^24",
     "tsup": "^9.0.0",
     "typescript": "^7.0.2",
