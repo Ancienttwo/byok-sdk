@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import * as v5Release from 'byok-protocol-previous';
+import * as v6Release from 'byok-protocol-v6-baseline';
 import * as currentModule from '../index';
 import {
   AgentMemorySelectionSchema,
@@ -30,8 +31,8 @@ import {
  * Executable wire-major-6 compatibility evidence (docs/protocol.md "Freeze
  * rule", docs/releases/README.md).
  *
- * v6 has no v5 reader, and no v6 release has been published yet, so there is
- * no published v6 decoder to prove additions against. This file keeps:
+ * v6 has no v5 reader. The published 0.41.0 decoder is the v6 baseline.
+ * This file keeps:
  *
  * 1. Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
  *    and the v2 release registry `golden/releases.json` are byte-identical to
@@ -418,7 +419,7 @@ describe('compat: the current decoder rejects every v5 envelope on its protocol 
 });
 
 // ---------------------------------------------------------------------------
-// 5. v6: self-consistency only — no published v6 decoder exists yet
+// 5. v6: current corpus and published baseline
 // ---------------------------------------------------------------------------
 
 const v6Lines = ndjsonLines(readGolden('v6.envelopes.ndjson'));
@@ -428,7 +429,7 @@ const v6HttpLines = ndjsonLines(v6HttpText);
 const v6HttpCorpus = httpCorpusOf(v6HttpLines);
 const v6Registry = JSON.parse(readGolden('v6.releases.json')) as { readonly releases: readonly ReleaseEntry[] };
 
-describe('compat v6 registry: no published v6 decoder exists yet, so cross-release gates are unproven', () => {
+describe('compat v6 registry', () => {
   it('the v6 registry has releases only, and no floor until a v6 release is supported', () => {
     expect(Object.keys(v6Registry)).toEqual(['releases']);
     expect(Array.isArray(v6Registry.releases)).toBe(true);
@@ -469,7 +470,7 @@ describe('compat v6 registry: no published v6 decoder exists yet, so cross-relea
   });
 });
 
-describe('compat v6: the current decoder reads every v6 corpus line exactly (self-consistency; no published v6 decoder yet)', () => {
+describe('compat v6: the current decoder reads every v6 corpus line exactly', () => {
   it.each(v6Corpus.map((line) => [line.index + 1, line.type, line] as const))(
     'v6 line %i (%s) decodes, round-trips and deep-equals the committed JSON',
     (_n, _type, line) => {
@@ -658,7 +659,7 @@ function assertCurrentHttp(line: HttpCorpusLine): void {
   assertBatchCounts(line, decoded);
 }
 
-describe('compat v6: HTTP corpus (self-consistency; no published v6 decoder yet)', () => {
+describe('compat v6: HTTP corpus', () => {
   it('covers all eleven scoped HTTP route schemas with owned bodies and independent expected values', () => {
     const surfaces: readonly HttpSurface[] = ['ChallengeRequest', 'ChallengeResponse', 'TokenRequest', 'TokenResponse',
       'PairRequest', 'PairResponse', 'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse',
@@ -688,6 +689,43 @@ describe('compat v6: HTTP corpus (self-consistency; no published v6 decoder yet)
   it('rejects unaccounted batch members', () => {
     const line = v6HttpCorpus.find((entry) => entry.surface === 'MessagesSendResponse' && entry.batchLength === 2)!;
     expect(() => assertCurrentHttp({ ...line, batchLength: 3 })).toThrow('entire submitted batch');
+  });
+});
+
+describe('compat v6: published 0.41.0 baseline', () => {
+  it('does not narrow the published JSON Schema shapes', () => {
+    expect(packageVersion('byok-protocol-v6-baseline')).toBe('0.41.0');
+    expect(v6Registry.releases.some((entry) => entry.version === '0.41.0')).toBe(true);
+    // Equality is conservative: even a widening needs explicit review of this guard.
+    expect(jsonSchema(EnvelopeSchema)).toEqual(jsonSchema(v6Release.EnvelopeSchema));
+    for (const surface of new Set(v6HttpCorpus.map((line) => line.surface))) {
+      expect(jsonSchema(httpSchema(currentModule, surface)), surface).toEqual(jsonSchema(httpSchema(v6Release, surface)));
+    }
+  });
+
+  it('the released decoder reads current envelope and HTTP corpus bytes', () => {
+    for (const line of v6Corpus) {
+      expect(v6Release.decodeEnvelope(line.raw), `envelope line ${line.index + 1}`).toEqual(JSON.parse(line.raw));
+    }
+    for (const line of v6HttpCorpus) {
+      const decoded = httpSchema(v6Release, line.surface).parse(JSON.parse(line.body));
+      expect(decoded, `HTTP line ${line.index + 1}`).toEqual(line.value);
+      for (const entry of undecodedEntries(line, decoded) ?? []) expect(v6Release.parseMessage(entry)).toEqual(entry);
+    }
+  });
+
+  it('proves every gated or strip-safe addition against the released decoder', () => {
+    for (const row of WIRE_ADDITIONS) {
+      const lines = v6Corpus.filter((line) => carries(line, row));
+      expect(lines.length, JSON.stringify(row)).toBeGreaterThan(0);
+      for (const line of lines) {
+        expect(v6Release.decodeEnvelope(line.raw), JSON.stringify(row)).toEqual(JSON.parse(line.raw));
+        expect(requiredReceiverCapabilities(line.type, line.payload), JSON.stringify(row)).toContain(row.capability);
+        expect(v6Release.requiredReceiverCapabilities(line.type, line.payload), JSON.stringify(row)).toContain(row.capability);
+      }
+    }
+    // v6 has no strip-safe rows; introducing one requires a released-decoder proof.
+    expect(WIRE_ADDITIONS.every((row) => row.rule === 'gated')).toBe(true);
   });
 });
 

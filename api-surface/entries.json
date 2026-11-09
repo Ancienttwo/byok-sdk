@@ -1851,7 +1851,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1532,
+      "budgetBytes": 1636,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
