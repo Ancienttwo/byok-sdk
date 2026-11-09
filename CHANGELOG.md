@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1595)** — On Windows, a `CODEX_HOME`, `CLAUDE_CONFIG_DIR` or `PI_CODING_AGENT_DIR` set in the user's session now reaches the runtime, as the login-shell environment keeps it on macOS and Linux. The `windows-session` base dropped these names, so `detect()` and every task used the runtime's default home instead: Codex `login status` checked the wrong home and reported no login, and Codex, Claude and Pi tasks read another configuration than the user's own terminal. Grok runs only on macOS and Linux, so `GROK_HOME` is unaffected.
+
 - **Fixed (client; #1549)** — Daemon-local completion events, `Daemon.tasks()` terminal state and execution records now wait for the first finalization attempt to settle, after this task's writes to the agent home (including resident-memory restore) are done on successful finalization, up to about 1s later than before. Failed attempts still emit local completion signals without waiting for a retry. Wire and cloud completion signals, including `TaskHandle.result()` and `TaskHandle.events()`, are unchanged.
 
 ## 0.40.0 — 2026-11-08 (published)

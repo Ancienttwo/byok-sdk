@@ -145,6 +145,11 @@ const WINDOWS_SESSION_NAMES: readonly string[] = [
   'PROCESSOR_ARCHITECTURE',
   'PROCESSOR_IDENTIFIER',
   'OS',
+  // The runtimes' own config homes a user may set on win32, kept as the
+  // macOS/Linux login-shell snapshot keeps them (#1595).
+  'CODEX_HOME',
+  'CLAUDE_CONFIG_DIR',
+  'PI_CODING_AGENT_DIR',
 ];
 
 /**

@@ -196,7 +196,8 @@ the Host sets does not reach an agent.
   logon from the machine and user `Environment` registry keys (System
   Properties > Environment Variables), so a directory added only in a
   PowerShell profile is not on a runtime's `PATH`: add it to the user `Path`
-  there instead. The other names come from the live session. If the registry
+  there instead. The other names come from the live session, including a
+  `CODEX_HOME`, `CLAUDE_CONFIG_DIR` or `PI_CODING_AGENT_DIR` you set. If the registry
   cannot be read, runtimes show
   `refused:runtime_environment_unavailable:logon-registry-unavailable`. List
   any other name in `pass`.
