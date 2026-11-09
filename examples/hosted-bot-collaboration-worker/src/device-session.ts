@@ -79,7 +79,7 @@ function reportStarts(adapter: RuntimeAdapter, send: (event: DeviceEvent) => voi
     ...(adapter.projectMcpEnvironment === undefined ? {} : { projectMcpEnvironment: adapter.projectMcpEnvironment.bind(adapter) }),
     async prepare(input) {
       const bound = await admission();
-      if (bound !== true) return { kind: 'reject', reason: bound === undefined ? 'member binding pending' : 'member binding failed', retryable: bound === undefined };
+      if (bound !== true) return { kind: 'reject', reason: bound === undefined ? 'member binding pending' : 'member binding failed', retryable: false };
       const result = await adapter.prepare(input);
       if (result.kind === 'reject') return result;
       const operation = result.operation;

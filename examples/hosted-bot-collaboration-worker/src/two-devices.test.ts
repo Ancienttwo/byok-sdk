@@ -370,7 +370,7 @@ describe('device runner boundaries', () => {
       expect(daemon.start).not.toHaveBeenCalled();
       await expect(device.start()).rejects.toThrow('comparison is required');
       await device.compareMember(browser.member);
-      expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'member binding pending', retryable: true });
+      expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'member binding pending', retryable: false });
       const key = mode === 'different' ? other.member.signingPublicJwk : browser.member.signingPublicJwk;
       read.mockImplementation(async () => mode === 'missing-record' ? undefined : { ...state,
         ...(mode === 'missing' || (mode === 'late-match' && Date.now() < pairedAt + 45_000) || mode === 'interrupted' ? {} : { anchor: {
@@ -383,7 +383,7 @@ describe('device runner boundaries', () => {
       const assertion = matches ? expect(started).resolves.toBeUndefined() : expect(started).rejects.toThrow('did not bind');
       if (mode === 'late-match') {
         await vi.advanceTimersByTimeAsync(30_001);
-        expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toMatchObject({ kind: 'reject', retryable: true });
+        expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toMatchObject({ kind: 'reject', reason: 'member binding pending', retryable: false });
       }
       if (mode === 'interrupted') controller.abort();
       await vi.advanceTimersByTimeAsync(mode === 'missing' ? 600_001 : 15_025); await assertion;
@@ -564,16 +564,20 @@ it.skipIf(!RUN || process.env.BYOK_TEST_WORKER_SEALED_CANARY !== '1').each(['con
         compared.member.signingPublicJwk, registration!.member.signingPublicJwk)).replaceAll(' ', '') });
       input.write('{"type":"approve"}\n');
     }
+    let earlyTask: string | undefined;
     if (delayed) {
       await until(async () => {
         const lifecycle = session!.daemon.status().lifecycle;
         return lifecycle.phase === 'running' && lifecycle.connection === 'open' || undefined;
       });
-      const earlyTask = `task-${randomUUID()}`, early = template(deviceId, `agent-${randomUUID()}`);
+      earlyTask = `task-${randomUUID()}`;
+      const early = template(deviceId, `agent-${randomUUID()}`);
       await cloud.submitAgentExecution(tenant, { taskId: earlyTask, deviceId, payload: early.payload });
-      const refused = await until(async () => (await cloud.readDeviceTerminal(tenant, earlyTask))?.envelope);
+      const offeredTask = earlyTask;
+      const refused = await until(async () => (await cloud.readDeviceTerminal(tenant, offeredTask))?.envelope);
       expect(refused.type).toBe('task.decline');
-      expect(refused.payload).toMatchObject({ reason: 'member binding pending', retryable: true });
+      expect(refused.payload).toMatchObject({ reason: 'member binding pending', retryable: false });
+      expect((await cloud.readTaskAttempt(tenant, earlyTask))?.status).toBe('failed');
       await wait('error');
       expect(events().filter(event => event.type === 'error')).toEqual([
         { type: 'error', taskId: earlyTask, message: 'runtime task did not complete', runtime: 'stub' },
@@ -611,6 +615,13 @@ it.skipIf(!RUN || process.env.BYOK_TEST_WORKER_SEALED_CANARY !== '1').each(['con
     await wait('finished');
     const terminal = await until(async () => (await cloud.readDeviceTerminal(tenant, task))?.envelope);
     expect(terminal.type).toBe('task.complete');
+    if (earlyTask) {
+      expect((await cloud.readDeviceTerminal(tenant, earlyTask))?.envelope).toMatchObject({
+        type: 'task.decline', payload: { reason: 'member binding pending', retryable: false },
+      });
+      expect((await cloud.readTaskAttempt(tenant, earlyTask))?.status).toBe('failed');
+      expect(events().filter(event => event.type === 'started').map(event => event.taskId)).toEqual([task]);
+    }
     if (automatic) {
       const { ciphertext, ...header } = (terminal.payload as { sealed: { ciphertext: string } }).sealed;
       const opened = await member.open('task.complete', { taskId: task }, deviceId, payload.agentRef,

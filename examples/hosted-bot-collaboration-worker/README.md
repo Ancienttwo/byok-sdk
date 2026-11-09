@@ -265,8 +265,9 @@ Compare these digits with the page's ten groups of five **before** confirming ei
 The device can now start and resume member verification. Before emitting `ready`, it reads the public persisted
 `anchor.approverSigningPublicJwk` and compares its canonical `kty/crv/x/y` fields with the approved key; a different or
 missing anchor stops the daemon and emits a fixed error. Runtime admission reads the same binding promise as startup:
-while pending, `prepare()` rejects retryably; a failed binding rejects permanently, so no runtime can start before the
-approved anchor matches. A sealed offer may still be opened in process memory before this refusal; nothing leaves the
+while pending or failed, `prepare()` rejects permanently, so no runtime can start before the approved anchor matches.
+Submit work only after `ready`: tasks offered before it are terminally declined and are not retried.
+A sealed offer may still be opened in process memory before this refusal; nothing leaves the
 process and no runtime starts. On a mismatch send `{"type":"reject"}`; the
 runner stops before daemon startup or member relay acceptance. `approve` without a successful comparison, a second
 bundle or task controls during the comparison fails closed. Keep this code on the device's local operator display;
