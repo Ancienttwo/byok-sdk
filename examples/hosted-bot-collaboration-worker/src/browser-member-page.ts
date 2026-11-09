@@ -34,9 +34,10 @@ action('create', async () => {
   member = await BrowserMember.create(input('tenant').value, memberTransport(bearer));
   input('bundle').value = JSON.stringify(member.member);
   input('remove-member').value = member.member.memberId;
-  for (const id of ['start', 'verify', 'compare', 'join', 'scope-button', 'submit', 'decrypt', 'revoke']) input(id).disabled = false;
+  for (const id of ['copy-bundle', 'start', 'verify', 'compare', 'join', 'scope-button', 'submit', 'decrypt', 'revoke']) input(id).disabled = false;
   report({ result: 'KEYS_READY', memberId: member.member.memberId });
 });
+action('copy-bundle', async () => { await navigator.clipboard.writeText(JSON.stringify(current().member)); });
 action('start', async () => { output('pairing', await current().start(input('product').value)); });
 action('verify', async () => {
   input('confirm-device').disabled = true;

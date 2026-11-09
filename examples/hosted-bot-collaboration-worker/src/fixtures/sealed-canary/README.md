@@ -185,9 +185,15 @@ and requests no caching or referrer transmission.
 3. Start the fresh tenant. Give the displayed `<pairingCode>.<pv>` input to the
    device privately. The verification secret never goes to the Host. Use W2b's
    E2EE pairing and local comparison flow, then enter its device ID. Verify its
-   MAC, compare all 50 digits on both screens, check the comparison box and confirm
-   the device. The page signs `add(device)` and relays the authenticated client
-   MAC. Never copy pairing inputs or comparison codes into acceptance evidence.
+   MAC, then use **Copy public bundle**. On the device runner's private stdin, send
+   `{ "type": "member-bundle", "bundle": <public bundle JSON> }`. It emits
+   `{ "type": "approval-code", "code": "..." }` locally. Compare all 50 digits
+   with the page's device code. Send `{ "type": "approve" }` on the device (or
+   `{ "type": "reject" }` to refuse), then check the comparison box and confirm
+   on the page. The page signs `add(device)` and relays the authenticated client
+   MAC only after that confirmation. Both screens therefore show the code before
+   the device is added. Never copy pairing inputs or comparison codes into
+   acceptance evidence.
 4. To add another browser, create keys in another tab with the same tenant. Copy
    its public bundle into the active tab, and the active tab's bundle into the
    new tab. Show and compare codes on both screens. Approve from the active tab,

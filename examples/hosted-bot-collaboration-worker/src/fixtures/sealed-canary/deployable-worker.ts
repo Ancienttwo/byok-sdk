@@ -27,7 +27,7 @@ const observer: ByokCloudObserver = { onInboundCommitted({ envelope }) {
 
 export default {
   async fetch(request: Request, env: Env, ctx: Context): Promise<Response> {
-    const route = new URL(request.url).pathname;
+    const route = URL.parse(request.url)!.pathname;
     if (route === '/member' || route === '/member.js') return memberAsset(request, env.ASSETS);
     if (!route.startsWith('/byok/')) {
       if (!env.HOST_ADMIN_TOKEN) return new Response('operator secret unavailable', { status: 503 });

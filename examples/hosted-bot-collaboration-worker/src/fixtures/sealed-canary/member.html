@@ -19,8 +19,10 @@ fieldset { margin: 1.5rem 0; border: 1px solid #acb7b5 } code { overflow-wrap: a
 <output id="pairing"></output>
 <p>Give the pairing input to the device privately. It includes a verification secret that must never go to the Host or logs.</p>
 <label>This tab's public bundle (safe to copy to another member) <textarea id="bundle" readonly rows="4"></textarea></label>
+<button id="copy-bundle" disabled>Copy public bundle</button>
 </fieldset>
 <fieldset><legend>2. Verify and approve the device</legend>
+<p>Copy this tab's public bundle into the device runner's public-bundle stdin command. Compare its local approval-code output with the code below. Approve locally on the device, then confirm here. The page sends add(device) and the client MAC only after this confirmation.</p>
 <label>Device ID <input id="device"></label><button id="verify" disabled>Verify device MAC and show code</button>
 <output id="device-code"></output>
 <label><input id="device-compared" type="checkbox" style="width:auto"> I compared all 50 digits on both screens</label>
