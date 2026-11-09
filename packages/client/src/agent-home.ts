@@ -1027,11 +1027,16 @@ export class AgentHomeExecutionLeaseManager {
       let group = AgentHomeExecutionLeaseManager.groups.get(resolution.canonicalHome);
       if (group === undefined) {
         // Set, read and cleared in one synchronous step: `acquire()` reads the
-        // mark before its first await, and the mark is gone before this await,
-        // so it can never reach a later claim on the same resolution object.
+        // mark before its first await, and the finally clears it even if an
+        // overridden `acquire()` throws synchronously. The promise is awaited
+        // only after, so the mark never reaches a later claim.
         executionClaims.add(resolution);
-        const claiming = this.manager.acquire(resolution);
-        executionClaims.delete(resolution);
+        let claiming: Promise<AgentHomeLease>;
+        try {
+          claiming = this.manager.acquire(resolution);
+        } finally {
+          executionClaims.delete(resolution);
+        }
         const baseLease = await claiming;
         group = {
           manager: this.manager,
