@@ -312,6 +312,8 @@ export class CodexAdapter implements RuntimeAdapter {
             // Startup plugin sync precedes beforeOpen and the thread's feature overrides.
             // Plugins are user context too, and the SDK home has no plugin cache to sync into.
             ...(excludeUserMcp || excludeUserContext ? ['-c', 'features.plugins=false'] : []),
+            // The memory pipeline would extract from the user's own threads in the linked sessions/.
+            ...(excludeUserContext ? ['-c', 'features.memories=false'] : []),
           ],
           ...(input.manifest.sessionRef === undefined
             ? {}
