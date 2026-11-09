@@ -1098,6 +1098,13 @@
               ],
               "description": "`CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`."
             },
+            "agentUserContext": {
+              "enum": [
+                "excluded",
+                "inherit"
+              ],
+              "description": "`CodexAdapterOptions.agentUserContext`: `excluded` runs an Agent task in an SDK-owned `CODEX_HOME` that keeps the user's `AGENTS.md`, skills, memories and threads out, links the login, configuration and guardrails, and keeps the Agent's threads in its home. Default `inherit`."
+            },
             "versionPolicy": {
               "type": "object",
               "properties": {
