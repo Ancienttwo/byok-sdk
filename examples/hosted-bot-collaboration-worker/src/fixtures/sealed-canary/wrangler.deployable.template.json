@@ -1,0 +1,8 @@
+{
+  "name": "byok-p9-canary",
+  "main": "../../examples/hosted-bot-collaboration-worker/src/fixtures/sealed-canary/deployable-worker.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "hyperdrive": [{ "binding": "BYOK_PG", "id": "REPLACE_WITH_CANARY_HYPERDRIVE_ID" }]
+}
