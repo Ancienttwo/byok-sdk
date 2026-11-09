@@ -19,7 +19,7 @@ import {
  */
 
 const helloBase = {
-  protocolVersions: [5],
+  protocolVersions: [6],
   capabilities: ['runtime-unavailable-cause'],
   deviceId: 'device-1',
   productId: 'product-1',
@@ -103,11 +103,9 @@ describe('PresencePublishRequest version policy projection (#1103 D8)', () => {
     ]);
   });
 
-  it('rejects a harness id in the presence id domain, which stays RuntimeId', () => {
-    expect(() => PresencePublishRequestSchema.parse({
-      level: 'online',
-      runtimeUnavailable: [{ id: 'grok', cause: 'not_installed', retryable: true }],
-    })).toThrow();
+  it('accepts a harness id in the presence id domain, the same domain as conn.hello', () => {
+    const runtimeUnavailable = [{ id: 'grok', cause: 'not_installed', retryable: true }];
+    expect(PresencePublishRequestSchema.parse({ level: 'online', runtimeUnavailable }).runtimeUnavailable).toEqual(runtimeUnavailable);
   });
 
   it('strips an unknown field rather than rejecting the body (an old receiver drops it)', () => {

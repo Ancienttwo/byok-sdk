@@ -4,7 +4,7 @@
 // oracle. This file only adds the seam the oracle cannot see: the per-runner
 // host recorded the same decline/claim boundary the wire saw.
 import { describe, expect, it } from 'vitest';
-import { createEnvelope, isSealedTaskPlainOutput, requiredReceiverCapabilities, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, isSealedTaskPlainOutput, type Envelope } from '@byok-sdk/protocol';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { hostFor, forgetHost } from '../daemon/task-runner/host';
@@ -33,7 +33,6 @@ function makeRunner(sent: Envelope[], overrides: Partial<TaskRunnerDeps> = {}): 
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
     approvalRegistry: new ApprovalRegistry(),
-    getServerCapabilities: () => ['native-sessions'],
     ...overrides,
   });
 }
@@ -161,10 +160,9 @@ describe('native session dream wiring', () => {
 
   it('refuses an undeclared native offer before claim, non-retryably', async () => {
     const sent: Envelope[] = [];
-    const runner = makeRunner(sent, { advertisedCapabilities: () => [], getServerCapabilities: () => ['native-sessions'] });
+    const runner = makeRunner(sent, { advertisedCapabilities: () => [] });
     await offer(runner, 'native-unsupported', nativeOffer);
     expect(sent.find(e => e.type === 'task.decline')?.payload).toMatchObject({ reason: 'native_sessions_unsupported', code: 'native_sessions_unsupported', retryable: false });
-    expect(requiredReceiverCapabilities('task.decline', sent.find(e => e.type === 'task.decline')!.payload)).toEqual(['native-sessions']);
     expect(sent.some(e => e.type === 'task.claim')).toBe(false);
   });
 
@@ -172,7 +170,6 @@ describe('native session dream wiring', () => {
     const sent: Envelope[] = [];
     const runner = makeRunner(sent, {
       advertisedCapabilities: () => freshOfferRunnerDeps().advertisedCapabilities().filter(flag => flag !== 'native-sessions'),
-      getServerCapabilities: () => ['sealed-payload-v1', 'native-sessions'],
     });
     await offer(runner, 'native-sealed-unsupported', { ...nativeOffer,
       sealing: { scopeId: 'native-scope', epoch: 1, categories: ['task-output'] },
@@ -183,17 +180,9 @@ describe('native session dream wiring', () => {
     expect(sent.some(e => e.type === 'task.claim')).toBe(false);
   });
 
-  it('rejects a native offer from a non-advertising server as a protocol violation without sending a decline', async () => {
-    const sent: Envelope[] = [];
-    const runner = makeRunner(sent, { getServerCapabilities: () => ['sealed-payload-v1'] });
-    await expect(offer(runner, 'native-protocol-violation', nativeOffer)).rejects.toThrow('protocol violation');
-    expect(sent).toEqual([]);
-    expect(runner.activeTaskCount).toBe(0);
-  });
-
   it('refuses an explicitly selected non-Pi runtime', async () => {
     const sent: Envelope[] = [];
-    const runner = makeRunner(sent, { adapters: [new StubRuntimeAdapter('codex')], nativeSessions: { sessionDir: '/sessions' }, getServerCapabilities: () => ['native-sessions'] });
+    const runner = makeRunner(sent, { adapters: [new StubRuntimeAdapter('codex')], nativeSessions: { sessionDir: '/sessions' } });
     await offer(runner, 'native-non-pi', { ...nativeOffer, runtime: 'codex' });
     expect(sent.find(e => e.type === 'task.decline')?.payload).toMatchObject({ reason: 'native_sessions_unsupported', code: 'native_sessions_unsupported', retryable: false });
     expect(sent.some(e => e.type === 'task.claim')).toBe(false);

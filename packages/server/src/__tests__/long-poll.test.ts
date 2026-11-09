@@ -73,9 +73,8 @@ describe('long-poll transport (§8)', () => {
     const body = (await pollRes.json()) as { events: Envelope[]; cursor: number; capabilities?: string[] };
     expect(body.events.map((e) => e.type)).toEqual(['task.offer']);
     expect(body.events[0]?.task_id).toBe(handle.taskId);
-    expect(body.capabilities).toContain('mailbox-read-ahead');
-    // Wire v3 folded the former `result-document` flag into the baseline.
-    expect(body.capabilities).not.toContain('result-document');
+    // Wire v6 has no server-flag gate.
+    expect(body.capabilities).toEqual([]);
     expect(elapsedMs).toBeLessThan(SHORT_HOLD_MS);
   });
 

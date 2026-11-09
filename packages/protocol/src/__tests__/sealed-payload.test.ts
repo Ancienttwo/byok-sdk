@@ -35,7 +35,7 @@ import {
 
 type Json = { [key: string]: unknown };
 
-const corpus = readFileSync(new URL('golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; ts: string; payload: Json });
@@ -409,36 +409,27 @@ describe('sealed payload v1: a plaintext branch never carries sealed content', (
 const markerFlag = (type: SealableMessageType) => SEALED_SPLIT_TABLE[type].category === 'agent-message' ? 'sealed-payload-v2' : 'sealed-payload-v1';
 
 describe('sealed payload v1: capability gates (§8.4)', () => {
-  it('gates the marker of each sealed branch on its category flag, advertised by its receiver', () => {
+  it('gates the marker of each server-to-daemon sealed branch on its category device flag; a daemon-to-server sealed branch needs none', () => {
     for (const type of SEALABLE_TYPES) {
       const { marker } = SEALED_SPLIT_TABLE[type];
-      const advertisedBy = isServerToDaemonType(type) ? 'device' : 'server';
+      const toDevice = isServerToDaemonType(type);
       const capability = markerFlag(type);
-      expect(WIRE_ADDITIONS.filter((entry) => entry.surface === type && entry.rule === 'gated' && entry.capability === capability && entry.field !== 'code'), type)
-        .toEqual([{ kind: 'envelope', rule: 'gated', surface: type, field: marker, capability, advertisedBy }]);
-      // Every row of the type names its receiver.
-      for (const entry of WIRE_ADDITIONS.filter((candidate) => candidate.surface === type && candidate.rule === 'gated')) {
-        expect(entry.rule === 'gated' && entry.advertisedBy, `${type} ${JSON.stringify(entry)}`).toBe(advertisedBy);
-      }
+      expect(WIRE_ADDITIONS.filter((entry) => entry.surface === type && entry.capability === capability), type)
+        .toEqual(toDevice ? [{ kind: 'envelope', rule: 'gated', surface: type, field: marker, capability, advertisedBy: 'device' }] : []);
       for (const line of corpus.filter((candidate) => candidate.type === type && isSealedPayload(type, candidate.payload))) {
-        expect(requiredReceiverCapabilities(type, line.payload), type).toContain(capability);
+        if (toDevice) expect(requiredReceiverCapabilities(type, line.payload), type).toContain(capability);
+        else expect(requiredReceiverCapabilities(type, line.payload), type).toEqual([]);
       }
     }
   });
 
-  it('gates a sealed task output that names its ciphertext blob on the server flag, except the inline-only types (§58a)', () => {
+  it('needs no flag for a sealed task output that names its ciphertext blob; the inline-only types are fixed (§58a)', () => {
     const outputs = SEALABLE_TYPES.filter((type) => SEALED_SPLIT_TABLE[type].category === 'task-output');
     const inlineOnly = outputs.filter((type) => (SEALED_SPLIT_TABLE[type] as SealedSplitEntry).inlineOnly === true);
     expect(inlineOnly).toEqual(['task.progress', 'task.await_approval']);
-    for (const type of outputs) {
+    for (const type of outputs.filter((candidate) => !inlineOnly.includes(candidate))) {
       const byReference = sealedLines.find((line) => line.type === type && 'ciphertextRef' in (line.payload.sealed as object))!;
-      const inline = sealedLines.find((line) => line.type === type && 'ciphertext' in (line.payload.sealed as object))!;
-      const gated = !inlineOnly.includes(type);
-      expect(requiredReceiverCapabilities(type, byReference.payload).includes('sealed-output-ciphertext-ref'), type).toBe(gated);
-      expect(requiredReceiverCapabilities(type, inline.payload), type).not.toContain('sealed-output-ciphertext-ref');
-    }
-    for (const type of SEALABLE_TYPES.filter((candidate) => SEALED_SPLIT_TABLE[candidate].category === 'task-input')) {
-      expect(WIRE_ADDITIONS.filter((entry) => entry.surface === type && entry.rule === 'gated' && entry.capability === 'sealed-output-ciphertext-ref'), type).toEqual([]);
+      expect(requiredReceiverCapabilities(type, byReference.payload), type).toEqual([]);
     }
   });
 
@@ -448,7 +439,7 @@ describe('sealed payload v1: capability gates (§8.4)', () => {
       const sealedFlags = requiredReceiverCapabilities(line.type, line.payload);
       const plainFlags = requiredReceiverCapabilities(line.type, plaintext);
       expect(plainFlags.filter((flag) => !sealedFlags.includes(flag)), line.type).toEqual([]);
-      expect(sealedFlags, line.type).toContain(markerFlag(line.type as SealableMessageType));
+      if (isServerToDaemonType(line.type)) expect(sealedFlags, line.type).toContain(markerFlag(line.type as SealableMessageType));
     }
     // The corpus has sealed offers whose plaintext fields carry other gates.
     expect(sealedLines.some((line) => requiredReceiverCapabilities(line.type, line.payload).includes('agent-home-contract'))).toBe(true);
@@ -459,7 +450,7 @@ describe('sealed payload v1: capability gates (§8.4)', () => {
     for (const type of SEALABLE_TYPES) {
       const { moved, forbidden } = SEALED_SPLIT_TABLE[type];
       for (const entry of WIRE_ADDITIONS) {
-        if (entry.kind !== 'envelope' || entry.surface !== type || entry.field === undefined) continue;
+        if (entry.surface !== type || entry.field === undefined) continue;
         const field = topField(entry.field);
         if (!([...moved, ...forbidden] as readonly string[]).includes(field)) continue;
         const value = corpus.find((line) => line.type === type && line.payload[field] !== undefined)?.payload[field];
@@ -470,9 +461,9 @@ describe('sealed payload v1: capability gates (§8.4)', () => {
     }
   });
 
-  it('gates the sealed decline codes on plain task.decline on the server flag, and not the earlier codes', () => {
+  it('needs no flag for the sealed decline codes on plain task.decline', () => {
     for (const code of SEALED_DECLINE_CODES) {
-      expect(requiredReceiverCapabilities('task.decline', { reason: code, code })).toEqual([code === 'native_sessions_unsupported' ? 'native-sessions' : 'sealed-payload-v1']);
+      expect(requiredReceiverCapabilities('task.decline', { reason: code, code })).toEqual([]);
       expect(parse('task.decline', { reason: code, code })).toBe(true);
     }
     expect(requiredReceiverCapabilities('task.decline', { reason: 'busy', code: 'agent_home_writer_busy' })).toEqual([]);

@@ -5,39 +5,43 @@ the M1-2 (server) and M1-3 (client) implementers — the schemas in
 `packages/protocol/src/` are authoritative; this document explains the rules
 those schemas encode and why.
 
-Status: wire version `v:5`, **FROZEN**. The pi, claude, and codex runtime
+Status: wire version `v:6`, **FROZEN**. The pi, claude, and codex runtime
 adapters have all exercised the wire (M2); every M1/M2 protocol gap identified
 along the way has been closed in place. From this point forward, this
 document and the schemas in `packages/protocol/src/` describe a closed
 contract — see "Freeze rule" immediately below for exactly what "frozen"
 does and doesn't allow.
 
-Only wire major `5` is currently supported. v5 renames one field: the runtime
-capability `durablePi` is `durableLane` (the durable worker lane, Pi today) in
-`RuntimeCapabilities`, so on `conn.hello` runtimes and harnesses, on
-`task.claim` and in presence. Every other v4 shape is unchanged. A rename
-narrows a shipped shape: a v4 reader would strip `durableLane` and a v5 reader
-`durablePi`, so the durable lane would silently disappear between mixed
-peers. That is why it is a major (Freeze rule, path 1).
+Only wire major `6` is currently supported. v6 splits one field: the runtime
+capability `isolation.userContext` in `RuntimeCapabilities` is replaced by one
+bit per source of user-level context a runtime can keep out
+(`userInstructions`, `userOutputStyle`, `userMemory`, `userSkills`,
+`userHookContext`), beside the unchanged `userMcpServers` and
+`sessionPersistence`, so on `conn.hello` runtimes and harnesses, on
+`task.claim` and in presence. Every other v5 shape is unchanged. Removing a
+field narrows a shipped shape: a v5 reader would strip the new bits and a v6
+reader `userContext`, so mixed peers would silently lose the isolation facts.
+That is why it is a major (Freeze rule, path 1). There is no derived
+`userContext` field.
 
-There is no v4 reader and no capability negotiation between v4 and v5. Every
-envelope must carry major `5`. **Drain before upgrading**, exactly as for the
-v3 → v4 cut below: stop new submissions, let every pending mailbox row be
-processed and acknowledged, every in-flight execution reach a terminal, and
-every daemon pending terminal be acknowledged by the server. Then upgrade the
-server side (embedded server, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`)
-and the daemons together. A v4 daemon is refused at the version boundary and
-receives no v5 offer; a `conn.hello` whose `protocolVersions` omits `5` is
-refused with `hello_protocol_version_unsupported`. A v5 daemon cannot use a
-v4 server. The startup checks refuse a pending v4 row: the embedded server
+There is no v5 reader and no capability negotiation between v5 and v6. Every
+envelope must carry major `6`. A v5 daemon is refused at the version boundary
+and receives no v6 offer; a `conn.hello` whose `protocolVersions` omits `6` is
+refused with `hello_protocol_version_unsupported`. A v6 daemon cannot use a
+v5 server. The startup checks refuse a pending v5 row: the embedded server
 ([SQLite startup check](#sqlite-startup-check-for-wire-major-upgrades)), the
 hosted data plane (`POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`) and the daemon
 journal (`DaemonJournalProtocolUnsupportedError`). Retained `acked` and
-`expired` rows do not block startup. Nothing rewrites v4 bytes: a hosted
-terminal receipt stored by a v4 build no longer decodes, so a result read of
-a task that ended before the cut fails with `terminal_receipt_unreadable`. The
-Host steps are in [the wire v5 migration](migrations/wire-v5-durable-lane.md).
-0.33.0 is the last v4 release.
+`expired` rows do not block startup. There is no drain or upgrade-precheck
+tool for this cut: rebuild a local store that still refuses, then upgrade the
+server side and the daemons together. The wire facts are in
+[the wire v6 migration](migrations/wire-v6-isolation-sources.md). 0.40.0 is
+the last v5 release.
+
+History: v5 renamed one field: the runtime capability `durablePi` became
+`durableLane` (the durable worker lane, Pi today). Its Host steps are in
+[the wire v5 migration](migrations/wire-v5-durable-lane.md). 0.33.0 is the
+last v4 release.
 
 History: v4 completed the Agent-only cutover (ADR-034) and removed the
 approval paths kept for peers that predate approval ids:
@@ -122,12 +126,12 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 ## Freeze rule
 
-`PROTOCOL_VERSION` is `5`. Every v5 change takes exactly one of three paths.
+`PROTOCOL_VERSION` is `6`. Every v6 change takes exactly one of three paths.
 Compatibility is decided by `packages/protocol/src/__tests__/compat.test.ts`,
-not by author judgment. 0.34.0, the first v5 release, is published, but no
-published v5 decoder is pinned as an oracle yet: until one is, the suite
-proves v5 self-consistency only and cross-release gates are unproven (see the
-evidence list below).
+not by author judgment. No v6 release is published yet, so no published v6
+decoder is pinned as an oracle: until one is, the suite proves v6
+self-consistency only and cross-release gates are unproven (see the evidence
+list below).
 
 1. **Version bump.** Bump `PROTOCOL_VERSION`; server and client upgrade
    together under "Server supports N and N-1" below. This is the only path
@@ -140,9 +144,10 @@ evidence list below).
    (`packages/protocol/src/wire-additions.ts`) as `gated`, with a capability
    flag that older releases do not know. The sender refuses a message
    carrying the addition, before it creates the task or appends to the
-   mailbox, unless the receiver durably advertised the flag (a device flag
-   for server-to-daemon messages, a server flag for daemon-to-server ones).
-   An older receiver therefore never sees it. Required for a new message
+   mailbox, unless the receiver durably advertised the flag. Gates exist only on
+   server-to-daemon messages: v6 has no server flag, and every
+   daemon-to-server surface is baseline. An older receiver therefore never
+   sees it. Required for a new message
    type, for a field on a strict payload (the offers, control payloads and
    the `instruction` blob-ref), and for any field whose loss would change what
    the receiver executes or acknowledges. `homeAccess` on the Agent offers
@@ -151,10 +156,9 @@ evidence list below).
    table.
 3. **Strip-safe addition.** A new optional field on a strip-unknown payload,
    a new `AgentEvent` variant, a new capability flag, or a new key inside
-   `RuntimeInfo.capabilities`. An older receiver drops it. A new payload field
-   on this path is declared in `WIRE_ADDITIONS` as `strip-safe`; the
-   declaration says dropping it does not change what the receiver executes or
-   acknowledges.
+   `RuntimeInfo.capabilities`. An older receiver drops it. `WIRE_ADDITIONS`
+   holds no row for this path: v6 deleted every strip-safe row, and the field
+   stays optional with absence meaning unknown.
 
 `compat.test.ts` holds the wire evidence:
 
@@ -177,39 +181,67 @@ evidence list below).
   shipped and read-only. The current decoder rejects every v4 envelope line at the
   version boundary, and the v4 HTTP lines that carry envelopes too. Rewriting
   only the version is not an upgrade: v5 renamed `durablePi`.
-- **v5 self-consistency.** `golden/v5.envelopes.ndjson` and
-  `golden/v5.http.ndjson` start from the v4 corpora with `v` and `durablePi`
-  rewritten, and are append-only. The current decoder reads every
+- **Retired v5 evidence (negative oracle).** `golden/v5.envelopes.ndjson`,
+  `golden/v5.http.ndjson` and the v5 registry `golden/v5.releases.json`
+  (0.34.0 through 0.40.0) are byte-identical to what the last v5 release
+  shipped and read-only. The current decoder rejects every v5 envelope line at
+  the version boundary, and the v5 HTTP lines that carry envelopes too.
+  Rewriting only the version is not an upgrade: v6 removed
+  `isolation.userContext`.
+- **v6 self-consistency.** `golden/v6.envelopes.ndjson` and
+  `golden/v6.http.ndjson` start from the v5 corpora with `v` rewritten and
+  `isolation.userContext` renamed `userInstructions`, plus lines that carry
+  the new isolation bits. While `golden/v6.releases.json` registers no
+  release, a line may still be edited in place: the presence line
+  (`v6.http.ndjson:21`) carries the new bits that way, and #1573 rewrote the
+  `TokenResponse` lines to `{ accessToken, expiresIn }`. Once a v6 release is
+  registered, the corpora are append-only. The current decoder reads every
   line back to the committed JSON, and the current HTTP decoders read every
   literal body to its independently authored value (messages responses must
-  account for their `batchLength`). The v5 corpus carries every message type,
+  account for their `batchLength`). The v6 corpus carries every message type,
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
-  and an `approvalId` on every approval request and decision. `golden/v5.releases.json` registers the published 0.34.0 corpus,
-  the first v5 release, and the same corpus for the published 0.35.0, 0.36.0 and 0.37.0, the published 0.38.0 with one more envelope line, and the published 0.39.0 with eight more, and the published 0.40.0 with three more; 0.33.0 is the last v4 release. It has no `floor`. Each registered v5 entry pins both corpus
-  prefixes, and the lines it covers are immutable.
+  and an `approvalId` on every approval request and decision.
+  `golden/v6.releases.json` registers no release yet and has no `floor`. Each
+  registered v6 entry will pin both corpus prefixes, and the lines it covers
+  are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
-  published 0.33.0 registry tarball, the last v4 release. It rejects every v5
-  corpus line and a v5 `conn.hello`: a v4 peer cannot read v5 bytes. Nothing it
-  produces is v5 evidence, and it never enters the v5 registry. Its
-  `requiredReceiverCapabilities` derives, for every v4 `task.offer` line that
-  release shipped, the same flags as the current table (`task-offer-gates.test.ts`).
+  published 0.40.0 registry tarball, the last v5 release. It rejects every v6
+  corpus line and a v6 `conn.hello`: a v5 peer cannot read v6 bytes. Nothing it
+  produces is v6 evidence, and it never enters the v6 registry. Its
+  `requiredReceiverCapabilities` derives, for every v5 `task.offer` line that
+  release shipped, the flags of the current table plus `custom-harness` and
+  `terminal-projection-selection`, which v6 retired (`task-offer-gates.test.ts`).
 
-No test runs a published v5 decoder yet, so the gated and strip-safe
-declarations are not proven against a released v5 decoder. That evidence
-starts when a published v5 release (0.34.0 or later) is pinned as an
-oracle.
+No test runs a published v6 decoder yet, so the gated declarations are not
+proven against a released v6 decoder. That evidence
+starts when a published v6 release is pinned as an oracle.
 
-The v5 table is the v4 table: the rename touches no gate. `durableLane`
-replaces `durablePi` among the runtime capability matrix fields, which are
-strip-safe.
+The v6 table is the v5 table minus the retired rows (#1573). The server flags
+`agent-message-draft`, `runtime-failure-class`, `runtime-quota-scope`,
+`resident-memory-over-limit`, `sealed-output-ciphertext-ref` and
+`mailbox-read-ahead` are gone, and so is the server's `sealed-payload-v1`,
+`sealed-payload-v2` and `native-sessions` advertisement:
+`CLOUD_PROTOCOL_CAPABILITIES` is empty, and the server accepts sealed
+daemon-to-server output by the task's frozen `sealing`. The device flags
+`custom-harness`, `terminal-projection-selection`, `blob-upload` and
+`runtime-unavailable-cause` are gone, so the `harnessId` and
+`terminalProjection` offer rows are removed. Every strip-safe row is deleted:
+the table holds only gated server-to-daemon rows. The v5 oracle check in
+`task-offer-gates.test.ts` expects the v5 flags minus `custom-harness` and
+`terminal-projection-selection`. The new isolation bits replace `userContext`
+among the runtime capability matrix fields.
+
+History: the v5 table was the v4 table: the `durableLane` rename touched no
+gate.
 
 History: v4 started from the v3 table minus the server `approval_resolved` gate (every
 v4 server reads `task.approval_resolved`) and minus the rows of the removed
 runtime-only offers (`harnessId` on the v3 `task.offer` and
 `task.offer_with_toolsets`, gated on `custom-harness`). The v3 Agent offer
 types are one `task.offer` in v4, so each gate a v3 type carried is a type,
-field or value row on `task.offer`:
+field or value row on `task.offer`. The `terminalProjection` and `harnessId`
+rows were retired in v6 (#1573):
 
 | `task.offer` carries | Device flag |
 | --- | --- |
@@ -234,7 +266,7 @@ The sealed rows of `task.steer` and the task outputs are generated the same
 way (§2.5). Against the v3 table (0.30.2), admission differs in two places:
 
 - An Agent offer naming a harness also needs the device's `custom-harness`
-  flag. In v3 only the removed offers had that gate.
+  flag. In v3 only the removed offers had that gate. Retired in v6 (#1573).
 - A prepared offer also needs `agent-memory-selection`, because it always
   carries `agentMemory`; v3 had no such row on `task.offer_prepared`. A
   daemon advertises the flag together with `agent-home-contract`
@@ -312,7 +344,7 @@ extends the earlier official-Pi exception to input-preparation v8. The strict
 preparation request, receipt binding and the prepared offer require explicit
 `agentMemory: 'none' | 'read' | 'read-write'`. `INPUT_PREPARATION_WIRE_VERSION` and
 record schema were 8 at that cut; admission requires `agent-input-preparation-v8`. The outer
-envelope was then v1 (it is v5 now). Binding and observation digests use domain v2. This is a paired
+envelope was then v1 (it is v6 now). Binding and observation digests use domain v2. This is a paired
 upgrade, with no old reader, mode default or dual token. Drain pre-cut preparation
 requests and prepared Executions first. The exception does not change unrelated
 strict messages; downstream deployment is separate from this source cut.
@@ -326,8 +358,8 @@ protocol version common to its own supported set and the daemon's
 immediately-prior major version so a fleet of daemons can roll forward
 without a hard cutover. (The v1 → v2 cut deliberately has no N-1 reader:
 the server accepts only `v:2`, so server and client upgrade together. The
-v2 → v3, v3 → v4 and v4 → v5 cuts are the same: the server accepted only
-`v:3`, then only `v:4`, and now only `v:5`.)
+v2 → v3, v3 → v4, v4 → v5 and v5 → v6 cuts are the same: the server
+accepted only `v:3`, then only `v:4`, then only `v:5`, and now only `v:6`.)
 
 **The observability-vs-control asymmetry.** Unknown is TOLERATED for
 observability data, but FAIL-CLOSED for control/security data:
@@ -475,14 +507,15 @@ durably advertises `agent-memory-commit-on-success`; server and hosted cloud
 refuse it otherwise before task creation or mailbox append. An older daemon's
 strict offer schema refuses the field, so the gate is required.
 
-**Agent message drafts (additive v3).** `agent.message.draft` is gated on the
-server's `agent-message-draft` flag. Its payload is strict. It has no reliable
-ack or spool entry. `RuntimeCapabilities.messageDraft` is optional strip-safe
-information in runtime/harness discovery and the claim snapshot. The three
-paths name one shared field in `WIRE_ADDITIONS`. See the
+**Agent message drafts (additive v3).** `agent.message.draft` was gated on the
+server's `agent-message-draft` flag; v6 retired the flag and the message is
+baseline (#1573). Its payload is strict. It has no reliable
+ack or spool entry. `RuntimeCapabilities.messageDraft` is optional
+information in runtime/harness discovery and the claim snapshot; absence means
+unknown. See the
 [Agent message draft lane](spec.md#agent-message-draft-lane).
 
-**Landed additive minor: version policy and `runtime_unavailable` on hello/presence (#1103 B2b).** `conn.hello.runtimes[]` and `conn.hello.harnesses[]` gain an OPTIONAL `versionPolicy: { state: 'allow' | 'warn' | 'block', qualifiedVersion? }`, the effective policy verdict reduced to discovery data (`matched` and the policy's spec lists stay local). `conn.hello` and `PUT /byok/presence` gain an OPTIONAL top-level `runtimeUnavailable[]` of `{ id, cause, retryable }` for non-available runtimes; presence keeps the frozen `RuntimeId` domain, so a custom harness's policy travels only on `conn.hello.harnesses[]`. The new capability flag `runtime-unavailable-cause` announces the typed cause. Every field is strip-safe on a strip-unknown payload: an older receiver drops it, and absence means unknown — never `allow` or `available`. See §11.4.1.
+**Landed additive minor: version policy and `runtime_unavailable` on hello/presence (#1103 B2b).** `conn.hello.runtimes[]` and `conn.hello.harnesses[]` gain an OPTIONAL `versionPolicy: { state: 'allow' | 'warn' | 'block', qualifiedVersion? }`, the effective policy verdict reduced to discovery data (`matched` and the policy's spec lists stay local). `conn.hello` and `PUT /byok/presence` gain an OPTIONAL top-level `runtimeUnavailable[]` of `{ id, cause, retryable }` for non-available runtimes; presence `runtimeUnavailable[].id` accepts `RuntimeId | HarnessId`, the same domain as `conn.hello.runtimeUnavailable` (v6, #1573; v5 presence kept `RuntimeId` only), while a custom harness's `versionPolicy` still travels only on `conn.hello.harnesses[]`. The capability flag `runtime-unavailable-cause` announced the typed cause; v6 retired it. Every field is optional: absence means unknown — never `allow` or `available`. See §11.4.1.
 
 **Landed additive minor: `task.fail.failure` (#869).** `task.fail`, and so
 its sealed branch, gains an OPTIONAL strict `failure: { class, resetsAt? }`.
@@ -497,24 +530,20 @@ observability-vs-control rule above.
 reported when the limit resets. Adapters classify from structured runtime
 fields only and never parse `reason`, which stays display text. `unknown`
 means the runtime gave no structured evidence; a failure the daemon makes
-itself is `unknown`. The field is gated on the server's new
-`runtime-failure-class` flag, because the sealed branch is strict: a daemon
-sends it only to a server that advertises the flag. Server flags are
-live-only, so a terminal built while the daemon had no connection carries no
-field. `failure` stays plaintext on a sealed `task.fail`. The reference server
-and the hosted cloud advertise the flag and project the field as
-`TaskResult.failure` and `TerminalResult.failure`.
+itself is `unknown`. The field was gated on the server's
+`runtime-failure-class` flag; v6 retired the flag and the field is baseline
+(#1573). `failure` stays plaintext on a sealed `task.fail`. The reference
+server and the hosted cloud project the field as `TaskResult.failure` and
+`TerminalResult.failure`.
 
 **Landed additive minor: `task.fail.failure.scope` (#1271).** The `quota`
 branch gains an OPTIONAL `scope: 'account' | 'model'`, set only from structured
 runtime evidence: `account` when the whole account is limited, `model` when
 only the model's own limit is used up, so another model of the same runtime
-may still run. It is gated on the server's new `runtime-quota-scope` flag
-(`failure.scope` in `WIRE_ADDITIONS`), because the `quota` branch is strict. A
-daemon talking to a server without the flag drops `scope` and sends `class`
-and `resetsAt` unchanged; the sealed branch does the same. The reference
-server and the hosted cloud advertise the flag and project `scope` with the
-rest of the failure.
+may still run. It was gated on the server's `runtime-quota-scope` flag; v6
+retired the flag and `scope` is baseline (#1573), on the sealed branch too. The
+reference server and the hosted cloud project `scope` with the rest of the
+failure.
 
 ## 1. Envelope
 
@@ -580,7 +609,7 @@ in your head and in any redelivery/ordering code.
 **`conn.*` envelopes never advance the redelivery cursor.** `conn.hello` is
 submitted as the first daemon→server long-poll message and has no
 cursor-advancing side effect. Server capability advertisement arrives in
-`EventsPollResponse.capabilities`, and cursor accounting covers every server → daemon control that requires durable
+`EventsPollResponse.capabilities` (an empty array in v6), and cursor accounting covers every server → daemon control that requires durable
 handler completion, including `task.*`, `agent.egress.ack`,
 `agent.content.read`, and `agent.home.projection`; it excludes `conn.*`.
 
@@ -655,11 +684,11 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId` (required — §5.3) | A session or the control socket requested approval (§5) |
-| `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2), `residentMemoryOverLimit?` (gated on the server's `resident-memory-over-limit` flag — §2.2) | Runtime reached `turn_end` |
-| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?`, `residentMemoryOverLimit?` | Task ends in error; `failure` is gated on the server's `runtime-failure-class` flag, its quota `scope` on `runtime-quota-scope`, and `residentMemoryOverLimit` on `resident-memory-over-limit` (§2.2) |
-| `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?`, `residentMemoryOverLimit?` | Task ends `Cancelled` (server- or daemon-initiated); `residentMemoryOverLimit` is gated on the server's `resident-memory-over-limit` flag (§2.2) |
+| `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2), `residentMemoryOverLimit?` (§2.2) | Runtime reached `turn_end` |
+| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?`, `residentMemoryOverLimit?` | Task ends in error; `failure` (with its quota `scope`) and `residentMemoryOverLimit` (§2.2) are baseline, no server flag |
+| `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?`, `residentMemoryOverLimit?` | Task ends `Cancelled` (server- or daemon-initiated); `residentMemoryOverLimit` is baseline (§2.2) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2); baseline, no capability gate |
-| `agent.message.draft` | D→S | **required** | optional | `agentRef`, `revision`, UTF-8 `offset`, `text` (≤ 16 KiB), `overflow?: true` | Display-only snapshot frames; server-advertised `agent-message-draft` gate |
+| `agent.message.draft` | D→S | **required** | optional | `agentRef`, `revision`, UTF-8 `offset`, `text` (≤ 16 KiB), `overflow?: true` | Display-only snapshot frames; baseline, no capability gate |
 | `agent.egress.reliable` | D→S | optional | optional | exact Agent/session/policy identity, stable `eventId`/`cursor`, payload hash and byte count | A locally fsynced reliable event is sent or retried |
 | `agent.content.receipt` | D→S | optional | optional | exact request/actor/Agent/session/runtime/cwd/policy/target/MIME/decode identity; allowed includes hash/size/BlobRef, denied includes zero bytes and typed reason | Local content policy and audit completed |
 
@@ -798,7 +827,9 @@ surface's capability.
 first send and retains the stable id/cursor until an exact
 `agent.egress.ack`. A duplicate exact event returns the existing durable
 receipt; a changed AgentRef, profile revision, session, policy, id, cursor,
-hash or bytes fails closed. It never degrades to latest-value activity.
+hash or bytes fails closed. It never degrades to latest-value activity. The
+daemon re-sends its unacknowledged reliable events on every session open; no
+server advertisement is involved (v6, #1573).
 
 `agent.content.read` is task-independent but cursor-tracked and redeliverable.
 Its target is a portable relative path (no absolute path, dot segment or
@@ -1004,20 +1035,19 @@ Attempt wrote, and the task-close projection sees the restored file. The schema
 does not compare `byteCount` with the limit, so a later lower limit cannot make
 an older receiver refuse the terminal.
 
-The field is gated on the server flag `resident-memory-over-limit`, because the
-sealed terminal branches are strict. A daemon talking to a server without the
-flag sends the terminal without the field. On a task whose `sealing` names
+The field is baseline in v6: the server flag `resident-memory-over-limit` is
+retired (#1573), and every server reads it on the terminals. On a task whose `sealing` names
 `memory-projection`, the field moves into the terminal ciphertext with
 `agentHomeMemoryChange`. Absence does not mean the file is within the limit: a
 reader terminal, a claimed failure before the Attempt became active, a failed
-measurement, a server without the flag and an older daemon all leave it absent.
+measurement and an older daemon all leave it absent.
 The check the device makes at the start of a fresh task is the gate: on a daemon
 that admits the memory MCP, an over-limit `MEMORY.md` fails that task before the
 runtime starts. A `MEMORY.md` with more than one hard link fails it the same way,
 with `agent_memory_resident_unreadable: multiple links`, because another link can
 name a file outside the home. A daemon that does not admit the memory MCP cannot
 write memory, so its fresh task keeps the reading guidance, carries no data and
-does not fail on the size. The hosted cloud advertises the flag, and
+does not fail on the size. The hosted cloud
 `readTaskResult` projects the field verbatim.
 
 Known limit: the restore compares raw bytes, so it handles a `MEMORY.md` of any
@@ -1075,10 +1105,10 @@ without the capability, a non-Pi selection, or a Pi adapter without the lane
 refuses before claim with `reason` and `code` both `native_sessions_unsupported`,
 non-retryably. This closed plaintext decline also applies when `task-output` is
 sealed, including when the owner disables the capability after Host enqueue.
-Its own `task.decline` wire row requires the server's `native-sessions`
-capability: this two-way gate advertises that the server understands both the
-V1 native-session input field and the decline code. The plain decline vocabulary
-remains open.
+The `native_sessions_unsupported` decline code is baseline in v6: the server's
+`native-sessions` advertisement and the `task.decline` wire row it gated are
+retired (#1573). Only the offer's `nativeSessions` row keeps the device gate.
+The plain decline vocabulary remains open.
 
 After claim, the daemon renders within `min(10 s, remaining startup time)`.
 Every rendering failure fails the claimed task without starting the runtime.
@@ -1542,18 +1572,19 @@ plaintext blob reference, because blob bytes have no sealing rule yet.
 by the plaintext type, is the one authority for this table; its `marker`
 names the marker field.
 
-**Capability.** The marker of each sealed branch is gated on
-`sealed-payload-v1` (`WIRE_ADDITIONS`, generated from the split table). The
-device advertises the flag for `task.offer` and `task.steer`. The server
-advertises it for the task outputs. A sealed branch shares every other row of
-its type, and a field it moves or drops is absent from it, so sealing never
-removes a gate the same fields would need: `requiredToolsets` on a sealed
-offer still needs `toolset-selection`. A sealed task output that names its
-ciphertext blob (`sealed.ciphertextRef`) also needs the server flag
-`sealed-output-ciphertext-ref`. The split table marks `task.progress` and
-`task.await_approval` `inlineOnly`, so their sealed branches have no such
-gate: they are always inline. A daemon that receives a sealed offer without
-advertising `sealed-payload-v1` declines it before opening it (Freeze rule).
+**Capability.** The marker of each sealed server-to-daemon branch is gated on
+`sealed-payload-v1` (`WIRE_ADDITIONS`, generated from the split table): the
+device advertises the flag for `task.offer` and `task.steer`. The
+daemon-to-server task-output branches need no flag: the server accepts them by
+the task's frozen `sealing` (the offer receipt; #1573). A sealed branch shares
+every other row of its type, and a field it moves or drops is absent from it,
+so sealing never removes a gate the same fields would need: `requiredToolsets`
+on a sealed offer still needs `toolset-selection`. A sealed task output that
+names its ciphertext blob (`sealed.ciphertextRef`) needs no flag either. The
+split table marks `task.progress` and `task.await_approval` `inlineOnly`, so
+their sealed branches are always inline. A daemon that receives a sealed offer
+without advertising `sealed-payload-v1` declines it before opening it (Freeze
+rule).
 
 A prepared offer (`preparation`), input preparation, egress and drafts are
 not sealed. Agent messages and memory projections are sealed only under v2. The split table forbids
@@ -1757,8 +1788,8 @@ refuses sealed task input declines non-retryably with one of the closed codes
 including an owner switching it off after enqueue; it does not assert missing keys.
 These codes go only on the plaintext
 `task.decline`, and its `reason` is then the code itself. On the plaintext
-`task.decline`, each code is a value gate on the server flag.
-The sealed `task.decline` branch refuses them: a device that cannot open or
+`task.decline`, each code is baseline in v6: the server flag that gated them
+is retired (#1573). The sealed `task.decline` branch refuses them: a device that cannot open or
 use the scope key often cannot seal a reply either, so one outcome has one
 encoding.
 
@@ -1808,8 +1839,7 @@ expire, so the cloud refuses either one with `ciphertextRef`
 If the device sends the terminal more than one day after the upload, orphan
 GC may have deleted the blob, and the Host then refuses the terminal.
 When the Host refuses a terminal sent by `ciphertextRef` (a `rejected`
-outcome, for example because it no longer declares
-`sealed-output-ciphertext-ref`, or because orphan GC has deleted the blob after
+outcome, for example because orphan GC has deleted the blob after
 the device was offline for more than 24 hours), the daemon replaces that
 terminal once and sends the replacement (owner batch §77b). The Host records
 nothing for a refused terminal, so it receives exactly one terminal for the
@@ -1824,15 +1854,11 @@ replacement settles once, and a refused inline terminal is not replaced. No
 answer, or a non-2xx answer, of `POST /byok/messages` is not a refusal: the
 daemon sends the same bytes again.
 
-The cloud advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`,
-because it accepts the sealed branch of all seven task outputs. It also advertises
-`sealed-output-ciphertext-ref`, because it holds the blob of a sealed
-terminal or artifact. A device sends a sealed output by `ciphertextRef` only
-to a server that advertises this flag. Without it, the device keeps every
-sealed output inline: a terminal over the inline frame becomes the sealed
-`task.fail` with `reason` `terminal_result_unsealable`, and an artifact over
-it becomes an error event. A terminal whose ciphertext blob the server
-refuses for good also becomes that sealed `task.fail`: a 4xx other than 408
+The cloud advertises no server flag for sealed output (#1573): it accepts the
+sealed branch of all seven task outputs by the task's frozen `sealing`, and it
+holds the blob of a sealed terminal or artifact sent by `ciphertextRef`. A
+terminal whose ciphertext blob the server refuses for good becomes the sealed
+`task.fail` with `reason` `terminal_result_unsealable`: a 4xx other than 408
 or 429, except a 401 or 403 from the signed content URL, which the device
 retries with a new reservation. §7.1 answers 401 for a missing, malformed or
 expired signature; an external presigned store may answer 403 instead.
@@ -1859,9 +1885,9 @@ v1 suite, keys and binding rules. The design is
 - **Capability.** The device advertises `sealed-payload-v2` before a Host may
   send it an offer whose `sealing.categories` includes `agent-message` or
   `memory-projection` (one value gate per category), or an
-  `agent.message.disposition` with `contentMac`. The server advertises it
-  before a device may send a sealed `agent.message.publish`; a sealed publish
-  by `ciphertextRef` also needs `sealed-output-ciphertext-ref`. A
+  `agent.message.disposition` with `contentMac`. A sealed
+  `agent.message.publish`, by `ciphertextRef` or inline, needs no
+  server flag: the Host accepts it by the task's frozen `sealing` (#1573). A
   `WIRE_ADDITIONS` row with a `value` on an array field matches when the
   array includes that value, so `requiredReceiverCapabilities` returns the
   flag for any offer that names either category.
@@ -1894,10 +1920,8 @@ v1 suite, keys and binding rules. The design is
   `paddedLength` and `metering.acceptedPaddedBytes`, and no `redactedHash`.
   The Host-issued projection grant gates this branch, not an envelope row.
 - **Device rules (#1045 S2).** The daemon advertises `sealed-payload-v2`
-  exactly when it advertises `sealed-payload-v1`. It declines an offer that
-  seals `agent-message` with `sealing_policy_mismatch` when the server does
-  not advertise the flags of a sealed publish, and it needs a sealing key
-  before such a task runs, as for `task-output`. It seals a message body once,
+  exactly when it advertises `sealed-payload-v1`. It needs a sealing key
+  before a task that seals `agent-message` runs, as for `task-output`. It seals a message body once,
   when the draft enters the Agent's message outbox, and every retry sends
   those bytes; without a key the message tool fails and nothing is sent. It
   matches a disposition by `contentMac` for a sealed message and by
@@ -1913,8 +1937,7 @@ v1 suite, keys and binding rules. The design is
   device appends no mutation. One writer epoch has one form: a pending record
   whose form differs from its grant stops the outbox unsent.
 
-- **Cloud message admission (#1045 S3).** The cloud advertises
-  `sealed-payload-v2`. A submission whose `sealing` names `agent-message`
+- **Cloud message admission (#1045 S3).** A submission whose `sealing` names `agent-message`
   and that carries `messageEgress` is refused with
   `agent_message_sealed_consumer_missing` before any write while
   `agentMessage.consumeSealed` is absent. The task's frozen `sealing` allows
@@ -2422,7 +2445,8 @@ reader resume/run-directory and home initialization conflicts reported as
 preserve it verbatim in the canonical envelope.
 
 Landed additive minor: `task.decline.code` (#471) was an optional v2 field,
-registered as strip-safe in `WIRE_ADDITIONS`. It is part of the v3 baseline.
+registered as strip-safe in `WIRE_ADDITIONS`. It is part of the v3 baseline, and
+v6 deleted every strip-safe row.
 
 A runtime that is unavailable before claim uses the open code
 `runtime_unavailable` and, when this version knows why, an optional
@@ -2431,9 +2455,9 @@ machine-readable classification from the append-only
 `RUNTIME_UNAVAILABLE_CAUSES` vocabulary; `reason` stays display text and is
 never parsed back into a cause. `code` is present only with
 `environment_unavailable` and carries the login-shell capture code (#1095).
-The nested field is strip-safe: an older server drops it and still records the
-open `runtime_unavailable` code, reading the code as `unknown` with
-`reportedCode` when it does not know it. A receiver that does not know a cause
+The nested field is optional and carries no gate; absence means unknown. A
+server that drops it still records the open `runtime_unavailable` code,
+reading the code as `unknown` with `reportedCode` when it does not know it. A receiver that does not know a cause
 reads it as `unknown` with `reportedCause`. The default retryable value is
 per cause (for example `version_blocked` and `environment_unavailable` are
 non-retryable; `none_available` is retryable); `retryable` remains one
@@ -2713,7 +2737,7 @@ generated device keypair register the device and mint its first token.
 
 ```
 Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey, machineId? }
-Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, expiresIn? }
+Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, expiresIn }
 ```
 
 - `devicePublicKey`: Ed25519 public key, base64url-encoded.
@@ -2740,21 +2764,17 @@ Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, 
   (`golden/v4.http.ndjson`) pins this required field with its `PairResponse`
   line.
 - `refreshHint`: opaque hint for when/how to renew; not itself a credential.
-  **Pinned semantics: the reference server always sets `refreshHint` to the
-  freshly-minted token's own ISO-8601 `expiresAt`** — the same value
-  `/byok/token` reports on every renewal (§6.2). It is kept for published
-  devices (0.31.0 and earlier read it as the first token's expiry). The
-  current reference client does not read it.
-- `expiresIn`: lifetime of `accessToken` in whole seconds (positive integer),
+  The schema keeps it as an optional opaque field. The v6 server no longer
+  sends it, and the client does not read it. Through v5 the reference server
+  set it to the token's ISO-8601 expiry for published devices (0.31.0 and
+  earlier).
+- `expiresIn`: required. Lifetime of `accessToken` in whole seconds (positive integer),
   relative to when the device receives the response (#1114). It is the
   device's only lifetime authority: the client stores receipt time +
   `expiresIn` as a device-local expiry and never compares a server timestamp
   with its own clock, so a device clock that is hours fast or slow renews on
-  the same schedule. The schema keeps it optional because published v4 hosts
-  omit it; the current client refuses a pair response without it, so a Host
-  must be upgraded before its devices. The server derives `expiresIn` and
-  `refreshHint` from the same TTL. Like the token response's, the field is a
-  strip-safe HTTP addition in `WIRE_ADDITIONS`.
+  the same schedule. The schema requires it (v6, #1573; published v4 hosts
+  omitted it), and the client refuses a pair response without it.
 
 **Claims flow (S1, 2026-08-07).** A pairing code is not an anonymous ticket:
 the server mints it already bound to a `{tenantId, productId}` pair
@@ -2785,25 +2805,21 @@ POST /byok/challenge
 
 POST /byok/token
   Request  (TokenRequestSchema):  { deviceId, nonce, signature }
-  Response (TokenResponseSchema): { accessToken, expiresAt, expiresIn? }
+  Response (TokenResponseSchema): { accessToken, expiresIn }
 ```
 
 The reference client decodes both responses with these schemas (#386).
-`expiresAt` must be an ISO 8601 timestamp with `Z` or a numeric UTC offset. A
-response that fails its schema fails the renewal and leaves the prior
+`TokenResponse` has no `expiresAt` in v6 (#1573): the server does not send it,
+and a decoder strips it if a peer does. A response that fails its schema fails the renewal and leaves the prior
 credential unchanged; it is not treated as a revocation.
 
 `expiresIn` is the token lifetime in whole seconds (positive integer),
 relative to when the device receives the response (#1114). It is the device's
 lifetime authority: the client records receipt time + `expiresIn` as a
-device-local expiry and never reads `expiresAt` for lifetime, so device clock
-skew does not move its renewal point. The server derives both fields from one
-TTL and one clock read, and keeps sending `expiresAt` because published
-devices (0.31.0) read it. The field is a strip-safe HTTP addition in
-`WIRE_ADDITIONS` and optional in the schema, since published v4 hosts omit
-it; the current client fails a token response without it with
-`AuthResponseInvalidError` and keeps the prior credential. Upgrade the Host
-before its devices.
+device-local expiry and never reads a server timestamp for lifetime, so device
+clock skew does not move its renewal point. The schema requires it, so a token
+response without it fails with `AuthResponseInvalidError` and the client keeps
+the prior credential. Upgrade the Host before its devices.
 
 The HTTP `Date` header of the pair and token responses is the one server-time
 reading the client takes. It only feeds the clock-skew measurement that
@@ -3061,8 +3077,8 @@ cover what the K7 subset cannot express:
 Messages never echo the value. The K7 subset, the composed schema bytes and the
 wire are unchanged ([#1374](https://github.com/Ancienttwo/byok-sdk/issues/1374)).
 
-Sending `terminalProjection` is gated by the device capability
-`terminal-projection-selection` (`WIRE_ADDITIONS`). A
+Sending `terminalProjection` needs no device capability: v6 retired
+`terminal-projection-selection` (#1573). A
 `messageEgress.mode:'required'` offer with no second terminal selection is
 itself message-only authority; an offer can request both lanes only by
 explicitly selecting `result-document`. Delivery of that one required message is the
@@ -3235,8 +3251,7 @@ readiness never waits on a poll (see the handshake below). `cursor` in the query
 is the last reliably processed sequence and is the sole durable ACK.
 `afterSeq` selects the next read position without acknowledging it; omission
 reads from the ACK. The response `cursor` is a navigation position only.
-Servers advertise `mailbox-read-ahead`; a client must observe it before sending
-`afterSeq > cursor`, and fail observably if support disappears. Navigation must
+`afterSeq > cursor` needs no capability flag in v6 (#1573). Navigation must
 be a safe integer between ACK and the previously delivered watermark, at most
 4096 sequences ahead of ACK. The client sweeps that window (plus one returned
 page), then backs off and replays from ACK if the gap persists. At mailbox head
@@ -3289,11 +3304,11 @@ PUT /byok/presence
 derived from a package, runtime executable, or host. `runtimes[]` contains
 only the version/auth facts returned by the daemon's real local probe;
 unavailable fields are omitted. `runtimes[].versionPolicy` and the top-level
-`runtimeUnavailable[]` are the same strip-safe discovery projection
-`conn.hello` carries (§11.4.1). Presence's identity domain stays the frozen
-`RuntimeId`: `runtimeUnavailable[].id` is a built-in runtime id, and a
-custom harness's policy or cause is available only on
-`conn.hello.harnesses[]` / `conn.hello.runtimeUnavailable[]`. The
+`runtimeUnavailable[]` are the same discovery projection `conn.hello` carries
+(§11.4.1), and absence means unknown. `runtimeUnavailable[].id` accepts
+`RuntimeId | HarnessId`, the same domain as `conn.hello.runtimeUnavailable[]`
+(v6, #1573). A custom harness's `versionPolicy` is available only on
+`conn.hello.harnesses[]`. The
 `conn.hello` and this first HTTP presence publication use one frozen
 per-start snapshot, so identity has one authority. Presence remains a lossy
 TTL hint and is not an execution or admission signal.
@@ -3870,11 +3885,12 @@ same flag. §1.3.1 states its rules.
 ```
 { steer?, resume?, approvalInteractive?, mcpToolsets?, messageDraft?,
   toolAuthorizationAuto?, durableLane?, preparedLane?,
-  isolation?: { userContext?, userMcpServers?, sessionPersistence? } }
+  isolation?: { userInstructions?, userOutputStyle?, userMemory?, userSkills?,
+               userHookContext?, userMcpServers?, sessionPersistence? } }
 ```
 
 The fields from `toolAuthorizationAuto` on are the capability matrix (#1103),
-each a strip-safe addition. They are the adapter's capability constant, the
+each optional, with absence meaning unknown. They are the adapter's capability constant, the
 same values [the generated matrix](adapter-capabilities.md#capability-matrix)
 shows. A presence publication carries the same object per runtime in
 `runtimes[].capabilities`, so a Host can read it from presence before dispatch.
@@ -3901,7 +3917,7 @@ steer gating (§11.2) reads `task.claim.capabilities` (§11.5) instead.
 
 ### 11.4.1 Runtime version policy and `runtime_unavailable` on hello/presence
 
-Two strip-safe discovery projections accompany the capability matrix (#1103
+Two optional discovery projections accompany the capability matrix (#1103
 B2b):
 
 ```
@@ -3923,17 +3939,15 @@ from the append-only `RUNTIME_UNAVAILABLE_CAUSES` vocabulary (§3.2) and
 `retryable` is the same per-cause default a `task.decline` reports. A
 receiver that does not know a cause reads it as `unknown` with the raw token
 (`readRuntimeUnavailableCause`). The array is bounded to 16 and unique by
-id; an id is a built-in `RuntimeId` on presence and either a `RuntimeId` or a
-`HarnessId` on `conn.hello` (the existing identity domains).
+id; an id is either a `RuntimeId` or a `HarnessId`, on presence and on
+`conn.hello` alike (v6, #1573; v5 presence accepted `RuntimeId` only).
 
-The `runtime-unavailable-cause` capability flag announces that this daemon
-emits the typed cause. It is a capability flag, not a gate on the fields: a
-device sends the strip-safe fields unconditionally, exactly as it sends the
-capability matrix, and an older peer ignores the unknown flag.
+The `runtime-unavailable-cause` capability flag is retired in v6 (#1573): a
+device sends these fields unconditionally, exactly as it sends the capability
+matrix.
 
-**Old daemon / old Host boundary.** Every field above is optional and
-strip-safe. An older receiver drops it without changing what it executes or
-acknowledges. Absence means **unknown**, never `allow` and never
+**Old daemon / old Host boundary.** Every field above is optional. Absence
+means **unknown**, never `allow` and never
 `available`: a Host must not synthesize a verdict, infer a block from a
 missing `runtimes[]` entry, or treat a missing `runtimeUnavailable[]` as
 "everything works". A newer Host reading an older daemon's hello or presence
@@ -4129,8 +4143,8 @@ a normal slow turn.
 
 Compatibility between releases is decided by
 `packages/protocol/src/__tests__/compat.test.ts` (see "Freeze rule"; until a
-v5 release is published it proves v5 self-consistency and that the last v4
-release rejects v5 bytes). It replaces the hand-built
+v6 release is published it proves v6 self-consistency and that the last v5
+release rejects v6 bytes). It replaces the hand-built
 future-peer simulation this section used to describe. What remains below is
 the receiver policy that the suite and the behavioural tests rely on: which
 unknowns a current receiver tolerates and which it refuses. Four scenarios,
@@ -4151,9 +4165,9 @@ each with its real evidence:
 
    The regression suites in
    `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts` and
-   `packages/client/src/__tests__/long-poll-validation-stall.test.ts` cover
+   `packages/client/src/__tests__/long-poll-events-page-decoder.test.ts` cover
    interleaved known/unknown events, persistent redelivery, malformed-known
-   stalls, cursor recovery, warning cadence, and poll backoff.
+   stalls, cursor recovery and warning cadence.
 
    > Historical (pre-WP3B Step4b; non-normative): the compatibility drill
    > previously compared separate socket-frame and long-poll implementations.
@@ -4165,8 +4179,8 @@ each with its real evidence:
    through the real end-to-end `decodeEnvelope` entrypoint (not just the
    isolated payload schema) to close the loop.
 4. **Handshake version negotiation: a daemon advertising a set that contains
-   the server's single `PROTOCOL_VERSION` (today `5`) agrees on it; a set
-   without it (e.g. `[4]`) gets a clean, typed failure, not a hang.** The
+   the server's single `PROTOCOL_VERSION` (today `6`) agrees on it; a set
+   without it (e.g. `[5]`) gets a clean, typed failure, not a hang.** The
    schema half (`conn.hello.protocolVersions` accepts a set that overlaps the
    server's version and a disjoint one; the schema never referees
    negotiation) is in `version-negotiation-drill.test.ts`. The negotiated version is selected at
@@ -4174,7 +4188,7 @@ each with its real evidence:
    single `PROTOCOL_VERSION`; a disjoint set is rejected before any task
    message is accepted. The real integration test exercises the rejection
    path and a timeout race, so incompatibility is observable rather than a
-   hanging request. The v1 → v2, v2 → v3, v3 → v4 and v4 → v5 cuts have no N-1 reader, so the "highest common
+   hanging request. The v1 → v2, v2 → v3, v3 → v4, v4 → v5 and v5 → v6 cuts have no N-1 reader, so the "highest common
    version across an N/N-1 range" policy remains future work.
 
 **Adjacent honest note (gatekeeper advisory, docs-only, no code change): an
@@ -4211,16 +4225,18 @@ an already delivered identity is refused even after mailbox retention.
 
 `PROTOCOL_VERSION` remains 1. The new optional fields and `custom-harness`
 capability preserve every existing builtin runtime meaning and golden envelope.
+Retired in v6 (#1573): the `custom-harness` flag is gone, and `harnesses` on
+`conn.hello` and `harnessId` on an offer need no flag.
 
 - `conn.hello.harnesses`: at most 64 unique custom descriptors with `id`, optional
   `version` (1–128 characters), and `capabilities`. IDs are lower-case ASCII
   segments separated by `.`, `_` or `-`, begin with a letter, are at most 128
-  characters, and exclude `pi`, `claude`, `codex`. This is a capability-gated,
+  characters, and exclude `pi`, `claude`, `codex`. This is an
   authenticated, replace-all durable device snapshot, without secret/env/path data.
 - All offer-family payloads may require `harnessId`, mutually exclusive with
   builtin `runtime` and `dispatchSelection`. The host checks the target device's
-  capability and exact inventory before task reservation. An unavailable or old
-  peer is rejected; unknown fields must not silently change execution identity.
+  advertised harness inventory before task reservation. A harness missing from
+  the inventory is rejected; unknown fields must not silently change execution identity.
 - `task.claim.harnessId` identifies the actual custom adapter and cannot coexist
   with `runtime`. It must be advertised and match any explicit sealed selection.
   The ownership CAS records it once as `claimedHarnessId`; retries cannot rewrite
@@ -4293,28 +4309,31 @@ Older consumers ignore these optional fields.
 ## SQLite startup check for wire-major upgrades
 
 The embedded server checks every pending mailbox row when it opens SQLite.
-A major other than the current `PROTOCOL_VERSION` (5), a missing major, or
+A major other than the current `PROTOCOL_VERSION` (6), a missing major, or
 malformed JSON causes `SqliteSchemaError` with code
 `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. SQLite schema version 5 alone does not
-prove that the pending wire rows use v5. Retained `acked` and `expired` rows
+prove that the pending wire rows use v6. Retained `acked` and `expired` rows
 do not block startup. The check does not change or retire mailbox rows.
-Stored v3 and v4 receipts are not migrated. A store a v3 build wrote is not
-supported; a store a v4 build wrote opens once no pending v4 row is left.
+Stored v3, v4 and v5 receipts are not migrated. A store a v3 build wrote is
+not supported; a store a v4 or v5 build wrote opens once no pending row of
+that major is left.
 
-Before upgrading, stop new dispatch and let the previous server and clients
-finish and acknowledge their pending rows. On an offline copy, check:
+On an offline copy, this query lists the pending rows that would stop
+startup:
 
 ```sql
 SELECT tenant_id, device_id, seq, message_id
 FROM mailbox_message
 WHERE state = 'pending'
   AND CASE WHEN json_valid(body)
-    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 5
+    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 6
     ELSE 1 END;
 ```
 
 An empty result confirms only the envelope-major check. It does not prove full
-payload validity or task completion. If rows remain, preserve the database and
-finish the drain with the previous SDK. Do not delete rows to force startup.
+payload validity or task completion. The v5 to v6 cut has no drain tool or
+upgrade precheck: if rows remain, move the database aside and start on a new
+store, as the [0.41.0 Host upgrade guide](releases/host-upgrade-0.41.0.md#rebuild-local-stores)
+describes. Do not delete rows to force startup.
 A fresh server database needs fresh device enrollment. Changing only the client
 `storeDir` keeps the OS credential for the same `productId`.

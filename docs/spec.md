@@ -325,6 +325,11 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
+The next MINOR after 0.40.0 moves the wire to v6: the runtime capability
+`isolation.userContext` is split into one bit per source, with no derived
+field and no v5 reader. 0.40.0 is the last v5 release. See the
+[wire v6 migration](migrations/wire-v6-isolation-sources.md).
+
 0.40.0 is a MINOR release under the general policy above. It keeps
 wire v5 and adds no `deploy/sql` migration or SQLite schema change; the hosted Bot example adds a `dream_state` table through its own store migration. See the
 [0.40.0 release notes](releases/v0.40.0.md). All nine packages were published on 2026-11-08; registry readback passed.

@@ -555,7 +555,6 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       beforeClaim: async () => {
         order.push(record.store.get(record.recordId)?.pin === undefined ? 'unpinned-at-claim' : 'pin');
       },
-      getServerCapabilities: () => [],
       inputPreparationLane: {
         store: record.store,
         authorizeAgentMemory: async () => {},
@@ -1908,7 +1907,6 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     const sent: Envelope[] = [];
     const pin = vi.spyOn(record.store, 'pin');
     const runner = await makeRunner(support, adapter, sent, {
-      getServerCapabilities: () => [],
       inputPreparationLane: toollessLane(record, options.revisions),
       ...options.extra,
     });

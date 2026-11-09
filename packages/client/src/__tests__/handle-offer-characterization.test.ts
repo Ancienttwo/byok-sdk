@@ -353,7 +353,7 @@ describe('handleOffer exit characterization (before the phase split)', () => {
 
     expect(claimed(sent, taskId)).toBe(1);
     expect(terminals(sent, taskId).map((entry) => ({ type: entry.type, payload: entry.payload }))).toEqual([{
-      type: 'task.fail', payload: { reason: 'runtime activation failed: send fixture failure', retryable: false, agentRef: AGENT },
+      type: 'task.fail', payload: { reason: 'runtime activation failed: send fixture failure', retryable: false, failure: { class: 'unknown' }, agentRef: AGENT },
     }]);
     expect(adapter.sessions).toHaveLength(1);
     expect(adapter.sessions[0]!.closeCalled).toBe(true);

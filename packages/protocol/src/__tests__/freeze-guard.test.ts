@@ -270,12 +270,12 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     expect(result.success).toBe(false);
   });
 
-  it('the current wire major is 5', () => {
-    expect(PROTOCOL_VERSION).toBe(5);
-    expect(createEnvelope('task.started', {}, { taskId: 'task-1' }).v).toBe(5);
+  it('the current wire major is 6', () => {
+    expect(PROTOCOL_VERSION).toBe(6);
+    expect(createEnvelope('task.started', {}, { taskId: 'task-1' }).v).toBe(6);
   });
 
-  it.each([1, 2, 3, 4])('a v%i envelope is REJECTED: there is no v1, v2, v3 or v4 reader', (v) => {
+  it.each([1, 2, 3, 4, 5])('a v%i envelope is REJECTED: there is no v1, v2, v3, v4 or v5 reader', (v) => {
     const envelope = createEnvelope('task.started', {}, { taskId: 'task-1' });
     expect(() => parseMessage({ ...envelope, v })).toThrow(EnvelopeValidationError);
   });

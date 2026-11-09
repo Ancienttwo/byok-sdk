@@ -37,11 +37,11 @@ function resultDocumentExecution(deviceId: string) {
 }
 
 describe('protocol-version admission at cloud lifecycle boundaries', () => {
-  it('is wire v5', () => {
-    expect(PROTOCOL_VERSION).toBe(5);
+  it('is wire v6', () => {
+    expect(PROTOCOL_VERSION).toBe(6);
   });
 
-  it.each([1, 2, 3, 4])('rejects the retired v:%i at the exported inbound gate before the claim lifecycle mutation', async (v) => {
+  it.each([1, 2, 3, 4, 5])('rejects the retired v:%i at the exported inbound gate before the claim lifecycle mutation', async (v) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
@@ -57,7 +57,7 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('offered');
   });
 
-  it.each([1, 2, 3, 4])('rejects the retired v:%i at POST /byok/messages before it can be acknowledged as accepted', async (v) => {
+  it.each([1, 2, 3, 4, 5])('rejects the retired v:%i at POST /byok/messages before it can be acknowledged as accepted', async (v) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
@@ -73,41 +73,41 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('offered');
   });
 
-  it('keeps the supported v:5 claim path accepted', async () => {
+  it('keeps the supported v:6 claim path accepted', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId });
-    expect(claim.v).toBe(5);
+    expect(claim.v).toBe(6);
 
     await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, claim).then((result) => result.outcome)).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('claimed');
   });
 
-  it('refuses a v2 daemon handshake and delivers no offer to it', async () => {
+  it.each([2, 5])('refuses a v%i daemon handshake and delivers no offer to it', async (retired) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const stores = storesFor(harness, device.deviceId);
     const helloPayload = {
       deviceId: device.deviceId,
       productId: 'test-product',
-      protocolVersions: [2],
+      protocolVersions: [retired],
       capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session',
         'terminal-projection-selection'],
       runtimes: [],
     };
     const capabilitiesBefore = (await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities;
 
-    // A v5 envelope that declares only v2: the handshake gate.
+    // A current envelope that declares only the retired major: the handshake gate.
     const currentHello = createEnvelope('conn.hello', helloPayload as never);
     const helloRefusal = refusalRecorder();
     expect(await handleInboundEnvelope(stores, device.deviceId, currentHello, undefined, undefined, helloRefusal.observer)
       .then((result) => result.outcome)).toBe('rejected');
     expect(helloRefusal.refused.map((entry) => entry.reason)).toEqual(['hello_protocol_version_unsupported']);
 
-    // What a v2 daemon actually sends: a `v: 2` envelope, refused on `v` alone.
-    const v2Hello = { ...createEnvelope('conn.hello', helloPayload as never), v: 2 } as unknown as Envelope;
+    // What a retired daemon actually sends: an envelope of its own major, refused on `v` alone.
+    const v2Hello = { ...createEnvelope('conn.hello', helloPayload as never), v: retired } as unknown as Envelope;
     const envelopeRefusal = refusalRecorder();
     expect(await handleInboundEnvelope(stores, device.deviceId, v2Hello, undefined, undefined, envelopeRefusal.observer)
       .then((result) => result.outcome)).toBe('rejected');

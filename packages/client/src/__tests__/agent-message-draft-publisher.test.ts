@@ -23,20 +23,17 @@ const agentRef = { agentId: 'draft-agent', profileRevision: '1' };
 const frameMax = AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES;
 type Draft = Extract<Envelope, { type: 'agent.message.draft' }>;
 
-function fixture(options: { maxBytes?: number; capabilities?: string[] } = {}) {
+function fixture(options: { maxBytes?: number } = {}) {
   const sent: Draft[] = [];
-  let capabilities = options.capabilities ?? ['agent-message-draft'];
   const publisher = new AgentMessageDraftPublisher({
     taskId: 'draft-task', agentRef, maxBytes: options.maxBytes ?? 256 * 1024,
     maxCoalesceMs: 250,
-    getServerCapabilities: () => capabilities,
     send: envelope => {
       expect(envelope.type).toBe('agent.message.draft');
       if (envelope.type === 'agent.message.draft') sent.push(envelope);
     },
   });
-  return { publisher, sent, push: (text: string, startsMessage = false) => publisher.push({ type: 'progress', text }, startsMessage),
-    withdraw: () => { capabilities = []; } };
+  return { publisher, sent, push: (text: string, startsMessage = false) => publisher.push({ type: 'progress', text }, startsMessage) };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -166,25 +163,6 @@ describe('AgentMessageDraftPublisher', () => {
     expect(sent[0]?.payload.offset).toBe(0);
   });
 
-  it('sends zero frames without the server capability', () => {
-    vi.useFakeTimers();
-    const { push, sent, publisher } = fixture({ capabilities: [] });
-    push('x'.repeat(frameMax * 2));
-    publisher.flush();
-    vi.advanceTimersByTime(1000);
-    expect(sent).toEqual([]);
-  });
-
-  it('drops pending text when the server withdraws the capability', () => {
-    vi.useFakeTimers();
-    const { push, sent, withdraw, publisher } = fixture();
-    push('pending');
-    withdraw();
-    vi.advanceTimersByTime(250);
-    publisher.flush();
-    expect(sent).toEqual([]);
-  });
-
   it('stops timers and ignores late progress after publish or cancellation', () => {
     vi.useFakeTimers();
     const { push, sent, publisher } = fixture();
@@ -301,11 +279,7 @@ describe('AgentMessageDraftPublisher draft deltas', () => {
     expect(sent.map(e => e.payload)).toEqual([{ agentRef, revision: 2, offset: 0, text: 'hell', overflow: true }]);
   });
 
-  it('ignores deltas without the server capability and after stop', () => {
-    const quiet = fixture({ capabilities: [] });
-    quiet.publisher.pushDelta('hidden', true);
-    quiet.publisher.flush();
-    expect(quiet.sent).toEqual([]);
+  it('ignores deltas after stop', () => {
     const { publisher, sent } = fixture();
     publisher.stop();
     publisher.pushDelta('late', true);
@@ -346,7 +320,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
       agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
       agentEgressPolicy: policy, agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'draft-device', tenantId: 'draft-tenant', productId: 'draft-finalize', storeDir,
-      getServerCapabilities: () => ['agent-message-draft'], send: envelope => { sent.push(envelope); },
+      send: envelope => { sent.push(envelope); },
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
       approvalRegistry: new ApprovalRegistry(),
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },

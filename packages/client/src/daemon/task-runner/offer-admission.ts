@@ -1,6 +1,6 @@
 // `TaskRunner` members for offer admission before any runtime work, and for
 // sealed offers (see ./support.ts for how a member module runs).
-import { requiredReceiverCapabilities, type Envelope, type SealedDeclineCode, type TaskSealing } from '@byok-sdk/protocol';
+import { requiredReceiverCapabilities, type Envelope, type SealedDeclineCode } from '@byok-sdk/protocol';
 import { AgentHomeBusyError, AgentHomeResolutionError, type AgentRef } from '../../agent-home';
 import { isReaderRunName, type AgentHomeAccessMode } from '../../agent-home-readers';
 import type { OfferPhaseContext } from './support';
@@ -189,10 +189,6 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
     decline('harnessId cannot be combined with a built-in runtime selection', false);
     return undefined;
   }
-  if (payload.harnessId !== undefined && !(this['deps'].getServerCapabilities?.() ?? []).includes('custom-harness')) {
-    decline('server does not support custom-harness identity', false);
-    return undefined;
-  }
   const requiredToolsets = payload.requiredToolsets;
   const resolvedMcp = requiredToolsets ? this['resolveMcpServers'](requiredToolsets) : undefined;
   if (resolvedMcp && !resolvedMcp.ok) {
@@ -214,12 +210,6 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
  */
 export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extract<Envelope, { type: 'task.offer' }>, admission: OfferAdmissionTiming): boolean {
   const taskId = envelope.task_id;
-  if (envelope.payload.nativeSessions !== undefined
-    && !requiredReceiverCapabilities('task.decline', { code: 'native_sessions_unsupported' })
-      .every(flag => (this['deps'].getServerCapabilities?.() ?? []).includes(flag))) {
-    // Rejecting the handler keeps the mailbox cursor unadvanced for repair.
-    throw new Error('protocol violation: nativeSessions offer from a server without native-sessions');
-  }
   const advertised = this['deps'].advertisedCapabilities();
   const missing = requiredReceiverCapabilities('task.offer', envelope.payload).filter((flag) => !advertised.includes(flag));
   if (missing.length === 0) return false;
@@ -242,16 +232,8 @@ export async function handleSealedOffer(this: TaskRunner, envelope: Envelope, ad
   if (this['tasks'].has(taskId) || this['startupOwnership'].has(taskId) || this['inFlightOffers'].has(taskId) || this['finishedTaskIds'].has(taskId) || this['strictDeclinedTaskIds'].has(taskId) || this['sealedOpening'].has(taskId)) return;
   const agentRef = (envelope.payload as { agentRef?: AgentRef }).agentRef;
   const sealedTasks = this['deps'].sealedTasks;
-  if (sealedTasks === undefined || !this['sealedCodesAllowed']()) {
+  if (sealedTasks === undefined) {
     this['declineSealedOffer'](taskId, admission, agentRef, 'sealed_key_unavailable');
-    return;
-  }
-  // #1045: a task that seals its Agent messages needs a server that takes a sealed publish.
-  const { sealing } = envelope.payload as { sealing?: TaskSealing };
-  const serverCapabilities = this['deps'].getServerCapabilities?.() ?? [];
-  if (sealing?.categories.includes('agent-message') === true
-    && !requiredReceiverCapabilities('agent.message.publish', { sealed: {} }).every((flag) => serverCapabilities.includes(flag))) {
-    this['declineSealedOffer'](taskId, admission, agentRef, 'sealing_policy_mismatch');
     return;
   }
   this['sealedOpening'].add(taskId);
@@ -270,10 +252,5 @@ export async function handleSealedOffer(this: TaskRunner, envelope: Envelope, ad
 export function declineSealedOffer(this: TaskRunner, taskId: string, admission: OfferAdmissionTiming, agentRef: AgentRef | undefined, code: SealedDeclineCode): void {
   if (this['strictDeclinedTaskIds'].has(taskId)) return;
   this['addStrictDeclinedTaskId'](taskId);
-  if (this['sealedCodesAllowed']()) {
-    this['decline'](taskId, admission, code, false, agentRef, code);
-  } else {
-    const why = this['deps'].sealedTasks === undefined ? 'this daemon does not open sealed task input' : 'the server does not accept sealed task output';
-    this['decline'](taskId, admission, `sealed_payload_unsupported: ${why}`, false, agentRef);
-  }
+  this['decline'](taskId, admission, code, false, agentRef, code);
 }

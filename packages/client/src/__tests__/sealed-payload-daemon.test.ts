@@ -61,7 +61,7 @@ const EPOCH = 1;
 const BOTH: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input', 'task-output'] };
 const OUTPUT_ONLY: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-output'] };
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; payload: Record<string, unknown> });
@@ -106,13 +106,6 @@ afterEach(async () => {
 });
 
 async function start(options: {
-  serverFlag?: boolean;
-  /** The server also holds sealed output blobs (`sealed-output-ciphertext-ref`). */
-  ciphertextRef?: boolean;
-  /** The server also takes a failed task's runtime failure class (`runtime-failure-class`). */
-  failureClass?: boolean;
-  /** The server also takes a quota failure's scope (`runtime-quota-scope`). */
-  quotaScope?: boolean;
   /** A short shutdown: the grace deadline, and how long a task's interrupt may take. */
   shutdown?: { readonly graceMs: number; readonly taskInterruptTimeoutMs: number };
   /** The categories of the device scope's policy. */
@@ -128,9 +121,6 @@ async function start(options: {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
   dirs.push(root);
   server ??= await TestServer.start();
-  if (options.serverFlag !== false) {
-    server.setAckCapabilities(['sealed-payload-v1', ...(options.ciphertextRef === true ? ['sealed-output-ciphertext-ref'] : []), ...(options.failureClass === true ? ['runtime-failure-class'] : []), ...(options.quotaScope === true ? ['runtime-quota-scope'] : [])]);
-  }
   const adapter = new StubRuntimeAdapter('pi');
   const storeDir = path.join(root, 'store');
   const config = {
@@ -460,24 +450,6 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, admission: { totalMs: expect.any(Number) } });
   });
 
-  it('declines a task that seals its Agent messages with sealing_policy_mismatch when the server does not take a sealed publish (#1045)', async () => {
-    const { server, adapter, deviceId, member } = await start();
-    const withMessages: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input', 'agent-message', 'task-output'] };
-    server.send(await sealedOffer(member, 'no-v2', server.nextSeq(), deviceId, 'never runs', withMessages));
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'no-v2');
-    expect(decline.payload).toMatchObject({ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
-    expect(adapter.startCalls).toHaveLength(0);
-  });
-
-  it('declines in plaintext, without a code, when the server does not accept sealed output', async () => {
-    const { server, adapter, deviceId, member } = await start({ serverFlag: false });
-    server.send(await sealedOffer(member, 'no-flag', server.nextSeq(), deviceId, 'never runs'));
-
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'no-flag');
-    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_payload_unsupported: the server does not accept sealed task output', retryable: false, admission: { totalMs: expect.any(Number) } });
-    expect(adapter.startCalls).toHaveLength(0);
-  });
-
   it('declines a sealed-output offer whose gates name a non-sealed flag it did not advertise with sealed_key_unavailable, and logs the flags only on the device (O4)', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { server, adapter, deviceId, member } = await start({ egress: false });
@@ -663,6 +635,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'huge');
       expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+      expect(failed.payload).toMatchObject({ failure: { class: 'unknown' } });
       // The local observer sees the failure that was sent, not the completion it replaced.
       await vi.waitFor(() => expect(daemon!.tasks().find((task) => task.taskId === 'huge')).toMatchObject({ state: 'Failed', summary: 'terminal_result_unsealable' }), BUDGET_MS);
     } finally {
@@ -671,7 +644,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   }, 30_000);
 
   it('bounds an oversized runtime failure reason, so it seals with its runtime class intact (#869, #1124)', async () => {
-    const { server, adapter, deviceId, member } = await start({ failureClass: true });
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'huge-classed', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
@@ -686,11 +659,8 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(failed.payload).toMatchObject({ failure: { class: 'auth' } });
   }, 30_000);
 
-  it.each([
-    [true, { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' }],
-    [false, { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' }],
-  ])('keeps a quota scope on the sealed branch only for a server that advertises runtime-quota-scope (#1271, flag %s)', async (quotaScope, expected) => {
-    const { server, adapter, deviceId, member } = await start({ failureClass: true, quotaScope });
+  it('keeps a quota scope on the sealed branch (#1271)', async () => {
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'sealed-scope', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
@@ -698,27 +668,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' },
     }));
     const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'sealed-scope');
-    expect((failed.payload as { failure?: unknown }).failure).toEqual(expected);
-  }, 30_000);
-
-  it.each([
-    [true, { failure: { class: 'unknown' } }],
-    [false, undefined],
-  ])('gives a task.complete over the sealed plaintext limit its replacement failure class by the live flag (#869, flag %s)', async (failureClass, expected) => {
-    const { server, adapter, deviceId, member } = await start({ failureClass });
-    server.send(await sealedOffer(member, 'huge-complete', server.nextSeq(), deviceId, 'run'));
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      adapter.sessions[0]!.emit({ type: 'progress', text: 'p'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024) });
-      adapter.sessions[0]!.emit({ type: 'turn_end' });
-      const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'huge-complete');
-      expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
-      if (expected === undefined) expect(failed.payload).not.toHaveProperty('failure');
-      else expect(failed.payload).toMatchObject(expected);
-    } finally {
-      diagnostic.mockRestore();
-    }
+    expect((failed.payload as { failure?: unknown }).failure).toEqual({ class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' });
   }, 30_000);
 
   it('reports sealed_key_unavailable in plaintext when the sealing key is gone at the terminal', async () => {
@@ -772,24 +722,6 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       diagnostic.mockRestore();
     }
     expect(JSON.stringify(taskEnvelopes('keyless-approval'))).not.toContain('secret approval summary');
-  });
-
-  it('settles a terminal whose sealed frame is over the inline maximum with a small sealed failure', async () => {
-    const { server, adapter, deviceId, member } = await start();
-    server.send(await sealedOffer(member, 'over-inline', server.nextSeq(), deviceId, 'run'));
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      // Under the 2 MiB plaintext limit, over the 256 KiB inline frame.
-      adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
-      adapter.sessions[0]!.emit({ type: 'turn_end' });
-      const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'over-inline');
-      expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
-    } finally {
-      diagnostic.mockRestore();
-    }
-    expect(taskEnvelopes('over-inline').map(wireForm)).not.toContain('task.complete_sealed');
-    expect(JSON.stringify(server.received)).not.toContain('ciphertextRef');
   });
 
   it('sends a sealed terminal made at shutdown before the connection closes', async () => {
@@ -897,28 +829,6 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(events.join('')).toContain('over the sealed inline limit');
   });
 
-  it('reports an artifact whose sealed frame is over the inline maximum as a sealed error, and uploads nothing', async () => {
-    const { server, adapter, deviceId, member } = await start();
-    server.send(await sealedOffer(member, 'large', server.nextSeq(), deviceId, 'run'));
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, 'large.bin'), randomBytes(220 * 1024));
-    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      adapter.sessions[0]!.emit({ type: 'artifact', name: 'large.bin', contentType: 'application/octet-stream' });
-      adapter.sessions[0]!.emit({ type: 'turn_end' });
-      await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'large');
-    } finally {
-      diagnostic.mockRestore();
-    }
-    const types = taskEnvelopes('large').map(wireForm);
-    expect(types).not.toContain('task.artifact_sealed');
-    expect(types).not.toContain('task.artifact');
-    const events = await Promise.all(taskEnvelopes('large').filter((envelope) => wireForm(envelope) === 'task.progress_sealed')
-      .map(async (envelope) => JSON.stringify((await openOutput(member, envelope, deviceId)).events)));
-    expect(events.join('')).toContain('over the inline maximum');
-    expect(JSON.stringify(server.received)).not.toContain('ciphertextRef');
-  });
-
   it('opens a sealed offer whose ciphertext is a blob, after the hash check', async () => {
     const { server, adapter, deviceId, member } = await start();
     const instruction = 'i'.repeat(300 * 1024);
@@ -963,9 +873,9 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 });
 
-describe('sealed output by ciphertextRef on a server that holds the blob (#654 ยง58a)', () => {
+describe('sealed output by ciphertextRef (#654 ยง58a)', () => {
   it('uploads a terminal over the inline frame as an octet-stream blob, and keeps the upload alive through the shutdown commit barrier', async () => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'upload-at-stop', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const release = server.holdBlobUploads();
@@ -987,7 +897,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
   });
 
   it('retries a failed terminal upload, and never replaces the result with a sealed failure', async () => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'upload-retry', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
@@ -1004,7 +914,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
   });
 
   it.each([409, 413, 422])('settles a terminal with a small sealed failure, without a retry, when the server refuses its ciphertext blob for good with %i', async (status) => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'upload-refused', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.refuseBlobCreates(status);
@@ -1029,7 +939,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     { step: 'content', status: 401 },
     { step: 'content', status: 403 },
   ] as const)('retries a terminal whose ciphertext blob $step answers $status, and never replaces the result with a sealed failure', async ({ step, status }) => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'upload-refused-retry', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const refuse = (value: number | undefined): void => (step === 'create' ? server.refuseBlobCreates(value) : server.refuseBlobUploads(value));
@@ -1048,11 +958,10 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     expect(taskEnvelopes('upload-refused-retry').map(wireForm)).not.toContain('task.fail_sealed');
   });
 
-  it('waits for the next session to read the server flags before it seals a large terminal', async () => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+  it('uploads a large terminal made while the session is down once it reconnects', async () => {
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'between-sessions', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    // A route failure withdraws the server flags until the next session advertises them.
     server.setFailMessagesSends(true);
     server.setFailEventsPolls(true);
     await vi.waitFor(() => expect(daemon!.status().lifecycle).toMatchObject({ connection: 'connecting' }), BUDGET_MS);
@@ -1070,7 +979,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
   });
 
   it('settles a terminal that a failed shutdown left queued in the closed form on the next stop', async () => {
-    const { server, adapter, deviceId, storeDir, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, storeDir, member } = await start();
     server.send(await sealedOffer(member, 'upload-stop-retry', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
@@ -1100,7 +1009,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
   });
 
   it('uploads a terminal that a failed shutdown left queued through the next run\'s blob client', async () => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'upload-restart', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
@@ -1128,7 +1037,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
   });
 
   it('keeps a terminal that a failed shutdown left queued until the next start reaches its session', async () => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'upload-slow-restart', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
@@ -1164,7 +1073,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
   }, 15_000);
 
   it('seals a terminal that a failed shutdown left queued with the next run\'s member, at that run\'s chain head', async () => {
-    const { server, adapter, deviceId, member, device } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member, device } = await start();
     server.send(await sealedOffer(member, 'restart-member', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
@@ -1198,7 +1107,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
   }, 15_000);
 
   it('settles a terminal that a failed shutdown left queued in the closed form when the next run has another member', async () => {
-    const { server, adapter, deviceId, member, device } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member, device } = await start();
     server.send(await sealedOffer(member, 'restart-other-member', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
@@ -1259,7 +1168,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
   }, 20_000);
 
   it('uploads an artifact over the inline frame as an octet-stream ciphertext blob', async () => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'large', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const content = randomBytes(220 * 1024);
@@ -1274,7 +1183,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
   });
 
   it('commits another task\'s terminal while one terminal upload is held', async () => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'held-upload', server.nextSeq(), deviceId, 'run the large task'));
     server.send(await sealedOffer(member, 'small-terminal', server.nextSeq(), deviceId, 'run the small task'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
@@ -1298,7 +1207,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
   });
 
   it('keeps an approval request inline only, and denies it locally over the inline frame without an upload', async () => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'inline-only-approval', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     const release = server.holdBlobUploads();
@@ -1380,7 +1289,7 @@ async function openAtEpoch(member: ScopeMember, envelope: Envelope, deviceId: st
 
 describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
   it.each(['payload_invalid', 'unsupported'])('replaces a result the Host refuses with %s by one sealed failure, in the journal too', async (reason) => {
-    const { server, adapter, deviceId, storeDir, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, storeDir, member } = await start();
     server.setOutboundRefusal((envelope) => (wireForm(envelope) === 'task.complete_sealed' && byReference(envelope) ? reason : undefined));
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await runLargeResult(adapter, member, deviceId, 'refused-ref');
@@ -1395,7 +1304,7 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
   });
 
   it('settles a refused replacement once, with no third terminal', async () => {
-    const { server, adapter, deviceId, storeDir, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, storeDir, member } = await start();
     server.setOutboundRefusal((envelope) => {
       if (wireForm(envelope) === 'task.complete_sealed' && byReference(envelope)) return 'payload_invalid';
       return wireForm(envelope) === 'task.fail_sealed' ? 'not_permitted' : undefined;
@@ -1411,7 +1320,7 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
   });
 
   it('does not replace a refused inline terminal', async () => {
-    const { server, adapter, deviceId, storeDir, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, storeDir, member } = await start();
     server.setOutboundRefusal((envelope) => (wireForm(envelope) === 'task.complete_sealed' ? 'payload_invalid' : undefined));
     server.send(await sealedOffer(member, 'refused-inline', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
@@ -1426,7 +1335,7 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
   });
 
   it('keeps a result whose sends fail on the route, and replaces nothing', async () => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    const { server, adapter, deviceId, member } = await start();
     const release = server.holdBlobUploads();
     await runLargeResult(adapter, member, deviceId, 'route-retry');
     await vi.waitFor(() => expect(server.blobUploadsHeld).toBeGreaterThan(0), BUDGET_MS);
@@ -1444,7 +1353,6 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
   it('replaces a refusal journaled before a restart (or by 0.30.1) with a sealed failure, once the member resumes', async () => {
     let refused: Envelope | undefined;
     const { server, deviceId, storeDir, member, device } = await start({
-      ciphertextRef: true,
       beforeStart: async (storeDir, deviceId, member, device) => { refused = await seedRefusedResult(storeDir, deviceId, member, 'refused-before-restart', device.memberId); },
     });
     const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'refused-before-restart');
@@ -1456,7 +1364,6 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
 
   it('replaces a refusal that another member sealed with the closed plaintext form', async () => {
     const { server, storeDir } = await start({
-      ciphertextRef: true,
       beforeStart: async (storeDir, deviceId, member) => { await seedRefusedResult(storeDir, deviceId, member, 'refused-other-member', member.web.member.memberId); },
     });
     const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === 'refused-other-member');
@@ -1469,7 +1376,6 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
   it('sends a replacement journaled before a restart with its exact bytes', async () => {
     let replacement: Envelope | undefined;
     const { server, storeDir } = await start({
-      ciphertextRef: true,
       beforeStart: async (storeDir, deviceId, member, device) => {
         const refused = await seedRefusedResult(storeDir, deviceId, member, 'replaced-before-restart', device.memberId);
         replacement = createEnvelope('task.fail', { reason: 'sealed_key_unavailable', retryable: false }, { taskId: 'replaced-before-restart' });

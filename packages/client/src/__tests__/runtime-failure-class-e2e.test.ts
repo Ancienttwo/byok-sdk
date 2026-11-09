@@ -47,32 +47,18 @@ const ADAPTERS = {
 
 let real: RealServerHandle | undefined;
 let daemon: Daemon | undefined;
-const originalFetch = globalThis.fetch;
 
 afterEach(async () => {
-  globalThis.fetch = originalFetch;
   await daemon?.stop();
   await real?.close();
   daemon = undefined;
   real = undefined;
 });
 
-async function failedTask(runtime: keyof typeof ADAPTERS, options: { oldServer?: boolean } = {}) {
+async function failedTask(runtime: keyof typeof ADAPTERS) {
   const productId = `failure-class-${runtime}`;
   real = await startRealServer({ productId, longPollHoldMs: 50 });
   const server = real;
-  if (options.oldServer) {
-    // A server that predates the flag: its advertisement lacks it.
-    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      const response = await originalFetch(input, init);
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (!url.startsWith(`${server.url}/byok/events`) && !url.startsWith(`${server.url}/byok/messages`)) return response;
-      const body = await response.clone().json() as { capabilities?: string[] };
-      if (body.capabilities === undefined) return response;
-      body.capabilities = body.capabilities.filter((flag) => flag !== 'runtime-failure-class');
-      return new Response(JSON.stringify(body), { status: response.status, headers: response.headers });
-    }) as typeof fetch;
-  }
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-failure-class-'));
   daemon = createDaemonWithAdapters({
     storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' },
@@ -109,11 +95,5 @@ describe('the runtime failure class through the real embedded server (#869)', ()
   it('reads a Pi failure with no structured evidence as unknown', async () => {
     const result = await failedTask('pi');
     expect(result.failure).toEqual({ class: 'unknown' });
-  }, 30_000);
-
-  it('reads no class from a daemon talking to a server without the flag', async () => {
-    const result = await failedTask('codex', { oldServer: true });
-    expect(result.failure).toBeUndefined();
-    expect(result.reason).toBe('Rate limit reached');
   }, 30_000);
 });

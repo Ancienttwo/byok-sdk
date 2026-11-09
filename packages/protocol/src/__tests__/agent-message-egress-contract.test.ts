@@ -3,7 +3,6 @@ import {
   AGENT_MESSAGE_EGRESS_CAPABILITY,
   AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES,
   AgentMessageDraftPayloadSchema,
-  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   AgentMessageDispositionPayloadSchema,
   AgentMessagePublishPayloadSchema,
   AgentMessageServerContextSchema,
@@ -41,7 +40,6 @@ describe('Agent-initiated message egress protocol', () => {
   });
 
   test('treats required-message offers as message-only unless a second terminal projection is explicit', () => {
-    expect(TERMINAL_PROJECTION_SELECTION_CAPABILITY).toBe('terminal-projection-selection');
     const shared = {
       instruction: 'send one message',
       agentRef,

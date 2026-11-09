@@ -11,7 +11,7 @@ import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../
 import { McpAuthorityError, MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from '../mcp-tools-probe';
 import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } from '../../mcp/observation';
 import type { PickResult, OfferPhaseContext, OfferRuntimeInput } from './support';
-import { isKnownRuntimeId, DEFAULT_RUNTIME_PREFERENCE, orderByPreference, adapterSupportsMcpToolsets, runtimeTaskInput, errorMessage, outboundErrorMessage } from './support';
+import { DEFAULT_RUNTIME_PREFERENCE, orderByPreference, adapterSupportsMcpToolsets, runtimeTaskInput, errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 
 export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseContext, input: OfferRuntimeInput) {
@@ -58,10 +58,6 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     // A durable Attempt runs on after a daemon restart, where the crash
     // recovery of the copy would roll it back while it is alive.
     decline('agent_memory_commit_unavailable: agentMemoryCommit does not run on the durable lane', false);
-    return undefined;
-  }
-  if (!isKnownRuntimeId(pick.descriptor.id) && !(this['deps'].getServerCapabilities?.() ?? []).includes('custom-harness')) {
-    decline('server does not support the selected custom harness identity', false);
     return undefined;
   }
   // The environment EVERY child process of this task receives, under the

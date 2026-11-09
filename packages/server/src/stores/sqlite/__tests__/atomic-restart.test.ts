@@ -200,7 +200,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
       messageId,
       admission: 'limited' as const,
       // A pending row must be a protocol envelope to survive reopen; pad it to
-      // an exact byte size (`{"v":5,"p":""}` is 14 bytes).
+      // an exact byte size (`{"v":6,"p":""}` is 14 bytes).
       materialize: () => ({
         body: JSON.stringify({ v: PROTOCOL_VERSION, p: 'x'.repeat(byteSize - 14) }),
         bodyHash: contentHash(`sha256:${'c'.repeat(64)}`),

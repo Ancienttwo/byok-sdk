@@ -5,13 +5,14 @@ import { beforeAll, expect } from 'vitest';
 import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../../adapters/dsh/dsh-adapter';
 import { OWNED_TREE_OBSERVE_MS } from '../../adapters/process-tree';
 import { classifyToolCall } from '../../tool-authorization';
-import { dshEnvironment } from '../../adapters/dsh/dsh-profile';
+import { dshAgentsHome, dshEnvironment } from '../../adapters/dsh/dsh-profile';
 import { QUALIFIED_DSH_VERSION } from '../../adapters/dsh/dsh-version';
+import { DSH_ABSENT_ISOLATION_SOURCES } from '../../adapters/dsh/dsh-capabilities';
 import { setLoginShellSnapshotSource } from '../../login-shell-environment';
 import { TEST_LOGIN_SHELL_SNAPSHOT } from '../fixtures/runtime-env';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 import {
-  baseEnv, check, contractTarget, createSandbox, defineRuntimeCases, defineRuntimeContract, detectWith, egressCheck, expectAuth,
+  baseEnv, absent, check, contractTarget, createSandbox, defineRuntimeCases, defineRuntimeContract, detectWith, egressCheck, expectAuth,
   expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, withProcessEnv, writeSubmitResultServer,
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
@@ -23,6 +24,7 @@ const MODEL = 'contract-model';
 const KEY_ENV = 'RC_CONTRACT_MODEL_KEY';
 const PROJECT_MARKER = 'BYOK-CONTRACT-DSH-PROJECT-4e19';
 const USER_MARKER = 'BYOK-CONTRACT-DSH-USER-a7c2';
+const PERSONA_MARKER = 'BYOK-CONTRACT-DSH-PERSONA-5a3e';
 const SKILL_MARKER = 'BYOK-CONTRACT-DSH-SKILL-0b5d';
 const SKILL = 'byok-contract-user-skill';
 const STEER_MARKER = 'BYOK-CONTRACT-DSH-STEER-3c8e';
@@ -69,10 +71,12 @@ beforeAll(async () => {
 
 const submitResult = callOnceThenReply(mcpTool('host', 'submit_result'), { summary: 'runtime contract' });
 
+const PERSONA_ROW = { id: 'system-prompt', name: '@deepseek-ai/dsh-system-prompt', config: { personaPrefix: PERSONA_MARKER } };
+
 /**
  * User context in the places dsh reads it by default: `~/.dsh/AGENTS.md`,
- * `~/.dsh/skills`, `~/.agents/skills`, and a user MCP server in the home patch
- * `~/.dsh/cordis.patch.yml`. The adapter runs dsh in its own `DSH_HOME` with
+ * `~/.dsh/skills`, `~/.agents/skills`, and a user MCP server and a
+ * `personaPrefix` in the home patch `~/.dsh/cordis.patch.yml`. The adapter runs dsh in its own `DSH_HOME` with
  * an empty `DSH_AGENTS_HOME`, so none of it may reach the turn.
  */
 async function writeUserContext(home: string, userServer: { command: string; args?: readonly string[] }): Promise<void> {
@@ -85,7 +89,7 @@ async function writeUserContext(home: string, userServer: { command: string; arg
   await fs.writeFile(path.join(dshHome, 'cordis.patch.yml'), `${JSON.stringify([{
     id: 'mcp-usermcp', name: '@deepseek-ai/dsh-mcp-client',
     config: { serverName: 'usermcp', transport: 'stdio', command: userServer.command, args: [...(userServer.args ?? [])] },
-  }], null, 2)}\n`);
+  }, PERSONA_ROW], null, 2)}\n`);
 }
 
 /** One contract turn: a loopback `custom` model, a Host MCP server, a workspace AGENTS.md, and user context. */
@@ -108,22 +112,22 @@ async function turn() {
 }
 
 /**
- * Positive control for the user-skill case: the same skill file in the
- * directory the adapter points `DSH_AGENTS_HOME` at reaches the model, so the
- * marker's absence above is isolation, not a skill dsh never lists. It uses a
- * root of its own so the file's shared root stays empty.
+ * Positive control for the isolation cases: the same file in the SDK-owned
+ * `DSH_HOME` (or the directory the adapter points `DSH_AGENTS_HOME` at)
+ * reaches the model, so a marker's absence in the user-home turn is isolation,
+ * not a source dsh never reads. It uses a root of its own so the file's shared
+ * root stays empty.
  */
-async function skillControlTurn() {
-  const box = await createSandbox('dsh-skill-control');
+async function controlTurn(label: string, write: (root: string) => Promise<void>) {
+  const box = await createSandbox(`dsh-${label}-control`);
   const recorder = await fileEgress();
   const provider = await startLoopbackProvider('openai-chat', () => ({ kind: 'text', chunks: CONTRACT_REPLY_CHUNKS }), MODEL);
   try {
-    const runtime = new DshAdapter({ home: path.join(box.root, 'dsh'), resolveBin, model: loopbackModel(provider.baseUrl) });
-    const skills = path.join(box.root, 'dsh', 'byok-agents-home', 'skills', SKILL);
-    await fs.mkdir(skills, { recursive: true });
-    await fs.writeFile(path.join(skills, 'SKILL.md'), SKILL_FILE);
+    const root = path.join(box.root, 'dsh');
+    const runtime = new DshAdapter({ home: root, resolveBin, model: loopbackModel(provider.baseUrl) });
     const init = await detectWith(runtime, baseEnv(box.home));
     if (init.kind !== 'available') throw new Error(`dsh control root init: ${JSON.stringify(init)}`);
+    await write(root);
     const env = { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
     await runTurn(runtime, 'Reply.', { workspaceDir: box.workspace, env });
     return provider;
@@ -321,7 +325,13 @@ const contractTurn = once(turn);
 const steered = once(steerTurn);
 const background = once(backgroundTurn);
 const toolInput = once(toolInputTurn);
-const skillControl = once(skillControlTurn);
+const skillControl = once(() => controlTurn('skill', async root => {
+  const skills = path.join(dshAgentsHome(root), 'skills', SKILL);
+  await fs.mkdir(skills, { recursive: true });
+  await fs.writeFile(path.join(skills, 'SKILL.md'), SKILL_FILE);
+}));
+const instructionsControl = once(() => controlTurn('instructions', root => fs.writeFile(path.join(root, 'AGENTS.md'), `# User\n\n${USER_MARKER}\n`)));
+const personaControl = once(() => controlTurn('persona', root => fs.writeFile(path.join(root, 'cordis.patch.yml'), `${JSON.stringify([PERSONA_ROW], null, 2)}\n`)));
 const closed = once(() => toolTreeTurn('close'));
 const sigkilled = once(() => toolTreeTurn('sigkill'));
 const descriptor = new DshAdapter({ home: path.resolve('/dsh-descriptor-only'), model: detectModel }).descriptor;
@@ -349,19 +359,29 @@ defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVer
   'instructions.project': check(async () => {
     expect((await contractTurn()).provider.saw(PROJECT_MARKER)).toBe(true);
   }),
-  'isolation.userContext': check(async () => {
-    const { provider } = await contractTurn();
-    expect(provider.saw(USER_MARKER), '~/.dsh/AGENTS.md').toBe(false);
-    expect(provider.saw(SKILL_MARKER), '~/.dsh/skills and ~/.agents/skills').toBe(false);
+  'isolation.userInstructions': check(async () => {
+    expect((await instructionsControl()).saw(USER_MARKER), 'positive control: AGENTS.md in the SDK-owned DSH_HOME reaches the model').toBe(true);
+    expect((await contractTurn()).provider.saw(USER_MARKER), '~/.dsh/AGENTS.md').toBe(false);
   }),
+  // dsh has no output style; the user-authored answer persona is its equivalent source.
+  'isolation.userOutputStyle': check(async () => {
+    expect((await personaControl()).saw(PERSONA_MARKER), 'positive control: personaPrefix in the SDK-owned DSH_HOME patch reaches the model').toBe(true);
+    expect((await contractTurn()).provider.saw(PERSONA_MARKER), 'personaPrefix in ~/.dsh/cordis.patch.yml').toBe(false);
+  }),
+  'isolation.userMemory': absent(DSH_ABSENT_ISOLATION_SOURCES.userMemory),
+  'isolation.userSkills': check(async () => {
+    expect((await skillControl()).saw(SKILL_MARKER), 'positive control: a skill in the adapter\'s DSH_AGENTS_HOME reaches the model').toBe(true);
+    expect((await contractTurn()).provider.saw(SKILL_MARKER), '~/.dsh/skills and ~/.agents/skills').toBe(false);
+  }),
+  'isolation.userHookContext': skip('the dsh hook bridge is a separate package that neither the npm install nor the acp profile includes, so no user hook source exists to isolate; the descriptor declares userHookContext false'),
   'isolation.userMcp': check(async () => {
     expect((await contractTurn()).userSpawned).toBe(false);
   }),
   'isolation.sessionPersistence': skip('the dsh adapter has no session persistence option; dsh keeps sessions under the SDK-owned DSH_HOME, which resume needs'),
   drafts: notAdvertised(descriptor, 'messageDraft'),
   'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
-  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await closed(); await sigkilled(); await background(); await steered(); await toolInput(); }),
-});
+  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await instructionsControl(); await personaControl(); await closed(); await sigkilled(); await background(); await steered(); await toolInput(); }),
+}, DSH_ABSENT_ISOLATION_SOURCES);
 
 defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersion})`, {
   'dsh.turnEnd': ['a background subagent and a background job do not outlive the turn', check(async () => {
@@ -397,9 +417,6 @@ defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.exp
     const models = provider.requests.filter(request => request.model);
     expect(models.length).toBeGreaterThan(0);
     for (const request of models) expect(JSON.parse(request.text).model).toBe(MODEL);
-  })],
-  'dsh.userSkills': ['the skill marker reaches the model from the adapter\'s DSH_AGENTS_HOME (positive control)', check(async () => {
-    expect((await skillControl()).saw(SKILL_MARKER)).toBe(true);
   })],
   'dsh.close': ['closing a session while its shell tool runs reaps the tool processes', check(async () => {
     const { survivors, diagnostic } = await closed();

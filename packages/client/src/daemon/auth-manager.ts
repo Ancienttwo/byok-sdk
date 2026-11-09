@@ -51,9 +51,7 @@ export class AuthRequestAbortedError extends Error {
  * Thrown when a successful `/byok/challenge` or `/byok/token` response body
  * is not valid JSON or does not satisfy its protocol schema
  * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
- * truncated body, a missing field, or a token `expiresAt` that is not an ISO
- * timestamp with an offset — and when a token or pair response carries no
- * `expiresIn` (#1114). The renewal or pairing fails and the prior credential
+ * truncated body or a missing field such as `expiresIn` (#1114). The renewal or pairing fails and the prior credential
  * is kept unchanged; nothing is inferred from the malformed body. The JSON
  * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
  */
@@ -67,14 +65,6 @@ export class AuthResponseInvalidError extends Error {
   }
 }
 
-/**
- * The device reads token lifetime only from `expiresIn` (#1114). The wire
- * schemas keep it optional because published v4 hosts omit it; this boundary
- * requires it, so a response without it fails closed instead of falling back
- * to a server timestamp read against this device's clock.
- */
-const DeviceTokenResponseSchema = TokenResponseSchema.required({ expiresIn: true });
-const DevicePairResponseSchema = PairResponseSchema.required({ expiresIn: true });
 type RenewedToken = Pick<DeviceRecord, 'accessToken' | 'expiresAt'> & {
   readonly clockSkew: ClockSkewObservation | undefined;
 };
@@ -315,7 +305,7 @@ export class AuthManager {
           // local state. Parse the required wire contract before building the
           // one atomic DeviceRecord; no token claim or host configuration is an
           // alternate tenant authority.
-          const paired = DevicePairResponseSchema.safeParse(await res.json());
+          const paired = PairResponseSchema.safeParse(await res.json());
           if (!paired.success) throw new AuthResponseInvalidError('pair', { cause: paired.error });
           return {
             ...paired.data,
@@ -466,7 +456,7 @@ export class AuthManager {
       if (!tokenRes.ok) {
         throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status} ${await safeErrorText(tokenRes)}`.trimEnd());
       }
-      const token = DeviceTokenResponseSchema.safeParse(await readAuthResponseJson(tokenRes, 'token'));
+      const token = TokenResponseSchema.safeParse(await readAuthResponseJson(tokenRes, 'token'));
       if (!token.success) throw new AuthResponseInvalidError('token', { cause: token.error });
       return {
         accessToken: token.data.accessToken,
@@ -615,8 +605,7 @@ function msUntilExpiry(expiresAt: string): number {
 /**
  * The stored `expiresAt` is device-local (#1114): this device's receipt time
  * plus the server's relative `expiresIn`, so {@link msUntilExpiry} compares it
- * only with the same device clock. The server's absolute `expiresAt` and
- * `refreshHint` are never read for lifetime.
+ * only with the same device clock. `refreshHint` is never read for lifetime.
  */
 function deviceLocalExpiry(receivedAt: number, expiresInSeconds: number): string {
   return new Date(receivedAt + expiresInSeconds * 1000).toISOString();

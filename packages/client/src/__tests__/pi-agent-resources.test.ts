@@ -51,7 +51,7 @@ describe('Pi Agent resources', () => {
   it('copies explicit resource grants and binds them into the launch digest', () => {
     const skillPaths = [path.resolve('approved-skill')];
     const extensionPaths = [path.resolve('approved-extension.ts')];
-    const resources = parsePiAgentResources({userContext:'excluded',skillPaths,extensionPaths});
+    const resources = parsePiAgentResources({agentUserContext:'excluded',skillPaths,extensionPaths});
     skillPaths.push(path.resolve('unselected-skill'));
     extensionPaths.length = 0;
     expect(resources.skillPaths).toEqual([path.resolve('approved-skill')]);

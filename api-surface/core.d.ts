@@ -1805,7 +1805,11 @@ export interface PresenceRuntimeCapabilities {
     readonly durableLane?: boolean;
     readonly preparedLane?: boolean;
     readonly isolation?: {
-        readonly userContext?: boolean;
+        readonly userInstructions?: boolean;
+        readonly userOutputStyle?: boolean;
+        readonly userMemory?: boolean;
+        readonly userSkills?: boolean;
+        readonly userHookContext?: boolean;
         readonly userMcpServers?: boolean;
         readonly sessionPersistence?: boolean;
     };
@@ -1860,7 +1864,7 @@ export interface PresenceHint {
     /**
      * Logical MCP toolset IDs this daemon reported as configured. Discovery
      * only: local task acceptance remains the fail-closed authority. Omission
-     * means legacy/unknown; an empty array means known-none.
+     * means unknown; an empty array means known-none.
      */
     readonly configuredToolsets?: readonly string[];
     /** The U4a Local Agent release version, when the daemon supplied it. */

@@ -2511,8 +2511,6 @@ export declare class AgentEgressController {
     /** Re-open every existing Agent-local spool before retrying stable records after restart. */
     recover(agentsRoot: string): Promise<void>;
     reliableRecords(): readonly AgentReliableEgressRecord[];
-    /** Missing ack capability holds records in their reliable lane; it never makes them lossy. */
-    retryableReliableRecords(serverCapabilities: readonly string[]): readonly AgentReliableEgressRecord[];
     private spoolFor;
     private bindSpool;
     private tenantPendingBytes;
@@ -3625,9 +3623,7 @@ export declare class AuthRequestAbortedError extends Error {
  * Thrown when a successful `/byok/challenge` or `/byok/token` response body
  * is not valid JSON or does not satisfy its protocol schema
  * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
- * truncated body, a missing field, or a token `expiresAt` that is not an ISO
- * timestamp with an offset — and when a token or pair response carries no
- * `expiresIn` (#1114). The renewal or pairing fails and the prior credential
+ * truncated body or a missing field such as `expiresIn` (#1114). The renewal or pairing fails and the prior credential
  * is kept unchanged; nothing is inferred from the malformed body. The JSON
  * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
  */
@@ -14365,13 +14361,30 @@ export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unav
  * the SDK makes no such guarantee for this runtime (#1103).
  */
 export interface RuntimeIsolationCapabilities {
-    /** User-level instructions (a user `CLAUDE.md`, `AGENTS.md` or rules) can be kept out. */
-    readonly userContext: boolean;
+    /** User-level instruction files (a user `CLAUDE.md`, `AGENTS.md` or rules) can be kept out. */
+    readonly userInstructions: boolean;
+    /** The output style the user configured for the runtime can be kept out. */
+    readonly userOutputStyle: boolean;
+    /** The runtime's user-level memory store can be kept out. */
+    readonly userMemory: boolean;
+    /** Skills the user installed for the runtime, including their names and descriptions, can be kept out. */
+    readonly userSkills: boolean;
+    /** Context that user-configured hooks add to the model (for example SessionStart output) can be kept out. */
+    readonly userHookContext: boolean;
     /** MCP servers the user configured for the runtime can be kept out. */
     readonly userMcpServers: boolean;
     /** The runtime's own transcript store can be turned off. */
     readonly sessionPersistence: boolean;
 }
+/** The isolation bits that name one source of user-level context. */
+export type RuntimeIsolationSource = 'userInstructions' | 'userOutputStyle' | 'userMemory' | 'userSkills' | 'userHookContext';
+/**
+ * An adapter's evidence-backed absent declarations: for each source the
+ * qualified runtime does not have, the qualified source location or official
+ * docs link that shows it. Such a bit may be `true` without a contract check;
+ * the contract plan marks the case `absent` with the same evidence.
+ */
+export type RuntimeIsolationAbsentSources = Readonly<Partial<Record<RuntimeIsolationSource, string>>>;
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     /**

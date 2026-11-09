@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { bindMcpToolsetServerObservation, observeMcpServer } from '../../mcp/observation';
-import type { McpStdioServerConfig, McpToolsetToolObservation, MessageDraftDelta, RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeDetectResult, Session } from '../../types';
+import type { McpStdioServerConfig, McpToolsetToolObservation, MessageDraftDelta, RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeDetectResult, RuntimeIsolationAbsentSources, RuntimeIsolationSource, Session } from '../../types';
 import { startPreparedOperation, type PreparedOperationResources } from '../fixtures/prepared-operation';
 import { runtimeVersionPolicyProjection } from '../../runtime-version-policy';
 import { bindDeclaredSessionMembers } from '../../daemon/session-contract';
@@ -12,9 +12,10 @@ import { startEgressRecorder, type EgressAttempt, type EgressRecorder } from './
 
 /**
  * #1103 runtime contract suite. Each adapter file binds every case below to a
- * check or to an explicit, reasoned skip; the record type makes a missing case
- * a type error, and {@link defineRuntimeContract} refuses a skip that hides a
- * capability the adapter descriptor advertises.
+ * check, to an explicit, reasoned skip, or for an isolation source the runtime
+ * does not have, to an evidence-backed absent declaration; the record type
+ * makes a missing case a type error, and {@link defineRuntimeContract} refuses
+ * a skip that hides a capability the adapter descriptor advertises.
  */
 export const CONTRACT_CASES = Object.freeze({
   'detect.version': 'detect() is available and names the expected version, with an advisory exactly when it is not the qualified one',
@@ -23,7 +24,11 @@ export const CONTRACT_CASES = Object.freeze({
   'detect.auth.login': 'detect() reports authPresent true for the runtime\'s own stored login',
   'mcp.submitResult': 'a Host MCP server reaches the model and its submit_result call reaches the server',
   'instructions.project': 'the project instruction file in the workspace reaches the model (folder trust)',
-  'isolation.userContext': 'with user context excluded, user-level instructions do not reach the model (positive control: they do when inherited)',
+  'isolation.userInstructions': 'with user context excluded, user-level instructions do not reach the model (positive control: they do when inherited)',
+  'isolation.userOutputStyle': 'with user context excluded, the user output style does not reach the model (positive control: it does when inherited)',
+  'isolation.userMemory': 'with user context excluded, user-level memory does not reach the model (positive control: it does when inherited)',
+  'isolation.userSkills': 'with user context excluded, no user skill name, description or body reaches the model (positive control: they do when inherited)',
+  'isolation.userHookContext': 'with user context excluded, context a user hook adds does not reach the model (positive control: it does when inherited)',
   'isolation.userMcp': 'with user MCP servers excluded, a user-configured MCP server is not started (positive control: it is when inherited)',
   'isolation.sessionPersistence': 'with session persistence disabled, no transcript is written',
   'drafts': 'streamed model text arrives as message_draft_delta events',
@@ -36,7 +41,20 @@ export interface ContractSkip { readonly skip: string }
 export const skip = (reason: string): ContractSkip => ({ skip: reason });
 export interface ContractCheck { readonly run: () => Promise<void>; readonly timeoutMs?: number }
 export const check = (run: () => Promise<void>, timeoutMs?: number): ContractCheck => ({ run, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
-export type ContractPlan = { readonly [K in ContractCaseId]: ContractCheck | ContractSkip };
+/** The runtime has no source of this kind; `evidence` is its entry in the adapter's absent-sources record. */
+export interface ContractAbsent { readonly absent: string }
+export const absent = (evidence: string | undefined): ContractAbsent => ({ absent: evidence ?? '' });
+export type ContractEntry = ContractCheck | ContractSkip | ContractAbsent;
+export type ContractPlan = { readonly [K in ContractCaseId]: ContractEntry };
+
+/** The contract case of each isolation source an adapter may declare absent. */
+export const ISOLATION_SOURCE_CASES: Readonly<Record<RuntimeIsolationSource, ContractCaseId>> = Object.freeze({
+  userInstructions: 'isolation.userInstructions',
+  userOutputStyle: 'isolation.userOutputStyle',
+  userMemory: 'isolation.userMemory',
+  userSkills: 'isolation.userSkills',
+  userHookContext: 'isolation.userHookContext',
+});
 
 export type ContractRuntime = 'pi' | 'claude' | 'codex' | 'grok' | 'hermes' | 'dsh' | 'agy';
 export type ContractMode = 'qualified' | 'latest';
@@ -74,36 +92,54 @@ export function contractTarget(runtime: Exclude<ContractRuntime, 'pi'>, qualifie
 
 /**
  * The plan's own admission, before any case registers: every case is present,
- * a skip names a nonempty reason, and no skip hides a capability the adapter
- * descriptor advertises. Extracted so the fail-closed rules are testable
- * without a real runtime CLI.
+ * a skip names a nonempty reason, no skip hides a capability the adapter
+ * descriptor advertises, and the plan's absent entries are exactly the
+ * adapter's absent-sources record, evidence for evidence. Extracted so the
+ * fail-closed rules are testable without a real runtime CLI.
  */
-export function assertContractPlan(descriptor: RuntimeAdapterDescriptor, plan: ContractPlan): void {
+export function assertContractPlan(descriptor: RuntimeAdapterDescriptor, plan: ContractPlan, absentSources: RuntimeIsolationAbsentSources): void {
   const capabilities = descriptor.capabilities;
   const advertised: Partial<Record<ContractCaseId, boolean>> = {
     'mcp.submitResult': capabilities.mcpToolsets === true,
     drafts: capabilities.messageDraft === true,
     'gate.auto': capabilities.toolAuthorizationAuto === true,
-    'isolation.userContext': capabilities.isolation?.userContext === true,
+    'isolation.userInstructions': capabilities.isolation?.userInstructions === true,
+    'isolation.userOutputStyle': capabilities.isolation?.userOutputStyle === true,
+    'isolation.userMemory': capabilities.isolation?.userMemory === true,
+    'isolation.userSkills': capabilities.isolation?.userSkills === true,
+    'isolation.userHookContext': capabilities.isolation?.userHookContext === true,
     'isolation.userMcp': capabilities.isolation?.userMcpServers === true,
     'isolation.sessionPersistence': capabilities.isolation?.sessionPersistence === true,
   };
   for (const id of Object.keys(CONTRACT_CASES) as ContractCaseId[]) {
     if (!(id in plan)) throw new Error(`${descriptor.id}: contract plan is missing the ${id} case`);
   }
-  for (const [id, entry] of Object.entries(plan) as Array<[ContractCaseId, ContractCheck | ContractSkip]>) {
+  for (const [id, entry] of Object.entries(plan) as Array<[ContractCaseId, ContractEntry]>) {
     if ('skip' in entry && advertised[id] === true) throw new Error(`${descriptor.id}: ${id} is advertised by the descriptor and cannot be skipped`);
     if ('skip' in entry && entry.skip.trim() === '') throw new Error(`${descriptor.id}: ${id} skip needs a reason`);
+  }
+  const sourceCases = new Map(Object.entries(ISOLATION_SOURCE_CASES).map(([source, id]) => [id, source as RuntimeIsolationSource]));
+  for (const [id, entry] of Object.entries(plan) as Array<[ContractCaseId, ContractEntry]>) {
+    if (!('absent' in entry)) continue;
+    const source = sourceCases.get(id);
+    if (source === undefined) throw new Error(`${descriptor.id}: ${id} is not an isolation source and cannot be declared absent`);
+    if (advertised[id] !== true) throw new Error(`${descriptor.id}: ${id} is declared absent, so the descriptor must advertise ${source}`);
+    if (entry.absent.trim() === '' || entry.absent !== absentSources[source]) throw new Error(`${descriptor.id}: ${id} absent evidence must be the ${source} entry of the adapter's absent-sources record`);
+  }
+  for (const source of Object.keys(absentSources) as RuntimeIsolationSource[]) {
+    const id = ISOLATION_SOURCE_CASES[source];
+    if (!('absent' in plan[id])) throw new Error(`${descriptor.id}: the absent-sources record names ${source}, so the ${id} case must be declared absent`);
   }
 }
 
 /** Register every case for one adapter. */
-export function defineRuntimeContract(title: string, descriptor: RuntimeAdapterDescriptor, plan: ContractPlan): void {
-  assertContractPlan(descriptor, plan);
+export function defineRuntimeContract(title: string, descriptor: RuntimeAdapterDescriptor, plan: ContractPlan, absentSources: RuntimeIsolationAbsentSources): void {
+  assertContractPlan(descriptor, plan, absentSources);
   describe(title, () => {
     for (const id of Object.keys(CONTRACT_CASES) as ContractCaseId[]) {
       const entry = plan[id];
       if ('skip' in entry) it.skip(`${id}: skipped: ${entry.skip}`, () => {});
+      else if ('absent' in entry) it.skip(`${id}: source absent: ${entry.absent}`, () => {});
       else it(`${id}: ${CONTRACT_CASES[id]}`, entry.run, entry.timeoutMs ?? 180_000);
     }
   });

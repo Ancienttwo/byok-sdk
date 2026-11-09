@@ -1,7 +1,7 @@
 /**
  * The gates of the one `task.offer` (#925 stage 2): a daemon whose decoder
  * does not know a gated field or value stops on it instead of stripping it,
- * the v5 gates of every v4 offer the oracle release shipped equal the gates
+ * the v6 gates of every v5 offer the oracle release shipped equal the gates
  * it derived, and the table names each gate once.
  */
 import { readFileSync } from 'node:fs';
@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import * as v4Release from 'byok-protocol-previous';
+import * as v5Release from 'byok-protocol-previous';
 
 import {
   AgentMemorySelectionSchema,
@@ -27,22 +27,22 @@ import {
 type Json = { [key: string]: unknown };
 type OfferRow = Extract<WireAddition, { rule: 'gated' }> & { readonly field: string };
 
-const v5Offers = readFileSync(new URL('golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
+const v6Offers = readFileSync(new URL('golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: string; payload: Json })
   .filter((line) => line.type === 'task.offer')
   .map((line) => line.payload);
 /**
- * The v4 offer lines the oracle's release shipped: the corpus prefix its
- * `golden/v4.releases.json` entry pins. Later v4 lines may carry gates that
+ * The v5 offer lines the oracle's release shipped: the corpus prefix its
+ * `golden/v5.releases.json` entry pins. Later v5 lines may carry gates that
  * release does not know.
  */
 const oracleVersion = (JSON.parse(readFileSync(createRequire(import.meta.url).resolve('byok-protocol-previous/package.json'), 'utf8')) as { version: string }).version;
-const oracleLines = (JSON.parse(readFileSync(new URL('golden/v4.releases.json', import.meta.url), 'utf8')) as {
+const oracleLines = (JSON.parse(readFileSync(new URL('golden/v5.releases.json', import.meta.url), 'utf8')) as {
   releases: { version: string; envelopes: { lines: number } }[];
 }).releases.find((entry) => entry.version === oracleVersion)!.envelopes.lines;
-const v4Offers = readFileSync(new URL('golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
+const v5Offers = readFileSync(new URL('golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .slice(0, oracleLines)
@@ -82,11 +82,11 @@ describe('task.offer gates: an unknown gated field stops the daemon (Q4)', () =>
   it.each(offerRows.map((row) => [`${row.field}${row.value === undefined ? '' : `=${row.value}`}`, row] as const))(
     'a decoder that does not know %s refuses every corpus offer that carries it',
     (_name, row) => {
-      const lines = v5Offers.filter((payload) => {
+      const lines = v6Offers.filter((payload) => {
         const value = fieldOf(payload, row.field);
         return value !== undefined && (row.value === undefined || (Array.isArray(value) ? value.includes(row.value) : value === row.value));
       });
-      expect(lines.length, 'the v5 corpus carries the row').toBeGreaterThan(0);
+      expect(lines.length, 'the v6 corpus carries the row').toBeGreaterThan(0);
       for (const payload of lines) {
         expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(payload).success).toBe(true);
         expect(decoderWithout(row, payload).safeParse(payload).success).toBe(false);
@@ -95,13 +95,14 @@ describe('task.offer gates: an unknown gated field stops the daemon (Q4)', () =>
   );
 });
 
-describe('task.offer gates: equal to the published v4 oracle (Q2)', () => {
-  it('needs exactly the flags the oracle release derived for every v4 offer line it shipped', () => {
-    expect(v4Offers.length).toBeGreaterThan(0);
-    for (const payload of v4Offers) {
+describe('task.offer gates: the published v5 oracle less the two offer gates v6 retired (Q2)', () => {
+  it('needs exactly the flags the oracle release derived for every v5 offer line it shipped, without the retired ones', () => {
+    const retired = ['custom-harness', 'terminal-projection-selection'];
+    expect(v5Offers.length).toBeGreaterThan(0);
+    for (const payload of v5Offers) {
       expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(payload).success).toBe(true);
-      const v4 = v4Release.requiredReceiverCapabilities('task.offer', payload as never) as string[];
-      expect(new Set(requiredReceiverCapabilities('task.offer', payload))).toEqual(new Set(v4));
+      const v5 = v5Release.requiredReceiverCapabilities('task.offer', payload as never) as string[];
+      expect(new Set(requiredReceiverCapabilities('task.offer', payload))).toEqual(new Set(v5.filter((flag) => !retired.includes(flag))));
     }
   });
 });
@@ -110,8 +111,8 @@ describe('WIRE_ADDITIONS', () => {
   it('names each gate once', () => {
     const keys = WIRE_ADDITIONS.map((entry) => JSON.stringify([
       entry.kind, entry.rule, entry.surface, entry.field ?? null,
-      entry.rule === 'gated' && entry.kind === 'envelope' ? entry.value ?? null : null,
-      entry.rule === 'gated' && entry.kind === 'envelope' ? entry.capability : null,
+      entry.value ?? null,
+      entry.capability,
     ]));
     expect(keys.filter((key, index) => keys.indexOf(key) !== index)).toEqual([]);
   });
@@ -119,7 +120,7 @@ describe('WIRE_ADDITIONS', () => {
 
 
 describe('native session offer admission (#1526)', () => {
-  const ordinary = v5Offers.find(p => p.agentMemoryCommit !== undefined && p.sealing === undefined)!;
+  const ordinary = v6Offers.find(p => p.agentMemoryCommit !== undefined && p.sealing === undefined)!;
   const { agentMemoryCommit: _commit, ...base } = ordinary;
   const native = { ...base, agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 } };
   it.each([undefined, { mode: 'none' }])('admits a fresh memory-only offer with projection %j', terminalProjection => {
@@ -129,9 +130,9 @@ describe('native session offer admission (#1526)', () => {
   });
   it.each([
     ['session', { mode: 'resume', sessionRef: 's' }], ['agentMemory', 'read'], ['agentMemory', undefined],
-    ['terminalProjection', v5Offers.find(p => (p.terminalProjection as Json)?.mode === 'result-document')!.terminalProjection],
+    ['terminalProjection', v6Offers.find(p => (p.terminalProjection as Json)?.mode === 'result-document')!.terminalProjection],
     ...['agentMemoryCommit', 'homeAccess', 'preparation', 'requiredToolsets', 'messageEgress', 'harnessId'].map(field =>
-      [field, v5Offers.find(p => p[field] !== undefined)![field]]),
+      [field, v6Offers.find(p => p[field] !== undefined)![field]]),
   ])('refuses nativeSessions with %s=%j', (field, value) => {
     const result = TaskOfferPlainPayloadSchema.safeParse({ ...native, [field as string]: value });
     expect(result.success).toBe(false);

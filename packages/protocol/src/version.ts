@@ -1,14 +1,22 @@
 /** Bounded volatile navigation; only cursor is a durable acknowledgement. */
 export const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
-export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
 
 /**
- * Wire protocol version. Every v5 change is a version bump, a gated addition
+ * Wire protocol version. Every v6 change is a version bump, a gated addition
  * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
  * one statement of the rule, and `src/wire-additions.ts`, which declares the
- * receiver-capability gates and additions. No v5 release has been published
- * yet, so `src/__tests__/compat.test.ts` has no published v5 decoder to prove
+ * receiver-capability gates and additions. No v6 release has been published
+ * yet, so `src/__tests__/compat.test.ts` has no published v6 decoder to prove
  * additions against; cross-release gates stay unproven until one exists.
+ *
+ * v6 splits the runtime capability `isolation.userContext` into one bit per
+ * source a runtime can keep out: `userInstructions`, `userOutputStyle`,
+ * `userMemory`, `userSkills` and `userHookContext`, beside the unchanged
+ * `userMcpServers` and `sessionPersistence`, on `conn.hello` runtimes and
+ * harnesses, `task.claim` and presence. `userContext` is gone with no derived
+ * field. A v5 envelope is rejected; there is no v5 reader. Stores that still
+ * hold v5 rows refuse to start; rebuild them, then upgrade server and client
+ * together.
  *
  * v5 renames the runtime capability `durablePi` to `durableLane`, beside
  * `preparedLane`, on `conn.hello` runtimes and harnesses, `task.claim` and
@@ -49,7 +57,7 @@ export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /**
  * The device runs `homeAccess: 'memory-reader'` Agent offers: each reader
@@ -77,11 +85,8 @@ export const AGENT_HOME_READERS_CAPABILITY = 'agent-home-readers' as const;
  * offer's `requiredToolsets` and can resolve its logical ids against local
  * MCP configuration.
  */
-export const CUSTOM_HARNESS_CAPABILITY = 'custom-harness' as const;
-
 export const CAPABILITY_FLAGS = [
   'steer',
-  'blob-upload',
   'dispatch-selection',
   PROVIDER_PROFILE_BINDING_CAPABILITY,
   'toolset-selection',
@@ -97,10 +102,7 @@ export const CAPABILITY_FLAGS = [
   AGENT_HOME_PROJECTION_CAPABILITY,
   AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY,
   AGENT_INPUT_PREPARATION_CAPABILITY,
-  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   HOST_MCP_TASK_CONTEXT_CAPABILITY,
-  CUSTOM_HARNESS_CAPABILITY,
-  MAILBOX_READ_AHEAD_CAPABILITY,
   PROVIDER_PROVISIONING_CAPABILITY,
   AGENT_MEMORY_INTENT_CAPABILITY,
   AGENT_MEMORY_SELECTION_CAPABILITY,
@@ -108,14 +110,8 @@ export const CAPABILITY_FLAGS = [
   AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY,
   AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY,
   NATIVE_SESSIONS_CAPABILITY,
-  'agent-message-draft',
   SEALED_PAYLOAD_CAPABILITY,
   SEALED_PAYLOAD_V2_CAPABILITY,
-  SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY,
-  RUNTIME_FAILURE_CLASS_CAPABILITY,
-  RUNTIME_QUOTA_SCOPE_CAPABILITY,
-  RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY,
-  RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY,
 ] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
@@ -129,7 +125,6 @@ import {
   AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
   AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY,
-  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   HOST_MCP_TASK_CONTEXT_CAPABILITY,
   PROVIDER_PROFILE_BINDING_CAPABILITY,
   PROVIDER_PROVISIONING_CAPABILITY,
@@ -142,9 +137,4 @@ import {
   AGENT_INPUT_PREPARATION_CAPABILITY,
   SEALED_PAYLOAD_CAPABILITY,
   SEALED_PAYLOAD_V2_CAPABILITY,
-  SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY,
-  RUNTIME_FAILURE_CLASS_CAPABILITY,
-  RUNTIME_QUOTA_SCOPE_CAPABILITY,
-  RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY,
-  RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY,
 } from './capability-constants';

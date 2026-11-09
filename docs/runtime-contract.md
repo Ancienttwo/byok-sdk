@@ -12,8 +12,19 @@ Each adapter file under `packages/client/src/__tests__/runtime-contract/`
 binds every case either to a check or to an explicit skip with a reason. A
 missing case is a type error. An adapter cannot skip a case for a capability
 its descriptor advertises: `mcpToolsets`, `messageDraft`,
-`toolAuthorizationAuto`, and each `isolation` guarantee (`userContext`,
+`toolAuthorizationAuto`, and each `isolation` guarantee (`userInstructions`,
+`userOutputStyle`, `userMemory`, `userSkills`, `userHookContext`,
 `userMcpServers`, `sessionPersistence`).
+
+A user-context bit (the first five) can instead be declared absent: the
+runtime has no such source. The case is then bound to `absent(evidence)`, and
+the evidence must be that bit's entry in the adapter's absent-sources record
+(`<ID>_ABSENT_ISOLATION_SOURCES` in its capability file): a source location in
+the qualified version or an official documentation link. The suite accepts the
+declaration only when the descriptor advertises the bit, the evidence is
+non-empty and equal to the record entry, and every record entry has its absent
+case. The capability matrix shows such a bit as `yes (no source)`. A bit
+declared `true` with neither a check nor absent evidence fails the suite.
 
 | Case | Checks |
 | --- | --- |
@@ -21,7 +32,9 @@ its descriptor advertises: `mcpToolsets`, `messageDraft`,
 | `detect.auth.*` | `authPresent` is false with no credential, and true for an API key in the environment and for the runtime's own stored login. |
 | `mcp.submitResult` | A Host MCP server's `submit_result` call reaches the server, including through deferred-tool search (Claude `ToolSearch`, Grok `search_tool`/`use_tool`). |
 | `instructions.project` | The project instruction file (AGENTS.md, or CLAUDE.md for Claude) reaches the model. |
-| `isolation.*` | With an exclusion option on, user instructions, user MCP servers, or session transcripts do not appear. A positive control shows they do appear with the option off. |
+| `isolation.userInstructions`, `.userOutputStyle`, `.userMemory`, `.userSkills`, `.userHookContext` | In an Agent task with user context excluded, a marker in that user source (instruction file, output style, memory store, skill name, description or body, hook output) does not reach the model. A positive control shows the marker does reach the model: the same adapter with the user context inherited (Claude, Pi), the marker in the adapter's own home (agy, dsh), or the same binary run outside the adapter on a user home (Hermes, which has no inherit mode). A bit declared absent runs no case; its evidence is the absent-sources record (see above). |
+| `isolation.userMcp` | With user MCP servers excluded, a user-configured MCP server is not started. Claude, Codex and Grok show it starts when inherited, and agy that a server in its own home is offered; dsh and Hermes assert only that it does not start. |
+| `isolation.sessionPersistence` | With session persistence disabled, no transcript is written; a persisted session writes one as the positive control (Claude). |
 | `drafts` | Streamed text reaches the Agent message draft, either as `message_draft_delta` events or as `progress` deltas, using the daemon's own rule. |
 | `gate.auto` | The `auto` gate refuses a high-risk native write before it executes. |
 | `egress.declaredHostsOnly` | No proxied request goes to an undeclared host. The proxy only sees clients that honor `HTTP(S)_PROXY`. |
@@ -48,8 +61,6 @@ dsh adds three cases of its own in `dsh.contract.ts`:
 
 - `dsh.patch`: every model request goes to the patch route and names the
   patch model.
-- `dsh.userSkills`: a positive control for `isolation.userContext`. A skill in
-  the adapter's own `DSH_AGENTS_HOME` reaches the model.
 - `dsh.close`: closing a session while a shell tool runs reaps the tool's
   processes.
 - `dsh.sigkill`: after the dsh root is SIGKILLed from outside, `close()` reaps

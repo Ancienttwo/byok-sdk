@@ -28,7 +28,7 @@ import { openJournalDatabase } from '../util/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; payload: Record<string, unknown> });
@@ -128,7 +128,7 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
     server.send(big);
 
     const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'big-sealed');
-    expect(decline.payload).toEqual({ reason: DECLINE_REASON, retryable: false, agentRef: payload.agentRef });
+    expect(decline.payload).toEqual({ reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false, agentRef: payload.agentRef });
     await vi.waitFor(async () => expect(await cursor()).toBe(big.seq), EVENTUAL_STATE_BUDGET_MS);
   });
 
