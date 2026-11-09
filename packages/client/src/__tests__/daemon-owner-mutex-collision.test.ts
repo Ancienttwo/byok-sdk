@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
-import { createConnection, createServer, type Server, type Socket } from 'node:net';
+import { createConnection, createServer, Server, type Socket } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../util/daemon-owner';
 
 /**
@@ -111,6 +111,36 @@ async function abruptMutexProbe(endpoint: string): Promise<void> {
 }
 
 describe('daemon owner store mutex: a store-scoped lock, immune to foreign listeners', () => {
+  it.skipIf(process.platform === 'win32')('an old mutex close preserves a successor bound before its callback resumes', async () => {
+    const storeDir = await tmpDir();
+    const identity = createHash('sha256').update(storeDir).digest('hex');
+    const endpoint = storeMutexEndpoint(storeDir, identity);
+    const held = await acquireDaemonOwner(storeDir, 'doctor');
+    if (path.dirname(endpoint) !== storeDir) fallbackDirectories.push(path.dirname(endpoint));
+    const successor = createServer((socket) => {
+      socket.on('error', () => {});
+      socket.end(`byok-store-mutex-v1:${identity}\n`);
+    });
+    servers.push(successor);
+    const close = Server.prototype.close;
+    // The store gate serializes lease acquisition; inject the next transport
+    // listener at the exact callback boundary to test pathname cleanup itself.
+    const spy = vi.spyOn(Server.prototype, 'close').mockImplementation(function (this: Server, callback) {
+      if (this.address() !== endpoint) return close.call(this, callback);
+      return close.call(this, (err?: Error) => {
+        successor.listen(endpoint, () => callback?.(err));
+      });
+    });
+    try {
+      await held.release();
+      expect((await lstat(endpoint)).isSocket()).toBe(true);
+      await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+    } finally {
+      spy.mockRestore();
+      await held.release();
+    }
+  });
+
   it('A: silent foreign listeners across the whole abandoned candidate walk cannot deny this store its lease', async () => {
     const storeDir = await tmpDir();
     // Every address the old derivation would have contended on for THIS store.

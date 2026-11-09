@@ -66,6 +66,26 @@ async function withTmpdir<T>(tmp: string, fn: () => Promise<T> | T): Promise<T> 
 }
 
 describe('control socket fallback: a fixed root, immune to TMPDIR', () => {
+  it.skipIf(process.platform === 'win32')('an old close preserves a successor socket, token and fallback directory', async () => {
+    const storeDir = await tooLongStoreDir();
+    const old = await startControlServer({ storeDir, productId: 'acme', methods: pingMethods() });
+    handles.push(old);
+    dirsToRemove.push(path.dirname(old.endpoint));
+    await old.stopServing();
+    const successor = await startControlServer({ storeDir, productId: 'acme', methods: pingMethods() });
+    handles.push(successor);
+    await old.close();
+    expect((await fs.lstat(successor.endpoint)).isSocket()).toBe(true);
+    const conn = await connectControlClient({ storeDir, productId: 'acme' });
+    expect(conn.ok).toBe(true);
+    if (!conn.ok) throw new Error(conn.reason);
+    try {
+      await expect(conn.client.request('ping')).resolves.toBe('pong');
+    } finally {
+      conn.client.close();
+    }
+  });
+
   it('E: a storeDir too long to hold the socket still gets a bindable, actually usable control endpoint under a deep TMPDIR', async () => {
     if (process.platform === 'win32') return; // a pipe name has no length branch
     const storeDir = await tooLongStoreDir();
