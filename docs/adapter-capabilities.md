@@ -308,20 +308,20 @@ it and resumed with it still carried the user instruction files and the auto
 memory in its first history message. A Host that turns the option on should
 start fresh Agent sessions (drop `sessionRef`).
 
-Under `excluded` these still load and can reach the model (probed on 2.1.319,
-#1564):
+Under `excluded` these still load and can reach the model:
 
 - Output of the user's hooks that add context, such as SessionStart and
-  UserPromptSubmit. Hooks merge across setting layers, so the flag layer
-  cannot remove one event's hooks, and `allowManagedHooksOnly` takes effect
-  only in managed policy. Dropping the `user` setting source also drops the
+  UserPromptSubmit (probed on 2.1.319, #1564). Hooks merge across setting
+  layers, so the flag layer cannot remove one event's hooks, and
+  `allowManagedHooksOnly` takes effect only in managed policy. Dropping the `user` setting source also drops the
   guard hooks, such as PreToolUse, and the deny rules (see above);
   `disableAllHooks`, `--bare` and `--safe-mode` drop every hook (from the
   help text; not probed).
 - The user's skills: their names, and depending on the frontmatter their
-  descriptions, appear in the skill listing.
+  descriptions, appear in the skill listing (probed on 2.1.319, #1564).
 - The user's commands and subagents, installed plugins' skills and hooks, and
   managed policy, including a managed `CLAUDE.md`, which cannot be excluded.
+  Not probed.
 
 Claude declares `userInstructions`, `userOutputStyle` and `userMemory` for
 `excluded`. The runtime contract suite checks each at the qualified 2.1.312
@@ -575,6 +575,11 @@ another loaded extension registers one of their tool, command or flag names,
 for example the user's own install of either package, Pi leaves the bundled
 one out instead of failing the launch on the name conflict, and the host writes
 a line to stderr naming it.
+
+Pi also loads the extensions, skills and packages that `<agentDir>/settings.json`
+lists. Under `excluded` that settings file is not read for resources: the host
+gives Pi in-memory settings that carry only the model selection below, so none
+of those entries load.
 
 `excluded` keeps the model selection of the user's global Pi settings
 (`defaultProvider`, `defaultModel`, `defaultThinkingLevel`; project settings are
