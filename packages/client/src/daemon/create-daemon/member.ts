@@ -100,7 +100,7 @@ export function startDeviceMember(daemonScope: DaemonScope, record: DeviceRecord
     daemonState.deviceMember = member;
     daemonState.activateSealedTasks?.(member);
     applyCapabilityDeclaration(daemonState.deploymentDeclaration);
-    console.info(`[byok/client] E2EE member ${session.member.memberId} verified at chain seq ${session.state.head!.seq}`);
+    logMember(`E2EE member ${session.member.memberId} verified at chain seq ${session.state.head!.seq}`);
   }, (error: unknown) => {
     if (abort.signal.aborted) return;
     daemonState.memberResuming = false;
