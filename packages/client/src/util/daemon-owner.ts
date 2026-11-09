@@ -4,6 +4,7 @@ import { createConnection, createServer, type Server, type Socket } from 'node:n
 import path from 'node:path';
 import { sameContent } from './file-state';
 import { ensureSecureDir } from './secure-dir';
+import { reclaimSocketFallbackDirectory } from './socket-fallback-directory';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
@@ -415,6 +416,17 @@ async function assertOwnedPrivateDir(dir: string): Promise<void> {
 }
 
 async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexLock> {
+  try {
+    return await acquireStoreMutexOnce(canonicalStoreDir);
+  } catch (err) {
+    // A closing holder can reclaim the fallback directory between our mkdir
+    // and listen; the directory is recreated on the second pass.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    return acquireStoreMutexOnce(canonicalStoreDir);
+  }
+}
+
+async function acquireStoreMutexOnce(canonicalStoreDir: string): Promise<StoreMutexLock> {
   const identity = storeMutexIdentity(canonicalStoreDir);
   const endpoint = storeMutexEndpoint(canonicalStoreDir, identity);
   const isPipe = process.platform === 'win32';
@@ -464,7 +476,10 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexL
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
       // A pipe has no file to remove; a Unix socket does, and leaving it
       // behind would cost the next acquire a probe round-trip to prove stale.
-      if (!isPipe) await fs.rm(endpoint, { force: true }).catch(() => undefined);
+      if (!isPipe) {
+        await fs.rm(endpoint, { force: true }).catch(() => undefined);
+        await reclaimSocketFallbackDirectory(endpoint);
+      }
     },
   };
 }

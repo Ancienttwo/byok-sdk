@@ -175,6 +175,8 @@ describe('daemon owner store mutex: a store-scoped lock, immune to foreign liste
       } finally {
         await held.release();
       }
+      // Releasing the lease reclaims the private fallback directory too.
+      await expect(lstat(path.dirname(endpoint))).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       if (original === undefined) delete process.env['TMPDIR'];
       else process.env['TMPDIR'] = original;

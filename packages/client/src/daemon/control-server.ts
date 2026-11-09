@@ -4,6 +4,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir } from '../util/secure-dir';
+import { reclaimSocketFallbackDirectory } from '../util/socket-fallback-directory';
 import {
   computeClientAuth,
   computeServerProof,
@@ -208,6 +209,17 @@ async function assertOwnedPrivateDir(dir: string): Promise<void> {
 }
 
 async function bindControlEndpoint(server: net.Server, endpoint: string): Promise<void> {
+  try {
+    await bindControlEndpointOnce(server, endpoint);
+  } catch (err) {
+    // A closing holder can reclaim the fallback directory between our mkdir
+    // and listen; the directory is recreated on the second pass.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    await bindControlEndpointOnce(server, endpoint);
+  }
+}
+
+async function bindControlEndpointOnce(server: net.Server, endpoint: string): Promise<void> {
   if (process.platform !== 'win32') {
     // Ensure the socket's own parent directory is private BEFORE the
     // socket file itself ever exists — closes the default-perms window on
@@ -585,6 +597,7 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
     await new Promise<void>((resolve) => server.close(() => resolve()));
     if (process.platform !== 'win32') {
       await fs.rm(endpoint, { force: true }).catch(() => {});
+      await reclaimSocketFallbackDirectory(endpoint);
     }
     throw err;
   }
@@ -609,6 +622,7 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
     await stopServing();
     if (process.platform !== 'win32') {
       await fs.rm(endpoint, { force: true }).catch(() => {});
+      await reclaimSocketFallbackDirectory(endpoint);
     }
     await fs.rm(tokenPath, { force: true }).catch(() => {});
   }

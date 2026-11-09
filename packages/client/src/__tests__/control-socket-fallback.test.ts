@@ -88,6 +88,10 @@ describe('control socket fallback: a fixed root, immune to TMPDIR', () => {
       if (!conn.ok) throw new Error('unreachable');
       await expect(conn.client.request('ping')).resolves.toBe('pong');
       conn.client.close();
+
+      // Closing the server reclaims the private fallback directory too.
+      await handle.close();
+      await expect(fs.lstat(path.dirname(endpoint))).rejects.toMatchObject({ code: 'ENOENT' });
     });
   }, 60_000);
 
