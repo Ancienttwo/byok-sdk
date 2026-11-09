@@ -418,10 +418,12 @@ Agent home (`lease.canonicalHome`):
   thread store is never linked: Codex cannot resume or list the user's
   threads. The adapter creates the store only through real directories inside
   the Agent home, and refuses the start when `.byok`, `.byok/codex` or the
-  store is a symbolic link. The store is the `agent-runtime-sessions` retention class
-  ([storage layout](host-local-storage-layout.md)). It is unbounded: each
-  Agent's rollouts accumulate until the Host removes the Agent home, as they
-  did in the user's `CODEX_HOME` before.
+  store is a symbolic link. The store is the `codex-session-store` retention class
+  ([storage layout](host-local-storage-layout.md)): a rollout expires 31 days
+  after its last write by default (`storage.retention.ttlMs['codex-session-store']`,
+  at least `session-ledger` plus one day) and is kept while the thread's session ledger lives. A thread that keeps chatting stays
+  resumable, and a thread a running task holds is never pruned. A resume of a
+  pruned thread fails closed through the missing-thread path below.
 
 A Bot that switches from `inherit` to `excluded` cannot resume the threads it
 made under `inherit`, because they are in the user's thread store. Such a

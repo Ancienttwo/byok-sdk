@@ -29,6 +29,14 @@ export function isPiSessionFileName(name: string): boolean {
   return piSessionRefFromFileName(name) !== undefined;
 }
 
+const CODEX_ROLLOUT = /^rollout-.+-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/u;
+
+/** Codex names a rollout `rollout-<local time>-<thread id>.jsonl`, in `YYYY/MM/DD` folders; the thread id is the session ref. */
+export function codexThreadIdFromRolloutName(name: string): string | undefined {
+  return CODEX_ROLLOUT.exec(name)?.[1];
+}
+export const isCodexRolloutFileName = (name: string): boolean => codexThreadIdFromRolloutName(name) !== undefined;
+
 /** Removes matching files whose last write is at least `maxAgeMs` old. Content is never parsed. */
 export async function pruneByLastWrite(input: {
   readonly directory: string;

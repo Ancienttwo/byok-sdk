@@ -682,6 +682,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `storage.retention.ttlMs` | advanced | object |
 | `storage.retention.ttlMs.agent-result` | advanced | number |
 | `storage.retention.ttlMs.agy-session-store` | advanced | number |
+| `storage.retention.ttlMs.codex-session-store` | advanced | number |
 | `storage.retention.ttlMs.confirmed-journal` | advanced | number |
 | `storage.retention.ttlMs.daemon-temp` | advanced | number |
 | `storage.retention.ttlMs.durable-replica` | advanced | number |
@@ -952,6 +953,7 @@ Manifest transition: **0.41.0 → 0.41.0**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
+| codex-session-store | breaking | The retention class agent-runtime-sessions is replaced by the expiring class codex-session-store: it is removed from PROTECTED_CLASS_IDS, ProtectedClassId and PROTECTED_CLASS_BOUNDS and added to EXPIRING_CLASS_IDS and ExpiringClassId, so replace the literal where the Host reads retention classes and treat the class as expiring. It covers the Codex rollouts that agentUserContext: excluded keeps under <Agent home>/.byok/codex. A rollout is deleted once its last write is older than the new DaemonConfig.storage.retention.ttlMs['codex-session-store'] (default 31 days, or the session-ledger TTL plus one day if longer; an explicit value must be at least that), unless a live session ledger still names its thread or its Agent home is running a task. Rollouts that used to stay until the Host removed the Agent home are now deleted by default; set the TTL higher to keep idle threads longer. Resuming a deleted thread fails closed through the existing non-retryable missing-thread path. [Migration](../docs/host-local-storage-layout.md#retention-bounds) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

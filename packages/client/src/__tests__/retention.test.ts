@@ -16,7 +16,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AgentHomeManager } from '../agent-home';
-import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
+import { AgentSessionHandoffStore, sessionFileName } from '../daemon/agent-session-handoff-store';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { journalHash, type JournalIdentity } from '../daemon/journal/journal';
 import { acquireReplicaLock } from '../adapters/pi-durable/replica';
@@ -483,14 +483,70 @@ it.each([
  }
  await f.sweeper.runPass('periodic');expect(await exists(file)).toBe(false);expect(f.failures).toEqual([]);
 });
-it('Codex rollouts in the Agent home are agent-runtime-sessions and never expire',async()=>{
- const {home,binding,directory}=await idleHome();await binding.lease.release();
- const rollout=path.join(directory,'.byok','codex','sessions','2026','11','09','rollout-x.jsonl');await fs.mkdir(path.dirname(rollout),{recursive:true});await fs.writeFile(rollout,'{}');await stamp(rollout,EXPIRED);
+const thread=(digit:string)=>`${digit.repeat(8)}-0000-4000-8000-000000000000`,rolloutName=(digit:string)=>`rollout-2026-10-01T00-00-00-${thread(digit)}.jsonl`;
+it('Codex rollouts expire by last write unless a live ledger names them; a held home, links and other files stay',async()=>{
+ const {home,binding,directory}=await idleHome();
+ const rollout=(store:string,day:string,name:string)=>path.join(directory,'.byok','codex',store,'2026','10',day,name);
+ const [idle,archived,recent,other,named]=[rollout('sessions','01',rolloutName('a')),rollout('archived_sessions','01',rolloutName('b')),rollout('sessions','02',rolloutName('c')),rollout('sessions','02','notes.txt'),rollout('sessions','03',rolloutName('d'))];
+ for(const file of [idle,archived,recent,other,named]){await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,EXPIRED);}
+ await stamp(recent,FRESH);
+ // A terminal record after close leaves the ledger younger than its rollout.
+ const ledger=path.join(directory,'.byok','runtime-sessions',sessionFileName('codex',thread('d')));await fs.mkdir(path.dirname(ledger),{recursive:true});await fs.writeFile(ledger,'');
+ const outside=testScratchRoot(),escaped=path.join(outside,rolloutName('e'));await fs.writeFile(escaped,'{}');await stamp(escaped,EXPIRED);
+ const linked=rollout('sessions','04',rolloutName('f')),linkedDir=path.join(directory,'.byok','codex','sessions','2026','10','05');await fs.mkdir(path.dirname(linked),{recursive:true});
+ if(process.platform!=='win32'){await fs.symlink(escaped,linked);await fs.symlink(outside,linkedDir);}
  const f=await fixture({home});
- expect(f.registry.classes.find(entry=>entry.id==='agent-runtime-sessions')!.authority).toEqual(expect.objectContaining({scope:'agent-home',bound:PROTECTED_CLASS_BOUNDS['agent-runtime-sessions']}));
+ expect(f.registry.classes.find(entry=>entry.id==='codex-session-store')!.authority).toEqual(expect.objectContaining({scope:'agent-home',bound:{kind:'ttl',ttlMs:31*DAY}}));
  await f.sweeper.runPass('periodic');
- expect(usage(f,'agent-runtime-sessions')).toMatchObject({entries:1});expect(usage(f,'byok-authority').entries).toBe(0);
- expect(await exists(rollout)).toBe(true);
+ expect(await Promise.all([idle,archived,recent,other,named].map(exists))).toEqual([true,true,true,true,true]);
+ await binding.lease.release();await f.sweeper.runPass('periodic');
+ expect(await Promise.all([idle,archived,recent,other,named].map(exists))).toEqual([false,false,true,true,true]);
+ expect(await exists(path.dirname(idle))).toBe(true);expect(await exists(escaped)).toBe(true);
+ expect(await fs.readdir(outside)).toEqual([rolloutName('e')]);
+ await stamp(ledger,EXPIRED);await f.sweeper.runPass('periodic');expect(await exists(named)).toBe(false);
+ expect(usage(f,'codex-session-store')).toMatchObject({protected:false,measured:true});expect(f.failures).toEqual([]);
+});
+it('Codex rollout cleanup under a one-deletion budget reaches every expired rollout across passes and a restart',async()=>{
+ const {home,binding,directory}=await idleHome();await binding.lease.release();
+ const store=testScratchRoot(),files:string[]=[];
+ for(const [name,days] of [['sessions',['01','02','03']],['archived_sessions',['01']]] as const)for(const day of days)for(const id of ['a','b'])files.push(path.join(directory,'.byok','codex',name,'2026','10',day,rolloutName(id)));
+ for(const file of files){await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,EXPIRED);}
+ const kept=path.join(directory,'.byok','codex','sessions','2026','10','01',rolloutName('c'));await fs.writeFile(kept,'{}');await stamp(kept,FRESH);
+ let f=await fixture({home,store,max:1});
+ for(let pass=0;pass<30&&(await Promise.all(files.map(exists))).some(Boolean);pass++){await f.sweeper.runPass('periodic');if(pass===3)f=await fixture({home,store,max:1});}
+ expect(await Promise.all(files.map(exists))).toEqual(files.map(()=>false));expect(await exists(kept)).toBe(true);
+});
+it.each([5,18,19])('Codex rollout cleanup reaches every folder through wide day folders when each pass is cut after %i rollouts, across a restart',async reads=>{
+ const {home,binding,directory}=await idleHome();await binding.lease.release();
+ const store=testScratchRoot(),root=path.join(directory,'.byok','codex','sessions','2026','10');
+ for(let day=1;day<=3;day++)for(let index=0;index<18;index++){const file=path.join(root,String(day).padStart(2,'0'),`rollout-2026-10-01T00-00-00-${index.toString(16).padStart(8,'0')}-0000-4000-8000-00000000000${day}.jsonl`);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,FRESH);}
+ const target=path.join(root,'04',rolloutName('f'));await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,'{}');await stamp(target,EXPIRED);
+ // Only this class's sweep is counted: once it has lstat'd `reads` rollouts the clock jumps past the per-home deadline, whatever the directory order or the usage walk does.
+ let seen=0,counting=false;const now=performance.now.bind(performance),lstat=fs.lstat.bind(fs);vi.spyOn(performance,'now').mockImplementation(()=>now()+(counting&&seen>=reads?60_000:0));
+ vi.spyOn(fs,'lstat').mockImplementation((async(...args:Parameters<typeof fs.lstat>)=>{if(counting&&String(args[0]).endsWith('.jsonl'))seen++;return lstat(...args);}) as typeof fs.lstat);
+ let f=await fixture({home,store}),cut=0;
+ const count=(g:typeof f)=>{const entry=g.registry.classes.find(item=>item.id==='codex-session-store') as {sweep(budget:never):Promise<void>},sweep=entry.sweep.bind(entry);entry.sweep=async budget=>{seen=0;counting=true;try{await sweep(budget);}finally{counting=false;}};};
+ count(f);
+ // A fixed number of passes, so the cuts do not depend on which pass finds the target.
+ for(let pass=0;pass<25;pass++){const report=await f.sweeper.runPass('periodic');if(report.truncated)cut++;if(pass===2){f=await fixture({home,store});count(f);}}
+ expect(await exists(target)).toBe(false);expect(cut).toBeGreaterThan(1);
+});
+it.skipIf(process.platform==='win32')('Codex rollout cleanup never reads or deletes through a linked store root or date folder',async()=>{
+ const outside=testScratchRoot(),escaped=path.join(outside,'2026','10','01',rolloutName('e'));await fs.mkdir(path.dirname(escaped),{recursive:true});await fs.writeFile(escaped,'{}');await stamp(escaped,EXPIRED);
+ const {home,binding,directory}=await idleHome();await binding.lease.release();
+ const linkedYear=path.join(directory,'.byok','codex','sessions');await fs.mkdir(linkedYear,{recursive:true});await fs.symlink(path.join(outside,'2026'),path.join(linkedYear,'2026'));
+ const f=await fixture({home});await f.sweeper.runPass('periodic');await f.sweeper.runPass('periodic');
+ expect(await exists(escaped)).toBe(true);expect(f.failures).toEqual([]);
+ await fs.rm(path.join(linkedYear,'2026'));await fs.rm(linkedYear,{recursive:true});await fs.symlink(outside,linkedYear);
+ await f.sweeper.runPass('periodic');
+ expect(await exists(escaped)).toBe(true);expect(f.failures).toEqual(['codex-session-store:sweep_failed']);
+});
+it('Codex rollout cleanup walks only the date folders',async()=>{
+ const {home,binding,directory}=await idleHome();await binding.lease.release();
+ const unrelated=path.join(directory,'.byok','codex','sessions','junk','nested',rolloutName('e')),nested=path.join(directory,'.byok','codex','sessions','2026','10','01','nested',rolloutName('d'));
+ for(const file of [unrelated,nested]){await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,EXPIRED);}
+ const f=await fixture({home});await f.sweeper.runPass('periodic');await f.sweeper.runPass('periodic');
+ expect(await exists(unrelated)).toBe(true);expect(await exists(nested)).toBe(true);
 });
 it('session ledgers and terminal evidence expire by last append; other names, directories and symlinks stay',async()=>{
  const {home,binding,directory}=await idleHome();await binding.lease.release();
@@ -700,5 +756,8 @@ it('Pi session TTL defaults to 31 days and must outlive the session-ledger TTL b
  expect(()=>assertAgySessionStoreTtl(resolveStorageConfig(store,{retention:{ttlMs:{'agy-session-store':30*DAY}}}).ttlMs,[agy])).toThrow('DaemonConfig.storage.retention.ttlMs.agy-session-store');
  expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'pi-session-dir':30*DAY}}})).toThrow("DaemonConfig.storage.retention.ttlMs.pi-session-dir must be at least retention.ttlMs['session-ledger'] plus one day");
  expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':60*DAY}}})).toThrow('DaemonConfig.storage.retention.ttlMs.pi-session-dir');
+ expect(resolveStorageConfig(store).ttlMs['codex-session-store']).toBe(31*DAY);
+ expect(resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':45*DAY,'pi-session-dir':46*DAY}}}).ttlMs['codex-session-store']).toBe(46*DAY);
+ expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'codex-session-store':30*DAY}}})).toThrow("DaemonConfig.storage.retention.ttlMs.codex-session-store must be at least retention.ttlMs['session-ledger'] plus one day");
  expect(resolveStorageConfig(store,{retention:{ttlMs:{'terminal-evidence':0}}}).ttlMs['terminal-evidence']).toBe(0);
 });
