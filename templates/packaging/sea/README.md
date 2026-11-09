@@ -129,7 +129,7 @@ each with its reason:
   defaults.
 
 `pi-single-file-bundle.test.ts` proves this for a single-pass CJS bundle run by
-Node, with the ordinary host and with the sealed-host redirect. It fails if any
+Node with the ordinary host. It fails if any
 other module keeps an empty `import.meta`. The packaging consistency lane
 (`examples/packaging/embedded-host-smoke.mjs`) runs a complete embedded Host
 inside a SEA binary on macOS, Linux and Windows.

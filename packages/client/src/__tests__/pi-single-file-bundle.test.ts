@@ -140,7 +140,7 @@ async function rpcState(capture: Capture, entryKind: 'pi-rpc' | 'pi-prepared'): 
 
 /**
  * The S2 registry tripwire as one piece of machinery. Every registry attempt
- * the sealed child can make is routed here by its environment
+ * the product child can make is routed here by its environment
  * (`npm_config_registry` / `BUN_CONFIG_DEFAULT_REGISTRY` both point at this
  * loopback listener) and recorded as the request URL. The containment case
  * above and the negative control below ride this same recording handler —
@@ -232,20 +232,14 @@ describe('Pi launch path — single-file product re-entry (sdkHelperHost)', () =
           api: 'openai-completions', baseUrl: providerUrl, apiKey: 'synthetic-never-sent', models: [fixture.model] } } }));
         await fs.writeFile(path.join(env.PI_CODING_AGENT_DIR, 'settings.json'), JSON.stringify({ defaultProvider: 'zai', defaultModel: 'glm-4.6' }));
         await fs.writeFile(path.join(release, 'sdk-entry.ts'), BUNDLE_ENTRY_SOURCE);
-        // The product bundler selects the sealed private artifact. The actual
-        // SDK root dispatcher remains the runtime entry (no test dispatch copy).
-        const sealedHost = fileURLToPath(new URL('../../dist/bin/pi-runtime-host-sealed.js', import.meta.url));
-        const buildSource = `let redirects=0;
+        // The actual SDK root dispatcher remains the runtime entry (no test dispatch copy).
+        const buildSource = `
           const result=await Bun.build({entrypoints:['./sdk-entry.ts'],target:'bun',format:'esm',
-            outdir:'.',naming:'sdk-entry.js',sourcemap:'external',plugins:[{name:'sealed-host-author',setup(build){
-              build.onResolve({filter:/^#byok-pi-runtime-host$/},()=>{redirects++;return {path:${JSON.stringify(sealedHost)}};});
-            }}]});
-          if(!result.success) throw new AggregateError(result.logs,'S2 build failed');
-          if(redirects===0) throw new Error('sealed host edge was not selected');`;
+            outdir:'.',naming:'sdk-entry.js',sourcemap:'external'});
+          if(!result.success) throw new AggregateError(result.logs,'S2 build failed');`;
         await execFileAsync(bun, ['--eval', buildSource], { cwd: release });
         const sourceMap = JSON.parse(await fs.readFile(path.join(release, 'sdk-entry.js.map'), 'utf8'));
-        expect(sourceMap.sources.some((file: string) => file.endsWith('/pi-runtime-host.js'))).toBe(false);
-        expect(sourceMap.sources.some((file: string) => file.endsWith('/pi-runtime-host-sealed.js'))).toBe(true);
+        expect(sourceMap.sources.some((file: string) => file.endsWith('/pi-runtime-host.js'))).toBe(true);
         const bundle = path.join(release, 'sdk-entry.js');
         const interpreter = path.join(release, 'bun'); await fs.copyFile(bun, interpreter); await fs.chmod(interpreter, 0o555);
         await fs.chmod(bundle, 0o444);
@@ -329,12 +323,12 @@ describe('Pi launch path — single-file product re-entry (sdkHelperHost)', () =
   // is exactly where the zero-attempt assertion would otherwise go unproven.
   // The control rides the real S2 observation chain instead of its own
   // listener: an isolated child process is spawned with the same registry env
-  // wiring the sealed child gets (`npm_config_registry` /
+  // wiring the product child gets (`npm_config_registry` /
   // `BUN_CONFIG_DEFAULT_REGISTRY` pointing at the loopback tripwire), it
   // deliberately commits one monitored violation — a real HTTP registry
   // attempt, the same violation class as the clipboard auto-install — and the
   // shared recording handler must capture it. The child interpreter is
-  // process.execPath rather than the sealed bun bundle only because that
+  // process.execPath rather than the bun product bundle only because that
   // bundle is bun-gated; gating this control on bun would reopen the
   // vacuous-skip hole it exists to close. The chain under test — child env
   // wiring to loopback recording handler — is exactly what the zero-attempt
@@ -406,9 +400,8 @@ await response.arrayBuffer();
 /**
  * #701: a Host that bundles its whole CLI as one CommonJS file in a single
  * esbuild pass (no ESM pass first). The bundle must load the Pi host and run a
- * real RPC session through the SDK-reserved helper, with no redirect or with
- * the sealed redirect. The ordinary host offers the subagent tool from the
- * pi-subagents copy in the Pi asset root; the sealed host never does. CommonJS output has no `import.meta`; Pi reads
+ * real RPC session through the SDK-reserved helper. The host offers the subagent
+ * tool from the pi-subagents copy in the Pi asset root. CommonJS output has no `import.meta`; Pi reads
  * `import.meta.url` when it evaluates, so the Host defines it from `__filename`.
  *
  * #724: `import.meta.url` is the only property the Host defines. The bundle
@@ -424,7 +417,6 @@ runSdkReservedHelperCommand(process.argv.slice(2)).then(handled => {
   if (!handled) throw new Error('not an SDK helper invocation');
 }).catch(error => { console.error(error); process.exitCode = 1; });
 `;
-const SEALED_HOST = fileURLToPath(new URL('../../dist/bin/pi-runtime-host-sealed.js', import.meta.url));
 /**
  * The reviewed third-party modules whose `import.meta` stays empty in a CommonJS bundle, with the reason each is
  * not reached (`sdkBundleImportMetaExemptions`, the packaging plugin's list).
@@ -475,10 +467,7 @@ async function expectNodeUndiciOwnsDispatcher(slotReport: string): Promise<void>
 }
 
 describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
-  it.each([
-    ['the ordinary host', undefined],
-    ['the sealed host redirect', SEALED_HOST],
-  ] as const)('runs a Pi RPC session from %s', async (_name, redirect) => {
+  it('runs a Pi RPC session from the host', async () => {
     const { build } = await import('esbuild');
     const release = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-cjs-release-')));
     const toolNames: string[][] = [];
@@ -494,24 +483,19 @@ describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
     await new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve));
     try {
       await fs.writeFile(path.join(release, 'entry.mjs'), CJS_ENTRY_SOURCE);
-      let redirects = 0;
       const result = await build({
         entryPoints: [path.join(release, 'entry.mjs')], outfile: path.join(release, 'entry.cjs'),
         bundle: true, platform: 'node', format: 'cjs', metafile: true, logLevel: 'silent',
         define: { 'import.meta.url': '__product_import_meta_url' },
         banner: { js: "const __product_import_meta_url = require('node:url').pathToFileURL(__filename).href;" },
-        plugins: redirect === undefined ? [] : [{ name: 'sealed-host-author', setup(builder) {
-          builder.onResolve({ filter: /^#byok-pi-runtime-host$/ }, () => { redirects++; return { path: redirect }; });
-        } }],
       });
       expect(result.errors).toEqual([]);
       expect(result.warnings.filter(warning => warning.id === 'empty-import-meta').map(warning => warning.location?.file)).toEqual([]);
       const emptyImportMeta = emptyImportMetaModules(await fs.readFile(path.join(release, 'entry.cjs'), 'utf8'));
       expect(emptyImportMeta.filter(module => !CJS_EMPTY_IMPORT_META_ALLOWLIST.some(allowed => module.endsWith(allowed)))).toEqual([]);
       for (const allowed of CJS_EMPTY_IMPORT_META_ALLOWLIST) expect(emptyImportMeta.filter(module => module.endsWith(allowed)), allowed).toHaveLength(1);
-      expect(redirects).toBe(redirect === undefined ? 0 : 1);
       const hosts = Object.keys(result.metafile.inputs).map(input => path.basename(input)).filter(name => name.startsWith('pi-runtime-host'));
-      expect(hosts).toEqual([redirect === undefined ? 'pi-runtime-host.js' : 'pi-runtime-host-sealed.js']);
+      expect(hosts).toEqual(['pi-runtime-host.js']);
       await fs.rm(path.join(release, 'entry.mjs'));
 
       const sdk = await import(CLIENT_DIST) as typeof import('../index');
@@ -553,8 +537,7 @@ describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
       expect(toolNames.length, stderr).toBeGreaterThan(0);
       for (const names of toolNames) {
         expect(names).toContain('read');
-        if (redirect === undefined) expect(names).toContain('subagent');
-        else expect(names).not.toContain('subagent');
+        expect(names).toContain('subagent');
       }
 
       // #700: the request above ran through Node's built-in undici, not through Pi's npm copy.

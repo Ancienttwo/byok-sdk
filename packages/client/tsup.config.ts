@@ -68,13 +68,9 @@ export default defineConfig({
   // non-win32 install (where the addon may be absent) never has it inlined,
   // and so the win32 branch loads the host's own prebuilt addon.
   external: [
-    'koffi', '#byok-hermes-session', '#byok-acp-runtime', '#byok-pi-runtime-host', '#byok-pi-runtime-host-sealed', '#byok-pi-todo-runtime',
+    'koffi', '#byok-hermes-session', '#byok-acp-runtime', '#byok-pi-runtime-host', '#byok-pi-todo-runtime',
     'typebox', 'typebox/compile',
     'undici',
   ],
-  define: {
-    __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
-    // Only the installed host loads the pi-subagents dependency; the sealed host never references it.
-    __BYOK_PI_SUBAGENTS__: 'true',
-  },
+  define: { __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version) },
 });

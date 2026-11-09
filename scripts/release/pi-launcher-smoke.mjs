@@ -238,15 +238,6 @@ await runtime.dispose();
   assert.equal(requests, 0);
   console.log('[release-pack] installed Node byok-pi-durable loaded its worker graph and refused missing digest; sessions=0; requests=0');
 
-  const sealedEntry = pathToFileURL(path.join(clientRoot, 'dist/bin/pi-runtime-host-sealed.js')).href;
-  const sealedProbe = path.join(dir, 'sealed-host-startup.mjs');
-  await writeFile(sealedProbe, `import {runPiRpcHost} from ${JSON.stringify(sealedEntry)}; await runPiRpcHost([]);`, { flag: 'wx' });
-  const sealedStartup = spawnSync(process.execPath, [sealedProbe],
-    {cwd:dir,env:startupEnv,encoding:'utf8',timeout:15_000});
-  assert.equal(sealedStartup.status, 78, sealedStartup.stderr || String(sealedStartup.error));
-  assert.match(sealedStartup.stderr, /^byok-pi-rpc: exactly one --config-digest=<sha256> is required\n$/);
-  assert.equal(requests, 0);
-  console.log('[release-pack] installed Node private sealed host reached exact usage refusal; sessions=0; requests=0');
   const todoEntry = pathToFileURL(path.join(clientRoot, 'dist/bin/pi-todo-runtime.js')).href;
   const todoAnchor = pathToFileURL(path.join(clientRoot, 'dist/assets/extensions/rpiv-todo/2.15.0') + path.sep).href;
   const todoStartup = spawnSync(process.execPath, ['--input-type=module', '-e',
