@@ -393,6 +393,15 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       if (before.imports?.[key] === undefined && isDeepStrictEqual(after.imports?.[key], entry)) delete after.imports[key];
       const smoke = ' && node scripts/check-hermes-session-entry.mjs';
       if (typeof before.scripts?.build === 'string' && after.scripts?.build === before.scripts.build + smoke) after.scripts.build = before.scripts.build;
+      // #1589 retires the sealed Pi host: exactly its private imports key and its build step go.
+      const sealedKey = '#byok-pi-runtime-host-sealed';
+      const sealedEntry = { types: './dist/bin/pi-runtime-host-sealed.d.ts', default: './dist/bin/pi-runtime-host-sealed.js' };
+      if (isDeepStrictEqual(before.imports?.[sealedKey], sealedEntry) && after.imports?.[sealedKey] === undefined) after.imports[sealedKey] = sealedEntry;
+      const sealedBuild = ' && node scripts/build-sealed-host.mjs';
+      if (typeof before.scripts?.build === 'string' && typeof after.scripts?.build === 'string'
+        && before.scripts.build === after.scripts.build.replace(' && tsc -p', sealedBuild + ' && tsc -p') && before.scripts.build.includes(sealedBuild + ' && tsc -p')) {
+        after.scripts.build = before.scripts.build;
+      }
       if (before.scripts?.['test:runtime-contract'] === undefined && after.scripts?.['test:runtime-contract'] === RUNTIME_CONTRACT_SCRIPT) {
         delete after.scripts['test:runtime-contract'];
       }

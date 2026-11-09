@@ -477,6 +477,7 @@ export const vitestTmpRootConsumers = Object.freeze([
 ]);
 // Reviewed M build inputs: exact paths retain workspace consumers and packed-artifact checks.
 const reviewedBuildConfigOwners = Object.freeze({
+  'packages/client/tsup.sealed.config.ts': 'packages/client', // retired by #1589; a deleting PR still lists it
   'packages/cloud-dataplane/tsup.config.ts': 'packages/cloud-dataplane',
   'packages/cloud-do/tsup.config.ts': 'packages/cloud-do',
   'packages/cloud-do/scripts/check-dist.mjs': 'packages/cloud-do',
@@ -621,9 +622,10 @@ export function selectImpact(paths, context = {}) {
     }
     // Client build inputs: the entry checks, the main build config, the todo
     // build config (check-adapters-entry.mjs --build-todo runs it) and the
-    // retired vendored-subagents build plugin.
+    // retired vendored-subagents build plugin and sealed host build check
+    // (a PR that deletes a path still lists it).
     if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/scripts/check-adapters-entry.mjs'
-      || path === 'packages/client/tsup.config.ts' || path === 'packages/client/tsup.todo.config.ts'
+      || path === 'packages/client/tsup.config.ts' || path === 'packages/client/tsup.todo.config.ts' || path === 'packages/client/scripts/build-sealed-host.mjs'
       || path === 'packages/client/scripts/subagents-build.ts') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
