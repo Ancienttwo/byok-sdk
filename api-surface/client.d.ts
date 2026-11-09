@@ -1313,7 +1313,10 @@ export interface CopyPiRuntimeAssetsOptions {
  *
  * The Pi package must be the exact official pin. The Pi export resources must
  * match their recorded SHA-256 digests, and the SDK todo locale assets must
- * match their build manifest; a mismatch fails closed. Returns the written
+ * match their build manifest; a mismatch fails closed. The root also holds the
+ * client's exact pi-subagents with its runtime dependencies and the SDK
+ * extensions its native children load, so the product's Pi offers foreground
+ * subagents. Returns the written
  * file paths, relative to `outDir`, in sorted order.
  */
 export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;

@@ -545,6 +545,56 @@ export function classifyToolCall(
   rules?: ToolAuthorizationRules,
   context: { readonly platform?: NodeJS.Platform } = {},
 ): ToolRisk {
+  if (call.toolName !== 'subagent_launch') return classifySingleToolCall(call, workspace, home, rules, context);
+  return mergeRisks(workflowChildLaunchEffects(call, workspace, home, rules, context).map(effect => effect.risk));
+}
+
+/** One concrete effect of a Pi workflow child launch, as the approval card names it. */
+interface WorkflowChildLaunchEffect { readonly text: string; readonly risk: ToolRisk }
+
+/**
+ * pi-subagents' workflow child check (#1589). The child runs in `cwd`; the
+ * parent process then runs each gate command at its own `cwd` (the child cwd
+ * when it states none) and writes `output`. Each effect is judged as the
+ * write or bash call it is: every cwd is a write target, each command is a
+ * bash command. The name is shared with a model-reachable call (#1511), so no
+ * allow rule loosens any part of it. The hook has validated the input shape.
+ */
+function workflowChildLaunchEffects(
+  call: Pick<ToolCall, 'toolName' | 'input' | 'cwd' | 'mcp'>, workspace: string, home: string,
+  rules: ToolAuthorizationRules | undefined, context: { readonly platform?: NodeJS.Platform },
+): readonly WorkflowChildLaunchEffect[] {
+  const strict = rules === undefined ? undefined : { ...rules, allowWithoutAsking: [] };
+  const launchCwd = call.input.cwd === undefined ? undefined : resolve(call.cwd, call.input.cwd as string);
+  const base = launchCwd ?? call.cwd;
+  const place = (cwd: string | undefined) => classifySingleToolCall({ toolName: 'subagent_launch', input: cwd === undefined ? {} : { cwd }, cwd: base }, workspace, home, strict, context);
+  const commands = (call.input.commands ?? []) as readonly { readonly command: string; readonly cwd?: string }[];
+  return [
+    { text: launchCwd === undefined ? 'child cwd not stated (a resumed child reuses its stored cwd)' : `child cwd ${launchCwd}`, risk: place(launchCwd) },
+    ...commands.map(entry => {
+      const cwd = entry.cwd ?? launchCwd;
+      return { text: `gate command ${JSON.stringify(entry.command)} in ${cwd ?? 'the unstated child cwd'}`,
+        risk: mergeRisks([place(cwd), classifySingleToolCall({ toolName: 'bash', input: { command: entry.command }, cwd: cwd ?? base }, workspace, home, strict, context)]) };
+    }),
+    ...(call.input.output === undefined ? [] : [{ text: `output ${String(call.input.output)}`,
+      risk: classifySingleToolCall({ toolName: 'write', input: { path: call.input.output }, cwd: call.cwd }, workspace, home, strict, context) }]),
+  ];
+}
+
+function mergeRisks(parts: readonly ToolRisk[]): ToolRisk {
+  const high = parts.filter((part): part is Extract<ToolRisk, { level: 'high' }> => part.level === 'high');
+  if (high.length === 0) return { level: 'normal', authorization: BUILT_IN_AUTHORIZATION };
+  const ruleIds = [...new Set(high.flatMap(part => part.authorization.ruleIds))];
+  return { level: 'high', reasons: Object.freeze([...new Set(high.flatMap(part => part.reasons))]),
+    authorization: high.some(part => part.authorization.source === 'floor') ? FLOOR_AUTHORIZATION
+      : ruleIds.length > 0 ? Object.freeze({ source: 'rule' as const, ruleIds: Object.freeze(ruleIds) }) : BUILT_IN_AUTHORIZATION };
+}
+
+function classifySingleToolCall(
+  call: Pick<ToolCall, 'toolName' | 'input' | 'cwd' | 'mcp'>, workspace: string, home: string,
+  rules: ToolAuthorizationRules | undefined,
+  context: { readonly platform?: NodeJS.Platform },
+): ToolRisk {
   const policy = parseToolAuthorizationPolicy({ default: 'auto', ...(rules === undefined ? {} : { rules }) });
   rules = policy.rules;
   const platform = context.platform ?? process.platform;
@@ -574,6 +624,13 @@ export function classifyToolCall(
   // Codex projects one native file operation as a batch, including move destinations.
   // Normalize here so auto decisions and all-mode reminders share the same path checks.
   const paths = PATH_KEYS.map(key => ({ path: call.input[key], mutating: MUTATING_TOOLS.has(call.toolName.toLowerCase()) }));
+  // A Pi workflow child launch: its cwd is where the child will write. A
+  // resumed child carries none (it reuses its stored run cwd), so it cannot be
+  // shown to stay in the workspace.
+  if (call.toolName === 'subagent_launch') {
+    if (typeof call.input.cwd === 'string') paths.push({ path: call.input.cwd, mutating: true });
+    else reasons.add('write-outside-workspace');
+  }
   if (call.toolName === 'file_change' && Array.isArray(call.input.changes)) {
     for (const change of call.input.changes) {
       if (change === null || typeof change !== 'object' || Array.isArray(change)) continue;
@@ -583,6 +640,7 @@ export function classifyToolCall(
   }
   const targets: string[] = [];
   const physicalTargets: string[] = [];
+  const physicalWorkspace = call.toolName === 'subagent_launch' ? nearestRealPath(resolve(workspace)) : undefined;
   for (const { path: raw, mutating } of paths) {
     if (typeof raw !== 'string' || raw.length === 0) continue;
     const expanded = raw === '~' ? home : raw.startsWith('~/') ? `${home}${raw.slice(1)}` : raw;
@@ -593,6 +651,10 @@ export function classifyToolCall(
     if (physicalTarget === undefined) floorCertain = false;
     if (isProtected(target) || (physicalTarget !== undefined && isProtected(physicalTarget))) reasons.add('sensitive-path');
     if (mutating && !within(workspace, target)) reasons.add('write-outside-workspace');
+    // A workflow child runs in its cwd, so a symlink in the workspace that leads out of it takes the child out too.
+    else if (mutating && call.toolName === 'subagent_launch' && (physicalWorkspace === undefined || physicalTarget === undefined || !within(physicalWorkspace, physicalTarget))) {
+      reasons.add('write-outside-workspace');
+    }
   }
 
   const matchingIds = (entries: readonly ToolRule[] | undefined, allow: boolean): readonly string[] => {
@@ -689,6 +751,44 @@ export function describeHighRiskToolCall(
   const subject = commandText(call.input)
     ?? PATH_KEYS.map(key => call.input[key]).find((value): value is string => typeof value === 'string')
     ?? '';
+  return toolCallSummary(call, reasons, authorization, subject);
+}
+
+/**
+ * The card of a workflow child launch names every effect, the risky ones
+ * first with their reasons. Effects that do not fit are counted, never dropped
+ * silently.
+ */
+function describeWorkflowChildLaunch(
+  call: Pick<ToolCall, 'toolName' | 'input' | 'mcp'>, risk: Extract<ToolRisk, { level: 'high' }>, effects: readonly WorkflowChildLaunchEffect[],
+): string {
+  const ordered = [...effects.filter(effect => effect.risk.level === 'high'), ...effects.filter(effect => effect.risk.level !== 'high')]
+    .map(effect => effect.risk.level === 'high' ? `${effect.text} (${effect.risk.reasons.join(', ')})` : effect.text);
+  const head = toolCallSummary(call, risk.reasons, risk.authorization, '');
+  const more = (count: number): string => count === 0 ? '' : `; +${count} more effect${count === 1 ? '' : 's'} not shown`;
+  // The card never exceeds its budget, and the count of effects left out always fits after the ones shown.
+  let subject = '';
+  let shown = 0;
+  for (const text of ordered) {
+    const separator = shown === 0 ? ' ' : '; ';
+    const tail = more(ordered.length - shown - 1);
+    if (head.length + subject.length + separator.length + text.length + tail.length <= MAX_SUMMARY_CHARS) {
+      subject += separator + text;
+      shown += 1;
+      continue;
+    }
+    if (shown === 0) {
+      subject = separator + text.slice(0, Math.max(0, MAX_SUMMARY_CHARS - head.length - separator.length - tail.length - 1)) + '…';
+      shown = 1;
+    }
+    break;
+  }
+  return head + subject + more(ordered.length - shown);
+}
+
+function toolCallSummary(
+  call: Pick<ToolCall, 'toolName' | 'mcp'>, reasons: readonly ToolRiskReason[], authorization: ToolAuthorizationReason | undefined, subject: string,
+): string {
   // A human decides on this card, so it names the concrete identity: the
   // shell command/path when the call has one, and the trusted MCP server/tool
   // when the runtime label is an MCP tool.
@@ -766,7 +866,10 @@ export function createAutoToolAuthorizationGate(input: {
           risk = { level: 'high', reasons: Object.freeze(['outside-file-scope']), authorization: FLOOR_AUTHORIZATION };
         }
         if (risk.level === 'normal') return finish({ decision: 'allow' });
-        const result = await Promise.race([input.requestAuthorization(describeHighRiskToolCall(call, risk.reasons, risk.authorization), withdraw.signal), expired]);
+        const summary = call.toolName === 'subagent_launch'
+          ? describeWorkflowChildLaunch(call, risk, workflowChildLaunchEffects(call, input.workspace, input.home ?? homedir(), rules, { platform: input.platform }))
+          : describeHighRiskToolCall(call, risk.reasons, risk.authorization);
+        const result = await Promise.race([input.requestAuthorization(summary, withdraw.signal), expired]);
         if (result === 'expired') {
           withdraw.abort();
           return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${input.timeoutMs}ms` });

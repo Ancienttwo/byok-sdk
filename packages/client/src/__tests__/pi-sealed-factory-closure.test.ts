@@ -20,12 +20,12 @@ describe('sealed host build and the installed pi-subagents dependency', () => {
     expect(ordinary).toMatch(/=\s*["']pi-subagents["']/u);
     expect(ordinary).toMatch(/=\s*["']pi-subagents\/required-child-extensions["']/u);
     const manifest = JSON.parse(read('package.json'));
-    expect(manifest.dependencies['pi-subagents']).toBe('0.83.1');
+    expect(manifest.dependencies['pi-subagents']).toBe('0.87.0');
     expect(manifest.devDependencies?.['pi-subagents']).toBeUndefined();
     const require = createRequire(path.join(root, 'dist/bin/pi-runtime-host.js'));
     let dir = path.dirname(require.resolve('pi-subagents'));
     while (!existsSync(path.join(dir, 'package.json'))) dir = path.dirname(dir);
-    expect(JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'))).toMatchObject({ name: 'pi-subagents', version: '0.83.1' });
+    expect(JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'))).toMatchObject({ name: 'pi-subagents', version: '0.87.0' });
   });
   it('emits the subagent child gate as its own entry beside the ordinary host', () => {
     const gate = read('dist/bin/pi-subagent-gate.js');
