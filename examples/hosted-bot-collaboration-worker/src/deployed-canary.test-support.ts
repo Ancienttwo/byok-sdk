@@ -15,6 +15,7 @@ import type { SealedMember } from '../../hosted-bot-collaboration/src/e2ee-membe
 import { CANARY_METHODS, decodeCanaryRpc, encodeCanaryRpc, type CanaryCloud } from '../../hosted-bot-collaboration/src/canary-cloud.test-support';
 import { openHostedDevice } from '../../hosted-bot-collaboration/src/hosted-device.test-support';
 import { provisionEntitlement } from './operator-provision';
+import { openRemoteCanaryDevice, type RemoteDeviceConfig } from './remote-canary-device.test-support';
 import { ZeroHitAdapter } from '../../hosted-bot-collaboration/src/zero-hit-runtime.test-support';
 
 export interface CanaryConfig {
@@ -22,6 +23,7 @@ export interface CanaryConfig {
   postgresUrl: string;
   adminToken: string;
   storage: Omit<ObjectStorageScope['config'], 'signingClock'>;
+  device?: RemoteDeviceConfig;
   logs(): Promise<string>;
 }
 
@@ -42,7 +44,9 @@ export function remoteCanaryConfig(): CanaryConfig | undefined {
     assert.ok(new URL(storage.endpoint).protocol === 'https:');
     for (const key of ['bucket', 'accessKeyId', 'secretAccessKey', 'region'] as const) assert.ok(typeof storage[key] === 'string' && storage[key].length > 0);
     const tailFile = required('BYOK_CANARY_TAIL_FILE');
-    return { base: url.origin, postgresUrl, storage, adminToken: required('HOST_ADMIN_TOKEN'), logs: () => readFile(tailFile, 'utf8') };
+    const device = process.env.BYOK_CANARY_DEVICE === undefined ? undefined : JSON.parse(process.env.BYOK_CANARY_DEVICE) as RemoteDeviceConfig;
+    if (device !== undefined) for (const key of ['machine', 'cwd', 'root'] as const) assert.ok(typeof device[key] === 'string' && device[key].length > 0);
+    return { base: url.origin, postgresUrl, storage, device, adminToken: required('HOST_ADMIN_TOKEN'), logs: () => readFile(tailFile, 'utf8') };
   } catch {
     throw new Error('Invalid deployed canary configuration; check the required operator environment variables');
   }
@@ -100,14 +104,16 @@ export async function runDeployedCanary(config: CanaryConfig, nodeLogs: () => st
     return (decodeCanaryRpc(await response.text()) as { value: unknown }).value;
   }])) as CanaryCloud;
   let device: Awaited<ReturnType<typeof openHostedDevice>> | undefined;
+  let remote: Awaited<ReturnType<typeof openRemoteCanaryDevice>> | undefined;
   const sealedText = `byok654sealed${randomUUID().replaceAll('-', '')}`, plainText = `byok654plain${randomUUID().replaceAll('-', '')}`;
   try {
     const core = createPostgresCoreStores({ pool, clock, objectStorage });
     await provisionEntitlement(core, tenant);
     const adapter = new ZeroHitAdapter();
-    device = await openHostedDevice(cloud, tenant, config.base, { adapter, objectStorage,
+    if (config.device) remote = await openRemoteCanaryDevice(cloud, tenant, config.base, config.device);
+    else device = await openHostedDevice(cloud, tenant, config.base, { adapter, objectStorage,
       e2ee: { scopeId: 'scope-zero-hit', categories: ['task-input', 'task-output'] } });
-    const { deviceId, member } = device;
+    const { deviceId, member } = (remote ?? device)!;
     await until(async () => (await cloud.listDevices(tenant)).find(d => d.deviceId === deviceId)?.capabilities?.includes('sealed-payload-v1') ? true : undefined);
     async function run(sealed: boolean, text: string) {
       const taskId = `task-${randomUUID()}`;
@@ -117,9 +123,12 @@ export async function runDeployedCanary(config: CanaryConfig, nodeLogs: () => st
         terminalProjection: payload.terminalProjection!, sealing: member!.sealing,
         sealed: await member!.seal('task.offer', { taskId }, deviceId, payload.agentRef, { instruction: text }) } });
       else await cloud.submitAgentExecution(tenant, input);
-      const session = await until(async () => adapter.sessions.get(taskId));
-      assert.ok(session.instruction.includes(text), 'device did not open instruction');
-      session.emit({ type: 'progress', text: `Progress ${text}` });
+      const session = remote ? undefined : await until(async () => adapter.sessions.get(taskId));
+      if (remote) await remote.begin(taskId, text, sealed);
+      else {
+        assert.ok(session!.instruction.includes(text), 'device did not open instruction');
+        session!.emit({ type: 'progress', text: `Progress ${text}` });
+      }
       await until(async () => (await cloud.readTaskAttempt(tenant, taskId))?.status === 'running' ? true : undefined);
       const steer = `Steer ${text}`;
       if (sealed) {
@@ -127,22 +136,26 @@ export async function runDeployedCanary(config: CanaryConfig, nodeLogs: () => st
         await cloud.steerSealedTask(tenant, taskId, { steerId,
           sealed: await member!.seal('task.steer', { taskId, steerId }, deviceId, payload.agentRef, { text: steer }) });
       } else await cloud.steerTask(tenant, taskId, { text: steer });
-      await until(async () => session.steers.includes(steer) ? true : undefined);
-      void session.start.approvalChannel!.request(`Approve ${text}`);
+      if (session) {
+        await until(async () => session.steers.includes(steer) ? true : undefined);
+        void session.start.approvalChannel!.request(`Approve ${text}`);
+      }
       const approvalId = await until(async () => {
         const entry = (await cloud.readApprovalTimeline(tenant, taskId))?.entries.find(entry => entry.event.type === 'approval_requested');
         return (entry?.event as { approvalId: string } | undefined)?.approvalId;
       });
       await cloud.approveTask(tenant, taskId, { approvalId });
-      await writeFile(path.join(session.workspaceDir, 'notes.txt'), `${text}${'.'.repeat(70_000)}`);
-      session.emit({ type: 'artifact', name: 'notes.txt', contentType: 'text/plain' });
-      // Two bounded events make the sealed terminal spill to an object without exceeding the per-event limit.
-      session.emit({ type: 'progress', text: `${text}${'.'.repeat(sealed ? 140_000 : 60_000)}` });
-      session.emit({ type: 'progress', text: `${text}${'.'.repeat(sealed ? 140_000 : 60_000)}` });
-      await session.finish({ text });
+      if (session) {
+        await writeFile(path.join(session.workspaceDir, 'notes.txt'), `${text}${'.'.repeat(70_000)}`);
+        session.emit({ type: 'artifact', name: 'notes.txt', contentType: 'text/plain' });
+        // Two bounded events make the sealed terminal spill to an object without exceeding the per-event limit.
+        session.emit({ type: 'progress', text: `${text}${'.'.repeat(sealed ? 140_000 : 60_000)}` });
+        session.emit({ type: 'progress', text: `${text}${'.'.repeat(sealed ? 140_000 : 60_000)}` });
+        await session.finish({ text });
+      } else await remote!.finish(taskId);
       const terminal = await until(async () => (await cloud.readDeviceTerminal(tenant, taskId))?.envelope);
       assert.ok(terminal.type === 'task.complete', 'task did not complete');
-      await waitForTaskCleanup(device!.daemon, session);
+      if (session) await waitForTaskCleanup(device!.daemon, session);
       return { taskId, agentRef: payload.agentRef, terminal };
     }
     const sealedRun = await run(true, sealedText), plainRun = await run(false, plainText);
@@ -168,7 +181,7 @@ export async function runDeployedCanary(config: CanaryConfig, nodeLogs: () => st
       ...activity.map(entry => ciphertextOf((entry as { sealed: unknown }).sealed)),
       ...approval.map(event => ciphertextOf((event as { sealed: unknown }).sealed)),
     ])).map(member => member.needle);
-    await device.close(); device = undefined;
+    await (remote ?? device)!.close(); device = undefined; remote = undefined;
     // Tail must contain both terminal observations before its scan can count as evidence.
     const logs = await until(async () => {
       const text = await config.logs();
@@ -198,6 +211,6 @@ export async function runDeployedCanary(config: CanaryConfig, nodeLogs: () => st
     return { tables, objects: objects.size, sealedHits: sealedHits.size, plainLocations: plainHits.size, inventoryDiff,
       memberSha256: createHash('sha256').update(sealedText).digest('hex') };
   } finally {
-    try { await device?.close(); } finally { await pool.end(); }
+    try { await (remote ?? device)?.close(); } finally { await pool.end(); }
   }
 }
