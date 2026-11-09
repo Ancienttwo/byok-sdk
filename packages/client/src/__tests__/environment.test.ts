@@ -261,13 +261,21 @@ describe('composeRuntimeEnvironment (#1095)', () => {
   it('win32: PATH is the logon registry value, not a profile-edited session PATH; the other session baseline names match and deny case-insensitively', () => {
     const live = { Path: 'C:\\Windows;C:\\Users\\u\\fnm', USERNAME: 'u', ProgramData: 'C:\\ProgramData', HOST_ONLY_SENTINEL: 'x', ClaudeCode: '1', byok_secret: 'must-not-leak', no_proxy: 'corp.example' };
     expect(composeRuntimeEnvironment({ policy: {}, live, windowsLogon: logonRegistry({ Path: sz('C:\\Windows') }), platform: 'win32' }).env)
-      .toEqual({ Path: 'C:\\Windows', USERNAME: 'u', ProgramData: 'C:\\ProgramData', NO_PROXY: 'corp.example,127.0.0.1,localhost' });
+      .toEqual({ PATH: 'C:\\Windows', USERNAME: 'u', PROGRAMDATA: 'C:\\ProgramData', NO_PROXY: 'corp.example,127.0.0.1,localhost' });
   });
 
   it.each(['CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'PI_CODING_AGENT_DIR'])('win32: the session %s reaches the runtime, as the login-shell snapshot keeps it elsewhere (#1595)', (name) => {
-    const live = { Path: 'C:\\Windows', [name]: 'D:\\custom-home', HOST_ONLY_SENTINEL: 'x' };
+    const live = { Path: 'C:\\Windows', [name.toLowerCase()]: 'D:\\custom-home', HOST_ONLY_SENTINEL: 'x' };
     expect(composeRuntimeEnvironment({ policy: {}, live, windowsLogon: logonRegistry({ Path: sz('C:\\Windows') }), platform: 'win32' }).env)
-      .toEqual({ Path: 'C:\\Windows', [name]: 'D:\\custom-home', NO_PROXY: '127.0.0.1,localhost' });
+      .toEqual({ PATH: 'C:\\Windows', [name]: 'D:\\custom-home', NO_PROXY: '127.0.0.1,localhost' });
+  });
+
+  it.each<RuntimeEnvironmentPolicy>([{}, { pass: ['CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'XDG_*'] }, { base: 'allowlist', allow: ['CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'XDG_*'] }])('win32: canonicalizes session names and keeps the first sorted duplicate under %j (#1611)', (policy) => {
+    const live = Object.freeze({ Codex_Home: 'D:\\other', CODEX_HOME: 'D:\\first', claude_config_dir: 'D:\\claude', xdg_config_home: 'D:\\xdg' });
+    const { env, report } = composeRuntimeEnvironment({ policy, live, windowsLogon: logonRegistry({}), platform: 'win32' });
+    expect(env).toEqual({ CODEX_HOME: 'D:\\first', CLAUDE_CONFIG_DIR: 'D:\\claude', XDG_CONFIG_HOME: 'D:\\xdg', NO_PROXY: '127.0.0.1,localhost' });
+    const source = policy.base === 'allowlist' ? 'allowlist' : policy.pass ? 'pass' : 'windows-session';
+    expect(report.names).toEqual([{ name: 'CLAUDE_CONFIG_DIR', source }, { name: 'CODEX_HOME', source }, { name: 'NO_PROXY', source: 'sdk' }, { name: 'XDG_CONFIG_HOME', source }]);
   });
 
   it('an adapter conflict rule removes base names only when pass supplied the trigger', () => {
@@ -282,7 +290,7 @@ describe('composeRuntimeEnvironment (#1095)', () => {
     const rule = (passed: ReadonlySet<string>) => passed.has('ANTHROPIC_API_KEY') ? ['ANTHROPIC_*', 'CLAUDE_CODE_USE_BEDROCK'] : [];
     const live = { Path: 'C:\\Windows', Claude_Code_Use_Bedrock: '1', Anthropic_Api_Key: 'sk-ant-host' };
     expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['CLAUDE_CODE_*'], pass: ['ANTHROPIC_API_KEY'] }, live, platform: 'win32', conflicts: rule }).env)
-      .toEqual({ Path: 'C:\\Windows', Anthropic_Api_Key: 'sk-ant-host', NO_PROXY: '127.0.0.1,localhost' });
+      .toEqual({ PATH: 'C:\\Windows', Anthropic_Api_Key: 'sk-ant-host', NO_PROXY: '127.0.0.1,localhost' });
   });
 
   it('NO_PROXY: merges both spellings with the loopback names, without duplicates', () => {
@@ -330,7 +338,7 @@ describe('composeRuntimeEnvironment (#1095)', () => {
     expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['ACME_HOME'] }, live: { PATH: '/usr/bin', ACME_HOME: '/a', OTHER: 'x' }, platform: 'darwin' }).report.names)
       .toEqual([{ name: 'ACME_HOME', source: 'allowlist' }, { name: 'NO_PROXY', source: 'sdk' }, { name: 'PATH', source: 'allowlist' }, { name: 'no_proxy', source: 'sdk' }]);
     expect(composeRuntimeEnvironment({ policy: {}, live: { Path: 'C:\\Windows', no_proxy: 'corp.example', HOST_ONLY_SENTINEL: 'x' }, windowsLogon: logonRegistry({ Path: sz('C:\\Windows') }), platform: 'win32' }).report)
-      .toEqual({ names: [{ name: 'NO_PROXY', source: 'sdk' }, { name: 'Path', source: 'windows-session' }], removed: [] });
+      .toEqual({ names: [{ name: 'NO_PROXY', source: 'sdk' }, { name: 'PATH', source: 'windows-session' }], removed: [] });
   });
 
   it('validates a policy at the boundary', () => {
@@ -388,7 +396,7 @@ describe('win32 logon registry base (#1317)', () => {
     const windowsLogon = await readWindowsLogonRegistry(async (key) => { asked.push(key); return keyValues(key === WINDOWS_MACHINE_ENVIRONMENT_KEY ? machine : user); });
     expect(asked).toEqual([WINDOWS_MACHINE_ENVIRONMENT_KEY, WINDOWS_USER_ENVIRONMENT_KEY]);
     const { env } = composeRuntimeEnvironment({ policy: {}, live: { ...session, Path: 'C:\\session-only' }, windowsLogon, platform: 'win32' });
-    expect({ Path: env.Path, PATHEXT: env.PATHEXT }).toEqual({ Path, PATHEXT });
+    expect({ Path: env.PATH, PATHEXT: env.PATHEXT }).toEqual({ Path, PATHEXT });
     expect(env).not.toHaveProperty('JAVA_HOME');
   });
 
@@ -449,7 +457,7 @@ describe('win32 logon registry base (#1317)', () => {
     }
     setWindowsLogonRegistrySource(undefined);
     const { env, report } = await buildRuntimeEnvironment({});
-    expect(env.Path).toMatch(/system32/iu);
-    expect(report.names).toContainEqual({ name: 'Path', source: 'windows-session' });
+    expect(env.PATH).toMatch(/system32/iu);
+    expect(report.names).toContainEqual({ name: 'PATH', source: 'windows-session' });
   });
 });
