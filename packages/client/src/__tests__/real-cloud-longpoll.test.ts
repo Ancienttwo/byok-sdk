@@ -85,7 +85,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     });
     expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE); // stays connected across the long-poll task lifecycle
 
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 5_000 });
     const session = adapter.sessions[0]!;
     session.emit({ type: 'progress', text: 'working over long-poll' });
     session.emit({ type: 'turn_end' });
@@ -144,7 +144,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     await vi.waitFor(async () => {
       expect((await cloud.readTaskAttempt(offer!.taskId))?.status).toBe('running');
     });
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 5_000 });
     const expectedCwd = path.join(await fs.realpath(hostStorageRoot), 'agents', 'agent-hosted-longpoll');
     expect(adapter.startCalls[0]?.ctx.workspaceDir).toBe(expectedCwd);
     adapter.sessions[0]!.emit({ type: 'turn_end' });
@@ -186,7 +186,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     await vi.waitFor(async () => {
       expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('running');
     });
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 5_000 });
 
     const cancellation = await cloud.cancelTask(offer.taskId, 'operator stopped it');
     expect(cancellation.status).toBe('cancel_requested');

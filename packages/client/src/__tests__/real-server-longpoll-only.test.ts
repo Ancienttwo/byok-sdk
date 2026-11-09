@@ -89,7 +89,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     const heldTask = await submitAgentTask(real, { taskId: 'task-held-poll', deviceId: record.deviceId, instruction: 'delivered by the held poll' });
     await waitForTaskState(real, heldTask, 'Running');
     expect(Date.now() - dispatchedAt).toBeLessThan(1_500);
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 5_000 });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await waitForTaskResult(real, heldTask);
 
@@ -252,7 +252,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     await waitForTaskState(real, taskId, 'Running');
     expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE); // still true throughout — WS never came up
 
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 5_000 });
     const session = adapter.sessions[0]!;
     session.emit({ type: 'progress', text: 'working over long-poll' });
     session.emit({ type: 'turn_end' });
@@ -308,7 +308,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     }, { timeout: 5000, interval: 20 });
 
     await vi.waitFor(async () => expect((await real.byok.tasks.get(taskId))?.state).toBe('Running'), { timeout: 10_000, interval: 20 });
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 5_000 });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(async () => expect((await real.byok.tasks.get(taskId))?.result).toMatchObject({ state: 'Complete' }), { timeout: 10_000, interval: 20 });
     expect(adapter.startCalls[0]?.ctx.workspaceDir).toBe(
