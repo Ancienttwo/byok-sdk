@@ -80,7 +80,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup && node scripts/check-adapters-entry.mjs --build-todo && node scripts/build-todo-assets.mjs && node scripts/build-pi-export-assets.mjs && node scripts/build-sealed-host.mjs && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs && node scripts/check-hermes-session-entry.mjs",
+    "build": "tsup && node scripts/check-adapters-entry.mjs --build-todo && node scripts/build-todo-assets.mjs && node scripts/build-pi-export-assets.mjs && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs && node scripts/check-hermes-session-entry.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -132,10 +132,6 @@
     "#byok-pi-todo-runtime": {
       "types": "./dist/bin/pi-todo-runtime.d.ts",
       "default": "./dist/bin/pi-todo-runtime.js"
-    },
-    "#byok-pi-runtime-host-sealed": {
-      "types": "./dist/bin/pi-runtime-host-sealed.d.ts",
-      "default": "./dist/bin/pi-runtime-host-sealed.js"
     }
   }
 }

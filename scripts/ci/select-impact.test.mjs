@@ -686,14 +686,6 @@ test('the configured path fold selects the client suite and the Windows client j
 });
 
 
-test('the sealed client build config retains the ordinary client build scope', () => {
-  const ordinary = selectImpact(['packages/client/tsup.config.ts']);
-  const sealed = selectImpact(['packages/client/tsup.sealed.config.ts']);
-  assert.deepEqual(sealed.dirs, ordinary.dirs);
-  assert.deepEqual(sealed.families, ordinary.families);
-  assert.equal(sealed.reason, ordinary.reason);
-});
-
 test('the todo build config selects the client build that runs it', () => {
   // check-adapters-entry.mjs --build-todo runs tsup.todo.config.ts in the client build.
   const runner = selectImpact(['packages/client/scripts/check-adapters-entry.mjs']);

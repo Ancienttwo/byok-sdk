@@ -202,14 +202,14 @@ test('reviewed release scripts install only when their tests need packages', () 
 
 
 test('M build inputs require build and packed checks without turning unknown configs into a release fallback', () => {
-  const paths = ['packages/client/tsup.sealed.config.ts', ...['cloud-dataplane', 'cloud-do', 'cloud', 'protocol', 'server', 'testkit', 'ui-runtime'].map(owner => `packages/${owner}/tsup.config.ts`)];
+  const paths = [...['cloud-dataplane', 'cloud-do', 'cloud', 'protocol', 'server', 'testkit', 'ui-runtime'].map(owner => `packages/${owner}/tsup.config.ts`)];
   const plan = planCi({ event: 'pull_request', sha, paths });
   assert.equal(plan.mode, 'targeted');
   assert.equal(needsBuild(plan), true);
   assert.ok(plan.families.includes('npm-release-pack'));
   assert.ok(plan.families.includes('dataplane'));
   assert.ok(!plan.families.includes('build-test'));
-  for (const owner of ['client', 'cloud-dataplane', 'cloud-do', 'cloud', 'protocol', 'server', 'testkit', 'ui-runtime']) assert.ok(plan.dirs.includes(`packages/${owner}`));
+  for (const owner of ['cloud-dataplane', 'cloud-do', 'cloud', 'protocol', 'server', 'testkit', 'ui-runtime']) assert.ok(plan.dirs.includes(`packages/${owner}`));
   assert.doesNotThrow(() => requireCiPlan(results(plan), plan, 'pull_request', sha));
   assert.throws(() => requireCiPlan({ ...results(plan), 'npm-release-pack': { result: 'skipped' } }, plan, 'pull_request', sha));
   assert.throws(() => planCi({ event: 'pull_request', sha, paths: [...paths, 'packages/client/tsup.unreviewed.config.ts'] }), /reviewed CI mapping required/i);

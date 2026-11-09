@@ -137,6 +137,21 @@ describe('SDK-owned Agent home contract', () => {
     await expect(fs.stat(path.join(home, 'artifacts'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('an execution claim whose acquire throws synchronously leaves no task mark: a later standalone acquire of the same resolution fails at once', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const resolution = await manager.layout.resolve(ref('one'));
+    const holder = await manager.leaseManager.acquire(resolution);
+    vi.spyOn(manager.leaseManager, 'acquire').mockImplementationOnce(() => { throw new Error('overridden acquire threw'); });
+    await expect(manager.executionLeaseManager.acquire(resolution, { taskId: 'task-1' })).rejects.toThrow('overridden acquire threw');
+
+    // A task-marked claim would wait up to 5 s for the standalone holder; a standalone claim fails at once.
+    const started = Date.now();
+    await expect(manager.leaseManager.acquire(resolution)).rejects.toBeInstanceOf(AgentHomeBusyError);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    await holder.release();
+  });
+
   it('atomically pre-claims concurrent same-Agent writers while different Agents remain independent', async () => {
     const root = await makeRoot();
     const manager = new AgentHomeManager({ hostStorageRoot: root });
