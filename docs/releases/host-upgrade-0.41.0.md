@@ -78,7 +78,7 @@ Project files in the Agent home (for example its `AGENTS.md` or `CLAUDE.md`) are
 ### Codex `agentUserContext: 'excluded'`
 
 - Threads: an excluded Codex Agent task keeps its threads in `<Agent home>/.byok/codex/`, never in the user's `CODEX_HOME`. A Bot you switch from `inherit` to `excluded` cannot resume the threads it made under `inherit`: that resume fails closed through the existing missing-thread path, as a non-retryable failure, so start a new thread.
-- Growth: these rollouts are the `codex-session-store` retention class and expire by last write after `storage.retention.ttlMs['codex-session-store']` (31 days by default, at least the `session-ledger` TTL plus one day). A thread idle past the TTL is pruned, and resuming it fails closed as a non-retryable missing thread; raise the TTL to keep idle threads longer ([storage layout](../host-local-storage-layout.md)).
+- Growth: these rollouts are the `agent-runtime-sessions` retention class and are never expired. Each Bot's Codex rollouts accumulate until you remove its Agent home, as they did in the user's `CODEX_HOME` before ([storage layout](../host-local-storage-layout.md)).
 - The task needs a sealed Agent home and a user `CODEX_HOME` with a file-mode `auth.json`; otherwise the start fails as a non-retryable `authority` failure ([`agentUserContext` (Codex)](../adapter-capabilities.md#agentusercontext-codex)).
 
 ### Retired gates and token lifetime
