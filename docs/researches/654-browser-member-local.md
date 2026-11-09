@@ -61,8 +61,12 @@ adds `dataplane`. The resulting jobs are **Affected workspace checks** and
 **dataplane suites against real Postgres (fixed Node)**. The former runs the
 complete example suite through `run-targeted.mjs`; the latter invokes the same
 example test script directly. The new suite's build case invokes
-`src/build-member.mjs` and checks its emitted HTML/JS, so these jobs execute both
-the member asset build and its tests. No new CI mapping rule is needed.
+`src/build-member.mjs` with an explicit fresh temporary output directory and
+checks its emitted HTML/JS. It compares the default operator files' bytes and
+modification times before and after, then removes the temporary directory. The
+runbook default remains `_ops/p9/member-assets` when no argument is supplied.
+These jobs execute both the member asset build and its tests without replacing
+operator assets. No new CI mapping rule is needed.
 
 The page logic tests use real WebCrypto and in-memory cloud member stores with
 an authenticated fetch/JSON adapter and a scripted device-side cryptographic

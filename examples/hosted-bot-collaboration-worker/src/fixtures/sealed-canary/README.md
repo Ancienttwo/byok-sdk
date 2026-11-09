@@ -77,8 +77,10 @@ current W2 runner for sealed execution.
    is already relative to that destination. Run
    `bun examples/hosted-bot-collaboration-worker/src/build-member.mjs` before deploying
    to produce the secret-free static assets under `_ops/p9/member-assets` using
-   Bun's existing bundler. The template binds that directory as `ASSETS` and runs
-   the Worker first for every route. Fill only the canary Hyperdrive id.
+   Bun's existing bundler. An optional output-directory argument overrides that
+   destination; tests use a fresh temporary directory and remove it afterwards.
+   The template binds the default directory as `ASSETS` and runs the Worker
+   first for every route. Fill only the canary Hyperdrive id.
    Keep real account identifiers and configuration under ignored `_ops/`, with
    no real routes in the tracked template. Use the owner's account environment.
 3. Generate the operator bearer and token key privately. Set these Worker secrets

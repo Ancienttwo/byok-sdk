@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createByokCloud, createInMemoryByokCloud, createHmacTokenSigner, fullCapabilityDeclaration,
@@ -89,11 +91,21 @@ async function fixture() {
   return { browser, device, bundle, transport, cloud, store, pairing, register, paired, terminal, terminals, objects, blobs, objectFetch, reads };
 }
 
-it('builds the deployable HTML and browser bundle through the example suite', () => {
-  execFileSync('bun', [fileURLToPath(new URL('./build-member.mjs', import.meta.url))], { stdio: 'pipe' });
-  const output = new URL('../../../_ops/p9/member-assets/', import.meta.url);
-  expect(readFileSync(new URL('index.html', output), 'utf8')).toContain('<script type="module" src="/member.js"></script>');
-  expect(readFileSync(new URL('member.js', output)).byteLength).toBeGreaterThan(0);
+it('builds isolated HTML and browser assets without touching operator output', () => {
+  const operatorOutput = new URL('../../../_ops/p9/member-assets/', import.meta.url);
+  const snapshot = () => ['index.html', 'member.js'].map(name => {
+    const target = new URL(name, operatorOutput);
+    return existsSync(target) ? { bytes: readFileSync(target), mtimeNs: statSync(target, { bigint: true }).mtimeNs } : null;
+  });
+  const before = snapshot();
+  const output = mkdtempSync(join(tmpdir(), 'byok-member-build-'));
+  try {
+    execFileSync('bun', [fileURLToPath(new URL('./build-member.mjs', import.meta.url)), output], { stdio: 'pipe' });
+    expect(readFileSync(join(output, 'index.html'), 'utf8')).toContain('<script type="module" src="/member.js"></script>');
+    expect(readFileSync(join(output, 'member.js')).byteLength).toBeGreaterThan(0);
+    expect(snapshot()).toEqual(before);
+  } finally { rmSync(output, { recursive: true, force: true }); }
+  expect(existsSync(output)).toBe(false);
 });
 
 it('keeps every browser RPC method in the deployable allowlist', () => {
