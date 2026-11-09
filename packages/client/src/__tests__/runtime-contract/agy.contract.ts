@@ -9,7 +9,7 @@ import { AGY_ABSENT_ISOLATION_SOURCES } from '../../adapters/antigravity/agy-cap
 import type { Session } from '../../types';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 import {
-  baseEnv, check, contractTarget, createSandbox, defineRuntimeCases, defineRuntimeContract, detectWith, egressCheck, expectAuth, expectDetectedVersion,
+  absent, baseEnv, check, contractTarget, createSandbox, defineRuntimeCases, defineRuntimeContract, detectWith, egressCheck, expectAuth, expectDetectedVersion,
   fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, writeSubmitResultServer,
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
@@ -18,6 +18,8 @@ const target = contractTarget('agy', QUALIFIED_AGY_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const PROJECT_MARKER = 'BYOK-CONTRACT-AGY-PROJECT-3d71';
 const USER_MARKER = 'BYOK-CONTRACT-AGY-USER-c92e';
+const SKILL_MARKER = 'BYOK-CONTRACT-AGY-SKILL-17ae';
+const HOOK_MARKER = 'BYOK-CONTRACT-AGY-HOOK-b6d4';
 const REAL_KEY = 'byok-contract-agy-real-key-5f08';
 
 /** One SDK-owned home for the file, as a Host keeps one across executions. */
@@ -28,10 +30,15 @@ const detectAdapter = async () => new AgyAdapter({ home: await ownedHome(), reso
 const submitResult = callOnceThenReply(mcpTool('host', 'submit_result'), { summary: 'runtime contract', toolSummary: 'Submit the result' });
 
 async function writeUserContext(home: string, userServer: { command: string; args?: readonly string[] }): Promise<void> {
-  const gemini = path.join(home, '.gemini');
-  await fs.mkdir(path.join(gemini, 'config'), { recursive: true });
-  await fs.writeFile(path.join(gemini, 'GEMINI.md'), `# User\n\n${USER_MARKER}\n`);
-  await fs.writeFile(path.join(gemini, 'config', 'mcp_config.json'), JSON.stringify({ mcpServers: { usermcp: { command: userServer.command, args: userServer.args ?? [] } } }));
+  const config = path.join(home, '.gemini', 'config');
+  await fs.mkdir(path.join(config, 'skills', 'contract-skill'), { recursive: true });
+  await fs.writeFile(path.join(home, '.gemini', 'GEMINI.md'), `# User\n\n${USER_MARKER}\n`);
+  await fs.writeFile(path.join(config, 'mcp_config.json'), JSON.stringify({ mcpServers: { usermcp: { command: userServer.command, args: userServer.args ?? [] } } }));
+  await fs.writeFile(path.join(config, 'skills', 'contract-skill', 'SKILL.md'), `---\nname: contract-skill\ndescription: ${SKILL_MARKER}\n---\n\n# Skill\n\n${SKILL_MARKER}\n`);
+  // A SessionStart hook adds model context through the `injectSteps` its stdout carries. agy runs the command from
+  // the directory of hooks.json, through `sh -c` or `cmd /c`; a bare command with no quotes parses the same in both.
+  await fs.writeFile(path.join(config, 'session-start-hook.js'), `process.stdout.write(JSON.stringify({ injectSteps: [{ systemMessage: { systemMessage: ${JSON.stringify(HOOK_MARKER)} } }] }));\n`);
+  await fs.writeFile(path.join(config, 'hooks.json'), JSON.stringify({ contract: { SessionStart: [{ type: 'command', command: 'node session-start-hook.js' }] } }));
 }
 
 /**
@@ -165,10 +172,16 @@ defineRuntimeContract(`agy runtime contract (${target.mode} ${target.expectedVer
     expect((await ownedTurn()).provider.saw(USER_MARKER), 'positive control: GEMINI.md in the home agy reads reaches the model').toBe(true);
     expect((await userTurn()).provider.saw(USER_MARKER)).toBe(false);
   }),
-  'isolation.userOutputStyle': skip('agy descriptor does not advertise isolation.userOutputStyle yet (#1575)'),
-  'isolation.userMemory': skip('agy descriptor does not advertise isolation.userMemory yet (#1575)'),
-  'isolation.userSkills': skip('agy descriptor does not advertise isolation.userSkills yet (#1575)'),
-  'isolation.userHookContext': skip('agy descriptor does not advertise isolation.userHookContext yet (#1575)'),
+  'isolation.userOutputStyle': absent(AGY_ABSENT_ISOLATION_SOURCES.userOutputStyle),
+  'isolation.userMemory': skip('agy has no memory tool; its Knowledge Items are an embedded default-off config whose store could not be located, so the SDK makes no guarantee'),
+  'isolation.userSkills': check(async () => {
+    expect((await ownedTurn()).provider.saw(SKILL_MARKER), 'positive control: a skill in the home agy reads reaches the model').toBe(true);
+    expect((await userTurn()).provider.saw(SKILL_MARKER)).toBe(false);
+  }),
+  'isolation.userHookContext': check(async () => {
+    expect((await ownedTurn()).provider.saw(HOOK_MARKER), 'positive control: a SessionStart hook in the home agy reads adds its context').toBe(true);
+    expect((await userTurn()).provider.saw(HOOK_MARKER)).toBe(false);
+  }),
   'isolation.userMcp': check(async () => {
     expect((await ownedTurn()).provider.saw('usermcp'), 'positive control: a server in the home agy reads is offered').toBe(true);
     const user = await userTurn();

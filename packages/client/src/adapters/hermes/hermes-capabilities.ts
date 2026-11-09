@@ -16,7 +16,7 @@ export const HERMES_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   // Each execution runs in a fresh profile home, so user context and user MCP
   // servers never reach it; there is no session persistence switch.
   isolation: Object.freeze({
-    userInstructions: true, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false,
+    userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: true, userHookContext: true,
     userMcpServers: true, sessionPersistence: false,
   }),
 });

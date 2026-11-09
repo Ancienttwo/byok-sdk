@@ -179,7 +179,7 @@ describe('HermesAdapter construction and descriptor', () => {
       versionPolicy: { qualifiedVersion: '0.22.2+2364.g0b10b9f', unqualified: 'warn' },
       capabilities: {
         steer: false, resume: false, approvalInteractive: false, mcpToolsets: true, messageDraft: true, preparedLane: false,
-        isolation: { userInstructions: true, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: false },
+        isolation: { userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: true, userHookContext: true, userMcpServers: true, sessionPersistence: false },
       },
     });
     expect(Object.isFrozen(descriptor)).toBe(true);
