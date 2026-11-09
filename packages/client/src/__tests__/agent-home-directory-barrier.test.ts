@@ -143,6 +143,17 @@ describe('ensureDirectoryNoSymlink under concurrent creation', () => {
     await expect(Promise.all(Array.from({ length: 5 }, () => ensureDirectoryNoSymlink(home, target)))).resolves.toEqual(Array(5).fill(target));
   });
 
+  it('accepts a host storage root component that a concurrent creator made between lstat and mkdir', async () => {
+    const { home } = await store();
+    const host = path.join(home, 'new', 'host');
+    const realMkdir = fs.mkdir.bind(fs);
+    vi.spyOn(fs, 'mkdir').mockImplementation(async (...args: Parameters<typeof fs.mkdir>) => {
+      if (args[0] === path.join(home, 'new')) await realMkdir(...args);
+      return realMkdir(...args);
+    });
+    await expect(new AgentHomeManager({ hostStorageRoot: host }).prepare({ agentId: 'one', profileRevision: 'p1' })).resolves.toBeDefined();
+  });
+
   it('refuses a symlink created between its lstat and its mkdir', async () => {
     const { home, target } = await store();
     const elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-home-elsewhere-'));

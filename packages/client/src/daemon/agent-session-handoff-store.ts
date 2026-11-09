@@ -310,7 +310,16 @@ async function evidenceDirectory(homeInput: string): Promise<string> {
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      await fs.mkdir(cursor, { mode: 0o700 });
+      try {
+        await fs.mkdir(cursor, { mode: 0o700 });
+      } catch (mkdirError) {
+        if ((mkdirError as NodeJS.ErrnoException).code !== 'EEXIST') throw mkdirError;
+        // A concurrent attempt created it first: accept only a real directory.
+        const raced = await fs.lstat(cursor);
+        if (!raced.isDirectory() || raced.isSymbolicLink()) {
+          throw new AgentSessionHandoffStoreError(`Agent session evidence path is not a real directory: ${cursor}`);
+        }
+      }
     }
   }
   const canonical = await fs.realpath(cursor);
