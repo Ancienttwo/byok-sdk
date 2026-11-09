@@ -1,7 +1,7 @@
 import { ConnectionManager } from '../connection-manager';
 import { toJournalEnvelopeRecord, terminalKindOf } from './support';
 import { JournalRecordTooLargeError, journalHash } from '../journal/journal';
-import { createEnvelope, decodeEnvelope, encodeEnvelope, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { terminalIdentity } from '../terminal-identity';
 import { hostFor } from '../task-runner/host';
 import type { DaemonScope } from './scope';
@@ -190,20 +190,14 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
       // borrowed from a previous connection generation.
       if (state === 'open') {
         daemonState.runner?.retryRecoveredAgentMessages();
+        // Unacknowledged reliable records go out again on every open; the
+        // outbox keeps one copy of an envelope that is still queued.
+        for (const record of daemonState.agentEgress.reliableRecords()) dispatchReliableRecord(record);
         runPresenceDiscovery();
       }
     },
     onHalted: (reason) => halted(reason),
     onCrashed: () => crashed(),
-    // Reliable records held for `capability_missing` go out as soon as an
-    // advertisement carries the ack capability — on every reconnect, not
-    // only at start.
-    onCapabilitiesAdvertised: (added) => {
-      if (!added.includes(AGENT_EGRESS_RELIABLE_ACK_CAPABILITY) || daemonState.connection === undefined) return;
-      for (const record of daemonState.agentEgress.retryableReliableRecords(daemonState.connection.getServerCapabilities())) {
-        dispatchReliableRecord(record);
-      }
-    },
     longPollRetryDelayMs: overrides.longPoll?.retryDelayMs,
     longPollIdleDelayMs: overrides.longPoll?.idleDelayMs,
     fleetJitter: daemonState.fleetJitter,

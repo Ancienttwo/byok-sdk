@@ -35,9 +35,6 @@ export const AGENT_HOME_PROJECTION_CAPABILITY = 'agent-home-projection' as const
 /** Device capability required before an Agent-home projection may carry `hostRevision`. */
 export const AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY = 'agent-home-projection-host-revision' as const;
 
-/** Capability required before an offer may select terminal projection behavior. */
-export const TERMINAL_PROJECTION_SELECTION_CAPABILITY = 'terminal-projection-selection' as const;
-
 /** Contract §8.1's capability gate for `byok-task-assertion-v1` tool authority. */
 export const HOST_MCP_TASK_CONTEXT_CAPABILITY = 'host-mcp-task-context' as const;
 
@@ -74,51 +71,18 @@ export const AGENT_INPUT_PREPARATION_CAPABILITY =
 
 /**
  * Sealed payload v1 (#654). A device advertises it before a Host may send it
- * a sealed offer or steer; a server advertises it before a device may send it
- * sealed task output or a sealed decline code. Both gates read
- * `WIRE_ADDITIONS`.
+ * a sealed offer or steer (`WIRE_ADDITIONS`). The server accepts sealed task
+ * output and the sealed decline codes by the task's frozen `sealing`.
  */
 export const SEALED_PAYLOAD_CAPABILITY = 'sealed-payload-v1' as const;
 
 /**
  * Sealed payload v2 (#1045): the `agent-message` and `memory-projection`
  * categories. A device advertises it before a Host may send it an offer whose
- * `sealing` names either category, or a sealed message disposition; a server
- * advertises it before a device may send it a sealed `agent.message.publish`.
+ * `sealing` names either category, or a sealed message disposition.
  */
 export const SEALED_PAYLOAD_V2_CAPABILITY = 'sealed-payload-v2' as const;
 
-/**
- * A server advertises it before a device may send a sealed task output that
- * names its ciphertext blob (`sealed.ciphertextRef`) instead of carrying it
- * inline. The server then holds the blob for the life of the task.
- */
-export const SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY = 'sealed-output-ciphertext-ref' as const;
-
-/**
- * A server advertises it before a device may send `task.fail.failure`, the
- * machine-readable runtime failure class (#869).
- */
-export const RUNTIME_FAILURE_CLASS_CAPABILITY = 'runtime-failure-class' as const;
-
-/** A server advertises it before a device may send `task.fail.failure.scope` (#1271). */
-export const RUNTIME_QUOTA_SCOPE_CAPABILITY = 'runtime-quota-scope' as const;
-
-/**
- * A server advertises it before a device may send `residentMemoryOverLimit`
- * on `task.complete`, `task.fail` or `task.cancelled` (#1439).
- */
-export const RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY = 'resident-memory-over-limit' as const;
-
-/**
- * The connection understands the typed pre-claim runtime-unavailable cause
- * (#1103 D8): `task.decline.runtimeUnavailable`, `conn.hello.runtimeUnavailable`
- * and the presence projection. A daemon declares it when it emits the cause.
- * Older peers ignore the unknown flag; absence means the peer may not read
- * the cause, so a Host falls back to `retryable` and treats the cause as
- * unknown. It never infers availability or allow from absence.
- */
-export const RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY = 'runtime-unavailable-cause' as const;
 /**
  * The closed classes of `task.fail.failure.class`: the vendored OAR
  * `FailureClass` values. `unknown` means the runtime gave no structured
@@ -141,8 +105,7 @@ export function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREP
 }
 
 /**
- * A device can run the native-session lane. A server understands the V1
- * `nativeSessions` offer field, resolves `ifAdvertised` at enqueue, and accepts
- * the `native_sessions_unsupported` decline code.
+ * A device can run the native-session lane: a Host sends an offer with
+ * `nativeSessions` only to a device that advertises it.
  */
 export const NATIVE_SESSIONS_CAPABILITY = 'native-sessions' as const;

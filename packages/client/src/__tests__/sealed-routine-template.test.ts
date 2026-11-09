@@ -91,7 +91,7 @@ async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
     agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
     agentEgressPolicy: first.payload.egressPolicy as never, agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-golden-1', tenantId: GOLDEN_TENANT, productId: 'sealed-routine', storeDir,
-    getServerCapabilities: () => ['sealed-payload-v1'], send: (envelope) => { sent.push(envelope); },
+    send: (envelope) => { sent.push(envelope); },
     blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
     approvalRegistry: new ApprovalRegistry(),
     agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
@@ -100,7 +100,6 @@ async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
     sealedTasks: new SealedTasks({
       keyring, tenantId: GOLDEN_TENANT, deviceId: 'device-golden-1',
       blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
-      serverCapabilities: () => [],
     }),
   });
   runners.push(runner);

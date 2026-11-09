@@ -95,13 +95,14 @@ describe('task.offer gates: an unknown gated field stops the daemon (Q4)', () =>
   );
 });
 
-describe('task.offer gates: equal to the published v5 oracle (Q2)', () => {
-  it('needs exactly the flags the oracle release derived for every v5 offer line it shipped', () => {
+describe('task.offer gates: the published v5 oracle less the two offer gates v6 retired (Q2)', () => {
+  it('needs exactly the flags the oracle release derived for every v5 offer line it shipped, without the retired ones', () => {
+    const retired = ['custom-harness', 'terminal-projection-selection'];
     expect(v5Offers.length).toBeGreaterThan(0);
     for (const payload of v5Offers) {
       expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(payload).success).toBe(true);
       const v5 = v5Release.requiredReceiverCapabilities('task.offer', payload as never) as string[];
-      expect(new Set(requiredReceiverCapabilities('task.offer', payload))).toEqual(new Set(v5));
+      expect(new Set(requiredReceiverCapabilities('task.offer', payload))).toEqual(new Set(v5.filter((flag) => !retired.includes(flag))));
     }
   });
 });
@@ -110,8 +111,8 @@ describe('WIRE_ADDITIONS', () => {
   it('names each gate once', () => {
     const keys = WIRE_ADDITIONS.map((entry) => JSON.stringify([
       entry.kind, entry.rule, entry.surface, entry.field ?? null,
-      entry.rule === 'gated' && entry.kind === 'envelope' ? entry.value ?? null : null,
-      entry.rule === 'gated' && entry.kind === 'envelope' ? entry.capability : null,
+      entry.value ?? null,
+      entry.capability,
     ]));
     expect(keys.filter((key, index) => keys.indexOf(key) !== index)).toEqual([]);
   });

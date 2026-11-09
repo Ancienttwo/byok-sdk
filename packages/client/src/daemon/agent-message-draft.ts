@@ -11,7 +11,6 @@ interface AgentMessageDraftPublisherOptions {
   agentRef: AgentRef;
   maxBytes: number;
   maxCoalesceMs: number;
-  getServerCapabilities: () => readonly string[];
   send: (envelope: Envelope) => void;
 }
 
@@ -34,7 +33,7 @@ export class AgentMessageDraftPublisher {
 
   /** Use TaskRunner's single boundary decision for the same text run as finalTextParts. */
   push(event: AgentEvent, startsMessage = false): void {
-    if (!this.canSend()) return;
+    if (this.stopped) return;
     if (event.type === 'tool_use' || event.type === 'tool_result') {
       this.reset();
       this.authority = '';
@@ -64,7 +63,7 @@ export class AgentMessageDraftPublisher {
 
   /** Draft-only text that a later progress event reconciles. */
   pushDelta(text: string, startsMessage: boolean): void {
-    if (!this.canSend()) return;
+    if (this.stopped) return;
     if (startsMessage) {
       this.reset();
       this.openedByDelta = true;
@@ -95,7 +94,7 @@ export class AgentMessageDraftPublisher {
   /** Reconcile the display text with the bounded body selected for publication. */
   finalize(body: string): void {
     this.flush();
-    if (!this.canSend()) return;
+    if (this.stopped) return;
     const text = body.toWellFormed();
     if (this.emittedText === text) return;
     this.reset();
@@ -124,16 +123,8 @@ export class AgentMessageDraftPublisher {
     this.openedByDelta = false;
   }
 
-  private canSend(): boolean {
-    if (this.stopped) return false;
-    if (this.options.getServerCapabilities().includes('agent-message-draft')) return true;
-    // A withdrawn advertisement ends this ephemeral lane. Do not replay it.
-    this.stop();
-    return false;
-  }
-
   private drain(force: boolean, final: boolean): void {
-    if (!this.canSend() || this.overflow) return;
+    if (this.stopped || this.overflow) return;
     // A runtime can split a UTF-16 surrogate pair between progress events.
     // Hold its first half until the next event or the final publish flush.
     const last = this.pending.charCodeAt(this.pending.length - 1);

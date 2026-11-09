@@ -131,7 +131,7 @@ describe('TaskRunner execution record', () => {
     session.emit(use('a'));
     session.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'retryable', reason: 'runtime exited' }));
     await finished();
-    expect(terminals().map(envelope => [envelope.type, envelope.payload])).toEqual([['task.fail', { agentRef: RECORD_AGENT, reason: 'runtime exited', retryable: true }]]);
+    expect(terminals().map(envelope => [envelope.type, envelope.payload])).toEqual([['task.fail', { agentRef: RECORD_AGENT, reason: 'runtime exited', retryable: true, failure: { class: 'unknown' } }]]);
     expect(records).toEqual([{
       taskId: TASK_ID, terminal: 'failed', status: 'partial', source: 'event-stream',
       gaps: [{ reason: 'unpaired_tool_call', count: 1 }, { reason: 'stream_ended_early', count: 1 }],

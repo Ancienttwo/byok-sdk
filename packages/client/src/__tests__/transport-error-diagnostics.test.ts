@@ -2,8 +2,7 @@ import { createTestDeviceStore } from './fixtures/device-credentials';
 /**
  * Typed long-poll route diagnostics prove a route failure carries its
  * credential-free `{transport, host, path}` endpoint projection. The tests
- * mock `global.fetch` (setup mirrors
- * `long-poll-validation-stall.test.ts`) because its two routes fail on the
+ * mock `global.fetch` because its two routes fail on the
  * HTTP response alone — no server behavior is involved beyond the status.
  */
 import { generateKeyPairSync } from 'node:crypto';

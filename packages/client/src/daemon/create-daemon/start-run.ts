@@ -9,7 +9,7 @@ import { type JournalIdentity, journalHash } from '../journal/journal';
 import type { AgentRef } from '../../agent-home';
 import type { SealedRunState } from './state';
 import { decodeEnvelope, createEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
-import { taskFailureField, DAEMON_TASK_FAILURE } from '../task-failure';
+import { DAEMON_TASK_FAILURE } from '../task-failure';
 import { terminalIdentity } from '../terminal-identity';
 import { assertJournalEnvelopeProtocol } from '../daemon-errors';
 import { resultReplyFailureFromState } from '../result-reply-failure';
@@ -130,7 +130,7 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
     const offer = decodeEnvelope(task.envelopeBytes);
     const { agentRef } = offer.payload as { agentRef?: AgentRef };
     const failure = createEnvelope('task.fail', { reason, retryable: false,
-      ...taskFailureField(DAEMON_TASK_FAILURE, daemonState.connection?.getServerCapabilities() ?? []),
+      failure: DAEMON_TASK_FAILURE,
       ...terminalIdentity(task.claimedRuntime, agentRef),
       ...(interrupted ? { recovery: { kind: 'daemon_interrupted' as const, offerId: offer.id } } : {}),
     }, { taskId: task.taskId });

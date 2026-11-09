@@ -19,9 +19,8 @@ type Event = Session['events'] extends AsyncIterable<infer E> ? E : never;
 export const PRODUCT_ID = 'beta-b3-test';
 /** The Agent that `tasks.dispatch` test keys run their tasks as. */
 export const AGENT: Readonly<AgentRef> = { agentId: 'main', profileRevision: '1' };
-/** The durable device capabilities the SDK requires before it submits a fresh Agent execution with a terminal projection. */
-export const AGENT_EXECUTION_CAPABILITIES = ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session',
-  'terminal-projection-selection'];
+/** The durable device capabilities the SDK requires before it submits a fresh Agent execution. */
+export const AGENT_EXECUTION_CAPABILITIES = ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session'];
 export const cleanup: Array<() => void | Promise<void>> = [];
 
 /** A scripted coding agent behind the public RuntimeAdapter contract. Tests emit its events. */

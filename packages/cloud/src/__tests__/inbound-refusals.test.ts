@@ -113,7 +113,6 @@ describe('observer.onInboundRefused', () => {
       ['type_not_allowed', createEnvelope('task.cancel', {}, { taskId, seq: 1 })],
       ['task_not_found_for_device', createEnvelope('task.started', {}, { taskId: 'task-nobody-offered' })],
       ['hello_device_mismatch', hello({ deviceId: 'someone-else' })],
-      ['hello_harnesses_without_capability', hello({ harnesses: [] })],
       ['hello_protocol_version_unsupported', hello({ protocolVersions: [PROTOCOL_VERSION + 1] })],
       ['claim_device_mismatch', createEnvelope('task.claim', { deviceId: 'someone-else' }, { taskId })],
       ['claim_harness_mismatch', createEnvelope('task.claim', { deviceId, harnessId: 'ghost' }, { taskId })],

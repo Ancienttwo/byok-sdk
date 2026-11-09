@@ -275,15 +275,6 @@ export class AgentEgressController {
     );
   }
 
-  /** Missing ack capability holds records in their reliable lane; it never makes them lossy. */
-  retryableReliableRecords(serverCapabilities: readonly string[]): readonly AgentReliableEgressRecord[] {
-    if (!serverCapabilities.includes('agent-egress-reliable-ack')) {
-      for (const record of this.reliableRecords()) this.noteDrop('reliable', 'capability_missing', record.agentRef);
-      return [];
-    }
-    return this.reliableRecords();
-  }
-
   private spoolFor(homeDir: string, agentRef: AgentRef): Promise<AgentReliableSpool> {
     const key = agentKey(agentRef);
     const existing = this.spools.get(key);

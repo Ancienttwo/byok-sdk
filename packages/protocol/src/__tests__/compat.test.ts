@@ -501,11 +501,11 @@ function fieldValues(root: unknown, field: string): unknown[] {
 }
 
 function carries(line: CorpusLine, entry: WireAddition): boolean {
-  if (entry.kind !== 'envelope' || line.type !== entry.surface) return false;
+  if (line.type !== entry.surface) return false;
   if (entry.field === undefined) return true;
   const value = fieldValues(line.payload, entry.field).find(value => value !== undefined);
   if (value === undefined) return false;
-  return entry.rule !== 'gated' || entry.value === undefined || (Array.isArray(value) ? value.includes(entry.value) : value === entry.value);
+  return entry.value === undefined || (Array.isArray(value) ? value.includes(entry.value) : value === entry.value);
 }
 
 /** The four Agent offer lanes of `task.offer`, by payload. */
@@ -525,11 +525,11 @@ function preparedWithMemory(agentMemory: string): boolean {
 }
 
 describe('compat v6: corpus coverage and WIRE_ADDITIONS', () => {
-  it('declares exactly one server gate for draft frames', () => {
-    expect(WIRE_ADDITIONS.filter(entry => entry.surface === 'agent.message.draft')).toEqual([
-      { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
-    ]);
-    expect(requiredReceiverCapabilities('agent.message.draft', {})).toEqual(['agent-message-draft']);
+  it('gates no daemon-to-server surface: every v6 server reads them all', () => {
+    expect(WIRE_ADDITIONS.filter(entry => entry.advertisedBy === 'server')).toEqual([]);
+    expect(requiredReceiverCapabilities('agent.message.draft', {})).toEqual([]);
+    expect(requiredReceiverCapabilities('task.fail', { failure: { class: 'quota', scope: 'model' } })).toEqual([]);
+    expect(requiredReceiverCapabilities('task.decline', { code: 'native_sessions_unsupported' })).toEqual([]);
   });
 
   it('every message type appears in the v6 corpus', () => {
@@ -549,12 +549,7 @@ describe('compat v6: corpus coverage and WIRE_ADDITIONS', () => {
 
   it('every entry names a current message type and capability, in the right direction', () => {
     for (const entry of WIRE_ADDITIONS) {
-      if (entry.kind === 'http') {
-        expect(Object.keys((httpSchema(currentModule, entry.surface) as unknown as { shape: object }).shape)).toContain(entry.field.split(/[.[]/u)[0]);
-        continue;
-      }
       expect(MESSAGE_TYPES).toContain(entry.surface);
-      if (entry.rule !== 'gated') continue;
       expect(CAPABILITY_FLAGS).toContain(entry.capability);
       expect(entry.advertisedBy, `${entry.surface} flows ${isServerToDaemonType(entry.surface) ? 'to the daemon' : 'to the server'}`).toBe(
         isServerToDaemonType(entry.surface) ? 'device' : 'server',
@@ -569,10 +564,8 @@ describe('compat v6: corpus coverage and WIRE_ADDITIONS', () => {
   });
 
   it('every entry is exercised by a v6 corpus line', () => {
-    const unused = WIRE_ADDITIONS.filter((entry) => entry.kind === 'envelope'
-      ? !v6Corpus.some((line) => carries(line, entry))
-      : !v6HttpCorpus.some((line) => line.surface === entry.surface && fieldValues(line.value, entry.field).some((value) => value !== undefined))).map(
-      (entry) => `${entry.surface}${entry.field === undefined ? '' : `.${entry.field}`}${entry.rule === 'gated' && entry.value !== undefined ? `=${entry.value}` : ''}`,
+    const unused = WIRE_ADDITIONS.filter((entry) => !v6Corpus.some((line) => carries(line, entry))).map(
+      (entry) => `${entry.surface}${entry.field === undefined ? '' : `.${entry.field}`}${entry.value === undefined ? '' : `=${entry.value}`}`,
     );
     expect(unused, 'append a v6 corpus line that carries each of these (golden/v6.envelopes.ndjson is append-only)').toEqual([]);
   });
@@ -613,11 +606,10 @@ describe('compat v6: corpus coverage and WIRE_ADDITIONS', () => {
     expect(preparedWithMemory('read-write-if-admitted')).toBe(false);
   });
 
-  it('gates residentMemoryOverLimit on the server flag on every terminal type; the schema does not compare byteCount with the limit (#1439)', () => {
+  it('residentMemoryOverLimit is baseline on every terminal type; the schema does not compare byteCount with the limit (#1439)', () => {
     const residentMemoryOverLimit = { byteCount: 12288 };
     for (const type of ['task.complete', 'task.fail', 'task.cancelled'] as const) {
-      expect(requiredReceiverCapabilities(type, { residentMemoryOverLimit }), type).toEqual(['resident-memory-over-limit']);
-      expect(requiredReceiverCapabilities(type, {}), type).not.toContain('resident-memory-over-limit');
+      expect(requiredReceiverCapabilities(type, { residentMemoryOverLimit }), type).toEqual([]);
     }
     const schema = currentModule.TerminalResidentMemoryOverLimitSchema;
     expect(schema.safeParse({ byteCount: 0 }).success).toBe(true);
@@ -626,7 +618,7 @@ describe('compat v6: corpus coverage and WIRE_ADDITIONS', () => {
     }
   });
 
-  it('requiredReceiverCapabilities derives field and value gates from the table; document and the v2 strip-safe fields need none', () => {
+  it('requiredReceiverCapabilities derives field and value gates from the table; document and the optional discovery fields need none', () => {
     expect(requiredReceiverCapabilities('task.offer', { homeAccess: 'memory-reader' })).toEqual([
       'agent-home-contract',
       'agent-home-readers',
@@ -641,33 +633,6 @@ describe('compat v6: corpus coverage and WIRE_ADDITIONS', () => {
     ] })).toEqual([]);
     expect(requiredReceiverCapabilities('task.complete', { document: {}, finalMessage: 'x' })).toEqual([]);
     expect(requiredReceiverCapabilities('task.decline', { code: 'agent_home_writer_busy' })).toEqual([]);
-    expect(WIRE_ADDITIONS.filter((entry) => entry.rule === 'strip-safe'), 'only declared optional fields are registered; v2 rows remain baseline').toEqual([
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.messageDraft' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.messageDraft' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.messageDraft' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.toolAuthorizationAuto' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.toolAuthorizationAuto' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.toolAuthorizationAuto' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.durableLane' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.durableLane' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.durableLane' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.preparedLane' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.preparedLane' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.preparedLane' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.isolation' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.isolation' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.isolation' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].versionPolicy' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].versionPolicy' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimeUnavailable' },
-      { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimes[].versionPolicy' },
-      { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimeUnavailable' },
-      { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimes[].capabilities' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'task.progress', field: 'events[].mcp' },
-      { kind: 'envelope', rule: 'strip-safe', surface: 'task.decline', field: 'runtimeUnavailable' },
-      { kind: 'http', rule: 'strip-safe', surface: 'TokenResponse', field: 'expiresIn' },
-      { kind: 'http', rule: 'strip-safe', surface: 'PairResponse', field: 'expiresIn' },
-    ]);
   });
 });
 

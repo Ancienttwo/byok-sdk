@@ -1,6 +1,6 @@
 export { HostOfferPlainPayloadSchema, HostOfferSealedPayloadSchema, type HostOfferPlainPayload, type HostOfferSealedPayload } from './host-offer-input';
 export * from './constants';
-export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
+export { MAILBOX_READ_AHEAD_MAX_SEQS } from './version';
 export { PROTOCOL_VERSION, CAPABILITY_FLAGS, AGENT_HOME_READERS_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
 export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions';
@@ -592,8 +592,6 @@ export type {
 } from './http-api';
 
 export type { HarnessId, HarnessInfo } from './messages';
-
-export { CUSTOM_HARNESS_CAPABILITY } from './version';
 
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
 

@@ -374,6 +374,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     expect(fail.payload).toEqual({ agentRef: echoedTestAgentRef,
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.start,
       retryable: false,
+      failure: { class: 'unknown' },
     });
     expect(diagnostic).toHaveBeenCalledOnce();
     diagnostic.mockRestore();

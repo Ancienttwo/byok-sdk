@@ -77,16 +77,13 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
   });
 
   it.each([
-    ['a missing accessToken', { expiresAt: '2030-01-01T00:00:00.000Z', expiresIn: 3600 }, ['accessToken']],
-    ['a missing expiresAt', { accessToken: 'fresh-token', expiresIn: 3600 }, ['expiresAt']],
-    ['an expiresAt with no offset', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00', expiresIn: 3600 }, ['expiresAt']],
-    ['an expiresAt that is not an ISO timestamp', { accessToken: 'fresh-token', expiresAt: 'Tue, 01 Jan 2030 00:00:00 GMT', expiresIn: 3600 }, ['expiresAt']],
+    ['a missing accessToken', { expiresIn: 3600 }, ['accessToken']],
     // #1114: expiresIn is the device's only lifetime authority, so the client requires it.
-    ['a missing expiresIn', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00.000Z' }, ['expiresIn']],
-    ['a non-integer expiresIn', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00.000Z', expiresIn: 1.5 }, ['expiresIn']],
-    ['a zero expiresIn', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00.000Z', expiresIn: 0 }, ['expiresIn']],
-    ['a negative expiresIn', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00.000Z', expiresIn: -60 }, ['expiresIn']],
-    ['a string expiresIn', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00.000Z', expiresIn: '3600' }, ['expiresIn']],
+    ['a missing expiresIn', { accessToken: 'fresh-token' }, ['expiresIn']],
+    ['a non-integer expiresIn', { accessToken: 'fresh-token', expiresIn: 1.5 }, ['expiresIn']],
+    ['a zero expiresIn', { accessToken: 'fresh-token', expiresIn: 0 }, ['expiresIn']],
+    ['a negative expiresIn', { accessToken: 'fresh-token', expiresIn: -60 }, ['expiresIn']],
+    ['a string expiresIn', { accessToken: 'fresh-token', expiresIn: '3600' }, ['expiresIn']],
   ])('refuses a token response with %s and keeps the prior credential', async (_case, body, issuePath) => {
     const { auth, store, before } = await pairedWithResponse('/byok/token', body);
     try {
@@ -125,7 +122,7 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
   });
 
   it.each([
-    ['a truncated', '{"accessToken":"fresh-token","expiresAt":"2030-'],
+    ['a truncated', '{"accessToken":"fresh-token","expiresIn":36'],
     ['a non-JSON', 'fresh-token'],
   ])('refuses %s token body as AuthResponseInvalidError and keeps the prior credential', async (_case, raw) => {
     const { auth, store, before } = await pairedWithRawResponse('/byok/token', raw);
@@ -152,11 +149,9 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
     }
   });
 
-  it('accepts a token expiresAt with a numeric offset and stores the device-local expiry from expiresIn, not expiresAt (#1114)', async () => {
-    // The server timestamp is two hours off this device's clock; only expiresIn may set the lifetime.
+  it('ignores a stray expiresAt and stores the device-local expiry from expiresIn (#1114)', async () => {
     // An hour out keeps the proactive renewal timer far from this test.
-    const expiresAt = new Date(Date.now() - 7_200_000).toISOString().replace('Z', '+00:00');
-    const { auth, store } = await pairedWithResponse('/byok/token', { accessToken: 'fresh-token', expiresAt, expiresIn: 3600 });
+    const { auth, store } = await pairedWithResponse('/byok/token', { accessToken: 'fresh-token', expiresAt: 'not a timestamp', expiresIn: 3600 });
     try {
       const requestedAt = Date.now();
       await expect(auth.handleUnauthorized()).resolves.toBe('fresh-token');

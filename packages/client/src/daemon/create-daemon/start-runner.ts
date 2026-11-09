@@ -157,27 +157,20 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     onToolAuthorizationDecision: (decision) => observer.noteToolAuthorizationDecision(decision),
     // #1061 D12: deny and policy-adoption audit only; allow is never recorded.
     onFileScopeAudit: (event) => observer.noteFileScopeAudit(event),
-    // M4 (additive-minor, `task.approval_resolved`): read fresh at call
-    // time via `connection` (assigned just below — safe by the time this
-    // is actually invoked, same closure pattern `send` above already
-    // relies on) rather than captured once here, since the negotiated
-    // capability is only known once the handshake completes, strictly
-    // after this `deps` object is constructed.
-    getServerCapabilities: () => daemonState.connection?.getServerCapabilities() ?? [],
     // The array `conn.hello` is built from; presence and the capability
     // declaration edit it in place, so read it at offer time.
     advertisedCapabilities: () => daemonState.helloCapabilities,
     sealedTasks: opened,
-    // Same late-binding closure as `getServerCapabilities`; with no
-    // connection yet there is no advertisement, and that is an error.
+    // Read at call time: `connection` is assigned after this `deps` object
+    // is built. With no connection yet there is no advertisement, and that
+    // is an error.
     getIngressBudget: () => {
       if (daemonState.connection === undefined) throw new Error('no activity ingress has been advertised; the connection is not started');
       return daemonState.connection.getIngressBudget();
     },
     // Contract §8.1: the nonce injection asks the SAME gate the RPC and the
-    // hello advertisement ask, read fresh at offer time for the same reason
-    // `getServerCapabilities` is — the declaration lands after this `deps`
-    // object is built.
+    // hello advertisement ask, read fresh at offer time: the declaration
+    // lands after this `deps` object is built.
     hostTaskContextAvailable: () => taskContextCapabilityAvailable(),
     prepareHostTaskContext: waitForHostTaskContext,
     // S3b (L-003): the production admission guard — §12.7.2.1's hard-pressure

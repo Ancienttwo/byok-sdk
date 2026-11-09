@@ -35,7 +35,6 @@ async function harness() {
   const hostStorageRoot = await temporary('byok-grok-reader-home-');
   const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [new GrokAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }) })],
-    getServerCapabilities: () => ['custom-harness'],
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-grok-reader',
     send: (envelope) => sent.push(envelope),

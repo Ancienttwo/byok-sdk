@@ -23,8 +23,7 @@ const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT
  * decision in isolation, mirroring `task-runner-approval.test.ts`'s own
  * convention of driving `TaskRunner` directly (no control socket, no real
  * connection) via `requestApproval`/`handleEnvelope` and a plain `sent`
- * array — `getServerCapabilities` is just a stub function here, exactly like
- * every other `TaskRunnerDeps` field this file's sibling stubs.
+ * array, stubbing every `TaskRunnerDeps` field as its siblings do.
  *
  * A full end-to-end pass (real daemon, real `@byok-sdk/server`, real capability
  * negotiation over a real handshake, real local-CLI-equivalent resolve) is
@@ -43,7 +42,7 @@ const unusedBlobClient: BlobResolver = {
 async function makeRunner(
   adapter: RuntimeAdapter,
   sent: Envelope[],
-  overrides: Partial<Pick<TaskRunnerDeps, 'approvalTimeoutMs' | 'approvalRegistry' | 'getServerCapabilities'>> = {},
+  overrides: Partial<Pick<TaskRunnerDeps, 'approvalTimeoutMs' | 'approvalRegistry'>> = {},
 ): Promise<{ runner: TaskRunner; approvalRegistry: ApprovalRegistry }> {
   const approvalRegistry = overrides.approvalRegistry ?? new ApprovalRegistry();
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
@@ -58,7 +57,6 @@ async function makeRunner(
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
     approvalTimeoutMs: overrides.approvalTimeoutMs,
-    getServerCapabilities: overrides.getServerCapabilities,
   };
   return { runner: new TaskRunner(deps), approvalRegistry };
 }
@@ -173,13 +171,10 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
     expect(resolved?.payload.resolvedBy).toBe('local');
   });
 
-  it.each([
-    ['getServerCapabilities not supplied', undefined],
-    ['a server list without any approval flag', () => ['steer', 'blob-upload']],
-  ] as const)('a local resolution sends task.approval_resolved whatever the server advertises (%s): it is wire v4 baseline', async (_label, getServerCapabilities) => {
+  it('a local resolution sends task.approval_resolved: it is wire v4 baseline', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
-    const { runner, approvalRegistry } = await makeRunner(adapter, sent, getServerCapabilities === undefined ? {} : { getServerCapabilities });
+    const { runner, approvalRegistry } = await makeRunner(adapter, sent);
     const taskId = 'task-any-server-1';
     await offerAndActivate(runner, taskId);
 

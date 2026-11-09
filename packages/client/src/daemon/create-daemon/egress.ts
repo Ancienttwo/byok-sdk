@@ -1,5 +1,5 @@
 import type { AgentReliableEgressRecord } from '../agent-egress-spool';
-import { AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, createEnvelope, AgentContentReceiptPayloadSchema } from '@byok-sdk/protocol';
+import { createEnvelope, AgentContentReceiptPayloadSchema } from '@byok-sdk/protocol';
 import type { AgentEgressReliablePayload } from '@byok-sdk/protocol';
 import type { AgentEgressReliableAppendResult } from '../agent-egress-controller';
 import type { AgentReliableEgressInput } from '../create-daemon';
@@ -13,13 +13,10 @@ export function dispatchReliableRecord(daemonScope: DaemonScope, record: AgentRe
     daemonState.agentEgress.noteTransportDrop('invalid_envelope', record.agentRef);
     return;
   }
-  if (!daemonState.connection?.getServerCapabilities().includes(AGENT_EGRESS_RELIABLE_ACK_CAPABILITY)) {
-    // The append stays durable and is retried when an advertisement next
-    // carries the ack capability (`onCapabilitiesAdvertised`). It is never
-    // republished through latest-value activity.
-    daemonState.agentEgress.noteTransportDrop('capability_missing', record.agentRef);
-    return;
-  }
+  // With no connection the append stays durable; every session open sends it
+  // again (`start-connection.ts`). It is never republished through
+  // latest-value activity.
+  if (daemonState.connection === undefined) return;
   const envelope = reliableEnvelopes.get(record) ?? (record.wireType === 'agent.egress.reliable'
     ? createEnvelope('agent.egress.reliable', {
         agentRef: record.agentRef,

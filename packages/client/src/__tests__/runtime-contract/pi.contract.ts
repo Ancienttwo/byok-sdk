@@ -6,7 +6,7 @@ import { readClientPiRuntimePin } from '../../adapters/pi/client-manifest';
 import { PI_ABSENT_ISOLATION_SOURCES } from '../../adapters/pi/pi-capabilities';
 import { createAutoToolAuthorizationGate } from '../../tool-authorization';
 import {
-  baseEnv, check, contractMode, createSandbox, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
+  absent, baseEnv, check, contractMode, createSandbox, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
   expectDetectedVersion, fileEgress, observeServers, once, readReceipt, runTurn, skip, skipRuntimeContract, writeSubmitResultServer,
 } from './contract';
 import { callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript, type ProviderTool } from './loopback';
@@ -25,6 +25,14 @@ const turnAdapter = (options: PiAdapterOptions = {}) => new PiAdapter({ resolveB
 const PROJECT_MARKER = 'BYOK-CONTRACT-PI-PROJECT-91c4';
 const USER_MARKER = 'BYOK-CONTRACT-PI-USER-0d6b';
 const ANCESTOR_MARKER = 'BYOK-CONTRACT-PI-ANCESTOR-5e1a';
+const SYSTEM_MARKER = 'BYOK-CONTRACT-PI-SYSTEM-3f7e';
+const APPEND_MARKER = 'BYOK-CONTRACT-PI-APPEND-b82d';
+const AGENT_SKILL_MARKER = 'BYOK-CONTRACT-PI-SKILL-AGENTDIR-6a90';
+const HOME_SKILL_MARKER = 'BYOK-CONTRACT-PI-SKILL-HOME-c13f';
+const EXTENSION_MARKER = 'BYOK-CONTRACT-PI-EXTENSION-27de';
+// Host-authorized resources are not user sources: they reach the model under both modes.
+const HOST_SKILL_MARKER = 'BYOK-CONTRACT-PI-HOST-SKILL-84b5';
+const HOST_EXTENSION_MARKER = 'BYOK-CONTRACT-PI-HOST-EXTENSION-e90a';
 const PROVIDER = 'contract-loopback';
 
 /** Pi's own `--version` text is the bare release. */
@@ -50,6 +58,17 @@ async function agentDirFor(home: string, baseUrl: string): Promise<string> {
   return agentDir;
 }
 
+const skillFile = (name: string, marker: string) => `---\nname: ${name}\ndescription: ${marker}\n---\nContract skill.\n`;
+// Injects the marker as a session message; a returned `systemPrompt` would replace the whole prompt and hide the other markers.
+const extensionSource = (marker: string) => `export default function(pi) {
+  pi.on('before_agent_start', () => ({ message: { customType: 'contract', content: ${JSON.stringify(marker)}, display: false } }));
+}\n`;
+
+async function writeFileIn(dir: string, name: string, content: string) {
+  await fs.mkdir(path.dirname(path.join(dir, name)), { recursive: true });
+  await fs.writeFile(path.join(dir, name), content);
+}
+
 /**
  * One contract turn as an Agent task: a Host MCP server (observed, as the
  * daemon does before Pi registers its tools), the Agent home AGENTS.md, and a
@@ -62,12 +81,23 @@ async function turn(agentUserContext: 'inherit' | 'excluded') {
   try {
     const agentDir = await agentDirFor(box.home, provider.baseUrl);
     await fs.writeFile(path.join(agentDir, 'AGENTS.md'), `# User\n\n${USER_MARKER}\n`);
+    await fs.writeFile(path.join(agentDir, 'SYSTEM.md'), `${SYSTEM_MARKER}\n`);
+    await fs.writeFile(path.join(agentDir, 'APPEND_SYSTEM.md'), `${APPEND_MARKER}\n`);
+    await writeFileIn(agentDir, 'skills/user-agentdir/SKILL.md', skillFile('user-agentdir', AGENT_SKILL_MARKER));
+    await writeFileIn(box.home, '.agents/skills/user-home/SKILL.md', skillFile('user-home', HOME_SKILL_MARKER));
+    await writeFileIn(agentDir, 'extensions/user-hook.ts', extensionSource(EXTENSION_MARKER));
+    // Outside the agent directory and $HOME/.agents, so only the grant can load them.
+    const hostDir = path.join(box.root, 'host-resources');
+    await writeFileIn(hostDir, 'skills/host-skill/SKILL.md', skillFile('host-skill', HOST_SKILL_MARKER));
+    await writeFileIn(hostDir, 'host-hook.ts', extensionSource(HOST_EXTENSION_MARKER));
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
     await fs.writeFile(path.join(box.root, 'AGENTS.md'), `# Ancestor\n\n${ANCESTOR_MARKER}\n`);
     const receipt = path.join(box.root, 'host.jsonl');
     const mcpServers = { host: await writeSubmitResultServer(box.root, receipt) };
     const env = { ...baseEnv(box.home), PI_CODING_AGENT_DIR: agentDir, ...recorder.env };
-    const events = await runTurn(turnAdapter({ agentUserContext }), 'Call the submit_result tool, then finish.', {
+    const events = await runTurn(turnAdapter({
+      agentUserContext, agentSkillPaths: [path.join(hostDir, 'skills/host-skill/SKILL.md')], agentExtensionPaths: [path.join(hostDir, 'host-hook.ts')],
+    }), 'Call the submit_result tool, then finish.', {
       workspaceDir: box.workspace, agentHome: box.workspace, env, mcpServers, mcpToolsetTools: await observeServers(mcpServers, env),
     });
     return { events, provider, calls: await readReceipt(receipt) };
@@ -137,11 +167,26 @@ if (mode === 'latest') {
       expect((await inherited()).provider.saw(ANCESTOR_MARKER), 'positive control: the inherited ancestor AGENTS.md reaches the model').toBe(true);
       expect((await excluded()).provider.saw(USER_MARKER)).toBe(false);
       expect((await excluded()).provider.saw(ANCESTOR_MARKER)).toBe(false);
+      // SYSTEM.md replaces the default prompt and APPEND_SYSTEM.md extends it: two separate loaders.
+      for (const marker of [SYSTEM_MARKER, APPEND_MARKER]) {
+        expect((await inherited()).provider.saw(marker), `positive control: ${marker} reaches the model`).toBe(true);
+        expect((await excluded()).provider.saw(marker)).toBe(false);
+      }
     }),
-    'isolation.userOutputStyle': skip('pi descriptor does not advertise isolation.userOutputStyle yet (#1576)'),
-    'isolation.userMemory': skip('pi descriptor does not advertise isolation.userMemory yet (#1576)'),
-    'isolation.userSkills': skip('pi descriptor does not advertise isolation.userSkills yet (#1576)'),
-    'isolation.userHookContext': skip('pi descriptor does not advertise isolation.userHookContext yet (#1576)'),
+    'isolation.userOutputStyle': absent(PI_ABSENT_ISOLATION_SOURCES.userOutputStyle),
+    'isolation.userMemory': absent(PI_ABSENT_ISOLATION_SOURCES.userMemory),
+    'isolation.userSkills': check(async () => {
+      for (const marker of [AGENT_SKILL_MARKER, HOME_SKILL_MARKER]) {
+        expect((await inherited()).provider.saw(marker), `positive control: ${marker} reaches the model`).toBe(true);
+        expect((await excluded()).provider.saw(marker)).toBe(false);
+      }
+      expect((await excluded()).provider.saw(HOST_SKILL_MARKER), 'a Host-authorized skill is not a user source').toBe(true);
+    }),
+    'isolation.userHookContext': check(async () => {
+      expect((await inherited()).provider.saw(EXTENSION_MARKER), 'positive control: the user extension reaches the model').toBe(true);
+      expect((await excluded()).provider.saw(EXTENSION_MARKER)).toBe(false);
+      expect((await excluded()).provider.saw(HOST_EXTENSION_MARKER), 'a Host-authorized extension is not a user source').toBe(true);
+    }),
     'isolation.userMcp': skip('Pi has no user MCP configuration; it registers only the task servers the daemon observed'),
     'isolation.sessionPersistence': skip('the Pi adapter has no session persistence option; resume relies on the Agent home session store'),
     drafts: check(async () => {
