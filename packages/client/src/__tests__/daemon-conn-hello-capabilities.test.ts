@@ -146,7 +146,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       messageDraft: true,
       toolAuthorizationAuto: true,
       preparedLane: false,
-      isolation: { userInstructions: true, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: true },
+      isolation: { userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: true },
     });
 
     // codex: persistent app-server steering with YOLO-only auto permission mode.
