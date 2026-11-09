@@ -157,18 +157,18 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
   it('still expresses Codex isolation and its static all mode without fileScope', async () => {
     const { file } = await salesko((input) => {
       input.runtimeAllowlist = ['codex'];
-      input.runtimes = { codex: { agentUserMcpServers: 'excluded' } };
+      input.runtimes = { codex: { agentUserMcpServers: 'excluded', agentUserContext: 'excluded' } };
       input.toolAuthorization = { default: 'all' };
     });
     const daemon = createDaemon(loadConfig(file));
     const effective = daemon.status().config;
     expect(effective.warnings).toEqual([]);
     expect(effective.toolAuthorization).toEqual({ mode: 'static', byRuntime: { codex: 'all' }, localToolApproval: 'host-only' });
-    expect(constructed.codex).toEqual([expect.objectContaining({ agentUserMcpServers: 'excluded' })]);
+    expect(constructed.codex).toEqual([expect.objectContaining({ agentUserMcpServers: 'excluded', agentUserContext: 'excluded' })]);
 
     const lines: string[] = [];
     expect(runConfigCheckCommand(file, { strict: true, json: false }, { log: (line) => lines.push(line) })).toBe(0);
-    expect(lines.join('\n')).toContain('codex [sdk-built] auto unsupported agentUserMcpServers=excluded sandbox=danger-full-access');
+    expect(lines.join('\n')).toContain('codex [sdk-built] auto unsupported agentUserMcpServers=excluded agentUserContext=excluded sandbox=danger-full-access');
   });
 
   it('builds the Grok adapter from the file alone when runtimeAllowlist lists grok', async () => {

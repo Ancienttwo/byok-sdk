@@ -481,13 +481,25 @@ export interface CodexAdapterOptions {
      * MCP servers. After the open it reads the thread's MCP server status
      * back, and the start fails if any other server is not disabled, or if a
      * user server has the name of a task or SDK server. The user's
-     * `AGENTS.md`, login, model, sandbox setting and other configuration still
-     * apply. It covers new and resumed threads. On a resume, Codex may start a
+     * login, model, sandbox setting and other configuration still apply, and
+     * so does the user's `AGENTS.md` unless `agentUserContext` is `excluded`. It covers new and resumed threads. On a resume, Codex may start a
      * queued turn before the read-back: that turn already runs with the
      * overrides, and a failed read-back stops the app server. Other tasks are
      * unchanged. Default `inherit`.
      */
     agentUserMcpServers?: 'inherit' | 'excluded';
+    /**
+     * For an Agent task (`task.offer`), `excluded` runs Codex in an SDK-owned
+     * `CODEX_HOME` in the execution's scratch, so the user's `AGENTS.md`,
+     * `AGENTS.override.md`, `skills/` and `memories/` stay out. The home holds
+     * symbolic links to the user's `auth.json`, `config.toml`, `hooks.json`,
+     * `rules/`, `sessions/` and `archived_sessions/`: the login, its refreshes,
+     * the configuration, the guardrails and the thread store stay the user's.
+     * The start fails unless Codex's effective `cli_auth_credentials_store` is
+     * `file`, and on Windows when the account may not create symbolic links.
+     * MCP servers are `agentUserMcpServers`' concern. Default `inherit`.
+     */
+    agentUserContext?: 'inherit' | 'excluded';
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
     /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
@@ -1366,6 +1378,8 @@ export interface RuntimeAdaptersRuntimes {
     codex?: {
         /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
         agentUserMcpServers?: CodexAdapterOptions['agentUserMcpServers'];
+        /** `CodexAdapterOptions.agentUserContext`: `excluded` runs an Agent task in an SDK-owned `CODEX_HOME` that keeps the user's `AGENTS.md`, skills and memories out and links the login, configuration, guardrails and thread store. Default `inherit`. */
+        agentUserContext?: CodexAdapterOptions['agentUserContext'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
     };

@@ -14,6 +14,8 @@ const target = contractTarget('codex', QUALIFIED_CODEX_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const adapter = (options: CodexAdapterOptions = {}) => new CodexAdapter({ resolveBin, sandbox: 'inherit', operationTimeoutMs: 60_000, ...options });
 const PROJECT_MARKER = 'BYOK-CONTRACT-CODEX-PROJECT-7c1e';
+const USER_MARKER = 'BYOK-CONTRACT-CODEX-USER-5d02';
+const MEMORY_MARKER = 'BYOK-CONTRACT-CODEX-MEMORY-0f47';
 const placeholderKey = 'sk-runtime-contract-placeholder';
 
 /** Codex's own `--version` text: `codex-cli 0.160.0`. */
@@ -32,8 +34,8 @@ async function detectEnv(label: string, files: Record<string, string> = {}) {
  * Host approved by exact tool name (#1072), a workspace AGENTS.md, and a user
  * MCP server in the user's config.toml.
  */
-async function turn(userMcp: 'inherit' | 'excluded') {
-  const box = await createSandbox(`codex-${userMcp}`);
+async function turn(mode: 'inherit' | 'excluded') {
+  const box = await createSandbox(`codex-${mode}`);
   const recorder = await fileEgress();
   const provider = await startLoopbackProvider('openai-responses', callOnceThenReply(mcpTool('host', 'submit_result'), { summary: 'runtime contract' }));
   try {
@@ -46,14 +48,18 @@ async function turn(userMcp: 'inherit' | 'excluded') {
     await fs.writeFile(path.join(codexHome, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: placeholderKey, tokens: null, last_refresh: null }), { mode: 0o600 });
     await fs.writeFile(path.join(codexHome, 'config.toml'), [
       'cli_auth_credentials_store = "file"', 'model = "contract-model"', 'model_provider = "contract"',
-      '[features]', 'plugins = false',
+      '[features]', 'plugins = false', 'memories = true',
       '[model_providers.contract]', 'name = "contract"', `base_url = "${provider.baseUrl}"`, 'wire_api = "responses"',
       'env_key = "OPENAI_API_KEY"', 'supports_websockets = false',
       '[mcp_servers.usermcp]', `command = ${JSON.stringify(user.command)}`, `args = ${JSON.stringify(user.args)}`, '',
     ].join('\n'), { mode: 0o600 });
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
+    await fs.writeFile(path.join(codexHome, 'AGENTS.md'), `# User\n\n${USER_MARKER}\n`);
+    await fs.mkdir(path.join(codexHome, 'memories'), { recursive: true });
+    await fs.writeFile(path.join(codexHome, 'memories', 'memory_summary.md'), `${MEMORY_MARKER}\n`);
     const env = { ...baseEnv(box.home), CODEX_HOME: codexHome, OPENAI_API_KEY: placeholderKey, ...recorder.env };
-    const events = await runTurn(adapter({ agentUserMcpServers: userMcp }), 'Call the submit_result tool, then finish.', {
+    const options: CodexAdapterOptions = mode === 'excluded' ? { agentUserMcpServers: 'excluded', agentUserContext: 'excluded' } : {};
+    const events = await runTurn(adapter(options), 'Call the submit_result tool, then finish.', {
       workspaceDir: box.workspace, agentHome: box.workspace, env,
       mcpServers: { host }, mcpToolApprovals: { host: ['submit_result'] },
     });
@@ -89,10 +95,17 @@ defineRuntimeContract(`codex runtime contract (${target.mode} ${target.expectedV
     const { provider } = await excluded();
     expect(provider.saw(PROJECT_MARKER)).toBe(true);
   }),
-  'isolation.userInstructions': skip('Codex has no per-process switch for the user AGENTS.md; the adapter documents that it applies (docs/adapter-capabilities.md)'),
+  'isolation.userInstructions': check(async () => {
+    expect((await inherited()).provider.saw(USER_MARKER), 'positive control: inherited user AGENTS.md reaches the model').toBe(true);
+    expect((await excluded()).provider.saw(USER_MARKER)).toBe(false);
+    expect((await excluded()).provider.saw(PROJECT_MARKER), 'positive control: the Agent home is still read under excluded').toBe(true);
+  }),
   'isolation.userOutputStyle': notAdvertised(descriptor, 'isolation.userOutputStyle'),
-  'isolation.userMemory': notAdvertised(descriptor, 'isolation.userMemory'),
-  'isolation.userSkills': notAdvertised(descriptor, 'isolation.userSkills'),
+  'isolation.userMemory': check(async () => {
+    expect((await inherited()).provider.saw(MEMORY_MARKER), 'positive control: inherited memory summary reaches the model').toBe(true);
+    expect((await excluded()).provider.saw(MEMORY_MARKER)).toBe(false);
+  }),
+  'isolation.userSkills': skip('codex also loads user skills from $HOME/.agents/skills, outside CODEX_HOME; the descriptor declares userSkills false (docs/adapter-capabilities.md)'),
   'isolation.userHookContext': notAdvertised(descriptor, 'isolation.userHookContext'),
   'isolation.userMcp': check(async () => {
     expect((await inherited()).userSpawned, 'positive control: inherited user MCP server starts').toBe(true);

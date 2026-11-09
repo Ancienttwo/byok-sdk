@@ -159,6 +159,7 @@ function sdkBuiltIsolation(id: string, config: DaemonConfig): Readonly<Record<st
     };
     case 'codex': return {
       agentUserMcpServers: runtimes?.codex?.agentUserMcpServers ?? 'inherit',
+      agentUserContext: runtimes?.codex?.agentUserContext ?? 'inherit',
       sandbox: config.codexSandbox ?? 'danger-full-access',
     };
     case 'grok': return {
