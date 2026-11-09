@@ -95,6 +95,8 @@ async function writeUserHome(userHome: string, root: string, extra: { user?: { c
   await fs.writeFile(path.join(userHome, 'config.yaml'), [
     'display:', '  personality: contract-style',
     'agent:', '  personalities:', `    contract-style: ${JSON.stringify(STYLE_MARKER)}`,
+    // Consent lives in the user home too, so the control and the adapter turn differ only in which home Hermes reads.
+    'hooks_auto_accept: true',
     'hooks:', '  pre_llm_call:', `    - command: ${JSON.stringify(`${JSON.stringify(process.execPath)} ${JSON.stringify(hook)}`)}`,
     ...(extra.user === undefined ? [] : ['mcp_servers:', '  usermcp:', `    command: ${JSON.stringify(extra.user.command)}`, `    args: ${JSON.stringify(extra.user.args)}`]),
     // The control has no adapter to write the model selection and the update-check switch, so its home carries them.
@@ -142,7 +144,7 @@ async function controlTurn() {
     const home = path.join((await rootBox()).root, 'hermes', 'profiles', 'control');
     await fs.rm(home, { recursive: true, force: true });
     await writeUserHome(home, box.root, { baseUrl: provider.baseUrl });
-    const args = ['chat', '-q', 'Reply.', '-Q', '--accept-hooks'];
+    const args = ['chat', '-q', 'Reply.', '-Q'];
     const env = { ...await hermesEnv(box.home), ...recorder.env, [KEY_ENV]: 'runtime-contract-placeholder', HERMES_HOME: home };
     const output = await new Promise<string>(resolve => {
       execFile(target.bin, args, { encoding: 'utf8', env, cwd: box.workspace, timeout: 600_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => resolve(JSON.stringify({ error: error?.message, stdout: stdout.slice(-2000), stderr: stderr.slice(-2000) })));
