@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ registered: [] as unknown[] }));
@@ -10,7 +13,7 @@ vi.mock('pi-subagents/required-child-extensions', () => ({
   },
 }));
 
-import { loadPiSubagentsExtensions } from '../adapters/pi/subagents';
+import { loadPiSubagentsAsset, loadPiSubagentsExtensions } from '../adapters/pi/subagents';
 import type { ToolAuthorizationIpcConfig } from '../tool-authorization-ipc';
 
 const gate: ToolAuthorizationIpcConfig = {
@@ -18,10 +21,9 @@ const gate: ToolAuthorizationIpcConfig = {
 };
 
 /** Run the SDK registration extension and return the exact input handed to pi-subagents. */
-async function registeredInput(fileScopePath?: string): Promise<{ extensions: readonly { id: string; path: string }[]; requireForAllRunners: boolean }> {
+async function registeredInput(fileScopePath?: string, factories?: readonly unknown[]): Promise<{ extensions: readonly { id: string; path: string }[]; requireForAllRunners: boolean }> {
   state.registered.length = 0;
-  const factories = await loadPiSubagentsExtensions(gate, '/dist/bin/pi-subagent-gate.js', fileScopePath);
-  const register = factories[1]!;
+  const register = (factories ?? await loadPiSubagentsExtensions(gate, '/dist/bin/pi-subagent-gate.js', fileScopePath)).at(-1) as (pi: never) => void;
   let start: ((event: unknown, context: { sessionManager: { getSessionId(): string } }) => unknown) | undefined;
   register({
     on: (event: string, handler: (event: unknown, context: { sessionManager: { getSessionId(): string } }) => unknown) => {
@@ -48,5 +50,33 @@ describe('native Pi subagent required-extension order (#1061 D11)', () => {
   it('requires only the gate when the parent has no file scope', async () => {
     const input = await registeredInput();
     expect(input.extensions).toEqual([{ id: 'byok-tool-authorization', path: '/dist/bin/pi-subagent-gate.js' }]);
+  });
+
+  // #1589: a single-file product's copy in its Pi asset root; its registration module records into the same state.
+  it('requires the asset root child extensions, gate last, from the exact pinned copy only', async () => {
+    const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'byok-subagent-asset-')));
+    try {
+      const dir = path.join(root, 'pi-subagents');
+      await mkdir(path.join(dir, 'bundle'), { recursive: true });
+      const manifest = (version: string) => JSON.stringify({ name: 'pi-subagents', version, pi: { extensions: ['./bundle/index.js'] },
+        exports: { './required-child-extensions': { default: './bundle/required-child-extensions.mjs' } } });
+      await writeFile(path.join(dir, 'bundle', 'required-child-extensions.mjs'),
+        'export const registerRequiredChildExtensions = input => { globalThis.__byokRegistered.push(input); return { dispose() {} }; };');
+      (globalThis as { __byokRegistered?: unknown[] }).__byokRegistered = state.registered;
+      await writeFile(path.join(dir, 'package.json'), manifest('0.83.1'));
+      const asset = await loadPiSubagentsAsset(root, gate, true);
+      expect(asset.extensionPath).toBe(path.join(dir, 'bundle', 'index.js'));
+      const input = await registeredInput(undefined, asset.factories);
+      expect(input.requireForAllRunners).toBe(true);
+      expect(input.extensions).toEqual([
+        { id: 'byok-file-scope', path: path.join(root, 'pi-subagent-extensions', 'pi-subagent-file-scope.js') },
+        { id: 'byok-tool-authorization', path: path.join(root, 'pi-subagent-extensions', 'pi-subagent-gate.js') },
+      ]);
+      await writeFile(path.join(dir, 'package.json'), manifest('0.84.0'));
+      await expect(loadPiSubagentsAsset(root, gate, true)).rejects.toThrow(/pi_bundled_assets_unavailable: .*pi-subagents@0\.84\.0, not pi-subagents@0\.83\.1/u);
+      await expect(loadPiSubagentsAsset(path.join(root, 'absent'), gate, false)).rejects.toThrow(/pi_bundled_assets_unavailable: the Pi asset root has no pi-subagents package/u);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

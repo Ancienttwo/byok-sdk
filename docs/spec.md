@@ -1570,7 +1570,7 @@ Host UI or native tools. SDK source is now v9 (see the v9 cut); downstream paire
 remain separate actions. No v7 reader, mode default or fallback is retained.
 
 Fresh Pi execution keeps Pi's default native tools, the SDK web and todo
-extensions, the installed pi-subagents extension (see "Pi subagents") and the
+extensions, the pi-subagents extension (see "Pi subagents") and the
 user's own extensions and skills. For Agent tasks on the
 ordinary RPC lane, local `PiAdapterOptions.agentUserContext: 'excluded'`
 removes user extensions, skills, templates, themes and session resource
@@ -2582,7 +2582,7 @@ and the SDK todo locale assets against their build manifest. A mismatch, or a
 target that is not empty, fails closed. The asset root then holds the pi
 `package.json`, the pi themes and export resources at the paths pi uses for the
 form, the photon WASM file and the SDK todo locale assets with their license
-and provenance files. The photon loader of pi reads its WASM file beside the
+and provenance files, and the pi-subagents copy described in "Pi subagents". The photon loader of pi reads its WASM file beside the
 executable; without it, pi skips image resizing. The asset root is a build
 output of the product. The product must not mix asset roots of two pins.
 Bundled pi loads the user's own Pi packages and extensions from the user's
@@ -4010,17 +4010,18 @@ poll the cloud read API. With no draft producer, only a terminal marker appears.
 ## Pi subagents
 
 Pi subagents are the upstream `pi-subagents` package (exact client dependency,
-0.83.1), loaded by the ordinary RPC host from its installed package. The SDK
-vendors and patches none of it. pi-subagents reads its own package files at run
-time, so the host imports it through opaque specifiers that a product bundler
-cannot inline, and loads it only when the host is installed (not a single-file
-product's bundled re-entry, and never in the sealed host) and the credential
-source is `pi-auth-store` (see the `keys-profile` lane above).
+0.83.1), loaded by the ordinary RPC host when the credential source is
+`pi-auth-store` (see the `keys-profile` lane above), and never by the sealed
+host. The SDK vendors and patches none of it. pi-subagents reads its own
+package files at run time, so a product bundler never inlines it. The installed
+host imports the installed package through opaque specifiers. A single-file
+product's bundled re-entry loads the copy in its Pi asset root (below) through
+Pi's own extension loader, which supplies the Pi modules of the product bundle.
 
-Foreground children are in-process Pi sessions inside the parent host; background
-runs use pi-subagents' detached Node runner from the installed package. Neither
-re-enters the SDK: there is no `pi-subagent-print` or `pi-subagent-runner` helper
-kind. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
+Foreground children are in-process Pi sessions inside the parent host. In the
+installed host, background runs use pi-subagents' detached Node runner from the
+installed package. Neither re-enters the SDK: there is no `pi-subagent-print` or
+`pi-subagent-runner` helper kind. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
 fan-out limits. The SDK adds no second limit and no money or token spend cap.
 
 Under the `auto` tool authorization gate, the parent session registers
@@ -4034,10 +4035,25 @@ to bind its extensions and the launch is rejected. pi-subagents refuses an
 external-cli, external-job or machine placement before it starts, because those
 runners cannot load the gate. Under `all` the host registers nothing.
 
-A single-file product has no pi-subagents: its bundled re-entry offers no
-`subagent` tool. Restoring foreground subagents there needs pi-subagents shipped
-as an asset Pi package; background subagents there need an upstream host runner
-command seam. Both are deferred (tasks/todos.md).
+A single-file product offers foreground subagents only. `copyPiRuntimeAssets`
+writes `pi-subagents/` into the Pi asset root: the client's exact pi-subagents
+package with the closure of its runtime dependencies in its own `node_modules`,
+about 22 MB. Beside it, `pi-subagent-extensions/` holds the SDK gate and
+file-scope child extensions, which every native child loads by path. The
+bundled host passes the package's `pi.extensions` entry to Pi as an additional
+extension path and registers the required child extensions from the same copy.
+An asset root without the copy, or with another version, fails the launch with
+`pi_bundled_assets_unavailable`. Background subagents need an upstream host
+runner command seam (#1589): on a Bun-compiled product, pi-subagents would
+re-execute the product itself with Pi CLI arguments. So the bundled host sets
+pi-subagents' Pi executable override, `PI_SUBAGENT_PI_BINARY`, to its
+launch-private directory, which always exists and cannot be spawned. Only spawn
+paths read that override, never foreground children. A background launch then
+fails before any runner starts, and the tool call returns the error. In an
+interpreter + bundle product, pi-subagents itself refuses the launch because it
+finds no npm Pi package. The other users of the override fail the same way and
+never re-execute the product: Herdr project panes, Rex local placement and the
+live model probe of the profile check.
 
 ## Local native interaction contract
 
