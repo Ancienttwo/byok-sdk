@@ -419,19 +419,6 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexL
   const identity = storeMutexIdentity(canonicalStoreDir);
   const endpoint = storeMutexEndpoint(canonicalStoreDir, identity);
   const isPipe = process.platform === 'win32';
-  if (!isPipe) {
-    const endpointDir = path.dirname(endpoint);
-    // A no-op for the common `<storeDir>/mutex.sock` case (the caller
-    // already ran `ensureSecureDir` on it); real work only for the fixed
-    // `/tmp` fallback (see STORE_MUTEX_FALLBACK_ROOT — not `os.tmpdir()`),
-    // whose subdirectory does not exist the first time a given store lands
-    // there.
-    if (endpointDir !== canonicalStoreDir) {
-      await ensureSecureDir(endpointDir);
-      await assertOwnedPrivateDir(endpointDir);
-    }
-    await clearStaleStoreMutexSocket(endpoint, identity);
-  }
   const server: Server = createServer((socket) => endOwnershipProbe(socket, `${STORE_MUTEX_ID_PREFIX}${identity}\n`));
   const listen = (): Promise<void> => new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -440,25 +427,43 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexL
       resolve();
     });
   });
-  try {
+  const prepareAndListen = async (): Promise<void> => {
+    if (!isPipe) {
+      const endpointDir = path.dirname(endpoint);
+      // A no-op for the common `<storeDir>/mutex.sock` case (the caller
+      // already ran `ensureSecureDir` on it); real work only for the fixed
+      // `/tmp` fallback (see STORE_MUTEX_FALLBACK_ROOT — not `os.tmpdir()`),
+      // whose subdirectory does not exist the first time a given store lands
+      // there.
+      if (endpointDir !== canonicalStoreDir) {
+        await ensureSecureDir(endpointDir);
+        await assertOwnedPrivateDir(endpointDir);
+      }
+      await clearStaleStoreMutexSocket(endpoint, identity);
+    }
     await listen();
+  };
+  try {
+    await prepareAndListen();
   } catch (err) {
     // Someone else owns this store's endpoint: a live holder, or the loser's
-    // half of a race against the stale-socket unlink just above. Either way
-    // this store already has a contender that got there first — refuse, and
+    // half of a race against the stale-socket unlink in the preparation. Either
+    // way this store already has a contender that got there first — refuse, and
     // never walk to a second address, which is what would let two processes
     // run the stale-owner/reclaim sequence against the same pathnames.
     if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new DaemonOwnerActiveError('unknown');
     // `ENOENT` is the restart race instead, not a contended store: a closing
-    // holder reclaimed the fallback directory between the `ensureSecureDir`
-    // above and this `listen` (see `util/socket-fallback-directory.ts`).
-    // Rebuild it and retry once; a second `ENOENT` is a real failure.
+    // holder reclaimed the fallback directory between the directory
+    // preparation and the ownership check or `listen` (see
+    // `util/socket-fallback-directory.ts`). Prepare again and retry once; a
+    // second `ENOENT` is a real failure.
     if (isPipe || (err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    const retryDir = path.dirname(endpoint);
-    await ensureSecureDir(retryDir);
-    await assertOwnedPrivateDir(retryDir);
-    await clearStaleStoreMutexSocket(endpoint, identity);
-    await listen();
+    try {
+      await prepareAndListen();
+    } catch (retryErr) {
+      if ((retryErr as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new DaemonOwnerActiveError('unknown');
+      throw retryErr;
+    }
   }
   // The socket file's own mode, on top of the 0700 directory that already
   // gates traversal to it — same post-bind tightening `bindControlEndpoint`

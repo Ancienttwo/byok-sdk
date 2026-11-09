@@ -93,8 +93,8 @@ describe('reclaimSocketFallbackDirectory', () => {
     // The common case: `<storeDir>/mutex.sock`. Its parent is the store, never a
     // fallback directory, whatever the store is called — including a store this
     // sweep has no business touching whose name matches the fallback shape.
-    const storeDir = `/tmp/byok-${'a'.repeat(16)}`;
-    await fs.mkdir(storeDir, { recursive: true, mode: 0o700 });
+    const storeDir = `/tmp/byok-${randomBytes(8).toString('hex')}`;
+    await fs.mkdir(storeDir, { mode: 0o700 }); // exclusive: fails rather than reuse a directory that is not ours
     dirsToRemove.push(storeDir);
     await fs.writeFile(path.join(storeDir, 'device.json'), '{}');
 

@@ -246,18 +246,20 @@ async function listenControlEndpoint(server: net.Server, endpoint: string): Prom
 }
 
 async function bindControlEndpoint(server: net.Server, endpoint: string): Promise<void> {
-  if (process.platform !== 'win32') await prepareControlEndpointDirectory(endpoint);
+  const prepareAndListen = async (): Promise<void> => {
+    if (process.platform !== 'win32') await prepareControlEndpointDirectory(endpoint);
+    await listenControlEndpoint(server, endpoint);
+  };
   try {
-    await listenControlEndpoint(server, endpoint);
+    await prepareAndListen();
   } catch (err) {
-    // `ENOENT` here is the restart race, not a bad endpoint: a daemon closing
-    // for this same store reclaimed the fallback directory between our `mkdir`
-    // above and this `listen` (see `util/socket-fallback-directory.ts`).
-    // Rebuilding it 0700 and retrying once is what makes that reclamation safe
-    // to do optimistically; a second `ENOENT` is a real failure and propagates.
+    // `ENOENT` is the restart race, not a bad endpoint: a daemon closing for
+    // this same store reclaimed the fallback directory between our `mkdir` and
+    // the ownership check or `listen` (see `util/socket-fallback-directory.ts`).
+    // Preparing the directory again and retrying once is what makes that
+    // reclamation safe to do optimistically; a second `ENOENT` propagates.
     if (process.platform === 'win32' || (err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    await prepareControlEndpointDirectory(endpoint);
-    await listenControlEndpoint(server, endpoint);
+    await prepareAndListen();
   }
   if (process.platform !== 'win32') {
     await fs.chmod(endpoint, 0o600).catch(() => {});

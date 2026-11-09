@@ -1,7 +1,8 @@
+import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectControlClient } from '../daemon/control-client';
 import { controlSocketPath } from '../daemon/control-protocol';
 import { startControlServer, type ControlMethods, type ControlServerHandle } from '../daemon/control-server';
@@ -131,14 +132,38 @@ describe('control socket fallback: the directory it binds in does not outlive th
     await expect(fs.stat(fallbackDir)).rejects.toMatchObject({ code: 'ENOENT' });
   }, 60_000);
 
+  it('I: the directory vanishing before its ownership check is retried, not fatal', async () => {
+    if (process.platform === 'win32') return;
+    const storeDir = await tooLongStoreDir();
+    const fallbackDir = path.dirname(controlSocketPath(storeDir));
+    // A closing daemon for this store reclaims the directory right after our
+    // mkdir: remove it just before the first ownership lstat sees it.
+    const realLstat = fs.lstat.bind(fs);
+    let removed = false;
+    const spy = vi.spyOn(fs, 'lstat').mockImplementation(async (target, ...rest) => {
+      if (!removed && target === fallbackDir) {
+        removed = true;
+        await fs.rm(fallbackDir, { recursive: true, force: true });
+      }
+      return realLstat(target, ...(rest as []));
+    });
+    try {
+      const handle = await startControlServer({ storeDir, productId: 'acme', methods: pingMethods() });
+      expect(removed).toBe(true);
+      await handle.close();
+    } finally {
+      spy.mockRestore();
+    }
+  }, 60_000);
+
   it('H: a store that itself lives under /tmp keeps its own directory', async () => {
     if (process.platform === 'win32') return;
     // Reclamation is scoped to a fallback DIRECTORY, not to anything a close
     // happens to see one level under /tmp. A store that lives there itself
     // binds its control socket directly inside it, and ordinary teardown must
     // never turn into store deletion.
-    const storeDir = `/tmp/byok-${'0'.repeat(16)}`;
-    await fs.mkdir(storeDir, { recursive: true, mode: 0o700 });
+    const storeDir = `/tmp/byok-${randomBytes(8).toString('hex')}`;
+    await fs.mkdir(storeDir, { mode: 0o700 }); // exclusive: fails rather than reuse a directory that is not ours
     dirsToRemove.push(storeDir);
     const sentinel = path.join(storeDir, 'device.json');
     await fs.writeFile(sentinel, '{}');
