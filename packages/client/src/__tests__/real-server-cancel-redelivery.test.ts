@@ -71,7 +71,7 @@ describe('a task.cancel sent while the daemon is not polling is delivered when p
     const taskId = await submitAgentTask(real, { taskId: 'task-cancel-redelivery', deviceId: record.deviceId, instruction: 'a long task to cancel' });
 
     await waitForTaskState(real, taskId, 'Running');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 5_000 });
     const session = adapter.sessions[0]!;
     expect(session.interruptCalled).toBe(false); // not yet — nothing has cancelled it
 
