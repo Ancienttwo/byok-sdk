@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "The hosted (H) Bot collaboration Host composed as a Cloudflare Worker, run on local workerd",
-  "scripts": { "device-runner": "node --import tsx src/device-runner.ts", "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": {
     "@byok-sdk/cloud": "workspace:*",
     "@byok-sdk/cloud-dataplane": "workspace:*",

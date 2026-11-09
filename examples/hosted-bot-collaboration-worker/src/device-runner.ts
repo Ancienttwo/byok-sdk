@@ -1,4 +1,4 @@
-/** Example-private JSON-lines CLI. Run through the device-runner package script. */
+/** Example-private JSON-lines CLI: node --import tsx src/device-runner.ts. */
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';

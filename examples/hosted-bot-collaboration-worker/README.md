@@ -89,7 +89,7 @@ macOS, from the repository root (replace the two placeholders locally):
 
 ```sh
 cd examples/hosted-bot-collaboration-worker
-npm run --silent device-runner -- \
+node --import tsx src/device-runner.ts \
   --server-url 'https://HOST.workers.dev' \
   --pairing-code 'PAIRING_CODE' \
   --root "$HOME/byok-worker-device" \
@@ -100,7 +100,7 @@ Windows PowerShell, from the repository root:
 
 ```powershell
 Set-Location examples/hosted-bot-collaboration-worker
-npm run --silent device-runner -- `
+node --import tsx src/device-runner.ts `
   --server-url 'https://HOST.workers.dev' `
   --pairing-code 'PAIRING_CODE' `
   --root "$env:USERPROFILE\byok-worker-device" `
