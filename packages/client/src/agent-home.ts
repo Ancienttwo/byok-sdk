@@ -656,9 +656,71 @@ function parseLeaseMarker(value: string, lockPath: string): StoredLeaseMarker {
   return { ...marker, agentRef, canonicalHome: path.resolve(marker.canonicalHome) };
 }
 
+/**
+ * The process registry of base writer leases, one per canonical home. The
+ * holder kind is written in the same synchronous step as the claim, so a task's
+ * lease reads `execution` from its first instant, before its execution group
+ * exists. `released` resolves when the entry leaves the registry.
+ */
+interface HeldBaseLease {
+  readonly leaseId: string;
+  readonly holder: 'execution' | 'standalone';
+  readonly released: Promise<void>;
+  readonly settle: () => void;
+}
+
+/**
+ * Resolutions passed to `AgentHomeLeaseManager.acquire()` by
+ * `AgentHomeExecutionLeaseManager`: their claim is an `execution` holder.
+ * Module-private, so the holder kind travels with the call's own argument and
+ * the public `acquire()` keeps its signature.
+ */
+const executionClaims = new WeakSet<AgentHomeResolution>();
+
+function heldBaseLeases(): Map<string, HeldBaseLease> {
+  return AgentHomeLeaseManager['held'];
+}
+
+function claimBaseLease(canonicalHome: string, leaseId: string, holder: HeldBaseLease['holder']): void {
+  let settle!: () => void;
+  const released = new Promise<void>((resolve) => { settle = resolve; });
+  heldBaseLeases().set(canonicalHome, { leaseId, holder, released, settle });
+}
+
+function ownsBaseLease(canonicalHome: string, leaseId: string): boolean {
+  return heldBaseLeases().get(canonicalHome)?.leaseId === leaseId;
+}
+
+/**
+ * How long an execution claim waits, once, for a standalone holder of the same
+ * home to release. The memory intent's last write takes the lease only after
+ * the Host answered its completion, so a task the Host dispatches at once can
+ * meet it at acquire time; under fsync stress that hold reached 1088 ms. 5 s
+ * covers it with margin and stays far below a 60 s task deadline.
+ */
+const STANDALONE_HOLDER_WAIT_MS = 5_000;
+
+/** Resolves when `released` does or after `ms`, whichever is first; leaves no timer behind. */
+async function boundedWait(released: Promise<void>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([released, new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The only removal from the registry, so every release path resolves `released`. */
+function dropBaseLease(canonicalHome: string, leaseId: string): void {
+  const held = heldBaseLeases().get(canonicalHome);
+  if (held?.leaseId !== leaseId) return;
+  heldBaseLeases().delete(canonicalHome);
+  held.settle();
+}
+
 /** One-writer lease backed by both a process registry and an exclusive marker. */
 export class AgentHomeLeaseManager {
-  private static readonly held = new Map<string, string>();
+  private static readonly held = new Map<string, HeldBaseLease>();
   private readonly ownerId: string;
   private readonly settleAgentMemoryCommit: AgentHomeLeaseManagerOptions['settleAgentMemoryCommit'];
 
@@ -676,15 +738,25 @@ export class AgentHomeLeaseManager {
   }
 
   async acquire(resolution: AgentHomeResolution): Promise<AgentHomeLease> {
+    // Only `AgentHomeExecutionLeaseManager` claims as `execution`; every other
+    // holder (memory intent, export, projection) is `standalone`.
+    const holder: HeldBaseLease['holder'] = executionClaims.has(resolution) ? 'execution' : 'standalone';
     const { canonicalHome, agentRef } = resolution;
     const leaseId = randomUUID();
-    // Reserve synchronously before the first await. Two acquire() calls in
-    // one process must not both pass an async filesystem preflight and then
-    // misclassify the winner's marker as restart residue.
-    if (AgentHomeLeaseManager.held.has(canonicalHome)) {
+    // An execution claim that meets a standalone holder (memory intent,
+    // export, projection, maintenance) waits once, bounded, for its release.
+    // Execution holders are never waited on; a standalone claim fails at once.
+    const current = heldBaseLeases().get(canonicalHome);
+    if (current !== undefined && holder === 'execution' && current.holder === 'standalone') {
+      await boundedWait(current.released, STANDALONE_HOLDER_WAIT_MS);
+    }
+    // Check and reserve in one synchronous step, before any later await. Two
+    // acquire() calls in one process must not both pass an async filesystem
+    // preflight and then misclassify the winner's marker as restart residue.
+    if (heldBaseLeases().has(canonicalHome)) {
       throw new AgentHomeBusyError(`Agent home ${canonicalHome} already has a mutable writer lease`);
     }
-    AgentHomeLeaseManager.held.set(canonicalHome, leaseId);
+    claimBaseLease(canonicalHome, leaseId, holder);
     let lockPath: string | undefined;
     let rootGate: PathMutationGate | undefined;
     let ownsMarker = false;
@@ -733,9 +805,7 @@ export class AgentHomeLeaseManager {
     } catch (error) {
       if (ownsMarker && lockPath !== undefined) await fs.rm(lockPath, { force: true }).catch(() => {});
       await rootGate?.release().catch(() => {});
-      if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) {
-        AgentHomeLeaseManager.held.delete(canonicalHome);
-      }
+      dropBaseLease(canonicalHome, leaseId);
       if (error instanceof PathMutationGateBusyError) {
         throw new AgentHomeBusyError('Agent-home root is reserved for local-state relocation');
       }
@@ -757,7 +827,7 @@ export class AgentHomeLeaseManager {
         if (released) return Promise.resolve();
         if (releaseAttempt !== undefined) return releaseAttempt;
         const attempt = (async () => {
-          if (AgentHomeLeaseManager.held.get(canonicalHome) !== leaseId) {
+          if (!ownsBaseLease(canonicalHome, leaseId)) {
             throw new AgentHomeBusyError(`Agent home lease ${leaseId} is no longer owned by this process`);
           }
           let contents: string;
@@ -765,7 +835,7 @@ export class AgentHomeLeaseManager {
             contents = await fs.readFile(acquiredLockPath, 'utf8');
           } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-              AgentHomeLeaseManager.held.delete(canonicalHome);
+              dropBaseLease(canonicalHome, leaseId);
               released = true;
               return;
             }
@@ -776,7 +846,7 @@ export class AgentHomeLeaseManager {
             throw new AgentHomeBusyError(`Agent home lease marker ${acquiredLockPath} belongs to another writer`);
           }
           await fs.rm(acquiredLockPath);
-          AgentHomeLeaseManager.held.delete(canonicalHome);
+          dropBaseLease(canonicalHome, leaseId);
           released = true;
         })();
         releaseAttempt = attempt.catch((error: unknown) => {
@@ -785,9 +855,7 @@ export class AgentHomeLeaseManager {
           // Keep an unknown/other on-disk marker intact, but never let the
           // process registry outlive the failed relinquish and wedge this home
           // after the external marker is repaired or removed.
-          if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) {
-            AgentHomeLeaseManager.held.delete(canonicalHome);
-          }
+          dropBaseLease(canonicalHome, leaseId);
           released = true;
           throw error;
         });
@@ -805,9 +873,9 @@ export class AgentHomeLeaseManager {
 
   /** No AgentRef is minted: this lease owns filesystem mutation, not a product profile. */
   async acquireMaintenance(agentsRoot: string, canonicalHome: string): Promise<{ release(): Promise<void> }> {
-    if (AgentHomeLeaseManager.held.has(canonicalHome)) throw new AgentHomeBusyError('Agent home has an active base lease');
+    if (heldBaseLeases().has(canonicalHome)) throw new AgentHomeBusyError('Agent home has an active base lease');
     const leaseId = randomUUID();
-    AgentHomeLeaseManager.held.set(canonicalHome, leaseId);
+    claimBaseLease(canonicalHome, leaseId, 'standalone');
     let gate: PathMutationGate | undefined;
     try {
       gate = await acquirePathMutationGate({ scope: 'agent-home-root', targetPath: agentsRoot });
@@ -827,7 +895,7 @@ export class AgentHomeLeaseManager {
       await this.settleLeftoverCommitCopy(canonicalHome, { dev: stat.dev, ino: stat.ino });
     } catch (error) {
       try { await gate?.release(); }
-      finally { if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) AgentHomeLeaseManager.held.delete(canonicalHome); }
+      finally { dropBaseLease(canonicalHome, leaseId); }
       if (error instanceof PathMutationGateBusyError) throw new AgentHomeBusyError('Agent-home root is reserved for another writer');
       throw error;
     }
@@ -836,7 +904,7 @@ export class AgentHomeLeaseManager {
     return { release: async () => {
       if (released) return;
       await heldGate.release();
-      if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) AgentHomeLeaseManager.held.delete(canonicalHome);
+      dropBaseLease(canonicalHome, leaseId);
       released = true;
     } };
   }
@@ -958,7 +1026,18 @@ export class AgentHomeExecutionLeaseManager {
     return this.exclusive(resolution.canonicalHome, async () => {
       let group = AgentHomeExecutionLeaseManager.groups.get(resolution.canonicalHome);
       if (group === undefined) {
-        const baseLease = await this.manager.acquire(resolution);
+        // Set, read and cleared in one synchronous step: `acquire()` reads the
+        // mark before its first await, and the finally clears it even if an
+        // overridden `acquire()` throws synchronously. The promise is awaited
+        // only after, so the mark never reaches a later claim.
+        executionClaims.add(resolution);
+        let claiming: Promise<AgentHomeLease>;
+        try {
+          claiming = this.manager.acquire(resolution);
+        } finally {
+          executionClaims.delete(resolution);
+        }
+        const baseLease = await claiming;
         group = {
           manager: this.manager,
           baseLease,
