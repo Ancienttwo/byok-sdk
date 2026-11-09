@@ -290,7 +290,7 @@ describe('composeRuntimeEnvironment (#1095)', () => {
     const rule = (passed: ReadonlySet<string>) => passed.has('ANTHROPIC_API_KEY') ? ['ANTHROPIC_*', 'CLAUDE_CODE_USE_BEDROCK'] : [];
     const live = { Path: 'C:\\Windows', Claude_Code_Use_Bedrock: '1', Anthropic_Api_Key: 'sk-ant-host' };
     expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['CLAUDE_CODE_*'], pass: ['ANTHROPIC_API_KEY'] }, live, platform: 'win32', conflicts: rule }).env)
-      .toEqual({ PATH: 'C:\\Windows', Anthropic_Api_Key: 'sk-ant-host', NO_PROXY: '127.0.0.1,localhost' });
+      .toEqual({ PATH: 'C:\\Windows', ANTHROPIC_API_KEY: 'sk-ant-host', NO_PROXY: '127.0.0.1,localhost' });
   });
 
   it('NO_PROXY: merges both spellings with the loopback names, without duplicates', () => {
