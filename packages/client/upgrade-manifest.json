@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "faaf8a889a15328f0ad67a55b76c40730ebf4151bcc84e3358848fa83906ed99"
+    "snapshotSha256": "5b3b7d660e081f6b8b9315e2b4b0767ea0f2e2fbe723f4005dbf5a11329180ec"
   },
   "configFields": {
     "status": "tracked",
@@ -104,23 +104,9 @@
         "export:@byok-sdk/client#ServiceInstallationOptions",
         "export:@byok-sdk/core#StoreCompatibilityVerdict"
       ]
-    },
-    {
-      "id": "agent-home-lease-holder-wait",
-      "impact": "additive",
-      "summary": "AgentHomeLeaseManager changed only in private members: its lease registry records whether a task or another holder (memory intent, export, projection, retention maintenance) holds a home, and a task's Agent-home acquire waits once, at most 5 s, for such a holder to release before it reports the same AgentHomeBusyError as before. Public methods and their signatures are unchanged. No Host action.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/pull/1604",
-      "items": [
-        "export:@byok-sdk/client#AgentHomeLeaseManager"
-      ]
     }
   ],
   "changes": [
-    {
-      "item": "export:@byok-sdk/client#AgentHomeLeaseManager",
-      "change": "changed",
-      "entry": "agent-home-lease-holder-wait"
-    },
     {
       "item": "export:@byok-sdk/client#CopySdkNativeAssetsOptions",
       "change": "changed",

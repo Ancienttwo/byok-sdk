@@ -659,16 +659,27 @@ interface HeldBaseLease {
   readonly released: Promise<void>;
   readonly settle: () => void;
 }
-const heldBaseLeases = new Map<string, HeldBaseLease>();
+
+/**
+ * Resolutions passed to `AgentHomeLeaseManager.acquire()` by
+ * `AgentHomeExecutionLeaseManager`: their claim is an `execution` holder.
+ * Module-private, so the holder kind travels with the call's own argument and
+ * the public `acquire()` keeps its signature.
+ */
+const executionClaims = new WeakSet<AgentHomeResolution>();
+
+function heldBaseLeases(): Map<string, HeldBaseLease> {
+  return AgentHomeLeaseManager['held'];
+}
 
 function claimBaseLease(canonicalHome: string, leaseId: string, holder: HeldBaseLease['holder']): void {
   let settle!: () => void;
   const released = new Promise<void>((resolve) => { settle = resolve; });
-  heldBaseLeases.set(canonicalHome, { leaseId, holder, released, settle });
+  heldBaseLeases().set(canonicalHome, { leaseId, holder, released, settle });
 }
 
 function ownsBaseLease(canonicalHome: string, leaseId: string): boolean {
-  return heldBaseLeases.get(canonicalHome)?.leaseId === leaseId;
+  return heldBaseLeases().get(canonicalHome)?.leaseId === leaseId;
 }
 
 /**
@@ -692,14 +703,15 @@ async function boundedWait(released: Promise<void>, ms: number): Promise<void> {
 
 /** The only removal from the registry, so every release path resolves `released`. */
 function dropBaseLease(canonicalHome: string, leaseId: string): void {
-  const held = heldBaseLeases.get(canonicalHome);
+  const held = heldBaseLeases().get(canonicalHome);
   if (held?.leaseId !== leaseId) return;
-  heldBaseLeases.delete(canonicalHome);
+  heldBaseLeases().delete(canonicalHome);
   held.settle();
 }
 
 /** One-writer lease backed by both a process registry and an exclusive marker. */
 export class AgentHomeLeaseManager {
+  private static readonly held = new Map<string, HeldBaseLease>();
   private readonly ownerId: string;
   private readonly settleAgentMemoryCommit: AgentHomeLeaseManagerOptions['settleAgentMemoryCommit'];
 
@@ -716,26 +728,23 @@ export class AgentHomeLeaseManager {
     }
   }
 
-  acquire(resolution: AgentHomeResolution): Promise<AgentHomeLease> {
-    return this.acquireAs(resolution, 'standalone');
-  }
-
-  // Only `AgentHomeExecutionLeaseManager` claims as `execution`; every other
-  // holder (memory intent, export, projection) goes through `acquire()`.
-  private async acquireAs(resolution: AgentHomeResolution, holder: HeldBaseLease['holder']): Promise<AgentHomeLease> {
+  async acquire(resolution: AgentHomeResolution): Promise<AgentHomeLease> {
+    // Only `AgentHomeExecutionLeaseManager` claims as `execution`; every other
+    // holder (memory intent, export, projection) is `standalone`.
+    const holder: HeldBaseLease['holder'] = executionClaims.has(resolution) ? 'execution' : 'standalone';
     const { canonicalHome, agentRef } = resolution;
     const leaseId = randomUUID();
     // An execution claim that meets a standalone holder (memory intent,
     // export, projection, maintenance) waits once, bounded, for its release.
     // Execution holders are never waited on; a standalone claim fails at once.
-    const current = heldBaseLeases.get(canonicalHome);
+    const current = heldBaseLeases().get(canonicalHome);
     if (current !== undefined && holder === 'execution' && current.holder === 'standalone') {
       await boundedWait(current.released, STANDALONE_HOLDER_WAIT_MS);
     }
     // Check and reserve in one synchronous step, before any later await. Two
     // acquire() calls in one process must not both pass an async filesystem
     // preflight and then misclassify the winner's marker as restart residue.
-    if (heldBaseLeases.has(canonicalHome)) {
+    if (heldBaseLeases().has(canonicalHome)) {
       throw new AgentHomeBusyError(`Agent home ${canonicalHome} already has a mutable writer lease`);
     }
     claimBaseLease(canonicalHome, leaseId, holder);
@@ -855,7 +864,7 @@ export class AgentHomeLeaseManager {
 
   /** No AgentRef is minted: this lease owns filesystem mutation, not a product profile. */
   async acquireMaintenance(agentsRoot: string, canonicalHome: string): Promise<{ release(): Promise<void> }> {
-    if (heldBaseLeases.has(canonicalHome)) throw new AgentHomeBusyError('Agent home has an active base lease');
+    if (heldBaseLeases().has(canonicalHome)) throw new AgentHomeBusyError('Agent home has an active base lease');
     const leaseId = randomUUID();
     claimBaseLease(canonicalHome, leaseId, 'standalone');
     let gate: PathMutationGate | undefined;
@@ -1008,7 +1017,13 @@ export class AgentHomeExecutionLeaseManager {
     return this.exclusive(resolution.canonicalHome, async () => {
       let group = AgentHomeExecutionLeaseManager.groups.get(resolution.canonicalHome);
       if (group === undefined) {
-        const baseLease = await this.manager['acquireAs'](resolution, 'execution');
+        // Set, read and cleared in one synchronous step: `acquire()` reads the
+        // mark before its first await, and the mark is gone before this await,
+        // so it can never reach a later claim on the same resolution object.
+        executionClaims.add(resolution);
+        const claiming = this.manager.acquire(resolution);
+        executionClaims.delete(resolution);
+        const baseLease = await claiming;
         group = {
           manager: this.manager,
           baseLease,
