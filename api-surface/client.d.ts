@@ -1753,12 +1753,12 @@ export interface AgentHomeLeaseManagerOptions {
 export declare function stableAgentHomeOwnerId(storeDir: string, productId: string): string;
 /** One-writer lease backed by both a process registry and an exclusive marker. */
 export declare class AgentHomeLeaseManager {
-    private static readonly held;
     private readonly ownerId;
     private readonly settleAgentMemoryCommit;
     constructor(options?: AgentHomeLeaseManagerOptions);
     private settleLeftoverCommitCopy;
     acquire(resolution: AgentHomeResolution): Promise<AgentHomeLease>;
+    private acquireAs;
     /** No AgentRef is minted: this lease owns filesystem mutation, not a product profile. */
     acquireMaintenance(agentsRoot: string, canonicalHome: string): Promise<{
         release(): Promise<void>;

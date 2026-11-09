@@ -575,6 +575,60 @@ describe('same-home admission after a published terminal (#476)', () => {
     expect(runner.activeTaskCount).toBe(0);
   });
 
+  /**
+   * The memory intent's last write takes the home's base lease after the Host
+   * already dispatched the task, so the hold starts after admission's count.
+   * `prepare` runs between that count and the Agent-home lease acquire.
+   */
+  class HoldDuringPrepareAdapter extends StubRuntimeAdapter {
+    hold: (() => Promise<unknown>) | undefined;
+
+    override async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+      const hold = this.hold;
+      this.hold = undefined;
+      await hold?.();
+      return super.prepare(input);
+    }
+  }
+
+  it('an Agent-home acquire waits once for a non-task holder that took the lease after admission, then admits', async () => {
+    const adapter = new HoldDuringPrepareAdapter('pi');
+    const { runner, agentHome, sent } = await agentRunner(adapter);
+    let released!: Promise<void>;
+    adapter.hold = async () => {
+      const standalone = await agentHome.acquire(AGENT);
+      // Hold fixture: the release lands while the offer's acquire is waiting.
+      released = new Promise<void>((resolve) => { setTimeout(() => { void standalone.lease.release().then(resolve); }, 500); });
+    };
+
+    await runner.handleEnvelope(agentOffer('first', 1));
+    await released;
+
+    expect(declines(sent, 'first')).toEqual([]);
+    expect(claimed(sent, 'first')).toBe(1);
+    await completeAdmitted(runner, adapter, sent, 'first');
+  });
+
+  it('a non-task holder past the wait bound: the offer is declined busy as without the wait', async () => {
+    const adapter = new HoldDuringPrepareAdapter('pi');
+    const { runner, agentHome, sent } = await agentRunner(adapter);
+    let standalone!: Awaited<ReturnType<AgentHomeManager['acquire']>>;
+    adapter.hold = async () => { standalone = await agentHome.acquire(AGENT); };
+
+    const started = Date.now();
+    await runner.handleEnvelope(agentOffer('first', 1));
+
+    // The single wait is bounded at 5 s; after it the decline is the one sent without a wait.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(4_900);
+    expect(declines(sent, 'first').map((entry) => entry.payload)).toEqual([
+      { reason: expect.stringContaining('Agent home admission failed'), retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy', admission: { totalMs: expect.any(Number) } },
+    ]);
+    expect(claimed(sent, 'first')).toBe(0);
+    expect(adapter.startCalls).toHaveLength(0);
+    await standalone.lease.release();
+    expect(agentHome.executionLeaseManager.activeAttemptSummary()).toMatchObject({ homes: 0, attempts: 0 });
+  }, 15_000);
+
   it('a live, not finishing Attempt is busy at once: no wait', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const { runner, sent } = await agentRunner(adapter);
