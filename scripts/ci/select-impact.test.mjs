@@ -9,6 +9,31 @@ import { familyOwners, knownFamilies, reviewedScripts, selectImpact, vitestTmpRo
 const root = new URL('../../', import.meta.url);
 const sorted = values => [...values].sort();
 
+test('the published v6 decoder alias is the only admitted protocol manifest addition', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-v6-alias-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, 'packages/protocol'), { recursive: true });
+  const path = 'packages/protocol/package.json';
+  const original = { name: '@byok-sdk/protocol', version: '0.41.0', devDependencies: { previous: '1.0.0' } };
+  const write = value => writeFileSync(join(cwd, path), JSON.stringify(value));
+  const git = (...args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+  write(original);
+  assert.equal(git('init').status, 0);
+  assert.equal(git('add', path).status, 0);
+  assert.equal(git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline').status, 0);
+  const base = git('rev-parse', 'HEAD').stdout.trim();
+  const alias = 'byok-protocol-v6-baseline';
+  const tarball = 'https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.41.0.tgz';
+  const withAlias = spec => ({ ...original, devDependencies: { ...original.devDependencies, [alias]: spec } });
+  write(withAlias(tarball));
+  assert.ok(selectImpact([path], { cwd, base }).dirs.includes('packages/protocol'));
+  for (const invalid of [withAlias(tarball + '?other'), { ...withAlias(tarball), private: true },
+    { ...original, devDependencies: { ...original.devDependencies, other: tarball } }]) {
+    write(invalid);
+    assert.throws(() => selectImpact([path], { cwd, base }), /Reviewed CI mapping required/);
+  }
+});
+
 test('reviewed graph covers every workspace and all local dependency edges', () => {
   const actual = {};
   for (const prefix of ['packages', 'examples']) {

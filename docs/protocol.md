@@ -128,10 +128,8 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 `PROTOCOL_VERSION` is `6`. Every v6 change takes exactly one of three paths.
 Compatibility is decided by `packages/protocol/src/__tests__/compat.test.ts`,
-not by author judgment. No v6 release is published yet, so no published v6
-decoder is pinned as an oracle: until one is, the suite proves v6
-self-consistency only and cross-release gates are unproven (see the evidence
-list below).
+not by author judgment. The published 0.41.0 v6 decoder is pinned as the
+cross-release baseline (see the evidence list below).
 
 1. **Version bump.** Bump `PROTOCOL_VERSION`; server and client upgrade
    together under "Server supports N and N-1" below. This is the only path
@@ -213,9 +211,9 @@ list below).
   release shipped, the flags of the current table plus `custom-harness` and
   `terminal-projection-selection`, which v6 retired (`task-offer-gates.test.ts`).
 
-No test runs a published v6 decoder yet, so the gated declarations are not
-proven against a released v6 decoder. That evidence
-starts when a published v6 release is pinned as an oracle.
+The published 0.41.0 v6 decoder reads the current corpus and proves the
+current gated declarations. The current schema must accept every released
+shape; new gated rows must carry a flag unknown to 0.41.0.
 
 The v6 table is the v5 table minus the retired rows (#1573). The server flags
 `agent-message-draft`, `runtime-failure-class`, `runtime-quota-scope`,
@@ -4142,9 +4140,8 @@ a normal slow turn.
 ## 13. Compatibility suite
 
 Compatibility between releases is decided by
-`packages/protocol/src/__tests__/compat.test.ts` (see "Freeze rule"; until a
-v6 release is published it proves v6 self-consistency and that the last v5
-release rejects v6 bytes). It replaces the hand-built
+`packages/protocol/src/__tests__/compat.test.ts` (see "Freeze rule"; it tests
+the published v6 baseline and that the last v5 release rejects v6 bytes). It replaces the hand-built
 future-peer simulation this section used to describe. What remains below is
 the receiver policy that the suite and the behavioural tests rely on: which
 unknowns a current receiver tolerates and which it refuses. Four scenarios,

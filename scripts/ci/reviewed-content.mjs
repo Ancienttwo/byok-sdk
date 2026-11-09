@@ -472,6 +472,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       after.description = before.description;
     }
     if (path === 'packages/protocol/package.json') {
+      // #1621: pin exactly the first published v6 decoder for compatibility tests.
+      const alias = 'byok-protocol-v6-baseline';
+      const tarball = 'https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.41.0.tgz';
+      if (before.devDependencies?.[alias] === undefined && after.devDependencies?.[alias] === tarball) {
+        delete after.devDependencies[alias];
+        qualify.push('packages/protocol');
+      }
       // #1106: the zod-free Agent memory Host contract, one runtime definition shared by client and server.
       const entry = { types: './dist/agent-memory.d.ts', import: './dist/agent-memory.js' };
       if (before.exports?.['./agent-memory'] === undefined && isDeepStrictEqual(after.exports?.['./agent-memory'], entry)) delete after.exports['./agent-memory'];
