@@ -21,9 +21,9 @@ from evidence, not the author's judgment (see "Freeze rule" in
 `docs/protocol.md`). The wire is at major 6: v6 splits the runtime
 capability `isolation.userContext` into one bit per source
 ([wire v6 migration](../migrations/wire-v6-isolation-sources.md)). 0.40.0 is
-the last v5 release, and `golden/v6.releases.json` registers the 0.41.0
-candidate ([release notes](v0.41.0.md)), the first v6 release, and has no floor. No
-published v6 decoder exists yet, so cross-release gates stay unproven until
+the last v5 release, and `golden/v6.releases.json` registers the published 0.41.0
+release ([release notes](v0.41.0.md)), the first v6 release, and has no floor. No
+published v6 decoder is pinned as an oracle yet, so cross-release gates stay unproven until
 one is pinned.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
