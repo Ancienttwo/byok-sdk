@@ -488,10 +488,11 @@ async function acquireStoreMutexOnce(canonicalStoreDir: string): Promise<StoreMu
       if (closed) return;
       closed = true;
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
-      // A pipe has no file to remove; a Unix socket does, and leaving it
-      // behind would cost the next acquire a probe round-trip to prove stale.
+      // Node and Bun remove the Unix socket during listener close. A second
+      // unlink after its callback could instead remove a successor's socket.
+      // Only reclaim the empty fallback parent: non-recursive rmdir leaves a
+      // directory containing a newly bound socket untouched.
       if (!isPipe) {
-        await fs.rm(endpoint, { force: true }).catch(() => undefined);
         await reclaimSocketFallbackDirectory(endpoint);
       }
     },

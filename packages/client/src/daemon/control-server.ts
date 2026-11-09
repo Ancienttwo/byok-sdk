@@ -76,9 +76,9 @@ export interface ControlServerHandle {
   /** The bound Unix socket path or Windows pipe name. */
   endpoint: string;
   /**
-   * Stops accepting new connections and destroys every open one, WITHOUT
-   * removing the socket/token files. Idempotent, and the first half of
-   * {@link close}.
+   * Stops accepting new connections and destroys every open one. The runtime
+   * removes the Unix socket while closing its listener; the token remains.
+   * Idempotent, and the first half of {@link close}.
    *
    * Split out from `close()` for `create-daemon.ts`'s shutdown sequence
    * (plan `shutdown-lease-order`): the socket/token files ARE this daemon's
@@ -89,10 +89,12 @@ export interface ControlServerHandle {
    * files. Between the two stages a connect is already refused while the
    * token file still exists — which reads as "still running", the
    * conservative answer, rather than as "exited while still holding the
-   * lease".
+   * lease". The token is therefore the part of the liveness signal that
+   * bridges listener close and lease release; preserving the socket file is
+   * neither required nor provided by the runtime.
    */
   stopServing(): Promise<void>;
-  /** Runs {@link stopServing}, then removes the socket/token files (a Windows pipe leaves no file to remove). Idempotent. */
+  /** Runs {@link stopServing}, then removes this server's token and reclaims an empty socket fallback directory. Idempotent. */
   close(): Promise<void>;
   /**
    * Replaces the method table on this same listener and token. Every later
@@ -599,13 +601,15 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
     // failure (its own temp-file-only cleanup — see `util/atomic-write.ts`),
     // so there is nothing to unwind on that side; only the listener this
     // function itself just stood up needs tearing down before rethrowing.
-    // Mirrors `close()`'s own teardown shape below (destroy any sockets
-    // that connected in this narrow window, close the server, remove the
-    // socket file — never a pipe, which has no file to remove).
+    // Mirrors `close()`'s teardown below: destroy connections, close the
+    // listener (which removes its Unix socket), and reclaim an empty fallback
+    // directory.
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    // Runtime close removes the Unix socket synchronously. Never unlink this
+    // pathname afterward: a successor may already have bound it before the
+    // close callback resumes us, including on a failed token publication.
     if (process.platform !== 'win32') {
-      await fs.rm(endpoint, { force: true }).catch(() => {});
       await reclaimSocketFallbackDirectory(endpoint);
     }
     throw err;
@@ -629,11 +633,21 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
     if (closed) return;
     closed = true;
     await stopServing();
+    // Node and Bun remove the Unix pathname as part of listener close, before
+    // its callback. Retaining a second pathname-based unlink here would let
+    // this old handle delete a successor bound after stopServing().
+    // Reclaim only the empty fallback directory; rmdir preserves a successor's
+    // socket (and therefore its nonempty parent directory).
     if (process.platform !== 'win32') {
-      await fs.rm(endpoint, { force: true }).catch(() => {});
       await reclaimSocketFallbackDirectory(endpoint);
     }
-    await fs.rm(tokenPath, { force: true }).catch(() => {});
+    // Lease release precedes this stage of daemon shutdown. A successor can
+    // already have published its own token, which this handle must preserve.
+    // The read/unlink pair is not atomic; see the decision on issue #1610.
+    const currentToken = await fs.readFile(tokenPath, 'utf8').catch(() => undefined);
+    if (currentToken === token) {
+      await fs.rm(tokenPath, { force: true }).catch(() => {});
+    }
   }
 
   return {
