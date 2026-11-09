@@ -3,9 +3,11 @@ import { timingSafeEqual, createHash } from 'node:crypto';
 import { createByokCloud, createHmacTokenSigner, createInProcessMailboxWake, createWebCrypto, fullCapabilityDeclaration,
   type ByokCloudObserver } from '@byok-sdk/cloud';
 import { createByokPool, createPostgresCloudStores, createPostgresCoreStores, PostgresE2eeMemberStore, PostgresProofReceiptRetentionAuthority } from '@byok-sdk/cloud-dataplane/runtime';
+import { memberAsset, readMemberCiphertext } from '../../member-readback';
 import { CANARY_METHODS, decodeCanaryRpc, encodeCanaryRpc } from '../../../../hosted-bot-collaboration/src/canary-cloud.test-support';
 
 interface Env {
+  ASSETS?: { fetch(request: Request): Promise<Response> };
   BYOK_PG: { connectionString: string };
   BYOK_CANARY_STORAGE: string;
   HOST_ADMIN_TOKEN?: string;
@@ -14,6 +16,7 @@ interface Env {
 }
 interface Context { waitUntil(promise: Promise<unknown>): void }
 const json = (value: unknown) => new Response(encodeCanaryRpc({ value }), { headers: { 'content-type': 'application/json' } });
+const MEMBER_METHODS = [...CANARY_METHODS, 'readMemberChain', 'readScopeKeyPackages'] as const;
 const digest = (value: string) => createHash('sha256').update(value).digest();
 
 /** Log only routing metadata and a digest: neither plain payloads nor credentials reach the tail. */
@@ -25,6 +28,7 @@ const observer: ByokCloudObserver = { onInboundCommitted({ envelope }) {
 export default {
   async fetch(request: Request, env: Env, ctx: Context): Promise<Response> {
     const route = new URL(request.url).pathname;
+    if (route === '/member' || route === '/member.js') return memberAsset(request, env.ASSETS);
     if (!route.startsWith('/byok/')) {
       if (!env.HOST_ADMIN_TOKEN) return new Response('operator secret unavailable', { status: 503 });
       const expected = digest(`Bearer ${env.HOST_ADMIN_TOKEN}`);
@@ -34,8 +38,8 @@ export default {
     if (!env.BYOK_TOKEN_SECRET || !/^[0-9a-f]{64}$/u.test(env.BYOK_TOKEN_SECRET)) {
       return new Response('token key unavailable', { status: 503 });
     }
-    if (!route.startsWith('/byok/') && route !== '/probe/call') return new Response('unknown canary route', { status: 404 });
-    if (route === '/probe/call' && request.method !== 'POST') return new Response('POST required', { status: 405 });
+    if (!route.startsWith('/byok/') && route !== '/probe/call' && route !== '/member/ciphertext') return new Response('unknown canary route', { status: 404 });
+    if ((route === '/probe/call' || route === '/member/ciphertext') && request.method !== 'POST') return new Response('POST required', { status: 405 });
     const pool = createByokPool({ connectionString: env.BYOK_PG.connectionString, max: 4 });
     try {
       const clock = { now: () => new Date() }, crypto = createWebCrypto();
@@ -48,8 +52,9 @@ export default {
         tokenSigner: createHmacTokenSigner(Uint8Array.from(env.BYOK_TOKEN_SECRET.match(/../gu)!, byte => parseInt(byte, 16)), clock),
         capabilities: { ...full, capabilities: full.capabilities.filter(capability => capability !== 'blobs.contentproxy') }, observer });
       if (route.startsWith('/byok/')) return await cloud.fetch(request);
-      const { method, args } = decodeCanaryRpc(await request.text()) as { method: typeof CANARY_METHODS[number]; args: never[] };
-      if (!CANARY_METHODS.includes(method)) return new Response('unknown canary method', { status: 404 });
+      if (route === '/member/ciphertext') return await readMemberCiphertext(request, cloud, stores.blobs);
+      const { method, args } = decodeCanaryRpc(await request.text()) as { method: typeof MEMBER_METHODS[number]; args: never[] };
+      if (!MEMBER_METHODS.includes(method)) return new Response('unknown canary method', { status: 404 });
       const call = cloud[method] as (...args: never[]) => unknown;
       return json(await call.apply(cloud, args));
     } catch {

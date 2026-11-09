@@ -74,7 +74,11 @@ current W2 runner for sealed execution.
    config must name the same bucket.
 2. Copy `wrangler.deployable.template.json` to
    `_ops/p9/byok-p9-canary.wrangler.jsonc` from the repository root. Its `main` path
-   is already relative to that destination. Fill only the canary Hyperdrive id.
+   is already relative to that destination. Run
+   `bun examples/hosted-bot-collaboration-worker/build-member.mjs` before deploying
+   to produce the secret-free static assets under `_ops/p9/member-assets` using
+   Bun's existing bundler. The template binds that directory as `ASSETS` and runs
+   the Worker first for every route. Fill only the canary Hyperdrive id.
    Keep real account identifiers and configuration under ignored `_ops/`, with
    no real routes in the tracked template. Use the owner's account environment.
 3. Generate the operator bearer and token key privately. Set these Worker secrets
@@ -153,3 +157,84 @@ canary. Missing or unexpected locations fail with the diff; success requires
 digests, so no raw observer payload is needed for this store/object inventory.
 Physical-device sealed execution and browser evidence remain separate acceptance
 work under #654; the W1 result is **operator-machine daemon (mini-cf)**.
+
+Browser member page (W4)
+
+The deployable entry serves `/member` and `/member.js` publicly. These two static
+assets carry no deployment values or secrets and open no database connection.
+The page asks the owner to type `HOST_ADMIN_TOKEN` at run time, clears the input
+after key creation, and keeps the bearer only in the tab's memory. API requests
+carry it in the Authorization header, never a URL or cookie. No localStorage,
+sessionStorage or private-key export is used. Public assets allow direct browser
+navigation without putting the operator bearer in browser history. All control
+plane calls, including `/member/ciphertext`, retain operator authentication.
+The page restricts connections and scripts to its own origin, disables framing,
+and requests no caching or referrer transmission.
+
+1. Build the workspace and page assets as above. Deploy only during the separately
+   approved staging window. For local workerd, use a private Wrangler config with
+   the same asset binding and local Hyperdrive connection as the deployable entry.
+   Open `/member` on that origin. The local fixture `worker.ts` has no member page.
+2. On the operator machine, provision an isolated tenant's quota in the same
+   schema, using `core.quota.writeEntitlement` as the W1 driver does. Enter that
+   tenant and product ID, then create browser keys. Both P-256 private keys are
+   WebCrypto non-extractable keys and remain in memory; public bundles alone are
+   shown for copying. The library's scope-key byte arrays exist temporarily in
+   memory, are never sent unwrapped, and are zeroed after use. Reloading loses
+   membership keys: use a fresh tenant or approve a fresh member from another tab.
+3. Start the fresh tenant. Give the displayed `<pairingCode>.<pv>` input to the
+   device privately. The verification secret never goes to the Host. Use W2b's
+   E2EE pairing and local comparison flow, then enter its device ID. Verify its
+   MAC, compare all 50 digits on both screens, check the comparison box and confirm
+   the device. The page signs `add(device)` and relays the authenticated client
+   MAC. Never copy pairing inputs or comparison codes into acceptance evidence.
+4. To add another browser, create keys in another tab with the same tenant. Copy
+   its public bundle into the active tab, and the active tab's bundle into the
+   new tab. Show and compare codes on both screens. Approve from the active tab,
+   then join from the new one. The new tab pins the approver's signing key and
+   verifies its `add(self)` anchor and the full chain. The first tab creates the
+   genesis `add(self)`; later browsers require an existing member's signature.
+5. Issue scope keys once from an active tab, starting at epoch 1. This signs the
+   C1/C3 scope policy and wraps the fresh scope key separately to each current
+   member. Wait for the device to advertise sealed-payload support. In the page,
+   paste a fresh Agent execution routing template as `{ "deviceId": "...",
+   "payload": { ... } }`, omitting `instruction`, `sealing`, and `sealed`.
+   The payload needs `runtime`, `session: { "mode": "fresh" }`, `agentRef`,
+   `egressPolicy`, and `terminalProjection`. Use the same result-document contract
+   as `examples/host-execution-core/src/test-support.ts#template`, with required
+   string field `text`; no provider call is needed. W2b's opt-in `--runtime stub
+   --stub-canary` must echo the decrypted instruction into `document.text` and
+   print its exact UTF-8 SHA-256. The normal manual stub does not echo it.
+6. Submit from the page. It generates a random canary privately, seals C1 using
+   `@byok-sdk/core/sealed-payload`, and calls the existing
+   `submitSealedAgentExecution`. It reports only task ID and expected canary hash.
+   When the device completes, decrypt C3. The page reads the original offer's
+   binding and the terminal from the Host, verifies the current chain and scope
+   key package, opens inline or referenced ciphertext, and compares the hash of
+   decrypted `document.text`. Referenced ciphertext is fetched from an
+   authenticated route that derives its blob reference from that tenant/task's
+   terminal; callers cannot supply a blob ID or URL. Its content hash is checked
+   before opening. The page and console report PASS plus hash, chain length and
+   browser user agent; failures report FAIL and a fixed reason, never plaintext.
+   Copy only task ID and expected hash to other admitted tabs and compare with the
+   device's hash. W1's separate driver creates its own Node member and tenant;
+   its result is not this browser's acceptance evidence.
+7. Remove one browser member from an active tab. From a remaining member, issue
+   a fresh scope epoch and submit another task. The removed tab must report
+   `FAIL` / `member_revoked` when asked to decrypt the new task; remaining tabs
+   must report PASS with matching hashes. Record this separately for each engine.
+   Old epoch knowledge cannot be recalled: the new task must use the new epoch.
+
+Local page-logic coverage needs no credentials, Docker or browser installation:
+
+```sh
+bun run --filter @byok-sdk/example-hosted-bot-collaboration-worker test src/browser-member.test.ts
+```
+
+These tests exercise the page's fetch/JSON transport, real in-memory cloud member
+stores and WebCrypto, both pairing MACs, genesis and subsequent browser admission,
+C1 submission, C3 inline/object opening, hash integrity, and post-removal refusal
+with another tab still decrypting. They are Node evidence. They do not execute a
+browser DOM or a deployed daemon; the physical-device and three-engine member
+rows remain for the owner's staging window. W3 owns the separate vector runner.
+
