@@ -24,9 +24,9 @@ the descriptor declares. `no` means the SDK makes no such guarantee; the
 the runtime does instead.
 
 <!-- generated:capability-matrix:start -->
-| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | OpenCode (unqualified) | Pi | Pi (`durableLane`) |
+| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `unqualified` | `1.5.0` | `1.5.0` |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `2.2.6` | `1.5.0` | `1.5.0` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | no | yes | yes |
@@ -43,11 +43,22 @@ the runtime does instead.
 ## OpenCode implementation and qualification (#1538)
 
 `OpenCodeAdapter` is an opt-in custom harness (`harnessId: 'opencode'`). Its
-platform list is empty until native OS/line onboarding canaries qualify it;
-replay tests do not advertise a platform. The compatibility floors are v1
-1.18.35 and v2 2.0.26. No default qualified-version policy is installed yet.
-A Host can supply a version policy; unrecognized, below-floor and prerelease
-tokens still fail the executable compatibility gate.
+descriptor declares `platforms: ['darwin']` (#1593); Windows and Linux stay
+undeclared. `platforms` is OS-grained, so `darwin` covers both arches, but the
+evidence differs: macOS x64 passed first task, same-session resume, cleanup and
+the free-model canary on 2.2.6. macOS arm64 on 2.2.6 passed detection and the
+free-model readback, but its first task hit the free-usage limit (a quota
+refusal, not a program failure), so arm64 has no measured task evidence yet.
+Windows x64 is blocked by the same limit and is declared after a retry once
+the quota resets. The compatibility floors are v1 1.18.35 and v2 2.0.26. The
+default version policy qualifies `2.2.6` and warns on any other accepted
+version (`OPENCODE_VERSION_POLICY`, `unqualified: 'warn'`); only a Host may
+declare `block`. Unrecognized, below-floor and prerelease tokens still fail the
+executable compatibility gate.
+
+Cleanup scope is SDK-owned state only: the owned processes and SDK scratch.
+OpenCode's native session files are outside the SDK cleanup scope, and the
+remote 24-hour scratch sweep was not observed.
 
 Native qualification results and the distinction between native CLI
 availability and adapter acceptance are recorded in the [PR 3 canary evidence](researches/2026-11-08-opencode-native-qualification.md).
