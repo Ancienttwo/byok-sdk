@@ -4,6 +4,7 @@ import { createConnection, createServer, type Server, type Socket } from 'node:n
 import path from 'node:path';
 import { sameContent } from './file-state';
 import { ensureSecureDir } from './secure-dir';
+import { reclaimSocketFallbackDirectory } from './socket-fallback-directory';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
@@ -415,9 +416,21 @@ async function assertOwnedPrivateDir(dir: string): Promise<void> {
 }
 
 async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexLock> {
+  try {
+    return await acquireStoreMutexOnce(canonicalStoreDir);
+  } catch (err) {
+    // A closing holder can reclaim the fallback directory between our mkdir
+    // and listen; the directory is recreated on the second pass.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    return acquireStoreMutexOnce(canonicalStoreDir);
+  }
+}
+
+async function acquireStoreMutexOnce(canonicalStoreDir: string): Promise<StoreMutexLock> {
   const identity = storeMutexIdentity(canonicalStoreDir);
   const endpoint = storeMutexEndpoint(canonicalStoreDir, identity);
   const isPipe = process.platform === 'win32';
+  const endpointDirChecked = !isPipe && path.dirname(endpoint) !== canonicalStoreDir;
   if (!isPipe) {
     const endpointDir = path.dirname(endpoint);
     // A no-op for the common `<storeDir>/mutex.sock` case (the caller
@@ -453,7 +466,20 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexL
   // gates traversal to it — same post-bind tightening `bindControlEndpoint`
   // does, and best-effort for the same reason (a mode change this process
   // does not own is `EPERM`, not a safety failure).
-  if (!isPipe) await fs.chmod(endpoint, 0o600).catch(() => undefined);
+  if (!isPipe) {
+    // A closing holder may have reclaimed the directory after the ownership
+    // check above, letting another user recreate it before our listen landed.
+    // Re-assert; if it no longer holds, the socket must not stay bound there.
+    if (endpointDirChecked) {
+      try {
+        await assertOwnedPrivateDir(path.dirname(endpoint));
+      } catch (err) {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        throw err;
+      }
+    }
+    await fs.chmod(endpoint, 0o600).catch(() => undefined);
+  }
   server.unref();
   let closed = false;
   return {
@@ -464,7 +490,10 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexL
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
       // A pipe has no file to remove; a Unix socket does, and leaving it
       // behind would cost the next acquire a probe round-trip to prove stale.
-      if (!isPipe) await fs.rm(endpoint, { force: true }).catch(() => undefined);
+      if (!isPipe) {
+        await fs.rm(endpoint, { force: true }).catch(() => undefined);
+        await reclaimSocketFallbackDirectory(endpoint);
+      }
     },
   };
 }
