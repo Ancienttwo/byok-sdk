@@ -22,9 +22,8 @@ from evidence, not the author's judgment (see "Freeze rule" in
 capability `isolation.userContext` into one bit per source
 ([wire v6 migration](../migrations/wire-v6-isolation-sources.md)). 0.40.0 is
 the last v5 release, and `golden/v6.releases.json` registers the published 0.41.0
-release ([release notes](v0.41.0.md)), the first v6 release, and has no floor. No
-published v6 decoder is pinned as an oracle yet, so cross-release gates stay unproven until
-one is pinned.
+release ([release notes](v0.41.0.md)), the first v6 release, and has no floor. The
+published 0.41.0 decoder is the cross-release baseline.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
@@ -81,9 +80,9 @@ coverage. Release preparation owns the manifest bump and corpus registration.
 
 ### Published v6 decoder baseline
 
-None yet. The first stable v6 release gets a published-decoder alias pinned
-by its registry tarball URL, and a published-compatibility test then checks
-that the released JSON Schema shape is not narrowed, that the released
-decoder reads current bytes, and that gated and strip-safe `WIRE_ADDITIONS`
-rows are proven against it. No v5 decoder was pinned this way before the v6
-cut; 0.40.0 serves only as the rejection oracle above.
+The `byok-protocol-v6-baseline` devDependency pins the 0.41.0 registry
+tarball and its lockfile integrity. The current schema must accept every released
+shape; new gated rows must carry a flag unknown to 0.41.0. The compatibility
+test reads current corpus bytes with the released decoder and proves gated rows
+against it. No v5 decoder was pinned this way before the v6 cut; 0.40.0 serves
+only as the rejection oracle above.
