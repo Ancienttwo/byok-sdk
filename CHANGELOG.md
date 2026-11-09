@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Added (client; #1603)** — A new retention class, `codex-session-store`, expires the Codex rollouts that `agentUserContext: 'excluded'` keeps under `<Agent home>/.byok/codex`. A rollout goes once its last write is older than `storage.retention.ttlMs['codex-session-store']` (31 days by default, at least `session-ledger` plus one day, as for `agy-session-store`). The sweep runs under the idle-home lease, so a thread a running task holds is kept, and resuming a pruned thread fails closed as a non-retryable missing thread. The class replaces the exempt `agent-runtime-sessions` class, which `ProtectedClassId` no longer lists; set the TTL higher to keep idle threads longer.
+- **Breaking (client; #1603)** — A new expiring retention class, `codex-session-store`, replaces the exempt `agent-runtime-sessions` class for the Codex rollouts that `agentUserContext: 'excluded'` keeps under `<Agent home>/.byok/codex`. `'agent-runtime-sessions'` is removed from `PROTECTED_CLASS_IDS`, `ProtectedClassId` and `PROTECTED_CLASS_BOUNDS`; `'codex-session-store'` joins `EXPIRING_CLASS_IDS` and `ExpiringClassId`, with the new `storage.retention.ttlMs['codex-session-store']`. Replace the old literal where you read retention classes. A rollout is now deleted once its last write is older than the TTL (31 days by default, or the `session-ledger` TTL plus one day if longer; an explicit value must be at least that), unless a live session ledger still names its thread or its Agent home is running a task. Rollouts that used to stay until the Host removed the Agent home are now deleted by default; set the TTL higher to keep idle threads longer. Resuming a deleted thread fails closed as a non-retryable missing thread.
 
 ## 0.41.0 — 2026-11-09 (published)
 

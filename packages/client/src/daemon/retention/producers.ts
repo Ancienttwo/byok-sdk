@@ -5,7 +5,7 @@ import { AGENT_HOME_READER_RUN_MAX_RETAINED } from '../../agent-home-readers';
 import { acquireReplicaLock, resetReplica } from '../../adapters/pi-durable/replica';
 import { atomicWriteFile } from '../../util/atomic-write';
 import { AGENT_RESULT_DIRECTORY, AGENT_RESULT_MAX_RETAINED, AGENT_RESULT_RECORD_NAME, AGENT_RESULT_TEMP_NAME, pruneAgentResults } from '../agent-result-store';
-import type { AgentSessionHandoffStore } from '../agent-session-handoff-store';
+import { sessionFileName, type AgentSessionHandoffStore } from '../agent-session-handoff-store';
 import type { InputPreparationService } from '../input-preparation-service';
 import type { JournalIdentity, LocalTaskJournal } from '../journal/journal';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../../util/path-mutation-gate';
@@ -17,7 +17,7 @@ import { authorityBudget, classBudget } from './runtime-accounting';
 import { TreeCleanup } from './tree-cleanup';
 import { selectReaderRuns } from '../../agent-home-reader-retention';
 import { RuntimeCleanup } from './runtime-cleanup';
-import { agentSessionFileTtlMs, isAgentSessionLedgerName, isAgentTaskTerminalName, isCodexRolloutFileName, isPiSessionFileName, piSessionRefFromFileName, pruneByLastWrite } from './session-ledgers';
+import { agentSessionFileTtlMs, isAgentSessionLedgerName, isAgentTaskTerminalName, codexThreadIdFromRolloutName, isCodexRolloutFileName, isPiSessionFileName, piSessionRefFromFileName, pruneByLastWrite } from './session-ledgers';
 import { existingDirectory, measureTree, removeOwnedPath } from './usage';
 import { acquireAgySessionRetention, agySessionPaths, isAgyConversationFileName } from '../../util/agy-session-retention';
 import { acquirePiSessionDiscovery, acquirePiSessionRetention, acquirePiSessionWriter, acquirePiSessionRebinding } from '../../util/pi-session-retention';
@@ -262,16 +262,26 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         } else if (id === 'codex-session-store') {
           // An execution holds its home lease from admission to the end of the session, so the idle-home
           // lease rules out a running or resuming task, and each age is read under it.
-          async function visit(directory: string): Promise<void> {
-            if (!await existingDirectory(directory)) return;
-            const children = entries(id, directory, homeBudget);
-            const subdirectories: string[] = [];
-            await pruneByLastWrite({ directory, entries: (async function* () { for await (const child of children) { if (child.isDirectory()) subdirectories.push(path.join(directory, child.name)); else yield child; } })(),
-              match: isCodexRolloutFileName, nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['codex-session-store'],
-              remove: async file => { if (!homeBudget.available()) return false; await remove(home, file, budget); return true; } });
-            for (const child of subdirectories) { if (!homeBudget.available()) return; await visit(child); }
+          const ledgers = path.join(home, '.byok', 'runtime-sessions');
+          const ledgerTtlMs = config.ttlMs['session-ledger'];
+          // A ledger entry may be written after the rollout's last write (a terminal record after close), and
+          // it must not name a thread that is gone. The ledger file name is derived from the thread id.
+          async function ledgerHolds(name: string): Promise<boolean> {
+            const stat = await fs.lstat(path.join(ledgers, sessionFileName('codex', codexThreadIdFromRolloutName(name)!))).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+            return stat !== undefined && budget.now.getTime() - stat.mtimeMs < ledgerTtlMs;
           }
-          for (const name of ['sessions', 'archived_sessions']) await visit(path.join(home, '.byok', 'codex', name));
+          async function visit(directory: string, top: boolean): Promise<void> {
+            if (!await existingDirectory(directory)) return;
+            const subdirectories: string[] = [];
+            const children = entries(id, directory, homeBudget);
+            const names = (async function* () { for await (const child of children) { if (child.isDirectory()) subdirectories.push(path.join(directory, child.name)); else yield child; } })();
+            await pruneByLastWrite({ directory, entries: names, match: isCodexRolloutFileName, nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['codex-session-store'],
+              remove: async file => { if (!homeBudget.available()) return false; if (!await ledgerHolds(path.basename(file))) await remove(home, file, budget); return true; } });
+            for (const child of subdirectories) { if (!homeBudget.available()) return; await visit(child, false); }
+            // Only a fully enumerated directory is emptied; the idle-home lease rules out a writer creating into it.
+            if (!top && homeBudget.available()) await fs.rmdir(directory).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOTEMPTY' && error.code !== 'ENOENT') throw error; });
+          }
+          for (const name of ['sessions', 'archived_sessions']) await visit(path.join(home, '.byok', 'codex', name), true);
         } else if (id === 'session-ledger' || id === 'terminal-evidence') {
           // Every ledger and terminal append holds an execution lease, so the idle-home lease rules out a concurrent writer.
           const ledgers = path.join(home, '.byok', 'runtime-sessions');

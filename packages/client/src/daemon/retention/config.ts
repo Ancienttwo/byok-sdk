@@ -86,6 +86,8 @@ export function resolveStorageConfig(storeDir: string, input: StorageConfig = {}
   // A live session ledger may name a Pi session to resume; that session file must outlive it by a day.
   if (ttlMs['pi-session-dir'] < ttlMs['session-ledger'] + 86_400_000) throw new LocalStorageConfigError('retention.ttlMs.pi-session-dir', "must be at least retention.ttlMs['session-ledger'] plus one day");
   // The same holds for the Codex rollouts under an Agent home: a live ledger may name a thread to resume.
+  // An omitted TTL follows a longer ledger TTL, so a config that predates the class still resolves.
+  if (retention.ttlMs?.['codex-session-store'] === undefined) ttlMs['codex-session-store'] = Math.max(ttlMs['codex-session-store'], ttlMs['session-ledger'] + 86_400_000);
   if (ttlMs['codex-session-store'] < ttlMs['session-ledger'] + 86_400_000) throw new LocalStorageConfigError('retention.ttlMs.codex-session-store', "must be at least retention.ttlMs['session-ledger'] plus one day");
   // A public entry: fold the store once here; both defaults derive from it.
   const store = foldNameAliases(storeDir);

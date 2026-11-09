@@ -17,8 +17,8 @@
   "entries": [
     {
       "id": "codex-session-store",
-      "impact": "additive",
-      "summary": "A new retention class codex-session-store expires the Codex rollouts that agentUserContext: excluded keeps under <Agent home>/.byok/codex, by last write, with the new DaemonConfig.storage.retention.ttlMs['codex-session-store'] (default 31 days, at least session-ledger plus one day). It replaces the exempt agent-runtime-sessions class. A thread idle past the TTL is pruned only while its Agent home is idle, so a thread a running task holds is kept; resuming a pruned thread fails closed through the existing non-retryable missing-thread path. Rollouts that used to stay until the Host removed the Agent home now expire; set the TTL higher to keep them longer.",
+      "impact": "breaking",
+      "summary": "The retention class agent-runtime-sessions is replaced by the expiring class codex-session-store: it is removed from PROTECTED_CLASS_IDS, ProtectedClassId and PROTECTED_CLASS_BOUNDS and added to EXPIRING_CLASS_IDS and ExpiringClassId, so replace the literal where the Host reads retention classes and treat the class as expiring. It covers the Codex rollouts that agentUserContext: excluded keeps under <Agent home>/.byok/codex. A rollout is deleted once its last write is older than the new DaemonConfig.storage.retention.ttlMs['codex-session-store'] (default 31 days, or the session-ledger TTL plus one day if longer; an explicit value must be at least that), unless a live session ledger still names its thread or its Agent home is running a task. Rollouts that used to stay until the Host removed the Agent home are now deleted by default; set the TTL higher to keep idle threads longer. Resuming a deleted thread fails closed through the existing non-retryable missing-thread path.",
       "migration": "docs/host-local-storage-layout.md#retention-bounds",
       "items": [
         "config:storage",
