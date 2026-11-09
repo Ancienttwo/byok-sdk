@@ -495,13 +495,16 @@ it('Codex rollouts expire by last write unless a live ledger names them; a held 
  const outside=testScratchRoot(),escaped=path.join(outside,rolloutName('e'));await fs.writeFile(escaped,'{}');await stamp(escaped,EXPIRED);
  const linked=rollout('sessions','04',rolloutName('f')),linkedDir=path.join(directory,'.byok','codex','sessions','2026','10','05');await fs.mkdir(path.dirname(linked),{recursive:true});
  if(process.platform!=='win32'){await fs.symlink(escaped,linked);await fs.symlink(outside,linkedDir);}
+ const lone=path.join(directory,'.byok','codex','archived_sessions','2025','09','15',rolloutName('9'));await fs.mkdir(path.dirname(lone),{recursive:true});await fs.writeFile(lone,'{}');await stamp(lone,EXPIRED);
+ const emptyDirs=['sessions/2026/10/06','sessions/misc','empty-elsewhere'].map(name=>path.join(directory,'.byok','codex',name));for(const dir of emptyDirs)await fs.mkdir(dir,{recursive:true});
  const f=await fixture({home});
  expect(f.registry.classes.find(entry=>entry.id==='codex-session-store')!.authority).toEqual(expect.objectContaining({scope:'agent-home',bound:{kind:'ttl',ttlMs:31*DAY}}));
  await f.sweeper.runPass('periodic');
  expect(await Promise.all([idle,archived,recent,other,named].map(exists))).toEqual([true,true,true,true,true]);
  await binding.lease.release();await f.sweeper.runPass('periodic');
  expect(await Promise.all([idle,archived,recent,other,named].map(exists))).toEqual([false,false,true,true,true]);
- expect(await exists(path.dirname(idle))).toBe(false);expect(await exists(path.dirname(named))).toBe(true);expect(await exists(escaped)).toBe(true);
+ expect(await exists(path.dirname(idle))).toBe(false);expect(await exists(path.join(directory,'.byok','codex','archived_sessions','2025'))).toBe(false);expect(await exists(path.join(directory,'.byok','codex','archived_sessions'))).toBe(true);
+ expect(await Promise.all(emptyDirs.map(exists))).toEqual([true,true,true]);expect(await exists(path.dirname(named))).toBe(true);expect(await exists(escaped)).toBe(true);
  expect(await fs.readdir(outside)).toEqual([rolloutName('e')]);
  await stamp(ledger,EXPIRED);await f.sweeper.runPass('periodic');expect(await exists(named)).toBe(false);
  expect(usage(f,'codex-session-store')).toMatchObject({protected:false,measured:true});expect(f.failures).toEqual([]);
@@ -515,6 +518,17 @@ it('Codex rollout cleanup under a one-deletion budget reaches every expired roll
  let f=await fixture({home,store,max:1});
  for(let pass=0;pass<30&&(await Promise.all(files.map(exists))).some(Boolean);pass++){await f.sweeper.runPass('periodic');if(pass===3)f=await fixture({home,store,max:1});}
  expect(await Promise.all(files.map(exists))).toEqual(files.map(()=>false));expect(await exists(kept)).toBe(true);
+});
+it('Codex rollout cleanup reaches an expired rollout behind many fresh ones when the per-home deadline expires early, across a restart',async()=>{
+ const {home,binding,directory}=await idleHome();await binding.lease.release();
+ const store=testScratchRoot(),root=path.join(directory,'.byok','codex','sessions','2026');
+ for(let day=1;day<=6;day++)for(let index=0;index<12;index++){const file=path.join(root,'10',String(day).padStart(2,'0'),rolloutName(index.toString(16)));await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,FRESH);}
+ const target=path.join(root,'11','09',rolloutName('f'));await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,'{}');await stamp(target,EXPIRED);
+ // Every clock read advances 16 ms, so the 250 ms per-home deadline ends a pass after about fifteen steps.
+ let ticks=0;const now=performance.now.bind(performance);vi.spyOn(performance,'now').mockImplementation(()=>now()+16*ticks++);
+ let f=await fixture({home,store});
+ for(let pass=0;pass<80&&await exists(target);pass++){await f.sweeper.runPass('periodic');if(pass===5)f=await fixture({home,store});}
+expect(await exists(target)).toBe(false);
 });
 it('session ledgers and terminal evidence expire by last append; other names, directories and symlinks stay',async()=>{
  const {home,binding,directory}=await idleHome();await binding.lease.release();

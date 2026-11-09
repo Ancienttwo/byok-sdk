@@ -192,8 +192,12 @@ same `session-ledger` lower bound as `pi-session-dir`.
 `codex-session-store` is the Codex rollouts that `agentUserContext: 'excluded'`
 keeps in `<home>/.byok/codex/sessions` and `archived_sessions`. A
 `rollout-<time>-<thread id>.jsonl` goes once its last write is older than the
-TTL, and a day folder it leaves empty goes with it; other files, links and
-folders stay. The sweep runs under the idle-home lease, so a home with a
+TTL. A folder is removed only when this pass emptied it by deleting a rollout
+beneath it, it sits under `sessions/` or `archived_sessions/`, and its path
+below that root is `YYYY`, `YYYY/MM` or `YYYY/MM/DD` (digits only): the day
+folder first, then its month and year if they are empty too. The store roots,
+other empty folders, other files and links stay. A walk longer than one pass
+deadline resumes where it stopped, so every folder is reached. The sweep runs under the idle-home lease, so a home with a
 running or resuming task is skipped and its threads are kept. A thread that
 keeps chatting stays resumable. A rollout is also kept while the home's
 `session-ledger` file for its thread is younger than the ledger TTL, because a
