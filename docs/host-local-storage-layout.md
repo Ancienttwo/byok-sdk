@@ -196,8 +196,11 @@ TTL. A folder is removed only when this pass emptied it by deleting a rollout
 beneath it, it sits under `sessions/` or `archived_sessions/`, and its path
 below that root is `YYYY`, `YYYY/MM` or `YYYY/MM/DD` (digits only): the day
 folder first, then its month and year if they are empty too. The store roots,
-other empty folders, other files and links stay. A walk longer than one pass
-deadline resumes where it stopped, so every folder is reached. The sweep runs under the idle-home lease, so a home with a
+other empty folders, other files and links stay. The sweep reads only those
+date folders, and rollouts only at the day level; anything else an Agent
+creates under the store is never read. A walk longer than one pass deadline
+resumes at the folder and file where it stopped, and a daemon restart starts it
+over. The sweep runs under the idle-home lease, so a home with a
 running or resuming task is skipped and its threads are kept. A thread that
 keeps chatting stays resumable. A rollout is also kept while the home's
 `session-ledger` file for its thread is younger than the ledger TTL, because a

@@ -519,16 +519,34 @@ it('Codex rollout cleanup under a one-deletion budget reaches every expired roll
  for(let pass=0;pass<30&&(await Promise.all(files.map(exists))).some(Boolean);pass++){await f.sweeper.runPass('periodic');if(pass===3)f=await fixture({home,store,max:1});}
  expect(await Promise.all(files.map(exists))).toEqual(files.map(()=>false));expect(await exists(kept)).toBe(true);
 });
-it('Codex rollout cleanup reaches an expired rollout behind many fresh ones when the per-home deadline expires early, across a restart',async()=>{
+it.each([5,12,13])('Codex rollout cleanup reaches every folder when each pass is cut after %i rollouts, across a restart',async reads=>{
  const {home,binding,directory}=await idleHome();await binding.lease.release();
- const store=testScratchRoot(),root=path.join(directory,'.byok','codex','sessions','2026');
- for(let day=1;day<=6;day++)for(let index=0;index<12;index++){const file=path.join(root,'10',String(day).padStart(2,'0'),rolloutName(index.toString(16)));await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,FRESH);}
- const target=path.join(root,'11','09',rolloutName('f'));await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,'{}');await stamp(target,EXPIRED);
- // Every clock read advances 16 ms, so the 250 ms per-home deadline ends a pass after about fifteen steps.
- let ticks=0;const now=performance.now.bind(performance);vi.spyOn(performance,'now').mockImplementation(()=>now()+16*ticks++);
- let f=await fixture({home,store});
- for(let pass=0;pass<80&&await exists(target);pass++){await f.sweeper.runPass('periodic');if(pass===5)f=await fixture({home,store});}
-expect(await exists(target)).toBe(false);
+ const store=testScratchRoot(),root=path.join(directory,'.byok','codex','sessions','2026','10');
+ for(let day=1;day<=3;day++)for(let index=0;index<12;index++){const file=path.join(root,String(day).padStart(2,'0'),rolloutName(index.toString(16)));await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,FRESH);}
+ const target=path.join(root,'04',rolloutName('f'));await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,'{}');await stamp(target,EXPIRED);
+ // The usage walk lstats all 37 rollouts first; the per-home deadline then falls (the clock jumps past it) after the sweep has read `reads` more, so each pass stops at a known candidate.
+ let seen=0;const now=performance.now.bind(performance),lstat=fs.lstat.bind(fs);vi.spyOn(performance,'now').mockImplementation(()=>now()+(seen>=37+reads?60_000:0));
+ vi.spyOn(fs,'lstat').mockImplementation((async(...args:Parameters<typeof fs.lstat>)=>{if(String(args[0]).endsWith('.jsonl'))seen++;return lstat(...args);}) as typeof fs.lstat);
+ let f=await fixture({home,store}),cut=0;
+ for(let pass=0;pass<20&&await exists(target);pass++){seen=0;const report=await f.sweeper.runPass('periodic');if(report.truncated)cut++;if(pass===2)f=await fixture({home,store});}
+ expect(await exists(target)).toBe(false);expect(cut).toBeGreaterThan(1);
+});
+it('Codex rollout cleanup walks only the date folders',async()=>{
+ const {home,binding,directory}=await idleHome();await binding.lease.release();
+ const unrelated=path.join(directory,'.byok','codex','sessions','junk','nested',rolloutName('e')),nested=path.join(directory,'.byok','codex','sessions','2026','10','01','nested',rolloutName('d'));
+ for(const file of [unrelated,nested]){await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,EXPIRED);}
+ const f=await fixture({home});await f.sweeper.runPass('periodic');await f.sweeper.runPass('periodic');
+ expect(await exists(unrelated)).toBe(true);expect(await exists(nested)).toBe(true);
+});
+it('Codex rollout cleanup under a one-deletion budget reaches every expired rollout across passes and a restart',async()=>{
+ const {home,binding,directory}=await idleHome();await binding.lease.release();
+ const store=testScratchRoot(),files:string[]=[];
+ for(const [name,days] of [['sessions',['01','02','03']],['archived_sessions',['01']]] as const)for(const day of days)for(const id of ['a','b'])files.push(path.join(directory,'.byok','codex',name,'2026','10',day,rolloutName(id)));
+ for(const file of files){await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,EXPIRED);}
+ const kept=path.join(directory,'.byok','codex','sessions','2026','10','01',rolloutName('c'));await fs.writeFile(kept,'{}');await stamp(kept,FRESH);
+ let f=await fixture({home,store,max:1});
+ for(let pass=0;pass<30&&(await Promise.all(files.map(exists))).some(Boolean);pass++){await f.sweeper.runPass('periodic');if(pass===3)f=await fixture({home,store,max:1});}
+ expect(await Promise.all(files.map(exists))).toEqual(files.map(()=>false));expect(await exists(kept)).toBe(true);
 });
 it('session ledgers and terminal evidence expire by last append; other names, directories and symlinks stay',async()=>{
  const {home,binding,directory}=await idleHome();await binding.lease.release();

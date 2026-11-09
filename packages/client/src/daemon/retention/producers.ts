@@ -52,7 +52,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   const replicas = path.join(storeDir, 'durable-replicas');
   // Open cursors resume between passes: a large prefix of unexpired items cannot starve old tails.
   const cursors = new Map<string, Dir>();
-  const codexFrontier = new Map<string, string[]>();
+  const codexWalks = new Map<string, { pending: string[]; current?: { directory: string; files: string[]; next: number; deleted: number } }>();
   async function* entries(id: ExpiringClassId, root: string, budget: SweepBudget): AsyncGenerator<Dirent> {
     if (!await existingDirectory(root)) return;
     if (id === 'exec-sdk' && budget.trigger === 'startup') {
@@ -229,6 +229,8 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     const manager = options.home;
     if (manager === undefined) return;
     const root = path.join(manager.layout.hostRootInput(), 'agents');
+    // A removed Agent home drops its walk.
+    if (id === 'codex-session-store') for (const home of [...codexWalks.keys()]) if (!await existingDirectory(home)) codexWalks.delete(home);
     for await (const entry of entries(id, root, budget)) {
       if (!entry.isDirectory()) continue;
       await manager.withIdleHomeLease(entry.name, async home => {
@@ -271,25 +273,37 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
             const stat = await fs.lstat(path.join(ledgers, sessionFileName('codex', codexThreadIdFromRolloutName(name)!))).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
             return stat !== undefined && budget.now.getTime() - stat.mtimeMs < ledgerTtlMs;
           }
-          // A pass resumes the home's pending directories; the queue refills from the two store roots only when it
-          // is empty, so a walk longer than one deadline still reaches every folder. A restart starts over.
+          // The walk visits only the Codex date folders (YYYY/MM/DD under each store root), so what an Agent
+          // creates elsewhere is never read. A pass resumes the home's stack of folders and the file list of
+          // the folder it stopped in; the state is dropped when the walk ends, and a restart starts over.
           const codex = path.join(home, '.byok', 'codex');
-          let pending = codexFrontier.get(home);
-          if (pending === undefined || pending.length === 0) { pending = ['sessions', 'archived_sessions'].map(name => path.join(codex, name)); codexFrontier.set(home, pending); }
-          while (pending.length > 0 && homeBudget.available()) {
-            const directory = pending.shift()!;
-            if (!await existingDirectory(directory)) continue;
-            let deleted = 0;
-            const children = entries(id, directory, homeBudget);
-            const files = (async function* () { for await (const child of children) { if (child.isDirectory()) pending.push(path.join(directory, child.name)); else yield child; } })();
-            await pruneByLastWrite({ directory, entries: files, match: isCodexRolloutFileName, nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['codex-session-store'],
-              remove: async file => { if (!homeBudget.available()) return false; if (!await ledgerHolds(path.basename(file))) { await remove(home, file, budget); deleted++; } return true; } });
+          let walk = codexWalks.get(home);
+          if (walk === undefined) { walk = { pending: ['archived_sessions', 'sessions'].map(name => path.join(codex, name)) }; codexWalks.set(home, walk); }
+          while (homeBudget.available()) {
+            if (walk.current === undefined) {
+              const directory = walk.pending.pop();
+              if (directory === undefined) { codexWalks.delete(home); break; }
+              const listing = await fs.readdir(directory, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return []; throw error; });
+              const depth = path.relative(codex, directory).split(path.sep).length - 1;
+              const dated = depth === 0 ? /^\d{4}$/u : /^\d{2}$/u;
+              const names = listing.map(child => ({ name: child.name, directory: child.isDirectory(), file: child.isFile() })).sort((left, right) => left.name < right.name ? -1 : 1);
+              if (depth < 3) for (const child of names.reverse()) if (child.directory && dated.test(child.name)) walk.pending.push(path.join(directory, child.name));
+              walk.current = { directory, files: depth === 3 ? names.filter(child => child.file && isCodexRolloutFileName(child.name)).map(child => child.name) : [], next: 0, deleted: 0 };
+            }
+            const current = walk.current;
+            // The budget is read before a candidate is taken, so a candidate taken is always finished.
+            while (current.next < current.files.length && homeBudget.available()) {
+              const file = path.join(current.directory, current.files[current.next++]!);
+              const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+              if (stat?.isFile() !== true || budget.now.getTime() - stat.mtimeMs < config.ttlMs['codex-session-store'] || await ledgerHolds(path.basename(file))) continue;
+              await remove(home, file, budget); current.deleted++;
+            }
+            if (current.next < current.files.length) break;
+            walk.current = undefined;
             // A date folder that this pass emptied goes, then its emptied month and year; nothing else is removed.
-            for (let folder = directory, relative = path.relative(codex, folder).split(path.sep); deleted > 0 && /^(?:sessions|archived_sessions)(?:\/\d{4}(?:\/\d{2}(?:\/\d{2})?)?)$/u.test(relative.join('/')) && relative.length > 1; folder = path.dirname(folder), relative = relative.slice(0, -1)) {
+            for (let folder = current.directory, depth = path.relative(codex, folder).split(path.sep).length - 1; current.deleted > 0 && depth >= 1 && depth <= 3; folder = path.dirname(folder), depth--) {
               if (!await fs.rmdir(folder).then(() => true, (error: NodeJS.ErrnoException) => { if (error.code === 'ENOTEMPTY' || error.code === 'ENOENT') return false; throw error; })) break;
             }
-            // A directory the budget stopped inside keeps its cursor and is the first to resume.
-            if (cursors.has(`${id}\0${directory}`)) { pending.unshift(directory); break; }
           }
         } else if (id === 'session-ledger' || id === 'terminal-evidence') {
           // Every ledger and terminal append holds an execution lease, so the idle-home lease rules out a concurrent writer.
