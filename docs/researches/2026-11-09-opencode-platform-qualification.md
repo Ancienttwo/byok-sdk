@@ -2,7 +2,7 @@
 
 Date: 2026-11-09 UTC. SDK subject: `871f0e999af209689dfa9705faf05b532bb5a102`. This is native runtime evidence, not a descriptor or release change. The earlier evidence and method are in [2026-11-08-opencode-native-qualification.md](2026-11-08-opencode-native-qualification.md).
 
-The default adapter has **no `versionPolicy`** at this subject, so no tested version is qualified or rejected by a default advisory policy. The executable compatibility parser accepts both `1.19.5` and `2.2.6`; acceptance by that parser is not qualification. Only the listed major lines were tested; other OS and major combinations remain untested.
+At the evidence subject the default adapter had **no `versionPolicy`**, so no tested version is qualified or rejected by a default advisory policy. The executable compatibility parser accepts both `1.19.5` and `2.2.6`; acceptance by that parser is not qualification. Only the listed major lines were tested; other OS and major combinations remain untested.
 
 | Native line | First task | Same-session resume | Cleanup | Free-model canary |
 | --- | --- | --- | --- | --- |
@@ -110,3 +110,7 @@ bun x vitest run src/__tests__/retention.test.ts -t 'disposal deletes SDK secret
 ```
 
 Result: one passed, 63 skipped. This proves the tested SDK retention path under controlled time on the local host; it is not an observed 24-hour sweep on either remote host, and the standalone native canary itself does not provide a retention owner. OpenCode native session files are outside the qualification cleanup scope.
+
+## Declaration decision (#1593, owner 2026-11-09)
+
+The owner decided to declare macOS now. `RuntimeAdapterDescriptor.platforms` is OS-grained, so the descriptor declares `darwin` and covers both arches. macOS x64 passed first task, same-session resume, cleanup and the canary on `opencode v2.2.6`. macOS arm64 on `2.2.6` passed detection and the free-model readback, but its first task hit the free-usage limit (a quota refusal, not a program failure), so arm64 has no measured task evidence yet. Windows x64 stays undeclared until a retry after the quota resets. The default version policy qualifies `2.2.6` with `unqualified: 'warn'`. Cleanup scope is SDK-owned processes and scratch; native session files are outside it, and the remote 24-hour sweep was not observed.
