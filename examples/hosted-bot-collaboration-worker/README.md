@@ -80,14 +80,27 @@ by its hash.
 
 ## Running a device
 
-`device-runner` is a private example CLI in this checkout. Build the workspace at the same commit used for the Host
-(`bun ci`, then `bun run build` from the repository root). Use Node satisfying the client's `engines` requirement.
-Run one runner per dedicated OS user on each device. The Host must already have a provisioned scope and supply a fresh
-pairing code from `POST /host/pairing-code`; the device needs only the Host URL and that code, never the operator bearer.
+`device-runner` is a private example CLI. For device acceptance, start with a clean checkout of tag `v0.41.0`
+(`2895560b37a5741d777241dcefc5c7fb1663fcb6`), then copy only the two runner files from the merge commit of PR #1624.
+Set `W2_MERGE_SHA` / `$W2MergeSha` below to that actual merge SHA before running the commands. The runner is an example
+overlay; the SDK packages are built from the tag. Record that SDK source commit and state in the evidence that the npm
+packages for this tag were published from the same commit. Record the runner's merge SHA separately.
 
-macOS, from the repository root (replace the two placeholders locally):
+Use Node satisfying the tagged client's `engines` requirement. Run one runner per dedicated OS user on each device.
+The Host must already have a provisioned scope and supply a fresh pairing code from `POST /host/pairing-code`; the
+device needs only the Host URL and that code, never the operator bearer.
+
+macOS, from the repository root (replace the merge SHA, Host and pairing-code placeholders locally):
 
 ```sh
+git fetch origin --tags
+git checkout v0.41.0
+W2_MERGE_SHA='REPLACE_WITH_PR_1624_MERGE_SHA'
+git checkout "$W2_MERGE_SHA" -- \
+  examples/hosted-bot-collaboration-worker/src/device-runner.ts \
+  examples/hosted-bot-collaboration-worker/src/device-session.ts
+bun install --frozen-lockfile
+bun run build
 cd examples/hosted-bot-collaboration-worker
 node --import tsx src/device-runner.ts \
   --server-url 'https://HOST.workers.dev' \
@@ -99,6 +112,14 @@ node --import tsx src/device-runner.ts \
 Windows PowerShell, from the repository root:
 
 ```powershell
+git fetch origin --tags
+git checkout v0.41.0
+$W2MergeSha = 'REPLACE_WITH_PR_1624_MERGE_SHA'
+git checkout $W2MergeSha -- `
+  examples/hosted-bot-collaboration-worker/src/device-runner.ts `
+  examples/hosted-bot-collaboration-worker/src/device-session.ts
+bun install --frozen-lockfile
+bun run build
 Set-Location examples/hosted-bot-collaboration-worker
 node --import tsx src/device-runner.ts `
   --server-url 'https://HOST.workers.dev' `
