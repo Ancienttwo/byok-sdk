@@ -545,6 +545,32 @@ export function classifyToolCall(
   rules?: ToolAuthorizationRules,
   context: { readonly platform?: NodeJS.Platform } = {},
 ): ToolRisk {
+  if (call.toolName !== 'subagent_launch') return classifySingleToolCall(call, workspace, home, rules, context);
+  // pi-subagents' workflow child check (#1589): the parent process runs each
+  // gate command at its own cwd after the child and writes `output`, so each is
+  // judged as the bash call or write it is. Its name is shared with a
+  // model-reachable call (#1511), so no allow rule loosens any part of it.
+  const strict = rules === undefined ? undefined : { ...rules, allowWithoutAsking: [] };
+  const launchCwd = typeof call.input.cwd === 'string' ? call.input.cwd : undefined;
+  const commands = Array.isArray(call.input.commands) ? call.input.commands as readonly { command: string; cwd?: string }[] : [];
+  const parts = [
+    classifySingleToolCall(call, workspace, home, strict, context),
+    ...commands.map(entry => classifySingleToolCall({ toolName: 'bash', input: { command: entry.command }, cwd: entry.cwd ?? launchCwd ?? call.cwd }, workspace, home, strict, context)),
+    ...(typeof call.input.output === 'string' ? [classifySingleToolCall({ toolName: 'write', input: { path: call.input.output }, cwd: call.cwd }, workspace, home, strict, context)] : []),
+  ];
+  const high = parts.filter((part): part is Extract<ToolRisk, { level: 'high' }> => part.level === 'high');
+  if (high.length === 0) return { level: 'normal', authorization: BUILT_IN_AUTHORIZATION };
+  const ruleIds = [...new Set(high.flatMap(part => part.authorization.ruleIds))];
+  return { level: 'high', reasons: Object.freeze([...new Set(high.flatMap(part => part.reasons))]),
+    authorization: high.some(part => part.authorization.source === 'floor') ? FLOOR_AUTHORIZATION
+      : ruleIds.length > 0 ? Object.freeze({ source: 'rule' as const, ruleIds: Object.freeze(ruleIds) }) : BUILT_IN_AUTHORIZATION };
+}
+
+function classifySingleToolCall(
+  call: Pick<ToolCall, 'toolName' | 'input' | 'cwd' | 'mcp'>, workspace: string, home: string,
+  rules: ToolAuthorizationRules | undefined,
+  context: { readonly platform?: NodeJS.Platform },
+): ToolRisk {
   const policy = parseToolAuthorizationPolicy({ default: 'auto', ...(rules === undefined ? {} : { rules }) });
   rules = policy.rules;
   const platform = context.platform ?? process.platform;
@@ -574,8 +600,13 @@ export function classifyToolCall(
   // Codex projects one native file operation as a batch, including move destinations.
   // Normalize here so auto decisions and all-mode reminders share the same path checks.
   const paths = PATH_KEYS.map(key => ({ path: call.input[key], mutating: MUTATING_TOOLS.has(call.toolName.toLowerCase()) }));
-  // A Pi workflow child launch: its cwd is where the child will write.
-  if (call.toolName === 'subagent_launch') paths.push({ path: call.input.cwd, mutating: true });
+  // A Pi workflow child launch: its cwd is where the child will write. A
+  // resumed child carries none (it reuses its stored run cwd), so it cannot be
+  // shown to stay in the workspace.
+  if (call.toolName === 'subagent_launch') {
+    if (typeof call.input.cwd === 'string') paths.push({ path: call.input.cwd, mutating: true });
+    else reasons.add('write-outside-workspace');
+  }
   if (call.toolName === 'file_change' && Array.isArray(call.input.changes)) {
     for (const change of call.input.changes) {
       if (change === null || typeof change !== 'object' || Array.isArray(change)) continue;
@@ -585,6 +616,7 @@ export function classifyToolCall(
   }
   const targets: string[] = [];
   const physicalTargets: string[] = [];
+  const physicalWorkspace = call.toolName === 'subagent_launch' ? nearestRealPath(resolve(workspace)) : undefined;
   for (const { path: raw, mutating } of paths) {
     if (typeof raw !== 'string' || raw.length === 0) continue;
     const expanded = raw === '~' ? home : raw.startsWith('~/') ? `${home}${raw.slice(1)}` : raw;
@@ -595,6 +627,10 @@ export function classifyToolCall(
     if (physicalTarget === undefined) floorCertain = false;
     if (isProtected(target) || (physicalTarget !== undefined && isProtected(physicalTarget))) reasons.add('sensitive-path');
     if (mutating && !within(workspace, target)) reasons.add('write-outside-workspace');
+    // A workflow child runs in its cwd, so a symlink in the workspace that leads out of it takes the child out too.
+    else if (mutating && call.toolName === 'subagent_launch' && (physicalWorkspace === undefined || physicalTarget === undefined || !within(physicalWorkspace, physicalTarget))) {
+      reasons.add('write-outside-workspace');
+    }
   }
 
   const matchingIds = (entries: readonly ToolRule[] | undefined, allow: boolean): readonly string[] => {
@@ -602,8 +638,6 @@ export function classifyToolCall(
     for (const { id, match } of entries ?? []) {
       if (!MATCH_KEYS.some(key => match[key] !== undefined)) continue;
       if (allow && (!simpleCommand || !floorCertain)) continue;
-      // pi-subagents' subagent_launch shares its name with a model-reachable call (#1511): no rule loosens it.
-      if (allow && call.toolName === 'subagent_launch') continue;
       if (match.toolName !== undefined && match.toolName !== call.toolName) continue;
       if (match.commandGlob !== undefined && (command === undefined || (!oversizedCommand && !matchGlob(command, match.commandGlob, false)))) continue;
       if (match.mcpServer !== undefined && (call.mcp === undefined || !matchGlob(call.mcp.server, match.mcpServer, false))) continue;
