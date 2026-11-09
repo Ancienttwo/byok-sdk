@@ -157,7 +157,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       mcpToolsets: true,
       messageDraft: true,
       preparedLane: false,
-      isolation: { userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: false },
+      isolation: { userInstructions: true, userOutputStyle: false, userMemory: true, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: false },
     });
 
     // The wire value remains adapter-generated. The shipped adapters all

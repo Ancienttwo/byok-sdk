@@ -41,9 +41,9 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 | Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | no | yes | yes |
 | Prepared lane | `preparedLane` | no | no | no | no | no | no | no | yes | no |
 | Durable worker lane | `durableLane` | no | no | no | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userInstructions` | yes | yes | no | yes | no | yes | no | yes | no |
+| Keeps user-level instructions out | `isolation.userInstructions` | yes | yes | yes | yes | no | yes | no | yes | no |
 | Keeps the user output style out | `isolation.userOutputStyle` | yes (no source) | yes | no | yes | no | yes | no | yes (no source) | no |
-| Keeps user-level memory out | `isolation.userMemory` | no | yes | no | yes (no source) | no | yes | no | yes (no source) | no |
+| Keeps user-level memory out | `isolation.userMemory` | no | yes | yes | yes (no source) | no | yes | no | yes (no source) | no |
 | Keeps user skills out | `isolation.userSkills` | yes | no | no | yes | no | yes | no | yes | no |
 | Keeps user hook context out | `isolation.userHookContext` | yes | no | no | no | no | yes | no | yes | no |
 | Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | yes | no | no | no |
@@ -370,26 +370,125 @@ for the working directory. See [configuration](https://developers.openai.com/cod
 and [instruction discovery](https://developers.openai.com/codex/guides/agents-md).
 
 The Codex 0.160.0 app server always reads `$CODEX_HOME/AGENTS.override.md`,
-else `$CODEX_HOME/AGENTS.md`. No configuration key, flag or environment
+else `$CODEX_HOME/AGENTS.md`, and puts it before the Agent home's `AGENTS.md`
+in the same instruction block. No configuration key, flag or environment
 variable turns that file off. `project_doc_max_bytes = 0` stops only the
 project files. The `config`, `base_instructions` and `developer_instructions`
 fields of `thread/start` and `thread/resume` do not remove the user file, and a
-per-thread MCP override does not either. `CODEX_HOME` also holds `auth.json`
-and the sessions, so moving it moves the login. The SDK has no Codex option
-for user instructions. Keeping the user file out means moving `CODEX_HOME`,
-and the login moves with it. A ChatGPT login refresh writes the new token back
-to `auth.json` and the old refresh token stops working, so a copied login does
-not survive its first refresh. The SDK therefore does not move `CODEX_HOME`.
-Codex declares none of the five user-context bits: the user `AGENTS.md`
-reaches the model, and the SDK qualifies no Codex exclusion for the other
-sources. Only `userMcpServers` is `yes`, through the option below.
+per-thread MCP override does not either. The only way to keep it out is a
+different `CODEX_HOME`, which `agentUserContext` provides.
+
+#### `agentUserContext` (Codex)
+
+`CodexAdapterOptions.agentUserContext: 'excluded'` (or
+`runtimes.codex.agentUserContext`) runs an Agent task (a run whose manifest
+has an `agentRef`) with `CODEX_HOME` set to an SDK-owned directory,
+`codex-home`, in the execution's scratch. A run without an `agentRef`, and the
+default `'inherit'`, are unchanged.
+
+The option controls which user context Codex loads: under `excluded`, the
+user's `AGENTS.md` and memories do not reach the model. It is not a filesystem
+boundary. The Agent's own tools can still read user files, and a path through
+a linked directory, such as `codex-home/rules/../AGENTS.md`, resolves to the
+user's file. Codex does not open such a path itself.
+
+The directory starts with only symbolic links. These link to the user's
+`CODEX_HOME` (`$CODEX_HOME`, else `~/.codex`), each one only when the user has
+it:
+
+- `auth.json`: the login. A ChatGPT login refresh writes through the link.
+  Codex 0.160.0 opens the file through the link and writes it in place;
+  0.167.0 resolves the link, writes a temporary file beside the target and
+  renames it onto the target, so the link stays and the user's file gets the
+  new refresh token. Codex 0.167.0 refuses to save to a hard-linked file, so
+  the SDK uses symbolic links only.
+- `config.toml`: the user's model, provider, sandbox and other configuration,
+  including its `developer_instructions`, still apply.
+- `rules/` and `hooks.json`: the user's command rules and hooks are guardrails
+  and are linked so that Codex can apply them. Whether a user hook runs under
+  `excluded` was not probed.
+
+These link to the Agent's own thread store, which the adapter creates in the
+Agent home (`lease.canonicalHome`):
+
+- `sessions/` to `<Agent home>/.byok/codex/sessions`, and `archived_sessions/`
+  to `<Agent home>/.byok/codex/archived_sessions`. Each execution has a fresh
+  `codex-home`, and a resume finds the thread through the rollout in this
+  store, so a later task of the same Agent resumes its thread. The user's
+  thread store is never linked: Codex cannot resume or list the user's
+  threads. The adapter creates the store only through real directories inside
+  the Agent home, and refuses the start when `.byok`, `.byok/codex` or the
+  store is a symbolic link. The store is the `agent-runtime-sessions` retention class
+  ([storage layout](host-local-storage-layout.md)). It is unbounded: each
+  Agent's rollouts accumulate until the Host removes the Agent home, as they
+  did in the user's `CODEX_HOME` before.
+
+A Bot that switches from `inherit` to `excluded` cannot resume the threads it
+made under `inherit`, because they are in the user's thread store. Such a
+resume fails closed through the existing missing-thread path, as a
+non-retryable failure; start a new thread.
+
+`AGENTS.md`, `AGENTS.override.md`, `skills/`, `memories/` and the plugin cache
+stay out. The app server starts with `features.plugins = false`, as under
+`agentUserMcpServers`, and with `features.memories = false`. The memory
+setting matters even with `memories/` left out: with the user's
+`[features] memories = true`, Codex runs a background memory agent that
+extracts from the thread store, calls the user's provider and writes
+`memories/` into the SDK home. Codex also loads user skills from
+`$HOME/.agents/skills`, outside `CODEX_HOME`, so `isolation.userSkills` stays
+`false`. User MCP servers in `config.toml` still start unless
+`agentUserMcpServers` is also `excluded`.
+
+Codex adds its own per-execution state to `codex-home` as it runs:
+`state_5.sqlite`, `logs_2.sqlite`, `memories_1.sqlite`, `queue_1.sqlite`,
+`goals_1.sqlite` and `thread_history_1.sqlite` with their `-wal` and `-shm`
+files, `installation_id`, `.sandbox_migration`, `skills/.system`,
+`shell_snapshots/`, `thread-writer-locks/` and `tmp/` (observed on 0.167.0).
+They start empty, and the resume and isolation checks pass with them. The
+session closes the app server before the scratch is released, and the release
+removes the whole `sdk` directory, `codex-home` with these files included,
+without following the links.
+
+The start fails as a non-retryable `authority` failure when:
+
+- The task has no sealed Agent home for its thread store, or its store path is
+  not a real directory inside the Agent home (for example a symbolic link an
+  earlier task left there). Reason: `codex Agent user context exclusion refused: the Agent home thread store is not a real directory inside the Agent home`.
+- Codex's effective `cli_auth_credentials_store` (from `config/read`) is not
+  `file`. A keyring entry is keyed by the `CODEX_HOME` path, so the SDK home
+  would not find the login, and a keyring save deletes `auth.json`, which is the
+  link. Reason: `codex Agent user context exclusion refused: cli_auth_credentials_store is <mode>; an SDK-owned CODEX_HOME supports file credentials only`.
+- The user's `CODEX_HOME` does not exist, or has no `auth.json`. Without the
+  link, a file-mode login would save `auth.json` in the SDK home and lose it
+  at cleanup. Reason: `codex Agent user context exclusion refused: the user CODEX_HOME has no auth.json; log in to Codex with file credentials first`.
+- On Windows, the account may not create symbolic links (`EPERM`: Developer
+  Mode is off and the daemon is not an administrator). Reason: `codex Agent user context exclusion refused: Windows refused to create a symbolic link (EPERM); turn on Developer Mode or run the daemon as an administrator`.
+  Otherwise Windows behaves as the other platforms.
+
+The credential store check runs on the started app server, through
+`config/read`, before the thread opens.
+
+Probed on Codex 0.160.0 and 0.167.0 through the runtime contract suite with a
+loopback provider and a placeholder login:
+
+- The user `AGENTS.md` and memory summary reach the model under `inherit` and
+  not under `excluded`, and the Agent home's `AGENTS.md` still does.
+- A second execution resumes the first execution's thread from the Agent home
+  store, its thread requests carry the first turn, and the user's
+  `CODEX_HOME` gets no `sessions/` (`codex.resume.excluded`).
+- With the user's memories on, no memory-agent request is made and no
+  `memories/` is written in the SDK home (`codex.memoryPipeline.excluded`).
+- No request leaves for another host.
+
+A real ChatGPT token refresh was not run; the refresh write path comes from
+the Codex source of both versions.
 
 #### `agentUserMcpServers` (Codex)
 
 `CodexAdapterOptions.agentUserMcpServers: 'excluded'` gives an Agent task (a
 run whose manifest has an `agentRef`, as every `task.offer` does) only the
 task's and the SDK's MCP servers. It changes MCP servers only; the user's
-`AGENTS.md` still loads. A run without an `agentRef`, and the default
+`AGENTS.md` still loads unless `agentUserContext` is also `excluded`. A run without an `agentRef`, and the default
 `'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
 [vendored session](../packages/client/vendor/oar/45488e7/PROVENANCE.md):
@@ -719,7 +818,7 @@ for Claude it is `agentSessionPersistence: 'disabled'`, below.
 | Runtime | Where an Agent task's session record goes |
 | --- | --- |
 | Claude | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<session>.jsonl`, outside the Agent home |
-| Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`. The adapter does not set `CODEX_HOME`, so normally under `~/.codex` |
+| Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`, normally under `~/.codex`. Under `agentUserContext: 'excluded'`, an Agent task's rollouts are in `<Agent home>/.byok/codex/sessions/` instead |
 | Grok | `$GROK_HOME/sessions/<encoded cwd>/<session id>/`, and the `sessions/session_search.sqlite` index. The adapter does not set `GROK_HOME`, so normally under `~/.grok` |
 | Pi, ordinary, Pi login | The settings `sessionDir`, else `<agent dir>/sessions/--<encoded cwd>--/<time>_<id>.jsonl`. The agent directory is `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` |
 | Pi, ordinary, Keys profile | `DaemonConfig.piByokLauncher.sessionDir/<time>_<id>.jsonl`, one folder for every execution, which the Host chooses |

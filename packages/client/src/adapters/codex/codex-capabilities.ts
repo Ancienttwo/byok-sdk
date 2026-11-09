@@ -13,9 +13,9 @@ export const CODEX_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   mcpToolsets: true,
   messageDraft: true,
   preparedLane: false,
-  // Codex has no per-process switch for the user AGENTS.md or its thread store.
+  // `agentUserContext: 'excluded'` moves CODEX_HOME; skills under $HOME/.agents, the hooks and the thread store stay the user's.
   isolation: Object.freeze({
-    userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false,
+    userInstructions: true, userOutputStyle: false, userMemory: true, userSkills: false, userHookContext: false,
     userMcpServers: true, sessionPersistence: false,
   }),
 });

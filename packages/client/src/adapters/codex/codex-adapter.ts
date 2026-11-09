@@ -45,6 +45,7 @@ import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities';
 import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 import { verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers';
+import { assertCodexFileCredentials, createCodexAgentHome } from './agent-user-context';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
@@ -94,13 +95,28 @@ export interface CodexAdapterOptions {
    * MCP servers. After the open it reads the thread's MCP server status
    * back, and the start fails if any other server is not disabled, or if a
    * user server has the name of a task or SDK server. The user's
-   * `AGENTS.md`, login, model, sandbox setting and other configuration still
-   * apply. It covers new and resumed threads. On a resume, Codex may start a
+   * login, model, sandbox setting and other configuration still apply, and
+   * so does the user's `AGENTS.md` unless `agentUserContext` is `excluded`. It covers new and resumed threads. On a resume, Codex may start a
    * queued turn before the read-back: that turn already runs with the
    * overrides, and a failed read-back stops the app server. Other tasks are
    * unchanged. Default `inherit`.
    */
   agentUserMcpServers?: 'inherit' | 'excluded';
+  /**
+   * For an Agent task (`task.offer`), `excluded` runs Codex in an SDK-owned
+   * `CODEX_HOME` in the execution's scratch, so the user's `AGENTS.md`,
+   * `AGENTS.override.md`, `skills/`, `memories/` and threads stay out, and
+   * plugins and the memory pipeline are off. The home holds symbolic links to
+   * the user's `auth.json`, `config.toml`, `hooks.json` and `rules/`, and its
+   * `sessions/` and `archived_sessions/` link to the Agent's own store in
+   * `<Agent home>/.byok/codex/`. Threads made under `inherit` are not
+   * resumable under `excluded`. The start fails without a sealed Agent home,
+   * unless Codex's effective `cli_auth_credentials_store` is `file`, without
+   * the user's `auth.json`, and on Windows when the account may not create
+   * symbolic links. MCP servers are `agentUserMcpServers`' concern. Default
+   * `inherit`.
+   */
+  agentUserContext?: 'inherit' | 'excluded';
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
   /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
@@ -139,6 +155,8 @@ export class CodexAdapter implements RuntimeAdapter {
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'CodexAdapterOptions.runtimeEnvironment');
     if (options.agentUserMcpServers !== undefined && options.agentUserMcpServers !== 'inherit' && options.agentUserMcpServers !== 'excluded')
       throw new TypeError('CodexAdapterOptions.agentUserMcpServers must be inherit or excluded');
+    if (options.agentUserContext !== undefined && options.agentUserContext !== 'inherit' && options.agentUserContext !== 'excluded')
+      throw new TypeError('CodexAdapterOptions.agentUserContext must be inherit or excluded');
     this.options = { ...options, ...(options.nativeInteractions === undefined ? {} : { nativeInteractions: snapshotNativeInteractionHostOptions(options.nativeInteractions) }) };
     if (
       !Number.isSafeInteger(options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES) ||
@@ -257,6 +275,7 @@ export class CodexAdapter implements RuntimeAdapter {
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const taskServers = mcpServers.map(server => server.name);
     const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && input.manifest.agentRef !== undefined;
+    const excludeUserContext = this.options.agentUserContext === 'excluded' && input.manifest.agentRef !== undefined;
     const spawned = createOwnedLineProcessSpawn({
       nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
     });
@@ -272,6 +291,7 @@ export class CodexAdapter implements RuntimeAdapter {
       input.manifest.sessionRef,
     );
     try {
+      const codexHome = excludeUserContext ? { CODEX_HOME: await createCodexAgentHome(input.env, input.scratch.sdkDir, input.manifest.lease?.canonicalHome) } : {};
       // The open deadline covers spawn, initialize, the thread open and its read-back.
       const raw = await session.within('open', retryable, codexSession(
         (bin, args, options) => {
@@ -286,14 +306,17 @@ export class CodexAdapter implements RuntimeAdapter {
         { kind: 'available', via: 'executable', command: invocation.command },
         {
           cwd,
-          env: { ...input.env, ...input.scratch.env } as Record<string, string>,
+          env: { ...input.env, ...input.scratch.env, ...codexHome } as Record<string, string>,
           ...(model === undefined ? {} : { model }),
           sandboxMode: this.options.sandbox ?? 'danger-full-access',
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           launchArgs: [
             ...(input.manifest.homeAccess === 'memory-reader' ? READER_PROJECT_ROOT_ARGS : []),
             // Startup plugin sync precedes beforeOpen and the thread's feature overrides.
-            ...(excludeUserMcp ? ['-c', 'features.plugins=false'] : []),
+            // Plugins are user context too, and the SDK home has no plugin cache to sync into.
+            ...(excludeUserMcp || excludeUserContext ? ['-c', 'features.plugins=false'] : []),
+            // The memory pipeline would extract from the user's own threads in the linked sessions/.
+            ...(excludeUserContext ? ['-c', 'features.memories=false'] : []),
           ],
           ...(input.manifest.sessionRef === undefined
             ? {}
@@ -302,13 +325,15 @@ export class CodexAdapter implements RuntimeAdapter {
         1000,
         {
           onReady: (id) => session.ready(id),
-          beforeOpen: async (request, params) => withCodexMcpToolGrants(
-            excludeUserMcp
-              ? withCodexUserMcpServersExcluded(params, await request('config/read', { cwd, includeLayers: false }), taskServers)
-              : params,
-            taskServers,
-            input.mcpToolApprovals,
-          ),
+          beforeOpen: async (request, params) => {
+            const effective = excludeUserMcp || excludeUserContext ? await request('config/read', { cwd, includeLayers: false }) : undefined;
+            if (excludeUserContext) assertCodexFileCredentials(effective!);
+            return withCodexMcpToolGrants(
+              excludeUserMcp ? withCodexUserMcpServersExcluded(params, effective!, taskServers) : params,
+              taskServers,
+              input.mcpToolApprovals,
+            );
+          },
           ...(excludeUserMcp ? {
             afterOpen: (request, threadId) => verifyCodexUserMcpServersExcluded(request, threadId, taskServers),
           } : {}),

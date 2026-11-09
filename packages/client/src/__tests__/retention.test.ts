@@ -225,8 +225,8 @@ it('a daemon runs a jittered retention timer and reports path-free classes in st
  const config={localAgentRelease:{version:'0.0.0-test'},productName:'Retention',productId:'retention',serverUrl:server.url,storeDir:testScratchRoot(),storage:{scratchRoot:testScratchRoot()}};
  const daemon=createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{retention:{timers:{setTimeout:(h,ms)=>{handler=h;delays.push(ms);return 'timer';},clearTimeout:()=>{}}}});
  cleanups.push(()=>daemon.stop());await daemon.pair('pairing-code');await daemon.start();expect(delays[0]).toBeGreaterThanOrEqual(675_000);expect(delays[0]).toBeLessThanOrEqual(1_125_000);
- expect(daemon.status().storage.classes).toHaveLength(24);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
- const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(24);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
+ expect(daemon.status().storage.classes).toHaveLength(25);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
+ const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(25);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
  expect(JSON.stringify(bundle.storage)).not.toContain(config.storeDir);expect(JSON.stringify(bundle.storage)).not.toContain(config.storage.scratchRoot);
 });
 it('uses newly measured pressure for maintenance even when the timer fired as periodic',async()=>{
@@ -482,6 +482,15 @@ it.each([
   f.advance(1);
  }
  await f.sweeper.runPass('periodic');expect(await exists(file)).toBe(false);expect(f.failures).toEqual([]);
+});
+it('Codex rollouts in the Agent home are agent-runtime-sessions and never expire',async()=>{
+ const {home,binding,directory}=await idleHome();await binding.lease.release();
+ const rollout=path.join(directory,'.byok','codex','sessions','2026','11','09','rollout-x.jsonl');await fs.mkdir(path.dirname(rollout),{recursive:true});await fs.writeFile(rollout,'{}');await stamp(rollout,EXPIRED);
+ const f=await fixture({home});
+ expect(f.registry.classes.find(entry=>entry.id==='agent-runtime-sessions')!.authority).toEqual(expect.objectContaining({scope:'agent-home',bound:PROTECTED_CLASS_BOUNDS['agent-runtime-sessions']}));
+ await f.sweeper.runPass('periodic');
+ expect(usage(f,'agent-runtime-sessions')).toMatchObject({entries:1});expect(usage(f,'byok-authority').entries).toBe(0);
+ expect(await exists(rollout)).toBe(true);
 });
 it('session ledgers and terminal evidence expire by last append; other names, directories and symlinks stay',async()=>{
  const {home,binding,directory}=await idleHome();await binding.lease.release();

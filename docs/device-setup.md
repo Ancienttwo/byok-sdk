@@ -782,6 +782,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.claude.versionPolicy.block` | advanced | array |
 | `runtimes.codex` | advanced | object |
 | `runtimes.codex.agentUserMcpServers` | advanced | "excluded" / "inherit" |
+| `runtimes.codex.agentUserContext` | advanced | "excluded" / "inherit" |
 | `runtimes.codex.versionPolicy` | advanced | object |
 | `runtimes.codex.versionPolicy.qualifiedVersion` | required when parent is set | string |
 | `runtimes.codex.versionPolicy.unqualified` | required when parent is set | "allow" / "block" / "warn" |
@@ -950,6 +951,7 @@ Manifest transition: **0.40.0 → 0.40.0**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
+| codex-agent-user-context | additive | CodexAdapterOptions.agentUserContext and DaemonConfig.runtimes.codex.agentUserContext: excluded runs a Codex Agent task in an SDK-owned CODEX_HOME of symbolic links to the user's auth.json, config.toml, hooks.json and rules, with sessions and archived_sessions in the Agent's own store <Agent home>/.byok/codex, so the user's AGENTS.md, skills, memories and threads stay out; plugins and the memory pipeline are off. Codex now declares isolation.userInstructions and isolation.userMemory. A Bot switched from inherit to excluded cannot resume its earlier threads (fails closed as a missing thread). The new retention class agent-runtime-sessions is exempt and unbounded until the Host removes the Agent home. The start refuses without a sealed Agent home, with a credential store other than file, without the user auth.json and, on Windows, on an account that may not create symbolic links. Default inherit changes nothing. [Migration](../docs/adapter-capabilities.md#agentusercontext-codex) |
 <!-- generated:migrations:end -->
 
 ## Removed fields
