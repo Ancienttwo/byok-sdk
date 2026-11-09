@@ -29,16 +29,16 @@ const detectAdapter = async () => new AgyAdapter({ home: await ownedHome(), reso
 
 const submitResult = callOnceThenReply(mcpTool('host', 'submit_result'), { summary: 'runtime contract', toolSummary: 'Submit the result' });
 
-async function writeUserContext(home: string, userServer: { command: string; args?: readonly string[] }, root: string): Promise<void> {
+async function writeUserContext(home: string, userServer: { command: string; args?: readonly string[] }): Promise<void> {
   const config = path.join(home, '.gemini', 'config');
   await fs.mkdir(path.join(config, 'skills', 'contract-skill'), { recursive: true });
   await fs.writeFile(path.join(home, '.gemini', 'GEMINI.md'), `# User\n\n${USER_MARKER}\n`);
   await fs.writeFile(path.join(config, 'mcp_config.json'), JSON.stringify({ mcpServers: { usermcp: { command: userServer.command, args: userServer.args ?? [] } } }));
   await fs.writeFile(path.join(config, 'skills', 'contract-skill', 'SKILL.md'), `---\nname: contract-skill\ndescription: ${SKILL_MARKER}\n---\n\n# Skill\n\n${SKILL_MARKER}\n`);
-  // A SessionStart hook adds model context through the `injectSteps` its stdout carries.
-  const hook = path.join(root, 'session-start-hook.js');
-  await fs.writeFile(hook, `process.stdout.write(JSON.stringify({ injectSteps: [{ systemMessage: { systemMessage: ${JSON.stringify(HOOK_MARKER)} } }] }));\n`);
-  await fs.writeFile(path.join(config, 'hooks.json'), JSON.stringify({ contract: { SessionStart: [{ type: 'command', command: `${JSON.stringify(process.execPath)} ${JSON.stringify(hook)}` }] } }));
+  // A SessionStart hook adds model context through the `injectSteps` its stdout carries. agy runs the command from
+  // the directory of hooks.json, through `sh -c` or `cmd /c`; a bare command with no quotes parses the same in both.
+  await fs.writeFile(path.join(config, 'session-start-hook.js'), `process.stdout.write(JSON.stringify({ injectSteps: [{ systemMessage: { systemMessage: ${JSON.stringify(HOOK_MARKER)} } }] }));\n`);
+  await fs.writeFile(path.join(config, 'hooks.json'), JSON.stringify({ contract: { SessionStart: [{ type: 'command', command: 'node session-start-hook.js' }] } }));
 }
 
 /**
@@ -55,7 +55,7 @@ async function turn(where: 'user' | 'owned', script: ProviderScript = submitResu
     const receipt = path.join(box.root, 'host.jsonl');
     const userReceipt = path.join(box.root, 'user-mcp.jsonl');
     const host = await writeSubmitResultServer(box.root, receipt);
-    await writeUserContext(where === 'owned' ? home : box.home, await writeSubmitResultServer(box.root, userReceipt, 'user_tool'), box.root);
+    await writeUserContext(where === 'owned' ? home : box.home, await writeSubmitResultServer(box.root, userReceipt, 'user_tool'));
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
     const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home, resolveBin }), provider.origin);
     const env = { ...baseEnv(box.home), GEMINI_API_KEY: REAL_KEY, ...recorder.env };
