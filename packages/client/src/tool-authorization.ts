@@ -765,16 +765,25 @@ function describeWorkflowChildLaunch(
   const ordered = [...effects.filter(effect => effect.risk.level === 'high'), ...effects.filter(effect => effect.risk.level !== 'high')]
     .map(effect => effect.risk.level === 'high' ? `${effect.text} (${effect.risk.reasons.join(', ')})` : effect.text);
   const head = toolCallSummary(call, risk.reasons, risk.authorization, '');
-  const shown: string[] = [];
-  for (const [index, text] of ordered.entries()) {
-    const rest = ordered.length - index - 1;
-    const tail = rest === 0 ? '' : `; +${rest} more effect${rest === 1 ? '' : 's'} not shown`;
-    if (shown.length > 0 && `${head} ${[...shown, text].join('; ')}${tail}`.length > MAX_SUMMARY_CHARS) {
-      return `${head} ${shown.join('; ')}; +${ordered.length - shown.length} more effect${ordered.length - shown.length === 1 ? '' : 's'} not shown`;
+  const more = (count: number): string => count === 0 ? '' : `; +${count} more effect${count === 1 ? '' : 's'} not shown`;
+  // The card never exceeds its budget, and the count of effects left out always fits after the ones shown.
+  let subject = '';
+  let shown = 0;
+  for (const text of ordered) {
+    const separator = shown === 0 ? ' ' : '; ';
+    const tail = more(ordered.length - shown - 1);
+    if (head.length + subject.length + separator.length + text.length + tail.length <= MAX_SUMMARY_CHARS) {
+      subject += separator + text;
+      shown += 1;
+      continue;
     }
-    shown.push(text);
+    if (shown === 0) {
+      subject = separator + text.slice(0, Math.max(0, MAX_SUMMARY_CHARS - head.length - separator.length - tail.length - 1)) + '…';
+      shown = 1;
+    }
+    break;
   }
-  return toolCallSummary(call, risk.reasons, risk.authorization, shown.join('; '));
+  return head + subject + more(ordered.length - shown);
 }
 
 function toolCallSummary(

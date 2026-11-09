@@ -496,7 +496,9 @@ describe('Pi workflow child launch check (subagent_launch, #1589)', () => {
         input: { workflowRunId: 'w', key: 'main', commands: [{ command: 'true', shell: 'zsh' }] } }, context))
         .toEqual({ block: true, reason: 'tool_authorization_denied: subagent_launch input does not have its pinned shape' });
       // Missing key, wrong types and an empty cwd are refused the same way.
-      for (const input of [{ workflowRunId: 'w' }, { workflowRunId: 42, key: 'main' }, { workflowRunId: 'w', key: 'main', async: 'yes' }, { workflowRunId: 'w', key: 'main', cwd: '' }]) {
+      for (const input of [{ workflowRunId: 'w' }, { workflowRunId: 42, key: 'main' }, { workflowRunId: 'w', key: 'main', async: 'yes' }, { workflowRunId: 'w', key: 'main', cwd: '' },
+        // Inherited Object.prototype names are unknown keys, at both levels.
+        { workflowRunId: 'w', key: 'main', toString: 'invalid' }, { workflowRunId: 'w', key: 'main', commands: [{ command: 'true', toString: 'invalid' }] }]) {
         expect(await handlers.tool_call![0]!({ type: 'tool_call', toolName: 'subagent_launch', toolCallId: 'call-ok/2', parentToolCallId: 'call-ok', input }, context))
           .toEqual({ block: true, reason: 'tool_authorization_denied: subagent_launch input does not have its pinned shape' });
       }

@@ -15,9 +15,11 @@ const path: FieldCheck = value => typeof value === 'string' && value.length > 0;
 const flag: FieldCheck = value => typeof value === 'boolean';
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const env: FieldCheck = value => record(value) && Object.values(value).every(entry => typeof entry === 'string');
+// Own properties only on both sides: an inherited name such as `toString` is neither a field nor a validator.
 const exactObject = (required: Readonly<Record<string, FieldCheck>>, optional: Readonly<Record<string, FieldCheck>>): FieldCheck => value => record(value)
-  && Object.entries(required).every(([key, check]) => key in value && check(value[key]))
-  && Object.entries(value).every(([key, field]) => required[key]?.(field) ?? optional[key]?.(field) ?? false);
+  && Object.entries(required).every(([key, check]) => Object.hasOwn(value, key) && check(value[key]))
+  && Object.entries(value).every(([key, field]) => Object.hasOwn(required, key) ? required[key]!(field)
+    : Object.hasOwn(optional, key) ? optional[key]!(field) : false);
 const command = exactObject({ command: text }, { cwd: path, env });
 /** One validator at the hook boundary; the gate classifier relies on this shape. */
 const wellFormedLaunch = exactObject({ workflowRunId: text, key: text }, {
