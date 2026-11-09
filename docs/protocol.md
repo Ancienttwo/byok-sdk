@@ -191,7 +191,11 @@ list below).
 - **v6 self-consistency.** `golden/v6.envelopes.ndjson` and
   `golden/v6.http.ndjson` start from the v5 corpora with `v` rewritten and
   `isolation.userContext` renamed `userInstructions`, plus lines that carry
-  the new isolation bits, and are append-only. The current decoder reads every
+  the new isolation bits. While `golden/v6.releases.json` registers no
+  release, a line may still be edited in place: the presence line
+  (`v6.http.ndjson:21`) carries the new bits that way, and #1573 rewrote the
+  `TokenResponse` lines to `{ accessToken, expiresIn }`. Once a v6 release is
+  registered, the corpora are append-only. The current decoder reads every
   line back to the committed JSON, and the current HTTP decoders read every
   literal body to its independently authored value (messages responses must
   account for their `batchLength`). The v6 corpus carries every message type,
@@ -4314,8 +4318,8 @@ Stored v3, v4 and v5 receipts are not migrated. A store a v3 build wrote is
 not supported; a store a v4 or v5 build wrote opens once no pending row of
 that major is left.
 
-Before upgrading, stop new dispatch and let the previous server and clients
-finish and acknowledge their pending rows. On an offline copy, check:
+On an offline copy, this query lists the pending rows that would stop
+startup:
 
 ```sql
 SELECT tenant_id, device_id, seq, message_id
@@ -4327,7 +4331,9 @@ WHERE state = 'pending'
 ```
 
 An empty result confirms only the envelope-major check. It does not prove full
-payload validity or task completion. If rows remain, preserve the database and
-finish the drain with the previous SDK. Do not delete rows to force startup.
+payload validity or task completion. The v5 to v6 cut has no drain tool or
+upgrade precheck: if rows remain, move the database aside and start on a new
+store, as the [0.41.0 Host upgrade guide](releases/host-upgrade-0.41.0.md#rebuild-local-stores)
+describes. Do not delete rows to force startup.
 A fresh server database needs fresh device enrollment. Changing only the client
 `storeDir` keeps the OS credential for the same `productId`.

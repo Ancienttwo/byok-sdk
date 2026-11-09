@@ -28,8 +28,8 @@
     {
       "id": "wire-v6-isolation-sources",
       "impact": "breaking",
-      "summary": "The envelope wire is v6 (PROTOCOL_VERSION = 6). The runtime capability isolation.userContext is removed and split into one bit per source a runtime can keep out: userInstructions, userOutputStyle, userMemory, userSkills and userHookContext, beside the unchanged userMcpServers and sessionPersistence, in RuntimeCapabilitiesSchema, so on conn.hello runtimes and harnesses, task.claim, presence, PresenceRuntimeCapabilities and RuntimeIsolationCapabilities. There is no derived userContext field and no v5 reader: a pending v5 row stops startup with SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED or DaemonJournalProtocolUnsupportedError and is left unchanged, and a v5 conn.hello is refused with hello_protocol_version_unsupported. Rebuild local stores, then start the server side and the daemons together.",
-      "migration": "docs/migrations/wire-v6-isolation-sources.md#shape",
+      "summary": "The envelope wire is v6 (PROTOCOL_VERSION = 6). The runtime capability isolation.userContext is removed and split into one bit per source a runtime can keep out: userInstructions, userOutputStyle, userMemory, userSkills and userHookContext, beside the unchanged userMcpServers and sessionPersistence, in RuntimeCapabilitiesSchema, so on conn.hello runtimes and harnesses, task.claim, presence, PresenceRuntimeCapabilities and RuntimeIsolationCapabilities. There is no derived userContext field and no v5 reader: a pending v5 row stops startup with SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED or DaemonJournalProtocolUnsupportedError and is left unchanged, and a v5 conn.hello is refused with hello_protocol_version_unsupported. A bit describes what the adapter can keep out of an Agent task: true is contract-checked or an evidence-backed absent source, false is no guarantee, missing is unknown, and on Claude and ordinary Pi the user-context bits need agentUserContext: excluded. There is no drain tool or upgrade precheck: stop the 0.40.0 deployment, start the server side and the daemons together, and start on a new store where one refuses.",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#wire-v6",
       "items": [
         "export:@byok-sdk/client#RuntimeIsolationCapabilities",
         "export:@byok-sdk/core#PresenceRuntimeCapabilities",
@@ -49,7 +49,7 @@
       "id": "wire-v6-retired-gates",
       "impact": "breaking",
       "summary": "Wire v6 retires every v5 gate that both sides always advertised. The server flags agent-message-draft, runtime-failure-class, runtime-quota-scope, resident-memory-over-limit, sealed-output-ciphertext-ref and mailbox-read-ahead are gone, the sealed and native-sessions decline codes need no flag, and the reference server advertises no server flag (CLOUD_PROTOCOL_CAPABILITIES is empty): every daemon-to-server surface is baseline, and the server accepts a sealed one by the task's frozen sealing. The device flags custom-harness, terminal-projection-selection, blob-upload and runtime-unavailable-cause are gone, so an offer with harnessId or terminalProjection needs no flag and conn.hello harnesses no longer need custom-harness (the refusal hello_harnesses_without_capability is removed). Their constants leave CAPABILITY_FLAGS and @byok-sdk/protocol. WIRE_ADDITIONS has no strip-safe rows and WireAddition is the gated row only. Device flags a daemon advertises by configuration, such as agent-home-contract, agent-egress-reliable-ack, native-sessions and sealed-payload-v1, still gate. The Agent egress drop reason capability_missing is removed: the daemon re-sends unacknowledged reliable egress on every session open. Presence runtimeUnavailable takes a custom harness id, like conn.hello. A Host that tested for a retired flag drops the check; upgrade server and daemons together.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1573",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#retired-gates-and-token-lifetime",
       "items": [
         "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
         "export:@byok-sdk/protocol#AgentEgressDropReasonSchema",
@@ -78,7 +78,7 @@
       "id": "token-lifetime-expires-in",
       "impact": "breaking",
       "summary": "TokenResponse and PairResponse carry the token lifetime only as expiresIn, now required. TokenResponse.expiresAt is removed (TokenResponseSchema strips it unread), the server no longer sends it or the pair refreshHint, and MintedAccessToken has no expiresAt. A daemon refuses a token or pair response without expiresIn and keeps its prior credential. A Host with its own auth plane returns expiresIn from mintAccessToken.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1573",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#retired-gates-and-token-lifetime",
       "items": [
         "export:@byok-sdk/cloud#MintedAccessToken",
         "export:@byok-sdk/protocol#PairResponseSchema",
