@@ -4134,7 +4134,10 @@ Background subagents in a single-file product need an upstream seam (#1589,
 item 2): a host runner command for background runs
 (nicobailon/pi-subagents#3105), and a way for the host to state that its Pi is
 the embedded one and that it hosts no background runs, instead of the package
-root setting above. Both are deferred.
+root setting above. Upstream closed #3105 as not planned; the pinned 0.87.0
+release still has no host runner command seam. Both capabilities remain
+blocked, and single-file products keep refusing background runs. See the
+[upstream decision and package-source evidence](researches/2026-11-09-pi-background-runner-seam.md).
 
 ## Local native interaction contract
 
