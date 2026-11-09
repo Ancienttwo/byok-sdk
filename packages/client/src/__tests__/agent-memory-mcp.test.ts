@@ -271,7 +271,6 @@ describe('Agent memory MCP local authority', () => {
     });
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
       adapters: [unsupported, supported],
-      getServerCapabilities: () => ['custom-harness'],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'device-memory-mcp-selection',

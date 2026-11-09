@@ -4,11 +4,12 @@ import path from 'node:path';
 import { beforeAll, expect } from 'vitest';
 import { HermesAdapter, type HermesModelSelection } from '../../adapters/hermes/hermes-adapter';
 import { hermesVersionLine, QUALIFIED_HERMES_VERSION } from '../../adapters/hermes/hermes-version';
+import { HERMES_ABSENT_ISOLATION_SOURCES } from '../../adapters/hermes/hermes-capabilities';
 import {
   baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
   expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, withProcessEnv, writeSubmitResultServer,
 } from './contract';
-import { searchThenCall, startLoopbackProvider } from './loopback';
+import { CONTRACT_REPLY_CHUNKS, searchThenCall, startLoopbackProvider } from './loopback';
 
 const target = contractTarget('hermes', QUALIFIED_HERMES_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
@@ -16,6 +17,11 @@ const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const KEY_ENV = 'RC_CONTRACT_MODEL_KEY';
 const PROJECT_MARKER = 'BYOK-CONTRACT-HERMES-PROJECT-62ab';
 const USER_MARKER = 'BYOK-CONTRACT-HERMES-USER-c3f0';
+const SKILL_MARKER = 'BYOK-CONTRACT-HERMES-SKILL-48d1';
+const MEMORY_MARKER = 'BYOK-CONTRACT-HERMES-MEMORY-9e27';
+const PROFILE_MARKER = 'BYOK-CONTRACT-HERMES-USERPROFILE-5b83';
+const STYLE_MARKER = 'BYOK-CONTRACT-HERMES-STYLE-d06a';
+const HOOK_MARKER = 'BYOK-CONTRACT-HERMES-HOOK-71fc';
 
 /** One SDK-owned Hermes root for the whole file; the build below fills it once. */
 const rootBox = once(() => createSandbox('hermes-root'));
@@ -73,10 +79,36 @@ const submitThroughToolSearch = searchThenCall({
 }, 'submit_result');
 
 /**
+ * Every user-level context source Hermes reads from its home: SOUL.md, a skill,
+ * both memory files, a selected personality, and a `pre_llm_call` shell hook.
+ * `user` adds an MCP server to the config.
+ */
+async function writeUserHome(userHome: string, root: string, extra: { user?: { command: string; args: readonly string[] }; baseUrl?: string } = {}): Promise<void> {
+  await fs.mkdir(path.join(userHome, 'skills', 'contract-skill'), { recursive: true });
+  await fs.mkdir(path.join(userHome, 'memories'), { recursive: true });
+  const hook = path.join(root, 'pre-llm-call-hook.js');
+  await fs.writeFile(hook, `process.stdout.write(JSON.stringify({ context: ${JSON.stringify(HOOK_MARKER)} }));\n`);
+  await fs.writeFile(path.join(userHome, 'SOUL.md'), `# User\n\n${USER_MARKER}\n`);
+  await fs.writeFile(path.join(userHome, 'skills', 'contract-skill', 'SKILL.md'), `---\nname: contract-skill\ndescription: ${SKILL_MARKER}\n---\n\n# Skill\n\n${SKILL_MARKER}\n`);
+  await fs.writeFile(path.join(userHome, 'memories', 'MEMORY.md'), `${MEMORY_MARKER}\n`);
+  await fs.writeFile(path.join(userHome, 'memories', 'USER.md'), `${PROFILE_MARKER}\n`);
+  await fs.writeFile(path.join(userHome, 'config.yaml'), [
+    'display:', '  personality: contract-style',
+    'agent:', '  personalities:', `    contract-style: ${JSON.stringify(STYLE_MARKER)}`,
+    // Consent lives in the user home too, so the control and the adapter turn differ only in which home Hermes reads.
+    'hooks_auto_accept: true',
+    'hooks:', '  pre_llm_call:', `    - command: ${JSON.stringify(`${JSON.stringify(process.execPath)} ${JSON.stringify(hook)}`)}`,
+    ...(extra.user === undefined ? [] : ['mcp_servers:', '  usermcp:', `    command: ${JSON.stringify(extra.user.command)}`, `    args: ${JSON.stringify(extra.user.args)}`]),
+    // The control has no adapter to write the model selection and the update-check switch, so its home carries them.
+    ...(extra.baseUrl === undefined ? [] : ['updates:', '  check: false', 'model:', '  provider: custom', '  default: contract-model', `  base_url: ${JSON.stringify(extra.baseUrl)}`, `  key_env: ${KEY_ENV}`]),
+  ].join('\n') + '\n');
+}
+
+/**
  * One contract turn: a loopback `custom` model, a Host MCP server, a workspace
- * AGENTS.md, and a user Hermes home (`~/.hermes`) with a SOUL.md and an MCP
- * server. The adapter never reads the user home, so the isolation cases have
- * no inherit mode to compare against.
+ * AGENTS.md, and a user Hermes home (`~/.hermes`) with every source above and
+ * an MCP server. The adapter never reads the user home, so the isolation cases
+ * have no inherit mode to compare against; {@link controlTurn} is their positive control.
  */
 async function turn() {
   const box = await createSandbox('hermes-turn');
@@ -87,10 +119,7 @@ async function turn() {
     const userReceipt = path.join(box.root, 'user-mcp.jsonl');
     const host = await writeSubmitResultServer(box.root, receipt);
     const user = await writeSubmitResultServer(box.root, userReceipt, 'user_tool');
-    const userHome = path.join(box.home, '.hermes');
-    await fs.mkdir(userHome, { recursive: true });
-    await fs.writeFile(path.join(userHome, 'SOUL.md'), `# User\n\n${USER_MARKER}\n`);
-    await fs.writeFile(path.join(userHome, 'config.yaml'), `mcp_servers:\n  usermcp:\n    command: ${JSON.stringify(user.command)}\n    args: ${JSON.stringify(user.args)}\n`);
+    await writeUserHome(path.join(box.home, '.hermes'), box.root, { user: { command: user.command, args: user.args ?? [] } });
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
     const runtime = await adapter({ provider: 'custom', model: 'contract-model', baseUrl: provider.baseUrl, keyEnv: KEY_ENV });
     const env = { ...await hermesEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
@@ -101,7 +130,33 @@ async function turn() {
   }
 }
 
+/**
+ * The positive control for the isolation markers: the same real Hermes binary
+ * runs one query outside the adapter, with `HERMES_HOME` on the user home that
+ * holds them, so a marker that reaches the model here is in a place Hermes reads.
+ * It is a profile of the SDK root, which shares the root's built environment.
+ */
+async function controlTurn() {
+  const box = await createSandbox('hermes-control');
+  const recorder = await fileEgress();
+  const provider = await startLoopbackProvider('openai-chat', () => ({ kind: 'text', chunks: CONTRACT_REPLY_CHUNKS }));
+  try {
+    const home = path.join((await rootBox()).root, 'hermes', 'profiles', 'control');
+    await fs.rm(home, { recursive: true, force: true });
+    await writeUserHome(home, box.root, { baseUrl: provider.baseUrl });
+    const args = ['chat', '-q', 'Reply.', '-Q'];
+    const env = { ...await hermesEnv(box.home), ...recorder.env, [KEY_ENV]: 'runtime-contract-placeholder', HERMES_HOME: home };
+    const output = await new Promise<string>(resolve => {
+      execFile(target.bin, args, { encoding: 'utf8', env, cwd: box.workspace, timeout: 600_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => resolve(JSON.stringify({ error: error?.message, stdout: stdout.slice(-2000), stderr: stderr.slice(-2000) })));
+    });
+    return { provider, output };
+  } finally {
+    await provider.close();
+  }
+}
+
 const contractTurn = once(turn);
+const control = once(controlTurn);
 const descriptor = new HermesAdapter({ home: path.resolve('/hermes-descriptor-only') }).descriptor;
 // The first detect() builds the Hermes environment in the new root.
 const FIRST_DETECT_MS = 900_000;
@@ -130,8 +185,31 @@ defineRuntimeContract(`hermes runtime contract (${target.mode} ${target.expected
   'instructions.project': check(async () => {
     expect((await contractTurn()).provider.saw(PROJECT_MARKER)).toBe(true);
   }, FIRST_DETECT_MS),
-  'isolation.userContext': check(async () => {
+  'isolation.userInstructions': check(async () => {
+    expect((await control()).provider.saw(USER_MARKER), 'positive control: SOUL.md in the home Hermes reads reaches the model').toBe(true);
     expect((await contractTurn()).provider.saw(USER_MARKER)).toBe(false);
+  }, FIRST_DETECT_MS),
+  'isolation.userOutputStyle': check(async () => {
+    const { provider, output } = await control();
+    expect(provider.saw(STYLE_MARKER), `positive control: a selected personality in the home Hermes reads reaches the model; ${output}`).toBe(true);
+    expect((await contractTurn()).provider.saw(STYLE_MARKER)).toBe(false);
+  }, FIRST_DETECT_MS),
+  'isolation.userMemory': check(async () => {
+    const { provider, output } = await control();
+    expect(provider.saw(MEMORY_MARKER), `positive control: MEMORY.md in the home Hermes reads reaches the model; ${output}`).toBe(true);
+    expect((await contractTurn()).provider.saw(MEMORY_MARKER)).toBe(false);
+    expect(provider.saw(PROFILE_MARKER), `positive control: USER.md reaches the model; ${output}`).toBe(true);
+    expect((await contractTurn()).provider.saw(PROFILE_MARKER)).toBe(false);
+  }, FIRST_DETECT_MS),
+  'isolation.userSkills': check(async () => {
+    const { provider, output } = await control();
+    expect(provider.saw(SKILL_MARKER), `positive control: a skill in the home Hermes reads reaches the model; ${output}`).toBe(true);
+    expect((await contractTurn()).provider.saw(SKILL_MARKER)).toBe(false);
+  }, FIRST_DETECT_MS),
+  'isolation.userHookContext': check(async () => {
+    const { provider, output } = await control();
+    expect(provider.saw(HOOK_MARKER), `positive control: a pre_llm_call hook's context in the home Hermes reads reaches the model; ${output}`).toBe(true);
+    expect((await contractTurn()).provider.saw(HOOK_MARKER)).toBe(false);
   }, FIRST_DETECT_MS),
   'isolation.userMcp': check(async () => {
     expect((await contractTurn()).userSpawned).toBe(false);
@@ -149,4 +227,4 @@ defineRuntimeContract(`hermes runtime contract (${target.mode} ${target.expected
     { phase: 'turn', target: 'hermes-agent.nousresearch.com:443', reason: 'Hermes model catalog (hermes_cli/model_catalog.py DEFAULT_CATALOG_URL), refetched every turn; follow-up to #1103' },
     { phase: 'turn', target: 'raw.githubusercontent.com:443', reason: 'Hermes model catalog fallback (DEFAULT_CATALOG_FALLBACK_URLS) after the primary is refused; follow-up to #1103' },
   ]),
-});
+}, HERMES_ABSENT_ISOLATION_SOURCES);

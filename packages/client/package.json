@@ -80,7 +80,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup && node scripts/check-adapters-entry.mjs --build-todo && node scripts/build-todo-assets.mjs && node scripts/build-pi-export-assets.mjs && node scripts/build-sealed-host.mjs && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs && node scripts/check-hermes-session-entry.mjs",
+    "build": "tsup && node scripts/check-adapters-entry.mjs --build-todo && node scripts/build-todo-assets.mjs && node scripts/build-pi-export-assets.mjs && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs && node scripts/check-hermes-session-entry.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -103,7 +103,7 @@
     "@earendil-works/pi-coding-agent": "1.5.0",
     "@modelcontextprotocol/client": "2.4.0",
     "pi-web-access": "0.47.0",
-    "pi-subagents": "0.83.1",
+    "pi-subagents": "0.87.0",
     "undici": "8.12.3",
     "@juicesharp/rpiv-i18n": "2.15.0",
     "@juicesharp/rpiv-config": "2.15.0",
@@ -132,10 +132,6 @@
     "#byok-pi-todo-runtime": {
       "types": "./dist/bin/pi-todo-runtime.d.ts",
       "default": "./dist/bin/pi-todo-runtime.js"
-    },
-    "#byok-pi-runtime-host-sealed": {
-      "types": "./dist/bin/pi-runtime-host-sealed.d.ts",
-      "default": "./dist/bin/pi-runtime-host-sealed.js"
     }
   }
 }

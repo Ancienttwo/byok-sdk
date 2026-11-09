@@ -121,8 +121,13 @@ export const RuntimeCapabilitiesSchema = z.object({
   /** The durable worker lane (Pi today). */
   durableLane: z.boolean().optional(),
   preparedLane: z.boolean().optional(),
+  /** Each bit names one source of user-level context the runtime can keep out (v6). */
   isolation: z.object({
-    userContext: z.boolean().optional(),
+    userInstructions: z.boolean().optional(),
+    userOutputStyle: z.boolean().optional(),
+    userMemory: z.boolean().optional(),
+    userSkills: z.boolean().optional(),
+    userHookContext: z.boolean().optional(),
     userMcpServers: z.boolean().optional(),
     sessionPersistence: z.boolean().optional(),
   }).optional(),
@@ -152,7 +157,7 @@ export const RuntimeInfoSchema = z.object({
   authPresent: z.boolean().optional(),
   /** Optional: older daemons omit this entirely (pre-freeze addition). */
   capabilities: RuntimeCapabilitiesSchema.optional(),
-  /** #1103 D8: strip-safe discovery projection; absent means unknown. */
+  /** #1103 D8: discovery projection; absent means unknown. */
   versionPolicy: RuntimeVersionPolicyProjectionSchema.optional(),
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
@@ -188,7 +193,7 @@ export const RuntimeUnavailableEntrySchema = z.object({
 export type RuntimeUnavailableEntry = z.infer<typeof RuntimeUnavailableEntrySchema>;
 
 /** Bounded, unique by id: 16 entries are more runtimes than one daemon hosts. */
-const RuntimeUnavailableListSchema = z.array(RuntimeUnavailableEntrySchema).max(16)
+export const RuntimeUnavailableListSchema = z.array(RuntimeUnavailableEntrySchema).max(16)
   .refine(values => new Set(values.map(value => value.id)).size === values.length, 'duplicate runtime-unavailable identity');
 
 /** Maximum logical toolsets one daemon may advertise as locally configured. */
@@ -278,7 +283,7 @@ export const ConnHelloPayloadSchema = z.object({
   /** Runtimes detected on this device (M1 gap #4; replaces `agents`). */
   runtimes: z.array(RuntimeInfoSchema).optional(),
   harnesses: HarnessInventorySchema.optional(),
-  /** #1103 D8: non-available runtimes and harnesses; strip-safe and absent means unknown. */
+  /** #1103 D8: non-available runtimes and harnesses; absent means unknown. */
   runtimeUnavailable: RuntimeUnavailableListSchema.optional(),
   /** Validated logical IDs configured on this device; definitions and secrets stay local. */
   configuredToolsets: ConfiguredToolsetsSchema.optional(),

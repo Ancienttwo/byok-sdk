@@ -111,11 +111,9 @@ function normalizeTableDdl(sql: string): string {
  * `CREATE TABLE IF NOT EXISTS` is a no-op against an existing table, so a store
  * written by a version with a narrower `provider_kind` CHECK would otherwise
  * keep opening and only reject the new kind at `save` time, from inside a
- * transaction, as an opaque constraint violation. There is deliberately no
- * in-place migration: the local profile database holds declared configuration
- * the operator can retype, and a silent ALTER would be exactly the steady-state
- * compatibility path this package refuses. A database that does not carry the
- * table yet passes.
+ * transaction, as an opaque constraint violation. Opening never migrates: the
+ * only repair is the Host's explicit {@link migrateProviderProfileStore} call.
+ * A database that does not carry the table yet passes.
  */
 function assertProviderProfileSchemaIsCurrent(
   database: DatabaseSync,
@@ -131,7 +129,7 @@ function assertProviderProfileSchemaIsCurrent(
   if (normalizeTableDdl(stored) === normalizeTableDdl(SCHEMA)) return;
   throw new ByokKeysError(
     'PROVIDER_STORE_SCHEMA_STALE',
-    `Provider profile store at ${path} was created by a different @byok-sdk/keys schema; preserve this store and explicitly provision a separate current-schema store before continuing`,
+    `Provider profile store at ${path} was created by a different @byok-sdk/keys schema; call migrateProviderProfileStore on it before opening`,
   );
 }
 
@@ -704,4 +702,137 @@ function ensureConfigurationLockFile(databasePath: string): void {
     new DatabaseSync(lockPath).close();
   }
   chmodSync(lockPath, 0o600);
+}
+
+/** What {@link migrateProviderProfileStore} did to the store. */
+export type ProviderProfileStoreMigration = 'migrated' | 'unchanged';
+
+/** Test-only seam: `afterCopy` runs inside the migration transaction, after the rows are copied. */
+export interface ProviderProfileStoreMigrationFaults {
+  afterCopy?(): void;
+}
+
+const PROFILE_COLUMNS =
+  'profile_ref, provider_kind, kind, adapter, display_name, base_url, auth_mode, model, pi_model, capabilities, enabled, created_at, updated_at';
+
+const MIGRATION_SOURCE_TABLE = 'provider_profile_migration_source';
+
+const PROVIDER_KIND_CHECK = /CHECK \(provider_kind IN \(([^()]*)\)\)/u;
+
+/**
+ * The one stored difference the migration accepts: the `provider_kind` CHECK
+ * set of an earlier version, a subset of the current one, with every other
+ * byte of the normalized statement equal to the current `SCHEMA`.
+ */
+function hasOlderProviderKindSetOnly(stored: string): boolean {
+  const storedDdl = normalizeTableDdl(stored);
+  const match = PROVIDER_KIND_CHECK.exec(storedDdl);
+  if (match === null) return false;
+  const kinds: readonly string[] = MODEL_PROVIDER_KINDS;
+  const subset = match[1]!.split(', ').every((item) => {
+    const kind = /^'([^']*)'$/u.exec(item)?.[1];
+    return kind !== undefined && kinds.includes(kind);
+  });
+  return subset
+    && storedDdl.replace(PROVIDER_KIND_CHECK, '') === normalizeTableDdl(SCHEMA).replace(PROVIDER_KIND_CHECK, '');
+}
+
+function storedTableDdl(database: DatabaseSync, name: string): string | undefined {
+  const row = database
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(name) as { sql?: string | null } | undefined;
+  return typeof row?.sql === 'string' ? row.sql : undefined;
+}
+
+function migrationRefused(path: string, reason: string): ByokKeysError {
+  return new ByokKeysError(
+    'PROVIDER_STORE_SCHEMA_STALE',
+    `Provider profile store at ${path} cannot be migrated: ${reason}; the store is unchanged. Preserve it and provision a separate current-schema store`,
+  );
+}
+
+/**
+ * One-shot migration of a store whose `provider_profile` table carries an
+ * earlier `provider_kind` CHECK set; SQLite cannot alter a CHECK in place.
+ *
+ * Call it explicitly, with no other connection open, before opening the store
+ * with this version; opening never migrates. Under SQLite's exclusive write
+ * lock, one transaction rebuilds the table from the current schema, copies
+ * every row verbatim (the profile ref names the credential-store secret, which
+ * is never read), verifies count and content, and recreates the index. The
+ * custody tables hold no provider kind and must already be current.
+ *
+ * `PROVIDER_STORE_SCHEMA_STALE` means any other difference, or a copy that did
+ * not verify: the store cannot be migrated and needs a new store. Any other
+ * error (such as `SQLITE_BUSY`) is operational: the transaction rolled back,
+ * the store is unchanged, and the call can be retried once other processes
+ * are closed. A current store, or no store, is `'unchanged'`.
+ */
+export function migrateProviderProfileStore(path: string): ProviderProfileStoreMigration {
+  return runProviderProfileStoreMigration(path);
+}
+
+/** {@link migrateProviderProfileStore} with its test-only fault seam. */
+export function runProviderProfileStoreMigration(
+  path: string,
+  faults?: ProviderProfileStoreMigrationFaults,
+): ProviderProfileStoreMigration {
+  if (!existsSync(path)) return 'unchanged';
+  const database = openSqliteDatabase(path);
+  try {
+    database.exec('BEGIN EXCLUSIVE');
+    try {
+      const migrated = migrateInTransaction(database, path, faults);
+      database.exec(migrated ? 'COMMIT' : 'ROLLBACK');
+      return migrated ? 'migrated' : 'unchanged';
+    } catch (error) {
+      // SQLite has already rolled back after a FULL, IOERR or NOMEM failure.
+      if (database.isTransaction) database.exec('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    database.close();
+  }
+}
+
+function migrateInTransaction(
+  database: DatabaseSync,
+  path: string,
+  faults: ProviderProfileStoreMigrationFaults | undefined,
+): boolean {
+  const stored = storedTableDdl(database, 'provider_profile');
+  if (stored === undefined || normalizeTableDdl(stored) === normalizeTableDdl(SCHEMA)) return false;
+  if (!hasOlderProviderKindSetOnly(stored)) {
+    throw migrationRefused(path, 'its provider_profile table differs from the current schema beyond an earlier provider_kind set');
+  }
+  for (const [name, ddl] of Object.entries(CUSTODY_TABLES)) {
+    const custody = storedTableDdl(database, name);
+    if (custody !== undefined && normalizeTableDdl(custody) !== normalizeTableDdl(ddl)) {
+      throw migrationRefused(path, `its ${name} table differs from the current schema`);
+    }
+  }
+  // Rename the old table instead of the new one: SQLite rewrites a renamed
+  // table's stored statement with a quoted name, which would no longer match
+  // `SCHEMA` on the next open.
+  database.exec(`ALTER TABLE provider_profile RENAME TO ${MIGRATION_SOURCE_TABLE}`);
+  database.exec(SCHEMA);
+  database.exec(`INSERT INTO provider_profile (${PROFILE_COLUMNS}) SELECT ${PROFILE_COLUMNS} FROM ${MIGRATION_SOURCE_TABLE}`);
+  faults?.afterCopy?.();
+  const check = database
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM ${MIGRATION_SOURCE_TABLE}) AS source,
+         (SELECT COUNT(*) FROM provider_profile) AS copied,
+         (SELECT COUNT(*) FROM (
+           SELECT ${PROFILE_COLUMNS} FROM ${MIGRATION_SOURCE_TABLE}
+           EXCEPT SELECT ${PROFILE_COLUMNS} FROM provider_profile
+         )) AS missing`,
+    )
+    .get() as { copied: number; missing: number; source: number };
+  if (Number(check.copied) !== Number(check.source) || Number(check.missing) !== 0) {
+    throw migrationRefused(path, 'the copied profile rows did not match the original rows');
+  }
+  database.exec(`DROP TABLE ${MIGRATION_SOURCE_TABLE}`);
+  database.exec(ENABLED_INDEX);
+  return true;
 }

@@ -321,14 +321,7 @@ describe('hosted Agent egress contract', () => {
     });
 
     const polled = await harness.request('/byok/events?cursor=0', { headers: device.authorization });
-    const pollBody = (await polled.json()) as { capabilities: readonly string[]; events: unknown[] };
-    expect(pollBody.capabilities).toEqual(
-      expect.arrayContaining([
-        'agent-egress-policy',
-        'agent-egress-reliable-ack',
-        'agent-content-workspace-read',
-      ]),
-    );
+    const pollBody = (await polled.json()) as { events: unknown[] };
     expect(pollBody.events).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'agent.egress.ack' })]));
   });
 

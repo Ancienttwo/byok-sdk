@@ -7,6 +7,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { createCodexAgentHome } from '../adapters/codex/agent-user-context';
 import type { Session, MessageDraftDelta } from '../types';
 import {
   RuntimeExecutionFailure,
@@ -136,7 +137,7 @@ describe('Codex persistent app-server adapter', () => {
       mcpToolsets: true,
       messageDraft: true,
       preparedLane: false,
-      isolation: { userContext: false, userMcpServers: true, sessionPersistence: false },
+      isolation: { userInstructions: true, userOutputStyle: false, userMemory: true, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: false },
     });
     // Codex reads MCP tools itself; the daemon takes no tools/list observation for it.
     expect(adapter().descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
@@ -814,5 +815,79 @@ describe('CodexAdapter agentUserMcpServers (#935)', () => {
       expect(frames.map(frame => frame.method)).not.toContain('mcpServerStatus/list');
       expect(frames[1].params.config).toEqual({ mcp_servers: { host: { command: process.execPath, args: ['host-mcp.js'], enabled: true } } });
     }
+  });
+});
+
+describe('CodexAdapter agentUserContext (#1565)', () => {
+  /** A user CODEX_HOME with every linked entry and the entries that stay out. */
+  async function userHome() {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-user-')));
+    dirs.push(root);
+    for (const name of ['auth.json', 'config.toml', 'hooks.json', 'AGENTS.md', 'AGENTS.override.md']) await fs.writeFile(path.join(root, name), '{}');
+    for (const name of ['rules', 'skills', 'memories']) await fs.mkdir(path.join(root, name));
+    return root;
+  }
+
+  it('validates the option', () => {
+    expect(() => adapter({ agentUserContext: 'strict' as never })).toThrow(new TypeError('CodexAdapterOptions.agentUserContext must be inherit or excluded'));
+  });
+
+  it('runs an Agent task in an SDK home of links to the login, configuration, guardrails and the Agent\'s own thread store', async () => {
+    const user = await userHome();
+    const resources = await ctx({ CODEX_HOME: user, FAKE_CODEX_USER_CONFIG: JSON.stringify({ cli_auth_credentials_store: 'file' }) });
+    const receipt = path.join(user, '..', `${path.basename(user)}.home.json`);
+    resources.env.FAKE_CODEX_HOME_RECEIPT = receipt;
+    resources.env.FAKE_CODEX_RPC_RECEIPT = `${receipt}.rpc`;
+    await turn(await open(adapter({ agentUserContext: 'excluded' }), task, { ...resources, agentHome: resources.workspaceDir }));
+    const { home, entries } = JSON.parse(await fs.readFile(receipt, 'utf8'));
+    expect(home).not.toBe(user);
+    const store = path.join(resources.workspaceDir, '.byok', 'codex');
+    expect(entries).toEqual({ ...Object.fromEntries(['auth.json', 'config.toml', 'hooks.json', 'rules'].map(name => [name, path.join(user, name)])),
+      sessions: path.join(store, 'sessions'), archived_sessions: path.join(store, 'archived_sessions') });
+    expect(await fs.readdir(user)).not.toContain('sessions');
+    const methods = (await fs.readFile(`${receipt}.rpc`, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(frame => frame.id !== undefined && typeof frame.method === 'string').map(frame => frame.method);
+    expect(methods.slice(0, 3)).toEqual(['initialize', 'config/read', 'thread/start']);
+  });
+
+  it('refuses a credential store other than file before the thread opens', async () => {
+    const resources = await ctx({ CODEX_HOME: await userHome(), FAKE_CODEX_USER_CONFIG: JSON.stringify({ cli_auth_credentials_store: 'keyring' }) });
+    const error = await startPreparedOperation(adapter({ agentUserContext: 'excluded' }), task, { ...resources, agentHome: resources.workspaceDir }).catch(e => e);
+    expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable',
+      message: 'codex Agent user context exclusion refused: cli_auth_credentials_store is keyring; an SDK-owned CODEX_HOME supports file credentials only' });
+  });
+
+  const refusals: ReadonlyArray<readonly [reason: string, prepare: (user: string, home: string) => Promise<unknown>, agentHome: string | undefined]> = [
+    ['the task has no sealed Agent home for its thread store', async () => {}, undefined],
+    ['the user CODEX_HOME does not exist', async (user: string) => fs.rm(user, { recursive: true }), 'agent-home'],
+    ['the user CODEX_HOME has no auth.json; log in to Codex with file credentials first', async (user: string) => fs.rm(path.join(user, 'auth.json')), 'agent-home'],
+    // An earlier task may have redirected its own store to the user's thread store.
+    ...[['.byok', 'codex'], ['.byok', 'codex', 'sessions'], ...(process.platform === 'darwin' ? [['.BYOK', 'codex']] : [])].map(at => [
+      'the Agent home thread store is not a real directory inside the Agent home',
+      async (user: string, home: string) => {
+        await fs.mkdir(path.join(user, 'sessions'));
+        await fs.mkdir(path.join(home, ...at.slice(0, -1)), { recursive: true });
+        await fs.symlink(at.length === 3 ? path.join(user, 'sessions') : user, path.join(home, ...at), 'dir');
+      },
+      'agent-home',
+    ] as const),
+  ];
+  it.each(refusals)('refuses when %s', async (reason, remove, agentHome) => {
+    const user = await userHome();
+    const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-sdk-')));
+    dirs.push(dir);
+    const home = agentHome && path.join(dir, agentHome);
+    if (home !== undefined) await fs.mkdir(home);
+    await remove(user, home!);
+    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, home)).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable',
+      message: `codex Agent user context exclusion refused: ${reason}` });
+  });
+
+  it('refuses on Windows when the account may not create a symbolic link', async () => {
+    const user = await userHome();
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-sdk-'));
+    dirs.push(dir);
+    vi.spyOn(fs, 'symlink').mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
+    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, path.join(dir, 'agent-home'), 'win32')).rejects.toMatchObject({ category: 'authority',
+      message: 'codex Agent user context exclusion refused: Windows refused to create a symbolic link (EPERM); turn on Developer Mode or run the daemon as an administrator' });
   });
 });

@@ -30,6 +30,9 @@ owns the only Agent-home composition rule:
           <taskId>/                    memory-reader runtime cwd, kept after the terminal
         results/
           result-<task-hash>.json      staged submit_result outcome; 7 days / 256 per home once the home is idle
+        codex/                         Codex agentUserContext 'excluded' only; kept until the Host removes the home
+          sessions/                    Codex rollouts of this Agent's threads, linked into each task's CODEX_HOME
+          archived_sessions/
       ...                             opaque Agent files
 ```
 
@@ -134,6 +137,7 @@ until it has one. TTLs are `storage.retention.ttlMs[<class>]`.
 | `quarantine` | Exempt: the only evidence of a corrupt journal or health file; one entry per corruption event, not per task | Operator, after `byok-agent doctor` |
 | `agent-content` | Exempt: Host product data | Host |
 | `byok-authority` | Exempt: a fixed set of SDK records per home with bounded log tails; grows with Agent count, not task count | Host, with the Agent home |
+| `agent-runtime-sessions` | Exempt: a runtime's own transcripts of an Agent's threads under `<home>/.byok/codex/` (Codex `agentUserContext: 'excluded'`), kept so a later task can resume. Unbounded: they grow with every task and accumulate until the Host removes the Agent home | Host, with the Agent home |
 | `store-authority` | Exempt: fixed device records and self-bounded logs (`audit.jsonl` rewrites past 10 MiB) | SDK, with the store |
 | `runtime-session-external` | Exempt: Claude, Codex, Grok and Pi-login session records under the runtime's own config directory, mixed with the user's sessions; never measured or deleted | Host: `ClaudeAdapterOptions.agentSessionPersistence: 'disabled'` for Claude, the runtime's own session management otherwise |
 

@@ -154,7 +154,7 @@ it('cleans a detached descendant before reporting success', async () => {
 it('registers an opt-in adapter with truthful capabilities, and rejects unqualified Host toolsets', async () => {
   const box = setup();
   const [adapter] = createRuntimeAdapters({ runtimeAllowlist: ['opencode'], runtimes: { opencode: { models, executable: fake } } });
-  expect(adapter!.descriptor).toEqual(expect.objectContaining({ id: 'opencode', platforms: [], capabilities: OPENCODE_RUNTIME_CAPABILITIES }));
+  expect(adapter!.descriptor).toEqual(expect.objectContaining({ id: 'opencode', platforms: ['darwin'], capabilities: OPENCODE_RUNTIME_CAPABILITIES, versionPolicy: { qualifiedVersion: '2.2.6', unqualified: 'warn' } }));
   expect(validateRuntimeDetectResult(await box.adapter.detect())).toMatchObject({ kind: 'available', version: '1.18.35', rawVersion: '1.18.35\n', executableSource: 'config' });
   const detect = vi.spyOn(box.adapter, 'runtimeEnvironment');
   expect(await box.adapter.prepare({ offer: { instruction: 'hello' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [], mcpServers: { host: { command: 'unused' } } })).toMatchObject({ kind: 'reject' });
@@ -212,7 +212,6 @@ it('keeps the admitted native identity in task.complete and persisted terminal e
   const recorded = vi.spyOn(handoffs, 'recordTerminal');
   const runner = new TaskRunner({ ...freshOfferRunnerDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [box.adapter], agentHome: new AgentHomeManager({ hostStorageRoot: path.join(box.cwd, 'homes') }), agentSessionHandoffs: handoffs,
-    getServerCapabilities: () => ['custom-harness'],
     deviceId: 'device-1', productId: 'opencode-test', storeDir: path.join(box.cwd, 'store'),
     send: envelope => { sent.push(envelope); }, approvalRegistry: new ApprovalRegistry(),
     blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },

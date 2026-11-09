@@ -145,9 +145,12 @@ directory before you write the executable into it. Without the asset root, `dete
 launch is refused with `pi_bundled_assets_unavailable`. Pi reads its photon
 WASM file beside the executable; without it, pi skips image resizing.
 
-Bundled pi offers no Pi subagents. The SDK loads the `pi-subagents` dependency
-only from its installed package, because it reads its own package files at run
-time; a product bundle never inlines it.
+Bundled pi offers foreground Pi subagents. pi-subagents reads its own package
+files at run time, so a product bundle never inlines it: the helper copies the
+client's exact `pi-subagents` package with its runtime dependencies (about
+22 MB) and the SDK child gate extensions into the asset root, and the bundled
+host loads that copy through pi's extension loader. Background subagents are
+refused in a bundled product; the tool call returns the error.
 
 Bundled pi loads the user's own Pi packages and extensions from the user's
 agent directory (`settings.json` `packages`, `extensions`), as the installed
@@ -161,7 +164,6 @@ call `runSdkReservedHelperCommand()` before its code imports pi. A product that
 imports pi itself at the top of its entry must define `PI_BUNDLED_NODE` as
 `true` in its bundler (esbuild/Bun `define: { PI_BUNDLED_NODE: 'true' }`).
 A CommonJS product bundle, single-pass or ESM-then-CJS, can include the Pi
-host with no redirect or with `#byok-pi-runtime-host` redirected to the sealed
 host. CJS output has no `import.meta`, and pi reads `import.meta.url` when it
 evaluates. So the bundler must define it from `__filename` (esbuild
 `define: { 'import.meta.url': '__product_import_meta_url' }` with the banner

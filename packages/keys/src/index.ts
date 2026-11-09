@@ -132,8 +132,8 @@ export {
   secureSqliteFilePermissions,
 } from './sqlite-support';
 
-export { SqliteProviderProfileStore } from './sqlite-profile-store';
-export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
+export { SqliteProviderProfileStore, migrateProviderProfileStore } from './sqlite-profile-store';
+export type { ProviderProfileStoreMigration, SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
 export { inspectProviderProfileStore } from './store-compatibility';
 
 export {

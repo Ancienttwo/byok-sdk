@@ -13,7 +13,7 @@ import { createHarness, TENANT_A } from './support/harness';
 const MATRIX = {
   steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true,
   toolAuthorizationAuto: true, durableLane: false, preparedLane: false,
-  isolation: { userContext: true, userMcpServers: true, sessionPersistence: true },
+  isolation: { userInstructions: true, userOutputStyle: false, userMemory: true, userSkills: false, userHookContext: true, userMcpServers: true, sessionPersistence: true },
 } as const;
 
 describe('presence capability matrix', () => {

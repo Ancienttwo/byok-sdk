@@ -20,7 +20,7 @@ import { testIngressBudget } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Record<string, unknown> });
@@ -40,7 +40,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 });
 
-async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], serverCapabilities: readonly string[] = []): Promise<TaskRunner> {
+async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[]): Promise<TaskRunner> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-refusal-'));
   dirs.push(dir);
   // The Host skipped the gate in these tests, and the daemon's own advertised-flag
@@ -56,13 +56,12 @@ async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], serverC
     },
     approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'sealed-refusal',
     localAgentRelease: Object.freeze({ version: '0.24.0-rc.1' }),
-    getServerCapabilities: () => serverCapabilities,
   });
 }
 
 describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', () => {
   it.each(sealedOffers)(
-    'declines a %s task.offer (%s) non-retryably and never starts a session',
+    'declines a %s task.offer (%s) non-retryably with the closed code sealed_key_unavailable and never starts a session',
     async (_form, _label, line) => {
       const adapter = new StubRuntimeAdapter('pi');
       const sent: Envelope[] = [];
@@ -73,36 +72,14 @@ describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', 
       await runner.handleEnvelope(offer);
 
       const declines = sent.filter((envelope) => envelope.type === 'task.decline');
-      expect(declines, 'one decline, also for a redelivered offer').toHaveLength(1);
-      expect(declines[0]).toMatchObject({
-        type: 'task.decline',
-        task_id: 'sealed-task',
-        payload: { reason: expect.stringMatching(/^sealed_payload_unsupported:/u), retryable: false },
-      });
-      expect(declines[0]!.payload).not.toHaveProperty('code');
-      expect(declines[0]!.payload).toMatchObject({ agentRef: line.payload.agentRef });
-      expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
-      expect(adapter.startCalls).toHaveLength(0);
-    },
-  );
-
-  it.each(sealedOffers)(
-    'declines a %s task.offer (%s) with the closed code sealed_key_unavailable to a server with sealed-payload-v1',
-    async (_form, _label, line) => {
-      const adapter = new StubRuntimeAdapter('pi');
-      const sent: Envelope[] = [];
-      const runner = await runnerWith(adapter, sent, ['sealed-payload-v1']);
-
-      await runner.handleEnvelope(createEnvelope('task.offer', line.payload as never, { taskId: 'sealed-task', seq: 1 }));
-
-      const declines = sent.filter((envelope) => envelope.type === 'task.decline');
-      expect(declines.map((envelope) => envelope.payload)).toEqual([{
+      expect(declines.map((envelope) => envelope.payload), 'one decline, also for a redelivered offer').toEqual([{
         reason: 'sealed_key_unavailable',
         code: 'sealed_key_unavailable',
         retryable: false,
         agentRef: line.payload.agentRef,
         admission: { totalMs: expect.any(Number) },
       }]);
+      expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
       expect(adapter.startCalls).toHaveLength(0);
     },
   );

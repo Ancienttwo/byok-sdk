@@ -91,7 +91,6 @@ function memorySealer(lost: () => boolean = () => false): SealedTasks {
     },
     tenantId: 'tenant-memory', deviceId: 'device-memory',
     blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
-    serverCapabilities: () => [],
   });
 }
 

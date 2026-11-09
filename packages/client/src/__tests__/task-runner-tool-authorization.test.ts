@@ -47,7 +47,7 @@ class GateCapturingAdapter extends StubRuntimeAdapter {
 const AUTO_CAPABLE: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, mcpToolsets: true, toolAuthorizationAuto: true };
 const NO_AUTO: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, mcpToolsets: true };
 
-function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'onToolAuthorizationDecision' | 'approvalTimeoutMs' | 'getServerCapabilities'>> = {}) {
+function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'onToolAuthorizationDecision' | 'approvalTimeoutMs'>> = {}) {
   const approvalRegistry = new ApprovalRegistry();
   const runner = new TaskRunner({
     advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
@@ -397,7 +397,7 @@ describe('daemon tool authorization', () => {
   it.each(['codex', 'grok', 'hermes'])('auto rules do not add missing pre-tool support to %s', async runtimeId => {
     const adapter = new GateCapturingAdapter(NO_AUTO, runtimeId);
     const sent: Envelope[] = [];
-    const { runner } = makeRunner(adapter, sent, { getServerCapabilities: () => ['custom-harness'], toolAuthorization: () => ({ default: 'auto', rules: {
+    const { runner } = makeRunner(adapter, sent, { toolAuthorization: () => ({ default: 'auto', rules: {
       allowWithoutAsking: [{ id: 'allow-read', match: { toolName: 'read' } }],
     } }) });
     await offer(runner, `unsupported-${runtimeId}`);

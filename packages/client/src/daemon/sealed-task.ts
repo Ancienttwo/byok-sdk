@@ -24,7 +24,6 @@ import {
   createEnvelope,
   isSealedPayload,
   isSealedTaskPlainOutput,
-  requiredReceiverCapabilities,
   sealedAgentMessageMaxContentLength,
   sealedMovedFields,
   type AgentMemoryProjectionSealedMutation,
@@ -35,13 +34,12 @@ import {
   type MessageType,
   type SealableMessageType,
   type SealedSplitEntry,
-  type TaskFailure,
   type TaskSealing,
 } from '@byok-sdk/protocol';
 import { BlobHttpError } from './blob-http-error';
 import type { AgentMemoryProjectionSealer } from './agent-memory';
 import { routineTemplateBinding, routineTemplateExpired, type RoutineRef } from './sealed-routine-template';
-import { DAEMON_TASK_FAILURE, taskFailureField } from './task-failure';
+import { DAEMON_TASK_FAILURE } from './task-failure';
 
 type JsonObject = { [key: string]: unknown };
 
@@ -79,13 +77,6 @@ export interface SealedTasksOptions {
   readonly tenantId: string;
   readonly deviceId: string;
   readonly blobs: SealedCiphertextBlobs;
-  /**
-   * The flags the current session's server advertised, which decide whether
-   * an output may name its ciphertext blob. `undefined` while the connection
-   * is between sessions or a start is under way: the next session's flags
-   * are not known yet.
-   */
-  readonly serverCapabilities: () => readonly string[] | undefined;
 }
 
 export type SealedOfferOpenResult =
@@ -110,8 +101,7 @@ const TERMINAL_TYPES: ReadonlySet<MessageType> = new Set(['task.complete', 'task
 
 /**
  * A seal that may succeed later: its ciphertext upload failed short of a
- * final refusal, or the server flags are not known until the next session.
- * The caller seals again later.
+ * final refusal. The caller seals again later.
  */
 class SealedRetryError extends Error {}
 
@@ -361,16 +351,9 @@ export class SealedTasks {
     if (header.paddedLength <= SEALED_INLINE_MAX_PADDED_LENGTH) {
       return createEnvelope(type, { ...kept, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId });
     }
-    // Above the inline frame, the output names its ciphertext blob, but only
-    // when the server holds such a blob (§2.5): never for an inline-only type,
-    // and only after the server advertised every flag the member needs.
-    const inlineOnly = entry.inlineOnly === true;
-    const advertised = inlineOnly ? [] : this.options.serverCapabilities();
-    if (advertised === undefined) {
-      throw new SealedRetryError(`${type} of sealed task ${taskId} waits for the next session to advertise the server flags`);
-    }
-    if (inlineOnly
-      || !requiredReceiverCapabilities(type, { ...kept, sealed: { ciphertextRef: {} } }).every((flag) => advertised.includes(flag))) {
+    // Above the inline frame, the output names its ciphertext blob, which the
+    // server holds for the life of the task (§2.5), except for an inline-only type.
+    if (entry.inlineOnly === true) {
       throw new Error(`${type} of sealed task ${taskId} seals to ${header.paddedLength} bytes, over the inline maximum`);
     }
     const ciphertextRef = omit(await this.#upload(ciphertext) as unknown as JsonObject, ['url']);
@@ -380,9 +363,8 @@ export class SealedTasks {
   /**
    * Seals the body of a task's Agent message once (#1045 C2). The message
    * outbox keeps the sealed member, so every retry sends the same bytes.
-   * Throws when the task has no sealing key, or when the member needs a
-   * ciphertext blob the current server does not hold: the message is not
-   * sent, and never in plaintext.
+   * Throws when the task has no sealing key or the ciphertext blob upload
+   * fails: the message is not sent, and never in plaintext.
    */
   async sealPublish(taskId: string, draft: { readonly messageId: string; readonly cursor: number; readonly body: string; readonly maxBytes: number }): Promise<AgentMessagePublishSealedPayload['sealed']> {
     const task = this.#tasks.get(taskId);
@@ -401,10 +383,6 @@ export class SealedTasks {
     });
     type Member = AgentMessagePublishSealedPayload['sealed'];
     if (header.paddedLength <= SEALED_INLINE_MAX_PADDED_LENGTH) return { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } as Member;
-    const advertised = this.options.serverCapabilities();
-    if (advertised === undefined || !requiredReceiverCapabilities('agent.message.publish', { sealed: { ciphertextRef: {} } }).every((flag) => advertised.includes(flag))) {
-      throw new Error(`the Agent message of sealed task ${taskId} needs a ciphertext blob the server does not hold now`);
-    }
     return { ...header, ciphertextRef: omit(await this.#upload(ciphertext) as unknown as JsonObject, ['url']) } as Member;
   }
 
@@ -480,18 +458,9 @@ export class SealedTasks {
     }
   }
 
-  /**
-   * A replacement failure is the daemon's own, so it never keeps the runtime's
-   * class. It carries `unknown` when the current server advertises
-   * runtime-failure-class; between sessions no flag is known, so it carries none.
-   */
-  #daemonFailure(): { failure?: TaskFailure } {
-    return taskFailureField(DAEMON_TASK_FAILURE, this.options.serverCapabilities() ?? []);
-  }
-
   /** The failure of a terminal that cannot be sealed as it is. */
   #unsealableFailure(payload: JsonObject): JsonObject {
-    return { reason: 'terminal_result_unsealable', retryable: false, ...this.#daemonFailure(), ...pick(payload, UNSEALABLE_FAIL_FIELDS) };
+    return { reason: 'terminal_result_unsealable', retryable: false, failure: DAEMON_TASK_FAILURE, ...pick(payload, UNSEALABLE_FAIL_FIELDS) };
   }
 
   /** The failure that replaces a refused terminal sent by `ciphertextRef` (§77b); `undefined` for any other envelope. */
@@ -509,7 +478,7 @@ export class SealedTasks {
     switch (envelope.type) {
       case 'task.complete':
       case 'task.fail':
-        return createEnvelope('task.fail', { reason: code, retryable: false, ...this.#daemonFailure(), ...pick(payload, plainTerminalFields(UNSEALABLE_FAIL_FIELDS, categories)) } as never, { taskId });
+        return createEnvelope('task.fail', { reason: code, retryable: false, failure: DAEMON_TASK_FAILURE, ...pick(payload, plainTerminalFields(UNSEALABLE_FAIL_FIELDS, categories)) } as never, { taskId });
       case 'task.cancelled':
         return createEnvelope('task.cancelled', omit(payload, ['reason', ...(categories.includes('memory-projection') ? memoryEvidenceFields('task.cancelled') : [])]) as never, { taskId });
       case 'task.decline':

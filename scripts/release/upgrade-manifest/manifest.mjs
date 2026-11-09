@@ -18,7 +18,7 @@ export const MANIFEST_SCHEMA_VERSION = 1;
 export const MANIFEST_PATH = 'packages/client/upgrade-manifest.json';
 export const BASELINE_PATH = 'scripts/release/upgrade-manifest/baseline.json';
 export const IMPACTS = ['additive', 'breaking'];
-export const ACCEPTANCE = ['accept', 'new-path-repair', 'reject'];
+export const ACCEPTANCE = ['accept', 'migrate', 'new-path-repair', 'reject'];
 const ENTRY_KEYS = new Set(['id', 'impact', 'summary', 'migration', 'acceptance', 'items']);
 const ISSUE_LINK = /^https:\/\/github\.com\/Ancienttwo\/byok-sdk\/(?:issues|pull)\/\d+$/;
 // Categories whose before/after values mean something to a reader. Export

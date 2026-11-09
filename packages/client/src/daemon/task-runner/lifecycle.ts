@@ -102,7 +102,7 @@ export async function teardownActiveTask(
       return createEnvelope('task.fail', {
         reason,
         retryable,
-        ...this['failurePayload'](DAEMON_TASK_FAILURE),
+        failure: DAEMON_TASK_FAILURE,
         ...this['terminalInferenceUsagePayload'](active),
         ...this['preparedObservationPayload'](active),
         ...this['agentTerminalPayload'](active),
@@ -131,7 +131,7 @@ export async function shutdownTask(this: TaskRunner, active: ActiveTask, reason:
       return createEnvelope('task.fail', {
         reason: shutdownReason,
         retryable: true,
-        ...this['failurePayload'](DAEMON_TASK_FAILURE),
+        failure: DAEMON_TASK_FAILURE,
         ...this['terminalInferenceUsagePayload'](active),
         ...this['preparedObservationPayload'](active),
         ...this['agentTerminalPayload'](active),

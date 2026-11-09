@@ -134,7 +134,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       // The capability matrix (#1103) rides on the same object.
       toolAuthorizationAuto: true,
       preparedLane: true,
-      isolation: { userContext: true, userMcpServers: false, sessionPersistence: false },
+      isolation: { userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: true, userHookContext: true, userMcpServers: false, sessionPersistence: false },
     });
 
     // Claude still supports plan; its private confirm/approval MCP path has been removed.
@@ -146,7 +146,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       messageDraft: true,
       toolAuthorizationAuto: true,
       preparedLane: false,
-      isolation: { userContext: true, userMcpServers: true, sessionPersistence: true },
+      isolation: { userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: true },
     });
 
     // codex: persistent app-server steering with YOLO-only auto permission mode.
@@ -157,7 +157,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       mcpToolsets: true,
       messageDraft: true,
       preparedLane: false,
-      isolation: { userContext: false, userMcpServers: true, sessionPersistence: false },
+      isolation: { userInstructions: true, userOutputStyle: false, userMemory: true, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: false },
     });
 
     // The wire value remains adapter-generated. The shipped adapters all
@@ -214,9 +214,7 @@ describe('conn.hello.capabilities', () => {
     const hello = await server.waitFor((e) => e.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
 
-    // `blob-upload` is unconditional, not gated on any adapter's own
-    // `capabilities()` the way `steer` is.
-    expect(hello.payload.capabilities).toEqual(['steer', 'blob-upload', 'runtime-unavailable-cause', 'terminal-projection-selection', 'dispatch-selection', 'toolset-selection', 'custom-harness']);
+    expect(hello.payload.capabilities).toEqual(['steer', 'dispatch-selection', 'toolset-selection']);
   });
 
   it('withholds dispatch-selection when a custom built-in-id adapter has not opted into exact target semantics', async () => {

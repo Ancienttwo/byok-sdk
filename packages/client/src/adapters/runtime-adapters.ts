@@ -50,6 +50,8 @@ export interface RuntimeAdaptersRuntimes {
   codex?: {
     /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
     agentUserMcpServers?: CodexAdapterOptions['agentUserMcpServers'];
+    /** `CodexAdapterOptions.agentUserContext`: `excluded` runs an Agent task in an SDK-owned `CODEX_HOME` that keeps the user's `AGENTS.md`, skills, memories and threads out, links the login, configuration and guardrails, and keeps the Agent's threads in its home. Default `inherit`. */
+    agentUserContext?: CodexAdapterOptions['agentUserContext'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
   };
@@ -166,7 +168,7 @@ type SdkBuiltRuntimeId = RuntimeId | 'grok' | 'dsh' | 'agy' | 'opencode';
 const RUNTIME_OPTION_VALUES: Readonly<Record<keyof RuntimeAdaptersRuntimes, Readonly<Record<string, readonly string[]>>>> = {
   pi: { agentUserContext: ['excluded', 'inherit'] },
   claude: { agentUserContext: ['excluded', 'inherit'], agentSessionPersistence: ['disabled', 'enabled'] },
-  codex: { agentUserMcpServers: ['excluded', 'inherit'] },
+  codex: { agentUserMcpServers: ['excluded', 'inherit'], agentUserContext: ['excluded', 'inherit'] },
   grok: { compatInstructions: ['disabled', 'inherit'], agentUserMcpServers: ['excluded', 'inherit'] },
   dsh: { sandbox: ['danger-full-access', 'read-only', 'workspace-write'] },
   agy: {},
@@ -240,6 +242,7 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
         nativeAssetRoot: config.nativeAssetRoot, ...environment,
         ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }),
         ...(codex?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: codex.agentUserMcpServers }),
+        ...(codex?.agentUserContext === undefined ? {} : { agentUserContext: codex.agentUserContext }),
         ...(codex?.versionPolicy === undefined ? {} : { versionPolicy: codex.versionPolicy, versionPolicySource: 'daemon-config' as const }),
       });
     case 'grok':

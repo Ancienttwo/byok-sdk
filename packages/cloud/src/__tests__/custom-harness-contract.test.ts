@@ -29,7 +29,7 @@ describe('custom harness protocol authority', () => {
   ] satisfies Array<[Omit<TaskClaimPayload, 'deviceId'>, Omit<TaskClaimPayload, 'deviceId'>]>) (
     'admits concurrent claims only for the atomic winner: %j / %j', async (first: Omit<TaskClaimPayload, 'deviceId'>, second: Omit<TaskClaimPayload, 'deviceId'>) => {
       const { h, stores, deviceId } = await setup();
-      await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'custom-harness'], harnesses: [...inventory, { ...inventory[0]!, id: 'other' }] });
+      await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY], harnesses: [...inventory, { ...inventory[0]!, id: 'other' }] });
       const { taskId } = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
       const claim = stores.tasks.claim.bind(stores.tasks);
       let release!: () => void;
@@ -68,20 +68,20 @@ describe('custom harness protocol authority', () => {
     expect(HarnessInventorySchema.safeParse([...inventory, ...inventory]).success).toBe(false);
   });
 
-  it('requires the capability and advertised inventory before reserving an offer', async () => {
+  it('requires the advertised inventory before reserving an offer, and takes a hello inventory with no flag', async () => {
     const { h, stores, deviceId } = await setup();
     await grantAgentHome(h, TENANT_A, deviceId);
-    await expect(h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness' } })).rejects.toThrow('custom-harness');
-    await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'custom-harness'], harnesses: inventory });
+    await expect(h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness' } })).rejects.toThrow('not advertised by this device');
+    await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY], harnesses: inventory });
     await expect(h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'other' } })).rejects.toThrow();
     await expect(h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness', runtime: 'pi' } })).rejects.toThrow();
     const hello = createEnvelope('conn.hello', { deviceId, productId: 'test-product', protocolVersions: [PROTOCOL_VERSION], capabilities: [], runtimes: [], harnesses: inventory });
-    expect(await handleInboundEnvelope(stores, deviceId, hello).then((result) => result.outcome)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, hello).then((result) => result.outcome)).toBe('accepted');
   });
 
   it('seals explicit selection, claim CAS and terminal echo for the actual device', async () => {
     const { h, stores, deviceId } = await setup();
-    await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'custom-harness'], harnesses: [...inventory, { ...inventory[0]!, id: 'other' }] });
+    await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY], harnesses: [...inventory, { ...inventory[0]!, id: 'other' }] });
     const { taskId } = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness' } });
     for (const payload of [{ deviceId, agentRef: TEST_AGENT_REF }, { deviceId, agentRef: TEST_AGENT_REF, harnessId: 'other' }, { deviceId, agentRef: TEST_AGENT_REF, harnessId: 'acme-harness', runtime: 'pi' as const }]) {
       expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', payload, { taskId })).then((result) => result.outcome)).toBe('rejected');
@@ -98,8 +98,8 @@ describe('custom harness protocol authority', () => {
     const { h, stores, deviceId } = await setup();
     const other = await h.pairDevice(TENANT_A);
     const otherStores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: other.deviceId }, { core: h.core, cloud: h.stores, mailboxWake: h.mailboxWake });
-    await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'custom-harness'], harnesses: inventory });
-    await otherStores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'custom-harness'], harnesses: [{ ...inventory[0]!, id: 'other' }] });
+    await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY], harnesses: inventory });
+    await otherStores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY], harnesses: [{ ...inventory[0]!, id: 'other' }] });
     await expect(h.cloud.enqueueAgentOffer(TENANT_A, other.deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness' } })).rejects.toThrow();
     const { taskId } = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
     expect(await handleInboundEnvelope(otherStores, other.deviceId, createEnvelope('task.claim', { deviceId: other.deviceId, agentRef: TEST_AGENT_REF, harnessId: 'other' }, { taskId })).then((result) => result.outcome)).toBe('rejected');
@@ -119,7 +119,7 @@ describe('custom harness protocol authority', () => {
   });
   it('accepts only offer-bound interruption observations without inventing a claim', async () => {
     const { h, stores, deviceId } = await setup();
-    await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'custom-harness'], harnesses: inventory });
+    await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY], harnesses: inventory });
     const offer = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness' } });
     const valid = { reason: 'daemon_interrupted', retryable: false, agentRef: TEST_AGENT_REF, harnessId: 'acme-harness',
       recovery: { kind: 'daemon_interrupted' as const, offerId: offer.envelope.id } };
@@ -149,7 +149,7 @@ describe('custom harness protocol authority', () => {
 
   it('does not use recovery to bypass a built-in selection or an existing claim', async () => {
     const { h, stores, deviceId } = await setup();
-    await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'custom-harness'], harnesses: [...inventory, { ...inventory[0]!, id: 'other' }] });
+    await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY], harnesses: [...inventory, { ...inventory[0]!, id: 'other' }] });
     for (const builtin of [false, true]) {
       const offer = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), ...(builtin ? { runtime: 'pi' as const } : {}) } });
       const payload = { reason: 'daemon_interrupted', retryable: false, agentRef: TEST_AGENT_REF, harnessId: 'acme-harness',

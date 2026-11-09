@@ -24,7 +24,7 @@ describe('presence upsert SQL binding contract', () => {
     const clock = createMutableClock();
     const matrix = {
       steer: true, resume: true, toolAuthorizationAuto: true, preparedLane: true,
-      isolation: { userContext: true, userMcpServers: false, sessionPersistence: false },
+      isolation: { userInstructions: true, userOutputStyle: true, userMemory: false, userSkills: true, userHookContext: false, userMcpServers: false, sessionPersistence: false },
     };
     const row = {
       tenant_id: 'sql-presence', device_id: 'device', level: 'online', detail: null, configured_toolsets: null, client_version: null,

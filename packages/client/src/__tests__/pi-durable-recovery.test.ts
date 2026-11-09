@@ -26,9 +26,9 @@ describe('durable parent recovery authority', () => {
     // #1197: the durable worker refuses excluded user context, so neither its
     // descriptor nor the wire projection may claim the capability. The
     // ordinary RPC lane still provides it.
-    expect(adapter.descriptor.capabilities.isolation).toEqual({ userContext: false, userMcpServers: false, sessionPersistence: false });
-    expect(toRuntimeInfoCapabilities(adapter.descriptor.capabilities).isolation?.userContext).toBe(false);
-    expect(new PiAdapter().descriptor.capabilities.isolation?.userContext).toBe(true);
+    expect(adapter.descriptor.capabilities.isolation).toEqual({ userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: false, sessionPersistence: false });
+    expect(toRuntimeInfoCapabilities(adapter.descriptor.capabilities).isolation?.userInstructions).toBe(false);
+    expect(new PiAdapter().descriptor.capabilities.isolation?.userInstructions).toBe(true);
     expect(Object.isFrozen(adapter.descriptor.capabilities.isolation)).toBe(true);
     expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');
     expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');

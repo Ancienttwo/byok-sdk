@@ -1,7 +1,8 @@
+import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectControlClient } from '../daemon/control-client';
 import { controlSocketPath } from '../daemon/control-protocol';
 import { startControlServer, type ControlMethods, type ControlServerHandle } from '../daemon/control-server';
@@ -89,7 +90,10 @@ describe('control socket fallback: a fixed root, immune to TMPDIR', () => {
       await expect(conn.client.request('ping')).resolves.toBe('pong');
       conn.client.close();
 
-      // Closing the server reclaims the private fallback directory too.
+      // One directory per store used to survive every daemon it ever hosted:
+      // unlinking the socket left the 0700 parent behind. It exists while the
+      // server runs and is gone after close().
+      expect(await fs.stat(path.dirname(endpoint)).then((st) => st.isDirectory())).toBe(true);
       await handle.close();
       await expect(fs.lstat(path.dirname(endpoint))).rejects.toMatchObject({ code: 'ENOENT' });
     });
@@ -115,4 +119,48 @@ describe('control socket fallback: a fixed root, immune to TMPDIR', () => {
       expect(controlSocketPath('/Users/me/.byok/acme')).toBe('/Users/me/.byok/acme/control.sock');
     });
   });
+});
+
+describe('control socket fallback: the directory it binds in does not outlive the daemon', () => {
+  it('I: the directory vanishing before its ownership check is retried, not fatal', async () => {
+    if (process.platform === 'win32') return;
+    const storeDir = await tooLongStoreDir();
+    const fallbackDir = path.dirname(controlSocketPath(storeDir));
+    // A closing daemon for this store reclaims the directory right after our
+    // mkdir: remove it just before the first ownership lstat sees it.
+    const realLstat = fs.lstat.bind(fs);
+    let removed = false;
+    const spy = vi.spyOn(fs, 'lstat').mockImplementation(async (target, ...rest) => {
+      if (!removed && target === fallbackDir) {
+        removed = true;
+        await fs.rm(fallbackDir, { recursive: true, force: true });
+      }
+      return realLstat(target, ...(rest as []));
+    });
+    try {
+      const handle = await startControlServer({ storeDir, productId: 'acme', methods: pingMethods() });
+      expect(removed).toBe(true);
+      await handle.close();
+    } finally {
+      spy.mockRestore();
+    }
+  }, 60_000);
+
+  it('H: a store that itself lives under /tmp keeps its own directory', async () => {
+    if (process.platform === 'win32') return;
+    // Reclamation is scoped to a fallback DIRECTORY, not to anything a close
+    // happens to see one level under /tmp. A store that lives there itself
+    // binds its control socket directly inside it, and ordinary teardown must
+    // never turn into store deletion.
+    const storeDir = `/tmp/byok-${randomBytes(8).toString('hex')}`;
+    await fs.mkdir(storeDir, { mode: 0o700 }); // exclusive: fails rather than reuse a directory that is not ours
+    dirsToRemove.push(storeDir);
+    const sentinel = path.join(storeDir, 'device.json');
+    await fs.writeFile(sentinel, '{}');
+
+    const handle = await startControlServer({ storeDir, productId: 'acme', methods: pingMethods() });
+    expect(path.dirname(handle.endpoint)).toBe(storeDir); // short path: no fallback at all
+    await handle.close();
+    await expect(fs.readFile(sentinel, 'utf8')).resolves.toBe('{}');
+  }, 60_000);
 });

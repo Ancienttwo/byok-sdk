@@ -94,7 +94,6 @@ export type AgentEgressLane = z.infer<typeof AgentEgressLaneSchema>;
 export declare const AgentEgressDropReasonSchema: z.ZodEnum<{
     ack_mismatch: "ack_mismatch";
     backpressure: "backpressure";
-    capability_missing: "capability_missing";
     coalesced: "coalesced";
     disconnected: "disconnected";
     invalid_envelope: "invalid_envelope";
@@ -1966,8 +1965,6 @@ export declare const AGENT_CONTENT_ARTIFACT_READ_CAPABILITY: 'agent-content-arti
 export declare const AGENT_HOME_PROJECTION_CAPABILITY: 'agent-home-projection';
 /** Device capability required before an Agent-home projection may carry `hostRevision`. */
 export declare const AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY: 'agent-home-projection-host-revision';
-/** Capability required before an offer may select terminal projection behavior. */
-export declare const TERMINAL_PROJECTION_SELECTION_CAPABILITY: 'terminal-projection-selection';
 /** Contract §8.1's capability gate for `byok-task-assertion-v1` tool authority. */
 export declare const HOST_MCP_TASK_CONTEXT_CAPABILITY: 'host-mcp-task-context';
 /** Daemon capability required before an exact local provider profile may be offered. */
@@ -1993,45 +1990,16 @@ export declare const AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY: 'agent-memory-co
 export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v9";
 /**
  * Sealed payload v1 (#654). A device advertises it before a Host may send it
- * a sealed offer or steer; a server advertises it before a device may send it
- * sealed task output or a sealed decline code. Both gates read
- * `WIRE_ADDITIONS`.
+ * a sealed offer or steer (`WIRE_ADDITIONS`). The server accepts sealed task
+ * output and the sealed decline codes by the task's frozen `sealing`.
  */
 export declare const SEALED_PAYLOAD_CAPABILITY: 'sealed-payload-v1';
 /**
  * Sealed payload v2 (#1045): the `agent-message` and `memory-projection`
  * categories. A device advertises it before a Host may send it an offer whose
- * `sealing` names either category, or a sealed message disposition; a server
- * advertises it before a device may send it a sealed `agent.message.publish`.
+ * `sealing` names either category, or a sealed message disposition.
  */
 export declare const SEALED_PAYLOAD_V2_CAPABILITY: 'sealed-payload-v2';
-/**
- * A server advertises it before a device may send a sealed task output that
- * names its ciphertext blob (`sealed.ciphertextRef`) instead of carrying it
- * inline. The server then holds the blob for the life of the task.
- */
-export declare const SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY: 'sealed-output-ciphertext-ref';
-/**
- * A server advertises it before a device may send `task.fail.failure`, the
- * machine-readable runtime failure class (#869).
- */
-export declare const RUNTIME_FAILURE_CLASS_CAPABILITY: 'runtime-failure-class';
-/** A server advertises it before a device may send `task.fail.failure.scope` (#1271). */
-export declare const RUNTIME_QUOTA_SCOPE_CAPABILITY: 'runtime-quota-scope';
-/**
- * A server advertises it before a device may send `residentMemoryOverLimit`
- * on `task.complete`, `task.fail` or `task.cancelled` (#1439).
- */
-export declare const RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY: 'resident-memory-over-limit';
-/**
- * The connection understands the typed pre-claim runtime-unavailable cause
- * (#1103 D8): `task.decline.runtimeUnavailable`, `conn.hello.runtimeUnavailable`
- * and the presence projection. A daemon declares it when it emits the cause.
- * Older peers ignore the unknown flag; absence means the peer may not read
- * the cause, so a Host falls back to `retryable` and treats the cause as
- * unknown. It never infers availability or allow from absence.
- */
-export declare const RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY: 'runtime-unavailable-cause';
 /**
  * The closed classes of `task.fail.failure.class`: the vendored OAR
  * `FailureClass` values. `unknown` means the runtime gave no structured
@@ -2045,9 +2013,8 @@ export declare const RUNTIME_QUOTA_SCOPES: readonly ['account', 'model'];
 export declare const PREPARED_AGENT_MEMORY_MODES: readonly ['none', 'read', 'read-write'];
 export declare function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number];
 /**
- * A device can run the native-session lane. A server understands the V1
- * `nativeSessions` offer field, resolves `ifAdvertised` at enqueue, and accepts
- * the `native_sessions_unsupported` decline code.
+ * A device can run the native-session lane: a Host sends an offer with
+ * `nativeSessions` only to a device that advertises it.
  */
 export declare const NATIVE_SESSIONS_CAPABILITY: 'native-sessions';
 // ==== @byok-sdk/protocol dist/codec.d.ts ====
@@ -2940,7 +2907,7 @@ export declare const PairResponseSchema: z.ZodObject<{
     deviceId: z.ZodString;
     accessToken: z.ZodString;
     refreshHint: z.ZodOptional<z.ZodString>;
-    expiresIn: z.ZodOptional<z.ZodNumber>;
+    expiresIn: z.ZodNumber;
     tenantId: z.ZodString;
 }, z.core.$strip>;
 export type PairResponse = z.infer<typeof PairResponseSchema>;
@@ -2960,8 +2927,7 @@ export declare const TokenRequestSchema: z.ZodObject<{
 export type TokenRequest = z.infer<typeof TokenRequestSchema>;
 export declare const TokenResponseSchema: z.ZodObject<{
     accessToken: z.ZodString;
-    expiresAt: z.ZodISODateTime;
-    expiresIn: z.ZodOptional<z.ZodNumber>;
+    expiresIn: z.ZodNumber;
 }, z.core.$strip>;
 export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 /**
@@ -3011,7 +2977,11 @@ export declare const PresencePublishRequestSchema: z.ZodObject<{
             durableLane: z.ZodOptional<z.ZodBoolean>;
             preparedLane: z.ZodOptional<z.ZodBoolean>;
             isolation: z.ZodOptional<z.ZodObject<{
-                userContext: z.ZodOptional<z.ZodBoolean>;
+                userInstructions: z.ZodOptional<z.ZodBoolean>;
+                userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+                userMemory: z.ZodOptional<z.ZodBoolean>;
+                userSkills: z.ZodOptional<z.ZodBoolean>;
+                userHookContext: z.ZodOptional<z.ZodBoolean>;
                 userMcpServers: z.ZodOptional<z.ZodBoolean>;
                 sessionPersistence: z.ZodOptional<z.ZodBoolean>;
             }, z.core.$strip>>;
@@ -3026,6 +2996,11 @@ export declare const PresencePublishRequestSchema: z.ZodObject<{
         }, z.core.$strip>>;
     }, z.core.$strip>>>;
     runtimeUnavailable: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        id: z.ZodUnion<readonly [z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            pi: "pi";
+        }>, z.ZodString]>;
         cause: z.ZodUnion<readonly [z.ZodEnum<{
             acp_unavailable: "acp_unavailable";
             app_server_unavailable: "app_server_unavailable";
@@ -3041,11 +3016,6 @@ export declare const PresencePublishRequestSchema: z.ZodObject<{
             version_blocked: "version_blocked";
         }>, z.ZodString]>;
         retryable: z.ZodBoolean;
-        id: z.ZodEnum<{
-            claude: "claude";
-            codex: "codex";
-            pi: "pi";
-        }>;
     }, z.core.$strip>>>;
 }, z.core.$strip>;
 export type PresencePublishRequest = z.infer<typeof PresencePublishRequestSchema>;
@@ -3133,7 +3103,7 @@ export declare const MESSAGES_SEND_MAX_BODY_BYTES: number;
  */
 export declare const MessagesSendRequestSchema: z.ZodObject<{
     messages: z.ZodArray<z.ZodObject<{
-        v: z.ZodLiteral<5>;
+        v: z.ZodLiteral<6>;
         id: z.ZodUUID;
     }, z.core.$loose>>;
 }, z.core.$strip>;
@@ -3807,7 +3777,7 @@ export declare function byokBlobContentPath(blobId: string): string;
 // ==== @byok-sdk/protocol dist/index.d.ts ====
 export { HostOfferPlainPayloadSchema, HostOfferSealedPayloadSchema, type HostOfferPlainPayload, type HostOfferSealedPayload } from './host-offer-input';
 export * from './constants';
-export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
+export { MAILBOX_READ_AHEAD_MAX_SEQS } from './version';
 export { PROTOCOL_VERSION, CAPABILITY_FLAGS, AGENT_HOME_READERS_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
 export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions';
@@ -3848,7 +3818,6 @@ export type { CreateEnvelopeOptions } from './codec';
 export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, DEVICE_NOT_REGISTERED_CODE, DeviceNotRegisteredResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, MESSAGES_SEND_MAX_BODY_BYTES, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_E2EE_MEMBER_KEY_PATH, BYOK_E2EE_CHAIN_PATH, BYOK_E2EE_KEY_PACKAGES_PATH, BYOK_E2EE_PAIRING_MAC_PATH, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
 export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, DeviceNotRegisteredResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, ActivityIngress, MessageSendOutcome, OutboundRefusalReason, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, InputPreparationCompletionRequest, InputPreparationStatus, InputPreparationReadback, InputPreparationStatusQuery, } from './http-api';
 export type { HarnessId, HarnessInfo } from './messages';
-export { CUSTOM_HARNESS_CAPABILITY } from './version';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
 export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, E2eeScopeKeyPackageV2Schema, } from './e2ee-member';
 export type { E2eeClientPairingMac, E2eeKeyPackageAvailablePayload, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeMemberKeyRegisterRequest, E2eeScopeKeyPackage, } from './e2ee-member';
@@ -4718,7 +4687,11 @@ export declare const RuntimeCapabilitiesSchema: z.ZodObject<{
     durableLane: z.ZodOptional<z.ZodBoolean>;
     preparedLane: z.ZodOptional<z.ZodBoolean>;
     isolation: z.ZodOptional<z.ZodObject<{
-        userContext: z.ZodOptional<z.ZodBoolean>;
+        userInstructions: z.ZodOptional<z.ZodBoolean>;
+        userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+        userMemory: z.ZodOptional<z.ZodBoolean>;
+        userSkills: z.ZodOptional<z.ZodBoolean>;
+        userHookContext: z.ZodOptional<z.ZodBoolean>;
         userMcpServers: z.ZodOptional<z.ZodBoolean>;
         sessionPersistence: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
@@ -4762,7 +4735,11 @@ export declare const RuntimeInfoSchema: z.ZodObject<{
         durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
-            userContext: z.ZodOptional<z.ZodBoolean>;
+            userInstructions: z.ZodOptional<z.ZodBoolean>;
+            userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+            userMemory: z.ZodOptional<z.ZodBoolean>;
+            userSkills: z.ZodOptional<z.ZodBoolean>;
+            userHookContext: z.ZodOptional<z.ZodBoolean>;
             userMcpServers: z.ZodOptional<z.ZodBoolean>;
             sessionPersistence: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
@@ -4793,7 +4770,11 @@ export declare const HarnessInfoSchema: z.ZodObject<{
         durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
-            userContext: z.ZodOptional<z.ZodBoolean>;
+            userInstructions: z.ZodOptional<z.ZodBoolean>;
+            userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+            userMemory: z.ZodOptional<z.ZodBoolean>;
+            userSkills: z.ZodOptional<z.ZodBoolean>;
+            userHookContext: z.ZodOptional<z.ZodBoolean>;
             userMcpServers: z.ZodOptional<z.ZodBoolean>;
             sessionPersistence: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
@@ -4821,7 +4802,11 @@ export declare const HarnessInventorySchema: z.ZodArray<z.ZodObject<{
         durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
-            userContext: z.ZodOptional<z.ZodBoolean>;
+            userInstructions: z.ZodOptional<z.ZodBoolean>;
+            userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+            userMemory: z.ZodOptional<z.ZodBoolean>;
+            userSkills: z.ZodOptional<z.ZodBoolean>;
+            userHookContext: z.ZodOptional<z.ZodBoolean>;
             userMcpServers: z.ZodOptional<z.ZodBoolean>;
             sessionPersistence: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
@@ -4866,6 +4851,29 @@ export declare const RuntimeUnavailableEntrySchema: z.ZodObject<{
     retryable: z.ZodBoolean;
 }, z.core.$strip>;
 export type RuntimeUnavailableEntry = z.infer<typeof RuntimeUnavailableEntrySchema>;
+/** Bounded, unique by id: 16 entries are more runtimes than one daemon hosts. */
+export declare const RuntimeUnavailableListSchema: z.ZodArray<z.ZodObject<{
+    id: z.ZodUnion<readonly [z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>, z.ZodString]>;
+    cause: z.ZodUnion<readonly [z.ZodEnum<{
+        acp_unavailable: "acp_unavailable";
+        app_server_unavailable: "app_server_unavailable";
+        environment_unavailable: "environment_unavailable";
+        none_available: "none_available";
+        not_executable: "not_executable";
+        not_installed: "not_installed";
+        platform_unsupported: "platform_unsupported";
+        probe_failed: "probe_failed";
+        probe_timeout: "probe_timeout";
+        runtime_not_allowed: "runtime_not_allowed";
+        runtime_not_configured: "runtime_not_configured";
+        version_blocked: "version_blocked";
+    }>, z.ZodString]>;
+    retryable: z.ZodBoolean;
+}, z.core.$strip>>;
 /** Maximum logical toolsets one daemon may advertise as locally configured. */
 export declare const CONFIGURED_TOOLSETS_MAX_ITEMS = 64;
 /**
@@ -4923,7 +4931,11 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             durableLane: z.ZodOptional<z.ZodBoolean>;
             preparedLane: z.ZodOptional<z.ZodBoolean>;
             isolation: z.ZodOptional<z.ZodObject<{
-                userContext: z.ZodOptional<z.ZodBoolean>;
+                userInstructions: z.ZodOptional<z.ZodBoolean>;
+                userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+                userMemory: z.ZodOptional<z.ZodBoolean>;
+                userSkills: z.ZodOptional<z.ZodBoolean>;
+                userHookContext: z.ZodOptional<z.ZodBoolean>;
                 userMcpServers: z.ZodOptional<z.ZodBoolean>;
                 sessionPersistence: z.ZodOptional<z.ZodBoolean>;
             }, z.core.$strip>>;
@@ -4950,7 +4962,11 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             durableLane: z.ZodOptional<z.ZodBoolean>;
             preparedLane: z.ZodOptional<z.ZodBoolean>;
             isolation: z.ZodOptional<z.ZodObject<{
-                userContext: z.ZodOptional<z.ZodBoolean>;
+                userInstructions: z.ZodOptional<z.ZodBoolean>;
+                userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+                userMemory: z.ZodOptional<z.ZodBoolean>;
+                userSkills: z.ZodOptional<z.ZodBoolean>;
+                userHookContext: z.ZodOptional<z.ZodBoolean>;
                 userMcpServers: z.ZodOptional<z.ZodBoolean>;
                 sessionPersistence: z.ZodOptional<z.ZodBoolean>;
             }, z.core.$strip>>;
@@ -6349,7 +6365,11 @@ export declare const TaskClaimPayloadSchema: z.ZodObject<{
         durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
-            userContext: z.ZodOptional<z.ZodBoolean>;
+            userInstructions: z.ZodOptional<z.ZodBoolean>;
+            userOutputStyle: z.ZodOptional<z.ZodBoolean>;
+            userMemory: z.ZodOptional<z.ZodBoolean>;
+            userSkills: z.ZodOptional<z.ZodBoolean>;
+            userHookContext: z.ZodOptional<z.ZodBoolean>;
             userMcpServers: z.ZodOptional<z.ZodBoolean>;
             sessionPersistence: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
@@ -9129,14 +9149,22 @@ export type TerminalProjectionSelection = z.infer<typeof TerminalProjectionSelec
 // ==== @byok-sdk/protocol dist/version.d.ts ====
 /** Bounded volatile navigation; only cursor is a durable acknowledgement. */
 export declare const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
-export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
 /**
- * Wire protocol version. Every v5 change is a version bump, a gated addition
+ * Wire protocol version. Every v6 change is a version bump, a gated addition
  * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
  * one statement of the rule, and `src/wire-additions.ts`, which declares the
- * receiver-capability gates and additions. No v5 release has been published
- * yet, so `src/__tests__/compat.test.ts` has no published v5 decoder to prove
+ * receiver-capability gates and additions. No v6 release has been published
+ * yet, so `src/__tests__/compat.test.ts` has no published v6 decoder to prove
  * additions against; cross-release gates stay unproven until one exists.
+ *
+ * v6 splits the runtime capability `isolation.userContext` into one bit per
+ * source a runtime can keep out: `userInstructions`, `userOutputStyle`,
+ * `userMemory`, `userSkills` and `userHookContext`, beside the unchanged
+ * `userMcpServers` and `sessionPersistence`, on `conn.hello` runtimes and
+ * harnesses, `task.claim` and presence. `userContext` is gone with no derived
+ * field. A v5 envelope is rejected; there is no v5 reader. Stores that still
+ * hold v5 rows refuse to start; rebuild them, then upgrade server and client
+ * together.
  *
  * v5 renames the runtime capability `durablePi` to `durableLane`, beside
  * `preparedLane`, on `conn.hello` runtimes and harnesses, `task.claim` and
@@ -9177,7 +9205,7 @@ export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
  */
-export declare const PROTOCOL_VERSION = 5;
+export declare const PROTOCOL_VERSION = 6;
 /**
  * The device runs `homeAccess: 'memory-reader'` Agent offers: each reader
  * Attempt gets its own run directory under the Agent home, and readers are
@@ -9203,27 +9231,23 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * offer's `requiredToolsets` and can resolve its logical ids against local
  * MCP configuration.
  */
-export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-home-projection-host-revision", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", "agent-memory-commit-on-success", "native-sessions", 'agent-message-draft', "sealed-payload-v1", "sealed-payload-v2", "sealed-output-ciphertext-ref", "runtime-failure-class", "runtime-quota-scope", "resident-memory-over-limit", "runtime-unavailable-cause"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-home-projection-host-revision", "agent-input-preparation-v9", "host-mcp-task-context", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", "agent-memory-commit-on-success", "native-sessions", "sealed-payload-v1", "sealed-payload-v2"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**
  * The one table of receiver-capability gates and wire additions
  * (docs/protocol.md "Freeze rule").
  *
- * A v4 change takes exactly one of three paths: a version bump, a gated
- * addition, or a strip-safe addition. Envelope and HTTP rows have explicit
- * kinds. The last two are declared here.
+ * A change takes exactly one of three paths: a version bump, a gated
+ * addition, or a strip-safe addition. Gated additions are declared here.
  *
  * - `gated`: the sender must not emit the surface unless the receiver
  *   durably advertised `capability`. A field entry applies when the payload
  *   carries the field (and, with `value`, when the field equals it, or when
  *   the field is an array that includes it); a dotted field names a nested
  *   field, for example `sealed.ciphertextRef`. A type entry applies to every
- *   message of that type. Server-to-daemon surfaces
- *   are gated by a device flag, daemon-to-server surfaces by a server flag.
- * - `strip-safe`: an optional field an older receiver drops without changing
- *   what it executes or acknowledges.
+ *   message of that type. Only server-to-daemon surfaces are gated, each by a
+ *   device flag: wire v6 has no server flag.
  *
  * v3 baseline: every v3 decoder reads every surface v2 had, so the v2
  * strip-safe rows and the v2 `result-document` gate are gone. The device
@@ -9239,6 +9263,13 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  * v4 release has been published yet, so no published decoder proves these rows
  * across releases.
  *
+ * v6 baseline: every v6 server reads every daemon-to-server surface and every
+ * v6 daemon reads every offer field that v5 gated on a flag both sides always
+ * advertised, so the server-flag rows, the `custom-harness` and
+ * `terminal-projection-selection` offer rows and every strip-safe row are
+ * gone. The rows left name device flags that a daemon advertises only when it
+ * is configured for them.
+ *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in
  * another. This module imports no runtime code except the plain-data split
@@ -9246,8 +9277,7 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  */
 import type { MessageType } from './messages';
 import type { CapabilityFlag } from './version';
-type HttpWireSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse' | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse' | 'PresencePublishRequest';
-export type WireAddition = {
+export interface WireAddition {
     readonly kind: 'envelope';
     readonly rule: 'gated';
     readonly surface: MessageType;
@@ -9255,17 +9285,7 @@ export type WireAddition = {
     readonly value?: string;
     readonly capability: CapabilityFlag;
     readonly advertisedBy: 'device' | 'server';
-} | {
-    readonly kind: 'envelope';
-    readonly rule: 'strip-safe';
-    readonly surface: MessageType;
-    readonly field: string;
-} | {
-    readonly kind: 'http';
-    readonly rule: 'strip-safe';
-    readonly surface: HttpWireSurface;
-    readonly field: string;
-};
+}
 export declare const WIRE_ADDITIONS: readonly WireAddition[];
 /**
  * Every capability the receiver must have durably advertised before a sender
@@ -9273,4 +9293,3 @@ export declare const WIRE_ADDITIONS: readonly WireAddition[];
  * creating the task or appending to the mailbox) when any is missing.
  */
 export declare function requiredReceiverCapabilities(type: MessageType, payload: unknown): CapabilityFlag[];
-export {};

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AgentHomeManager } from '../agent-home';
+import { AgentHomeManager, AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../agent-home';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -128,5 +128,41 @@ describe.skipIf(process.platform !== 'linux')('Linux new Agent home directory ba
     const binding = await manager.prepare({ agentId: 'one', profileRevision: 'p1' });
     await binding.lease.release();
     expect(retried).toBe(true);
+  });
+});
+
+describe('ensureDirectoryNoSymlink under concurrent creation', () => {
+  async function store() {
+    const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-home-race-')));
+    roots.push(home);
+    return { home, target: path.join(home, '.byok', 'codex', 'sessions') };
+  }
+
+  it('lets concurrent first calls on an absent path all succeed', async () => {
+    const { home, target } = await store();
+    await expect(Promise.all(Array.from({ length: 5 }, () => ensureDirectoryNoSymlink(home, target)))).resolves.toEqual(Array(5).fill(target));
+  });
+
+  it('accepts a host storage root component that a concurrent creator made between lstat and mkdir', async () => {
+    const { home } = await store();
+    const host = path.join(home, 'new', 'host');
+    const realMkdir = fs.mkdir.bind(fs);
+    vi.spyOn(fs, 'mkdir').mockImplementation(async (...args: Parameters<typeof fs.mkdir>) => {
+      if (args[0] === path.join(home, 'new')) await realMkdir(...args);
+      return realMkdir(...args);
+    });
+    await expect(new AgentHomeManager({ hostStorageRoot: host }).prepare({ agentId: 'one', profileRevision: 'p1' })).resolves.toBeDefined();
+  });
+
+  it('refuses a symlink created between its lstat and its mkdir', async () => {
+    const { home, target } = await store();
+    const elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-home-elsewhere-'));
+    roots.push(elsewhere);
+    const realMkdir = fs.mkdir.bind(fs);
+    vi.spyOn(fs, 'mkdir').mockImplementation(async (...args: Parameters<typeof fs.mkdir>) => {
+      if (args[0] === path.join(home, '.byok')) await fs.symlink(elsewhere, args[0] as string, 'dir');
+      return realMkdir(...args);
+    });
+    await expect(ensureDirectoryNoSymlink(home, target)).rejects.toBeInstanceOf(AgentHomeResolutionError);
   });
 });

@@ -224,9 +224,9 @@ describe('agent-home-contract reference server', () => {
       body: JSON.stringify({ messages: [hello] }),
     });
     expect(response.status).toBe(200);
-    // The accepted hello's answer carries the poll's capability advertisement (#391 Phase 2).
+    // The accepted hello's answer carries the poll's capability advertisement (#391 Phase 2), empty in v6.
     const answer = (await response.json()) as { accepted: number; capabilities?: string[] };
-    expect(answer).toMatchObject({ accepted: 1, capabilities: expect.arrayContaining(['agent-home-contract']) });
+    expect(answer).toMatchObject({ accepted: 1, capabilities: [] });
     await expect(
       started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'agent over long-poll', agentRef, sessionRef: SESSION_REF }),
     ).resolves.toMatchObject({ taskId: expect.any(String) });

@@ -80,6 +80,35 @@ test('Hermes private session mapping and smoke admit exact additions only', t =>
   assert.throws(() => selectImpact(['packages/client/scripts/check-other-entry.mjs']));
 });
 
+test('sealed Pi host retirement admits only its imports key and build step', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-sealed-retire-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, 'packages/client'), { recursive: true });
+  const file = join(cwd, 'packages/client/package.json');
+  const sealed = { types: './dist/bin/pi-runtime-host-sealed.d.ts', default: './dist/bin/pi-runtime-host-sealed.js' };
+  const baseline = { name: '@byok-sdk/client', version: '0.28.1', imports: { '#existing': './dist/existing.js', '#byok-pi-runtime-host-sealed': sealed },
+    scripts: { build: 'tsup && node scripts/build-sealed-host.mjs && tsc -p tsconfig.build.json' } };
+  writeFileSync(file, JSON.stringify(baseline));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
+  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
+  const candidate = structuredClone(baseline);
+  delete candidate.imports['#byok-pi-runtime-host-sealed'];
+  candidate.scripts.build = 'tsup && tsc -p tsconfig.build.json';
+  const write = value => writeFileSync(file, JSON.stringify(value));
+  write(candidate);
+  assert.ok(selectImpact(['packages/client/package.json'], context).families.includes('npm-release-pack'));
+  for (const mutate of [
+    m => { delete m.imports['#existing']; },
+    m => { m.scripts.build = 'tsup'; },
+    m => { m.scripts.build = 'tsup && tsc -p tsconfig.build.json && echo extra'; },
+    m => { m.dependencies = { unreviewed: '1.0.0' }; },
+  ]) {
+    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
+    assert.throws(() => selectImpact(['packages/client/package.json'], context), /more than/);
+  }
+});
+
 test('client testing entry admits the exact reviewed export only', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-testing-entry-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));

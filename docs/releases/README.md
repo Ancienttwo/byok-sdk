@@ -18,18 +18,18 @@ A release ships `packages/client/upgrade-manifest.json` with one entry per Host-
 
 `packages/protocol/src/__tests__/compat.test.ts` decides wire compatibility
 from evidence, not the author's judgment (see "Freeze rule" in
-`docs/protocol.md`). The wire is at major 5: v5 renames the runtime
-capability `durablePi` to `durableLane`. 0.33.0 is the last v4 release, and
-`golden/v5.releases.json` registers the corpus of the published 0.34.0, the
-first v5 release, the same corpus for the published 0.35.0, 0.36.0 and
-0.37.0, the published 0.38.0 with one more envelope line, and the published
-0.39.0 with eight more, and the published 0.40.0 with three more, and has no floor. No published v5 decoder is pinned as an oracle yet, so cross-release gates stay
-unproven until one is pinned.
+`docs/protocol.md`). The wire is at major 6: v6 splits the runtime
+capability `isolation.userContext` into one bit per source
+([wire v6 migration](../migrations/wire-v6-isolation-sources.md)). 0.40.0 is
+the last v5 release and the first v6 release is the next MINOR, so
+`golden/v6.releases.json` registers no release yet and has no floor. No
+published v6 decoder exists yet, so cross-release gates stay unproven until
+one is pinned.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
 0.26.1, envelopes only) are read-only and pinned by whole-file hash. They are
-a negative oracle: the v4 decoder rejects every v2 envelope. Do not edit,
+a negative oracle: the current decoder rejects every v2 envelope. Do not edit,
 append to, or register anything in them.
 
 Retired v3 evidence. `golden/v3.envelopes.ndjson`, `golden/v3.http.ndjson` and
@@ -40,19 +40,23 @@ Retired v4 evidence. `golden/v4.envelopes.ndjson`, `golden/v4.http.ndjson` and
 `golden/v4.releases.json` (0.31.0 through 0.33.0) are read-only and pinned by
 whole-file hash. The current decoder rejects every v4 envelope.
 
-v5 evidence. `golden/v5.envelopes.ndjson` and `golden/v5.http.ndjson` are
-append-only, with one narrow exception: before the first v5 release is
-published, a v5 corpus line that no published entry covers may be corrected in
-place when a pre-release v5 tightening makes it undecodable. Once a v5 release
+Retired v5 evidence. `golden/v5.envelopes.ndjson`, `golden/v5.http.ndjson` and
+`golden/v5.releases.json` (0.34.0 through 0.40.0) are read-only and pinned by
+whole-file hash. The current decoder rejects every v5 envelope.
+
+v6 evidence. `golden/v6.envelopes.ndjson` and `golden/v6.http.ndjson` are
+append-only, with one narrow exception: before the first v6 release is
+published, a v6 corpus line that no published entry covers may be corrected in
+place when a pre-release v6 tightening makes it undecodable. Once a v6 release
 is published, the lines it covers are immutable and the rest stays
-append-only. `golden/v5.releases.json` records each stable v5 release's corpus
+append-only. `golden/v6.releases.json` records each stable v6 release's corpus
 line counts and SHA-256 prefixes; each entry pins both `envelopes` and `http`.
 Prereleases are not registered and are outside the guarantee.
 
 Rejection oracle. The `devDependencies` alias `byok-protocol-previous` in
-`packages/protocol/package.json` pins 0.33.0, the last v4 release. The suite uses it to
-prove that a v4 decoder rejects every v5 corpus line and a v5 `conn.hello`, and
-that it derives the same `task.offer` gates as the current table for every v4
+`packages/protocol/package.json` pins 0.40.0, the last v5 release. The suite uses it to
+prove that a v5 decoder rejects every v6 corpus line and a v6 `conn.hello`, and
+that it derives the same `task.offer` gates as the current table for every v5
 offer line it shipped. Aliases are registry tarball URLs
 (`https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-<version>.tgz`),
 not `npm:@byok-sdk/protocol@<version>`. Bun links an `npm:` alias to the
@@ -62,8 +66,8 @@ the "released" decoder the current source.
 ### Every stable release
 
 1. Before tagging, run `bun run --filter @byok-sdk/protocol test`. When the
-   package version is not registered (and is not a v4 release), the test
-   fails and prints the exact entry to append to `golden/v5.releases.json`,
+   package version is not registered (and is not a v5 release), the test
+   fails and prints the exact entry to append to `golden/v6.releases.json`,
    with both `envelopes` and `http` prefixes. Append it unchanged only as
    part of the stable release preparation whose published bytes it will
    record. The diagnostic is print-only.
@@ -75,11 +79,11 @@ public API change is recorded under CHANGELOG `Unreleased`, with its required
 next MINOR release; do not bump/register that future version just to add corpus
 coverage. Release preparation owns the manifest bump and corpus registration.
 
-### Published v5 decoder baseline
+### Published v6 decoder baseline
 
-None yet. The first stable v5 release gets a published-decoder alias pinned
+None yet. The first stable v6 release gets a published-decoder alias pinned
 by its registry tarball URL, and a published-compatibility test then checks
 that the released JSON Schema shape is not narrowed, that the released
 decoder reads current bytes, and that gated and strip-safe `WIRE_ADDITIONS`
-rows are proven against it. No v4 decoder was pinned this way before the v5
-cut; 0.33.0 serves only as the rejection oracle above.
+rows are proven against it. No v5 decoder was pinned this way before the v6
+cut; 0.40.0 serves only as the rejection oracle above.

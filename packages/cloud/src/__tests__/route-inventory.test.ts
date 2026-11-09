@@ -156,27 +156,7 @@ describe('tenant isolation across every device-class resource', () => {
       ingress: { activityMaxEvents: 50, activityMaxBytes: 65536 },
       events: [],
       cursor: 0,
-      capabilities: [
-        'custom-harness',
-        'native-sessions',
-        'mailbox-read-ahead',
-        'agent-message-draft',
-        'agent-home-contract',
-        'agent-home-projection',
-        'agent-egress-policy',
-        'agent-egress-reliable-ack',
-        'agent-egress-fresh-session',
-        'agent-message-egress',
-        'agent-content-workspace-read',
-        'agent-content-transcript-read',
-        'agent-content-artifact-read',
-        'sealed-payload-v1',
-        'sealed-output-ciphertext-ref',
-        'sealed-payload-v2',
-        'runtime-failure-class',
-        'runtime-quota-scope',
-        'resident-memory-over-limit',
-      ],
+      capabilities: [],
     });
     expect(JSON.stringify(events.body)).not.toContain('secret work');
 

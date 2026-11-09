@@ -22,8 +22,7 @@ const store = new SqliteClarificationStore(hostDatabasePath, authenticatedTenant
 const host = new ClarificationHost(tenantScopedByokServer, store, () => Date.now());
 // Configure agentHome; the runtime calls submit_result.
 // Its agentEgress.policy must exactly match target.egressPolicy; it must
-// advertise terminal-projection-selection,
-// agent-egress-fresh-session and agent-home-contract support.
+// advertise agent-egress-fresh-session and agent-home-contract support.
 ```
 
 The caller supplies the existing explicit `BotTarget` (deviceId, AgentRef,

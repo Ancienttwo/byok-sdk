@@ -15,7 +15,7 @@ import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invo
 import type { ResolvedBin } from '../codex/resolve-bin';
 import { agentPersona } from '../agent-persona';
 import { OPENCODE_RUNTIME_CAPABILITIES } from './opencode-capabilities';
-import { opencodeVersionToken } from './opencode-version';
+import { OPENCODE_VERSION_POLICY, opencodeVersionToken } from './opencode-version';
 import { resolveOpenCodeBin } from './resolve-bin';
 import { object, OpenCodeProjection, type OpenCodeTurnOutcome } from './projection';
 
@@ -50,15 +50,18 @@ export class OpenCodeAdapter implements RuntimeAdapter {
       if (!Number.isSafeInteger(value) || value <= 0 || (name === 'interruptTimeoutMs' && value > 2_147_483_647)) throw new TypeError(`invalid opencode ${name}`);
     }
     this.environment = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'OpenCodeAdapterOptions.runtimeEnvironment');
-    this.policy = resolveRuntimeVersionPolicy(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-      ? { daemonConfig: options.versionPolicy } : { adapterOption: options.versionPolicy }).policy;
+    this.policy = resolveRuntimeVersionPolicy({
+      descriptor: OPENCODE_VERSION_POLICY,
+      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
+        ? { daemonConfig: options.versionPolicy } : { adapterOption: options.versionPolicy }),
+    }).policy;
     this.options = { ...options, models: Object.freeze([...options.models]) };
   }
 
   get descriptor() {
     return freezeRuntimeAdapterDescriptor({ id: 'opencode', supportsDispatchSelection: false,
-      // PR 3 adds only OS/line combinations with native first-task, resume and cleanup evidence.
-      platforms: [], capabilities: OPENCODE_RUNTIME_CAPABILITIES,
+      // `platforms` is OS-grained, so `darwin` covers x64 (qualified) and arm64 (no task evidence yet; #1593).
+      platforms: ['darwin'], capabilities: OPENCODE_RUNTIME_CAPABILITIES,
       ...(this.policy === undefined ? {} : { versionPolicy: this.policy }),
     });
   }

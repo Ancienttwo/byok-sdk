@@ -19,14 +19,20 @@ is unknown, not `no`.
 
 `yes` for an isolation row is a guarantee the
 [runtime contract suite](runtime-contract.md) checks: it refuses to skip a case
-the descriptor declares. `no` means the SDK makes no such guarantee; the
+the descriptor declares. `yes (no source)` means the qualified runtime has no
+source of that kind; the adapter's absent-sources record
+(`<ID>_ABSENT_ISOLATION_SOURCES` in the same capability file) gives the source
+location or official documentation, and the suite accepts the declaration only
+with that evidence. `no` means the SDK makes no such guarantee; the
 [isolation section](#user-level-configuration-and-session-isolation) says what
-the runtime does instead.
+the runtime does instead. Where a runtime keeps a source out only behind an
+adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
+`yes` describes Agent tasks with that option set.
 
 <!-- generated:capability-matrix:start -->
-| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | OpenCode (unqualified) | Pi | Pi (`durableLane`) |
+| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `unqualified` | `1.5.0` | `1.5.0` |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `2.2.6` | `1.5.0` | `1.5.0` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | no | yes | yes |
@@ -35,7 +41,11 @@ the runtime does instead.
 | Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | no | yes | yes |
 | Prepared lane | `preparedLane` | no | no | no | no | no | no | no | yes | no |
 | Durable worker lane | `durableLane` | no | no | no | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userContext` | yes | yes | no | yes | no | yes | no | yes | no |
+| Keeps user-level instructions out | `isolation.userInstructions` | yes | yes | yes | yes | no | yes | no | yes | no |
+| Keeps the user output style out | `isolation.userOutputStyle` | yes (no source) | yes | no | yes | no | yes | no | yes (no source) | no |
+| Keeps user-level memory out | `isolation.userMemory` | no | yes | yes | yes (no source) | no | yes | no | yes (no source) | no |
+| Keeps user skills out | `isolation.userSkills` | yes | no | no | yes | no | yes | no | yes | no |
+| Keeps user hook context out | `isolation.userHookContext` | yes | no | no | no | no | yes | no | yes | no |
 | Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | yes | no | no | no |
 | Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
@@ -43,11 +53,22 @@ the runtime does instead.
 ## OpenCode implementation and qualification (#1538)
 
 `OpenCodeAdapter` is an opt-in custom harness (`harnessId: 'opencode'`). Its
-platform list is empty until native OS/line onboarding canaries qualify it;
-replay tests do not advertise a platform. The compatibility floors are v1
-1.18.35 and v2 2.0.26. No default qualified-version policy is installed yet.
-A Host can supply a version policy; unrecognized, below-floor and prerelease
-tokens still fail the executable compatibility gate.
+descriptor declares `platforms: ['darwin']` (#1593); Windows and Linux stay
+undeclared. `platforms` is OS-grained, so `darwin` covers both arches, but the
+evidence differs: macOS x64 passed first task, same-session resume, cleanup and
+the free-model canary on 2.2.6. macOS arm64 on 2.2.6 passed detection and the
+free-model readback, but its first task hit the free-usage limit (a quota
+refusal, not a program failure), so arm64 has no measured task evidence yet.
+Windows x64 is blocked by the same limit and is declared after a retry once
+the quota resets. The compatibility floors are v1 1.18.35 and v2 2.0.26. The
+default version policy qualifies `2.2.6` and warns on any other accepted
+version (`OPENCODE_VERSION_POLICY`, `unqualified: 'warn'`); only a Host may
+declare `block`. Unrecognized, below-floor and prerelease tokens still fail the
+executable compatibility gate.
+
+Cleanup scope is SDK-owned state only: the owned processes and SDK scratch.
+OpenCode's native session files are outside the SDK cleanup scope, and the
+remote 24-hour scratch sweep was not observed.
 
 Native qualification results and the distinction between native CLI
 availability and adapter acceptance are recorded in the [PR 3 canary evidence](researches/2026-11-08-opencode-native-qualification.md).
@@ -202,8 +223,8 @@ which of these the SDK keeps out, as checked by the runtime contract suite. The
 [#871/#873 evidence note](researches/2026-10-24-871-873-claude-agent-user-context.md)
 give the source lines, help output and probes. The SDK option is an adapter option: it applies
 to every session that the adapter starts. A choice per task would need a new
-wire field. The default is unchanged, and the option is not an isolation
-guarantee.
+wire field. The default is unchanged. The option guarantees only the
+isolation bits the adapter declares `yes`.
 
 ### Claude: user-level configuration
 
@@ -280,6 +301,10 @@ parent walk. Under `excluded` an Agent task starts with:
 - In the same file, `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY` set to `1`. The flag
   layer outranks a user `settings.json` `env` block. The process variable and
   `autoMemoryEnabled: false` do not (probed).
+- In the same file, `outputStyle` set to `default`. It outranks a user
+  `outputStyle`, so neither the style file's text nor the system-prompt
+  section that refers to an output style reaches the model (probed on
+  2.1.319, #1564).
 - `--setting-sources` untouched. The user's settings, deny rules, hooks,
   `apiKeyHelper`, model and env still apply (probed for deny rules, a hook,
   model and env).
@@ -294,9 +319,31 @@ it and resumed with it still carried the user instruction files and the auto
 memory in its first history message. A Host that turns the option on should
 start fresh Agent sessions (drop `sessionRef`).
 
-Under `excluded` these still load: the user's skills, commands, subagents and
-output styles; installed plugins' skills and hooks; managed policy, including
-a managed `CLAUDE.md`, which cannot be excluded.
+Under `excluded` these still load and can reach the model:
+
+- Output of the user's hooks that add context, such as SessionStart and
+  UserPromptSubmit (probed on 2.1.319, #1564). Hooks merge across setting
+  layers, so the flag layer cannot remove one event's hooks, and
+  `allowManagedHooksOnly` takes effect only in managed policy. Dropping the `user` setting source also drops the
+  guard hooks, such as PreToolUse, and the deny rules (see above);
+  `disableAllHooks`, `--bare` and `--safe-mode` drop every hook (from the
+  help text; not probed).
+- The user's skills: their names, and depending on the frontmatter their
+  descriptions, appear in the skill listing (probed on 2.1.319, #1564).
+- The user's commands and subagents, installed plugins' skills and hooks, and
+  managed policy, including a managed `CLAUDE.md`, which cannot be excluded.
+  Not probed.
+
+Claude declares `userInstructions`, `userOutputStyle` and `userMemory` for
+`excluded`. The runtime contract suite checks each at the qualified 2.1.312
+with a marker that appears when inherited and is absent under `excluded`: a
+user `<config>/CLAUDE.md`, a user `outputStyle`, and auto memory in
+`<config>/projects/<cwd key>/memory/MEMORY.md`. A `CLAUDE.md` in a parent of
+the Agent home is also asserted absent under `excluded`. No case covers the
+user `rules/` directory. The Agent home's own
+`.claude/settings.json` `outputStyle` is kept out too, because the flag
+layer's `outputStyle: "default"` outranks it; the suite pins that.
+`userSkills` and `userHookContext` are `no`, for the sources listed above.
 
 On Windows the adapter writes the same patterns, and fixture tests cover a
 win32 home. No Claude on Windows was probed: drive-letter case, `\\?\` paths and
@@ -323,25 +370,125 @@ for the working directory. See [configuration](https://developers.openai.com/cod
 and [instruction discovery](https://developers.openai.com/codex/guides/agents-md).
 
 The Codex 0.160.0 app server always reads `$CODEX_HOME/AGENTS.override.md`,
-else `$CODEX_HOME/AGENTS.md`. No configuration key, flag or environment
+else `$CODEX_HOME/AGENTS.md`, and puts it before the Agent home's `AGENTS.md`
+in the same instruction block. No configuration key, flag or environment
 variable turns that file off. `project_doc_max_bytes = 0` stops only the
 project files. The `config`, `base_instructions` and `developer_instructions`
 fields of `thread/start` and `thread/resume` do not remove the user file, and a
-per-thread MCP override does not either. `CODEX_HOME` also holds `auth.json`
-and the sessions, so moving it moves the login. The SDK has no Codex option
-for user instructions. Keeping the user file out means moving `CODEX_HOME`,
-and the login moves with it. A ChatGPT login refresh writes the new token back
-to `auth.json` and the old refresh token stops working, so a copied login does
-not survive its first refresh. The SDK therefore does not move `CODEX_HOME`. A
-Host that needs isolation checks `isolation.userContext`, which is `false` for
-Codex.
+per-thread MCP override does not either. The only way to keep it out is a
+different `CODEX_HOME`, which `agentUserContext` provides.
+
+#### `agentUserContext` (Codex)
+
+`CodexAdapterOptions.agentUserContext: 'excluded'` (or
+`runtimes.codex.agentUserContext`) runs an Agent task (a run whose manifest
+has an `agentRef`) with `CODEX_HOME` set to an SDK-owned directory,
+`codex-home`, in the execution's scratch. A run without an `agentRef`, and the
+default `'inherit'`, are unchanged.
+
+The option controls which user context Codex loads: under `excluded`, the
+user's `AGENTS.md` and memories do not reach the model. It is not a filesystem
+boundary. The Agent's own tools can still read user files, and a path through
+a linked directory, such as `codex-home/rules/../AGENTS.md`, resolves to the
+user's file. Codex does not open such a path itself.
+
+The directory starts with only symbolic links. These link to the user's
+`CODEX_HOME` (`$CODEX_HOME`, else `~/.codex`), each one only when the user has
+it:
+
+- `auth.json`: the login. A ChatGPT login refresh writes through the link.
+  Codex 0.160.0 opens the file through the link and writes it in place;
+  0.167.0 resolves the link, writes a temporary file beside the target and
+  renames it onto the target, so the link stays and the user's file gets the
+  new refresh token. Codex 0.167.0 refuses to save to a hard-linked file, so
+  the SDK uses symbolic links only.
+- `config.toml`: the user's model, provider, sandbox and other configuration,
+  including its `developer_instructions`, still apply.
+- `rules/` and `hooks.json`: the user's command rules and hooks are guardrails
+  and are linked so that Codex can apply them. Whether a user hook runs under
+  `excluded` was not probed.
+
+These link to the Agent's own thread store, which the adapter creates in the
+Agent home (`lease.canonicalHome`):
+
+- `sessions/` to `<Agent home>/.byok/codex/sessions`, and `archived_sessions/`
+  to `<Agent home>/.byok/codex/archived_sessions`. Each execution has a fresh
+  `codex-home`, and a resume finds the thread through the rollout in this
+  store, so a later task of the same Agent resumes its thread. The user's
+  thread store is never linked: Codex cannot resume or list the user's
+  threads. The adapter creates the store only through real directories inside
+  the Agent home, and refuses the start when `.byok`, `.byok/codex` or the
+  store is a symbolic link. The store is the `agent-runtime-sessions` retention class
+  ([storage layout](host-local-storage-layout.md)). It is unbounded: each
+  Agent's rollouts accumulate until the Host removes the Agent home, as they
+  did in the user's `CODEX_HOME` before.
+
+A Bot that switches from `inherit` to `excluded` cannot resume the threads it
+made under `inherit`, because they are in the user's thread store. Such a
+resume fails closed through the existing missing-thread path, as a
+non-retryable failure; start a new thread.
+
+`AGENTS.md`, `AGENTS.override.md`, `skills/`, `memories/` and the plugin cache
+stay out. The app server starts with `features.plugins = false`, as under
+`agentUserMcpServers`, and with `features.memories = false`. The memory
+setting matters even with `memories/` left out: with the user's
+`[features] memories = true`, Codex runs a background memory agent that
+extracts from the thread store, calls the user's provider and writes
+`memories/` into the SDK home. Codex also loads user skills from
+`$HOME/.agents/skills`, outside `CODEX_HOME`, so `isolation.userSkills` stays
+`false`. User MCP servers in `config.toml` still start unless
+`agentUserMcpServers` is also `excluded`.
+
+Codex adds its own per-execution state to `codex-home` as it runs:
+`state_5.sqlite`, `logs_2.sqlite`, `memories_1.sqlite`, `queue_1.sqlite`,
+`goals_1.sqlite` and `thread_history_1.sqlite` with their `-wal` and `-shm`
+files, `installation_id`, `.sandbox_migration`, `skills/.system`,
+`shell_snapshots/`, `thread-writer-locks/` and `tmp/` (observed on 0.167.0).
+They start empty, and the resume and isolation checks pass with them. The
+session closes the app server before the scratch is released, and the release
+removes the whole `sdk` directory, `codex-home` with these files included,
+without following the links.
+
+The start fails as a non-retryable `authority` failure when:
+
+- The task has no sealed Agent home for its thread store, or its store path is
+  not a real directory inside the Agent home (for example a symbolic link an
+  earlier task left there). Reason: `codex Agent user context exclusion refused: the Agent home thread store is not a real directory inside the Agent home`.
+- Codex's effective `cli_auth_credentials_store` (from `config/read`) is not
+  `file`. A keyring entry is keyed by the `CODEX_HOME` path, so the SDK home
+  would not find the login, and a keyring save deletes `auth.json`, which is the
+  link. Reason: `codex Agent user context exclusion refused: cli_auth_credentials_store is <mode>; an SDK-owned CODEX_HOME supports file credentials only`.
+- The user's `CODEX_HOME` does not exist, or has no `auth.json`. Without the
+  link, a file-mode login would save `auth.json` in the SDK home and lose it
+  at cleanup. Reason: `codex Agent user context exclusion refused: the user CODEX_HOME has no auth.json; log in to Codex with file credentials first`.
+- On Windows, the account may not create symbolic links (`EPERM`: Developer
+  Mode is off and the daemon is not an administrator). Reason: `codex Agent user context exclusion refused: Windows refused to create a symbolic link (EPERM); turn on Developer Mode or run the daemon as an administrator`.
+  Otherwise Windows behaves as the other platforms.
+
+The credential store check runs on the started app server, through
+`config/read`, before the thread opens.
+
+Probed on Codex 0.160.0 and 0.167.0 through the runtime contract suite with a
+loopback provider and a placeholder login:
+
+- The user `AGENTS.md` and memory summary reach the model under `inherit` and
+  not under `excluded`, and the Agent home's `AGENTS.md` still does.
+- A second execution resumes the first execution's thread from the Agent home
+  store, its thread requests carry the first turn, and the user's
+  `CODEX_HOME` gets no `sessions/` (`codex.resume.excluded`).
+- With the user's memories on, no memory-agent request is made and no
+  `memories/` is written in the SDK home (`codex.memoryPipeline.excluded`).
+- No request leaves for another host.
+
+A real ChatGPT token refresh was not run; the refresh write path comes from
+the Codex source of both versions.
 
 #### `agentUserMcpServers` (Codex)
 
 `CodexAdapterOptions.agentUserMcpServers: 'excluded'` gives an Agent task (a
 run whose manifest has an `agentRef`, as every `task.offer` does) only the
 task's and the SDK's MCP servers. It changes MCP servers only; the user's
-`AGENTS.md` still loads. A run without an `agentRef`, and the default
+`AGENTS.md` still loads unless `agentUserContext` is also `excluded`. A run without an `agentRef`, and the default
 `'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
 [vendored session](../packages/client/vendor/oar/45488e7/PROVENANCE.md):
@@ -437,8 +584,9 @@ stay:
   configured values.
 
 Keeping these out means moving `GROK_HOME`, which also moves `auth.json` and
-the sessions; the adapter does not do it, so Grok declares
-`isolation.userContext: false`. A Host that needs isolation checks that bit. With the four variables, `grok inspect --json` 1.0.52 lists the
+the sessions; the adapter does not do it, so Grok declares none of the five
+user-context bits, with or without `compatInstructions: 'disabled'`. Only
+`userMcpServers` is `yes`, through the option below. With the four variables, `grok inspect --json` 1.0.52 lists the
 four Claude and Cursor files as `disabled`; without them, as `enabled`. The
 probe ran in a synthetic home with the network denied. `inspect` reports
 discovery, not prompt text. No live Grok session shows what the model sees.
@@ -511,13 +659,40 @@ option for user instructions: Agent tasks accept
 `agentUserContext: 'excluded'` excludes user-level resources and the instruction
 files of every directory above the Agent home. Instruction files in the Agent
 home (`lease.canonicalHome`) itself and its subdirectories load as usual, the
-same rule as Claude.
+same rule as Claude. Under `excluded` the settings are not project-trusted
+(`projectTrusted: false` in `pi-session-runtime.ts`), so the Agent home's own
+`.pi/SYSTEM.md` does not load either.
+
+On the ordinary RPC lane Pi declares all five user-context bits for
+`excluded`. The runtime contract suite checks three at Pi 1.5.0 with markers
+that appear when inherited and are absent under `excluded`:
+
+- `userInstructions`: `AGENTS.md`, `SYSTEM.md` and `APPEND_SYSTEM.md` in the
+  agent directory.
+- `userSkills`: the description of a skill in `<agentDir>/skills/` and in
+  `~/.agents/skills/`.
+- `userHookContext`: a user extension in `<agentDir>/extensions/` that adds a
+  `before_agent_start` message.
+
+`userOutputStyle` and `userMemory` read `yes (no source)`: Pi 1.5.0 has a fixed
+system-prompt preamble with no style setting (themes only color the UI and the
+HTML export), and no native memory. The same cases show that Host-authorized
+`agentSkillPaths` and `agentExtensionPaths` still reach the model under
+`excluded`. Pi
+has no user MCP configuration and no transcript switch, so `userMcpServers`
+and `sessionPersistence` are `no`. The durable lane declares no isolation bit,
+because Agent resources run only on the RPC lane (#1197).
 
 The host bundles pi-web-access and rpiv-todo as replaceable extensions. When
 another loaded extension registers one of their tool, command or flag names,
 for example the user's own install of either package, Pi leaves the bundled
 one out instead of failing the launch on the name conflict, and the host writes
 a line to stderr naming it.
+
+Pi also loads the extensions, skills and packages that `<agentDir>/settings.json`
+lists. Under `excluded` that settings file is not read for resources: the host
+gives Pi in-memory settings that carry only the model selection below, so none
+of those entries load.
 
 `excluded` keeps the model selection of the user's global Pi settings
 (`defaultProvider`, `defaultModel`, `defaultThinkingLevel`; project settings are
@@ -554,6 +729,13 @@ directories, `HERMES_HOME/skills` and configured skill directories, which the
 SDK profile does not set. No user-level instruction source reaches the
 session, so Hermes needs no option.
 
+Hermes declares all five user-context bits. The runtime contract suite puts a
+marker for each in a user `HERMES_HOME`: `SOUL.md`, a skill in `skills/`,
+`memories/MEMORY.md` and `USER.md`, a `display.personality` in `config.yaml`,
+and a `hooks.pre_llm_call` hook whose output adds context. A positive-control
+turn runs the same Hermes binary outside the adapter on that home and sees
+every marker; the adapter turn, on its fresh home, sees none.
+
 ### dsh: user-level configuration
 
 The [dsh adapter](../packages/client/src/adapters/dsh/dsh-adapter.ts) runs
@@ -568,8 +750,16 @@ and user MCP servers from the profile and home `cordis.patch.yml` files under
 `DSH_HOME`. With the SDK root none of the user's own copies apply, so dsh needs
 no option. Project context still loads: the workspace `AGENTS.md`/`CLAUDE.md`
 (and `.local` overrides) and the project `.agents/skills`. The runtime contract
-suite checks this with markers in `~/.dsh` and `~/.agents`. A positive control
-shows that a skill in the adapter's own `DSH_AGENTS_HOME` does reach the model.
+suite checks this with markers in `~/.dsh` and `~/.agents`. Positive controls
+in the adapter's own root show that each source does reach the model there:
+`AGENTS.md` in `DSH_HOME` (`userInstructions`), a `personaPrefix` in
+`DSH_HOME/cordis.patch.yml` (`userOutputStyle`) and a skill in
+`DSH_AGENTS_HOME` (`userSkills`). `userMemory` reads `yes (no source)`: dsh
+0.2.2-rc.1 ships no memory package, and the memory MCP server its guide
+describes is a user MCP server, which `userMcpServers` covers.
+`userHookContext` is `no`: the dsh hook bridge is a separate package that
+neither the npm install nor the ACP profile includes, so the suite cannot
+exercise it without installing another package.
 
 ### agy: user-level configuration
 
@@ -604,7 +794,15 @@ agy needs no option. Project context still loads: agy reads `AGENTS.md`,
 `GEMINI.md` and `.agents/AGENTS.md` from the workspace, and it walks up to a
 `.git` root. The runtime contract suite checks this with markers in the ambient
 home, and a positive control shows that files in the adapter's own home reach
-the model. agy always keeps conversations in that home, because resume needs
+the model. Three bits have such a case: `userInstructions`
+(`~/.gemini/GEMINI.md`), `userSkills` (a skill in `.gemini/config/skills/`,
+with markers in its description and body) and `userHookContext` (a
+`SessionStart` hook in `.gemini/config/hooks.json` that adds a system
+message). `userOutputStyle` reads `yes (no source)`: the agy CLI reference
+lists no response-style setting, `verbosity` only sets what the UI shows, and
+the 1.5.1 binary has none. `userMemory` is `no`: agy has no memory tool, and
+the store of its default-off Knowledge Items could not be located, so the SDK
+makes no guarantee. agy always keeps conversations in that home, because resume needs
 them; the `agy-session-store` retention class expires them. A daemon cleans up
 sessions for one agy home only.
 
@@ -620,7 +818,7 @@ for Claude it is `agentSessionPersistence: 'disabled'`, below.
 | Runtime | Where an Agent task's session record goes |
 | --- | --- |
 | Claude | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<session>.jsonl`, outside the Agent home |
-| Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`. The adapter does not set `CODEX_HOME`, so normally under `~/.codex` |
+| Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`, normally under `~/.codex`. Under `agentUserContext: 'excluded'`, an Agent task's rollouts are in `<Agent home>/.byok/codex/sessions/` instead |
 | Grok | `$GROK_HOME/sessions/<encoded cwd>/<session id>/`, and the `sessions/session_search.sqlite` index. The adapter does not set `GROK_HOME`, so normally under `~/.grok` |
 | Pi, ordinary, Pi login | The settings `sessionDir`, else `<agent dir>/sessions/--<encoded cwd>--/<time>_<id>.jsonl`. The agent directory is `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` |
 | Pi, ordinary, Keys profile | `DaemonConfig.piByokLauncher.sessionDir/<time>_<id>.jsonl`, one folder for every execution, which the Host chooses |
@@ -719,13 +917,29 @@ launch arguments and environment. They do not
 prove an installed CLI's entire prompt contains no user rules. No provider
 ran, and no global configuration changed.
 
-For an “Agent home only” guarantee, qualify the exact runtime version with
-synthetic user-rule and Agent-home markers in a live session, show user
-markers absent while the persona remains present, and cover resume behavior
-and credential discovery. Until then, Hosts requiring that guarantee must
-treat the Claude, Codex, Grok and Pi lanes as unqualified, with or without the
-Grok option. [Issue #634](https://github.com/Ancienttwo/byok-sdk/issues/634)
-tracks that remaining work; adding persona text alone does not establish isolation.
+The [runtime contract suite](runtime-contract.md) binds every isolation bit an
+adapter declares `yes` to one of two things, against a loopback provider at the
+qualified version:
+
+- A live case. For a user-context bit, a synthetic marker in the user source
+  is absent from the Agent task, and a positive control shows the marker does
+  reach the model. The control differs by lane: Claude and Pi run the same
+  adapter with the user context inherited; agy and dsh put the marker in the
+  adapter's own home; Hermes, which has no inherit mode, runs the same binary
+  outside the adapter on a user home. `userMcpServers` is checked by whether a
+  user MCP server starts (Claude, Codex, Grok and agy with a positive control,
+  dsh and Hermes without), and `sessionPersistence` by whether a transcript is
+  written.
+- An absent declaration, `yes (no source)`: no live case runs, and the
+  evidence is the adapter's absent-sources record (Pi `userOutputStyle` and
+  `userMemory`, dsh `userMemory`, agy `userOutputStyle`).
+
+A `no` bit carries no guarantee, and the sources this section lists for it
+still reach the model.
+Only Hermes and ordinary Pi declare all five user-context bits, so a Host that
+needs an “Agent home only” session reads all five bits of the runtime it
+dispatches to. The cases do not cover resume behavior or credential discovery,
+and adding persona text alone does not establish isolation.
 
 ## Grok
 

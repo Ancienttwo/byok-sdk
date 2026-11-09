@@ -64,7 +64,7 @@ pending mailbox (`outbox`) row and rejects with
 `PostgresMailboxProtocolUnsupportedError` (`code`
 `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`, plus `requiredVersion`, `tenantId`,
 `deviceId` and `seq` of the first offending row) if any body is not a wire
-envelope of the build's `PROTOCOL_VERSION` (4). Acked and expired rows are
+envelope of the build's `PROTOCOL_VERSION` (6). Acked and expired rows are
 history and are not inspected. The check is read-only: no row is rewritten,
 reclassified or deleted, and there is no synchronous variant that skips it.
 

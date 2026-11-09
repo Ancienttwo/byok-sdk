@@ -1,4 +1,4 @@
-import type { RuntimeCapabilities } from '../../types';
+import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types';
 
 /**
  * What the Codex adapter can do: the one authority for its descriptor, the
@@ -13,6 +13,12 @@ export const CODEX_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   mcpToolsets: true,
   messageDraft: true,
   preparedLane: false,
-  // Codex has no per-process switch for the user AGENTS.md or its thread store.
-  isolation: Object.freeze({ userContext: false, userMcpServers: true, sessionPersistence: false }),
+  // `agentUserContext: 'excluded'` moves CODEX_HOME; skills under $HOME/.agents, the hooks and the thread store stay the user's.
+  isolation: Object.freeze({
+    userInstructions: true, userOutputStyle: false, userMemory: true, userSkills: false, userHookContext: false,
+    userMcpServers: true, sessionPersistence: false,
+  }),
 });
+
+/** Isolation sources the qualified codex has none of, with evidence; the contract plan marks each `absent`. */
+export const CODEX_ABSENT_ISOLATION_SOURCES: RuntimeIsolationAbsentSources = Object.freeze({});

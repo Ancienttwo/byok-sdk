@@ -169,6 +169,7 @@ describe('daemon owner store mutex: a store-scoped lock, immune to foreign liste
       fallbackDirectories.push(path.dirname(endpoint));
 
       const held = await acquireDaemonOwner(storeDir, 'doctor');
+      expect(await stat(path.dirname(endpoint)).then((st) => st.isDirectory())).toBe(true);
       try {
         // The fallback branch must be a real lock, not merely a bindable path.
         await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);

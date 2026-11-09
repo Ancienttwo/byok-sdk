@@ -51,7 +51,6 @@ describe('SealedTasks send order (#654 E3c)', () => {
     const tasks = new SealedTasks({
       keyring, tenantId: 'tenant-test', deviceId: 'dev_1',
       blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
-      serverCapabilities: () => [],
     });
     const opened = await tasks.openOffer(createEnvelope('task.offer', {
       agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
@@ -89,7 +88,6 @@ describe('SealedTasks memory after a terminal (#654 E3c)', () => {
     const tasks = new SealedTasks({
       keyring: new GatedKeyring(), tenantId: 'tenant-test', deviceId: 'dev_1',
       blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
-      serverCapabilities: () => [],
     });
     await tasks.openOffer(createEnvelope('task.offer', {
       agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
@@ -132,7 +130,6 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
     const sealedTasks = new SealedTasks({
       keyring: new GatedKeyring(), tenantId: 'draft-tenant', deviceId: 'draft-device',
       blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
-      serverCapabilities: () => [],
     });
     const runner = new TaskRunner({
       getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
@@ -140,7 +137,7 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
       agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
       agentEgressPolicy: policy, agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'draft-device', tenantId: 'draft-tenant', productId: 'sealed-draft', storeDir,
-      getServerCapabilities: () => ['agent-message-draft', 'sealed-payload-v1'], send: (envelope) => { sent.push(envelope); },
+      send: (envelope) => { sent.push(envelope); },
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
       approvalRegistry: new ApprovalRegistry(),
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
@@ -175,7 +172,7 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
 describe('admission timings on a sealed task\'s decline (#1014)', () => {
   const admission = { totalMs: 30, resultHelperPreflightMs: 12 };
   const sealedTasks = async (keyring: SealedScopeKeyring, taskId: string) => {
-    const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } }, serverCapabilities: () => [] });
+    const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } } });
     await tasks.openOffer(createEnvelope('task.offer', {
       agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
     } as never, { taskId, seq: 1 }));
@@ -201,8 +198,8 @@ describe('admission timings on a sealed task\'s decline (#1014)', () => {
 });
 
 describe('the failure class of a sealed task (#869)', () => {
-  const sealedTasks = async (keyring: SealedScopeKeyring, taskId: string, flags: readonly string[] = []) => {
-    const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } }, serverCapabilities: () => flags });
+  const sealedTasks = async (keyring: SealedScopeKeyring, taskId: string) => {
+    const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } } });
     await tasks.openOffer(createEnvelope('task.offer', {
       agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
     } as never, { taskId, seq: 1 }));
@@ -223,8 +220,8 @@ describe('the failure class of a sealed task (#869)', () => {
   it('is unknown on a replacement failure the daemon makes, whatever the replaced task.fail carried', async () => {
     // The key is there when the offer opens and gone when the terminal seals.
     const keyless: SealedScopeKeyring = new GatedKeyring();
-    const tasks = await sealedTasks(keyless, 'keyless', ['runtime-failure-class']);
-    const other = await sealedTasks(keyless, 'keyless-2', ['runtime-failure-class']);
+    const tasks = await sealedTasks(keyless, 'keyless');
+    const other = await sealedTasks(keyless, 'keyless-2');
     keyless.sealingKey = async () => undefined;
     const withClass = await tasks.sealOutbound(createEnvelope('task.fail', { reason: 'r', retryable: false, failure }, { taskId: 'keyless' }));
     expect(withClass?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' } });
@@ -232,35 +229,12 @@ describe('the failure class of a sealed task (#869)', () => {
     expect(withoutClass?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' } });
   });
 
-  it('carries no class on a replacement failure when the server does not advertise the flag', async () => {
+  it('gives a sealed task.complete that cannot be sealed the unknown class', async () => {
     const keyless: SealedScopeKeyring = new GatedKeyring();
-    const tasks = await sealedTasks(keyless, 'keyless-no-flag');
+    const tasks = await sealedTasks(keyless, 'complete-unsealable');
     keyless.sealingKey = async () => undefined;
-    const replaced = await tasks.sealOutbound(createEnvelope('task.fail', { reason: 'r', retryable: false, failure }, { taskId: 'keyless-no-flag' }));
-    expect(replaced?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false });
-  });
-
-  it('gives a sealed task.complete that cannot be sealed a class by the live server flags', async () => {
-    const keyless: SealedScopeKeyring = new GatedKeyring();
-    let flags: readonly string[] | undefined = ['runtime-failure-class'];
-    const open = async (taskId: string) => {
-      const tasks = new SealedTasks({ keyring: keyless, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } }, serverCapabilities: () => flags });
-      await tasks.openOffer(createEnvelope('task.offer', {
-        agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
-      } as never, { taskId, seq: 1 }));
-      return tasks;
-    };
-    const advertised = await open('complete-flag');
-    const without = await open('complete-no-flag');
-    const between = await open('complete-between');
-    keyless.sealingKey = async () => undefined;
-    const complete = (taskId: string) => createEnvelope('task.complete', { summary: 'done', sessionRef: 'session' }, { taskId });
-
-    expect((await advertised.sealOutbound(complete('complete-flag')))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' } });
-    flags = [];
-    expect((await without.sealOutbound(complete('complete-no-flag')))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false });
-    flags = undefined;
-    expect((await between.sealOutbound(complete('complete-between')))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false });
+    const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'session' }, { taskId: 'complete-unsealable' });
+    expect((await tasks.sealOutbound(complete))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' } });
   });
 });
 
@@ -268,7 +242,6 @@ describe('a terminal built for a sealed task in a run that may not seal it (#866
   const tasks = () => new SealedTasks({
     keyring: new GatedKeyring(), tenantId: 'tenant-test', deviceId: 'dev_1',
     blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
-    serverCapabilities: () => [],
   });
   const sealedOffer = createEnvelope('task.offer', {
     agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
@@ -288,7 +261,7 @@ describe('a terminal built for a sealed task in a run that may not seal it (#866
     const fail = createEnvelope('task.fail', { reason: 'secret reason', retryable: true, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } } as never, { taskId: 'recovered' });
     const closed = await tasks().sealRecovered(sealedOffer, fail, false);
     expect(closed.type).toBe('task.fail');
-    expect(closed.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } });
+    expect(closed.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' }, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } });
     const cancelled = await tasks().sealRecovered(sealedOffer, createEnvelope('task.cancelled', { reason: 'secret reason' } as never, { taskId: 'recovered' }), false);
     expect(cancelled.payload).toEqual({});
   });
@@ -306,7 +279,6 @@ describe('sealed payload v2 on the device (#1045 S2)', () => {
   const sealedTasks = (keyring: GatedKeyring) => new SealedTasks({
     keyring, tenantId: 'tenant-test', deviceId: 'dev_1',
     blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
-    serverCapabilities: () => [],
   });
   async function openTask(keyring: GatedKeyring, taskId: string) {
     const tasks = sealedTasks(keyring);

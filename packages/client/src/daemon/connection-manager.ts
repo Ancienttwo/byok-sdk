@@ -541,14 +541,7 @@ export class ConnectionManager {
           bytes += Buffer.byteLength(JSON.stringify(this.outbox[count])) + 1;
           if (count > 0 && bytes > MESSAGES_SEND_MAX_BODY_BYTES) break;
         }
-        let batch = this.outbox.splice(0, count);
-        // serveSession applies handshake capabilities before opening this drain.
-        // Re-gate queued drafts after reconnect; dropped drafts have no receipt.
-        if (!this.serverCapabilities.includes('agent-message-draft')) {
-          for (const envelope of batch) if (envelope.type === 'agent.message.draft') this.forget(envelope);
-          batch = batch.filter(envelope => envelope.type !== 'agent.message.draft');
-        }
-        if (batch.length === 0) continue;
+        const batch = this.outbox.splice(0, count);
         // Finding F5(b): tracked for the DURATION of the `postBatch` await —
         // `batch` has already left `this.outbox` (spliced out above) but
         // isn't confirmed delivered yet, so a plain `this.outbox.length`

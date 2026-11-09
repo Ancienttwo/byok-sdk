@@ -7,13 +7,355 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "5c101efe75dd23439980ffa563e336243e14ef3433b2782076edff60760b7d27"
+    "snapshotSha256": "7c0cfdbcc3f722a615b610a106dab8ee709340a95ee0aac54ebd80d50be57215"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "keys-profile-store-migration",
+      "impact": "additive",
+      "summary": "migrateProviderProfileStore migrates a keys SQLite profile store with an earlier provider_kind CHECK set in one transaction, keeping profiles and credential-store key references. Call it before opening the store; opening never migrates.",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#stores",
+      "items": [
+        "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+        "export:@byok-sdk/keys#migrateProviderProfileStore"
+      ]
+    },
+    {
+      "id": "codex-agent-user-context",
+      "impact": "additive",
+      "summary": "CodexAdapterOptions.agentUserContext and DaemonConfig.runtimes.codex.agentUserContext: excluded runs a Codex Agent task in an SDK-owned CODEX_HOME of symbolic links to the user's auth.json, config.toml, hooks.json and rules, with sessions and archived_sessions in the Agent's own store <Agent home>/.byok/codex, so the user's AGENTS.md, skills, memories and threads stay out; plugins and the memory pipeline are off. Codex now declares isolation.userInstructions and isolation.userMemory. A Bot switched from inherit to excluded cannot resume its earlier threads (fails closed as a missing thread). The new retention class agent-runtime-sessions is exempt and unbounded until the Host removes the Agent home. The start refuses without a sealed Agent home, with a credential store other than file, without the user auth.json and, on Windows, on an account that may not create symbolic links. Default inherit changes nothing.",
+      "migration": "docs/adapter-capabilities.md#agentusercontext-codex",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#CodexAdapterOptions",
+        "export:@byok-sdk/client/adapters#CodexAdapterOptions",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+        "export:@byok-sdk/client#ProtectedClassId"
+      ]
+    },
+    {
+      "id": "wire-v6-isolation-sources",
+      "impact": "breaking",
+      "summary": "The envelope wire is v6 (PROTOCOL_VERSION = 6). The runtime capability isolation.userContext is removed and split into one bit per source a runtime can keep out: userInstructions, userOutputStyle, userMemory, userSkills and userHookContext, beside the unchanged userMcpServers and sessionPersistence, in RuntimeCapabilitiesSchema, so on conn.hello runtimes and harnesses, task.claim, presence, PresenceRuntimeCapabilities and RuntimeIsolationCapabilities. There is no derived userContext field and no v5 reader: a pending v5 row stops startup with SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED or DaemonJournalProtocolUnsupportedError and is left unchanged, and a v5 conn.hello is refused with hello_protocol_version_unsupported. A bit describes what the adapter can keep out of an Agent task: true is contract-checked or an evidence-backed absent source, false is no guarantee, missing is unknown, and on Claude and ordinary Pi the user-context bits need agentUserContext: excluded. There is no drain tool or upgrade precheck: stop the 0.40.0 deployment, start the server side and the daemons together, and start on a new store where one refuses.",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#wire-v6",
+      "items": [
+        "export:@byok-sdk/client#RuntimeIsolationCapabilities",
+        "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+        "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+        "export:@byok-sdk/protocol#HarnessInfoSchema",
+        "export:@byok-sdk/protocol#HarnessInventorySchema",
+        "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+        "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+        "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+        "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+        "export:@byok-sdk/protocol#RuntimeInfoSchema",
+        "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+        "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION"
+      ]
+    },
+    {
+      "id": "wire-v6-retired-gates",
+      "impact": "breaking",
+      "summary": "Wire v6 retires every v5 gate that both sides always advertised. The server flags agent-message-draft, runtime-failure-class, runtime-quota-scope, resident-memory-over-limit, sealed-output-ciphertext-ref and mailbox-read-ahead are gone, the sealed and native-sessions decline codes need no flag, and the reference server advertises no server flag (CLOUD_PROTOCOL_CAPABILITIES is empty): every daemon-to-server surface is baseline, and the server accepts a sealed one by the task's frozen sealing. The device flags custom-harness, terminal-projection-selection, blob-upload and runtime-unavailable-cause are gone, so an offer with harnessId or terminalProjection needs no flag and conn.hello harnesses no longer need custom-harness (the refusal hello_harnesses_without_capability is removed). Their constants leave CAPABILITY_FLAGS and @byok-sdk/protocol. WIRE_ADDITIONS has no strip-safe rows and WireAddition is the gated row only. Device flags a daemon advertises by configuration, such as agent-home-contract, agent-egress-reliable-ack, native-sessions and sealed-payload-v1, still gate. The Agent egress drop reason capability_missing is removed: the daemon re-sends unacknowledged reliable egress on every session open. Presence runtimeUnavailable takes a custom harness id, like conn.hello. A Host that tested for a retired flag drops the check; upgrade server and daemons together.",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#retired-gates-and-token-lifetime",
+      "items": [
+        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/protocol#AgentEgressDropReasonSchema",
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#CUSTOM_HARNESS_CAPABILITY",
+        "export:@byok-sdk/protocol#MAILBOX_READ_AHEAD_CAPABILITY",
+        "export:@byok-sdk/protocol#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+        "export:@byok-sdk/protocol#RUNTIME_FAILURE_CLASS_CAPABILITY",
+        "export:@byok-sdk/protocol#RUNTIME_QUOTA_SCOPE_CAPABILITY",
+        "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY",
+        "export:@byok-sdk/protocol#SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY",
+        "export:@byok-sdk/protocol#TERMINAL_PROJECTION_SELECTION_CAPABILITY",
+        "export:@byok-sdk/protocol#WireAddition",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#CUSTOM_HARNESS_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#MAILBOX_READ_AHEAD_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#RUNTIME_FAILURE_CLASS_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#RUNTIME_QUOTA_SCOPE_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#TERMINAL_PROJECTION_SELECTION_CAPABILITY"
+      ]
+    },
+    {
+      "id": "token-lifetime-expires-in",
+      "impact": "breaking",
+      "summary": "TokenResponse and PairResponse carry the token lifetime only as expiresIn, now required. TokenResponse.expiresAt is removed (TokenResponseSchema strips it unread), the server no longer sends it or the pair refreshHint, and MintedAccessToken has no expiresAt. A daemon refuses a token or pair response without expiresIn and keeps its prior credential. A Host with its own auth plane returns expiresIn from mintAccessToken.",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#retired-gates-and-token-lifetime",
+      "items": [
+        "export:@byok-sdk/cloud#MintedAccessToken",
+        "export:@byok-sdk/protocol#PairResponseSchema",
+        "export:@byok-sdk/protocol#TokenResponseSchema"
+      ]
+    },
+    {
+      "id": "native-assets-archive-path",
+      "impact": "additive",
+      "summary": "copySdkNativeAssets accepts an optional absolute archivePath to a local copy of the pinned Koffi tgz. It runs the same SHA-512 integrity and addon SHA-256 checks and never calls fetch. Without it, behavior is unchanged.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1567",
+      "items": [
+        "export:@byok-sdk/client#CopySdkNativeAssetsOptions"
+      ]
+    },
+    {
+      "id": "store-migration-required-verdict",
+      "impact": "additive",
+      "summary": "A store precheck can report migration-required: the candidate opens the store after its explicit migration. inspectProviderProfileStore reports it for a profile store with an earlier provider_kind CHECK set. A service installation runs the Host's new migrate program after the store snapshot, then the precheck again; without migrate the upgrade fails with store_migration_required, and a failed migration restores the snapshot (store_migration_failed). A precheck exits 2 only for new-path-repair or rejected.",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#stores",
+      "items": [
+        "export:@byok-sdk/client#ServiceInstallationErrorCode",
+        "export:@byok-sdk/client#ServiceInstallationOptions",
+        "export:@byok-sdk/core#StoreCompatibilityVerdict"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=bef6a1db2b3b066f",
+      "after": "optional schema-sha256=8933bd48c145a3e5",
+      "entry": "codex-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapterOptions",
+      "change": "changed",
+      "entry": "codex-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#CopySdkNativeAssetsOptions",
+      "change": "changed",
+      "entry": "native-assets-archive-path"
+    },
+    {
+      "item": "export:@byok-sdk/client#ProtectedClassId",
+      "change": "changed",
+      "entry": "codex-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeIsolationCapabilities",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapterOptions",
+      "change": "changed",
+      "entry": "codex-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "codex-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+      "change": "changed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#MintedAccessToken",
+      "change": "changed",
+      "entry": "token-lifetime-expires-in"
+    },
+    {
+      "item": "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/core#StoreCompatibilityVerdict",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+      "change": "added",
+      "entry": "keys-profile-store-migration"
+    },
+    {
+      "item": "export:@byok-sdk/keys#migrateProviderProfileStore",
+      "change": "added",
+      "entry": "keys-profile-store-migration"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEgressDropReasonSchema",
+      "change": "changed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CUSTOM_HARNESS_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessInfoSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessInventorySchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MAILBOX_READ_AHEAD_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairResponseSchema",
+      "change": "changed",
+      "entry": "token-lifetime-expires-in"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RUNTIME_FAILURE_CLASS_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RUNTIME_QUOTA_SCOPE_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeInfoSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TERMINAL_PROJECTION_SELECTION_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TokenResponseSchema",
+      "change": "changed",
+      "entry": "token-lifetime-expires-in"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#WireAddition",
+      "change": "changed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CUSTOM_HARNESS_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#MAILBOX_READ_AHEAD_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RUNTIME_FAILURE_CLASS_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RUNTIME_QUOTA_SCOPE_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#TERMINAL_PROJECTION_SELECTION_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v6-retired-gates"
+    }
+  ]
 }

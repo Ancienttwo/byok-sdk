@@ -81,10 +81,10 @@ describe('removed DaemonConfig fields (TE-B)', () => {
   });
 });
 
-function v2Bytes(bytes: string): string {
+function majorBytes(bytes: string, v: number): string {
   const parsed = JSON.parse(bytes) as { v: number };
   expect(parsed.v).toBe(PROTOCOL_VERSION);
-  return `${JSON.stringify({ ...parsed, v: 2 })}\n`;
+  return `${JSON.stringify({ ...parsed, v })}\n`;
 }
 
 function snapshot(storeDir: string): Record<string, unknown[]> {
@@ -132,9 +132,18 @@ describe('startup refuses a journal of another wire major', () => {
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     // A v3 row first: scanning before acting means it gets no terminal either.
     await seedOffer(journal, identity, 'v3-task', 1, encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'current' }, { taskId: 'v3-task', seq: 1 })));
-    await seedOffer(journal, identity, 'v2-task', 2, v2Bytes(encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v2-task', seq: 2 }))));
+    await seedOffer(journal, identity, 'v2-task', 2, majorBytes(encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v2-task', seq: 2 })), 2));
     await journal.close();
     await expectStartupRefused(config, { taskId: 'v2-task', record: 'recovery-offer' });
+    expect(snapshot(config.storeDir!).journal_terminal).toEqual([]);
+  });
+
+  it('a v5 recovery offer, the last retired major, stops startup', async () => {
+    const { config, identity } = await pairedDaemonStore();
+    const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    await seedOffer(journal, identity, 'v5-task', 1, majorBytes(encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v5-task', seq: 1 })), 5));
+    await journal.close();
+    await expectStartupRefused(config, { taskId: 'v5-task', record: 'recovery-offer', found: 5 });
     expect(snapshot(config.storeDir!).journal_terminal).toEqual([]);
   });
 
@@ -142,7 +151,7 @@ describe('startup refuses a journal of another wire major', () => {
     const { server, config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     await seedOffer(journal, identity, 'done-task', 1, encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'done' }, { taskId: 'done-task', seq: 1 })));
-    const terminal = v2Bytes(encodeEnvelope(createEnvelope('task.complete', { summary: 'old', sessionRef: 's' }, { taskId: 'done-task', sessionRef: 's' })));
+    const terminal = majorBytes(encodeEnvelope(createEnvelope('task.complete', { summary: 'old', sessionRef: 's' }, { taskId: 'done-task', sessionRef: 's' })), 2);
     await journal.recordTerminal({ taskId: 'done-task', terminalType: 'complete', bytes: terminal, payloadHash: journalHash(terminal),
       truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
     await journal.close();

@@ -75,6 +75,13 @@ describe('new 14-4 candidate: durable handoff directory publication', () => {
     expect(await store.history(h.input)).toHaveLength(2);
   });
 
+  it('survives a concurrent first create of the evidence directory', async () => {
+    const h = await fixture(); const store = new AgentSessionHandoffStore();
+    const results = await Promise.all([store.record(h.input), store.record(h.input)]);
+    expect(results).toHaveLength(2);
+    expect(await store.history(h.input)).toHaveLength(2);
+  });
+
   describe.skipIf(!POSIX)('POSIX directory barrier faults', () => {
     for (const phase of ['runtime-sessions', '.byok', 'home'] as const) {
       it.each(['record', 'terminal', 'task-terminal'] as const)(`refuses %s completion until ${phase} sync recovers, including existing-directory retry`, async kind => {

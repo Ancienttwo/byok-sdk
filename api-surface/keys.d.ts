@@ -596,8 +596,8 @@ export type { SecretScope } from './secret-scope';
 export { InMemoryProviderProfileStore } from './profile-store';
 export type { ProviderProfileStore } from './profile-store';
 export { isSqliteAvailable, loadSqliteModule, openSqliteDatabase, secureSqliteFilePermissions, } from './sqlite-support';
-export { SqliteProviderProfileStore } from './sqlite-profile-store';
-export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
+export { SqliteProviderProfileStore, migrateProviderProfileStore } from './sqlite-profile-store';
+export type { ProviderProfileStoreMigration, SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
 export { inspectProviderProfileStore } from './store-compatibility';
 export { PROVIDER_PROFILE_TRUTH_RECORD_KEY, TruthStoreProviderProfileStore, } from './truth-profile-store';
 export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store';
@@ -2459,6 +2459,32 @@ export declare class SqliteProviderProfileStore implements ProviderProfileStore 
     recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean>;
     setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile>;
 }
+/** What {@link migrateProviderProfileStore} did to the store. */
+export type ProviderProfileStoreMigration = 'migrated' | 'unchanged';
+/** Test-only seam: `afterCopy` runs inside the migration transaction, after the rows are copied. */
+export interface ProviderProfileStoreMigrationFaults {
+    afterCopy?(): void;
+}
+/**
+ * One-shot migration of a store whose `provider_profile` table carries an
+ * earlier `provider_kind` CHECK set; SQLite cannot alter a CHECK in place.
+ *
+ * Call it explicitly, with no other connection open, before opening the store
+ * with this version; opening never migrates. Under SQLite's exclusive write
+ * lock, one transaction rebuilds the table from the current schema, copies
+ * every row verbatim (the profile ref names the credential-store secret, which
+ * is never read), verifies count and content, and recreates the index. The
+ * custody tables hold no provider kind and must already be current.
+ *
+ * `PROVIDER_STORE_SCHEMA_STALE` means any other difference, or a copy that did
+ * not verify: the store cannot be migrated and needs a new store. Any other
+ * error (such as `SQLITE_BUSY`) is operational: the transaction rolled back,
+ * the store is unchanged, and the call can be retried once other processes
+ * are closed. A current store, or no store, is `'unchanged'`.
+ */
+export declare function migrateProviderProfileStore(path: string): ProviderProfileStoreMigration;
+/** {@link migrateProviderProfileStore} with its test-only fault seam. */
+export declare function runProviderProfileStoreMigration(path: string, faults?: ProviderProfileStoreMigrationFaults): ProviderProfileStoreMigration;
 // ==== @byok-sdk/keys dist/sqlite-support.d.ts ====
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 export type SqliteOpenStep = 'after-open' | 'after-wal' | 'after-synchronous';
@@ -2531,9 +2557,12 @@ import type { StoreCompatibility } from '@byok-sdk/core';
  * process that writes the store first: a file that changes while it is copied
  * fails the check rather than yielding a verdict about a torn copy.
  *
- * A store created by a different schema (`PROVIDER_STORE_SCHEMA_STALE`) is
- * `new-path-repair`: provision a separate current-schema store. Any other
- * refusal is `rejected`.
+ * When the open refuses the store as stale (`PROVIDER_STORE_SCHEMA_STALE`),
+ * {@link migrateProviderProfileStore} runs on the same copy. A migration that
+ * leaves a store this build opens is `migration-required`: the Host runs the
+ * migration before it opens the store. A store the migration refuses as stale
+ * is `new-path-repair`, carrying the migration's code and reason: provision a
+ * separate current-schema store. Any other refusal is `rejected`.
  */
 export declare function inspectProviderProfileStore(path: string): Promise<StoreCompatibility>;
 // ==== @byok-sdk/keys dist/truth-profile-store.d.ts ====

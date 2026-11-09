@@ -10,7 +10,7 @@ import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credent
 import { runPiSessionRuntime } from './pi-session-runtime';
 export { openPiRpcSession } from './pi-session-runtime';
 import { webExtension } from './pi-extension-factories.js';
-import { loadPiSubagentsExtensions } from '../adapters/pi/subagents';
+import { loadPiSubagentsAsset, loadPiSubagentsExtensions, writePiSubagentsHostSdk } from '../adapters/pi/subagents';
 import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
@@ -20,8 +20,6 @@ import { parseSerializedFileScopeGrant, verifySerializedFileScopeGrant, type Ser
 import { createPiFileScopeExtension } from '../adapters/pi/file-scope-extension';
 import { assertPiFileScopeRegistry } from '../adapters/pi/file-scope-registry';
 import { createPiMemoryLane, assertPiMemoryToolLoadout } from './pi-memory-lane';
-
-declare const __BYOK_PI_SUBAGENTS__: boolean;
 
 const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
@@ -96,7 +94,7 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
     fail(`config must contain exactly ${keys.join(', ')}`);
   }
   if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 11) fail('unsupported config format/version');
-  const resources = parsePiAgentResources({ userContext: raw.agentUserContext, skillPaths: raw.agentSkillPaths, extensionPaths: raw.agentExtensionPaths });
+  const resources = parsePiAgentResources({ agentUserContext: raw.agentUserContext, skillPaths: raw.agentSkillPaths, extensionPaths: raw.agentExtensionPaths });
   const credentialSource = raw.credentialSource;
   if (typeof credentialSource !== 'string' || !(CREDENTIAL_SOURCES as readonly string[]).includes(credentialSource)) {
     fail(`config.credentialSource must be one of [${CREDENTIAL_SOURCES.join(', ')}]`);
@@ -105,14 +103,14 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
     fail('config.cwd must be a normalized absolute path');
   }
   const agentHome = raw.agentHome;
-  if (resources.userContext === 'excluded'
+  if (resources.agentUserContext === 'excluded'
     ? typeof agentHome !== 'string' || !isAbsolute(agentHome) || resolve(agentHome) !== agentHome
     : agentHome !== null) {
     fail('config.agentHome must be a normalized absolute path under excluded user context and null otherwise');
   }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   const fileScope = raw.fileScope === null ? null : parseSerializedFileScopeGrant(raw.fileScope, fail);
-  if (fileScope?.mode === 'memory' && (resources.userContext !== 'excluded'
+  if (fileScope?.mode === 'memory' && (resources.agentUserContext !== 'excluded'
     || agentHome !== raw.cwd || fileScope.home.path !== raw.cwd
     || resources.skillPaths.length !== 0 || resources.extensionPaths.length !== 0
     || raw.toolAuthorization !== null || Object.keys(mcp.mcpServers).length !== 0
@@ -122,7 +120,7 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   return {
     format: 'byok.pi.rpc-launch', version: 11,
     credentialSource: credentialSource as PiRpcHostConfig['credentialSource'], cwd: raw.cwd, mcp,
-    agentUserContext: resources.userContext,
+    agentUserContext: resources.agentUserContext,
     agentHome: agentHome as string | null,
     agentSkillPaths: resources.skillPaths,
     agentExtensionPaths: resources.extensionPaths,
@@ -265,10 +263,10 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   const extensionFactories: InlineExtension[] = [
     { name: 'byok-web-access', factory: webExtension, replaceable: true }, createByokMcpExtension(config.mcp),
   ];
-  // pi-subagents is an installed dependency that reads its own package files at
-  // run time, so a bundled product has no subagents (the sealed build drops this
-  // branch). Under keys-profile a child session opens its own model runtime and
-  // would read the key marker from the projection, not the in-memory key.
+  // pi-subagents reads its own package files at run time: the installed host
+  // imports the installed dependency, and a bundled product hands the copy in
+  // its Pi asset root to Pi's extension loader. Under keys-profile a child session opens its own model runtime
+  // and would read the key marker from the projection, not the in-memory key.
   //
   // A file-scoped parent does offer native subagents, but only through the
   // same grant: the child gate config carries the serialized grant, both child
@@ -277,13 +275,28 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   // gate extension refuses the six file tools when those tools did not
   // register, so an unscoped child never appears. bash/MCP/extensions remain
   // per-call approval.
-  if (__BYOK_PI_SUBAGENTS__ && packaging === 'installed' && config.credentialSource !== 'keys-profile') {
-    const gateExtension = fileURLToPath(new URL('./pi-subagent-gate.js', import.meta.url));
-    const fileScopeExtension = fileURLToPath(new URL('./pi-subagent-file-scope.js', import.meta.url));
-    extensionFactories.push(...await loadPiSubagentsExtensions(
-      config.toolAuthorization, gateExtension,
-      config.fileScope === null || config.toolAuthorization === null ? undefined : fileScopeExtension,
-    ));
+  const subagentExtensionPaths: string[] = [];
+  if (config.credentialSource !== 'keys-profile') {
+    const fileScoped = config.fileScope !== null && config.toolAuthorization !== null;
+    if (packaging === 'installed') {
+      const gateExtension = fileURLToPath(new URL('./pi-subagent-gate.js', import.meta.url));
+      const fileScopeExtension = fileURLToPath(new URL('./pi-subagent-file-scope.js', import.meta.url));
+      extensionFactories.push(...await loadPiSubagentsExtensions(config.toolAuthorization, gateExtension, fileScoped ? fileScopeExtension : undefined));
+    } else {
+      // Background runs have no runner a bundled product can host (#1589): on
+      // a Bun-compiled product pi-subagents would re-execute the product
+      // itself with Pi CLI arguments. Its Pi executable override is read only
+      // on spawn paths, never by in-process foreground children. It names the
+      // launch-private directory, which holds this launch's config, so the
+      // spawn always fails and the tool call reports it.
+      process.env.PI_SUBAGENT_PI_BINARY = resolve(dirname(args.configPath));
+      // pi-subagents' own Pi root setting: foreground children get the product's Pi, and no foreign Pi above the product is used.
+      const assetRoot = bundledAssetRoot();
+      process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = await writePiSubagentsHostSdk(join(resolve(dirname(args.configPath)), 'pi-subagents-host-sdk'), assetRoot);
+      const asset = await loadPiSubagentsAsset(assetRoot, config.toolAuthorization, fileScoped);
+      subagentExtensionPaths.push(asset.extensionPath);
+      extensionFactories.push(...asset.factories);
+    }
   }
   extensionFactories.push({ name: 'byok-todo', factory: createTodoExtension(localeAnchor), replaceable: true });
   if (fileScope !== undefined) {
@@ -315,7 +328,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     resourceLoaderOptions: {
       extensionFactories,
       additionalSkillPaths: [...config.agentSkillPaths],
-      additionalExtensionPaths: [...config.agentExtensionPaths],
+      additionalExtensionPaths: [...subagentExtensionPaths, ...config.agentExtensionPaths],
       ...(agentHome === null ? {} : {
         noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
         // Only instruction files whose real path is at or below the Agent home

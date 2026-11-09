@@ -1,4 +1,4 @@
-import type { RuntimeCapabilities } from '../../types';
+import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types';
 
 /**
  * What the Pi adapter can do on its ordinary RPC lane: the one authority for
@@ -16,7 +16,10 @@ export const PI_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   toolAuthorizationAuto: true,
   preparedLane: true,
   // Pi has no user MCP configuration and no session persistence switch.
-  isolation: Object.freeze({ userContext: true, userMcpServers: false, sessionPersistence: false }),
+  isolation: Object.freeze({
+    userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: true, userHookContext: true,
+    userMcpServers: false, sessionPersistence: false,
+  }),
 });
 
 /** The durable Pi worker (`PiAdapterOptions.durableLane`): no steer, resume or prepared lane. */
@@ -29,5 +32,14 @@ export const PI_DURABLE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freez
   // Agent resources (including excluded user context) only run on the RPC
   // lane, so the durable worker must not inherit this capability from
   // PI_RUNTIME_CAPABILITIES. #1197
-  isolation: Object.freeze({ userContext: false, userMcpServers: false, sessionPersistence: false }),
+  isolation: Object.freeze({
+    userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false,
+    userMcpServers: false, sessionPersistence: false,
+  }),
+});
+
+/** Isolation sources the qualified pi has none of, with evidence; the contract plan marks each `absent`. */
+export const PI_ABSENT_ISOLATION_SOURCES: RuntimeIsolationAbsentSources = Object.freeze({
+  userOutputStyle: '@earendil-works/pi-coding-agent@1.5.0 dist/core/system-prompt.js (fixed preamble, no style field), dist/core/settings-schema.js (no style, personality or prompt setting); themes only color the UI and HTML export (docs/themes.md:3, dist/core/agent-session.js exportToHtml)',
+  userMemory: '@earendil-works/pi-coding-agent@1.5.0 dist/{core,modes,extensions,utils}, dist/main.js, dist/config.js: no native memory source (searched for "memor"); the agent directory loads only SYSTEM.md, APPEND_SYSTEM.md, AGENTS.md, skills/, extensions/, prompts/ and themes/ (dist/core/resource-loader.js:959-980)',
 });

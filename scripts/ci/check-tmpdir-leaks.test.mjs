@@ -57,8 +57,12 @@ describe('check-tmpdir-leaks', () => {
     assert.deepEqual(findNewEntries(['byok-a'], ['byok-a', 'byok-b']), ['byok-b']);
   });
 
-  it('also rejects a socket fallback directory leaked into the fixed short root', { skip: process.platform === 'win32' }, () => {
+  it('also rejects a long-path socket fallback leaked into the fixed short root', { skip: process.platform === 'win32' }, () => {
     assert.equal(run('snapshot').status, 0);
+    // `byok-<store hash>` and `byok-store-mutex-<store hash>` are the other two
+    // things that land in /tmp by design. The scan named only `byok-t-` before,
+    // so a leak of either went unreported even though catching them is exactly
+    // what this gate exists for.
     const leaked = mkdtempSync('/tmp/byok-store-mutex-');
     try {
       const result = run('verify');

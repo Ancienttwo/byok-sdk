@@ -73,8 +73,10 @@ export interface ClaudeAdapterOptions {
      * `--strict-mcp-config`, so only the task's and the SDK's MCP servers load,
      * and with a `--settings` file that excludes the `CLAUDE.md`,
      * `CLAUDE.local.md` and rules of the Claude config directory and of every
-     * directory above the Agent home, and turns off Claude auto memory. The
-     * user's settings, deny rules, hooks, model and env still apply. It affects
+     * directory above the Agent home, turns off Claude auto memory and sets
+     * the default output style. The user's settings, deny rules, hooks,
+     * skills, model and env still apply, so hook output and skill listings
+     * still reach the model. It affects
      * new sessions only: a resumed session keeps its history. Other tasks are
      * unchanged. Default `inherit`.
      */
@@ -479,13 +481,28 @@ export interface CodexAdapterOptions {
      * MCP servers. After the open it reads the thread's MCP server status
      * back, and the start fails if any other server is not disabled, or if a
      * user server has the name of a task or SDK server. The user's
-     * `AGENTS.md`, login, model, sandbox setting and other configuration still
-     * apply. It covers new and resumed threads. On a resume, Codex may start a
+     * login, model, sandbox setting and other configuration still apply, and
+     * so does the user's `AGENTS.md` unless `agentUserContext` is `excluded`. It covers new and resumed threads. On a resume, Codex may start a
      * queued turn before the read-back: that turn already runs with the
      * overrides, and a failed read-back stops the app server. Other tasks are
      * unchanged. Default `inherit`.
      */
     agentUserMcpServers?: 'inherit' | 'excluded';
+    /**
+     * For an Agent task (`task.offer`), `excluded` runs Codex in an SDK-owned
+     * `CODEX_HOME` in the execution's scratch, so the user's `AGENTS.md`,
+     * `AGENTS.override.md`, `skills/`, `memories/` and threads stay out, and
+     * plugins and the memory pipeline are off. The home holds symbolic links to
+     * the user's `auth.json`, `config.toml`, `hooks.json` and `rules/`, and its
+     * `sessions/` and `archived_sessions/` link to the Agent's own store in
+     * `<Agent home>/.byok/codex/`. Threads made under `inherit` are not
+     * resumable under `excluded`. The start fails without a sealed Agent home,
+     * unless Codex's effective `cli_auth_credentials_store` is `file`, without
+     * the user's `auth.json`, and on Windows when the account may not create
+     * symbolic links. MCP servers are `agentUserMcpServers`' concern. Default
+     * `inherit`.
+     */
+    agentUserContext?: 'inherit' | 'excluded';
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
     /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
@@ -1311,7 +1328,10 @@ export interface CopyPiRuntimeAssetsOptions {
  *
  * The Pi package must be the exact official pin. The Pi export resources must
  * match their recorded SHA-256 digests, and the SDK todo locale assets must
- * match their build manifest; a mismatch fails closed. Returns the written
+ * match their build manifest; a mismatch fails closed. The root also holds the
+ * client's exact pi-subagents with its runtime dependencies and the SDK
+ * extensions its native children load, so the product's Pi offers foreground
+ * subagents. Returns the written
  * file paths, relative to `outDir`, in sorted order.
  */
 export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;
@@ -1361,6 +1381,8 @@ export interface RuntimeAdaptersRuntimes {
     codex?: {
         /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
         agentUserMcpServers?: CodexAdapterOptions['agentUserMcpServers'];
+        /** `CodexAdapterOptions.agentUserContext`: `excluded` runs an Agent task in an SDK-owned `CODEX_HOME` that keeps the user's `AGENTS.md`, skills, memories and threads out, links the login, configuration and guardrails, and keeps the Agent's threads in its home. Default `inherit`. */
+        agentUserContext?: CodexAdapterOptions['agentUserContext'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
     };
@@ -2506,8 +2528,6 @@ export declare class AgentEgressController {
     /** Re-open every existing Agent-local spool before retrying stable records after restart. */
     recover(agentsRoot: string): Promise<void>;
     reliableRecords(): readonly AgentReliableEgressRecord[];
-    /** Missing ack capability holds records in their reliable lane; it never makes them lossy. */
-    retryableReliableRecords(serverCapabilities: readonly string[]): readonly AgentReliableEgressRecord[];
     private spoolFor;
     private bindSpool;
     private tenantPendingBytes;
@@ -3620,9 +3640,7 @@ export declare class AuthRequestAbortedError extends Error {
  * Thrown when a successful `/byok/challenge` or `/byok/token` response body
  * is not valid JSON or does not satisfy its protocol schema
  * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
- * truncated body, a missing field, or a token `expiresAt` that is not an ISO
- * timestamp with an offset — and when a token or pair response carries no
- * `expiresIn` (#1114). The renewal or pairing fails and the prior credential
+ * truncated body or a missing field such as `expiresIn` (#1114). The renewal or pairing fails and the prior credential
  * is kept unchanged; nothing is inferred from the malformed body. The JSON
  * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
  */
@@ -8296,7 +8314,7 @@ export declare class StoragePressure {
 }
 // ==== @byok-sdk/client dist/daemon/retention/registry.d.ts ====
 export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir', 'agy-session-store'];
-export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'agent-content', 'byok-authority', 'agent-home-lease', 'skill-pack-current', 'store-authority', 'runtime-session-external'];
+export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'agent-content', 'byok-authority', 'agent-runtime-sessions', 'agent-home-lease', 'skill-pack-current', 'store-authority', 'runtime-session-external'];
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
 export type ProtectedClassId = typeof PROTECTED_CLASS_IDS[number];
 export type RetentionClassId = ExpiringClassId | ProtectedClassId;
@@ -11718,12 +11736,21 @@ export interface ServiceInstallationOptions {
      * The candidate's store precheck, run from its staged `versionDir` while
      * every writer is stopped. It prints `{ "stores": ServiceStoreVerdict[] }`
      * (`byok-agent upgrade check --store --json` prints the SDK's own stores in
-     * this shape) and exits 0 or 2. Every store the candidate rewrites must be
+     * this shape) and exits 2 when a store is `new-path-repair` or `rejected`,
+     * 0 otherwise. Every store the candidate rewrites must be
      * listed, Host stores included: the snapshot covers exactly the listed
      * stores. Output that breaks {@link ServiceStoreVerdict}'s rules is
      * `precheck_failed`.
      */
     precheck(versionDir: string): ServiceProgram;
+    /**
+     * The candidate's store migration, run from its staged `versionDir` after
+     * the snapshot when the precheck reports a store as `migration-required`;
+     * exit 0 is success. The precheck then runs again and must report every
+     * store `accepted` or `absent`. Without it, a `migration-required` store is
+     * `store_migration_required` and nothing is switched.
+     */
+    migrate?(versionDir: string): ServiceProgram;
     /**
      * Resolves when the started version is healthy and throws when it is not.
      * Default: the daemon's control socket reports a live `lifecycle` — `running`
@@ -11786,11 +11813,13 @@ export interface ServiceInstallation {
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
      * Stages the payload, writes the pending receipt, stops the service, runs
-     * the candidate's precheck, snapshots the listed stores, switches
+     * the candidate's precheck, snapshots the listed stores, runs `migrate`
+     * and the precheck again when a store is `migration-required`, switches
      * `current` (the old one becomes `previous`), starts it and checks its
      * health. A store refusal stops before the switch and restarts the old
-     * version; a failed health check restores the old version and its snapshot
-     * together; a death after the receipt leaves `recover()` that work.
+     * version; a failed migration restores the snapshot first; a failed health
+     * check restores the old version and its snapshot together; a death after
+     * the receipt leaves `recover()` that work.
      */
     upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
     /**
@@ -11822,6 +11851,8 @@ declare const ERROR_MESSAGES: {
     readonly snapshot_failed: 'The store snapshot could not be written. Nothing was switched; free space or remove what cannot be copied, then retry.';
     readonly store_repair_required: 'The candidate needs a new store path and a new pairing. Nothing was switched; decide before upgrading.';
     readonly store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.';
+    readonly store_migration_required: 'The candidate opens a store only after its migration, and no migrate program is configured. Nothing was switched and the store is unchanged.';
+    readonly store_migration_failed: 'The candidate\'s store migration failed or left a store it does not accept. The store snapshot was restored and nothing was switched.';
     readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
@@ -13780,6 +13811,8 @@ export interface CopySdkNativeAssetsOptions {
     readonly outDir: string;
     readonly platform: 'win32' | 'darwin';
     readonly arch: 'x64' | 'arm64';
+    /** Absolute path to a local copy of the pinned Koffi tgz (for example a CI cache). The same integrity and addon checks apply and nothing is fetched. */
+    readonly archivePath?: string;
 }
 /** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
 export declare function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]>;
@@ -14345,13 +14378,30 @@ export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unav
  * the SDK makes no such guarantee for this runtime (#1103).
  */
 export interface RuntimeIsolationCapabilities {
-    /** User-level instructions (a user `CLAUDE.md`, `AGENTS.md` or rules) can be kept out. */
-    readonly userContext: boolean;
+    /** User-level instruction files (a user `CLAUDE.md`, `AGENTS.md` or rules) can be kept out. */
+    readonly userInstructions: boolean;
+    /** The output style the user configured for the runtime can be kept out. */
+    readonly userOutputStyle: boolean;
+    /** The runtime's user-level memory store can be kept out. */
+    readonly userMemory: boolean;
+    /** Skills the user installed for the runtime, including their names and descriptions, can be kept out. */
+    readonly userSkills: boolean;
+    /** Context that user-configured hooks add to the model (for example SessionStart output) can be kept out. */
+    readonly userHookContext: boolean;
     /** MCP servers the user configured for the runtime can be kept out. */
     readonly userMcpServers: boolean;
     /** The runtime's own transcript store can be turned off. */
     readonly sessionPersistence: boolean;
 }
+/** The isolation bits that name one source of user-level context. */
+export type RuntimeIsolationSource = 'userInstructions' | 'userOutputStyle' | 'userMemory' | 'userSkills' | 'userHookContext';
+/**
+ * An adapter's evidence-backed absent declarations: for each source the
+ * qualified runtime does not have, the qualified source location or official
+ * docs link that shows it. Such a bit may be `true` without a contract check;
+ * the contract plan marks the case `absent` with the same evidence.
+ */
+export type RuntimeIsolationAbsentSources = Readonly<Partial<Record<RuntimeIsolationSource, string>>>;
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     /**

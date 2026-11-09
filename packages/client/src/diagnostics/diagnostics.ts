@@ -1089,7 +1089,16 @@ export async function quarantineCorruptOperationalHealth(
         }
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-        await fs.mkdir(quarantineDir, { mode: 0o700 });
+        try {
+          await fs.mkdir(quarantineDir, { mode: 0o700 });
+        } catch (mkdirErr) {
+          if ((mkdirErr as NodeJS.ErrnoException).code !== 'EEXIST') throw mkdirErr;
+          // A concurrent attempt created it first: accept only a real directory.
+          const raced = await fs.lstat(quarantineDir);
+          if (!raced.isDirectory() || raced.isSymbolicLink()) {
+            throw new Error('quarantine path is not a real directory; refusing quarantine');
+          }
+        }
       }
       await ensureSecureDir(quarantineDir);
       const securedQuarantine = await fs.lstat(quarantineDir, { bigint: true });

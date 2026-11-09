@@ -183,11 +183,10 @@ describe('token renewal (§6.2)', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as TokenResponse;
     expect(body.accessToken).toBeTypeOf('string');
-    expect(Date.parse(body.expiresAt)).toBeGreaterThan(Date.now());
     expect(body.expiresIn).toBe(ACCESS_TOKEN_TTL_SECONDS);
   });
 
-  it('pair and token responses carry the configured TTL as expiresIn, from the same clock read as the absolute expiry (#1114)', async () => {
+  it('pair and token responses carry the configured TTL as expiresIn and no absolute expiry (#1114)', async () => {
     const ttlSeconds = 900;
     const clock = createMutableClock();
     const configured = createHarness({ clock, accessTokenTtlSeconds: ttlSeconds });
@@ -201,16 +200,14 @@ describe('token renewal (§6.2)', () => {
     expect(pairResponse.status).toBe(200);
     const paired = (await pairResponse.json()) as PairResponse;
     expect(paired.expiresIn).toBe(ttlSeconds);
-    // Published devices still read refreshHint as the first token's expiry.
-    expect(paired.refreshHint).toBe(new Date(clock.now().getTime() + ttlSeconds * 1000).toISOString());
+    expect(paired).not.toHaveProperty('refreshHint');
 
     clock.advance(5_000);
     const { nonce } = await challenge(configured, paired.deviceId);
     const response = await token(configured, { deviceId: paired.deviceId, nonce, signature: keys.signNonce(nonce ?? '') });
     expect(response.status).toBe(200);
     const body = (await response.json()) as TokenResponse;
-    expect(body.expiresIn).toBe(ttlSeconds);
-    expect(body.expiresAt).toBe(new Date(clock.now().getTime() + ttlSeconds * 1000).toISOString());
+    expect(body).toEqual({ accessToken: expect.any(String), expiresIn: ttlSeconds });
   });
 
   it.each([0, -60, 0.5])('refuses to compose with an access-token TTL of %s seconds, which expiresIn cannot carry', (accessTokenTtlSeconds) => {
@@ -296,7 +293,7 @@ describe('token renewal (§6.2)', () => {
         consumed = true;
         return true;
       },
-      mintAccessToken: async () => ({ accessToken: `token-${++minted}`, expiresAt: new Date().toISOString(), expiresIn: 3600 }),
+      mintAccessToken: async () => ({ accessToken: `token-${++minted}`, expiresIn: 3600 }),
     };
     const app = new Hono();
     app.post('/byok/token', tokenHandler({ auth }));

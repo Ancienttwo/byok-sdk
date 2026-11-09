@@ -27,6 +27,7 @@ import {
   SEALED_PAYLOAD_CATEGORIES,
   SEALED_PAYLOAD_SUITE,
   SEALED_PAYLOAD_VERSION,
+  SEALED_DECLINE_CODES,
   SEALED_SPLIT_TABLE,
   SealedPayloadSchema,
   TaskOfferSealedPayloadSchema,
@@ -59,7 +60,7 @@ const GOLDEN_TENANT = 'tenant-golden';
 const GOLDEN_DEVICE = 'device-golden-1';
 const GOLDEN_SCOPE = { scopeId: 'scope-golden-device-1', epoch: 2 };
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; ts: string; payload: Json });
@@ -365,8 +366,7 @@ describe('sealed payload v1: a routine template opens under the binding its rout
 
 describe('sealed payload v1: a task without output sealing refuses sealed output (#654)', () => {
   const sealedInbound = corpus.filter((line) => !isServerToDaemonType(line.type)
-    && requiredReceiverCapabilities(line.type, line.payload).some((flag) => flag.startsWith('sealed-payload-')
-      || (line.type === 'task.decline' && flag === 'native-sessions')));
+    && (isSealedLine(line) || (line.type === 'task.decline' && (SEALED_DECLINE_CODES as readonly unknown[]).includes(line.payload.code))));
 
   it('covers every daemon-to-server sealed type and every sealed decline code', () => {
     expect(new Set(sealedInbound.filter(isSealedLine).map((line) => line.type))).toEqual(

@@ -29,14 +29,14 @@ async function requestToken(
   deviceId: string,
   nonce: string,
   signature: string,
-): Promise<{ status: number; accessToken?: string; expiresAt?: string }> {
+): Promise<{ status: number; accessToken?: string; expiresIn?: number }> {
   const res = await fetch(`${baseUrl}/byok/token`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ deviceId, nonce, signature }),
   });
   if (!res.ok) return { status: res.status };
-  const body = (await res.json()) as { accessToken: string; expiresAt: string };
+  const body = (await res.json()) as { accessToken: string; expiresIn: number };
   return { status: res.status, ...body };
 }
 
@@ -74,7 +74,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     const token = await requestToken(started.baseUrl, deviceId, nonce, signature);
     expect(token.status).toBe(200);
     expect(token.accessToken).toBeTruthy();
-    expect(new Date(token.expiresAt!).getTime()).toBeGreaterThan(Date.now());
+    expect(token.expiresIn).toBeGreaterThan(0);
   });
 
   it('rejects a token request with an invalid signature (wrong key)', async () => {
