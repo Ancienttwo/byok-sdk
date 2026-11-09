@@ -519,13 +519,16 @@ it('Codex rollout cleanup under a one-deletion budget reaches every expired roll
 it.each([5,18,19])('Codex rollout cleanup reaches every folder through wide day folders when each pass is cut after %i rollouts, across a restart',async reads=>{
  const {home,binding,directory}=await idleHome();await binding.lease.release();
  const store=testScratchRoot(),root=path.join(directory,'.byok','codex','sessions','2026','10');
- for(let day=1;day<=2;day++)for(let index=0;index<18;index++){const file=path.join(root,String(day).padStart(2,'0'),`rollout-2026-10-01T00-00-00-${index.toString(16).padStart(8,'0')}-0000-4000-8000-00000000000${day}.jsonl`);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,FRESH);}
- const target=path.join(root,'03',rolloutName('f'));await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,'{}');await stamp(target,EXPIRED);
- // The usage walk lstats all 37 rollouts first; the per-home deadline then falls (the clock jumps past it) after the sweep has read `reads` more, so each pass stops at a known candidate.
- let seen=0;const now=performance.now.bind(performance),lstat=fs.lstat.bind(fs);vi.spyOn(performance,'now').mockImplementation(()=>now()+(seen>=37+reads?60_000:0));
- vi.spyOn(fs,'lstat').mockImplementation((async(...args:Parameters<typeof fs.lstat>)=>{if(String(args[0]).endsWith('.jsonl'))seen++;return lstat(...args);}) as typeof fs.lstat);
+ for(let day=1;day<=3;day++)for(let index=0;index<18;index++){const file=path.join(root,String(day).padStart(2,'0'),`rollout-2026-10-01T00-00-00-${index.toString(16).padStart(8,'0')}-0000-4000-8000-00000000000${day}.jsonl`);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'{}');await stamp(file,FRESH);}
+ const target=path.join(root,'04',rolloutName('f'));await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,'{}');await stamp(target,EXPIRED);
+ // Only this class's sweep is counted: once it has lstat'd `reads` rollouts the clock jumps past the per-home deadline, whatever the directory order or the usage walk does.
+ let seen=0,counting=false;const now=performance.now.bind(performance),lstat=fs.lstat.bind(fs);vi.spyOn(performance,'now').mockImplementation(()=>now()+(counting&&seen>=reads?60_000:0));
+ vi.spyOn(fs,'lstat').mockImplementation((async(...args:Parameters<typeof fs.lstat>)=>{if(counting&&String(args[0]).endsWith('.jsonl'))seen++;return lstat(...args);}) as typeof fs.lstat);
  let f=await fixture({home,store}),cut=0;
- for(let pass=0;pass<20&&await exists(target);pass++){seen=0;const report=await f.sweeper.runPass('periodic');if(report.truncated)cut++;if(pass===2)f=await fixture({home,store});}
+ const count=(g:typeof f)=>{const entry=g.registry.classes.find(item=>item.id==='codex-session-store') as {sweep(budget:never):Promise<void>},sweep=entry.sweep.bind(entry);entry.sweep=async budget=>{seen=0;counting=true;try{await sweep(budget);}finally{counting=false;}};};
+ count(f);
+ // A fixed number of passes, so the cuts do not depend on which pass finds the target.
+ for(let pass=0;pass<25;pass++){const report=await f.sweeper.runPass('periodic');if(report.truncated)cut++;if(pass===2){f=await fixture({home,store});count(f);}}
  expect(await exists(target)).toBe(false);expect(cut).toBeGreaterThan(1);
 });
 it.skipIf(process.platform==='win32')('Codex rollout cleanup never reads or deletes through a linked store root or date folder',async()=>{
