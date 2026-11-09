@@ -430,6 +430,7 @@ async function acquireStoreMutexOnce(canonicalStoreDir: string): Promise<StoreMu
   const identity = storeMutexIdentity(canonicalStoreDir);
   const endpoint = storeMutexEndpoint(canonicalStoreDir, identity);
   const isPipe = process.platform === 'win32';
+  const endpointDirChecked = !isPipe && path.dirname(endpoint) !== canonicalStoreDir;
   if (!isPipe) {
     const endpointDir = path.dirname(endpoint);
     // A no-op for the common `<storeDir>/mutex.sock` case (the caller
@@ -465,7 +466,20 @@ async function acquireStoreMutexOnce(canonicalStoreDir: string): Promise<StoreMu
   // gates traversal to it — same post-bind tightening `bindControlEndpoint`
   // does, and best-effort for the same reason (a mode change this process
   // does not own is `EPERM`, not a safety failure).
-  if (!isPipe) await fs.chmod(endpoint, 0o600).catch(() => undefined);
+  if (!isPipe) {
+    // A closing holder may have reclaimed the directory after the ownership
+    // check above, letting another user recreate it before our listen landed.
+    // Re-assert; if it no longer holds, the socket must not stay bound there.
+    if (endpointDirChecked) {
+      try {
+        await assertOwnedPrivateDir(path.dirname(endpoint));
+      } catch (err) {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        throw err;
+      }
+    }
+    await fs.chmod(endpoint, 0o600).catch(() => undefined);
+  }
   server.unref();
   let closed = false;
   return {

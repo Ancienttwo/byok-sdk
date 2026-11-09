@@ -252,6 +252,15 @@ async function bindControlEndpointOnce(server: net.Server, endpoint: string): Pr
     server.listen(endpoint);
   });
   if (process.platform !== 'win32') {
+    // A closing holder may have reclaimed the directory after the ownership
+    // check above, letting another user recreate it before our listen landed.
+    // Re-assert; if it no longer holds, the socket must not stay bound there.
+    try {
+      await assertOwnedPrivateDir(path.dirname(endpoint));
+    } catch (err) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      throw err;
+    }
     await fs.chmod(endpoint, 0o600).catch(() => {});
   }
 }
