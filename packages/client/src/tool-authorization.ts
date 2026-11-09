@@ -745,6 +745,7 @@ function scopedFileToolNames(gate: ToolAuthorizationGate): readonly string[] | u
 }
 
 const MAX_SUMMARY_CHARS = 1_000;
+const MIN_EFFECT_SLOT_CHARS = 60;
 export function describeHighRiskToolCall(
   call: Pick<ToolCall, 'toolName' | 'input' | 'mcp'>, reasons: readonly ToolRiskReason[], authorization?: ToolAuthorizationReason,
 ): string {
@@ -764,8 +765,11 @@ function describeWorkflowChildLaunch(
 ): string {
   const ordered = [...effects.filter(effect => effect.risk.level === 'high'), ...effects.filter(effect => effect.risk.level !== 'high')]
     .map(effect => effect.risk.level === 'high' ? `${effect.text} (${effect.risk.reasons.join(', ')})` : effect.text);
-  const head = toolCallSummary(call, risk.reasons, risk.authorization, '');
   const more = (count: number): string => count === 0 ? '' : `; +${count} more effect${count === 1 ? '' : 's'} not shown`;
+  // The head is cut first, leaving room for the worst-case count and a minimum effect slot, so that many long rule ids cannot push the effects and the count out of the card.
+  const fullHead = toolCallLabel(call, risk.reasons, risk.authorization);
+  const headBudget = MAX_SUMMARY_CHARS - more(ordered.length).length - MIN_EFFECT_SLOT_CHARS;
+  const head = fullHead.length > headBudget ? `${fullHead.slice(0, headBudget - 1)}…` : fullHead;
   // The card never exceeds its budget, and the count of effects left out always fits after the ones shown.
   let subject = '';
   let shown = 0;
@@ -786,8 +790,8 @@ function describeWorkflowChildLaunch(
   return head + subject + more(ordered.length - shown);
 }
 
-function toolCallSummary(
-  call: Pick<ToolCall, 'toolName' | 'mcp'>, reasons: readonly ToolRiskReason[], authorization: ToolAuthorizationReason | undefined, subject: string,
+function toolCallLabel(
+  call: Pick<ToolCall, 'toolName' | 'mcp'>, reasons: readonly ToolRiskReason[], authorization: ToolAuthorizationReason | undefined,
 ): string {
   // A human decides on this card, so it names the concrete identity: the
   // shell command/path when the call has one, and the trusted MCP server/tool
@@ -796,7 +800,13 @@ function toolCallSummary(
   const label = reasons.includes('outside-file-scope') ? 'Tool call outside the file scope'
     : authorization?.source === 'rule' ? `Tool authorization rule (${authorization.ruleIds.join(', ')})`
       : authorization?.source === 'floor' ? 'Protected-path tool call' : 'High-risk tool call';
-  const summary = `${label} (${reasons.join(', ')}): ${call.toolName}${identity}${subject ? ` ${subject}` : ''}`;
+  return `${label} (${reasons.join(', ')}): ${call.toolName}${identity}`;
+}
+
+function toolCallSummary(
+  call: Pick<ToolCall, 'toolName' | 'mcp'>, reasons: readonly ToolRiskReason[], authorization: ToolAuthorizationReason | undefined, subject: string,
+): string {
+  const summary = `${toolCallLabel(call, reasons, authorization)}${subject ? ` ${subject}` : ''}`;
   return summary.length > MAX_SUMMARY_CHARS ? `${summary.slice(0, MAX_SUMMARY_CHARS - 1)}…` : summary;
 }
 
