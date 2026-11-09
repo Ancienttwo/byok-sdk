@@ -175,8 +175,9 @@ The direct `opencode-go` vendor profile currently has a reasoning replay
 defect, see [#1586](https://github.com/Ancienttwo/byok-sdk/issues/1586).
 Pi 1.5.0 replays thinking in the field the gateway used. A gateway that
 returns thinking as `reasoning_content`, as magpie does, gets that field back
-in the replayed assistant message. The recorded run below did not exercise
-this replay.
+in the replayed assistant message, including the message that carries a tool
+call. At `thinkingLevel: 'high'` the model may answer a simple turn without
+thinking. The recorded replay run used `'max'`.
 
 One run through magpie is recorded in
 [OpenCode Go via a local gateway](../../docs/researches/2026-11-09-opencode-go-via-gateway.md).
