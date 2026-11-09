@@ -2,6 +2,7 @@
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
+import { ReadStream } from 'node:tty';
 import type { Readable, Writable } from 'node:stream';
 import { createDeviceSession, deviceConfig, MemberComparisonError, type DeviceCommand, type DeviceEvent, type RuntimeMode } from './device-session.js';
 
@@ -9,6 +10,7 @@ export function runnerOptions(args: string[]) {
   const { values } = parseArgs({ args, options: {
     'server-url': { type: 'string' }, 'pairing-code': { type: 'string' }, 'verification-secret': { type: 'string' },
     root: { type: 'string' }, runtime: { type: 'string' }, 'stub-canary': { type: 'boolean', default: false },
+    'canary-controls': { type: 'boolean', default: false },
   }, strict: true, allowPositionals: false });
   if (!values['server-url'] || !values['pairing-code'] || !values.root || !['stub', 'real'].includes(values.runtime ?? '')) {
     throw new Error('required: --server-url --pairing-code --root --runtime stub|real');
@@ -19,10 +21,12 @@ export function runnerOptions(args: string[]) {
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
     throw new Error('server URL must be HTTP(S) without credentials, query or fragment');
   }
-  if (values['stub-canary'] && values.runtime !== 'stub') throw new Error('stub canary requires --runtime stub');
+  if ((values['stub-canary'] || values['canary-controls']) && values.runtime !== 'stub') throw new Error('canary modes require --runtime stub');
+  if (values['stub-canary'] && values['canary-controls']) throw new Error('select one canary mode');
   if (values['verification-secret'] === '') throw new Error('verification secret must not be empty');
   return { config: deviceConfig(url.href, path.resolve(values.root)), code: values['pairing-code'],
-    verificationSecret: values['verification-secret'], runtime: values.runtime as RuntimeMode, stubCanary: values['stub-canary'] };
+    verificationSecret: values['verification-secret'], runtime: values.runtime as RuntimeMode,
+    stubCanary: values['stub-canary'], canaryControls: values['canary-controls'] };
 }
 
 export function runnerCommand(line: string): DeviceCommand {
@@ -46,12 +50,22 @@ export function runnerCommand(line: string): DeviceCommand {
   throw new Error('expected a device control command');
 }
 
+/** Raw TTY input disables terminal echo, including secret fields rejected before parsing. */
+export function protectTerminalInput(input: Readable, stop: () => void): () => void {
+  if (!(input instanceof ReadStream) || !input.isTTY) return () => {};
+  const wasRaw = input.isRaw;
+  input.setRawMode(true);
+  const controls = (data: Buffer) => { if (data.includes(3) || data.includes(4)) stop(); };
+  input.on('data', controls);
+  return () => { input.off('data', controls); input.setRawMode(wasRaw); };
+}
+
 /** The optional composition seam lets local tests use disposable custody without adding a CLI custody override. */
 export async function runDeviceRunner(args: string[], input: Readable, output: Writable, signal: AbortSignal,
   createSession = createDeviceSession): Promise<void> {
-  const { config, code, verificationSecret, runtime, stubCanary } = runnerOptions(args);
+  const { config, code, verificationSecret, runtime, stubCanary, canaryControls } = runnerOptions(args);
   const send = (event: DeviceEvent) => { output.write(JSON.stringify(event.type === 'approval-code' ? event : { ...event, runtime }) + '\n'); };
-  const device = createSession(config, runtime, send, {}, stubCanary);
+  const device = createSession(config, runtime, send, {}, stubCanary, canaryControls);
   const lines = createInterface({ input, crlfDelay: Infinity });
   // Start consuming before pairing so piped commands cannot be lost during the handshake.
   const iterator = lines[Symbol.asyncIterator]();
@@ -66,8 +80,8 @@ export async function runDeviceRunner(args: string[], input: Readable, output: W
   signal.addEventListener('abort', abort, { once: true });
   try {
     if (signal.aborted) return;
-    let awaitingApproval = stubCanary && verificationSecret !== undefined, compared = false;
-    await device.pair(code, verificationSecret, awaitingApproval);
+    let awaitingApproval = verificationSecret !== undefined, compared = false;
+    await device.pair(code, verificationSecret);
     while (!signal.aborted) {
       const next = await iterator.next();
       if (next.done) break;
@@ -102,7 +116,9 @@ if (import.meta.main) {
   const stop = () => controller.abort();
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
+  let restoreInput = () => {};
   try {
+    restoreInput = protectTerminalInput(process.stdin, stop);
     await runDeviceRunner(process.argv.slice(2), process.stdin, process.stdout, controller.signal);
   } catch (error) {
     // Neither SDK errors nor malformed input are echoed: they may contain server-provided secrets or task content.
@@ -110,6 +126,7 @@ if (import.meta.main) {
     else process.stderr.write('device-runner failed; check arguments, local custody, runtime and Host state.\n');
     process.exitCode = 1;
   } finally {
+    restoreInput();
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
   }

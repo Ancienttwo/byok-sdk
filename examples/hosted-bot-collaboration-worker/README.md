@@ -191,8 +191,8 @@ failed member verification fails closed. This mode emits one additional metadata
 ```
 
 `paired` means the device registered its member bundle. The operator member can now verify its MAC, approve it and put
-scope keys. It precedes `ready`; `ready` still means the Host accepted `conn.hello` and alone does not prove member
-approval or scope-key readiness.
+scope keys. It precedes `ready`; for E2EE, `ready` also requires the persisted relay approver key to match the locally
+compared key. Scope-key readiness is still established by the Host's capability read.
 
 For the deployed sealed canary, keep the W1 driver, member keys, Postgres/R2 credentials, bearer and tail capture on
 mini-cf, following [the deployed canary setup](src/fixtures/sealed-canary/README.md). Prepare the device with the tagged
@@ -207,8 +207,10 @@ bun run --filter @byok-sdk/example-hosted-bot-collaboration-worker test \
 ```
 
 Without this variable the driver uses its in-process daemon. With it, the driver uses `hc run --bg --on <machine>` to
-start the stub runner, `hc send` for stdin and `hc read` for metadata. Only the Host URL, pairing code, verification
-secret and synthetic canary content reach the device. It approves the registered member and installs scope keys from
+start the stub runner with `--canary-controls`, `hc send` for stdin and `hc read` for metadata. Before adding the device,
+the driver sends its public bundle, verifies the runner's code against the MAC-authenticated device registration, and
+sends `approve` (a mismatch sends `reject` and fails). Only the Host URL, pairing code, verification secret, public member
+bundle and synthetic canary content reach the device. It approves the registered member and installs scope keys from
 mini-cf, runs the sealed task and plaintext twin, then stops and removes its own hc terminal. Run each physical device
 separately and record its SDK source commit, overlay merge commit, OS identity and result independently.
 
@@ -218,14 +220,16 @@ After `started`, the driver sends this single canary trigger on stdin:
 {"type":"canary","taskId":"task-id","text":"synthetic-canary","sealed":true}
 ```
 
-In stub mode this checks the opened instruction, emits progress, waits for `Steer synthetic-canary`, requests
+With `--runtime stub --canary-controls`, this checks the opened instruction, emits progress, waits for `Steer synthetic-canary`, requests
 `Approve synthetic-canary`, and requires approval. It writes a fixed `notes.txt` artifact, emits two bounded progress
 events to exercise terminal object spill, submits `{ "text": "synthetic-canary" }`, and waits for local task cleanup
 before `finished`. The Host driver supplies the steer and approval through the existing sealed canary RPCs. Set
 `sealed` to `false` for the plaintext twin's smaller progress events. Missing sessions, mismatched input, refused
 approval, timeout or interruption fail the run. The command adds no content-bearing output event; the existing
 `ready/started/finished/error` shapes stay the same. Each command runs sequentially; Ctrl-C/SIGTERM interrupts a pending
-canary, while a stdin `stop` follows the current command. This synthetic probe makes no model call.
+canary, while a stdin `stop` follows the current command. This synthetic probe makes no model call. The default stub
+retains its original non-interactive capabilities; only explicit canary modes select the scripted adapter. The two
+canary flags are mutually exclusive and valid only with `--runtime stub`.
 
 For the browser member's separate round trip, add `--stub-canary` with `--runtime stub`. This opt-in mode sets
 `agentMemoryMcp: 'off'` so the SDK does not prepend Agent-memory guidance to the opened instruction. It automatically
@@ -241,8 +245,8 @@ stub emits the JSON result document as progress. `finished` still follows the da
 alone does not prove Host completion. Prepared launches are refused by this mode. The flag is invalid with
 `--runtime real`. With the flag off, the runner continues waiting for stdin controls.
 
-With both `--stub-canary` and `--verification-secret`, the runner registers its device member, emits `paired`, and
-pauses before `daemon.start()`. Copy the browser member's **public** bundle JSON from the page into the device's local
+Whenever `--verification-secret` is given, in stub or real mode, the runner registers its device member, emits `paired`,
+and pauses before `daemon.start()`. Copy the browser member's **public** bundle JSON from the page into the device's local
 stdin, using this command (the placeholder denotes the actual JSON object):
 
 ```jsonl
@@ -258,17 +262,20 @@ fields. It reads only the tenant id and public device bundle from the local OS `
 
 Compare these digits with the page's ten groups of five **before** confirming either side. On a match, send
 `{"type":"approve"}` to the device, then confirm on the page so it signs `add(device)` and relays the client MAC.
-The device can now start, resume member verification and emit `ready`. On a mismatch send `{"type":"reject"}`; the
+The device can now start and resume member verification. Before emitting `ready`, it reads the public persisted
+`anchor.approverSigningPublicJwk` and compares its canonical `kty/crv/x/y` fields with the approved key; a different or
+missing anchor stops the daemon and emits a fixed error. On a mismatch send `{"type":"reject"}`; the
 runner stops before daemon startup or member relay acceptance. `approve` without a successful comparison, a second
 bundle or task controls during the comparison fails closed. Keep this code on the device's local operator display;
-do not send it to the browser or include it in evidence.
+do not send it to the browser or include it in evidence. The SDK's 10-minute pairing-verification TTL runs during this
+pause: a slow operator fails closed and must pair again.
 
 This comparison uses SDK-internal `DeviceMemberRecords` and the credential provider through source imports from the
 pinned checkout. It reads only `member-state`, never the private `member-keys` entry or pairing-secret entry. The
 public `@byok-sdk/core/sealed-payload` parser and fingerprint function are resolved through the installed client's
 dependency. Missing modules or an incompatible/missing local record fail with a fixed comparison diagnostic. This is
-an example overlay pinned to the checkout above; no SDK export or wire shape changes. The W1 canary control mode
-without `--stub-canary` keeps its operator-member pairing flow.
+an example overlay pinned to the checkout above; no SDK export or wire shape changes. The remote W1 driver follows
+this same comparison gate.
 
 For an explicitly approved real-runtime run, change only `--runtime stub` to `--runtime real` in the commands above.
 That selects the SDK's bundled runtime adapters (Pi, Claude and Codex); the Host's execution template selects the
@@ -279,8 +286,9 @@ emit an `error` event with the task id and fixed text.
 This CLI does not grant approval for model calls or establish cross-device acceptance evidence.
 
 Send `{"type":"stop"}` on stdin, close stdin, or press Ctrl-C to stop and release the daemon. SIGTERM also stops it.
-Keep stdin open while driving the Host from another terminal. Malformed arguments or commands exit nonzero without
-echoing their contents. The original `device.child.ts` remains the test-only IPC entry with synthetic identities and
+Keep stdin open while driving the Host from another terminal. A TTY enters raw mode before reading controls to disable
+echo; its original mode is restored on success, error and interruption. Ctrl-C/Ctrl-D still stop the runner. Malformed
+arguments or commands exit nonzero without echoing their contents. The original `device.child.ts` remains the test-only IPC entry with synthetic identities and
 in-memory custody; both entries share task and event logic in `device-session.ts`.
 
 ## Tests

@@ -9,7 +9,10 @@ import { createAgentHomeProjectionConsumer, createDaemonWithAdapters, type Daemo
   type RuntimeAdapter, type RuntimeOperationStartInput } from '@byok-sdk/client';
 import { createRuntimeAdapters } from '@byok-sdk/client/adapters';
 import { policy } from '@byok-sdk/example-host-execution-core/test-support';
+import { BotStubAdapter } from '../../basic/goal-btw.test-support';
 import { ZeroHitAdapter } from '../../hosted-bot-collaboration/src/zero-hit-runtime.test-support';
+
+type PublicSigningKey = import('../../../packages/core/src/sealed-payload/index.js').MemberKeyBundleV1['signingPublicJwk'];
 
 export type DeviceEvent =
   | { type: 'approval-code'; code: string }
@@ -45,19 +48,24 @@ export async function sealedCore() {
   } catch { throw new MemberComparisonError('member comparison requires the pinned SDK sealed-payload export'); }
 }
 
+async function localMemberState(config: DaemonConfig, deviceId: string) {
+  const { DeviceMemberRecords } = await import('../../../packages/client/src/daemon/device-member-custody.js');
+  const { createDeviceMemberCustody } = await import('../../../packages/client/src/daemon/device-credential-provider.js');
+  const state = await new DeviceMemberRecords(createDeviceMemberCustody({ productId: config.productId,
+    storeDir: config.storeDir!, deviceCredentials: config.deviceCredentials, nativeAssetRoot: config.nativeAssetRoot })).readState();
+  if (!state || state.deviceId !== deviceId || state.member.deviceId !== deviceId) throw new Error('device member state mismatch');
+  return state;
+}
+
 /** Pinned checkout-only read: the member-state entry contains public data; the member-keys entry is never read. */
-export async function localMemberApproval(config: DaemonConfig, deviceId: string, bundle: unknown): Promise<string> {
+export async function localMemberApproval(config: DaemonConfig, deviceId: string, bundle: unknown) {
   try {
-    // Resolve the public core export through the installed client dependency, keeping the two-file overlay self-contained.
     const core = await sealedCore();
     const browser = await core.parseMemberKeyBundle(bundle);
     if (!browser || browser.deviceId !== undefined) throw new Error('expected a public browser member bundle');
-    const { DeviceMemberRecords } = await import('../../../packages/client/src/daemon/device-member-custody.js');
-    const { createDeviceMemberCustody } = await import('../../../packages/client/src/daemon/device-credential-provider.js');
-    const state = await new DeviceMemberRecords(createDeviceMemberCustody({ productId: config.productId,
-      storeDir: config.storeDir!, deviceCredentials: config.deviceCredentials, nativeAssetRoot: config.nativeAssetRoot })).readState();
-    if (!state || state.deviceId !== deviceId || state.member.deviceId !== deviceId) throw new Error('device member state mismatch');
-    return (await core.memberApprovalCode(state.tenantId, browser.signingPublicJwk, state.member.signingPublicJwk)).replaceAll(' ', '');
+    const state = await localMemberState(config, deviceId);
+    return { code: (await core.memberApprovalCode(state.tenantId, browser.signingPublicJwk, state.member.signingPublicJwk)).replaceAll(' ', ''),
+      signingPublicJwk: browser.signingPublicJwk };
   } catch { throw new MemberComparisonError('member comparison requires a valid public browser bundle and the pinned SDK local member-state record'); }
 }
 
@@ -88,14 +96,15 @@ function reportStarts(adapter: RuntimeAdapter, send: (event: DeviceEvent) => voi
 }
 
 export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, send: (event: DeviceEvent) => void,
-  overrides: DaemonOverrides = {}, stubCanary = false) {
-  const stub = runtime === 'stub' ? new ZeroHitAdapter() : undefined;
+  overrides: DaemonOverrides = {}, stubCanary = false, canaryControls = false) {
+  const scripted = runtime === 'stub' && (stubCanary || canaryControls) ? new ZeroHitAdapter() : undefined;
+  const stub = runtime === 'stub' ? scripted ?? new BotStubAdapter() : undefined;
   const adapters = stub ? [stub] : createRuntimeAdapters({});
   const autoFinish = !stubCanary ? undefined : (start: RuntimeOperationStartInput) => {
     // Return the session before submitting a result: TaskRunner must first publish its active task.
     setImmediate(() => {
       const taskId = start.manifest.taskId;
-      const session = stub!.sessions.get(taskId)!;
+      const session = scripted!.sessions.get(taskId)!;
       if (start.kind !== 'instruction') {
         session.fail(); send({ type: 'error', taskId, message: 'stub canary requires an instruction task' }); return;
       }
@@ -112,9 +121,32 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
       send({ type: 'error', taskId: event.taskId, message: 'runtime task did not complete' });
     }
   });
-  let pairedDeviceId: string | undefined;
+  let pairedDeviceId: string | undefined, memberPairing = false;
+  let comparedKey: PublicSigningKey | undefined;
+  async function bindComparedMember(deviceId: string) {
+    try {
+      for (const deadline = Date.now() + 30_000; Date.now() < deadline;) {
+        const state = await localMemberState(config, deviceId);
+        const key = state.anchor?.approverSigningPublicJwk;
+        if (key) {
+          if (!comparedKey || key.kty !== comparedKey.kty || key.crv !== comparedKey.crv || key.x !== comparedKey.x || key.y !== comparedKey.y) {
+            throw new Error('relayed member does not match local approval');
+          }
+          return;
+        }
+        await delay(25);
+      }
+      throw new Error('member relay anchor missing');
+    } catch {
+      const message = 'member relay did not bind the locally approved browser key';
+      send({ type: 'error', message });
+      await daemon.stop();
+      throw new MemberComparisonError(message);
+    }
+  }
   async function start() {
     if (!pairedDeviceId) throw new Error('device is not paired');
+    if (memberPairing && !comparedKey) throw new MemberComparisonError('member comparison is required before startup');
     await daemon.start();
     for (const deadline = Date.now() + 30_000; ;) {
       const lifecycle = daemon.status().lifecycle;
@@ -122,19 +154,23 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
       if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed' || Date.now() > deadline) throw new Error('daemon did not become ready');
       await delay(25);
     }
+    if (memberPairing) await bindComparedMember(pairedDeviceId);
     send({ type: 'ready', deviceId: pairedDeviceId });
   }
   return {
     daemon, start,
-    async pair(code: string, verificationSecret?: string, deferStart = false) {
+    async pair(code: string, verificationSecret?: string) {
       const { deviceId } = await daemon.pair(code, verificationSecret === undefined ? undefined : { verificationSecret });
       pairedDeviceId = deviceId;
-      if (verificationSecret !== undefined) send({ type: 'paired', deviceId });
-      if (!deferStart) await start();
+      memberPairing = verificationSecret !== undefined;
+      comparedKey = undefined;
+      if (memberPairing) send({ type: 'paired', deviceId });
+      else await start();
     },
     async compareMember(bundle: unknown) {
       if (!pairedDeviceId) throw new Error('device is not paired');
-      const code = await localMemberApproval(config, pairedDeviceId, bundle);
+      const { code, signingPublicJwk } = await localMemberApproval(config, pairedDeviceId, bundle);
+      comparedKey = signingPublicJwk;
       send({ type: 'approval-code', code });
     },
     async finish(taskId: string, document: unknown) {
@@ -146,7 +182,8 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
     },
     async canary(taskId: string, text: string, sealed: boolean, signal = AbortSignal.timeout(60_000)) {
       if (!stub) throw new Error('canary is only available with the stub runtime');
-      const session = stub.sessions.get(taskId);
+      if (!scripted || !canaryControls) throw new Error('canary requires --canary-controls');
+      const session = scripted.sessions.get(taskId);
       if (!session) throw new Error('no runtime session for canary');
       if (!session.instruction.includes(text)) throw new Error('device did not open instruction');
       session.emit({ type: 'progress', text: `Progress ${text}` });

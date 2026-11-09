@@ -8,7 +8,7 @@
  * accepts, answers the delegation, and A's report Turn runs on device 1.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { access, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
@@ -81,6 +81,7 @@ describe('device runner boundaries', () => {
   });
   it.each([
     [], [...runnerArgs, '--verification-secret', ''], [...runnerArgs.slice(0, -1), 'real', '--stub-canary'],
+    [...runnerArgs.slice(0, -1), 'real', '--canary-controls'], [...runnerArgs, '--stub-canary', '--canary-controls'],
     [...runnerArgs.slice(0, -1), 'unknown'], [...runnerArgs, '--unknown', 'secret'],
     ['--server-url', 'invalid', ...runnerArgs.slice(2)],
     ...['ftp://host', 'https://user:secret@host', 'https://host/?secret=x', 'https://host/#secret'].map(url => ['--server-url', url, ...runnerArgs.slice(2)]),
@@ -141,13 +142,13 @@ describe('device runner boundaries', () => {
     vi.useFakeTimers();
     try {
       const device = createDeviceSession(deviceConfig('http://localhost', '/tmp/ready-runner'), 'stub', send);
-      const paired = device.pair('secret', 'A'.repeat(26));
+      const paired = device.pair('secret');
       const assertion = phase === 'connecting' ? expect(paired).resolves.toBeUndefined() : expect(paired).rejects.toThrow('did not become ready');
       await vi.advanceTimersByTimeAsync(30_025);
       await assertion;
-      expect(daemon.pair).toHaveBeenCalledWith('secret', { verificationSecret: 'A'.repeat(26) });
-      expect(send.mock.calls).toEqual([[{ type: 'paired', deviceId: 'device' }], ...(phase === 'connecting' ? [[{ type: 'ready', deviceId: 'device' }]] : [])]);
-      await expect(device.canary('missing-task', 'private', true)).rejects.toThrow('no runtime session');
+      expect(daemon.pair).toHaveBeenCalledWith('secret', undefined);
+      expect(send.mock.calls).toEqual(phase === 'connecting' ? [[{ type: 'ready', deviceId: 'device' }]] : []);
+      await expect(device.canary('missing-task', 'private', true)).rejects.toThrow('--canary-controls');
       await expect(device.finish('missing-task', {})).rejects.toThrow('no runtime session');
       await device.stop();
     } finally { vi.useRealTimers(); compose.mockRestore(); }
@@ -160,7 +161,7 @@ describe('device runner boundaries', () => {
     const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => { wrapped = adapters[0]!; return daemon; });
     const send = vi.fn(), approve = vi.fn(async () => ({ approved: true }));
     try {
-      const device = createDeviceSession(deviceConfig('http://localhost', root), 'stub', send);
+      const device = createDeviceSession(deviceConfig('http://localhost', root), 'stub', send, {}, false, true);
       const prepared = await wrapped.prepare({} as client.RuntimeAdapterPrepareInput);
       if (prepared.kind !== 'prepared') throw new Error('expected prepared');
       const session = await prepared.operation.start({ kind: 'instruction', instruction: 'private canary',
@@ -222,7 +223,7 @@ describe('device runner boundaries', () => {
     const daemon = { subscribe: () => () => {}, stop: vi.fn() } as unknown as client.Daemon;
     const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => { wrapped = adapters[0]!; return daemon; });
     try {
-      const device = createDeviceSession(deviceConfig('http://localhost', '/tmp/canary-refused'), 'stub', vi.fn());
+      const device = createDeviceSession(deviceConfig('http://localhost', '/tmp/canary-refused'), 'stub', vi.fn(), {}, false, true);
       const prepared = await wrapped.prepare({} as client.RuntimeAdapterPrepareInput);
       if (prepared.kind !== 'prepared') throw new Error('expected prepared');
       const session = await prepared.operation.start({ kind: 'instruction', instruction: 'private', manifest: { taskId: 'task' },
@@ -240,11 +241,19 @@ describe('device runner boundaries', () => {
     } finally { compose.mockRestore(); }
   });
 
-  it.each(['success', 'exited', 'error', 'bad-json', 'identity'])('drives a remote hc device and cleans up on %s', async mode => {
-    const member = { verificationSecret: 'A'.repeat(26), approve: vi.fn(async () => ({})), putScope: vi.fn() };
-    const create = vi.spyOn(HostedMember, 'create').mockResolvedValue(member as unknown as HostedMember);
-    const cloud = { createPairingCode: vi.fn(async () => ({ code: 'pair-secret' })) } as unknown as CanaryCloud;
-    const events: (DeviceEvent & { runtime: string })[] = [{ type: 'paired', deviceId: 'physical', runtime: 'stub' },
+  it.each(['success', 'exited', 'error', 'bad-json', 'identity', 'mismatch', 'bad-mac'])('drives a remote hc device and cleans up on %s', async mode => {
+    const core = await sealedCore();
+    const cloud = { createPairingCode: vi.fn(async () => ({ code: 'pair-secret' })), appendMemberChainEntries: vi.fn() } as unknown as CanaryCloud;
+    const member = await HostedMember.create(cloud, 'tenant' as never);
+    const keys = (await core.openMemberKeyRecord(await core.generateMemberKeyRecord({ tenantId: 'tenant', deviceId: 'physical' })))!;
+    const deviceBundle = await core.createMemberKeyBundle({ deviceId: 'physical', signingPublicJwk: keys.signing.publicJwk,
+      signingPrivateKey: keys.signing.privateKey, kemPublicJwk: keys.kem.publicJwk, kemEpoch: keys.kem.epoch });
+    const mac = await core.computeDevicePairingMac(member.pv, { tenantId: 'tenant', deviceId: 'physical', member: deviceBundle });
+    cloud.readMemberKeyRegistration = vi.fn(async () => ({ member: deviceBundle, deviceMac: mode === 'bad-mac' ? 'invalid' : mac }));
+    vi.spyOn(member, 'approve').mockResolvedValue(deviceBundle); vi.spyOn(member, 'putScope').mockResolvedValue();
+    const create = vi.spyOn(HostedMember, 'create').mockResolvedValue(member);
+    const code = (await core.memberApprovalCode('tenant', member.member.signingPublicJwk, deviceBundle.signingPublicJwk)).replaceAll(' ', '');
+    const events: (DeviceEvent & { runtime?: string })[] = [{ type: 'paired', deviceId: 'physical', runtime: 'stub' },
       { type: 'ready', deviceId: mode === 'identity' ? 'other' : 'physical', runtime: 'stub' },
       { type: 'started', taskId: 'task', agentId: 'agent', runtime: 'stub' }];
     const hc = vi.fn(async (args: string[]) => {
@@ -255,7 +264,11 @@ describe('device runner boundaries', () => {
       ].join('\n') });
       if (args[0] === 'get') return JSON.stringify({ state: 'finished' });
       if (args[0] === 'wait') return JSON.stringify({ ended: true, exit_code: 0 });
-      if (args[0] === 'send' && JSON.parse(args[2]!).type === 'canary') events.push({ type: 'finished', taskId: 'task', runtime: 'stub' });
+      if (args[0] === 'send') {
+        const command = JSON.parse(args[2]!) as { type: string };
+        if (command.type === 'member-bundle') events.push({ type: 'approval-code', code: mode === 'mismatch' ? '0'.repeat(50) : code });
+        if (command.type === 'canary') events.push({ type: 'finished', taskId: 'task', runtime: 'stub' });
+      }
       return '{}';
     });
     try {
@@ -264,11 +277,17 @@ describe('device runner boundaries', () => {
         const device = await opened;
         await device.begin('task', 'private', true); await device.finish('task'); await device.close();
         expect(member.approve).toHaveBeenCalledWith('physical');
-        expect(member.putScope).toHaveBeenCalledWith('scope-zero-hit', {}, ['task-input', 'task-output']);
+        expect(member.putScope).toHaveBeenCalledWith('scope-zero-hit', deviceBundle, ['task-input', 'task-output']);
+        const sent = hc.mock.calls.map(([args]) => args).filter(args => args[0] === 'send').map(args => JSON.parse(args[2]!) as { type: string });
+        expect(sent.map(command => command.type)).toEqual(['member-bundle', 'approve', 'canary', 'stop']);
         expect(hc.mock.calls[0]![0]).toEqual(['run', '--bg', '--json', '--no-notify', '--on', 'device', '--cwd', '/sdk/examples/hosted-bot-collaboration-worker',
           'node', '--import', 'tsx', 'src/device-runner.ts', '--server-url', 'https://host.invalid',
-          '--pairing-code', 'pair-secret', '--verification-secret', 'A'.repeat(26), '--root', '/root/device', '--runtime', 'stub']);
-      } else await expect(opened).rejects.toThrow(/remote canary|canary device transport/);
+          '--pairing-code', 'pair-secret', '--verification-secret', member.verificationSecret, '--root', '/root/device', '--runtime', 'stub', '--canary-controls']);
+      } else {
+        await expect(opened).rejects.toThrow(/remote canary|canary device transport|remote device/);
+        if (mode === 'mismatch') expect(hc).toHaveBeenCalledWith(['send', 'device/t1', '{"type":"reject"}']);
+        if (mode !== 'identity') expect(member.approve).not.toHaveBeenCalled();
+      }
       expect(hc).toHaveBeenCalledWith(['kill', 'device/t1']);
       expect(hc).toHaveBeenCalledWith(['rm', 'device/t1']);
     } finally { create.mockRestore(); }
@@ -286,7 +305,7 @@ describe('device runner boundaries', () => {
     try {
       const config = deviceConfig('https://host.invalid', '/tmp/comparison');
       const expected = (await core.memberApprovalCode('tenant', browser.signingPublicJwk, device.signingPublicJwk)).replaceAll(' ', '');
-      expect(await localMemberApproval(config, 'physical', browser)).toBe(expected);
+      expect((await localMemberApproval(config, 'physical', browser)).code).toBe(expected);
       expect(expected).toMatch(/^\d{50}$/);
       for (const invalid of [{ ...browser, privateKey: 'never echo' }, { ...browser, signingPublicJwk: { ...browser.signingPublicJwk, d: 'never echo' } }]) {
         await expect(localMemberApproval(config, 'physical', invalid)).rejects.toThrow('valid public browser bundle');
@@ -297,7 +316,8 @@ describe('device runner boundaries', () => {
     } finally { read.mockRestore(); }
   });
 
-  it.each(['approve', 'reject', 'early-approve', 'early-task', 'repeat-bundle'])('gates member resume on local comparison: %s', async ending => {
+  it.each(['stub', 'real', 'echo', 'controls'].flatMap(mode => ['approve', 'reject', 'early-approve', 'early-task', 'repeat-bundle'].map(ending => ({ mode, ending }))))
+    ('gates every E2EE member resume: $mode / $ending', async ({ mode, ending }) => {
     const input = new PassThrough(), output = new PassThrough();
     let printed = '';
     output.on('data', chunk => { printed += chunk.toString(); });
@@ -307,7 +327,8 @@ describe('device runner boundaries', () => {
       compareMember.mockImplementation(async () => { send({ type: 'approval-code', code: '1'.repeat(50) }); });
       return { pair, start, stop, compareMember, daemon: { subscribe: () => () => {} } };
     }) as unknown as typeof createDeviceSession;
-    const running = runDeviceRunner([...runnerArgs, '--verification-secret', 'A'.repeat(26), '--stub-canary'], input, output, new AbortController().signal, factory);
+    const running = runDeviceRunner([...runnerArgs.slice(0, -1), mode === 'real' ? 'real' : 'stub', '--verification-secret', 'A'.repeat(26),
+      ...(mode === 'echo' ? ['--stub-canary'] : mode === 'controls' ? ['--canary-controls'] : [])], input, output, new AbortController().signal, factory);
     const assertion = ['early-approve', 'early-task', 'repeat-bundle'].includes(ending) ? expect(running).rejects.toThrow() : expect(running).resolves.toBeUndefined();
     if (ending === 'early-approve') input.end('{"type":"approve"}\n');
     else if (ending === 'early-task') input.end('{"type":"finish","taskId":"task","document":{}}\n');
@@ -316,10 +337,112 @@ describe('device runner boundaries', () => {
       input.end(ending === 'repeat-bundle' ? '{"type":"member-bundle","bundle":{}}\n' : JSON.stringify({ type: ending }) + '\n');
     }
     await assertion;
-    expect(pair).toHaveBeenCalledWith('test-pairing-secret', 'A'.repeat(26), true);
+    expect(pair).toHaveBeenCalledWith('test-pairing-secret', 'A'.repeat(26));
     expect(start).toHaveBeenCalledTimes(ending === 'approve' ? 1 : 0);
     if (!ending.startsWith('early')) expect(JSON.parse(printed.trim())).toEqual({ type: 'approval-code', code: '1'.repeat(50) });
     expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the default stub capabilities unchanged', async () => {
+    const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockReturnValue({ subscribe: () => () => {}, stop: vi.fn() } as unknown as client.Daemon);
+    try {
+      const device = createDeviceSession(deviceConfig('http://localhost', '/tmp/default-stub'), 'stub', vi.fn());
+      expect(compose.mock.calls[0]![1][0]!.descriptor.capabilities).toMatchObject({ steer: false, approvalInteractive: false });
+      await device.stop();
+    } finally { compose.mockRestore(); }
+  });
+
+  it.each(['match', 'different', 'missing', 'missing-record'])('binds local approval to the relayed public anchor: %s', async mode => {
+    const fakeCloud = { appendMemberChainEntries: vi.fn() } as unknown as CanaryCloud;
+    const browser = await HostedMember.create(fakeCloud, 'tenant' as never), other = await HostedMember.create(fakeCloud, 'tenant' as never);
+    const state = { tenantId: 'tenant', deviceId: 'physical', member: { ...other.member, deviceId: 'physical' } };
+    const read = vi.spyOn(DeviceMemberRecords.prototype, 'readState').mockResolvedValue(state);
+    const daemon = { subscribe: () => () => {}, pair: vi.fn(async () => ({ deviceId: 'physical' })), start: vi.fn(), stop: vi.fn(),
+      status: () => ({ lifecycle: { phase: 'running', connection: 'open' } }) } as unknown as client.Daemon;
+    const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockReturnValue(daemon), send = vi.fn();
+    try {
+      const device = createDeviceSession(deviceConfig('https://host.invalid', '/tmp/binding'), 'stub', send);
+      await device.pair('code', browser.verificationSecret);
+      expect(daemon.start).not.toHaveBeenCalled();
+      await expect(device.start()).rejects.toThrow('comparison is required');
+      await device.compareMember(browser.member);
+      const key = mode === 'different' ? other.member.signingPublicJwk : browser.member.signingPublicJwk;
+      read.mockResolvedValue(mode === 'missing-record' ? undefined : { ...state, ...(mode === 'missing' ? {} : { anchor: {
+        approverSigningPublicJwk: { y: key.y, x: key.x, crv: key.crv, kty: key.kty }, entry: { seq: 1, hash: `sha256:${'0'.repeat(64)}` },
+      } }) });
+      vi.useFakeTimers();
+      const started = device.start();
+      const assertion = mode === 'match' ? expect(started).resolves.toBeUndefined() : expect(started).rejects.toThrow('did not bind');
+      await vi.advanceTimersByTimeAsync(30_025); await assertion;
+      expect(send.mock.calls.some(([event]) => event.type === 'ready')).toBe(mode === 'match');
+      if (mode !== 'match') {
+        expect(daemon.stop).toHaveBeenCalled();
+        expect(send).toHaveBeenCalledWith({ type: 'error', message: 'member relay did not bind the locally approved browser key' });
+      }
+      await device.stop();
+    } finally { vi.useRealTimers(); read.mockRestore(); compose.mockRestore(); }
+  });
+
+  it.skipIf(process.platform === 'win32').each(['canary', 'private-bundle', 'interrupt'])('keeps a real PTY free of input and restores raw mode: %s', async mode => {
+    const root = await mkdtemp(path.join(tmpdir(), 'hw-tty-')), fixture = path.join(root, 'probe.mjs');
+    const entry = new URL('./device-runner.ts', import.meta.url).href;
+    const secret = `not-in-terminal-${randomUUID()}`;
+    const args = [...runnerArgs, '--canary-controls', ...(mode === 'private-bundle' ? ['--verification-secret', 'A'.repeat(26)] : [])];
+    await writeFile(fixture, `
+      import { runDeviceRunner, protectTerminalInput } from ${JSON.stringify(entry)};
+      import { localMemberApproval } from ${JSON.stringify(new URL('./device-session.ts', import.meta.url).href)};
+      const abort = new AbortController(), restore = protectTerminalInput(process.stdin, () => abort.abort());
+      const send = event => process.stdout.write(JSON.stringify(event) + '\\n');
+      try { await runDeviceRunner(${JSON.stringify(args)}, process.stdin, process.stdout, abort.signal, (config, runtime, report) => ({
+        daemon: { subscribe: () => () => {} }, stop: async () => {},
+        pair: async (_code, pv) => report({ type: pv ? 'paired' : 'ready', deviceId: 'physical' }),
+        compareMember: bundle => localMemberApproval(config, 'physical', bundle),
+        canary: async taskId => report({ type: 'finished', taskId }),
+      })); } catch { send({ type: 'error', message: 'control refused' }); }
+      finally { restore(); send({ type: 'restored', raw: process.stdin.isRaw }); process.stdin.pause(); }
+    `);
+    const argv = [process.execPath, '--import', createRequire(import.meta.url).resolve('tsx'), fixture];
+    const child = spawn('python3', ['-c', `
+import os, pty, select, subprocess, sys
+master, slave = pty.openpty()
+child = subprocess.Popen(sys.argv[1:], stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+os.close(slave)
+while True:
+    readable, _, _ = select.select([master, 0], [], [])
+    if master in readable:
+        try:
+            data = os.read(master, 65536)
+        except OSError:
+            break
+        if not data:
+            break
+        os.write(1, data)
+    if 0 in readable:
+        data = os.read(0, 65536)
+        if not data:
+            break
+        os.write(master, data)
+os.close(master)
+sys.exit(child.wait())
+`, ...argv]);
+    let printed = '', sent = false;
+    child.stderr.on('data', chunk => { printed += chunk.toString(); });
+    child.stdout.on('data', chunk => {
+      printed += chunk.toString();
+      if (!sent && printed.includes(`"type":"${mode === 'private-bundle' ? 'paired' : 'ready'}"`)) {
+        sent = true;
+        child.stdin.write(mode === 'interrupt' ? '\x03' : JSON.stringify(mode === 'private-bundle'
+          ? { type: 'member-bundle', bundle: { privateKey: secret } } : { type: 'canary', taskId: 'task', text: secret, sealed: true }) + '\n' +
+          (mode === 'canary' ? '{"type":"stop"}\n' : ''));
+      }
+    });
+    try {
+      const code = await new Promise<number | null>((resolve, reject) => { child.once('exit', resolve); child.once('error', reject); });
+      expect(code, printed).toBe(0); expect(sent).toBe(true);
+      expect(printed).not.toContain(secret); expect(printed).not.toContain('privateKey');
+      expect(printed).toContain('"type":"restored","raw":false');
+      expect(printed).toContain(mode === 'private-bundle' ? '"type":"error"' : mode === 'canary' ? '"type":"finished"' : '"type":"restored"');
+    } finally { child.kill(); await rm(root, { recursive: true, force: true }); }
   });
 
   it.each(['stop', 'eof', 'signal', 'pre-aborted', 'invalid', 'halt', 'crash', 'pair-failure'])('stops and releases the runner on %s', async ending => {
@@ -330,7 +453,7 @@ describe('device runner boundaries', () => {
     const ready = new Promise<void>(resolve => { paired = resolve; });
     const pair = vi.fn(async () => { paired(); if (ending === 'pair-failure') throw new Error('pairing-secret'); });
     if (ending === 'pre-aborted') controller.abort();
-    const running = runDeviceRunner([...runnerArgs, '--verification-secret', 'A'.repeat(26)], input, output, controller.signal, (() => ({ pair, finish, canary, stop,
+    const running = runDeviceRunner([...runnerArgs, '--canary-controls'], input, output, controller.signal, (() => ({ pair, finish, canary, stop,
       daemon: { subscribe: (callback: client.DaemonEventListener) => { listener = callback; return unsubscribe; } },
     })) as unknown as typeof createDeviceSession);
     const settled = expect(running);
@@ -345,7 +468,7 @@ describe('device runner boundaries', () => {
     if (['invalid', 'halt', 'crash', 'pair-failure'].includes(ending)) await settled.rejects.toThrow();
     else await settled.resolves.toBeUndefined();
     if (ending === 'stop') {
-      expect(pair).toHaveBeenCalledWith('test-pairing-secret', 'A'.repeat(26), false);
+      expect(pair).toHaveBeenCalledWith('test-pairing-secret', undefined);
       expect(canary).toHaveBeenCalledWith('task', 'private', true, expect.any(AbortSignal));
       expect(finish).toHaveBeenCalledWith('task', {});
     }
@@ -383,15 +506,15 @@ it.skipIf(!RUN || process.env.BYOK_TEST_WORKER_SEALED_CANARY !== '1').each([fals
     const member = await HostedMember.create(cloud, tenant);
     const { code } = await cloud.createPairingCode(tenant, { productId: 'hosted-collaboration-worker' });
     running = runDeviceRunner(['--server-url', worker.base, '--pairing-code', code, '--verification-secret', member.verificationSecret,
-      '--root', root, '--runtime', 'stub', ...(automatic ? ['--stub-canary'] : [])], input, output, controller.signal,
-    (config, runtime, send, overrides, stubCanary) => createDeviceSession(
-      keychain ? { ...config, deviceCredentials: { macosKeychainPath: keychain.path } } : config, runtime, send, overrides, stubCanary));
+      '--root', root, '--runtime', 'stub', ...(automatic ? ['--stub-canary'] : ['--canary-controls'])], input, output, controller.signal,
+    (config, runtime, send, overrides, stubCanary, canaryControls) => createDeviceSession(
+      keychain ? { ...config, deviceCredentials: { macosKeychainPath: keychain.path } } : config, runtime, send, overrides, stubCanary, canaryControls));
     void running.catch(error => { failure = error; });
     const wait = (type: DeviceEvent['type']) => until(async () => { if (failure) throw failure; return events().find(event => event.type === type); });
     const paired = await wait('paired');
     if (paired.type !== 'paired') throw new Error('expected paired');
     const { deviceId } = paired;
-    if (automatic) {
+    {
       expect(events().some(event => event.type === 'ready')).toBe(false);
       input.write(JSON.stringify({ type: 'member-bundle', bundle: member.member }) + '\n');
       const codeEvent = await wait('approval-code');
@@ -433,7 +556,7 @@ it.skipIf(!RUN || process.env.BYOK_TEST_WORKER_SEALED_CANARY !== '1').each([fals
         sha256: createHash('sha256').update(text, 'utf8').digest('hex'), runtime: 'stub' });
     } else expect(terminal.payload).toHaveProperty('sealed.ciphertextRef');
     input.write('{"type":"stop"}\n'); await running;
-    expect(events().map(event => event.type)).toEqual(['paired', ...(automatic ? ['approval-code'] : []), 'ready', 'started', ...(automatic ? ['canary-result'] : []), 'finished']);
+    expect(events().map(event => event.type)).toEqual(['paired', 'approval-code', 'ready', 'started', ...(automatic ? ['canary-result'] : []), 'finished']);
     for (const secret of [text, code, member.verificationSecret]) expect(printed).not.toContain(secret);
   } finally {
     controller.abort(); input.end(); await running?.catch(() => {});

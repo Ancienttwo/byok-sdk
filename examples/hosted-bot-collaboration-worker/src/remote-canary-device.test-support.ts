@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import type { TenantId } from '@byok-sdk/cloud';
 import type { CanaryCloud } from '../../hosted-bot-collaboration/src/canary-cloud.test-support';
 import { HostedMember } from '../../hosted-bot-collaboration/src/e2ee-member.test-support';
-import type { DeviceCommand, DeviceEvent } from './device-session.js';
+import { sealedCore, type DeviceCommand, type DeviceEvent } from './device-session.js';
 
 export interface RemoteDeviceConfig { machine: string; cwd: string; root: string }
 const exec = promisify(execFile);
@@ -25,7 +25,7 @@ export async function openRemoteCanaryDevice(cloud: CanaryCloud, tenant: TenantI
     '--cwd', `${config.cwd}/examples/hosted-bot-collaboration-worker`,
     'node', '--import', 'tsx', 'src/device-runner.ts',
     '--server-url', base, '--pairing-code', code, '--verification-secret', member.verificationSecret,
-    '--root', config.root, '--runtime', 'stub']);
+    '--root', config.root, '--runtime', 'stub', '--canary-controls']);
   const send = (command: DeviceCommand) => hc(['send', address, JSON.stringify(command)]);
   async function event(type: DeviceEvent['type'], taskId?: string): Promise<DeviceEvent> {
     for (const deadline = Date.now() + 60_000; Date.now() < deadline;) {
@@ -35,7 +35,7 @@ export async function openRemoteCanaryDevice(cloud: CanaryCloud, tenant: TenantI
         if (!line.startsWith('{')) continue;
         let value: DeviceEvent & { runtime?: string };
         try { value = JSON.parse(line); } catch { continue; }
-        if (value.runtime !== 'stub') continue;
+        if (value.type !== 'approval-code' && value.runtime !== 'stub') continue;
         if (value.type === 'error') throw new Error('remote canary device reported failure');
         if (value.type === type && (taskId === undefined || ('taskId' in value && value.taskId === taskId))) return value;
       }
@@ -59,6 +59,19 @@ export async function openRemoteCanaryDevice(cloud: CanaryCloud, tenant: TenantI
     const paired = await event('paired');
     if (paired.type !== 'paired') throw new Error('remote canary pairing event missing');
     const deviceId = paired.deviceId;
+    const core = await sealedCore();
+    const registration = await cloud.readMemberKeyRegistration(tenant, deviceId);
+    const deviceBundle = await core.parseMemberKeyBundle(registration?.member);
+    if (!deviceBundle || !registration?.deviceMac || !(await core.verifyDevicePairingMac(member.pv,
+      { tenantId: tenant, deviceId, member: deviceBundle }, registration.deviceMac))) throw new Error('remote device pairing MAC did not verify');
+    const expected = (await core.memberApprovalCode(tenant, member.member.signingPublicJwk, deviceBundle.signingPublicJwk)).replaceAll(' ', '');
+    await send({ type: 'member-bundle', bundle: member.member });
+    const comparison = await event('approval-code');
+    if (comparison.type !== 'approval-code' || comparison.code !== expected) {
+      await send({ type: 'reject' });
+      throw new Error('remote device approval code did not match');
+    }
+    await send({ type: 'approve' });
     await member.putScope('scope-zero-hit', await member.approve(deviceId), ['task-input', 'task-output']);
     const ready = await event('ready');
     if (ready.type !== 'ready' || ready.deviceId !== deviceId) throw new Error('remote canary device identity changed');
