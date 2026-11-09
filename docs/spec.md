@@ -4045,13 +4045,28 @@ session's gate hook remembers the `subagent` calls the gate allowed, until
 `session_shutdown`. It refuses any `subagent_launch` whose parent is not one of
 them with `tool_authorization_denied`, before it reaches the gate: no parent,
 a parent that is not `subagent` (codemode), a denied or still-pending
-`subagent` call, or a parent from before the shutdown. An admitted launch goes
-to the gate like other calls. The gate checks the child `cwd` as a write
-target, so a sensitive path stays at the floor and a cwd outside the workspace
-asks. `alwaysAsk` rules apply; `allowWithoutAsking` rules never match
-`subagent_launch`, so a Host rule can make the launch stricter but never looser.
-A Host with only `subagent` rules gets one ask per `subagent` call, not one per
-child.
+`subagent` call, or a parent from before the shutdown. It also refuses a launch whose input is not
+the pinned shape (`cwd`, `output`, and `commands` entries of `command`, `cwd`
+and `env`). An admitted launch goes to the gate like other calls. The gate
+judges each part as the call it stands for. The child `cwd` is a write target,
+resolved through symlinks, so a sensitive path stays at the floor and a cwd
+outside the workspace asks. A resumed child carries no `cwd`; it reuses its
+stored run cwd, which the call does not show, so it asks. Each gate command
+(`commands[].command`, which the parent runs after the child) is judged as a
+bash command at its own `cwd`. `output`, which the parent writes, is a write
+target. The launch asks when any part would ask as that bash call or write.
+`alwaysAsk` rules apply. `allowWithoutAsking` rules apply to no part of
+`subagent_launch`, so a Host rule can make the launch stricter but never
+looser: the name is shared with a call the model can reach, so an allow rule
+on it would be unsafe (#1511). A Host with only `subagent` rules gets one ask
+per `subagent` call, not one per child, except in a file-scoped session: there
+the child `cwd` is outside the file scope's tools, so each workflow child asks.
+
+pi-subagents calls `subagent_launch` only for children started by a workflow
+from a `subagent` call. It skips the call for schedule ticks, auto-resume,
+`/prompt-workflow` and RPC starts. Those children still load the gate
+extension, so each of their tool calls is gated, but no launch check of their
+`cwd`, gate commands or output runs. This is the same as 0.83.1.
 
 A single-file product offers foreground subagents only. `copyPiRuntimeAssets`
 writes `pi-subagents/` into the Pi asset root: the client's exact pi-subagents
@@ -4061,17 +4076,40 @@ file-scope child extensions, which every native child loads by path. The
 bundled host passes the package's `pi.extensions` entry to Pi as an additional
 extension path and registers the required child extensions from the same copy.
 An asset root without the copy, or with another version, fails the launch with
-`pi_bundled_assets_unavailable`. Background subagents need an upstream host
-runner command seam (#1589): on a Bun-compiled product, pi-subagents would
-re-execute the product itself with Pi CLI arguments. So the bundled host sets
-pi-subagents' Pi executable override, `PI_SUBAGENT_PI_BINARY`, to its
-launch-private directory, which always exists and cannot be spawned. Only spawn
-paths read that override, never foreground children. A background launch then
-fails before any runner starts, and the tool call returns the error. In an
-interpreter + bundle product, pi-subagents itself refuses the launch because it
-finds no npm Pi package. The other users of the override fail the same way and
-never re-execute the product: Herdr project panes, Rex local placement and the
-live model probe of the profile check.
+`pi_bundled_assets_unavailable`. The copy is SDK build output, so the check
+is its name and version, not a content digest.
+
+pi-subagents loads the Pi SDK of its foreground children, and decides whether
+a background run can start, from the Pi package root it finds. It reads
+`PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` before it searches the ancestors of
+the entry point and its own resolution, which could otherwise find a foreign
+Pi installed above the product. The bundled host sets that variable to a
+package it writes into its launch-private directory. The package carries Pi's
+name, version and `piConfig` and re-exports the product's own in-process Pi
+module, but holds none of Pi's peers. Foreground children therefore always run
+on the product's Pi, and pi-subagents refuses every background run in the
+interpreter + bundle form ("Background children require the host npm package
+… with its dependencies"). The Bun-compiled form re-executes `process.execPath`
+for a background run, which would start the product itself with Pi CLI
+arguments. So the bundled host also sets pi-subagents' Pi executable override,
+`PI_SUBAGENT_PI_BINARY`, to the same launch-private directory, which always
+exists and cannot be spawned. Only spawn paths read that override, never
+foreground children. A background launch then fails before any runner starts
+("async runner did not produce a pid"), and the tool call returns the error.
+The other users of the override fail the same way and never re-execute the
+product: Herdr project panes, Rex local placement and the live model probe of
+the profile check. Pi's bash tool passes the host environment to the commands
+it runs, and pi-subagents children build their own bash tools, so the SDK
+cannot strip both variables from them. A `pi` that a user starts inside the
+agent's bash therefore fails to load pi-subagents (the generated package loads
+only inside its host) and cannot spawn a background runner; it never loads a
+foreign Pi.
+
+Background subagents in a single-file product need an upstream seam (#1589,
+item 2): a host runner command for background runs
+(nicobailon/pi-subagents#3105), and a way for the host to state that its Pi is
+the embedded one and that it hosts no background runs, instead of the package
+root setting above. Both are deferred.
 
 ## Local native interaction contract
 
