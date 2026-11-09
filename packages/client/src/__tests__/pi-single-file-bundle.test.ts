@@ -303,7 +303,9 @@ describe('Pi launch path — single-file product re-entry (sdkHelperHost)', () =
           registryAttempts, providerRequests }));
         expect(escaped, `Pi launch paths resolved outside the release ${release}`).toEqual([]);
         expect(await fs.readdir(cacheDir), 'the S2 launch path auto-installed into the bun cache').toEqual([]);
-        expect(existsSync(childCache) ? await fs.readdir(childCache) : [], 'the actual host auto-installed into its isolated HOME cache').toEqual([]);
+        // `@t@` is Bun's runtime transpiler cache, written when the host loads the pi-subagents asset sources; it holds no package.
+        const installed = (existsSync(childCache) ? await fs.readdir(childCache) : []).filter(name => name !== '@t@');
+        expect(installed, 'the actual host auto-installed into its isolated HOME cache').toEqual([]);
         // Bun 1.4.2 registry override was independently measured with two
         // loopback tripwires; this does not claim whole-network isolation.
         expect(registryAttempts, 'local registry tripwire observed an install attempt (not a whole-network isolation claim)').toEqual([]);
