@@ -7,13 +7,49 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "f5aceea85bd783eb7bb2838851d4641dfb422b9f8e385a2e661fb8056703d9ad"
+    "snapshotSha256": "edd52a67fa80834eca34617842c2e7b5e03de6e539e483f6822d2ee89c9f8a15"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "codex-session-store",
+      "impact": "breaking",
+      "summary": "The retention class agent-runtime-sessions is replaced by the expiring class codex-session-store: it is removed from PROTECTED_CLASS_IDS, ProtectedClassId and PROTECTED_CLASS_BOUNDS and added to EXPIRING_CLASS_IDS and ExpiringClassId, so replace the literal where the Host reads retention classes and treat the class as expiring. It covers the Codex rollouts that agentUserContext: excluded keeps under <Agent home>/.byok/codex. A rollout is deleted once its last write is older than the new DaemonConfig.storage.retention.ttlMs['codex-session-store'] (default 31 days, or the session-ledger TTL plus one day if longer; an explicit value must be at least that), unless a live session ledger still names its thread or its Agent home is running a task. Rollouts that used to stay until the Host removed the Agent home are now deleted by default; set the TTL higher to keep idle threads longer. Resuming a deleted thread fails closed through the existing non-retryable missing-thread path.",
+      "migration": "docs/host-local-storage-layout.md#retention-bounds",
+      "items": [
+        "config:storage",
+        "export:@byok-sdk/client#ExpiringClassId",
+        "export:@byok-sdk/client#resolveStorageConfig",
+        "export:@byok-sdk/client#ProtectedClassId"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "config:storage",
+      "change": "changed",
+      "before": "optional schema-sha256=26156d226d19d4c6",
+      "after": "optional schema-sha256=e89f34f2223d0907",
+      "entry": "codex-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/client#ExpiringClassId",
+      "change": "changed",
+      "entry": "codex-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/client#ProtectedClassId",
+      "change": "changed",
+      "entry": "codex-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveStorageConfig",
+      "change": "changed",
+      "entry": "codex-session-store"
+    }
+  ]
 }
