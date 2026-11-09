@@ -288,11 +288,9 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
   });
 
   it.each([
-    [['resident-memory-over-limit'], 9 * 1024, { byteCount: 9 * 1024 }],
-    [[], 9 * 1024, undefined],
-    [['resident-memory-over-limit'], 8 * 1024, undefined],
-  ])('reports a writer MEMORY.md over the limit only to a server with the flag, never on a reader (#1439, flags %j, %i bytes)', async (flags, size, expected) => {
-    server.setAckCapabilities(flags);
+    [9 * 1024, { byteCount: 9 * 1024 }],
+    [8 * 1024, undefined],
+  ])('reports a writer MEMORY.md over the limit, never on a reader (#1439, %i bytes)', async (size, expected) => {
     const harness = await start();
     const home = await harness.home('resident');
     offer('resident-reader', 'resident', { reader: true });
@@ -308,7 +306,6 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     ['12 KiB', 12288],
     ['300 KiB', 300 * 1024],
   ])('restores only MEMORY.md after a writer overran it to %s, and reports the size it wrote (#1439)', async (_label, size) => {
-    server.setAckCapabilities(['resident-memory-over-limit']);
     const harness = await start();
     const home = await harness.home('restored');
     offer('restored-setup', 'restored');

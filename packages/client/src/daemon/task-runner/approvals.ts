@@ -146,7 +146,7 @@ function approvalHost(this: TaskRunner): TaskRunnerHost {
             return createEnvelope('task.fail', {
               reason,
               retryable: false,
-              ...this['failurePayload'](DAEMON_TASK_FAILURE),
+              failure: DAEMON_TASK_FAILURE,
               ...this['terminalInferenceUsagePayload'](active),
               ...this['preparedObservationPayload'](active),
               ...this['agentTerminalPayload'](active),
@@ -359,7 +359,7 @@ export async function handleReject(this: TaskRunner, taskId: string, reason: str
           await this['persistAgentTerminalEvidence'](active, 'failed', reason ?? 'rejected');
           return createEnvelope('task.fail', {
             reason: reason ?? 'rejected', retryable: false,
-            ...this['failurePayload'](DAEMON_TASK_FAILURE),
+            failure: DAEMON_TASK_FAILURE,
             ...this['terminalInferenceUsagePayload'](active),
             ...this['preparedObservationPayload'](active),
             ...this['agentTerminalPayload'](active),

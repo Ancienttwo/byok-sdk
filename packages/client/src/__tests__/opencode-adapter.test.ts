@@ -212,7 +212,6 @@ it('keeps the admitted native identity in task.complete and persisted terminal e
   const recorded = vi.spyOn(handoffs, 'recordTerminal');
   const runner = new TaskRunner({ ...freshOfferRunnerDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [box.adapter], agentHome: new AgentHomeManager({ hostStorageRoot: path.join(box.cwd, 'homes') }), agentSessionHandoffs: handoffs,
-    getServerCapabilities: () => ['custom-harness'],
     deviceId: 'device-1', productId: 'opencode-test', storeDir: path.join(box.cwd, 'store'),
     send: envelope => { sent.push(envelope); }, approvalRegistry: new ApprovalRegistry(),
     blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },

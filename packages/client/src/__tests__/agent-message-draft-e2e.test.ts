@@ -37,7 +37,7 @@ afterEach(async () => {
   daemon = undefined; real = undefined; root = undefined; readerAbort = undefined;
 });
 
-async function setup(options: { adapter?: RuntimeAdapter; oldServer?: boolean; gateReply?: boolean } = {}) {
+async function setup(options: { adapter?: RuntimeAdapter; gateReply?: boolean } = {}) {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-draft-e2e-'));
   const gate = path.join(root, 'reply');
   await fs.mkdir(gate);
@@ -51,7 +51,6 @@ async function setup(options: { adapter?: RuntimeAdapter; oldServer?: boolean; g
   const accepted: AgentMessagePublishPlainPayload[] = [];
   const sent: Envelope[] = [];
   const rejections: unknown[] = [];
-  const advertisements: string[][] = [];
   real = await startRealServer({ productId, storage: { kind: 'memory' }, longPollHoldMs: 30,
     agentMessage: { consume: async ({ payload }) => { accepted.push(payload); return { outcome: 'accepted' }; } },
   });
@@ -65,15 +64,8 @@ async function setup(options: { adapter?: RuntimeAdapter; oldServer?: boolean; g
     }
     const response = await originalFetch(input, init);
     if (!messagesRoute && !eventsRoute) return response;
-    const body = await response.clone().json() as { capabilities?: string[]; rejected?: number };
+    const body = await response.clone().json() as { rejected?: number };
     if (body.rejected) rejections.push(body);
-    if (body.capabilities !== undefined) {
-      if (options.oldServer) body.capabilities = body.capabilities.filter(flag => flag !== 'agent-message-draft');
-      advertisements.push(body.capabilities);
-      if (options.oldServer) return new Response(JSON.stringify(body), {
-        status: response.status, headers: response.headers,
-      });
-    }
     return response;
   }) as typeof fetch;
   daemon = createDaemonWithAdapters({
@@ -108,7 +100,7 @@ async function setup(options: { adapter?: RuntimeAdapter; oldServer?: boolean; g
   const terminal = () => vi.waitFor(async () => {
     expect(await server.byok.tasks.deviceTerminal(taskId)).toMatchObject({ envelope: { type: 'task.complete' } });
   }, { timeout: 10_000 });
-  return { server, deviceId, accepted, sent, rejections, advertisements, submit, read, terminal,
+  return { server, deviceId, accepted, sent, rejections, submit, read, terminal,
     release: (name: 'next' | 'finish') => fs.writeFile(path.join(gate, name), '') };
 }
 
@@ -148,7 +140,6 @@ describe('Agent message drafts through the real server and daemon', () => {
     expect(reader.events.at(-1)).toEqual({ kind: 'ended' });
     expect(f.sent.findIndex(e => e.type === 'agent.message.publish')).toBeGreaterThan(f.sent.findLastIndex(e => e.type === 'agent.message.draft'));
     expect(f.rejections).toEqual([]);
-    expect(f.advertisements.some(flags => flags.includes('agent-message-draft'))).toBe(true);
     assertWireCapability(f.sent, 'pi', true);
   }, 20_000);
 
@@ -182,21 +173,6 @@ describe('Agent message drafts through the real server and daemon', () => {
     expect(f.accepted[0]?.body).toBe('stub answer');
     expect(drafts(f.sent)).toEqual([]);
     assertWireCapability(f.sent, 'pi', undefined);
-    expect(f.rejections).toEqual([]);
-  }, 20_000);
-
-  it('sends zero Pi draft frames to an old server without the flag', async () => {
-    const f = await setup({ oldServer: true });
-    await f.submit();
-    const reader = f.read();
-    await reader.done;
-    await f.terminal();
-    expect(reader.events).toEqual([{ kind: 'ended' }]);
-    expect(f.accepted[0]?.body).toBe('Hello world');
-    expect(drafts(f.sent)).toEqual([]);
-    expect(f.advertisements.length).toBeGreaterThan(0);
-    expect(f.advertisements.every(flags => !flags.includes('agent-message-draft'))).toBe(true);
-    assertWireCapability(f.sent, 'pi', true);
     expect(f.rejections).toEqual([]);
   }, 20_000);
 

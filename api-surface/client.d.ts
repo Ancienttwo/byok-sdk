@@ -2508,8 +2508,6 @@ export declare class AgentEgressController {
     /** Re-open every existing Agent-local spool before retrying stable records after restart. */
     recover(agentsRoot: string): Promise<void>;
     reliableRecords(): readonly AgentReliableEgressRecord[];
-    /** Missing ack capability holds records in their reliable lane; it never makes them lossy. */
-    retryableReliableRecords(serverCapabilities: readonly string[]): readonly AgentReliableEgressRecord[];
     private spoolFor;
     private bindSpool;
     private tenantPendingBytes;
@@ -3622,9 +3620,7 @@ export declare class AuthRequestAbortedError extends Error {
  * Thrown when a successful `/byok/challenge` or `/byok/token` response body
  * is not valid JSON or does not satisfy its protocol schema
  * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
- * truncated body, a missing field, or a token `expiresAt` that is not an ISO
- * timestamp with an offset — and when a token or pair response carries no
- * `expiresIn` (#1114). The renewal or pairing fails and the prior credential
+ * truncated body or a missing field such as `expiresIn` (#1114). The renewal or pairing fails and the prior credential
  * is kept unchanged; nothing is inferred from the malformed body. The JSON
  * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
  */

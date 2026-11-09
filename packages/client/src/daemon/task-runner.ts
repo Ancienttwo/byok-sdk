@@ -22,7 +22,6 @@ import {
   type TaskDeclinePayload,
   type TaskFailure,
   type TaskOfferPlainPayload,
-  requiredReceiverCapabilities,
 } from '@byok-sdk/protocol';
 import {
   type McpStdioServerConfig,
@@ -51,7 +50,6 @@ import {
 import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { SealedTasks } from './sealed-task';
-import { taskFailureField } from './task-failure';
 import type {
   AgentResultDescribeParams,
   AgentResultDescribeResult,
@@ -326,19 +324,6 @@ export interface TaskRunnerDeps {
    */
   maxInlineEventBytes?: number;
   /**
-   * The capabilities advertised by the server on the latest successful
-   * long-poll events response — read fresh at call time (mirrors
-   * `getCursor`/`getToken`'s own
-   * "read fresh, not captured once" convention elsewhere in this codebase),
-   * since the capability is learned asynchronously, after this `TaskRunner`
-   * is already constructed (`create-daemon.ts`'s `start()` builds `deps`
-   * before `connection` exists). `create-daemon.ts` wires this to
-   * `ConnectionManager.getServerCapabilities`. Optional, and treated as "no
-   * capabilities" when absent, so a minimal test harness that doesn't care
-   * about these gates isn't forced to supply one.
-   */
-  getServerCapabilities?: () => readonly string[];
-  /**
    * The flags this daemon's current `conn.hello` advertises. Every `task.offer`
    * is checked against them before it is opened or run: an offer that needs a
    * flag missing here is declined non-retryably, whatever the sender admitted
@@ -363,7 +348,7 @@ export interface TaskRunnerDeps {
    * now — this daemon can sign, AND it has read a deployment declaration naming
    * `host-mcp-task-context`?
    *
-   * Read fresh at offer time for the same reason `getServerCapabilities` is:
+   * Read fresh at offer time:
    * `create-daemon.ts` builds these deps before the declaration has been read.
    *
    * ABSENT MEANS UNAVAILABLE, not "assume yes". A runner with no way to ask
@@ -1527,21 +1512,9 @@ export class TaskRunner {
     return declineOfferMissingCapabilities.call(this, envelope, admission);
   }
 
-  private failurePayload(failure: TaskFailure): { failure?: TaskFailure } {
-    return taskFailureField(failure, this.deps.getServerCapabilities?.() ?? []);
-  }
-
-  private sealedCodesAllowed(): boolean {
-    const capabilities = this.deps.getServerCapabilities?.() ?? [];
-    return requiredReceiverCapabilities('task.decline', { reason: 'sealed_open_failed', code: 'sealed_open_failed' })
-      .every((flag) => capabilities.includes(flag));
-  }
-
   /**
-   * Declines a sealed offer once, non-retryably, before any claim. To a server
-   * with `sealed-payload-v1` it sends the closed code as both `reason` and
-   * `code` (#654 decisions 12c and 12d). The code is a value gate on that
-   * flag, so without it the decline has a plaintext reason and no code.
+   * Declines a sealed offer once, non-retryably, before any claim, with the
+   * closed code as both `reason` and `code` (#654 decisions 12c and 12d).
    */
   private declineSealedOffer(taskId: string, admission: OfferAdmissionTiming, agentRef: AgentRef | undefined, code: SealedDeclineCode): void {
     return declineSealedOffer.call(this, taskId, admission, agentRef, code);
@@ -1549,10 +1522,6 @@ export class TaskRunner {
 
   /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
   private decline(taskId: string, admission: OfferAdmissionTiming, reason: string, retryable: boolean, agentRef?: AgentRef, code?: TaskDeclinePayload['code'], runtimeUnavailable?: RuntimeUnavailableAdmission): void {
-    const capabilities = this.deps.getServerCapabilities?.() ?? [];
-    if (!requiredReceiverCapabilities('task.decline', { code }).every(flag => capabilities.includes(flag))) {
-      throw new Error('protocol violation: task.decline code requires an unadvertised server capability');
-    }
     const timings = admission.snapshot();
     this.deps.send(createEnvelope(
       'task.decline',

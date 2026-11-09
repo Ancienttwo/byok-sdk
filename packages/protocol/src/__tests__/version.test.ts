@@ -6,9 +6,11 @@ describe('protocol version and capability flags', () => {
     expect(PROTOCOL_VERSION).toBe(6);
   });
 
-  it('includes at least the steer and blob-upload capability flags', () => {
+  it('includes the steer flag and none of the flags v6 retired', () => {
     expect(CAPABILITY_FLAGS).toContain('steer');
-    expect(CAPABILITY_FLAGS).toContain('blob-upload');
+    const retired = ['blob-upload', 'custom-harness', 'mailbox-read-ahead', 'terminal-projection-selection', 'runtime-unavailable-cause',
+      'agent-message-draft', 'runtime-failure-class', 'runtime-quota-scope', 'resident-memory-over-limit', 'sealed-output-ciphertext-ref'];
+    expect(CAPABILITY_FLAGS.filter((flag) => (retired as readonly string[]).includes(flag))).toEqual([]);
   });
 
   it('has no approval flag: v4 approval targeting and task.approval_resolved are baseline', () => {

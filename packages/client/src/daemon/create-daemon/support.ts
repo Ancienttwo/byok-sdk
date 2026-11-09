@@ -1,6 +1,6 @@
 import type { Envelope, RuntimeInfo, CapabilityFlag, RuntimeId, AgentEgressPolicy, ContentReadPolicy, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
 import { type JournalIdentity, type ReceivedEnvelopeRecord, journalHash } from '../journal/journal';
-import { encodeEnvelope, TERMINAL_PROJECTION_SELECTION_CAPABILITY, PROVIDER_PROFILE_BINDING_CAPABILITY, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY, RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY } from '@byok-sdk/protocol';
+import { encodeEnvelope, PROVIDER_PROFILE_BINDING_CAPABILITY, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
 import type { RuntimeAdapter } from '../../types';
 import { type HarnessInfo, HarnessIdSchema } from '@byok-sdk/protocol';
 import { type RuntimeObservation, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection';
@@ -95,15 +95,14 @@ export function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIde
 
 /**
  * Runtimes actually detected as present on this device, typed per protocol
- * §10 gap #4 (`ConnHelloPayload.runtimes`), plus the strip-safe
+ * §10 gap #4 (`ConnHelloPayload.runtimes`), plus the optional
  * `runtimeUnavailable` projection of every non-available adapter (#1103 B2b).
  * Computed once at `start()` — re-probing on every reconnect would mean
  * re-spawning each runtime's `--version` check for no real benefit within one
  * daemon lifetime.
  *
  * The unavailable list carries the existing identity domain (built-in runtime
- * or custom harness id) on `conn.hello`; presence filters it to built-in
- * runtime ids, because that id domain is frozen on the HTTP body.
+ * or custom harness id) on `conn.hello` and presence alike.
  */
 export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
   runtimes: RuntimeInfo[];
@@ -165,8 +164,7 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
 /**
  * M0 gatekeeper finding ②: advertise only what this device can actually do,
  * not a static spread of every known flag. `steer` reflects whether any
- * configured adapter can express it; `blob-upload` is unconditional now
- * that the blob client (protocol §7) genuinely implements it.
+ * configured adapter can express it.
  */
 export function computeCapabilities(
   adapters: RuntimeAdapter[],
@@ -187,12 +185,6 @@ export function computeCapabilities(
     && nativeSessions.sessionDir !== undefined
     && adapters.some(adapter => adapter.descriptor.id === 'pi' && adapter.descriptor.memoryLane !== undefined)) flags.push('native-sessions');
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
-  flags.push('blob-upload');
-  // #1103 B2b: this daemon understands the typed runtime-unavailable cause it
-  // emits on declines, hello and presence. Unconditional, like `blob-upload`:
-  // it is a property of this daemon version, not of any configured adapter.
-  flags.push(RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY);
-  flags.push(TERMINAL_PROJECTION_SELECTION_CAPABILITY);
   const selectionAdapters = adapters.filter((adapter) =>
     ALL_RUNTIME_IDS.includes(adapter.descriptor.id as RuntimeId),
   );

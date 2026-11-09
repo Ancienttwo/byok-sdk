@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createEnvelope, MAX_MESSAGES_PER_BATCH, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager, type OutboundSettlement } from '../daemon/connection-manager';
@@ -183,7 +183,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
   });
 });
 
-describe('draft outbox gating after the current session handshake', () => {
+describe('draft outbox after a failed post', () => {
   let server: TestServer | undefined;
   let connection: ConnectionManager | undefined;
   const roots: string[] = [];
@@ -202,10 +202,9 @@ describe('draft outbox gating after the current session handshake', () => {
     await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
   });
 
-  async function setup(capabilities: string[]) {
+  async function setup() {
     const instance = await TestServer.start();
     server = instance;
-    instance.setAckCapabilities(capabilities);
     const storeDir = await tmpDir('byok-draft-outbox-');
     roots.push(storeDir);
     const auth = new AuthManager({ serverUrl: instance.url, store: createTestDeviceStore(storeDir) });
@@ -235,11 +234,10 @@ describe('draft outbox gating after the current session handshake', () => {
     return { server: instance, manager, settled, queued, beforePost, draft, publish, complete };
   }
 
-  it.each([false, true])('re-gates a failed mixed batch when the next session supports drafts: %s', async supportsDrafts => {
-    const f = await setup(['agent-message-draft']);
+  it('resends a failed mixed batch, drafts included, on the next session', async () => {
+    const f = await setup();
     const drafts = [f.draft(0, '你好'), f.draft(6, '!')];
     const batch = [...drafts, f.publish, f.complete];
-    const expected = supportsDrafts ? batch : [f.publish, f.complete];
     const attempts: Envelope[][] = [];
     let releaseFailure!: () => void;
     const failureGate = new Promise<void>(resolve => { releaseFailure = resolve; });
@@ -271,58 +269,25 @@ describe('draft outbox gating after the current session handshake', () => {
     await f.manager.start();
     await vi.waitFor(() => expect(attempts).toHaveLength(1));
     expect(attempts[0]).toEqual(batch);
-    expect(f.manager.getServerCapabilities()).toContain('agent-message-draft');
     expect(f.manager.outboxLength()).toBe(batch.length);
     expect(f.server.received.filter(e => e.task_id === taskId)).toEqual([]);
-    f.server.setAckCapabilities(supportsDrafts ? ['agent-message-draft'] : []);
     releaseFailure();
 
     await f.server.waitFor(e => e.id === f.complete.id);
     await vi.waitFor(() => expect(attempts).toHaveLength(2));
     expect(helloPosts).toBe(2);
-    expect(f.manager.getServerCapabilities().includes('agent-message-draft')).toBe(supportsDrafts);
-    expect(attempts[1]).toEqual(expected);
-    expect(f.server.received.filter(e => e.task_id === taskId)).toEqual(expected);
-    expect(f.server.received.filter(e => e.type === 'agent.message.draft')).toEqual(supportsDrafts ? drafts : []);
-    // The server holds acceptance: only the filtered in-flight batch counts.
-    expect(f.manager.outboxLength()).toBe(expected.length);
-    expect(f.beforePost.mock.calls.map(([posted]) => posted)).toEqual([batch, expected]);
+    expect(attempts[1]).toEqual(batch);
+    expect(f.server.received.filter(e => e.task_id === taskId)).toEqual(batch);
+    expect(f.server.received.filter(e => e.type === 'agent.message.draft')).toEqual(drafts);
+    // The server holds acceptance: the in-flight batch still counts.
+    expect(f.manager.outboxLength()).toBe(batch.length);
+    expect(f.beforePost.mock.calls.map(([posted]) => posted)).toEqual([batch, batch]);
     releaseAcceptance();
     await vi.waitFor(() => expect(f.manager.outboxLength()).toBe(0));
-    expect(f.settled.filter(s => s.envelope.task_id === taskId).map(s => s.envelope)).toEqual(expected);
+    expect(f.settled.filter(s => s.envelope.task_id === taskId).map(s => s.envelope)).toEqual(batch);
     expect(f.queued.mock.calls.map(([envelope]) => envelope)).toEqual(batch);
     expect(attempts).toHaveLength(2);
     expect(helloPosts).toBe(2);
     expect(f.manager.isOpen()).toBe(true);
-  });
-
-  it('drops absent-capability drafts at drain, skips an empty batch, and retains no drafts for later advertisement', async () => {
-    const f = await setup([]);
-    const drafts = Array.from({ length: MAX_MESSAGES_PER_BATCH + 1 }, (_, offset) => f.draft(offset, 'x'));
-    const expected = [f.publish, f.complete];
-    const postBatch = vi.spyOn(LongPollClient.prototype, 'postBatch');
-    for (const envelope of [...drafts, ...expected]) f.manager.send(envelope);
-    expect(f.manager.outboxLength()).toBe(drafts.length + expected.length);
-    expect(f.queued).toHaveBeenCalledTimes(drafts.length + expected.length);
-    await f.manager.start();
-    await f.server.waitFor(e => e.id === f.complete.id);
-    await vi.waitFor(() => expect(f.manager.outboxLength()).toBe(0));
-    expect(f.server.received.filter(e => e.task_id === taskId)).toEqual(expected);
-    expect(f.beforePost.mock.calls.map(([batch]) => batch)).toEqual([expected]);
-    expect(f.settled.filter(s => s.envelope.task_id === taskId).map(s => s.envelope)).toEqual(expected);
-    expect(postBatch.mock.calls.map(([batch]) => batch.map(e => e.type))).toEqual([
-      ['conn.hello'], ['agent.message.publish', 'task.complete'],
-    ]);
-
-    // A later advertisement must not resurrect drafts removed from the outbox.
-    f.server.setAckCapabilities(['agent-message-draft']);
-    await vi.waitFor(() => expect(f.manager.getServerCapabilities()).toContain('agent-message-draft'));
-    const later = createEnvelope('task.fail', { reason: 'drain barrier' }, { taskId: 'after-draft-drop' });
-    f.manager.send(later);
-    await f.server.waitFor(e => e.id === later.id);
-    await vi.waitFor(() => expect(f.manager.outboxLength()).toBe(0));
-    expect(f.server.received.filter(e => e.type === 'agent.message.draft')).toEqual([]);
-    expect(f.settled.some(s => s.envelope.type === 'agent.message.draft')).toBe(false);
-    expect(f.beforePost.mock.calls.map(([batch]) => batch)).toEqual([expected, [later]]);
   });
 });

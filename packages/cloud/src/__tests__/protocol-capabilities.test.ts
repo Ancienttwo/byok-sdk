@@ -1,47 +1,16 @@
 /**
- * The protocol capability advertisement a long-poll daemon negotiates against.
+ * The protocol capability advertisement a long-poll daemon reads.
  *
- * `GET /byok/events` is the ONLY channel that carries it, and the daemon
- * hard-gates real wire behavior on what it finds there
- * (`packages/client/src/daemon/agent-egress-controller.ts`). A flag dropped
- * from the kernel's declaration is therefore a silently disabled protocol
- * path, not a cosmetic difference.
- *
- * So the list is pinned exactly rather than by `toContain`: any future edit to
- * `CLOUD_PROTOCOL_CAPABILITIES` shows up here as a visible diff that has to be
- * justified against the kernel's inbound, in both directions (a removal breaks
- * a daemon path; an addition promises acceptance the kernel may not implement).
+ * Wire v6 has no server-flag gate, so the advertisement is empty. The list is
+ * pinned exactly rather than by `toContain`: an addition promises acceptance
+ * the kernel's inbound must implement, and shows up here as a visible diff.
  */
 import { createEnvelope, PROTOCOL_VERSION, type MessagesSendResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { TENANT_A, createHarness, decodeEventsPage, grantAgentHome, offerPayload } from './support/harness';
 
-/**
- * The exact advertisement, in declaration order
- * (`packages/cloud/src/handlers/events.ts:35`). Keep this literal — deriving it
- * from the source under test would assert nothing.
- */
-const EXPECTED_CAPABILITIES = [
-  'custom-harness',
-  'native-sessions',
-  'mailbox-read-ahead',
-  'agent-message-draft',
-  'agent-home-contract',
-  'agent-home-projection',
-  'agent-egress-policy',
-  'agent-egress-reliable-ack',
-  'agent-egress-fresh-session',
-  'agent-message-egress',
-  'agent-content-workspace-read',
-  'agent-content-transcript-read',
-  'agent-content-artifact-read',
-  'sealed-payload-v1',
-  'sealed-output-ciphertext-ref',
-  'sealed-payload-v2',
-  'runtime-failure-class',
-  'runtime-quota-scope',
-  'resident-memory-over-limit',
-];
+/** The exact advertisement. Keep this literal: deriving it from the source under test would assert nothing. */
+const EXPECTED_CAPABILITIES: string[] = [];
 
 describe('GET /byok/events protocol capability advertisement', () => {
   it('serves the exact declared list on the empty-page path', async () => {

@@ -2,7 +2,6 @@ import {
   type ActivityIngress,
   BYOK_EVENTS_PATH,
   EventsPollResponseSchema,
-  MAILBOX_READ_AHEAD_CAPABILITY,
   MAILBOX_READ_AHEAD_MAX_SEQS,
   BYOK_MESSAGES_PATH,
   MESSAGE_TYPES,
@@ -404,7 +403,6 @@ export class LongPollClient {
   private async loop(signal: AbortSignal): Promise<void> {
     let retryAttempt = 0;
     let readCursor: number | undefined;
-    let readAheadSupported = false;
     let warnedWindowAt: number | undefined;
     while (this.running && !signal.aborted) {
       try {
@@ -435,14 +433,7 @@ export class LongPollClient {
         }
         const afterSeq = Math.max(ack, readCursor ?? ack);
         if (cursor !== undefined) url.searchParams.set('cursor', String(cursor));
-        if (afterSeq > ack) {
-          if (!readAheadSupported) {
-            const error = new Error('server does not advertise mailbox-read-ahead; cannot read past unacknowledged work');
-            this.warnRouteFailure(this.eventsEndpoint, undefined, error);
-            throw error;
-          }
-          url.searchParams.set('afterSeq', String(afterSeq));
-        }
+        if (afterSeq > ack) url.searchParams.set('afterSeq', String(afterSeq));
 
         // Phase 2 — the route request/response cycle. Only failures from here
         // on are {@link LongPollRouteError}s.
@@ -480,7 +471,6 @@ export class LongPollClient {
         try {
           parsed = decodeEventsPage(await res.json(), afterSeq);
           validateTrustedEventsPage(parsed.events, afterSeq, parsed.cursor);
-          if (afterSeq > ack && !parsed.capabilities.includes(MAILBOX_READ_AHEAD_CAPABILITY)) throw new Error('mailbox read-ahead capability was withdrawn');
         } catch (err) {
           // The response DID exist (and was a success status) — it is its body
           // that is unusable. Carrying `res.status` here rather than
@@ -489,7 +479,6 @@ export class LongPollClient {
           this.warnRouteFailure(this.eventsEndpoint, res.status, err);
           throw err;
         }
-        readAheadSupported = parsed.capabilities.includes(MAILBOX_READ_AHEAD_CAPABILITY);
         const madeReadProgress = parsed.cursor > afterSeq;
         readCursor = parsed.cursor;
         this.opts.onIngress?.(parsed.ingress);

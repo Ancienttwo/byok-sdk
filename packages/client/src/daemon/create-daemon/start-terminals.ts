@@ -1,9 +1,9 @@
 import type { Envelope } from '@byok-sdk/protocol';
-import { encodeEnvelope, decodeEnvelope, createEnvelope, isSealedPayload, requiredReceiverCapabilities } from '@byok-sdk/protocol';
+import { encodeEnvelope, decodeEnvelope, createEnvelope, isSealedPayload } from '@byok-sdk/protocol';
 import { terminalKindOf } from './support';
 import { journalHash, JournalRecordTooLargeError, type ReceivedEnvelopeRecord } from '../journal/journal';
 import type { AgentRef } from '../../agent-home';
-import { taskFailureField, DAEMON_TASK_FAILURE } from '../task-failure';
+import { DAEMON_TASK_FAILURE } from '../task-failure';
 import { terminalIdentity } from '../terminal-identity';
 import type { SealedTasks } from '../sealed-task';
 import type { TaskRunnerDeps } from '../task-runner';
@@ -67,7 +67,7 @@ export function composeStartTerminals(daemonScope: DaemonScope, run: Pick<StartR
         const offerPayload = offer.payload as { agentRef?: AgentRef };
         const plainFailure = createEnvelope('task.fail', {
           reason: 'terminal_result_too_large', retryable: false,
-          ...taskFailureField(DAEMON_TASK_FAILURE, daemonState.connection?.getServerCapabilities() ?? []),
+          failure: DAEMON_TASK_FAILURE,
           ...terminalIdentity(task.claimedRuntime, offerPayload.agentRef),
         }, { taskId });
         // Only the owner run's tenant, device and member seal this failure.
@@ -188,12 +188,9 @@ export function composeStartTerminals(daemonScope: DaemonScope, run: Pick<StartR
     }
     const { agentRef } = envelope.payload as { agentRef?: AgentRef };
     // A sealed offer this device cannot hold is one it cannot open; a device
-    // with no keyring declines every sealed offer for want of a key. The
-    // closed code is a value gate on the server's `sealed-payload-v1`.
+    // with no keyring declines every sealed offer for want of a key.
     const code = sealedRun.sealedMember === undefined ? 'sealed_key_unavailable' : 'sealed_open_failed';
-    const serverCapabilities = daemonState.connection?.getServerCapabilities() ?? [];
-    const closedCode = isSealedPayload(envelope.type, envelope.payload)
-      && requiredReceiverCapabilities('task.decline', { reason: code, code }).every((flag) => serverCapabilities.includes(flag));
+    const closedCode = isSealedPayload(envelope.type, envelope.payload);
     const decline = createEnvelope('task.decline', {
       ...(closedCode ? { reason: code, code } : { reason: 'inbound_envelope_too_large' }),
       retryable: false, ...(agentRef === undefined ? {} : { agentRef }),

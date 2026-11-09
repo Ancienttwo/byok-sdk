@@ -5,7 +5,7 @@ import type { ResultReplyFailure } from '../result-reply-failure';
 import { terminalIdentity } from '../terminal-identity';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { RESIDENT_MEMORY_MAX_BYTES, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, requiredReceiverCapabilities, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit } from '@byok-sdk/protocol';
+import { RESIDENT_MEMORY_MAX_BYTES, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit } from '@byok-sdk/protocol';
 import type { AgentRef } from '../../agent-home';
 import { compareAgentHomeMemory, digestAgentHomeMemory } from '../../agent-home-readers';
 import type { AgentTerminalCause } from '../agent-session-handoff-store';
@@ -68,23 +68,8 @@ export function agentTerminalPayload(
     ...terminalIdentity(active.adapter.descriptor.id, active.agentRef),
     ...(active.appliedAgentHomeProjection === undefined ? {} : { agentHomeProjection: active.appliedAgentHomeProjection }),
     ...(active.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: active.agentHomeMemoryChange }),
-    ...residentMemoryOverLimitField(active.residentMemoryOverLimit, this['deps'].getServerCapabilities?.() ?? []),
+    ...(active.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: active.residentMemoryOverLimit }),
   };
-}
-
-/**
- * `residentMemoryOverLimit`, sent only to a server that advertised its gate on
- * every terminal type (#1439); otherwise the terminal goes without it. Server
- * flags are live-only, so a terminal built with no connection has none.
- */
-function residentMemoryOverLimitField(
-  residentMemoryOverLimit: TerminalResidentMemoryOverLimit | undefined,
-  serverCapabilities: readonly string[],
-): { residentMemoryOverLimit?: TerminalResidentMemoryOverLimit } {
-  if (residentMemoryOverLimit === undefined) return {};
-  const admitted = (['task.complete', 'task.fail', 'task.cancelled'] as const).every((type) =>
-    requiredReceiverCapabilities(type, { residentMemoryOverLimit }).every((flag) => serverCapabilities.includes(flag)));
-  return admitted ? { residentMemoryOverLimit } : {};
 }
 
 export async function resolveStagedResult(

@@ -126,7 +126,7 @@ export interface DaemonState {
   // asynchronous to start(); only Agent offers with host toolsets wait for it.
   presencePublisher: PresencePublisher | undefined;
   detectedRuntimeFacts: readonly RuntimeInfo[];
-  /** #1103 B2b: the strip-safe `runtimeUnavailable` projection of this run's detection. */
+  /** #1103 B2b: the optional `runtimeUnavailable` projection of this run's detection. */
   detectedRuntimeUnavailable: readonly RuntimeUnavailableEntry[];
   runtimeObservations: RuntimeObservation[];
   resolvedEnvironment: ServiceEnvironmentStatus;

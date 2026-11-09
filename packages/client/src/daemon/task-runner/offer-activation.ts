@@ -119,14 +119,12 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   // #654 D9: a task with sealing streams no draft (design §6.1, §10.4).
   if (active.messageRequirement !== undefined
     && pick.descriptor.capabilities.messageDraft === true
-    && this['deps'].getServerCapabilities?.().includes('agent-message-draft')
     && this['deps'].sealedTasks?.isSealed(taskId) !== true) {
     active.messageDraft = new AgentMessageDraftPublisher({
       taskId,
       agentRef: active.agentRef,
       maxBytes: active.messageRequirement.maxBytes,
       maxCoalesceMs: this['deps'].agentEgressPolicy!.activity.maxCoalesceMs,
-      getServerCapabilities: () => this['deps'].getServerCapabilities?.() ?? [],
       send: envelope => this['deps'].send(envelope),
     });
   }

@@ -30,7 +30,6 @@ async function grokRunner(sent: Envelope[]) {
   const storeDir = await temporary('byok-grok-egress-store-');
   return new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
     adapters: [new GrokAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }) })],
-    getServerCapabilities: () => ['custom-harness'],
     agentHome: new AgentHomeManager({ hostStorageRoot: await temporary('byok-grok-egress-home-') }),
     agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-grok-egress',

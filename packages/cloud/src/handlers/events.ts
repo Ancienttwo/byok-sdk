@@ -1,14 +1,4 @@
-import {
-  MAILBOX_READ_AHEAD_CAPABILITY,
-  NATIVE_SESSIONS_CAPABILITY,
-  MAILBOX_READ_AHEAD_MAX_SEQS,
-  RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY,
-  RUNTIME_FAILURE_CLASS_CAPABILITY,
-  RUNTIME_QUOTA_SCOPE_CAPABILITY,
-  SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY,
-  SEALED_PAYLOAD_V2_CAPABILITY,
-  SEALED_PAYLOAD_CAPABILITY,
-} from '@byok-sdk/protocol';
+import { MAILBOX_READ_AHEAD_MAX_SEQS } from '@byok-sdk/protocol';
 /**
  * `GET /byok/events?cursor=N` — the long-poll receive half (§8).
  *
@@ -42,74 +32,16 @@ import { decodeEnvelope, type Envelope, type EventsPollResponse } from '@byok-sd
 import { admitDeviceRequest, type DeviceRouteDeps } from './shared';
 
 /**
- * Protocol features this cloud build accepts from a long-poll daemon.
+ * Server flags this cloud build advertises on every long-poll response and
+ * handshake answer: the only advertisement a long-poll daemon sees.
  *
- * This response is the ONLY advertisement a long-poll daemon ever sees, and
- * the daemon hard-gates outgoing messages on it
- * (`AgentEgressController.retryableReliableRecords` in
- * `packages/client/src/daemon/agent-egress-controller.ts`). An entry
- * missing here is therefore not cosmetic: it silently disables an inbound wire
- * path the kernel already implements.
- *
- * The list is deliberately the kernel's INBOUND acceptance set, not the union
- * of `@byok-sdk/protocol`'s `CAPABILITY_FLAGS` (which the deleted reference
- * server advertised wholesale). Excluded on purpose, each for a reason:
- *
- * - server-to-daemon message types the daemon never gates on — `steer`,
- *   `toolset-selection`;
- * - device-side flags the kernel reads off `conn.hello` instead —
- *   `terminal-projection-selection` (a device-advertised `WIRE_ADDITIONS`
- *   gate, read through `requiredReceiverCapabilities` in `cloud.ts`),
- *   `agent-home-readers` (the Agent offer enqueue gates in `cloud.ts`);
- * - deployment-conditional routes a static const cannot honestly promise —
- *   `blob-upload`, whose handlers mount only when the declaration carries
- *   `blobs.presigned` (the `CLOUD_CAPABILITIES.blobsPresigned` route
- *   mount in `cloud.ts`);
- * - flags with no kernel implementation at all — `dispatch-selection`,
- *   `provider-profile-binding`.
- *
- * `task.complete.document` needs no entry: wire v3 folded the former
- * `result-document` flag into the baseline, so every peer may send it.
- * `task.approval_resolved` needs none either: wire v4 folded the former
- * `approval_resolved` flag into the baseline.
+ * Wire v6 has no server-flag gate. Every daemon-to-server surface is baseline,
+ * and the kernel accepts a sealed one by the task's frozen `sealing`, not by a
+ * flag. The kernel reads the device's own flags off `conn.hello` instead.
  *
  * Exact-list drift guard: `packages/cloud/src/__tests__/protocol-capabilities.test.ts`.
  */
-export const CLOUD_PROTOCOL_CAPABILITIES = [
-  'custom-harness',
-  NATIVE_SESSIONS_CAPABILITY,
-  MAILBOX_READ_AHEAD_CAPABILITY,
-  'agent-message-draft',
-  'agent-home-contract',
-  'agent-home-projection',
-  'agent-egress-policy',
-  'agent-egress-reliable-ack',
-  'agent-egress-fresh-session',
-  // `handleAgentMessagePublish` accepts `agent.message_egress` gated on exactly
-  // this capability (`packages/cloud/src/inbound.ts`) — the same inbound
-  // family as the three egress flags above, omitted by the same drift.
-  'agent-message-egress',
-  'agent-content-workspace-read',
-  'agent-content-transcript-read',
-  'agent-content-artifact-read',
-  // The inbound gate accepts every sealed daemon-to-server type, and the four
-  // sealed decline codes on the plaintext decline (#654 E3b-2).
-  SEALED_PAYLOAD_CAPABILITY,
-  // A sealed terminal or artifact may name its ciphertext blob, which the
-  // task holds while it lives (#654 §58a).
-  SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY,
-  // `handleAgentMessagePublish` admits the sealed Agent message of a task whose
-  // `sealing` names `agent-message`, for `agentMessage.consumeSealed` (#1045).
-  SEALED_PAYLOAD_V2_CAPABILITY,
-  // The inbound gate parses `task.fail.failure` on both branches,
-  // and `projectTerminalResult` copies it (#869).
-  RUNTIME_FAILURE_CLASS_CAPABILITY,
-  // ... with a quota failure's `scope` (#1271).
-  RUNTIME_QUOTA_SCOPE_CAPABILITY,
-  // The inbound gate parses a terminal's `residentMemoryOverLimit` on both
-  // branches, and `projectTerminalResult` copies it (#1439).
-  RESIDENT_MEMORY_OVER_LIMIT_CAPABILITY,
-];
+export const CLOUD_PROTOCOL_CAPABILITIES: string[] = [];
 
 export interface EventsRouteDeps extends DeviceRouteDeps {
   readonly activityBounds: import('../coordination').ActivityBounds;

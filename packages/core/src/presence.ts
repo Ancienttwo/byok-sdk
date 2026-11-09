@@ -121,7 +121,7 @@ export interface PresenceHint {
   /**
    * Logical MCP toolset IDs this daemon reported as configured. Discovery
    * only: local task acceptance remains the fail-closed authority. Omission
-   * means legacy/unknown; an empty array means known-none.
+   * means unknown; an empty array means known-none.
    */
   readonly configuredToolsets?: readonly string[];
   /** The U4a Local Agent release version, when the daemon supplied it. */

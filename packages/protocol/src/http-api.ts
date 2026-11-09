@@ -7,7 +7,7 @@ import {
   ProtocolVersionNumberSchema,
   RuntimeCapabilitiesSchema,
   RuntimeIdSchema,
-  RuntimeUnavailableEntrySchema,
+  RuntimeUnavailableListSchema,
   RuntimeVersionPolicyProjectionSchema,
   AgentHomeProjectionAgentRefSchema,
 } from './messages';
@@ -92,10 +92,9 @@ export const PairResponseSchema = z.object({
   /**
    * Lifetime of `accessToken` in seconds, relative to when the device receives
    * this response. The device-side lifetime authority (#1114): a device never
-   * compares a server timestamp with its own clock. Optional on the wire
-   * because published v4 hosts omit it; the client requires it.
+   * compares a server timestamp with its own clock.
    */
-  expiresIn: z.number().int().positive().optional(),
+  expiresIn: z.number().int().positive(),
   /** Exact opaque, non-secret tenant binding from the authenticated device row. */
   tenantId: PairResponseTenantIdSchema,
 });
@@ -130,14 +129,11 @@ export type TokenRequest = z.infer<typeof TokenRequestSchema>;
 
 export const TokenResponseSchema = z.object({
   accessToken: z.string(),
-  /** Absolute server-clock expiry. Kept for published devices; current devices derive lifetime from `expiresIn`. */
-  expiresAt: z.iso.datetime({ offset: true }),
   /**
    * Lifetime of `accessToken` in seconds, relative to when the device receives
-   * this response (#1114). Optional on the wire because published v4 hosts
-   * omit it; the client requires it.
+   * this response (#1114), the one lifetime authority.
    */
-  expiresIn: z.number().int().positive().optional(),
+  expiresIn: z.number().int().positive(),
 });
 export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 
@@ -177,19 +173,9 @@ const PresenceRuntimeFactSchema = z.object({
   version: z.string().min(1).max(PRESENCE_RUNTIME_VERSION_MAX_LENGTH).optional(),
   authPresent: z.boolean().optional(),
   capabilities: RuntimeCapabilitiesSchema.optional(),
-  /** #1103 D8: strip-safe discovery projection; absent means unknown. */
+  /** #1103 D8: discovery projection; absent means unknown. */
   versionPolicy: RuntimeVersionPolicyProjectionSchema.optional(),
 });
-
-/**
- * Presence carries the built-in runtime identity domain only (#1103 D8): a
- * custom harness id would fail an older server's whole-body decode, so
- * harness policies and versions travel on `conn.hello.harnesses[]`, never
- * here. The cause vocabulary is the same append-only one.
- */
-const PresenceRuntimeUnavailableEntrySchema = RuntimeUnavailableEntrySchema.extend({ id: RuntimeIdSchema });
-const PresenceRuntimeUnavailableSchema = z.array(PresenceRuntimeUnavailableEntrySchema).max(16)
-  .refine(values => new Set(values.map(value => value.id)).size === values.length, 'duplicate runtime-unavailable identity');
 
 export const PresencePublishRequestSchema = z.object({
   level: z.enum(['online', 'thinking', 'working', 'error', 'offline']),
@@ -200,8 +186,8 @@ export const PresencePublishRequestSchema = z.object({
   protocolVersions: z.array(ProtocolVersionNumberSchema).max(16).optional(),
   /** Runtime version/auth facts from the same real probe as conn.hello. */
   runtimes: z.array(PresenceRuntimeFactSchema).max(16).optional(),
-  /** #1103 D8: non-available built-in runtimes; strip-safe and absent means unknown. */
-  runtimeUnavailable: PresenceRuntimeUnavailableSchema.optional(),
+  /** The `conn.hello` list: built-in runtime and custom harness ids (#1103 D8); absent means unknown. */
+  runtimeUnavailable: RuntimeUnavailableListSchema.optional(),
 });
 export type PresencePublishRequest = z.infer<typeof PresencePublishRequestSchema>;
 
