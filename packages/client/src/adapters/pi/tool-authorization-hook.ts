@@ -6,22 +6,24 @@ import { requestToolAuthorization, type ToolAuthorizationIpcConfig } from '../..
 const PI_SUBAGENT_LAUNCH_TOOL = 'subagent_launch';
 const UNADMITTED_LAUNCH = 'tool_authorization_denied: subagent_launch is admitted only as the workflow child check of an allowed subagent call';
 const MALFORMED_LAUNCH = 'tool_authorization_denied: subagent_launch input does not have its pinned shape';
-// The parameters of the pinned pi-subagents `subagent_launch` tool.
-const LAUNCH_KEYS = new Set(['workflowRunId', 'key', 'agent', 'task', 'cwd', 'model', 'async', 'worktree', 'resume', 'commands', 'output']);
-const LAUNCH_COMMAND_KEYS = new Set(['command', 'cwd', 'env']);
-
-const optionalString = (value: unknown): boolean => value === undefined || typeof value === 'string';
+// The pinned `subagent_launch` parameters (pi-subagents 0.87.0
+// bundle/chunk-EYGBK6CE.js:8201-8216): `workflowRunId` and `key` are required
+// strings; the rest are optional. Paths must be non-empty.
+type FieldCheck = (value: unknown) => boolean;
+const text: FieldCheck = value => typeof value === 'string';
+const path: FieldCheck = value => typeof value === 'string' && value.length > 0;
+const flag: FieldCheck = value => typeof value === 'boolean';
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/** The gate judges `cwd`, `commands` and `output`; any other shape is refused rather than guessed. */
-function wellFormedLaunch(input: unknown): boolean {
-  if (!record(input) || Object.keys(input).some(key => !LAUNCH_KEYS.has(key))) return false;
-  if (!optionalString(input.cwd) || !optionalString(input.output)) return false;
-  if (input.commands === undefined) return true;
-  return Array.isArray(input.commands) && input.commands.every(entry => record(entry)
-    && Object.keys(entry).every(key => LAUNCH_COMMAND_KEYS.has(key)) && typeof entry.command === 'string' && optionalString(entry.cwd)
-    && (entry.env === undefined || (record(entry.env) && Object.values(entry.env).every(value => typeof value === 'string'))));
-}
+const env: FieldCheck = value => record(value) && Object.values(value).every(entry => typeof entry === 'string');
+const exactObject = (required: Readonly<Record<string, FieldCheck>>, optional: Readonly<Record<string, FieldCheck>>): FieldCheck => value => record(value)
+  && Object.entries(required).every(([key, check]) => key in value && check(value[key]))
+  && Object.entries(value).every(([key, field]) => required[key]?.(field) ?? optional[key]?.(field) ?? false);
+const command = exactObject({ command: text }, { cwd: path, env });
+/** One validator at the hook boundary; the gate classifier relies on this shape. */
+const wellFormedLaunch = exactObject({ workflowRunId: text, key: text }, {
+  agent: text, task: text, cwd: path, model: text, async: flag, worktree: flag, resume: text,
+  commands: value => Array.isArray(value) && value.every(command), output: path,
+});
 
 /**
  * Pi's `tool_call` hook runs before execution; a block becomes the tool's error

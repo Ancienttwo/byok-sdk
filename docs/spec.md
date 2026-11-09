@@ -4046,15 +4046,21 @@ session's gate hook remembers the `subagent` calls the gate allowed, until
 them with `tool_authorization_denied`, before it reaches the gate: no parent,
 a parent that is not `subagent` (codemode), a denied or still-pending
 `subagent` call, or a parent from before the shutdown. It also refuses a launch whose input is not
-the pinned shape (`cwd`, `output`, and `commands` entries of `command`, `cwd`
-and `env`). An admitted launch goes to the gate like other calls. The gate
+the pinned 0.87.0 schema: the required strings `workflowRunId` and `key`; the
+optional strings `agent`, `task`, `model` and `resume`; the optional booleans
+`async` and `worktree`; the non-empty paths `cwd` and `output`; and `commands`,
+whose entries hold a `command` string, a non-empty `cwd` and a string-valued
+`env`. Unknown keys and wrong types are refused. An admitted launch goes to the gate like other calls. The gate
 judges each part as the call it stands for. The child `cwd` is a write target,
 resolved through symlinks, so a sensitive path stays at the floor and a cwd
 outside the workspace asks. A resumed child carries no `cwd`; it reuses its
 stored run cwd, which the call does not show, so it asks. Each gate command
 (`commands[].command`, which the parent runs after the child) is judged as a
-bash command at its own `cwd`. `output`, which the parent writes, is a write
-target. The launch asks when any part would ask as that bash call or write.
+bash command, and its own `cwd` (the child `cwd` when it states none) as a
+write target like the child `cwd`. `output`, which the parent writes, is a write
+target. The launch asks when any part would ask as that bash call or write. Its
+approval card names every effect: the risky ones first with their reasons,
+then the others; effects that do not fit on the card are counted, not dropped.
 `alwaysAsk` rules apply. `allowWithoutAsking` rules apply to no part of
 `subagent_launch`, so a Host rule can make the launch stricter but never
 looser: the name is shared with a call the model can reach, so an allow rule

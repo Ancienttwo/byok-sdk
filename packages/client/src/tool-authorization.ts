@@ -546,18 +546,42 @@ export function classifyToolCall(
   context: { readonly platform?: NodeJS.Platform } = {},
 ): ToolRisk {
   if (call.toolName !== 'subagent_launch') return classifySingleToolCall(call, workspace, home, rules, context);
-  // pi-subagents' workflow child check (#1589): the parent process runs each
-  // gate command at its own cwd after the child and writes `output`, so each is
-  // judged as the bash call or write it is. Its name is shared with a
-  // model-reachable call (#1511), so no allow rule loosens any part of it.
+  return mergeRisks(workflowChildLaunchEffects(call, workspace, home, rules, context).map(effect => effect.risk));
+}
+
+/** One concrete effect of a Pi workflow child launch, as the approval card names it. */
+interface WorkflowChildLaunchEffect { readonly text: string; readonly risk: ToolRisk }
+
+/**
+ * pi-subagents' workflow child check (#1589). The child runs in `cwd`; the
+ * parent process then runs each gate command at its own `cwd` (the child cwd
+ * when it states none) and writes `output`. Each effect is judged as the
+ * write or bash call it is: every cwd is a write target, each command is a
+ * bash command. The name is shared with a model-reachable call (#1511), so no
+ * allow rule loosens any part of it. The hook has validated the input shape.
+ */
+function workflowChildLaunchEffects(
+  call: Pick<ToolCall, 'toolName' | 'input' | 'cwd' | 'mcp'>, workspace: string, home: string,
+  rules: ToolAuthorizationRules | undefined, context: { readonly platform?: NodeJS.Platform },
+): readonly WorkflowChildLaunchEffect[] {
   const strict = rules === undefined ? undefined : { ...rules, allowWithoutAsking: [] };
-  const launchCwd = typeof call.input.cwd === 'string' ? call.input.cwd : undefined;
-  const commands = Array.isArray(call.input.commands) ? call.input.commands as readonly { command: string; cwd?: string }[] : [];
-  const parts = [
-    classifySingleToolCall(call, workspace, home, strict, context),
-    ...commands.map(entry => classifySingleToolCall({ toolName: 'bash', input: { command: entry.command }, cwd: entry.cwd ?? launchCwd ?? call.cwd }, workspace, home, strict, context)),
-    ...(typeof call.input.output === 'string' ? [classifySingleToolCall({ toolName: 'write', input: { path: call.input.output }, cwd: call.cwd }, workspace, home, strict, context)] : []),
+  const launchCwd = call.input.cwd === undefined ? undefined : resolve(call.cwd, call.input.cwd as string);
+  const base = launchCwd ?? call.cwd;
+  const place = (cwd: string | undefined) => classifySingleToolCall({ toolName: 'subagent_launch', input: cwd === undefined ? {} : { cwd }, cwd: base }, workspace, home, strict, context);
+  const commands = (call.input.commands ?? []) as readonly { readonly command: string; readonly cwd?: string }[];
+  return [
+    { text: launchCwd === undefined ? 'child cwd not stated (a resumed child reuses its stored cwd)' : `child cwd ${launchCwd}`, risk: place(launchCwd) },
+    ...commands.map(entry => {
+      const cwd = entry.cwd ?? launchCwd;
+      return { text: `gate command ${JSON.stringify(entry.command)} in ${cwd ?? 'the unstated child cwd'}`,
+        risk: mergeRisks([place(cwd), classifySingleToolCall({ toolName: 'bash', input: { command: entry.command }, cwd: cwd ?? base }, workspace, home, strict, context)]) };
+    }),
+    ...(call.input.output === undefined ? [] : [{ text: `output ${String(call.input.output)}`,
+      risk: classifySingleToolCall({ toolName: 'write', input: { path: call.input.output }, cwd: call.cwd }, workspace, home, strict, context) }]),
   ];
+}
+
+function mergeRisks(parts: readonly ToolRisk[]): ToolRisk {
   const high = parts.filter((part): part is Extract<ToolRisk, { level: 'high' }> => part.level === 'high');
   if (high.length === 0) return { level: 'normal', authorization: BUILT_IN_AUTHORIZATION };
   const ruleIds = [...new Set(high.flatMap(part => part.authorization.ruleIds))];
@@ -727,6 +751,35 @@ export function describeHighRiskToolCall(
   const subject = commandText(call.input)
     ?? PATH_KEYS.map(key => call.input[key]).find((value): value is string => typeof value === 'string')
     ?? '';
+  return toolCallSummary(call, reasons, authorization, subject);
+}
+
+/**
+ * The card of a workflow child launch names every effect, the risky ones
+ * first with their reasons. Effects that do not fit are counted, never dropped
+ * silently.
+ */
+function describeWorkflowChildLaunch(
+  call: Pick<ToolCall, 'toolName' | 'input' | 'mcp'>, risk: Extract<ToolRisk, { level: 'high' }>, effects: readonly WorkflowChildLaunchEffect[],
+): string {
+  const ordered = [...effects.filter(effect => effect.risk.level === 'high'), ...effects.filter(effect => effect.risk.level !== 'high')]
+    .map(effect => effect.risk.level === 'high' ? `${effect.text} (${effect.risk.reasons.join(', ')})` : effect.text);
+  const head = toolCallSummary(call, risk.reasons, risk.authorization, '');
+  const shown: string[] = [];
+  for (const [index, text] of ordered.entries()) {
+    const rest = ordered.length - index - 1;
+    const tail = rest === 0 ? '' : `; +${rest} more effect${rest === 1 ? '' : 's'} not shown`;
+    if (shown.length > 0 && `${head} ${[...shown, text].join('; ')}${tail}`.length > MAX_SUMMARY_CHARS) {
+      return `${head} ${shown.join('; ')}; +${ordered.length - shown.length} more effect${ordered.length - shown.length === 1 ? '' : 's'} not shown`;
+    }
+    shown.push(text);
+  }
+  return toolCallSummary(call, risk.reasons, risk.authorization, shown.join('; '));
+}
+
+function toolCallSummary(
+  call: Pick<ToolCall, 'toolName' | 'mcp'>, reasons: readonly ToolRiskReason[], authorization: ToolAuthorizationReason | undefined, subject: string,
+): string {
   // A human decides on this card, so it names the concrete identity: the
   // shell command/path when the call has one, and the trusted MCP server/tool
   // when the runtime label is an MCP tool.
@@ -804,7 +857,10 @@ export function createAutoToolAuthorizationGate(input: {
           risk = { level: 'high', reasons: Object.freeze(['outside-file-scope']), authorization: FLOOR_AUTHORIZATION };
         }
         if (risk.level === 'normal') return finish({ decision: 'allow' });
-        const result = await Promise.race([input.requestAuthorization(describeHighRiskToolCall(call, risk.reasons, risk.authorization), withdraw.signal), expired]);
+        const summary = call.toolName === 'subagent_launch'
+          ? describeWorkflowChildLaunch(call, risk, workflowChildLaunchEffects(call, input.workspace, input.home ?? homedir(), rules, { platform: input.platform }))
+          : describeHighRiskToolCall(call, risk.reasons, risk.authorization);
+        const result = await Promise.race([input.requestAuthorization(summary, withdraw.signal), expired]);
         if (result === 'expired') {
           withdraw.abort();
           return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${input.timeoutMs}ms` });
