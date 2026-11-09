@@ -45,7 +45,7 @@ The offline query for the embedded SQLite store is in [protocol, SQLite startup 
 - `false`: the SDK makes no guarantee; the source can reach the model.
 - Missing (a runtime the daemon did not report): unknown, not `false`. A Host that needs the guarantee does not dispatch on an unknown bit.
 
-A bit describes the adapter, not the current option. For Claude and ordinary Pi the user-context bits hold only for Agent tasks with `agentUserContext: 'excluded'` set on the adapter, which a Host does through `createDaemonWithAdapters`; `createDaemon` sets no option. The same holds for `userMcpServers` (Claude `agentUserContext`, Codex and Grok `agentUserMcpServers`) and `sessionPersistence` (Claude `agentSessionPersistence`). agy, dsh and Hermes need no option. A Host that needs a session with no user-level context dispatches only to a runtime whose five bits are all `true`, with that runtime's option set.
+A bit describes what the adapter can guarantee under its exclusion option, not the current task state ([capability matrix](../adapter-capabilities.md#capability-matrix): `yes` describes Agent tasks with that option set). For Claude and ordinary Pi the user-context bits hold only for Agent tasks with `agentUserContext: 'excluded'` set on the adapter, which a Host does through `createDaemonWithAdapters`; `createDaemon` sets no option. The same holds for `userMcpServers` (Claude `agentUserContext`, Codex and Grok `agentUserMcpServers`) and `sessionPersistence` (Claude `agentSessionPersistence`). agy, dsh and Hermes need no option. A Host that needs a session with no user-level context dispatches only to a runtime whose five bits are all `true`, with that runtime's option set.
 
 ### Per-adapter values
 
