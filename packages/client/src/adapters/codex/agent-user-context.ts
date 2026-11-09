@@ -29,7 +29,7 @@ function userCodexHome(env: Readonly<Record<string, string | undefined>>, platfo
  * 0.167 resolves the link and replaces the target), so the user's
  * `auth.json` keeps the live refresh token. The thread store is created in the
  * user home when it is missing, so a thread never lives only in the
- * execution's scratch. A Windows account that may not create symbolic links
+ * execution's scratch. A user home without `auth.json` refuses the start. A Windows account that may not create symbolic links
  * (no Developer Mode, not an administrator) refuses the start.
  */
 export async function createCodexAgentHome(env: Readonly<Record<string, string | undefined>>, dir: string, platform: NodeJS.Platform = process.platform): Promise<string> {
@@ -40,6 +40,11 @@ export async function createCodexAgentHome(env: Readonly<Record<string, string |
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw refuse('the user CODEX_HOME does not exist');
     throw error;
   }
+  // Without the link, a later file-mode login would save auth.json in the SDK home and lose it at cleanup.
+  if (!await fs.stat(path.join(user, 'auth.json')).then(() => true, (error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  })) throw refuse('the user CODEX_HOME has no auth.json; log in to Codex with file credentials first');
   await fs.mkdir(path.join(user, 'sessions'), { recursive: true });
   const home = path.join(dir, 'codex-home');
   await fs.mkdir(home, { mode: 0o700 });

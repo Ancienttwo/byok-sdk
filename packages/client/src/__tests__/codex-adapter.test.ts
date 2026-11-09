@@ -853,6 +853,18 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
       message: 'codex Agent user context exclusion refused: cli_auth_credentials_store is keyring; an SDK-owned CODEX_HOME supports file credentials only' });
   });
 
+  it.each([
+    ['the user CODEX_HOME does not exist', async (user: string) => fs.rm(user, { recursive: true })],
+    ['the user CODEX_HOME has no auth.json; log in to Codex with file credentials first', async (user: string) => fs.rm(path.join(user, 'auth.json'))],
+  ])('refuses when %s', async (reason, remove) => {
+    const user = await userHome();
+    await remove(user);
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-sdk-'));
+    dirs.push(dir);
+    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir)).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable',
+      message: `codex Agent user context exclusion refused: ${reason}` });
+  });
+
   it('refuses on Windows when the account may not create a symbolic link', async () => {
     const user = await userHome();
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-sdk-'));
