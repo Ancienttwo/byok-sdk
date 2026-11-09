@@ -6,13 +6,20 @@ const PREFIX = 'codex Agent user context exclusion refused';
 const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: `${PREFIX}: ${reason}` });
 
 /**
- * The user `CODEX_HOME` entries an SDK-owned home links (#1565): the login,
- * the configuration, the guardrails (`rules/`, `hooks.json`) and the thread
- * store, so a resume finds its thread where it always was. Everything else,
- * `AGENTS.md`, `AGENTS.override.md`, `skills/` and `memories/` among it, stays
- * out.
+ * The user `CODEX_HOME` entries an SDK-owned home links (#1565): the login and
+ * the configuration, which a ChatGPT refresh and the user's provider setup
+ * need, and the guardrails `rules/` and `hooks.json`. Everything else stays out:
+ * `AGENTS.md`, `AGENTS.override.md`, `skills/`, `memories/` and the user's
+ * thread store (`sessions/`, `archived_sessions/`).
  */
-const LINKED = Object.freeze(['auth.json', 'config.toml', 'hooks.json', 'rules', 'sessions', 'archived_sessions']);
+const LINKED = Object.freeze(['auth.json', 'config.toml', 'hooks.json', 'rules']);
+
+/**
+ * The Agent's own thread store, in its home: `<home>/.byok/codex/sessions` and
+ * `archived_sessions`. It outlives each execution, so a later task of the same
+ * Agent resumes its thread; it never holds the user's threads.
+ */
+const AGENT_STORE = Object.freeze(['sessions', 'archived_sessions']);
 
 /** Codex's own resolution: a set `CODEX_HOME`, else `.codex` in the home directory. */
 function userCodexHome(env: Readonly<Record<string, string | undefined>>, platform: NodeJS.Platform): string {
@@ -24,15 +31,16 @@ function userCodexHome(env: Readonly<Record<string, string | undefined>>, platfo
 
 /**
  * Builds the SDK-owned `CODEX_HOME` of one Agent task in `dir` and returns it.
- * Each entry is a symbolic link to the user's own, never a copy or a hard
- * link: Codex writes a refreshed login through the link (0.160 in place;
- * 0.167 resolves the link and replaces the target), so the user's
- * `auth.json` keeps the live refresh token. The thread store is created in the
- * user home when it is missing, so a thread never lives only in the
- * execution's scratch. A user home without `auth.json` refuses the start. A Windows account that may not create symbolic links
- * (no Developer Mode, not an administrator) refuses the start.
+ * Each entry is a symbolic link, never a copy or a hard link: Codex writes a
+ * refreshed login through the link (0.160 in place; 0.167 resolves the link
+ * and replaces the target), so the user's `auth.json` keeps the live refresh
+ * token. The thread store links to the Agent's own store in `agentHome`. A
+ * task without a sealed Agent home, a user home without `auth.json`, and a
+ * Windows account that may not create symbolic links (no Developer Mode, not
+ * an administrator) refuse the start.
  */
-export async function createCodexAgentHome(env: Readonly<Record<string, string | undefined>>, dir: string, platform: NodeJS.Platform = process.platform): Promise<string> {
+export async function createCodexAgentHome(env: Readonly<Record<string, string | undefined>>, dir: string, agentHome: string | undefined, platform: NodeJS.Platform = process.platform): Promise<string> {
+  if (agentHome === undefined || agentHome === '') throw refuse('the task has no sealed Agent home for its thread store');
   let user: string;
   try {
     user = await fs.realpath(userCodexHome(env, platform));
@@ -45,24 +53,30 @@ export async function createCodexAgentHome(env: Readonly<Record<string, string |
     if (error.code === 'ENOENT') return false;
     throw error;
   })) throw refuse('the user CODEX_HOME has no auth.json; log in to Codex with file credentials first');
-  await fs.mkdir(path.join(user, 'sessions'), { recursive: true });
   const home = path.join(dir, 'codex-home');
   await fs.mkdir(home, { mode: 0o700 });
-  for (const name of LINKED) {
-    const target = path.join(user, name);
-    const stat = await fs.stat(target).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return undefined;
-      throw error;
-    });
-    if (stat === undefined) continue;
+  const link = async (target: string, name: string, type: 'dir' | 'file') => {
     try {
-      await fs.symlink(target, path.join(home, name), stat.isDirectory() ? 'dir' : 'file');
+      await fs.symlink(target, path.join(home, name), type);
     } catch (error) {
       if (platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM') {
         throw refuse('Windows refused to create a symbolic link (EPERM); turn on Developer Mode or run the daemon as an administrator');
       }
       throw error;
     }
+  };
+  for (const name of LINKED) {
+    const target = path.join(user, name);
+    const stat = await fs.stat(target).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    });
+    if (stat !== undefined) await link(target, name, stat.isDirectory() ? 'dir' : 'file');
+  }
+  for (const name of AGENT_STORE) {
+    const target = path.join(agentHome, '.byok', 'codex', name);
+    await fs.mkdir(target, { recursive: true, mode: 0o700 });
+    await link(target, name, 'dir');
   }
   return home;
 }

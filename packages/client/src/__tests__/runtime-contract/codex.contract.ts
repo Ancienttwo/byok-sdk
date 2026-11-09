@@ -84,8 +84,8 @@ async function turn(mode: 'inherit' | 'excluded') {
 
 /**
  * Two Agent turns under `excluded`, each in its own execution and so its own
- * fresh SDK home: the second resumes the first's thread through the linked
- * `sessions/`, with no Codex state database from the first. The user config
+ * fresh SDK home: the second resumes the first's thread through the Agent's
+ * own store in its home, with no Codex state database from the first. The user config
  * turns Codex memories on, and the second execution has a rollout to extract.
  */
 const resumeTurns = once(async () => {
@@ -111,7 +111,8 @@ const resumeTurns = once(async () => {
     const sessionRef = await run({ instruction: `Remember ${FIRST_MARKER}.` });
     const before = provider.requests.length;
     const resumedRef = await run({ instruction: 'Continue.', sessionRef });
-    return { sessionRef, resumedRef, resumed: provider.requests.slice(before), all: provider.requests, homes };
+    const agentStore = (await fs.readdir(path.join(box.workspace, '.byok', 'codex', 'sessions'), { recursive: true })).filter(name => name.endsWith('.jsonl'));
+    return { sessionRef, resumedRef, resumed: provider.requests.slice(before), all: provider.requests, homes, agentStore, userEntries: await fs.readdir(codexHome) };
   } finally {
     await provider.close();
   }
@@ -168,8 +169,10 @@ defineRuntimeContract(`codex runtime contract (${target.mode} ${target.expectedV
 }, CODEX_ABSENT_ISOLATION_SOURCES);
 
 defineRuntimeCases(`codex runtime cases (${target.mode} ${target.expectedVersion})`, {
-  'codex.resume.excluded': ['under agentUserContext excluded, a second execution resumes the first execution\'s thread', check(async () => {
-    const { sessionRef, resumedRef, resumed } = await resumeTurns();
+  'codex.resume.excluded': ['under agentUserContext excluded, a second execution resumes the first execution\'s thread from the Agent home store, and the user CODEX_HOME gets no sessions/', check(async () => {
+    const { sessionRef, resumedRef, resumed, agentStore, userEntries } = await resumeTurns();
+    expect(agentStore.some(name => name.includes(sessionRef)), 'the rollout is in the Agent home store').toBe(true);
+    expect(userEntries).not.toContain('sessions');
     expect(sessionRef).not.toBe('');
     expect(resumedRef).toBe(sessionRef);
     // Codex's own background memory agent runs on another thread; only the resumed thread's requests count.

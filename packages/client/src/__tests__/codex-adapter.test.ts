@@ -832,7 +832,7 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
     expect(() => adapter({ agentUserContext: 'strict' as never })).toThrow(new TypeError('CodexAdapterOptions.agentUserContext must be inherit or excluded'));
   });
 
-  it('runs an Agent task in an SDK home of links to the login, configuration, guardrails and thread store', async () => {
+  it('runs an Agent task in an SDK home of links to the login, configuration, guardrails and the Agent\'s own thread store', async () => {
     const user = await userHome();
     const resources = await ctx({ CODEX_HOME: user, FAKE_CODEX_USER_CONFIG: JSON.stringify({ cli_auth_credentials_store: 'file' }) });
     const receipt = path.join(user, '..', `${path.basename(user)}.home.json`);
@@ -841,7 +841,10 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
     await turn(await open(adapter({ agentUserContext: 'excluded' }), task, { ...resources, agentHome: resources.workspaceDir }));
     const { home, entries } = JSON.parse(await fs.readFile(receipt, 'utf8'));
     expect(home).not.toBe(user);
-    expect(entries).toEqual(Object.fromEntries(['auth.json', 'config.toml', 'hooks.json', 'rules', 'sessions'].map(name => [name, path.join(user, name)])));
+    const store = path.join(resources.workspaceDir, '.byok', 'codex');
+    expect(entries).toEqual({ ...Object.fromEntries(['auth.json', 'config.toml', 'hooks.json', 'rules'].map(name => [name, path.join(user, name)])),
+      sessions: path.join(store, 'sessions'), archived_sessions: path.join(store, 'archived_sessions') });
+    expect(await fs.readdir(user)).not.toContain('sessions');
     const methods = (await fs.readFile(`${receipt}.rpc`, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(frame => frame.id !== undefined && typeof frame.method === 'string').map(frame => frame.method);
     expect(methods.slice(0, 3)).toEqual(['initialize', 'config/read', 'thread/start']);
   });
@@ -854,14 +857,15 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
   });
 
   it.each([
-    ['the user CODEX_HOME does not exist', async (user: string) => fs.rm(user, { recursive: true })],
-    ['the user CODEX_HOME has no auth.json; log in to Codex with file credentials first', async (user: string) => fs.rm(path.join(user, 'auth.json'))],
-  ])('refuses when %s', async (reason, remove) => {
+    ['the task has no sealed Agent home for its thread store', async () => {}, undefined],
+    ['the user CODEX_HOME does not exist', async (user: string) => fs.rm(user, { recursive: true }), 'agent-home'],
+    ['the user CODEX_HOME has no auth.json; log in to Codex with file credentials first', async (user: string) => fs.rm(path.join(user, 'auth.json')), 'agent-home'],
+  ])('refuses when %s', async (reason, remove, agentHome) => {
     const user = await userHome();
     await remove(user);
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-sdk-'));
     dirs.push(dir);
-    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir)).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable',
+    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, agentHome && path.join(dir, agentHome))).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable',
       message: `codex Agent user context exclusion refused: ${reason}` });
   });
 
@@ -870,7 +874,7 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-sdk-'));
     dirs.push(dir);
     vi.spyOn(fs, 'symlink').mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
-    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, 'win32')).rejects.toMatchObject({ category: 'authority',
+    await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, path.join(dir, 'agent-home'), 'win32')).rejects.toMatchObject({ category: 'authority',
       message: 'codex Agent user context exclusion refused: Windows refused to create a symbolic link (EPERM); turn on Developer Mode or run the daemon as an administrator' });
   });
 });

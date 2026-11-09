@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "2b0d8c38f6a9908808133b962dbf66d15917bbba80d6a91c9c8242a351752b55"
+    "snapshotSha256": "7c0cfdbcc3f722a615b610a106dab8ee709340a95ee0aac54ebd80d50be57215"
   },
   "configFields": {
     "status": "tracked",
@@ -28,13 +28,14 @@
     {
       "id": "codex-agent-user-context",
       "impact": "additive",
-      "summary": "CodexAdapterOptions.agentUserContext and DaemonConfig.runtimes.codex.agentUserContext: excluded runs a Codex Agent task in an SDK-owned CODEX_HOME of symbolic links to the user's auth.json, config.toml, hooks.json, rules, sessions and archived_sessions, so the user's AGENTS.md, skills and memories stay out; Codex now declares isolation.userInstructions and isolation.userMemory. The start refuses a credential store other than file and, on Windows, an account that may not create symbolic links. Default inherit changes nothing.",
+      "summary": "CodexAdapterOptions.agentUserContext and DaemonConfig.runtimes.codex.agentUserContext: excluded runs a Codex Agent task in an SDK-owned CODEX_HOME of symbolic links to the user's auth.json, config.toml, hooks.json and rules, with sessions and archived_sessions in the Agent's own store <Agent home>/.byok/codex, so the user's AGENTS.md, skills, memories and threads stay out; plugins and the memory pipeline are off. Codex now declares isolation.userInstructions and isolation.userMemory. A Bot switched from inherit to excluded cannot resume its earlier threads (fails closed as a missing thread). The new retention class agent-runtime-sessions is exempt and unbounded until the Host removes the Agent home. The start refuses without a sealed Agent home, with a credential store other than file, without the user auth.json and, on Windows, on an account that may not create symbolic links. Default inherit changes nothing.",
       "migration": "docs/adapter-capabilities.md#agentusercontext-codex",
       "items": [
         "config:runtimes",
         "export:@byok-sdk/client#CodexAdapterOptions",
         "export:@byok-sdk/client/adapters#CodexAdapterOptions",
-        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+        "export:@byok-sdk/client#ProtectedClassId"
       ]
     },
     {
@@ -135,6 +136,11 @@
       "item": "export:@byok-sdk/client#CopySdkNativeAssetsOptions",
       "change": "changed",
       "entry": "native-assets-archive-path"
+    },
+    {
+      "item": "export:@byok-sdk/client#ProtectedClassId",
+      "change": "changed",
+      "entry": "codex-agent-user-context"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeIsolationCapabilities",

@@ -105,13 +105,16 @@ export interface CodexAdapterOptions {
   /**
    * For an Agent task (`task.offer`), `excluded` runs Codex in an SDK-owned
    * `CODEX_HOME` in the execution's scratch, so the user's `AGENTS.md`,
-   * `AGENTS.override.md`, `skills/` and `memories/` stay out. The home holds
-   * symbolic links to the user's `auth.json`, `config.toml`, `hooks.json`,
-   * `rules/`, `sessions/` and `archived_sessions/`: the login, its refreshes,
-   * the configuration, the guardrails and the thread store stay the user's.
-   * The start fails unless Codex's effective `cli_auth_credentials_store` is
-   * `file`, and on Windows when the account may not create symbolic links.
-   * MCP servers are `agentUserMcpServers`' concern. Default `inherit`.
+   * `AGENTS.override.md`, `skills/`, `memories/` and threads stay out, and
+   * plugins and the memory pipeline are off. The home holds symbolic links to
+   * the user's `auth.json`, `config.toml`, `hooks.json` and `rules/`, and its
+   * `sessions/` and `archived_sessions/` link to the Agent's own store in
+   * `<Agent home>/.byok/codex/`. Threads made under `inherit` are not
+   * resumable under `excluded`. The start fails without a sealed Agent home,
+   * unless Codex's effective `cli_auth_credentials_store` is `file`, without
+   * the user's `auth.json`, and on Windows when the account may not create
+   * symbolic links. MCP servers are `agentUserMcpServers`' concern. Default
+   * `inherit`.
    */
   agentUserContext?: 'inherit' | 'excluded';
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
@@ -288,7 +291,7 @@ export class CodexAdapter implements RuntimeAdapter {
       input.manifest.sessionRef,
     );
     try {
-      const codexHome = excludeUserContext ? { CODEX_HOME: await createCodexAgentHome(input.env, input.scratch.sdkDir) } : {};
+      const codexHome = excludeUserContext ? { CODEX_HOME: await createCodexAgentHome(input.env, input.scratch.sdkDir, input.manifest.lease?.canonicalHome) } : {};
       // The open deadline covers spawn, initialize, the thread open and its read-back.
       const raw = await session.within('open', retryable, codexSession(
         (bin, args, options) => {

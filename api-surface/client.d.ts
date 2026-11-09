@@ -491,13 +491,16 @@ export interface CodexAdapterOptions {
     /**
      * For an Agent task (`task.offer`), `excluded` runs Codex in an SDK-owned
      * `CODEX_HOME` in the execution's scratch, so the user's `AGENTS.md`,
-     * `AGENTS.override.md`, `skills/` and `memories/` stay out. The home holds
-     * symbolic links to the user's `auth.json`, `config.toml`, `hooks.json`,
-     * `rules/`, `sessions/` and `archived_sessions/`: the login, its refreshes,
-     * the configuration, the guardrails and the thread store stay the user's.
-     * The start fails unless Codex's effective `cli_auth_credentials_store` is
-     * `file`, and on Windows when the account may not create symbolic links.
-     * MCP servers are `agentUserMcpServers`' concern. Default `inherit`.
+     * `AGENTS.override.md`, `skills/`, `memories/` and threads stay out, and
+     * plugins and the memory pipeline are off. The home holds symbolic links to
+     * the user's `auth.json`, `config.toml`, `hooks.json` and `rules/`, and its
+     * `sessions/` and `archived_sessions/` link to the Agent's own store in
+     * `<Agent home>/.byok/codex/`. Threads made under `inherit` are not
+     * resumable under `excluded`. The start fails without a sealed Agent home,
+     * unless Codex's effective `cli_auth_credentials_store` is `file`, without
+     * the user's `auth.json`, and on Windows when the account may not create
+     * symbolic links. MCP servers are `agentUserMcpServers`' concern. Default
+     * `inherit`.
      */
     agentUserContext?: 'inherit' | 'excluded';
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
@@ -1378,7 +1381,7 @@ export interface RuntimeAdaptersRuntimes {
     codex?: {
         /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
         agentUserMcpServers?: CodexAdapterOptions['agentUserMcpServers'];
-        /** `CodexAdapterOptions.agentUserContext`: `excluded` runs an Agent task in an SDK-owned `CODEX_HOME` that keeps the user's `AGENTS.md`, skills and memories out and links the login, configuration, guardrails and thread store. Default `inherit`. */
+        /** `CodexAdapterOptions.agentUserContext`: `excluded` runs an Agent task in an SDK-owned `CODEX_HOME` that keeps the user's `AGENTS.md`, skills, memories and threads out, links the login, configuration and guardrails, and keeps the Agent's threads in its home. Default `inherit`. */
         agentUserContext?: CodexAdapterOptions['agentUserContext'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
@@ -8311,7 +8314,7 @@ export declare class StoragePressure {
 }
 // ==== @byok-sdk/client dist/daemon/retention/registry.d.ts ====
 export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir', 'agy-session-store'];
-export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'agent-content', 'byok-authority', 'agent-home-lease', 'skill-pack-current', 'store-authority', 'runtime-session-external'];
+export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'agent-content', 'byok-authority', 'agent-runtime-sessions', 'agent-home-lease', 'skill-pack-current', 'store-authority', 'runtime-session-external'];
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
 export type ProtectedClassId = typeof PROTECTED_CLASS_IDS[number];
 export type RetentionClassId = ExpiringClassId | ProtectedClassId;

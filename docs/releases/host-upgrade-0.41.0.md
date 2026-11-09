@@ -71,6 +71,12 @@ Values at each adapter's qualified version. "No source" means the bit is `true` 
 
 Project files in the Agent home (for example its `AGENTS.md` or `CLAUDE.md`) are Agent-home inputs, not user sources, and load on every runtime. Under Pi `excluded` the Agent home's own `.pi/SYSTEM.md` does not load, because those settings are not project-trusted.
 
+### Codex `agentUserContext: 'excluded'`
+
+- Threads: an excluded Codex Agent task keeps its threads in `<Agent home>/.byok/codex/`, never in the user's `CODEX_HOME`. A Bot you switch from `inherit` to `excluded` cannot resume the threads it made under `inherit`: that resume fails closed through the existing missing-thread path, as a non-retryable failure, so start a new thread.
+- Growth: these rollouts are the `agent-runtime-sessions` retention class and are never expired. Each Bot's Codex rollouts accumulate until you remove its Agent home, as they did in the user's `CODEX_HOME` before ([storage layout](../host-local-storage-layout.md)).
+- The task needs a sealed Agent home and a user `CODEX_HOME` with a file-mode `auth.json`; otherwise the start fails as a non-retryable `authority` failure ([`agentUserContext` (Codex)](../adapter-capabilities.md#agentusercontext-codex)).
+
 ### Retired gates and token lifetime
 
 Wire v6 also retires every v5 gate that both sides always advertised. Host impact:
