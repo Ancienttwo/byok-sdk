@@ -4010,7 +4010,7 @@ poll the cloud read API. With no draft producer, only a terminal marker appears.
 ## Pi subagents
 
 Pi subagents are the upstream `pi-subagents` package (exact client dependency,
-0.83.1), loaded by the ordinary RPC host when the credential source is
+0.87.0), loaded by the ordinary RPC host when the credential source is
 `pi-auth-store` (see the `keys-profile` lane above), and never by the sealed
 host. The SDK vendors and patches none of it. pi-subagents reads its own
 package files at run time, so a product bundler never inlines it. The installed

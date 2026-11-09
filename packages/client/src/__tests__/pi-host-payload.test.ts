@@ -50,7 +50,7 @@ describe('copyPiRuntimeAssets', () => {
     expect(files.filter(file => !subagentFiles.includes(file))).toEqual(expectedInventory(form));
     // The client's pi-subagents with its runtime dependencies, and the SDK child extensions.
     const subagents = JSON.parse(await fs.readFile(path.join(outDir, 'pi-subagents/package.json'), 'utf8'));
-    expect([subagents.name, subagents.version]).toEqual(['pi-subagents', '0.83.1']);
+    expect([subagents.name, subagents.version]).toEqual(['pi-subagents', '0.87.0']);
     for (const dependency of [...Object.keys(subagents.dependencies), 'jsbi']) expect(subagentFiles).toContain(`pi-subagents/node_modules/${dependency}/package.json`);
     expect(subagentFiles.filter(file => file.startsWith('pi-subagent-extensions/'))).toEqual(['pi-subagent-extensions/pi-subagent-file-scope.js', 'pi-subagent-extensions/pi-subagent-gate.js']);
     const written = await fs.readdir(outDir, { recursive: true, withFileTypes: true });

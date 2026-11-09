@@ -48,10 +48,12 @@ async function assertEmptyTarget(outDir: string): Promise<void> {
   }
 }
 
-async function listFiles(root: string, relative: string): Promise<string[]> {
+/** Regular files below `root/relative`; `excludeTopLevel` names a directory directly in `root` to skip. */
+async function listFiles(root: string, relative: string, excludeTopLevel?: string): Promise<string[]> {
   const entries = await fs.readdir(path.join(root, relative), { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries) {
+    if (relative === '' && entry.isDirectory() && entry.name === excludeTopLevel) continue;
     const child = relative === '' ? entry.name : `${relative}/${entry.name}`;
     if (entry.isDirectory()) files.push(...await listFiles(root, child));
     else if (entry.isFile()) files.push(child);
@@ -101,7 +103,8 @@ async function piSubagentsCopies(): Promise<PlannedCopy[]> {
   const copies: PlannedCopy[] = [];
   for (const pkg of [root, ...closure.values()]) {
     const target = pkg === root ? PI_SUBAGENTS_ASSET_DIR : `${PI_SUBAGENTS_ASSET_DIR}/node_modules/${pkg.name}`;
-    copies.push(...(await listFiles(pkg.dir, '')).map(file => ({ from: path.join(pkg.dir, file), to: `${target}/${file}` })));
+    // A package's own node_modules (npm nests one on a version conflict) is resolved through the closure above.
+    copies.push(...(await listFiles(pkg.dir, '', 'node_modules')).map(file => ({ from: path.join(pkg.dir, file), to: `${target}/${file}` })));
   }
   const bin = path.join(clientPackageRoot(), 'dist', 'bin');
   copies.push(...[PI_SUBAGENT_GATE_FILE, PI_SUBAGENT_FILE_SCOPE_FILE].map(file => ({ from: path.join(bin, file), to: `${PI_SUBAGENT_EXTENSIONS_ASSET_DIR}/${file}` })));
