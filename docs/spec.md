@@ -312,9 +312,9 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-A version bump does not authorize publish. The current aligned release is `0.40.0`; publication requires separate
+A version bump does not authorize publish. The current aligned release is `0.41.0` (source candidate); publication requires separate
 release authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.40.0`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.41.0`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -325,10 +325,24 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
-The next MINOR after 0.40.0 moves the wire to v6: the runtime capability
+0.41.0 moves the wire to v6: the runtime capability
 `isolation.userContext` is split into one bit per source, with no derived
 field and no v5 reader. 0.40.0 is the last v5 release. See the
 [wire v6 migration](migrations/wire-v6-isolation-sources.md).
+
+0.41.0 is a MINOR source candidate under the general policy above and the
+first wire v6 release: a v5 peer cannot read v6. The upgrade manifest from
+0.40.0 holds 3 breaking entries and 4 additive entries; the removed private
+`#byok-pi-runtime-host-sealed` import is a further breaking change outside
+the manifest. It adds no Postgres
+migration and no SQLite schema change (DDL identical to 0.40.0). Keys adds the
+explicit one-shot `migrateProviderProfileStore`, which rebuilds only an older
+profile store written with a narrower `provider_kind` CHECK set: among
+released versions, a store from keys before 0.4.0, whose set is `openai`,
+`deepseek`, `anthropic` and `custom`. `inspectProviderProfileStore` reports
+`migration-required` for such a store; a store written by keys 0.4.0 through
+0.40.0 already has the current set and is `accepted`. See the [0.41.0 release notes](releases/v0.41.0.md).
+Publication remains pending.
 
 0.40.0 is a MINOR release under the general policy above. It keeps
 wire v5 and adds no `deploy/sql` migration or SQLite schema change; the hosted Bot example adds a `dream_state` table through its own store migration. See the

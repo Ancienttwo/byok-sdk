@@ -1,6 +1,6 @@
 # Wire v6: isolation sources
 
-The next MINOR after 0.40.0 moves the envelope wire from v5 to v6
+0.41.0 moves the envelope wire from v5 to v6
 (`PROTOCOL_VERSION = 6`). It replaces one field: the runtime capability
 `isolation.userContext` becomes one bit per source of user-level context a
 runtime can keep out. Every other v5 shape is unchanged. 0.40.0 is the last

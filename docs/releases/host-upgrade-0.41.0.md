@@ -1,6 +1,6 @@
 # Host upgrade to 0.41.0
 
-Use this checklist for a Host moving from 0.40.0 to 0.41.0. Earlier Hosts must first apply the [0.40.0 checklist](host-upgrade-0.40.0.md) and its predecessors. 0.41.0 is not released yet; this checklist grows with the release train.
+Use this checklist for a Host moving from 0.40.0 to 0.41.0. Earlier Hosts must first apply the [0.40.0 checklist](host-upgrade-0.40.0.md) and its predecessors. The source base is main `1874ef482`; pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
 
 ## Stores
 
@@ -94,3 +94,22 @@ Wire v6 also retires every v5 gate that both sides always advertised. Host impac
 - **Presence.** `runtimeUnavailable` takes a custom harness id, as on `conn.hello`. The server only validates and drops the field, so storage is unchanged.
 
 The [upgrade manifest](../../packages/client/upgrade-manifest.json) lists every changed export under `wire-v6-isolation-sources`, `wire-v6-retired-gates` and `token-lifetime-expires-in`.
+
+## Other Host-visible changes
+
+- OpenCode (`harnessId: 'opencode'`) declares `platforms: ['darwin']` and a default `versionPolicy` (`qualifiedVersion: '2.2.6'`, `unqualified: 'warn'`), so a Host can enable it on macOS. macOS x64 has first-task, resume, cleanup and canary evidence; macOS arm64 has no task evidence yet, and Windows stays undeclared. OpenCode keeps no isolation guarantee, `auto` tool authorization stays unsupported, and the SDK still holds no OpenCode key. See the [qualification evidence](../researches/2026-11-09-opencode-platform-qualification.md).
+- `copySdkNativeAssets` accepts an optional absolute `archivePath` to a local copy of the pinned Koffi tgz; the integrity checks are unchanged.
+- Claude `agentUserContext: 'excluded'` also leaves the user output style out of a new Agent task session.
+- An execution claim that meets a brief non-task holder of the agent-home writer lock waits at most 5 s, then declines with `agent_home_writer_busy` as before (#1604). On Windows, admitted session environment names take their canonical spelling (#1611), and `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `PI_CODING_AGENT_DIR` from the user's session reach the runtime (#1595). A closing daemon no longer removes a successor's sockets (#1610).
+- Daemon-local completion events, `Daemon.tasks()` terminal state and execution records wait for the first finalization attempt to settle, up to about 1s later than before. Wire and cloud completion signals are unchanged.
+
+## Release and verification checklist
+
+0.41.0 moves the wire to v6 and has no new `deploy/sql` migration and no SQLite schema change; the keys profile store migration above applies only to a store written with an earlier `provider_kind` CHECK set.
+
+- [ ] Record the release commit, tag and publication; archive the release manifest.
+- [ ] Review every final breaking entry and pin the release graph.
+- [ ] Apply the backup, stop, precheck, smoke and rollback gates in the [0.39.0 checklist](host-upgrade-0.39.0.md#checklist), adjusted to the 0.41.0 authorities, and upgrade the server side and the daemons together.
+- [ ] Walk affected flows on each target platform, including the keys profile store migration, bundles that used the sealed host import, single-file Pi subagents, Codex `excluded` where enabled, and OpenCode on macOS where enabled.
+
+Documentation checks do not establish release, platform or production acceptance.
