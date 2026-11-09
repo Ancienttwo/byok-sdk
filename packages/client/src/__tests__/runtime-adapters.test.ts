@@ -180,7 +180,7 @@ const OPTION_SOURCES = {
   codex: {
     nativeAssetRoot: 'nativeAssetRoot', runtimeEnvironment: 'runtimeEnvironment', sandbox: 'codexSandbox', resolveBin: 'embedded-only',
     spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only', operationTimeoutMs: 'embedded-only',
-    nativeInteractions: 'embedded-only', agentUserMcpServers: 'runtimes.codex.agentUserMcpServers', versionPolicy: 'runtimes.codex.versionPolicy',
+    nativeInteractions: 'embedded-only', agentUserMcpServers: 'runtimes.codex.agentUserMcpServers', agentUserContext: 'runtimes.codex.agentUserContext', versionPolicy: 'runtimes.codex.versionPolicy',
     versionPolicySource: 'runtimes.codex.versionPolicy',
   } satisfies Record<keyof CodexAdapterOptions, OptionSource>,
   grok: {

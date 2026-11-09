@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "5b3b7d660e081f6b8b9315e2b4b0767ea0f2e2fbe723f4005dbf5a11329180ec"
+    "snapshotSha256": "7c0cfdbcc3f722a615b610a106dab8ee709340a95ee0aac54ebd80d50be57215"
   },
   "configFields": {
     "status": "tracked",
@@ -23,6 +23,19 @@
       "items": [
         "export:@byok-sdk/keys#ProviderProfileStoreMigration",
         "export:@byok-sdk/keys#migrateProviderProfileStore"
+      ]
+    },
+    {
+      "id": "codex-agent-user-context",
+      "impact": "additive",
+      "summary": "CodexAdapterOptions.agentUserContext and DaemonConfig.runtimes.codex.agentUserContext: excluded runs a Codex Agent task in an SDK-owned CODEX_HOME of symbolic links to the user's auth.json, config.toml, hooks.json and rules, with sessions and archived_sessions in the Agent's own store <Agent home>/.byok/codex, so the user's AGENTS.md, skills, memories and threads stay out; plugins and the memory pipeline are off. Codex now declares isolation.userInstructions and isolation.userMemory. A Bot switched from inherit to excluded cannot resume its earlier threads (fails closed as a missing thread). The new retention class agent-runtime-sessions is exempt and unbounded until the Host removes the Agent home. The start refuses without a sealed Agent home, with a credential store other than file, without the user auth.json and, on Windows, on an account that may not create symbolic links. Default inherit changes nothing.",
+      "migration": "docs/adapter-capabilities.md#agentusercontext-codex",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#CodexAdapterOptions",
+        "export:@byok-sdk/client/adapters#CodexAdapterOptions",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+        "export:@byok-sdk/client#ProtectedClassId"
       ]
     },
     {
@@ -108,9 +121,26 @@
   ],
   "changes": [
     {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=bef6a1db2b3b066f",
+      "after": "optional schema-sha256=8933bd48c145a3e5",
+      "entry": "codex-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapterOptions",
+      "change": "changed",
+      "entry": "codex-agent-user-context"
+    },
+    {
       "item": "export:@byok-sdk/client#CopySdkNativeAssetsOptions",
       "change": "changed",
       "entry": "native-assets-archive-path"
+    },
+    {
+      "item": "export:@byok-sdk/client#ProtectedClassId",
+      "change": "changed",
+      "entry": "codex-agent-user-context"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeIsolationCapabilities",
@@ -126,6 +156,16 @@
       "item": "export:@byok-sdk/client#ServiceInstallationOptions",
       "change": "changed",
       "entry": "store-migration-required-verdict"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapterOptions",
+      "change": "changed",
+      "entry": "codex-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "codex-agent-user-context"
     },
     {
       "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",

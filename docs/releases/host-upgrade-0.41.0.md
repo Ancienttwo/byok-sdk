@@ -55,7 +55,7 @@ The offline query for the embedded SQLite store is in [protocol, SQLite startup 
 - `false`: the SDK makes no guarantee; the source can reach the model.
 - Missing: unknown, not `false`. This covers a runtime the daemon did not report, a reported runtime without a capability object (`capabilities` is optional on `conn.hello` `runtimes[]`, on `task.claim` and on presence runtimes; `harnesses[]` always carries it), a capability object without `isolation`, and an `isolation` object without that bit. A Host that needs the guarantee does not dispatch on an unknown bit.
 
-A bit describes what the adapter can guarantee under its exclusion option, not the current task state ([capability matrix](../adapter-capabilities.md#capability-matrix): `yes` describes Agent tasks with that option set). For Claude and ordinary Pi the user-context bits hold only for Agent tasks with `agentUserContext: 'excluded'` set on the adapter, which a Host does through `createDaemonWithAdapters`; `createDaemon` sets no option. The same holds for `userMcpServers` (Claude `agentUserContext`, Codex and Grok `agentUserMcpServers`) and `sessionPersistence` (Claude `agentSessionPersistence`). agy, dsh and Hermes need no option. A Host that needs a session with no user-level context dispatches only to a runtime whose five bits are all `true`, with that runtime's option set.
+A bit describes what the adapter can guarantee under its exclusion option, not the current task state ([capability matrix](../adapter-capabilities.md#capability-matrix): `yes` describes Agent tasks with that option set). For Claude, Codex and ordinary Pi the user-context bits hold only for Agent tasks with `agentUserContext: 'excluded'` set on the adapter, which a Host does through `createDaemonWithAdapters`; `createDaemon` sets no option. The same holds for `userMcpServers` (Claude `agentUserContext`, Codex and Grok `agentUserMcpServers`) and `sessionPersistence` (Claude `agentSessionPersistence`). agy, dsh and Hermes need no option. A Host that needs a session with no user-level context dispatches only to a runtime whose five bits are all `true`, with that runtime's option set.
 
 ### Per-adapter values
 
@@ -65,7 +65,7 @@ Values at each adapter's qualified version. "No source" means the bit is `true` 
 | --- | --- | --- | --- | --- | --- | --- |
 | agy 1.5.1 | `true` | `true` (no source) | `false` | `true` | `true` | No guarantee for Knowledge Items (default off; store not located) |
 | Claude 2.1.312 (`excluded`) | `true` | `true` | `true` | `false` | `false` | User skills and user hook output (probed on 2.1.319); plugin hook output, commands, subagents, installed plugins and managed policy, including a managed `CLAUDE.md` (not probed) |
-| Codex 0.160.0 | `false` | `false` | `false` | `false` | `false` | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`; no Codex exclusion of the other sources is qualified |
+| Codex 0.160.0 (`excluded`) | `true` | `false` | `true` | `false` | `false` | User skills from `$HOME/.agents/skills`, user hooks and rules (`hooks.json`, `rules/`, kept as guardrails) and the `developer_instructions` of the user's `config.toml` ([`agentUserContext` (Codex)](../adapter-capabilities.md#agentusercontext-codex)) |
 | dsh 0.2.2-rc.1 | `true` | `true` | `true` (no source) | `true` | `false` | No guarantee for the separately installed hook bridge |
 | Grok 1.0.52 | `false` | `false` | `false` | `false` | `false` | Sources Grok may load (from its guide and `grok inspect` discovery; no live session shows the prompt): `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and `extra_rule_dirs`; the Claude and Cursor instruction and rule files unless `compatInstructions: 'disabled'`; their skills and hooks cells always; their MCP cells unless `agentUserMcpServers: 'excluded'` |
 | Hermes 0.22.2+2364.g0b10b9f | `true` | `true` | `true` | `true` | `true` | None of the five sources |
@@ -74,6 +74,12 @@ Values at each adapter's qualified version. "No source" means the bit is `true` 
 | Pi 1.5.0, `durableLane` | `false` | `false` | `false` | `false` | `false` | No guarantee: Agent resources run only on the RPC lane (#1197) |
 
 Project files in the Agent home (for example its `AGENTS.md` or `CLAUDE.md`) are Agent-home inputs, not user sources, and load on every runtime. Under Pi `excluded` the Agent home's own `.pi/SYSTEM.md` does not load, because those settings are not project-trusted.
+
+### Codex `agentUserContext: 'excluded'`
+
+- Threads: an excluded Codex Agent task keeps its threads in `<Agent home>/.byok/codex/`, never in the user's `CODEX_HOME`. A Bot you switch from `inherit` to `excluded` cannot resume the threads it made under `inherit`: that resume fails closed through the existing missing-thread path, as a non-retryable failure, so start a new thread.
+- Growth: these rollouts are the `agent-runtime-sessions` retention class and are never expired. Each Bot's Codex rollouts accumulate until you remove its Agent home, as they did in the user's `CODEX_HOME` before ([storage layout](../host-local-storage-layout.md)).
+- The task needs a sealed Agent home and a user `CODEX_HOME` with a file-mode `auth.json`; otherwise the start fails as a non-retryable `authority` failure ([`agentUserContext` (Codex)](../adapter-capabilities.md#agentusercontext-codex)).
 
 ### Retired gates and token lifetime
 

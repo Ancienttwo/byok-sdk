@@ -48,6 +48,12 @@ if (process.env.FAKE_CODEX_ENV_RECEIPT) {
     authDiscoveryMatches: process.env.HOME === process.env.CODEX_HOME && process.env.USER === 'synthetic-user',
   }));
 }
+// FAKE_CODEX_HOME_RECEIPT: each CODEX_HOME entry and the target of its symbolic link.
+if (process.env.FAKE_CODEX_HOME_RECEIPT) {
+  const { readdirSync, readlinkSync } = await import('node:fs');
+  const home = process.env.CODEX_HOME;
+  writeFileSync(process.env.FAKE_CODEX_HOME_RECEIPT, JSON.stringify({ home, entries: Object.fromEntries(readdirSync(home).map(name => [name, readlinkSync(path.join(home, name))])) }));
+}
 if (process.env.FAKE_CODEX_PROCESS_TREE_FILE)
   await spawnProcessTreeDescendant({
     receiptFile: process.env.FAKE_CODEX_PROCESS_TREE_FILE,

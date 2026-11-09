@@ -1034,6 +1034,12 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "inherit"
               ]
             },
+            "agentUserContext": {
+              "enum": [
+                "excluded",
+                "inherit"
+              ]
+            },
             "versionPolicy": {
               "type": "object",
               "properties": {
