@@ -54,7 +54,7 @@ Values at each adapter's qualified version. "No source" means the bit is `true` 
 | Adapter | `userInstructions` | `userOutputStyle` | `userMemory` | `userSkills` | `userHookContext` | Can still reach the model |
 | --- | --- | --- | --- | --- | --- | --- |
 | agy 1.5.1 | `true` | `true` (no source) | `false` | `true` | `true` | No guarantee for Knowledge Items (default off; store not located) |
-| Claude 2.1.312 (`excluded`) | `true` | `true` | `true` | `false` | `false` | User skills and user hook output (probed on 2.1.319); commands, subagents, installed plugins and managed policy, including a managed `CLAUDE.md` (not probed) |
+| Claude 2.1.312 (`excluded`) | `true` | `true` | `true` | `false` | `false` | User skills and user hook output (probed on 2.1.319); plugin hook output, commands, subagents, installed plugins and managed policy, including a managed `CLAUDE.md` (not probed) |
 | Codex 0.160.0 | `false` | `false` | `false` | `false` | `false` | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`; no Codex exclusion of the other sources is qualified |
 | dsh 0.2.2-rc.1 | `true` | `true` | `true` (no source) | `true` | `false` | No guarantee for the separately installed hook bridge |
 | Grok 1.0.52 | `false` | `false` | `false` | `false` | `false` | Sources Grok may load (from its guide and `grok inspect` discovery; no live session shows the prompt): `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and `extra_rule_dirs`; the Claude and Cursor instruction and rule files unless `compatInstructions: 'disabled'`; their skills and hooks cells always; their MCP cells unless `agentUserMcpServers: 'excluded'` |
