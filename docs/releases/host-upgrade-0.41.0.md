@@ -51,13 +51,13 @@ A bit describes what the adapter can guarantee under its exclusion option, not t
 
 Values at each adapter's qualified version. "No source" means the bit is `true` because the runtime has no such source. The [isolation section](../adapter-capabilities.md#user-level-configuration-and-session-isolation) has the sources and evidence.
 
-| Adapter | `userInstructions` | `userOutputStyle` | `userMemory` | `userSkills` | `userHookContext` | Still reaches the model |
+| Adapter | `userInstructions` | `userOutputStyle` | `userMemory` | `userSkills` | `userHookContext` | Can still reach the model |
 | --- | --- | --- | --- | --- | --- | --- |
 | agy 1.5.1 | `true` | `true` (no source) | `false` | `true` | `true` | No guarantee for Knowledge Items (default off; store not located) |
-| Claude 2.1.312 (`excluded`) | `true` | `true` | `true` | `false` | `false` | User skills, commands and subagents; user and plugin hook output; installed plugins; managed policy, including a managed `CLAUDE.md` |
+| Claude 2.1.312 (`excluded`) | `true` | `true` | `true` | `false` | `false` | User skills and user hook output (probed on 2.1.319); commands, subagents, installed plugins and managed policy, including a managed `CLAUDE.md` (not probed) |
 | Codex 0.160.0 | `false` | `false` | `false` | `false` | `false` | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`; no Codex exclusion of the other sources is qualified |
 | dsh 0.2.2-rc.1 | `true` | `true` | `true` (no source) | `true` | `false` | No guarantee for the separately installed hook bridge |
-| Grok 1.0.52 | `false` | `false` | `false` | `false` | `false` | `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/`, `extra_rule_dirs`, the Claude and Cursor instruction and rule files unless `compatInstructions: 'disabled'`, and their skills, hooks and MCP cells always |
+| Grok 1.0.52 | `false` | `false` | `false` | `false` | `false` | Sources Grok may load (from its guide and `grok inspect` discovery; no live session shows the prompt): `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and `extra_rule_dirs`; the Claude and Cursor instruction and rule files unless `compatInstructions: 'disabled'`; their skills and hooks cells always; their MCP cells unless `agentUserMcpServers: 'excluded'` |
 | Hermes 0.22.2+2364.g0b10b9f | `true` | `true` | `true` | `true` | `true` | None of the five sources |
 | OpenCode (unqualified) | `false` | `false` | `false` | `false` | `false` | User context, MCP configuration and native transcripts |
 | Pi 1.5.0, RPC lane (`excluded`) | `true` | `true` (no source) | `true` (no source) | `true` | `true` | Host-authorized `agentSkillPaths` and `agentExtensionPaths`, by design |
