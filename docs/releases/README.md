@@ -81,9 +81,8 @@ coverage. Release preparation owns the manifest bump and corpus registration.
 ### Published v6 decoder baseline
 
 The `byok-protocol-v6-baseline` devDependency pins the 0.41.0 registry
-tarball and its lockfile integrity. The compatibility test compares published
-and current JSON Schema shapes, reads current corpus bytes with the released
-decoder, and proves `WIRE_ADDITIONS` rows against it. Its schema equality check
-is conservative: widening a shape requires reviewing the guard. No v5 decoder
-was pinned this way before the v6 cut; 0.40.0 serves only as the rejection
-oracle above.
+tarball and its lockfile integrity. The current schema must accept every released
+shape; new gated rows must carry a flag unknown to 0.41.0. The compatibility
+test reads current corpus bytes with the released decoder and proves gated rows
+against it. No v5 decoder was pinned this way before the v6 cut; 0.40.0 serves
+only as the rejection oracle above.

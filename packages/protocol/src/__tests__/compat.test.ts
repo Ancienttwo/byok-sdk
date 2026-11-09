@@ -692,24 +692,121 @@ describe('compat v6: HTTP corpus', () => {
   });
 });
 
+// A conservative structural inclusion check: unknown new constraints fail closed.
+function schemaAcceptsReleased(released: SchemaNode, current: SchemaNode, oldRoot = released, newRoot = current, seen = new Set<string>()): boolean {
+  if (released.$ref !== undefined || current.$ref !== undefined) {
+    if (typeof released.$ref !== 'string' || typeof current.$ref !== 'string') return false;
+    const pair = `${released.$ref}\0${current.$ref}`;
+    if (seen.has(pair)) return true;
+    return schemaAcceptsReleased(definition(oldRoot, released.$ref).node, definition(newRoot, current.$ref).node, oldRoot, newRoot, new Set([...seen, pair]));
+  }
+  const oldBranches = branches(released);
+  const newBranches = branches(current);
+  if (oldBranches.length || newBranches.length) {
+    if (!oldBranches.length || !newBranches.length || !oldBranches.every((old) =>
+      newBranches.some((next) => schemaAcceptsReleased(old, next, oldRoot, newRoot, seen)))) return false;
+  }
+  const oldProperties = schemaNode(released.properties) ?? {};
+  const newProperties = schemaNode(current.properties) ?? {};
+  for (const [key, value] of Object.entries(oldProperties)) {
+    const old = schemaNode(value);
+    const next = schemaNode(newProperties[key]);
+    if (!old || !next || !schemaAcceptsReleased(old, next, oldRoot, newRoot, seen)) return false;
+  }
+  const oldRequired = Array.isArray(released.required) ? released.required : [];
+  if (Array.isArray(current.required) && !current.required.every((key) => oldRequired.includes(key))) return false;
+  const oldValues = 'const' in released ? [released.const] : released.enum;
+  const newValues = 'const' in current ? [current.const] : current.enum;
+  if (Array.isArray(newValues) && (!Array.isArray(oldValues) || !oldValues.every((value) =>
+    newValues.some((candidate) => JSON.stringify(candidate) === JSON.stringify(value))))) return false;
+  if (current.type !== undefined && current.type !== released.type && !(released.type === 'integer' && current.type === 'number')) return false;
+  for (const key of ['minimum', 'exclusiveMinimum', 'minLength', 'minItems', 'minProperties'] as const) {
+    if (typeof current[key] === 'number' && (typeof released[key] !== 'number' || current[key] > released[key])) return false;
+  }
+  for (const key of ['maximum', 'exclusiveMaximum', 'maxLength', 'maxItems', 'maxProperties'] as const) {
+    if (typeof current[key] === 'number' && (typeof released[key] !== 'number' || current[key] < released[key])) return false;
+  }
+  for (const key of ['items', 'additionalProperties'] as const) {
+    if (current[key] === false && released[key] !== false) return false;
+    const next = schemaNode(current[key]);
+    if (next) {
+      const old = schemaNode(released[key]);
+      if (!old || !schemaAcceptsReleased(old, next, oldRoot, newRoot, seen)) return false;
+    }
+  }
+  const handled = new Set(['$schema', '$defs', 'title', 'description', 'default', 'examples', 'properties', 'required', 'type', 'const', 'enum', 'anyOf', 'oneOf', 'items', 'additionalProperties', 'minimum', 'exclusiveMinimum', 'minLength', 'minItems', 'minProperties', 'maximum', 'exclusiveMaximum', 'maxLength', 'maxItems', 'maxProperties']);
+  return Object.entries(current).every(([key, value]) => handled.has(key) || JSON.stringify(value) === JSON.stringify(released[key]));
+}
+
+function isNewGate(row: WireAddition): boolean {
+  return !v6Release.WIRE_ADDITIONS.some((old) => old.kind === row.kind && old.rule === row.rule && old.surface === row.surface
+    && old.field === row.field && old.value === row.value && old.capability === row.capability && old.advertisedBy === row.advertisedBy);
+}
+
+function hasNewGatedEnvelope(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasNewGatedEnvelope);
+  if (value === null || typeof value !== 'object') return false;
+  const object = value as Record<string, unknown>;
+  if (typeof object.type === 'string' && object.payload !== null && typeof object.payload === 'object') {
+    const line = { type: object.type, payload: object.payload } as CorpusLine;
+    if (WIRE_ADDITIONS.some((row) => isNewGate(row) && carries(line, row))) return true;
+  }
+  return Object.values(object).some(hasNewGatedEnvelope);
+}
+
+function preservesDecodedFields(input: unknown, decoded: unknown): boolean {
+  if (Array.isArray(input) && Array.isArray(decoded)) return input.length === decoded.length && decoded.every((value, i) => preservesDecodedFields(input[i], value));
+  if (input !== null && decoded !== null && typeof input === 'object' && typeof decoded === 'object' && !Array.isArray(input) && !Array.isArray(decoded)) {
+    return Object.entries(decoded).every(([key, value]) => key in input && preservesDecodedFields((input as Record<string, unknown>)[key], value));
+  }
+  return Object.is(input, decoded);
+}
+
 describe('compat v6: published 0.41.0 baseline', () => {
+  it('recognizes schema widening and rejects narrowing', () => {
+    const old = { type: 'object', properties: { x: { type: 'string', enum: ['a', 'b'] } }, required: ['x'] };
+    expect(schemaAcceptsReleased(old, { ...old, required: [], properties: { ...old.properties, y: { type: 'string' } } })).toBe(true);
+    const narrowings: SchemaNode[] = [
+      { ...old, properties: { x: { type: 'string', enum: ['a'] } } },
+      { ...old, required: ['x', 'y'] },
+      { ...old, properties: { x: { type: 'string', pattern: '^a' } } },
+      { ...old, additionalProperties: false },
+      { ...old, properties: { x: { type: 'string', minLength: 1 } } },
+      { ...old, properties: { x: { const: 'a' } } },
+    ];
+    for (const narrowed of narrowings) expect(schemaAcceptsReleased(old, narrowed)).toBe(false);
+    expect(schemaAcceptsReleased({ anyOf: [{ type: 'string' }, { type: 'number' }] }, { anyOf: [{ type: 'string' }] })).toBe(false);
+    const ref = { $ref: '#/$defs/value' };
+    expect(schemaAcceptsReleased({ ...ref, $defs: { value: { type: 'string' } } }, { ...ref, $defs: { value: { type: 'string', minLength: 1 } } })).toBe(false);
+  });
   it('does not narrow the published JSON Schema shapes', () => {
     expect(packageVersion('byok-protocol-v6-baseline')).toBe('0.41.0');
     expect(v6Registry.releases.some((entry) => entry.version === '0.41.0')).toBe(true);
-    // Equality is conservative: even a widening needs explicit review of this guard.
-    expect(jsonSchema(EnvelopeSchema)).toEqual(jsonSchema(v6Release.EnvelopeSchema));
+    expect(schemaAcceptsReleased(schemaNode(jsonSchema(v6Release.EnvelopeSchema))!, schemaNode(jsonSchema(EnvelopeSchema))!)).toBe(true);
     for (const surface of new Set(v6HttpCorpus.map((line) => line.surface))) {
-      expect(jsonSchema(httpSchema(currentModule, surface)), surface).toEqual(jsonSchema(httpSchema(v6Release, surface)));
+      expect(schemaAcceptsReleased(schemaNode(jsonSchema(httpSchema(v6Release, surface)))!, schemaNode(jsonSchema(httpSchema(currentModule, surface)))!), surface).toBe(true);
     }
   });
 
   it('the released decoder reads current envelope and HTTP corpus bytes', () => {
     for (const line of v6Corpus) {
-      expect(v6Release.decodeEnvelope(line.raw), `envelope line ${line.index + 1}`).toEqual(JSON.parse(line.raw));
+      if (WIRE_ADDITIONS.some((row) => isNewGate(row) && carries(line, row))) continue;
+      const original = JSON.parse(line.raw) as unknown;
+      const decoded = v6Release.decodeEnvelope(line.raw);
+      if (line.index < v6Registry.releases.find((entry) => entry.version === '0.41.0')!.envelopes.lines) {
+        expect(decoded, `released envelope line ${line.index + 1}`).toEqual(original);
+      }
+      expect(preservesDecodedFields(original, decoded), `envelope line ${line.index + 1}`).toBe(true);
+      expect(parseMessage(decoded), `envelope line ${line.index + 1} after stripping`).toEqual(decoded);
     }
     for (const line of v6HttpCorpus) {
+      if (hasNewGatedEnvelope(line.value)) continue;
       const decoded = httpSchema(v6Release, line.surface).parse(JSON.parse(line.body));
-      expect(decoded, `HTTP line ${line.index + 1}`).toEqual(line.value);
+      if (line.index < v6Registry.releases.find((entry) => entry.version === '0.41.0')!.http!.lines) {
+        expect(decoded, `released HTTP line ${line.index + 1}`).toEqual(line.value);
+      }
+      expect(preservesDecodedFields(line.value, decoded), `HTTP line ${line.index + 1}`).toBe(true);
+      expect(httpSchema(currentModule, line.surface).parse(decoded)).toEqual(decoded);
       for (const entry of undecodedEntries(line, decoded) ?? []) expect(v6Release.parseMessage(entry)).toEqual(entry);
     }
   });
@@ -717,15 +814,21 @@ describe('compat v6: published 0.41.0 baseline', () => {
   it('proves every gated or strip-safe addition against the released decoder', () => {
     for (const row of WIRE_ADDITIONS) {
       const lines = v6Corpus.filter((line) => carries(line, row));
+      const released = !isNewGate(row);
       expect(lines.length, JSON.stringify(row)).toBeGreaterThan(0);
+      if (!released) expect(v6Release.CAPABILITY_FLAGS as readonly string[], JSON.stringify(row)).not.toContain(row.capability);
       for (const line of lines) {
-        expect(v6Release.decodeEnvelope(line.raw), JSON.stringify(row)).toEqual(JSON.parse(line.raw));
         expect(requiredReceiverCapabilities(line.type, line.payload), JSON.stringify(row)).toContain(row.capability);
-        expect(v6Release.requiredReceiverCapabilities(line.type, line.payload), JSON.stringify(row)).toContain(row.capability);
+        if (released) {
+          expect(v6Release.decodeEnvelope(line.raw), JSON.stringify(row)).toEqual(JSON.parse(line.raw));
+          expect(v6Release.requiredReceiverCapabilities(line.type, line.payload), JSON.stringify(row)).toContain(row.capability);
+        } else {
+          const result = v6Release.EnvelopeSchema.safeParse(JSON.parse(line.raw));
+          expect(result.success && (row.field === undefined || fieldValues(result.data.payload, row.field).some((value) =>
+            value !== undefined && (row.value === undefined || (Array.isArray(value) ? value.includes(row.value) : value === row.value)))), JSON.stringify(row)).toBe(false);
+        }
       }
     }
-    // v6 has no strip-safe rows; introducing one requires a released-decoder proof.
-    expect(WIRE_ADDITIONS.every((row) => row.rule === 'gated')).toBe(true);
   });
 });
 

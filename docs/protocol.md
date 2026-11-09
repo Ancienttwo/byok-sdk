@@ -212,8 +212,8 @@ cross-release baseline (see the evidence list below).
   `terminal-projection-selection`, which v6 retired (`task-offer-gates.test.ts`).
 
 The published 0.41.0 v6 decoder reads the current corpus and proves the
-current gated declarations. Its JSON Schema is compared with the current
-shapes; the equality guard conservatively requires review for widening too.
+current gated declarations. The current schema must accept every released
+shape; new gated rows must carry a flag unknown to 0.41.0.
 
 The v6 table is the v5 table minus the retired rows (#1573). The server flags
 `agent-message-draft`, `runtime-failure-class`, `runtime-quota-scope`,
