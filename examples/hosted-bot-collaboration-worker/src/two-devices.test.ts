@@ -21,6 +21,7 @@ import * as runtimeAdapters from '@byok-sdk/client/adapters';
 import { createTestKeychain } from '../../../scripts/testing/macos-keychain.mjs';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { createDeviceSession, deviceConfig, localMemberApproval, sealedCore, type DeviceEvent } from './device-session.js';
+import * as deviceMemberModule from '../../../packages/client/src/daemon/device-member';
 import { DeviceMemberRecords } from '../../../packages/client/src/daemon/device-member-custody';
 import { openRemoteCanaryDevice } from './remote-canary-device.test-support';
 import { HostedMember } from '../../hosted-bot-collaboration/src/e2ee-member.test-support';
@@ -352,35 +353,63 @@ describe('device runner boundaries', () => {
     } finally { compose.mockRestore(); }
   });
 
-  it.each(['match', 'different', 'missing', 'missing-record'])('binds local approval to the relayed public anchor: %s', async mode => {
+  it.each(['match', 'different', 'missing', 'missing-record', 'late-match', 'expired', 'interrupted'])('binds local approval to the relayed public anchor: %s', async mode => {
     const fakeCloud = { appendMemberChainEntries: vi.fn() } as unknown as CanaryCloud;
     const browser = await HostedMember.create(fakeCloud, 'tenant' as never), other = await HostedMember.create(fakeCloud, 'tenant' as never);
     const state = { tenantId: 'tenant', deviceId: 'physical', member: { ...other.member, deviceId: 'physical' } };
     const read = vi.spyOn(DeviceMemberRecords.prototype, 'readState').mockResolvedValue(state);
     const daemon = { subscribe: () => () => {}, pair: vi.fn(async () => ({ deviceId: 'physical' })), start: vi.fn(), stop: vi.fn(),
       status: () => ({ lifecycle: { phase: 'running', connection: 'open' } }) } as unknown as client.Daemon;
-    const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockReturnValue(daemon), send = vi.fn();
+    let wrapped!: client.RuntimeAdapter;
+    const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => { wrapped = adapters[0]!; return daemon; }), send = vi.fn();
     try {
+      vi.useFakeTimers();
+      const pairedAt = Date.now();
       const device = createDeviceSession(deviceConfig('https://host.invalid', '/tmp/binding'), 'stub', send);
       await device.pair('code', browser.verificationSecret);
       expect(daemon.start).not.toHaveBeenCalled();
       await expect(device.start()).rejects.toThrow('comparison is required');
       await device.compareMember(browser.member);
+      expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'member binding pending', retryable: true });
       const key = mode === 'different' ? other.member.signingPublicJwk : browser.member.signingPublicJwk;
-      read.mockResolvedValue(mode === 'missing-record' ? undefined : { ...state, ...(mode === 'missing' ? {} : { anchor: {
-        approverSigningPublicJwk: { y: key.y, x: key.x, crv: key.crv, kty: key.kty }, entry: { seq: 1, hash: `sha256:${'0'.repeat(64)}` },
-      } }) });
-      vi.useFakeTimers();
-      const started = device.start();
-      const assertion = mode === 'match' ? expect(started).resolves.toBeUndefined() : expect(started).rejects.toThrow('did not bind');
-      await vi.advanceTimersByTimeAsync(30_025); await assertion;
-      expect(send.mock.calls.some(([event]) => event.type === 'ready')).toBe(mode === 'match');
-      if (mode !== 'match') {
+      read.mockImplementation(async () => mode === 'missing-record' ? undefined : { ...state,
+        ...(mode === 'missing' || (mode === 'late-match' && Date.now() < pairedAt + 45_000) || mode === 'interrupted' ? {} : { anchor: {
+          approverSigningPublicJwk: { y: key.y, x: key.x, crv: key.crv, kty: key.kty }, entry: { seq: 1, hash: `sha256:${'0'.repeat(64)}` },
+        } }) });
+      const controller = new AbortController();
+      if (mode === 'expired') await vi.advanceTimersByTimeAsync(600_001);
+      const started = device.start(controller.signal);
+      const matches = mode === 'match' || mode === 'late-match';
+      const assertion = matches ? expect(started).resolves.toBeUndefined() : expect(started).rejects.toThrow('did not bind');
+      if (mode === 'late-match') {
+        await vi.advanceTimersByTimeAsync(30_001);
+        expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toMatchObject({ kind: 'reject', retryable: true });
+      }
+      if (mode === 'interrupted') controller.abort();
+      await vi.advanceTimersByTimeAsync(mode === 'missing' ? 600_001 : 15_025); await assertion;
+      expect(send.mock.calls.some(([event]) => event.type === 'ready')).toBe(matches);
+      expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toMatchObject(matches ? { kind: 'prepared' }
+        : { kind: 'reject', reason: 'member binding failed', retryable: false });
+      if (!matches) {
         expect(daemon.stop).toHaveBeenCalled();
         expect(send).toHaveBeenCalledWith({ type: 'error', message: 'member relay did not bind the locally approved browser key' });
       }
       await device.stop();
     } finally { vi.useRealTimers(); read.mockRestore(); compose.mockRestore(); }
+  });
+
+  it.each([undefined, 0, -1, Infinity, NaN])('fails closed for an invalid pinned pairing TTL: %s', async ttl => {
+    const ttlRead = vi.spyOn(deviceMemberModule, 'PAIRING_VERIFICATION_TTL_MS', 'get').mockReturnValue(ttl as number);
+    let wrapped!: client.RuntimeAdapter;
+    const daemon = { subscribe: () => () => {}, pair: vi.fn(), stop: vi.fn() } as unknown as client.Daemon;
+    const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => { wrapped = adapters[0]!; return daemon; });
+    try {
+      const device = createDeviceSession(deviceConfig('https://host.invalid', '/tmp/ttl'), 'stub', vi.fn());
+      await expect(device.pair('code', 'A'.repeat(26))).rejects.toThrow('pinned SDK pairing-verification TTL');
+      expect(daemon.pair).not.toHaveBeenCalled();
+      expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'member binding failed', retryable: false });
+      await device.stop();
+    } finally { ttlRead.mockRestore(); compose.mockRestore(); }
   });
 
   it.skipIf(process.platform === 'win32').each(['canary', 'private-bundle', 'interrupt'])('keeps a real PTY free of input and restores raw mode: %s', async mode => {
@@ -432,8 +461,8 @@ sys.exit(child.wait())
       if (!sent && printed.includes(`"type":"${mode === 'private-bundle' ? 'paired' : 'ready'}"`)) {
         sent = true;
         child.stdin.write(mode === 'interrupt' ? '\x03' : JSON.stringify(mode === 'private-bundle'
-          ? { type: 'member-bundle', bundle: { privateKey: secret } } : { type: 'canary', taskId: 'task', text: secret, sealed: true }) + '\n' +
-          (mode === 'canary' ? '{"type":"stop"}\n' : ''));
+          ? { type: 'member-bundle', bundle: { privateKey: secret } } : { type: 'canary', taskId: 'task', text: secret, sealed: true }) + '\r' +
+          (mode === 'canary' ? '{"type":"stop"}\r' : ''));
       }
     });
     try {
@@ -478,7 +507,8 @@ sys.exit(child.wait())
   });
 });
 
-it.skipIf(!RUN || process.env.BYOK_TEST_WORKER_SEALED_CANARY !== '1').each([false, true])('executes a sealed canary over runner stdin with member pairing and JSON-only events (automatic=%s)', async automatic => {
+it.skipIf(!RUN || process.env.BYOK_TEST_WORKER_SEALED_CANARY !== '1').each(['controls', 'echo', 'delayed-match', 'delayed-mismatch'])('executes a sealed canary over runner stdin with member pairing and JSON-only events (mode=%s)', async mode => {
+  const automatic = mode !== 'controls', delayed = mode.startsWith('delayed');
   const scope = await createDataplaneScope(), storage = await createObjectStorageScope();
   const pool = createByokPool({ connectionString: scope.connectionString });
   const root = await mkdtemp(path.join(tmpdir(), 'hw-sealed-runner-'));
@@ -489,6 +519,12 @@ it.skipIf(!RUN || process.env.BYOK_TEST_WORKER_SEALED_CANARY !== '1').each([fals
   output.on('data', chunk => { printed += chunk.toString(); });
   const events = () => printed.trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as DeviceEvent & { runtime: string });
   let worker: Awaited<ReturnType<typeof startWranglerDev>> | undefined, running: Promise<void> | undefined;
+  let session: ReturnType<typeof createDeviceSession> | undefined, wrapped!: client.RuntimeAdapter;
+  const originalCompose = client.createDaemonWithAdapters;
+  const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((config, adapters, overrides) => {
+    wrapped = adapters[0]!;
+    return originalCompose(config, adapters, overrides);
+  });
   try {
     await migrate(pool, migrationsDir());
     const { signingClock: _clock, ...objectStorage } = storage.config;
@@ -507,24 +543,52 @@ it.skipIf(!RUN || process.env.BYOK_TEST_WORKER_SEALED_CANARY !== '1').each([fals
     const { code } = await cloud.createPairingCode(tenant, { productId: 'hosted-collaboration-worker' });
     running = runDeviceRunner(['--server-url', worker.base, '--pairing-code', code, '--verification-secret', member.verificationSecret,
       '--root', root, '--runtime', 'stub', ...(automatic ? ['--stub-canary'] : ['--canary-controls'])], input, output, controller.signal,
-    (config, runtime, send, overrides, stubCanary, canaryControls) => createDeviceSession(
-      keychain ? { ...config, deviceCredentials: { macosKeychainPath: keychain.path } } : config, runtime, send, overrides, stubCanary, canaryControls));
+    (config, runtime, send, overrides, stubCanary, canaryControls) => {
+      session = createDeviceSession(keychain ? { ...config, deviceCredentials: { macosKeychainPath: keychain.path } } : config,
+        runtime, send, overrides, stubCanary, canaryControls);
+      return session;
+    });
     void running.catch(error => { failure = error; });
     const wait = (type: DeviceEvent['type']) => until(async () => { if (failure) throw failure; return events().find(event => event.type === type); });
     const paired = await wait('paired');
     if (paired.type !== 'paired') throw new Error('expected paired');
     const { deviceId } = paired;
+    const compared = mode === 'delayed-mismatch' ? await HostedMember.create({ appendMemberChainEntries: vi.fn() } as unknown as CanaryCloud, tenant) : member;
     {
       expect(events().some(event => event.type === 'ready')).toBe(false);
-      input.write(JSON.stringify({ type: 'member-bundle', bundle: member.member }) + '\n');
+      input.write(JSON.stringify({ type: 'member-bundle', bundle: compared.member }) + '\n');
       const codeEvent = await wait('approval-code');
       const registration = await cloud.readMemberKeyRegistration(tenant, deviceId);
       const core = await sealedCore();
       expect(codeEvent).toEqual({ type: 'approval-code', code: (await core.memberApprovalCode(tenant,
-        member.member.signingPublicJwk, registration!.member.signingPublicJwk)).replaceAll(' ', '') });
+        compared.member.signingPublicJwk, registration!.member.signingPublicJwk)).replaceAll(' ', '') });
       input.write('{"type":"approve"}\n');
     }
+    if (delayed) {
+      await until(async () => {
+        const lifecycle = session!.daemon.status().lifecycle;
+        return lifecycle.phase === 'running' && lifecycle.connection === 'open' || undefined;
+      });
+      const earlyTask = `task-${randomUUID()}`, early = template(deviceId, `agent-${randomUUID()}`);
+      await cloud.submitAgentExecution(tenant, { taskId: earlyTask, deviceId, payload: early.payload });
+      const refused = await until(async () => (await cloud.readDeviceTerminal(tenant, earlyTask))?.envelope);
+      expect(refused.type).toBe('task.decline');
+      expect(refused.payload).toMatchObject({ reason: 'member binding pending', retryable: true });
+      await wait('error');
+      expect(events().filter(event => event.type === 'error')).toEqual([
+        { type: 'error', taskId: earlyTask, message: 'runtime task did not complete', runtime: 'stub' },
+      ]);
+      expect(events().some(event => event.type === 'started')).toBe(false);
+    }
     await member.putScope('scope-zero-hit', await member.approve(deviceId), ['task-input', 'task-output']);
+    if (mode === 'delayed-mismatch') {
+      await expect(running).rejects.toThrow('did not bind');
+      expect(session!.daemon.status().lifecycle.phase).not.toBe('running');
+      expect(events().some(event => event.type === 'started' || event.type === 'ready')).toBe(false);
+      expect(events()).toContainEqual({ type: 'error', message: 'member relay did not bind the locally approved browser key', runtime: 'stub' });
+      expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'member binding failed', retryable: false });
+      return;
+    }
     await wait('ready');
     await until(async () => (await cloud.listDevices(tenant)).find(device => device.deviceId === deviceId)?.capabilities?.includes('sealed-payload-v1') || undefined);
     const task = `task-${randomUUID()}`, text = `private-你好-${randomUUID()}`, execution = template(deviceId, `agent-${randomUUID()}`);
@@ -556,12 +620,12 @@ it.skipIf(!RUN || process.env.BYOK_TEST_WORKER_SEALED_CANARY !== '1').each([fals
         sha256: createHash('sha256').update(text, 'utf8').digest('hex'), runtime: 'stub' });
     } else expect(terminal.payload).toHaveProperty('sealed.ciphertextRef');
     input.write('{"type":"stop"}\n'); await running;
-    expect(events().map(event => event.type)).toEqual(['paired', 'approval-code', 'ready', 'started', ...(automatic ? ['canary-result'] : []), 'finished']);
+    expect(events().map(event => event.type)).toEqual(['paired', 'approval-code', ...(delayed ? ['error'] : []), 'ready', 'started', ...(automatic ? ['canary-result'] : []), 'finished']);
     for (const secret of [text, code, member.verificationSecret]) expect(printed).not.toContain(secret);
   } finally {
     controller.abort(); input.end(); await running?.catch(() => {});
     await worker?.stop(); await keychain?.dispose(); await rm(root, { recursive: true, force: true });
-    await pool.end(); await scope.dispose();
+    await pool.end(); await scope.dispose(); compose.mockRestore();
   }
 });
 

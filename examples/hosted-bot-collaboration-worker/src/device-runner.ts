@@ -93,7 +93,7 @@ export async function runDeviceRunner(args: string[], input: Readable, output: W
       }
       if (command.type === 'approve') {
         if (!awaitingApproval || !compared) throw new Error('member comparison is required before approval');
-        await device.start(); awaitingApproval = false; continue;
+        await device.start(signal); awaitingApproval = false; continue;
       }
       if (awaitingApproval) throw new Error('member comparison and approval are required before task controls');
       if (command.type === 'canary') await device.canary(command.taskId, command.text, command.sealed,

@@ -48,11 +48,11 @@ export async function sealedCore() {
   } catch { throw new MemberComparisonError('member comparison requires the pinned SDK sealed-payload export'); }
 }
 
-async function localMemberState(config: DaemonConfig, deviceId: string) {
+async function localMemberState(config: DaemonConfig, deviceId: string, signal?: AbortSignal) {
   const { DeviceMemberRecords } = await import('../../../packages/client/src/daemon/device-member-custody.js');
   const { createDeviceMemberCustody } = await import('../../../packages/client/src/daemon/device-credential-provider.js');
   const state = await new DeviceMemberRecords(createDeviceMemberCustody({ productId: config.productId,
-    storeDir: config.storeDir!, deviceCredentials: config.deviceCredentials, nativeAssetRoot: config.nativeAssetRoot })).readState();
+    storeDir: config.storeDir!, deviceCredentials: config.deviceCredentials, nativeAssetRoot: config.nativeAssetRoot })).readState(signal);
   if (!state || state.deviceId !== deviceId || state.member.deviceId !== deviceId) throw new Error('device member state mismatch');
   return state;
 }
@@ -71,13 +71,15 @@ export async function localMemberApproval(config: DaemonConfig, deviceId: string
 
 /** Observe the public operation seam, retaining optional launch and lease hooks and their receivers. */
 function reportStarts(adapter: RuntimeAdapter, send: (event: DeviceEvent) => void,
-  afterStart?: (start: RuntimeOperationStartInput) => void): RuntimeAdapter {
+  admission: () => Promise<boolean | undefined>, afterStart?: (start: RuntimeOperationStartInput) => void): RuntimeAdapter {
   return {
     descriptor: adapter.descriptor,
     detect: signal => adapter.detect(signal),
     runtimeEnvironment: () => adapter.runtimeEnvironment(),
     ...(adapter.projectMcpEnvironment === undefined ? {} : { projectMcpEnvironment: adapter.projectMcpEnvironment.bind(adapter) }),
     async prepare(input) {
+      const bound = await admission();
+      if (bound !== true) return { kind: 'reject', reason: bound === undefined ? 'member binding pending' : 'member binding failed', retryable: bound === undefined };
       const result = await adapter.prepare(input);
       if (result.kind === 'reject') return result;
       const operation = result.operation;
@@ -93,6 +95,12 @@ function reportStarts(adapter: RuntimeAdapter, send: (event: DeviceEvent) => voi
       } };
     },
   };
+}
+
+function memberBinding() {
+  let resolve!: (bound: boolean) => void;
+  const promise = new Promise<boolean>(done => { resolve = done; });
+  return { promise, resolve };
 }
 
 export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, send: (event: DeviceEvent) => void,
@@ -113,8 +121,12 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
       }).catch(() => { send({ type: 'error', taskId, message: 'stub canary result failed' }); });
     });
   };
+  let binding = memberBinding();
+  binding.resolve(true);
+  const lifetime = new AbortController();
+  const admission = () => Promise.race([binding.promise, Promise.resolve(undefined)]);
   const daemon = createDaemonWithAdapters(stubCanary ? { ...config, agentMemoryMcp: 'off' } : config,
-    adapters.map(adapter => reportStarts(adapter, send, autoFinish)), overrides);
+    adapters.map(adapter => reportStarts(adapter, send, admission, autoFinish)), overrides);
   const unsubscribe = daemon.subscribe(event => {
     if ((runtime === 'real' || stubCanary) && event.kind === 'completed') send({ type: 'finished', taskId: event.taskId });
     if ((runtime === 'real' || stubCanary) && (event.kind === 'failed' || event.kind === 'cancelled')) {
@@ -123,46 +135,69 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
   });
   let pairedDeviceId: string | undefined, memberPairing = false;
   let comparedKey: PublicSigningKey | undefined;
-  async function bindComparedMember(deviceId: string) {
+  let pairingDeadline = 0;
+  async function bindComparedMember(deviceId: string, signal: AbortSignal) {
     try {
-      for (const deadline = Date.now() + 30_000; Date.now() < deadline;) {
-        const state = await localMemberState(config, deviceId);
+      while (Date.now() < pairingDeadline) {
+        signal.throwIfAborted();
+        const state = await localMemberState(config, deviceId, signal);
+        signal.throwIfAborted();
+        if (Date.now() >= pairingDeadline) throw new Error('pairing verification expired');
         const key = state.anchor?.approverSigningPublicJwk;
         if (key) {
           if (!comparedKey || key.kty !== comparedKey.kty || key.crv !== comparedKey.crv || key.x !== comparedKey.x || key.y !== comparedKey.y) {
             throw new Error('relayed member does not match local approval');
           }
+          binding.resolve(true);
           return;
         }
-        await delay(25);
+        await delay(Math.min(25, pairingDeadline - Date.now()), undefined, { signal });
       }
       throw new Error('member relay anchor missing');
     } catch {
+      binding.resolve(false);
       const message = 'member relay did not bind the locally approved browser key';
       send({ type: 'error', message });
       await daemon.stop();
-      throw new MemberComparisonError(message);
     }
   }
-  async function start() {
+  async function start(signal: AbortSignal = lifetime.signal) {
     if (!pairedDeviceId) throw new Error('device is not paired');
     if (memberPairing && !comparedKey) throw new MemberComparisonError('member comparison is required before startup');
+    const startupSignal = AbortSignal.any([signal, lifetime.signal]);
+    startupSignal.throwIfAborted();
     await daemon.start();
+    if (memberPairing) await bindComparedMember(pairedDeviceId, AbortSignal.any([
+      startupSignal, AbortSignal.timeout(Math.max(0, pairingDeadline - Date.now())),
+    ]));
+    if (!(await binding.promise)) throw new MemberComparisonError('member relay did not bind the locally approved browser key');
     for (const deadline = Date.now() + 30_000; ;) {
+      startupSignal.throwIfAborted();
       const lifecycle = daemon.status().lifecycle;
       if (lifecycle.phase === 'running' && lifecycle.connection === 'open') break;
       if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed' || Date.now() > deadline) throw new Error('daemon did not become ready');
-      await delay(25);
+      await delay(25, undefined, { signal: startupSignal });
     }
-    if (memberPairing) await bindComparedMember(pairedDeviceId);
     send({ type: 'ready', deviceId: pairedDeviceId });
   }
   return {
     daemon, start,
     async pair(code: string, verificationSecret?: string) {
+      memberPairing = verificationSecret !== undefined;
+      binding = memberBinding();
+      if (memberPairing) {
+        const initiated = Date.now();
+        try {
+          const { PAIRING_VERIFICATION_TTL_MS: ttl } = await import('../../../packages/client/src/daemon/device-member.js');
+          if (!Number.isFinite(ttl) || ttl <= 0) throw new Error('invalid pairing TTL');
+          pairingDeadline = initiated + ttl;
+        } catch {
+          binding.resolve(false);
+          throw new MemberComparisonError('member comparison requires the pinned SDK pairing-verification TTL');
+        }
+      } else binding.resolve(true);
       const { deviceId } = await daemon.pair(code, verificationSecret === undefined ? undefined : { verificationSecret });
       pairedDeviceId = deviceId;
-      memberPairing = verificationSecret !== undefined;
       comparedKey = undefined;
       if (memberPairing) send({ type: 'paired', deviceId });
       else await start();
@@ -213,6 +248,6 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
       }
       send({ type: 'finished', taskId });
     },
-    async stop() { unsubscribe(); await daemon.stop(); },
+    async stop() { lifetime.abort(); binding.resolve(false); unsubscribe(); await daemon.stop(); },
   };
 }

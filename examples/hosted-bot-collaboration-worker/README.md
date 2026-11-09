@@ -264,11 +264,16 @@ Compare these digits with the page's ten groups of five **before** confirming ei
 `{"type":"approve"}` to the device, then confirm on the page so it signs `add(device)` and relays the client MAC.
 The device can now start and resume member verification. Before emitting `ready`, it reads the public persisted
 `anchor.approverSigningPublicJwk` and compares its canonical `kty/crv/x/y` fields with the approved key; a different or
-missing anchor stops the daemon and emits a fixed error. On a mismatch send `{"type":"reject"}`; the
+missing anchor stops the daemon and emits a fixed error. Runtime admission reads the same binding promise as startup:
+while pending, `prepare()` rejects retryably; a failed binding rejects permanently, so no runtime can start before the
+approved anchor matches. A sealed offer may still be opened in process memory before this refusal; nothing leaves the
+process and no runtime starts. On a mismatch send `{"type":"reject"}`; the
 runner stops before daemon startup or member relay acceptance. `approve` without a successful comparison, a second
 bundle or task controls during the comparison fails closed. Keep this code on the device's local operator display;
 do not send it to the browser or include it in evidence. The SDK's 10-minute pairing-verification TTL runs during this
-pause: a slow operator fails closed and must pair again.
+pause: a slow operator fails closed and must pair again. The runner imports the SDK TTL from the pinned internal
+module and measures the deadline from initiating pairing, never extending it. Binding waits remain interruptible by
+Ctrl-C/SIGTERM. Discard the device root after a binding failure: its persisted anchor must never be resumed.
 
 This comparison uses SDK-internal `DeviceMemberRecords` and the credential provider through source imports from the
 pinned checkout. It reads only `member-state`, never the private `member-keys` entry or pairing-secret entry. The
