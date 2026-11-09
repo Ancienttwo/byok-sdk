@@ -1,4 +1,5 @@
-<!doctype html>
+/** Static public markup. No deployment values or secrets belong in this module. */
+export const memberPage = `<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -49,8 +50,9 @@ fieldset { margin: 1.5rem 0; border: 1px solid #acb7b5 } code { overflow-wrap: a
 </fieldset>
 <fieldset><legend>5. Revoke a browser</legend>
 <label>Member ID to remove <input id="remove-member"></label><button id="revoke" disabled>Remove member</button>
-<p>From a remaining member, issue a new scope epoch, then submit another sealed task. In the removed tab, enter the new task and hash and decrypt: it must report FAIL with member_revoked. Remaining tabs must report PASS. A failed request or a wrong hash alone is not revocation evidence.</p>
+<p>From a remaining member, issue a new scope epoch, then submit another sealed task. In the removed tab, enter the new task and hash and decrypt: it must report FAIL with member_revoked and scopeKey: absent for that new epoch. Remaining tabs must report PASS. A failed request or a wrong hash alone is not revocation evidence.</p>
 </fieldset>
 <pre id="result" role="status">Ready</pre>
 <script type="module" src="/member.js"></script>
 </html>
+`;

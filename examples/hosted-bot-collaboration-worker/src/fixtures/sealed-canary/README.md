@@ -75,7 +75,7 @@ current W2 runner for sealed execution.
 2. Copy `wrangler.deployable.template.json` to
    `_ops/p9/byok-p9-canary.wrangler.jsonc` from the repository root. Its `main` path
    is already relative to that destination. Run
-   `bun examples/hosted-bot-collaboration-worker/build-member.mjs` before deploying
+   `bun examples/hosted-bot-collaboration-worker/src/build-member.mjs` before deploying
    to produce the secret-free static assets under `_ops/p9/member-assets` using
    Bun's existing bundler. The template binds that directory as `ASSETS` and runs
    the Worker first for every route. Fill only the canary Hyperdrive id.
@@ -160,7 +160,8 @@ work under #654; the W1 result is **operator-machine daemon (mini-cf)**.
 
 Browser member page (W4)
 
-The deployable entry serves `/member` and `/member.js` publicly. These two static
+The deployable entry serves GET and HEAD on `/member` and `/member.js` publicly.
+Other methods require the operator bearer before returning a method error. These static
 assets carry no deployment values or secrets and open no database connection.
 The page asks the owner to type `HOST_ADMIN_TOKEN` at run time, clears the input
 after key creation, and keeps the bearer only in the tab's memory. API requests
@@ -227,8 +228,12 @@ and requests no caching or referrer transmission.
    its result is not this browser's acceptance evidence.
 7. Remove one browser member from an active tab. From a remaining member, issue
    a fresh scope epoch and submit another task. The removed tab must report
-   `FAIL` / `member_revoked` when asked to decrypt the new task; remaining tabs
-   must report PASS with matching hashes. Record this separately for each engine.
+   `FAIL` / `member_revoked` with `scopeKey: "absent"` when asked to decrypt the
+   new task; the page queries that exact scope epoch and recipient before
+   reporting this evidence. Remaining tabs must report PASS with matching hashes.
+   Record the new task/epoch and missing-package result separately for each
+   engine. If an old epoch package is still present, the page refuses with
+   `member_revoked_scope_key_present`, which is not new-epoch revocation evidence.
    Old epoch knowledge cannot be recalled: the new task must use the new epoch.
 
 Local page-logic coverage needs no credentials, Docker or browser installation:
@@ -243,4 +248,3 @@ C1 submission, C3 inline/object opening, hash integrity, and post-removal refusa
 with another tab still decrypting. They are Node evidence. They do not execute a
 browser DOM or a deployed daemon; the physical-device and three-engine member
 rows remain for the owner's staging window. W3 owns the separate vector runner.
-

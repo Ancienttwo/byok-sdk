@@ -17,13 +17,22 @@ export type BrowserTaskTemplate = Pick<Parameters<ByokCloud['submitSealedAgentEx
 };
 export type MemberTransport = MemberCloud & { ciphertext(tenant: Tenant, taskId: string): Promise<Uint8Array> };
 type PublicJwk = MemberKeyBundleV1['signingPublicJwk'];
-export class MemberFailure extends Error {}
+export class MemberFailure extends Error {
+  constructor(reason: string, readonly scopeKey?: 'absent') { super(reason); }
+}
 function refuse(reason: string): never { throw new MemberFailure(reason); }
 type CryptoKey = Awaited<ReturnType<typeof crypto.subtle.importKey>>;
 async function chainHash({ sig: _sig, ...entry }: MemberChainEntryV1): Promise<string> { return memberChainEntryHash(entry); }
 export const sha256 = async (bytes: Uint8Array): Promise<string> =>
   Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes))), b => b.toString(16).padStart(2, '0')).join('');
 
+export function base64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 32_768) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 32_768));
+  }
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+}
 export function memberTransport(bearer: string, request: typeof fetch = fetch): MemberTransport {
   const call = async (method: string, args: unknown[]) => {
     const response = await request('/probe/call', { method: 'POST', redirect: 'error', credentials: 'omit',
@@ -189,7 +198,7 @@ export class BrowserMember {
           categories: sealing.categories, notAfter: null }, plaintext: { instruction: canary }, maxContentLength: 2 * 1024 * 1024 });
       await this.host.submitSealedAgentExecution(this.tenant, { deviceId: template.deviceId, taskId, payload: { ...template.payload,
         sealing: { ...sealing, categories: [...sealing.categories] }, sealed: { ...header, category: 'task-input',
-          ciphertext: btoa(String.fromCharCode(...ciphertext)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '') } } });
+          ciphertext: base64Url(ciphertext) } } });
       return { taskId, sha256: await sha256(new TextEncoder().encode(canary)) };
     } finally { key.fill(0); }
   }
@@ -208,7 +217,6 @@ export class BrowserMember {
   async decrypt(taskId: string, expectedHash: string): Promise<{ result: 'PASS'; sha256: string; chainLength: number }> {
     if (!/^[0-9a-f]{64}$/u.test(expectedHash)) refuse('expected_hash_required');
     const state = await this.refresh();
-    if (!state.members.has(this.member.memberId)) refuse('member_revoked');
     const [offer, terminal] = await Promise.all([this.host.readTaskOffer(this.tenant, taskId), this.host.readDeviceTerminal(this.tenant, taskId)]);
     if (!offer || terminal?.envelope.type !== 'task.complete' || terminal.envelope.task_id !== taskId) refuse('sealed_terminal_required');
     const payload = offer.payload;
@@ -217,8 +225,16 @@ export class BrowserMember {
     if (!('sealed' in wire) || !wire.sealed) refuse('sealed_terminal_required');
     const { ciphertext, ciphertextRef, ...rawHeader } = wire.sealed;
     const header = SealedContentHeaderV1Schema.parse(rawHeader);
+    if (header.category !== 'task-output' || header.scope.id !== payload.sealing.scopeId || header.scope.epoch !== payload.sealing.epoch) refuse('sealed_offer_scope_mismatch');
+    if (!state.members.has(this.member.memberId)) {
+      const { packages } = await this.host.readScopeKeyPackages(this.tenant, {
+        scopeId: header.scope.id, epoch: header.scope.epoch, recipient: this.member.memberId,
+      });
+      if (packages.length) refuse('member_revoked_scope_key_present');
+      throw new MemberFailure('member_revoked', 'absent');
+    }
     const policy = state.scopes.get(header.scope.id);
-    if (header.category !== 'task-output' || !policy?.members.includes(this.member.memberId)
+    if (!policy?.members.includes(this.member.memberId)
       || !policy.members.includes(header.sender) || !state.members.has(header.sender) || state.shredded.has(header.scope.id)) refuse('scope_not_authorized');
     const chainEntry = (await this.#entries())[header.chainHead.seq - 1];
     if (!chainEntry || await chainHash(chainEntry) !== header.chainHead.hash) refuse('terminal_chain_head_invalid');

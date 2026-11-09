@@ -16,7 +16,7 @@ interface Env {
 }
 interface Context { waitUntil(promise: Promise<unknown>): void }
 const json = (value: unknown) => new Response(encodeCanaryRpc({ value }), { headers: { 'content-type': 'application/json' } });
-const MEMBER_METHODS = [...CANARY_METHODS, 'readMemberChain', 'readScopeKeyPackages'] as const;
+export const MEMBER_METHODS = [...CANARY_METHODS, 'readMemberChain', 'readScopeKeyPackages'] as const;
 const digest = (value: string) => createHash('sha256').update(value).digest();
 
 /** Log only routing metadata and a digest: neither plain payloads nor credentials reach the tail. */
@@ -28,13 +28,15 @@ const observer: ByokCloudObserver = { onInboundCommitted({ envelope }) {
 export default {
   async fetch(request: Request, env: Env, ctx: Context): Promise<Response> {
     const route = URL.parse(request.url)!.pathname;
-    if (route === '/member' || route === '/member.js') return memberAsset(request, env.ASSETS);
+    const isMemberAsset = route === '/member' || route === '/member.js';
+    if (isMemberAsset && (request.method === 'GET' || request.method === 'HEAD')) return memberAsset(request, env.ASSETS);
     if (!route.startsWith('/byok/')) {
       if (!env.HOST_ADMIN_TOKEN) return new Response('operator secret unavailable', { status: 503 });
       const expected = digest(`Bearer ${env.HOST_ADMIN_TOKEN}`);
       const supplied = digest(request.headers.get('authorization') ?? '');
       if (!timingSafeEqual(expected, supplied)) return new Response('unauthorized', { status: 401 });
     }
+    if (isMemberAsset) return memberAsset(request, env.ASSETS);
     if (!env.BYOK_TOKEN_SECRET || !/^[0-9a-f]{64}$/u.test(env.BYOK_TOKEN_SECRET)) {
       return new Response('token key unavailable', { status: 503 });
     }

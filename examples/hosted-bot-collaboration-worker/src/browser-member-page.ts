@@ -23,7 +23,8 @@ function action(id: string, run: () => Promise<void>) {
     const enabled = [...document.querySelectorAll<HTMLButtonElement>('button')].filter(button => !button.disabled);
     enabled.forEach(button => { button.disabled = true; });
     try { await run(); }
-    catch (error) { report({ result: 'FAIL', reason: error instanceof MemberFailure ? error.message : 'operation_failed' }); }
+    catch (error) { report({ result: 'FAIL', reason: error instanceof MemberFailure ? error.message : 'operation_failed',
+      ...(error instanceof MemberFailure && error.scopeKey ? { scopeKey: error.scopeKey } : {}) }); }
     finally { enabled.forEach(button => { button.disabled = false; }); }
   });
 }

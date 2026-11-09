@@ -1,12 +1,15 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createByokCloud, createInMemoryByokCloud, createHmacTokenSigner, fullCapabilityDeclaration,
   InMemoryE2eeMemberStore, tenantId, type DeviceTerminal, type TaskOfferReadback } from '@byok-sdk/cloud';
 import { computeDevicePairingMac, createMemberKeyBundle, parsePairingInput, memberApprovalCode,
   verifyClientPairingMac, openScopeKeyPackage, openSealedContent, sealContent } from '@byok-sdk/core/sealed-payload';
 import { template } from '../../host-execution-core/src/test-support';
-import { BrowserMember, memberTransport, sha256 } from './browser-member';
+import { BrowserMember, base64Url, memberTransport, sha256 } from './browser-member';
 import { memberAsset, readMemberCiphertext } from './member-readback';
-import deployable from './fixtures/sealed-canary/deployable-worker';
+import deployable, { MEMBER_METHODS } from './fixtures/sealed-canary/deployable-worker';
 
 const tenant = tenantId('browser-canary'), deviceId = 'device-browser', scopeId = 'browser-scope';
 const summary = 'local-browser-canary-secret';
@@ -32,7 +35,8 @@ async function fixture() {
     const request = new Request(`https://canary.invalid${url}`, init);
     if (request.headers.get('authorization') !== 'Bearer local-operator') return new Response('', { status: 401 });
     if (url === '/member/ciphertext') return readMemberCiphertext(request, reads, blobs, objectFetch);
-    const { method, args } = await request.json() as { method: string; args: never[] };
+    const { method, args } = await request.json() as { method: typeof MEMBER_METHODS[number]; args: never[] };
+    if (!MEMBER_METHODS.includes(method)) return new Response('unknown canary method', { status: 404 });
     const api = { ...cloud, ...reads };
     const call = api[method as keyof typeof api] as (...args: never[]) => Promise<unknown>;
     const value = await call(...args);
@@ -84,6 +88,23 @@ async function fixture() {
   }
   return { browser, device, bundle, transport, cloud, store, pairing, register, paired, terminal, terminals, objects, blobs, objectFetch, reads };
 }
+
+it('builds the deployable HTML and browser bundle through the example suite', () => {
+  execFileSync('bun', [fileURLToPath(new URL('./build-member.mjs', import.meta.url))], { stdio: 'pipe' });
+  const output = new URL('../../../_ops/p9/member-assets/', import.meta.url);
+  expect(readFileSync(new URL('index.html', output), 'utf8')).toContain('<script type="module" src="/member.js"></script>');
+  expect(readFileSync(new URL('member.js', output)).byteLength).toBeGreaterThan(0);
+});
+
+it('keeps every browser RPC method in the deployable allowlist', () => {
+  const methods = Object.keys(memberTransport('local-operator')).filter(method => method !== 'ciphertext');
+  expect(MEMBER_METHODS).toEqual(expect.arrayContaining(methods));
+});
+
+it.each([0, 1, 32_768, 262_144])('encodes %s ciphertext bytes in bounded base64 chunks', length => {
+  const bytes = Uint8Array.from({ length }, (_, index) => index % 256);
+  expect(base64Url(bytes)).toBe(Buffer.from(bytes).toString('base64url'));
+});
 
 it('adds self at genesis and keeps both private keys non-extractable', async () => {
   const f = await fixture();
@@ -169,9 +190,10 @@ it('removes one tab, rotates the scope, refuses its next decrypt and lets the re
   await f.terminal();
   expect((await other.decrypt('task-browser', await hash())).result).toBe('PASS');
   await f.browser.revoke(other.member.memberId);
+  await expect(other.decrypt('task-browser', await hash())).rejects.toThrow('member_revoked_scope_key_present');
   await f.browser.scope(scopeId, 2);
   await f.terminal('task-after-remove', 2, true);
-  await expect(other.decrypt('task-after-remove', await hash())).rejects.toThrow('member_revoked');
+  await expect(other.decrypt('task-after-remove', await hash())).rejects.toMatchObject({ message: 'member_revoked', scopeKey: 'absent' });
   expect((await f.browser.decrypt('task-after-remove', await hash())).result).toBe('PASS');
   expect((await f.cloud.readScopeKeyPackages(tenant, { scopeId, epoch: 2, recipient: other.member.memberId })).packages).toEqual([]);
 });
@@ -196,6 +218,22 @@ it('refuses another tenant or task ciphertext and ignores caller-supplied blob i
   }
   expect(f.blobs.getDownloadUrl).not.toHaveBeenCalled();
   expect(f.objectFetch).not.toHaveBeenCalled();
+});
+
+it.each(['/member', '/member.js'])('exempts only GET and HEAD from bearer authentication on %s', async path => {
+  const assets = { fetch: vi.fn(async (_request: Request) => new Response('static asset')) };
+  const env = { ASSETS: assets, HOST_ADMIN_TOKEN: 'local-operator', BYOK_PG: { connectionString: 'unused' }, BYOK_CANARY_STORAGE: '{}' };
+  const ctx = { waitUntil: vi.fn() };
+  for (const method of ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
+    for (const authorized of [false, true]) {
+      const headers = new Headers(authorized ? { authorization: 'Bearer local-operator' } : undefined);
+      const response = await deployable.fetch(new Request(`https://canary.invalid${path}`, { method, headers }), env, ctx);
+      const isRead = method === 'GET' || method === 'HEAD';
+      expect(response.status, `${method} ${path} authorized=${authorized}`).toBe(isRead ? 200 : authorized ? 405 : 401);
+    }
+  }
+  expect(assets.fetch).toHaveBeenCalledTimes(4);
+  expect(ctx.waitUntil).not.toHaveBeenCalled();
 });
 
 it('serves secret-free assets publicly while all member APIs require the operator bearer', async () => {
