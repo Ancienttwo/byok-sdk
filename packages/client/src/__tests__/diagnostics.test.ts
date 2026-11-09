@@ -665,6 +665,21 @@ describe('doctor explicit fix', () => {
     expect(await fs.readFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), 'utf8')).toBe('{bad');
   });
 
+  it('accepts a quarantine directory that a concurrent attempt created first', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), '{bad');
+    const realMkdir = fs.mkdir.bind(fs);
+    const mkdir = vi.spyOn(fs, 'mkdir').mockImplementation(async (target, options) => {
+      if (target === path.join(dir, 'quarantine')) await realMkdir(target, options);
+      return realMkdir(target, options);
+    });
+    try {
+      await expect(quarantineCorruptOperationalHealth(dir)).resolves.toBeDefined();
+    } finally {
+      mkdir.mockRestore();
+    }
+  });
+
   it('pins the checked quarantine directory inode and refuses a raced symlink before writing evidence', async () => {
     const dir = await tempDir();
     const outside = await tempDir();
