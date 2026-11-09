@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2344219,
+      "budgetBytes": 2344728,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
