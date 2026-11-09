@@ -90,7 +90,10 @@ describe('control socket fallback: a fixed root, immune to TMPDIR', () => {
       await expect(conn.client.request('ping')).resolves.toBe('pong');
       conn.client.close();
 
-      // Closing the server reclaims the private fallback directory too.
+      // One directory per store used to survive every daemon it ever hosted:
+      // unlinking the socket left the 0700 parent behind. It exists while the
+      // server runs and is gone after close().
+      expect(await fs.stat(path.dirname(endpoint)).then((st) => st.isDirectory())).toBe(true);
       await handle.close();
       await expect(fs.lstat(path.dirname(endpoint))).rejects.toMatchObject({ code: 'ENOENT' });
     });
@@ -119,23 +122,6 @@ describe('control socket fallback: a fixed root, immune to TMPDIR', () => {
 });
 
 describe('control socket fallback: the directory it binds in does not outlive the daemon', () => {
-  it('G: close() removes the fallback directory, not just the socket inside it', async () => {
-    if (process.platform === 'win32') return; // a pipe leaves no directory behind
-    const storeDir = await tooLongStoreDir();
-    const endpoint = controlSocketPath(storeDir);
-    const fallbackDir = path.dirname(endpoint);
-    expect(fallbackDir).not.toBe(storeDir); // the branch under test actually ran
-
-    const handle = await startControlServer({ storeDir, productId: 'acme', methods: pingMethods() });
-    expect(await fs.stat(fallbackDir).then((s) => s.isDirectory())).toBe(true);
-
-    await handle.close();
-    // One directory per store used to survive every daemon it ever hosted:
-    // unlinking the socket left the 0700 parent behind, keyed by the store, so
-    // a machine accumulated one per store that took the long-path branch.
-    await expect(fs.stat(fallbackDir)).rejects.toMatchObject({ code: 'ENOENT' });
-  }, 60_000);
-
   it('I: the directory vanishing before its ownership check is retried, not fatal', async () => {
     if (process.platform === 'win32') return;
     const storeDir = await tooLongStoreDir();

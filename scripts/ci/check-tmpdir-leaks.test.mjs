@@ -57,18 +57,6 @@ describe('check-tmpdir-leaks', () => {
     assert.deepEqual(findNewEntries(['byok-a'], ['byok-a', 'byok-b']), ['byok-b']);
   });
 
-  it('also rejects a socket fallback directory leaked into the fixed short root', { skip: process.platform === 'win32' }, () => {
-    assert.equal(run('snapshot').status, 0);
-    const leaked = mkdtempSync('/tmp/byok-store-mutex-');
-    try {
-      const result = run('verify');
-      assert.equal(result.status, 1, result.stdout);
-      assert.match(result.stderr, new RegExp(path.basename(leaked)));
-    } finally {
-      rmSync(leaked, { recursive: true });
-    }
-  });
-
   it('also rejects a long-path socket fallback leaked into the fixed short root', { skip: process.platform === 'win32' }, () => {
     assert.equal(run('snapshot').status, 0);
     // `byok-<store hash>` and `byok-store-mutex-<store hash>` are the other two
