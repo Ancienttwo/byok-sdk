@@ -1,6 +1,6 @@
 # Host upgrade to 0.41.0
 
-Use this checklist for a Host moving from 0.40.0 to 0.41.0. Earlier Hosts must first apply the [0.40.0 checklist](host-upgrade-0.40.0.md) and its predecessors. The release commit is main `2895560b3`; pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
+Use this checklist for a Host moving from 0.40.0 to 0.41.0. Earlier Hosts must first apply the [0.40.0 checklist](host-upgrade-0.40.0.md) and its predecessors. The release commit is main `2895560b3`; tag `v0.41.0` points to it and all nine packages are on npm `latest`. Pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
 
 ## Stores
 
@@ -108,7 +108,7 @@ The [upgrade manifest](../../packages/client/upgrade-history/0.40.0-0.41.0.json)
 
 0.41.0 moves the wire to v6 and has no new `deploy/sql` migration and no SQLite schema change; the keys profile store migration above applies only to a store written with an earlier `provider_kind` CHECK set.
 
-- [ ] Record the release commit, tag and publication; archive the release manifest.
+- [x] Release commit, tag and publication recorded; the release manifest is archived.
 - [ ] Review every final breaking entry and pin the release graph.
 - [ ] Apply the backup, stop, precheck, smoke and rollback gates in the [0.39.0 checklist](host-upgrade-0.39.0.md#checklist), adjusted to the 0.41.0 authorities, and upgrade the server side and the daemons together.
 - [ ] Walk affected flows on each target platform, including the keys profile store migration, bundles that used the sealed host import, single-file Pi subagents, Codex `excluded` where enabled, and OpenCode on macOS where enabled.
