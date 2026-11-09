@@ -36,9 +36,9 @@ the runtime does instead.
 | Prepared lane | `preparedLane` | no | no | no | no | no | no | no | yes | no |
 | Durable worker lane | `durableLane` | no | no | no | no | no | no | no | no | yes |
 | Keeps user-level instructions out | `isolation.userInstructions` | yes | yes | no | yes | no | yes | no | yes | no |
-| Keeps the user output style out | `isolation.userOutputStyle` | yes (no source) | no | no | no | no | yes | no | no | no |
-| Keeps user-level memory out | `isolation.userMemory` | no | no | no | no | no | yes | no | no | no |
-| Keeps user skills out | `isolation.userSkills` | yes | no | no | no | no | yes | no | no | no |
+| Keeps the user output style out | `isolation.userOutputStyle` | yes (no source) | yes | no | yes | no | yes | no | no | no |
+| Keeps user-level memory out | `isolation.userMemory` | no | yes | no | yes (no source) | no | yes | no | no | no |
+| Keeps user skills out | `isolation.userSkills` | yes | no | no | yes | no | yes | no | no | no |
 | Keeps user hook context out | `isolation.userHookContext` | yes | no | no | no | no | yes | no | no | no |
 | Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | yes | no | no | no |
 | Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no | no |

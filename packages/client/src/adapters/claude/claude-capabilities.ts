@@ -15,7 +15,7 @@ export const CLAUDE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   messageDraft: true,
   preparedLane: false,
   isolation: Object.freeze({
-    userInstructions: true, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false,
+    userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: false, userHookContext: false,
     userMcpServers: true, sessionPersistence: true,
   }),
 });
