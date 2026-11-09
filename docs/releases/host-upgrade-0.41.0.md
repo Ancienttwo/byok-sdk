@@ -101,6 +101,7 @@ The [upgrade manifest](../../packages/client/upgrade-manifest.json) lists every 
 - `copySdkNativeAssets` accepts an optional absolute `archivePath` to a local copy of the pinned Koffi tgz; the integrity checks are unchanged.
 - Claude `agentUserContext: 'excluded'` also leaves the user output style out of a new Agent task session.
 - An execution claim that meets a brief non-task holder of the agent-home writer lock waits at most 5 s, then declines with `agent_home_writer_busy` as before (#1604). On Windows, admitted session environment names take their canonical spelling (#1611), and `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `PI_CODING_AGENT_DIR` from the user's session reach the runtime (#1595). A closing daemon no longer removes a successor's sockets (#1610).
+- Under the `auto` gate, a pi-subagents `subagent_launch` is admitted only as a nested call of a `subagent` call the gate allowed in that session; any other `subagent_launch`, such as one through `tool_search` or codemode, is refused with `tool_authorization_denied`. In file-scoped sessions, each workflow child asks (#1589).
 - Daemon-local completion events, `Daemon.tasks()` terminal state and execution records wait for the first finalization attempt to settle, up to about 1s later than before. Wire and cloud completion signals are unchanged.
 
 ## Release and verification checklist
