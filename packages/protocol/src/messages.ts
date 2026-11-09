@@ -157,7 +157,7 @@ export const RuntimeInfoSchema = z.object({
   authPresent: z.boolean().optional(),
   /** Optional: older daemons omit this entirely (pre-freeze addition). */
   capabilities: RuntimeCapabilitiesSchema.optional(),
-  /** #1103 D8: strip-safe discovery projection; absent means unknown. */
+  /** #1103 D8: discovery projection; absent means unknown. */
   versionPolicy: RuntimeVersionPolicyProjectionSchema.optional(),
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
@@ -283,7 +283,7 @@ export const ConnHelloPayloadSchema = z.object({
   /** Runtimes detected on this device (M1 gap #4; replaces `agents`). */
   runtimes: z.array(RuntimeInfoSchema).optional(),
   harnesses: HarnessInventorySchema.optional(),
-  /** #1103 D8: non-available runtimes and harnesses; strip-safe and absent means unknown. */
+  /** #1103 D8: non-available runtimes and harnesses; absent means unknown. */
   runtimeUnavailable: RuntimeUnavailableListSchema.optional(),
   /** Validated logical IDs configured on this device; definitions and secrets stay local. */
   configuredToolsets: ConfiguredToolsetsSchema.optional(),

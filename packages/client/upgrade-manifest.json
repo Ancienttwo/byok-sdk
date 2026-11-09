@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "48c8bdb52684253c1b2c5c89925d5801f797824abd8a010d04326851105e73d4"
+    "snapshotSha256": "7b4bdbd5aa3ffd791d8ba9e2ab94c16312800c730303e781737c1213fc27bd54"
   },
   "configFields": {
     "status": "tracked",
@@ -48,10 +48,11 @@
     {
       "id": "wire-v6-retired-gates",
       "impact": "breaking",
-      "summary": "Wire v6 retires every v5 gate that both sides always advertised. The server flags agent-message-draft, runtime-failure-class, runtime-quota-scope, resident-memory-over-limit, sealed-output-ciphertext-ref and mailbox-read-ahead are gone, the sealed and native-sessions decline codes need no flag, and the reference server advertises no server flag (CLOUD_PROTOCOL_CAPABILITIES is empty): every daemon-to-server surface is baseline, and the server accepts a sealed one by the task's frozen sealing. The device flags custom-harness, terminal-projection-selection, blob-upload and runtime-unavailable-cause are gone, so an offer with harnessId or terminalProjection needs no flag and conn.hello harnesses no longer need custom-harness (the refusal hello_harnesses_without_capability is removed). Their constants leave CAPABILITY_FLAGS and @byok-sdk/protocol. WIRE_ADDITIONS has no strip-safe rows and WireAddition is the gated row only. Device flags a daemon advertises by configuration, such as agent-home-contract, agent-egress-reliable-ack, native-sessions and sealed-payload-v1, still gate. Presence runtimeUnavailable takes a custom harness id, like conn.hello. A Host that tested for a retired flag drops the check; upgrade server and daemons together.",
+      "summary": "Wire v6 retires every v5 gate that both sides always advertised. The server flags agent-message-draft, runtime-failure-class, runtime-quota-scope, resident-memory-over-limit, sealed-output-ciphertext-ref and mailbox-read-ahead are gone, the sealed and native-sessions decline codes need no flag, and the reference server advertises no server flag (CLOUD_PROTOCOL_CAPABILITIES is empty): every daemon-to-server surface is baseline, and the server accepts a sealed one by the task's frozen sealing. The device flags custom-harness, terminal-projection-selection, blob-upload and runtime-unavailable-cause are gone, so an offer with harnessId or terminalProjection needs no flag and conn.hello harnesses no longer need custom-harness (the refusal hello_harnesses_without_capability is removed). Their constants leave CAPABILITY_FLAGS and @byok-sdk/protocol. WIRE_ADDITIONS has no strip-safe rows and WireAddition is the gated row only. Device flags a daemon advertises by configuration, such as agent-home-contract, agent-egress-reliable-ack, native-sessions and sealed-payload-v1, still gate. The Agent egress drop reason capability_missing is removed: the daemon re-sends unacknowledged reliable egress on every session open. Presence runtimeUnavailable takes a custom harness id, like conn.hello. A Host that tested for a retired flag drops the check; upgrade server and daemons together.",
       "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1573",
       "items": [
         "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/protocol#AgentEgressDropReasonSchema",
         "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
         "export:@byok-sdk/protocol#CUSTOM_HARNESS_CAPABILITY",
         "export:@byok-sdk/protocol#MAILBOX_READ_AHEAD_CAPABILITY",
@@ -115,6 +116,11 @@
       "item": "export:@byok-sdk/keys#migrateProviderProfileStore",
       "change": "added",
       "entry": "keys-profile-store-migration"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEgressDropReasonSchema",
+      "change": "changed",
+      "entry": "wire-v6-retired-gates"
     },
     {
       "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",

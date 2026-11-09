@@ -10,8 +10,8 @@
  *   carries the field (and, with `value`, when the field equals it, or when
  *   the field is an array that includes it); a dotted field names a nested
  *   field, for example `sealed.ciphertextRef`. A type entry applies to every
- *   message of that type. Server-to-daemon surfaces
- *   are gated by a device flag, daemon-to-server surfaces by a server flag.
+ *   message of that type. Only server-to-daemon surfaces are gated, each by a
+ *   device flag: wire v6 has no server flag.
  *
  * v3 baseline: every v3 decoder reads every surface v2 had, so the v2
  * strip-safe rows and the v2 `result-document` gate are gone. The device

@@ -105,8 +105,7 @@ export function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREP
 }
 
 /**
- * A device can run the native-session lane. A server understands the V1
- * `nativeSessions` offer field, resolves `ifAdvertised` at enqueue, and accepts
- * the `native_sessions_unsupported` decline code.
+ * A device can run the native-session lane: a Host sends an offer with
+ * `nativeSessions` only to a device that advertises it.
  */
 export const NATIVE_SESSIONS_CAPABILITY = 'native-sessions' as const;

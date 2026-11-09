@@ -101,8 +101,7 @@ const TERMINAL_TYPES: ReadonlySet<MessageType> = new Set(['task.complete', 'task
 
 /**
  * A seal that may succeed later: its ciphertext upload failed short of a
- * final refusal, or the server flags are not known until the next session.
- * The caller seals again later.
+ * final refusal. The caller seals again later.
  */
 class SealedRetryError extends Error {}
 

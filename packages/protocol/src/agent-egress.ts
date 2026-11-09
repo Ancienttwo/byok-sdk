@@ -117,7 +117,6 @@ export type AgentEgressLane = z.infer<typeof AgentEgressLaneSchema>;
 /** Every refusal/replacement is observable rather than silently degrading to another lane. */
 export const AgentEgressDropReasonSchema = z.enum([
   'policy_denied',
-  'capability_missing',
   'quota_exceeded',
   'backpressure',
   'coalesced',

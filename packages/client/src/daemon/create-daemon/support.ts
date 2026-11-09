@@ -95,15 +95,14 @@ export function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIde
 
 /**
  * Runtimes actually detected as present on this device, typed per protocol
- * §10 gap #4 (`ConnHelloPayload.runtimes`), plus the strip-safe
+ * §10 gap #4 (`ConnHelloPayload.runtimes`), plus the optional
  * `runtimeUnavailable` projection of every non-available adapter (#1103 B2b).
  * Computed once at `start()` — re-probing on every reconnect would mean
  * re-spawning each runtime's `--version` check for no real benefit within one
  * daemon lifetime.
  *
  * The unavailable list carries the existing identity domain (built-in runtime
- * or custom harness id) on `conn.hello`; presence filters it to built-in
- * runtime ids, because that id domain is frozen on the HTTP body.
+ * or custom harness id) on `conn.hello` and presence alike.
  */
 export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
   runtimes: RuntimeInfo[];
@@ -165,8 +164,7 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
 /**
  * M0 gatekeeper finding ②: advertise only what this device can actually do,
  * not a static spread of every known flag. `steer` reflects whether any
- * configured adapter can express it; `blob-upload` is unconditional now
- * that the blob client (protocol §7) genuinely implements it.
+ * configured adapter can express it.
  */
 export function computeCapabilities(
   adapters: RuntimeAdapter[],

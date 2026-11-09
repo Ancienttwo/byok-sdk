@@ -94,7 +94,6 @@ export type AgentEgressLane = z.infer<typeof AgentEgressLaneSchema>;
 export declare const AgentEgressDropReasonSchema: z.ZodEnum<{
     ack_mismatch: "ack_mismatch";
     backpressure: "backpressure";
-    capability_missing: "capability_missing";
     coalesced: "coalesced";
     disconnected: "disconnected";
     invalid_envelope: "invalid_envelope";
@@ -2014,9 +2013,8 @@ export declare const RUNTIME_QUOTA_SCOPES: readonly ['account', 'model'];
 export declare const PREPARED_AGENT_MEMORY_MODES: readonly ['none', 'read', 'read-write'];
 export declare function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number];
 /**
- * A device can run the native-session lane. A server understands the V1
- * `nativeSessions` offer field, resolves `ifAdvertised` at enqueue, and accepts
- * the `native_sessions_unsupported` decline code.
+ * A device can run the native-session lane: a Host sends an offer with
+ * `nativeSessions` only to a device that advertises it.
  */
 export declare const NATIVE_SESSIONS_CAPABILITY: 'native-sessions';
 // ==== @byok-sdk/protocol dist/codec.d.ts ====
@@ -9248,8 +9246,8 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  *   carries the field (and, with `value`, when the field equals it, or when
  *   the field is an array that includes it); a dotted field names a nested
  *   field, for example `sealed.ciphertextRef`. A type entry applies to every
- *   message of that type. Server-to-daemon surfaces
- *   are gated by a device flag, daemon-to-server surfaces by a server flag.
+ *   message of that type. Only server-to-daemon surfaces are gated, each by a
+ *   device flag: wire v6 has no server flag.
  *
  * v3 baseline: every v3 decoder reads every surface v2 had, so the v2
  * strip-safe rows and the v2 `result-document` gate are gone. The device
