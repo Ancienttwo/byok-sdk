@@ -429,7 +429,7 @@ function windowsLogonBase(logon: Extract<WindowsLogonRegistry, { source: 'regist
   const pathValue = scope.get('PATH');
   const pathext = scope.get('PATHEXT');
   return {
-    ...(pathValue === undefined || pathValue.length === 0 ? {} : { Path: pathValue }),
+    ...(pathValue === undefined || pathValue.length === 0 ? {} : { PATH: pathValue }),
     ...(pathext === undefined ? {} : { PATHEXT: pathext }),
   };
 }
@@ -579,10 +579,21 @@ export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput)
   const denied = new Set<string>();
   const admit = (source: Readonly<Record<string, string | undefined>>, admitted: (name: string) => boolean): Record<string, string> => {
     const result: Record<string, string> = {};
-    for (const [name, value] of Object.entries(source)) {
+    const names = Object.keys(source);
+    // Node sends the lexicographically first spelling of a win32 name to a child.
+    if (caseInsensitive) names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+    for (const name of names) {
+      const value = source[name];
       if (value === undefined || !admitted(name)) continue;
       if (matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive)) denied.add(name);
-      else result[name] = value;
+      else {
+        // Use the session list's spelling for SDK reads as well as child lookups.
+        // Prefix entries (LC_*, XDG_*) canonicalize the whole name to upper case.
+        const pattern = caseInsensitive ? WINDOWS_SESSION_NAMES.find((pattern) => matchesPattern(name, pattern, true)) : undefined;
+        let canonical = name;
+        if (pattern !== undefined) canonical = pattern.endsWith('*') ? name.toUpperCase() : pattern;
+        if (!Object.hasOwn(result, canonical)) result[canonical] = value;
+      }
     }
     return result;
   };
