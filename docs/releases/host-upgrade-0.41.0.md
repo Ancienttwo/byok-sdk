@@ -17,6 +17,10 @@ The migration runs in one SQLite transaction under the exclusive write lock. It 
 - `PROVIDER_STORE_SCHEMA_STALE`: the store has another schema difference, or the copied rows did not verify. It cannot be migrated; keep it, provision a separate current-schema store and re-enter keys.
 - Any other error, such as `SQLITE_BUSY` or an I/O error, is operational. The transaction rolled back; close the other processes that use the store and call the migration again. Do not provision a new store for it.
 
+## Sealed host removed
+
+The private import `#byok-pi-runtime-host-sealed` no longer exists. If your bundler redirects `#byok-pi-runtime-host` to it, delete the redirect; the bundle then takes `#byok-pi-runtime-host` and needs the Pi asset root from [Single-file Pi asset root](#single-file-pi-asset-root).
+
 ## Single-file Pi asset root
 
 A single-file product rebuilds its Pi asset root with `copyPiRuntimeAssets` from this client, as on every upgrade. The root now also holds `pi-subagents/` (the client's exact pi-subagents 0.87.0 with its runtime dependencies) and `pi-subagent-extensions/`, about 22 MB more. Ship both directories with the product. A Pi launch from an asset root built by an earlier client fails with `pi_bundled_assets_unavailable`. The product's Pi then offers foreground subagents under the same rules as the installed host; background subagent runs are refused with a tool error. See the spec section [Pi subagents](../spec.md#pi-subagents).

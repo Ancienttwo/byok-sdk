@@ -31,7 +31,6 @@ beforeAll(() => {
     await require('esbuild').build({
       stdin:{contents:${JSON.stringify(entry)},resolveDir:${JSON.stringify(clientRoot)},loader:'ts'},
       outfile:${JSON.stringify(host)},bundle:true,packages:'external',platform:'node',format:'esm',target:'es2022',
-      define:{__BYOK_PI_SUBAGENTS__:'true'}
     });
   `);
   const result = spawnSync(bun, ['--no-install', driver], { cwd: clientRoot, encoding: 'utf8', timeout: 20_000 });

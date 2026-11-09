@@ -21,8 +21,6 @@ import { createPiFileScopeExtension } from '../adapters/pi/file-scope-extension'
 import { assertPiFileScopeRegistry } from '../adapters/pi/file-scope-registry';
 import { createPiMemoryLane, assertPiMemoryToolLoadout } from './pi-memory-lane';
 
-declare const __BYOK_PI_SUBAGENTS__: boolean;
-
 const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
 export { parsePiHostReadyEvent, type PiHostReadyEvent } from '../adapters/pi/host-ready';
@@ -267,8 +265,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   ];
   // pi-subagents reads its own package files at run time: the installed host
   // imports the installed dependency, and a bundled product hands the copy in
-  // its Pi asset root to Pi's extension loader (the sealed build drops this
-  // branch). Under keys-profile a child session opens its own model runtime
+  // its Pi asset root to Pi's extension loader. Under keys-profile a child session opens its own model runtime
   // and would read the key marker from the projection, not the in-memory key.
   //
   // A file-scoped parent does offer native subagents, but only through the
@@ -279,7 +276,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   // register, so an unscoped child never appears. bash/MCP/extensions remain
   // per-call approval.
   const subagentExtensionPaths: string[] = [];
-  if (__BYOK_PI_SUBAGENTS__ && config.credentialSource !== 'keys-profile') {
+  if (config.credentialSource !== 'keys-profile') {
     const fileScoped = config.fileScope !== null && config.toolAuthorization !== null;
     if (packaging === 'installed') {
       const gateExtension = fileURLToPath(new URL('./pi-subagent-gate.js', import.meta.url));

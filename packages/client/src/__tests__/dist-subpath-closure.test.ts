@@ -1,6 +1,7 @@
 /** Client-owned lazy boundaries. Dependency policies live in entries.json. */
 import { parse, type Node } from 'acorn';
 import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -37,6 +38,31 @@ describe('client build and private lazy entry boundaries', () => {
     const root = readFileSync(path.join(DIST, 'index.js'), 'utf8');
     expect(staticImports(root).filter(name => name.includes('@earendil-works/'))).toEqual([]);
     expect(root).toMatch(/import\(["']#byok-pi-runtime-host["']\)/);
+  });
+
+  it('loads pi-subagents and TypeBox from installed packages, ships the child gate entry, and leaves no build metadata in dist', () => {
+    const manifest = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
+    const host = readFileSync(path.join(DIST, 'bin/pi-runtime-host.js'), 'utf8');
+    // Opaque specifiers: a product bundler cannot inline the package.
+    expect(host).not.toMatch(/(?:from|import\()\s*['"]pi-subagents/u);
+    expect(host).toMatch(/=\s*["']pi-subagents["']/u);
+    expect(host).toMatch(/=\s*["']pi-subagents\/required-child-extensions["']/u);
+    expect(manifest.dependencies['pi-subagents']).toBe('0.87.0');
+    expect(manifest.devDependencies?.['pi-subagents']).toBeUndefined();
+    const installedVersion = (name: string) => {
+      let dir = path.dirname(createRequire(path.join(DIST, 'bin/pi-runtime-host.js')).resolve(name));
+      while (!existsSync(path.join(dir, 'package.json'))) dir = path.dirname(dir);
+      return JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')) as { name: string; version: string };
+    };
+    expect(installedVersion('pi-subagents')).toMatchObject({ name: 'pi-subagents', version: '0.87.0' });
+    const gate = readFileSync(path.join(DIST, 'bin/pi-subagent-gate.js'), 'utf8');
+    expect(gate).toContain('tool_authorization_unavailable');
+    expect(gate).not.toMatch(/(?:from|import\()\s*['"]@earendil-works\//u);
+    expect(manifest.dependencies.typebox).toBe('1.3.27');
+    expect(installedVersion('typebox').version).toBe('1.3.27');
+    expect(host).not.toMatch(/["']typebox\/compile["']/u);
+    expect(existsSync(path.join(DIST, 'bin/metafile-esm.json'))).toBe(false);
+    expect(existsSync(path.join(DIST, 'assets/provenance/pi-subagents'))).toBe(false);
   });
 
   it('keeps todo initialization behind its sole private literal lazy entry', () => {
