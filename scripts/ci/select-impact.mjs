@@ -73,6 +73,7 @@ export const workspaceGraph = {
       "@byok-sdk/client",
       "@byok-sdk/cloud",
       "@byok-sdk/cloud-dataplane",
+      "@byok-sdk/core",
       "@byok-sdk/example-bot-collaboration",
       "@byok-sdk/example-host-execution-core",
       "@byok-sdk/example-hosted-bot-collaboration",

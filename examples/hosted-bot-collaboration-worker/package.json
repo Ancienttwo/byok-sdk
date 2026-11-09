@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "description": "The hosted (H) Bot collaboration Host composed as a Cloudflare Worker, run on local workerd",
-  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run", "test:browser": "vitest run --config src/browser/vitest.config.ts" },
   "dependencies": {
+    "@byok-sdk/core": "workspace:*",
     "@byok-sdk/cloud": "workspace:*",
     "@byok-sdk/cloud-dataplane": "workspace:*",
     "@byok-sdk/example-bot-collaboration": "workspace:*",
@@ -14,6 +15,6 @@
     "@byok-sdk/example-hosted-bot-collaboration": "workspace:*",
     "pg": "^8.22.0"
   },
-  "devDependencies": { "@byok-sdk/client": "workspace:*", "@types/node": "^24", "@types/pg": "^8.23.1", "tsx": "^4.23.15", "typescript": "^7.0.2", "vitest": "^5.1.0",
+  "devDependencies": { "@byok-sdk/client": "workspace:*", "@types/node": "^24", "@types/pg": "^8.23.1", "tsx": "^4.23.15", "typescript": "^7.0.2", "vitest": "5.1.0",
     "wrangler": "4.158.0" }
 }
