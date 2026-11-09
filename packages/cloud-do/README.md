@@ -4,11 +4,11 @@ This package hosts a pi-durable session in a Cloudflare Durable Object.
 It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
-The current stable release is 0.40.0, in the nine-package release set,
+The current stable release is 0.41.0, in the nine-package release set,
 published on npm `latest`. From 0.28.2, keys carries the same version. The npm
-registry read of 2026-11-08 (UTC) lists 0.40.0 as `latest` for all nine
-packages. See the [release notes](../../docs/releases/v0.40.0.md).
-The earlier stable releases were 0.39.0 (published 2026-11-06, UTC), 0.38.0 and 0.37.0 (published 2026-11-04,
+registry read of 2026-11-09 (UTC) lists 0.41.0 as `latest` for all nine
+packages. See the [release notes](../../docs/releases/v0.41.0.md).
+The earlier stable releases were 0.40.0 (published 2026-11-08, UTC), 0.39.0 (published 2026-11-06, UTC), 0.38.0 and 0.37.0 (published 2026-11-04,
 UTC), 0.36.0
 (published 2026-11-03, UTC), 0.35.0
 and 0.34.0 (published 2026-11-02,
@@ -57,7 +57,7 @@ The package needs Node 24.22.1 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the 0.41.0 source candidate, pending publication.
+The following install example names the current stable release, 0.41.0.
 Use an installed package to verify the consumer path.
 
 ~~~sh

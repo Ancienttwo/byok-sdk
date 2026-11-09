@@ -948,11 +948,10 @@ their source contract rather than being assigned invented release versions:
   [the shared approval path](security.md#3-shared-approval-path).
 
 <!-- generated:migrations:start -->
-Manifest transition: **0.40.0 → 0.41.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
+Manifest transition: **0.41.0 → 0.41.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
-| codex-agent-user-context | additive | CodexAdapterOptions.agentUserContext and DaemonConfig.runtimes.codex.agentUserContext: excluded runs a Codex Agent task in an SDK-owned CODEX_HOME of symbolic links to the user's auth.json, config.toml, hooks.json and rules, with sessions and archived_sessions in the Agent's own store <Agent home>/.byok/codex, so the user's AGENTS.md, skills, memories and threads stay out; plugins and the memory pipeline are off. Codex now declares isolation.userInstructions and isolation.userMemory. A Bot switched from inherit to excluded cannot resume its earlier threads (fails closed as a missing thread). The new retention class agent-runtime-sessions is exempt and unbounded until the Host removes the Agent home. The start refuses without a sealed Agent home, with a credential store other than file, without the user auth.json and, on Windows, on an account that may not create symbolic links. Default inherit changes nothing. [Migration](../docs/adapter-capabilities.md#agentusercontext-codex) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

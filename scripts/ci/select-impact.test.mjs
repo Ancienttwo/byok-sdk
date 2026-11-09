@@ -488,7 +488,7 @@ test('upgrade-manifest data files select the script checks', () => {
   assert.deepEqual(selectImpact(['packages/client/upgrade-history/0.31.0-0.32.0.json']), {
     dirs: [], files: ['packages/client/upgrade-history/0.31.0-0.32.0.json'], families: ['npm-release-pack'], reason: 'impacted',
   });
-  assert.throws(() => selectImpact(['packages/client/upgrade-history/0.40.0-0.40.0.json']), /reviewed CI mapping required/i);
+  assert.throws(() => selectImpact(['packages/client/upgrade-history/0.41.0-0.41.0.json']), /reviewed CI mapping required/i);
 });
 
 // #1102: the store precheck fixtures run the suites of the three inspectors (and their dependents).

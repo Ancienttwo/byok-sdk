@@ -1,6 +1,6 @@
 # Host upgrade to 0.41.0
 
-Use this checklist for a Host moving from 0.40.0 to 0.41.0. Earlier Hosts must first apply the [0.40.0 checklist](host-upgrade-0.40.0.md) and its predecessors. The source base is main `1874ef482`; pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
+Use this checklist for a Host moving from 0.40.0 to 0.41.0. Earlier Hosts must first apply the [0.40.0 checklist](host-upgrade-0.40.0.md) and its predecessors. The release commit is main `2895560b3`; pin the Host's direct and resolved SDK dependencies to the released versions in its lockfile.
 
 ## Stores
 
@@ -93,7 +93,7 @@ Wire v6 also retires every v5 gate that both sides always advertised. Host impac
 - **Token lifetime.** `TokenResponse` and `PairResponse` require `expiresIn`; `TokenResponse.expiresAt`, the pair `refreshHint` and `MintedAccessToken.expiresAt` are removed. A Host with its own auth plane returns only `expiresIn`.
 - **Presence.** `runtimeUnavailable` takes a custom harness id, as on `conn.hello`. The server only validates and drops the field, so storage is unchanged.
 
-The [upgrade manifest](../../packages/client/upgrade-manifest.json) lists every changed export under `wire-v6-isolation-sources`, `wire-v6-retired-gates` and `token-lifetime-expires-in`.
+The [upgrade manifest](../../packages/client/upgrade-history/0.40.0-0.41.0.json) lists every changed export under `wire-v6-isolation-sources`, `wire-v6-retired-gates` and `token-lifetime-expires-in`.
 
 ## Other Host-visible changes
 
