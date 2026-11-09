@@ -51,9 +51,17 @@ Owner-run deployment day
 
 The following steps are for the owner to run during the approved staging window.
 This change provides the entry and driver; it records no deployed acceptance.
-The driver runs a real daemon and Node member on the machine executing the command,
-with a scripted runtime and OS credential custody. Run it on each approved physical
-device to collect separate results. It does not use the W2 remote device runner.
+Run the W1 driver, its in-process daemon and Node member only on the operator
+machine mini-cf, with all configuration loaded from mode-600 ignored
+`_ops/p9/p9.env`. Label this evidence **operator-machine daemon (mini-cf)**.
+It uses a scripted runtime and OS credential custody; it is not physical-device
+evidence. Keep the DSN, S3 keys, `HOST_ADMIN_TOKEN` and raw tail only on mini-cf.
+The physical devices mac-pro and win-ci run only the W2 `device-runner`, receiving
+the public server URL and a pairing code, never the operator environment or tail.
+Physical-device sealed execution for #654 (d) needs a W2 extension for E2EE
+pairing with `verificationSecret` and the driver's steer, progress, approval and
+artifact controls. t3 tracks that work separately; this driver does not use the
+current W2 runner for sealed execution.
 
 1. Build the workspace with `bun run build`. Prepare a disposable Postgres schema,
    a role whose database-scoped `search_path` selects that schema, and an existing
@@ -64,7 +72,7 @@ device to collect separate results. It does not use the W2 remote device runner.
    tenant rows and objects for owner teardown. The Worker Hyperdrive origin and the
    direct scan DSN must select the same schema; its S3 secret and the driver's S3
    config must name the same bucket.
-2. Copy `wrangler.deployable.template.jsonc` to
+2. Copy `wrangler.deployable.template.json` to
    `_ops/p9/byok-p9-canary.wrangler.jsonc` from the repository root. Its `main` path
    is already relative to that destination. Fill only the canary Hyperdrive id.
    Keep real account identifiers and configuration under ignored `_ops/`, with
@@ -92,9 +100,9 @@ device to collect separate results. It does not use the W2 remote device runner.
    bunx wrangler@4.158.0 deploy -c _ops/p9/byok-p9-canary.wrangler.jsonc
    ```
 
-4. Capture all Worker tail events into a private file on the machine running the
-   driver. Keep the tail open while the driver runs; if the operator is on another
-   machine, privately stream that capture to the driver's machine first:
+4. On mini-cf only, capture all Worker tail events into the private file below.
+   Keep the tail open while the W1 driver runs. Do not copy or stream the raw
+   tail to the physical devices:
 
    ```sh
    bunx wrangler@4.158.0 tail byok-p9-canary --format json > _ops/p9/canary-tail.jsonl
@@ -104,8 +112,9 @@ device to collect separate results. It does not use the W2 remote device runner.
    they contain no payload text or credentials. They replace the fixture's module
    array and `/probe/observed`. Fixed error diagnostics also omit request content
    and connection strings. Keep the raw tail private, including request metadata.
-5. Load the following variables from an owner-managed environment or a mode-600
-   ignored `_ops/p9/p9.env` file. Do not pass the DSN or secrets on argv:
+5. On mini-cf only, load the following variables from mode-600 ignored
+   `_ops/p9/p9.env`. Do not pass the DSN or secrets on argv or send this file
+   to mac-pro or win-ci:
 
    | Variable | Required value |
    | --- | --- |
@@ -115,7 +124,8 @@ device to collect separate results. It does not use the W2 remote device runner.
    | `BYOK_CANARY_STORAGE` | Same S3 JSON configuration as the Worker secret |
    | `BYOK_CANARY_TAIL_FILE` | Absolute path to the live private tail capture |
 
-   Then run on the device from the repository root:
+   Then run on mini-cf from the repository root (export the private file's values
+   in the operator shell first):
 
    ```sh
    bun run --filter @byok-sdk/example-hosted-bot-collaboration-worker test \
@@ -132,8 +142,14 @@ The deployed probe runs a sealed task and plaintext twin, checks device input an
 member terminal decryption, scans every tenant table/column and every bucket
 object with the shared S0 scanner, and scans captured Worker and Node console
 output for sealed content. The twin must appear in `outbox.body` and an object.
-Tail observation of both tasks is required; the driver reports only counts and a
-member content hash. The safe observer intentionally retains no raw payload, so
-this probe does not reproduce the local suite's raw-observer ciphertext inventory
-comparison. The broader deployed inventory diff, W2 cross-device coordination and
-browser matrix remain separate owner-run acceptance evidence under #654.
+Tail observation of both terminal completions is required; the driver reports only
+counts, a member content hash and the ciphertext inventory diff. It scans the
+sealed offer, steer, progress, approval and terminal ciphertext in every tenant
+column and object, normalizes object locations with the shared scanner, and
+compares the measured locations with the `hosted-sealed-inventory` block in
+`docs/security.md`. Every ciphertext location must also hold the plaintext twin's
+canary. Missing or unexpected locations fail with the diff; success requires
+`{ "missing": [], "unexpected": [] }`. Observer logs retain only metadata and
+digests, so no raw observer payload is needed for this store/object inventory.
+Physical-device sealed execution and browser evidence remain separate acceptance
+work under #654; the W1 result is **operator-machine daemon (mini-cf)**.

@@ -1,6 +1,4 @@
 {
-  // Template: copy to _ops/p9/byok-p9-canary.wrangler.jsonc before filling the Hyperdrive id.
-  // main is relative to that ignored copy, not to this template.
   "name": "byok-p9-canary",
   "main": "../../examples/hosted-bot-collaboration-worker/src/fixtures/sealed-canary/deployable-worker.ts",
   "compatibility_date": "2026-08-01",

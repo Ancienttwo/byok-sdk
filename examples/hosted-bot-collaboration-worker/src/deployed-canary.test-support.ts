@@ -8,8 +8,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { tenantId } from '@byok-sdk/cloud';
 import { createByokPool, createPostgresCoreStores } from '@byok-sdk/cloud-dataplane';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { waitForTaskCleanup } from '../../basic/goal-btw.test-support';
 import type { ObjectStorageScope } from '../../../packages/cloud-dataplane/src/__tests__/support/dataplane';
-import { canaryNeedles, readObjects, record, scanPostgres, type Hits } from '../../../packages/cloud-dataplane/src/__tests__/support/plaintext-scan';
+import { canaryNeedles, objectLocation, readObjects, record, scanPostgres, type Hits, type Needle } from '../../../packages/cloud-dataplane/src/__tests__/support/plaintext-scan';
+import type { SealedMember } from '../../hosted-bot-collaboration/src/e2ee-member.test-support';
 import { CANARY_METHODS, decodeCanaryRpc, encodeCanaryRpc, type CanaryCloud } from '../../hosted-bot-collaboration/src/canary-cloud.test-support';
 import { openHostedDevice } from '../../hosted-bot-collaboration/src/hosted-device.test-support';
 import { ZeroHitAdapter } from '../../hosted-bot-collaboration/src/zero-hit-runtime.test-support';
@@ -45,6 +47,19 @@ export function remoteCanaryConfig(): CanaryConfig | undefined {
   }
 }
 
+export async function compareCiphertextInventory(actual: string[]) {
+  const doc = await readFile(new URL('../../../docs/security.md', import.meta.url), 'utf8');
+  const start = doc.indexOf('<!-- hosted-sealed-inventory:start -->');
+  const end = doc.indexOf('<!-- hosted-sealed-inventory:end -->', start);
+  assert.ok(start >= 0 && end > start, 'hosted sealed inventory markers missing');
+  const expected = doc.slice(start, end).split('\n').filter(line => line.startsWith('| `')).map(line => line.split('`')[1]!);
+  assert.ok(expected.length > 0, 'hosted sealed inventory empty');
+  const diff = { missing: expected.filter(location => !actual.includes(location)).sort(),
+    unexpected: actual.filter(location => !expected.includes(location)).sort() };
+  assert.deepEqual(diff, { missing: [], unexpected: [] }, 'hosted sealed ciphertext inventory differs');
+  return diff;
+}
+
 async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
   const deadline = Date.now() + 60_000;
   do {
@@ -64,6 +79,19 @@ export async function runDeployedCanary(config: CanaryConfig, nodeLogs: () => st
   const { AwsClient } = require('aws4fetch') as { AwsClient: new (options: Record<string, unknown>) => ObjectStorageScope['client'] };
   const storage: ObjectStorageScope = { bucket: objectStorage.bucket, config: objectStorage,
     client: new AwsClient({ ...objectStorage, service: 's3', retries: 0 }) };
+  async function ciphertextOf(sealed: unknown): Promise<SealedMember & { needle: Needle }> {
+    const { ciphertext, ciphertextRef, ...header } = sealed as { ciphertext?: string; ciphertextRef?: { contentHash: string } } & Record<string, unknown>;
+    if (ciphertext !== undefined) {
+      const text = ciphertext.slice(8, 72);
+      return { header, ciphertext: Buffer.from(ciphertext, 'base64url'), needle: { form: 'ciphertext', text, bytes: Buffer.from(text) } };
+    }
+    assert.ok(ciphertextRef, 'ciphertext reference missing');
+    const hash = ciphertextRef.contentHash.slice('sha256:'.length);
+    const response = await storage.client.fetch(`${objectStorage.endpoint}/${objectStorage.bucket}/tenants/${tenant}/objects/sha256/${hash}`);
+    assert.ok(response.ok, 'ciphertext object unavailable');
+    const bytes = Buffer.from(await response.arrayBuffer()), slice = bytes.subarray(16, 64);
+    return { header, ciphertext: bytes, needle: { form: 'ciphertext', text: slice.toString('base64url'), bytes: slice } };
+  }
   const cloud = Object.fromEntries(CANARY_METHODS.map(method => [method, async (...args: unknown[]) => {
     const response = await fetch(`${config.base}/probe/call`, { method: 'POST', redirect: 'error',
       headers: { authorization: `Bearer ${config.adminToken}` }, body: encodeCanaryRpc({ method, args }) });
@@ -91,30 +119,55 @@ export async function runDeployedCanary(config: CanaryConfig, nodeLogs: () => st
       else await cloud.submitAgentExecution(tenant, input);
       const session = await until(async () => adapter.sessions.get(taskId));
       assert.ok(session.instruction.includes(text), 'device did not open instruction');
+      session.emit({ type: 'progress', text: `Progress ${text}` });
+      await until(async () => (await cloud.readTaskAttempt(tenant, taskId))?.status === 'running' ? true : undefined);
+      const steer = `Steer ${text}`;
+      if (sealed) {
+        const steerId = randomUUID();
+        await cloud.steerSealedTask(tenant, taskId, { steerId,
+          sealed: await member!.seal('task.steer', { taskId, steerId }, deviceId, payload.agentRef, { text: steer }) });
+      } else await cloud.steerTask(tenant, taskId, { text: steer });
+      await until(async () => session.steers.includes(steer) ? true : undefined);
+      void session.start.approvalChannel!.request(`Approve ${text}`);
+      const approvalId = await until(async () => {
+        const entry = (await cloud.readApprovalTimeline(tenant, taskId))?.entries.find(entry => entry.event.type === 'approval_requested');
+        return (entry?.event as { approvalId: string } | undefined)?.approvalId;
+      });
+      await cloud.approveTask(tenant, taskId, { approvalId });
+      await writeFile(path.join(session.workspaceDir, 'notes.txt'), `${text}${'.'.repeat(70_000)}`);
+      session.emit({ type: 'artifact', name: 'notes.txt', contentType: 'text/plain' });
       // Two bounded events make the sealed terminal spill to an object without exceeding the per-event limit.
       session.emit({ type: 'progress', text: `${text}${'.'.repeat(sealed ? 140_000 : 60_000)}` });
       session.emit({ type: 'progress', text: `${text}${'.'.repeat(sealed ? 140_000 : 60_000)}` });
-      await writeFile(path.join(session.workspaceDir, 'notes.txt'), `${text}${'.'.repeat(70_000)}`);
-      session.emit({ type: 'artifact', name: 'notes.txt', contentType: 'text/plain' });
       await session.finish({ text });
       const terminal = await until(async () => (await cloud.readDeviceTerminal(tenant, taskId))?.envelope);
       assert.ok(terminal.type === 'task.complete', 'task did not complete');
+      await waitForTaskCleanup(device!.daemon, session);
       return { taskId, agentRef: payload.agentRef, terminal };
     }
     const sealedRun = await run(true, sealedText), plainRun = await run(false, plainText);
     const wire = sealedRun.terminal.payload as { sealed?: Record<string, unknown> };
     assert.ok(wire.sealed, 'sealed terminal missing');
-    const { ciphertext, ciphertextRef, ...header } = wire.sealed;
-    let bytes: Uint8Array;
-    if (typeof ciphertext === 'string') bytes = Buffer.from(ciphertext, 'base64url');
-    else {
-      const hash = (ciphertextRef as { contentHash: string }).contentHash.slice('sha256:'.length);
-      const response = await storage.client.fetch(`${objectStorage.endpoint}/${objectStorage.bucket}/tenants/${tenant}/objects/sha256/${hash}`);
-      assert.ok(response.ok, 'ciphertext object unavailable');
-      bytes = new Uint8Array(await response.arrayBuffer());
-    }
+    const terminalMember = await ciphertextOf(wire.sealed);
     assert.ok(JSON.stringify(await member!.open('task.complete', { taskId: sealedRun.taskId }, deviceId, sealedRun.agentRef,
-      { header, ciphertext: bytes })).includes(sealedText), 'member did not open terminal');
+      terminalMember)).includes(sealedText), 'member did not open terminal');
+    const offer = await cloud.readTaskOffer(tenant, sealedRun.taskId);
+    const steer = await pool.query<{ body: string }>(`SELECT body::text AS body FROM outbox
+      WHERE body::text LIKE '%"task.steer"%' AND body::text LIKE $1`, [`%${sealedRun.taskId}%`]);
+    assert.ok(steer.rows.length === 1, 'sealed steer missing');
+    const activity = (await cloud.readActivity(tenant, sealedRun.taskId))?.entries.filter(entry => 'sealed' in entry) ?? [];
+    const approval = (await cloud.readApprovalTimeline(tenant, sealedRun.taskId))?.entries.map(entry => entry.event)
+      .filter(event => event.type === 'approval_requested' && 'sealed' in event) ?? [];
+    assert.ok(activity.length > 0 && approval.length === 1, 'sealed progress or approval missing');
+    // SAFETY: this task was submitted sealed above; the task-offer read union does not retain that narrowing.
+    const offerPayload = offer as unknown as { payload: { sealed: unknown } };
+    const ciphertextNeedles = (await Promise.all([
+      ciphertextOf(offerPayload.payload.sealed),
+      ciphertextOf((JSON.parse(steer.rows[0]!.body) as { payload: { sealed: unknown } }).payload.sealed),
+      Promise.resolve(terminalMember),
+      ...activity.map(entry => ciphertextOf((entry as { sealed: unknown }).sealed)),
+      ...approval.map(event => ciphertextOf((event as { sealed: unknown }).sealed)),
+    ])).map(member => member.needle);
     await device.close(); device = undefined;
     // Tail must contain both terminal observations before its scan can count as evidence.
     const logs = await until(async () => {
@@ -123,21 +176,26 @@ export async function runDeployedCanary(config: CanaryConfig, nodeLogs: () => st
       const messages = text.replaceAll('\\"', '"');
       return [sealedRun.taskId, plainRun.taskId].every(id => messages.includes(`"type":"task.complete","taskId":"${id}"`)) ? text : undefined;
     });
-    const sealedHits: Hits = new Map(), plainHits: Hits = new Map();
+    const sealedHits: Hits = new Map(), plainHits: Hits = new Map(), ciphertextHits: Hits = new Map();
     const sealedNeedles = canaryNeedles(sealedText, sealedText), plainNeedles = canaryNeedles(plainText, plainText);
     const tables = await scanPostgres(pool, sealedNeedles, sealedHits);
     await scanPostgres(pool, plainNeedles, plainHits);
+    await scanPostgres(pool, ciphertextNeedles, ciphertextHits);
     assert.ok(tables > 20, 'tenant schema scan incomplete');
     const objects = await readObjects(storage);
     for (const [key, value] of objects) {
-      record(sealedHits, `object:${createHash('sha256').update(key).digest('hex')}`, value, sealedNeedles);
-      record(plainHits, 'object', value, plainNeedles);
+      const location = objectLocation(key, tenant);
+      record(sealedHits, location, value, sealedNeedles);
+      record(plainHits, location, value, plainNeedles);
+      record(ciphertextHits, location, value, ciphertextNeedles);
     }
     record(sealedHits, 'worker logs', logs, sealedNeedles);
     record(sealedHits, 'node console', nodeLogs(), sealedNeedles);
     assert.ok(sealedHits.size === 0, 'sealed plaintext found');
-    assert.ok(plainHits.has('outbox.body') && plainHits.has('object'), 'plaintext positive controls missing');
-    return { tables, objects: objects.size, sealedHits: sealedHits.size, plainLocations: plainHits.size,
+    assert.ok(plainHits.has('outbox.body') && [...plainHits.keys()].some(location => location.startsWith('r2:')), 'plaintext positive controls missing');
+    assert.deepEqual([...ciphertextHits.keys()].filter(location => !plainHits.has(location)), [], 'ciphertext location lacks plaintext positive control');
+    const inventoryDiff = await compareCiphertextInventory([...ciphertextHits.keys()]);
+    return { tables, objects: objects.size, sealedHits: sealedHits.size, plainLocations: plainHits.size, inventoryDiff,
       memberSha256: createHash('sha256').update(sealedText).digest('hex') };
   } finally {
     try { await device?.close(); } finally { await pool.end(); }

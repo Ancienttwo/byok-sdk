@@ -1,3 +1,4 @@
+import { AssertionError } from 'node:assert';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { format } from 'node:util';
@@ -5,7 +6,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { unstable_dev, type Unstable_DevWorker } from 'wrangler';
 import { createByokPool, migrate, migrationsDir } from '@byok-sdk/cloud-dataplane';
 import { createDataplaneScope, createObjectStorageScope } from '../../../packages/cloud-dataplane/src/__tests__/support/dataplane';
-import { remoteCanaryConfig, runDeployedCanary, type CanaryConfig } from './deployed-canary.test-support';
+import { compareCiphertextInventory, remoteCanaryConfig, runDeployedCanary, type CanaryConfig } from './deployed-canary.test-support';
 import { sealedZeroHitSuite } from '../../hosted-bot-collaboration/src/sealed-zero-hit.test-support';
 import { openWorkerCanary } from './sealed-zero-hit.test-support';
 import { RUN } from './worker.test-support';
@@ -24,9 +25,19 @@ it.skipIf(!remote)('runs the owner-configured HTTPS canary against existing Post
     .map(level => vi.spyOn(console, level).mockImplementation((...args) => { lines.push(format(...args)); }));
   let result: Awaited<ReturnType<typeof runDeployedCanary>>;
   try { result = await runDeployedCanary(remote!, () => lines.join('\n')); }
-  catch { throw new Error('Deployed canary failed; inspect the private operator capture (no credentials are printed)'); }
+  catch (error) {
+    if (error instanceof AssertionError || (error instanceof Error && /^canary RPC: HTTP \d{3}$/u.test(error.message))) throw error;
+    throw new Error('Deployed canary failed; inspect the private operator capture (no credentials are printed)');
+  }
   finally { spies.forEach(spy => spy.mockRestore()); }
   console.info('deployed canary counts', JSON.stringify(result));
+});
+
+it.each([
+  { locations: [], missing: ['activity_log_entry.body', 'approval_timeline_tail.entries', 'device_request_receipts.body', 'outbox.body', 'r2:tenants/<tenant>/objects/sha256/<hex>'], unexpected: [] },
+  { locations: ['activity_log_entry.body', 'approval_timeline_tail.entries', 'device_request_receipts.body', 'outbox.body', 'r2:tenants/<tenant>/objects/sha256/<hex>', 'unexpected.body'], missing: [], unexpected: ['unexpected.body'] },
+])('rejects missing or unexpected ciphertext locations (%#)', async ({ locations, missing, unexpected }) => {
+  await expect(compareCiphertextInventory(locations)).rejects.toMatchObject({ code: 'ERR_ASSERTION', actual: { missing, unexpected } });
 });
 
 describe.skipIf(!RUN)('deployable canary on local workerd', () => {
@@ -82,6 +93,7 @@ describe.skipIf(!RUN)('deployable canary on local workerd', () => {
       const result = await runDeployedCanary({ base: `http://${configured.address}:${configured.port}`, postgresUrl: scope.connectionString,
         adminToken, storage: storage.config, logs: async () => JSON.stringify({ logs: [{ message: [lines.join('\n')] }] }) }, () => lines.join('\n'));
       expect(result.sealedHits).toBe(0);
+      expect(result.inventoryDiff).toEqual({ missing: [], unexpected: [] });
       expect(lines.join('\n')).toContain('canary observer');
       expect(lines.join('\n')).not.toMatch(/byok654sealed|byok654plain/u);
       expect(lines.join('\n')).not.toContain(adminToken);
