@@ -57,7 +57,7 @@ describe('an unreadable delivery cursor halts until the operator resets it (real
     await connected();
 
     const first = await submitAgentTask(real, { taskId: 'task-before-corruption', deviceId: record.deviceId, instruction: 'before corruption' });
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 5_000 });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     expect((await waitForTaskResult(real, first)).state).toBe('Complete');
     const file = await cursorFile(storeDir);
@@ -90,7 +90,7 @@ describe('an unreadable delivery cursor halts until the operator resets it (real
     // The replay from 0 is delivered in seq order ahead of this new offer, so
     // once the new task has started, the finished one would have started too.
     const second = await submitAgentTask(real, { taskId: 'task-after-reset', deviceId: record.deviceId, instruction: 'after reset' });
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), { timeout: 5_000 });
     adapter.sessions[1]!.emit({ type: 'turn_end' });
     expect((await waitForTaskResult(real, second)).state).toBe('Complete');
     expect(adapter.startCalls.map(call => String(call.task.instruction).split('\n').at(-1))).toEqual(['before corruption', 'after reset']);

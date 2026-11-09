@@ -31,12 +31,10 @@ function main(argv) {
   if (mode === 'snapshot') {
     const directory = realpathSync(os.tmpdir());
     const directories = [{ directory, prefix: LEAK_PREFIX }];
-    // globalSetup uses /tmp on POSIX to keep socket paths short. Check that
-    // fixed root too when the caller's original TMPDIR is somewhere else. The
-    // whole `byok-` prefix, not just the `byok-t-` run roots: the long-path
-    // socket fallbacks (`byok-<store hash>`, `byok-store-mutex-<store hash>`)
-    // and the scratch fallback (`byok-scratch-<store hash>`) write there by
-    // design, so a leak check naming only the run roots reported those clean.
+    // globalSetup's run roots and the daemon's long-path socket fallbacks
+    // (byok-<hash>, byok-store-mutex-<hash>) live under /tmp on POSIX
+    // regardless of TMPDIR. Check them too when the original TMPDIR is
+    // somewhere else; the snapshot diff keeps pre-existing entries out.
     if (process.platform !== 'win32' && realpathSync('/tmp') !== directory) {
       directories.push({ directory: realpathSync('/tmp'), prefix: LEAK_PREFIX });
     }

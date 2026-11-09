@@ -352,7 +352,10 @@ which has no login shell, the base is the platform baseline names
 (`windows-session`): `PATH` and `PATHEXT` as logon builds them from the
 machine and user `Environment` registry keys, read once per process with
 `%SystemRoot%\System32\reg.exe export` into a private temp directory that is
-removed after the read; the other names come from the live session. A
+removed after the read; the other names come from the live session. They
+include the runtimes' own config homes `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and
+`PI_CODING_AGENT_DIR`, as the login-shell snapshot keeps them elsewhere
+(#1595). A
 directory that only a PowerShell profile adds to the session `PATH` is
 therefore not in the base. A failed read fails closed as
 `refused:runtime_environment_unavailable:logon-registry-unavailable`. The

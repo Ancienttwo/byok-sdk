@@ -208,27 +208,35 @@ async function assertOwnedPrivateDir(dir: string): Promise<void> {
   }
 }
 
-/**
- * Prepares the socket's own parent directory BEFORE the socket file ever
- * exists — closes the default-perms window on the socket file (see
- * `control-protocol.ts`'s `controlSocketPath` doc comment): a directory's own
- * 0700 mode blocks any OTHER user from even traversing into it, regardless of
- * the socket file's transient mode between `listen()` creating it and the
- * post-bind `chmod` tightening it.
- *
- * A no-op re-assertion for the common (storeDir) case, already 0700 — this only
- * does real work for the fixed-`/tmp` long-path fallback, whose parent
- * subdirectory does not exist yet the first time a given storeDir hits it.
- */
-async function prepareControlEndpointDirectory(endpoint: string): Promise<void> {
-  const endpointDir = path.dirname(endpoint);
-  await fs.mkdir(endpointDir, { recursive: true, mode: 0o700 });
-  await fs.chmod(endpointDir, 0o700).catch(() => {});
-  await assertOwnedPrivateDir(endpointDir);
-  await handleStaleUnixSocket(endpoint);
+async function bindControlEndpoint(server: net.Server, endpoint: string): Promise<void> {
+  try {
+    await bindControlEndpointOnce(server, endpoint);
+  } catch (err) {
+    // A closing holder can reclaim the fallback directory between our mkdir
+    // and listen; the directory is recreated on the second pass.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    await bindControlEndpointOnce(server, endpoint);
+  }
 }
 
-async function listenControlEndpoint(server: net.Server, endpoint: string): Promise<void> {
+async function bindControlEndpointOnce(server: net.Server, endpoint: string): Promise<void> {
+  if (process.platform !== 'win32') {
+    // Ensure the socket's own parent directory is private BEFORE the
+    // socket file itself ever exists — closes the default-perms window on
+    // the socket file (see `control-protocol.ts`'s `controlSocketPath` doc
+    // comment): a directory's own 0700 mode blocks any OTHER user from even
+    // traversing into it, regardless of the socket file's transient mode
+    // between `listen()` creating it and the `chmod` below tightening it.
+    // A no-op re-assertion for the common (storeDir) case, already 0700 —
+    // this only does real work for the fixed-`/tmp` long-path fallback, whose
+    // parent subdirectory doesn't exist yet the first time a given
+    // storeDir hits it.
+    const endpointDir = path.dirname(endpoint);
+    await fs.mkdir(endpointDir, { recursive: true, mode: 0o700 });
+    await fs.chmod(endpointDir, 0o700).catch(() => {});
+    await assertOwnedPrivateDir(endpointDir);
+    await handleStaleUnixSocket(endpoint);
+  }
   await new Promise<void>((resolve, reject) => {
     const onError = (err: NodeJS.ErrnoException): void => {
       server.removeListener('listening', onListening);
@@ -243,25 +251,16 @@ async function listenControlEndpoint(server: net.Server, endpoint: string): Prom
     server.once('listening', onListening);
     server.listen(endpoint);
   });
-}
-
-async function bindControlEndpoint(server: net.Server, endpoint: string): Promise<void> {
-  const prepareAndListen = async (): Promise<void> => {
-    if (process.platform !== 'win32') await prepareControlEndpointDirectory(endpoint);
-    await listenControlEndpoint(server, endpoint);
-  };
-  try {
-    await prepareAndListen();
-  } catch (err) {
-    // `ENOENT` is the restart race, not a bad endpoint: a daemon closing for
-    // this same store reclaimed the fallback directory between our `mkdir` and
-    // the ownership check or `listen` (see `util/socket-fallback-directory.ts`).
-    // Preparing the directory again and retrying once is what makes that
-    // reclamation safe to do optimistically; a second `ENOENT` propagates.
-    if (process.platform === 'win32' || (err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    await prepareAndListen();
-  }
   if (process.platform !== 'win32') {
+    // A closing holder may have reclaimed the directory after the ownership
+    // check above, letting another user recreate it before our listen landed.
+    // Re-assert; if it no longer holds, the socket must not stay bound there.
+    try {
+      await assertOwnedPrivateDir(path.dirname(endpoint));
+    } catch (err) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      throw err;
+    }
     await fs.chmod(endpoint, 0o600).catch(() => {});
   }
 }
@@ -632,9 +631,6 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
     await stopServing();
     if (process.platform !== 'win32') {
       await fs.rm(endpoint, { force: true }).catch(() => {});
-      // The long-path fallback nests the socket one level below a fixed short
-      // root in a directory keyed by this store alone, so leaving it behind
-      // would accumulate one for every store that ever took that branch.
       await reclaimSocketFallbackDirectory(endpoint);
     }
     await fs.rm(tokenPath, { force: true }).catch(() => {});

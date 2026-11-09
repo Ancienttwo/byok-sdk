@@ -264,6 +264,12 @@ describe('composeRuntimeEnvironment (#1095)', () => {
       .toEqual({ Path: 'C:\\Windows', USERNAME: 'u', ProgramData: 'C:\\ProgramData', NO_PROXY: 'corp.example,127.0.0.1,localhost' });
   });
 
+  it.each(['CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'PI_CODING_AGENT_DIR'])('win32: the session %s reaches the runtime, as the login-shell snapshot keeps it elsewhere (#1595)', (name) => {
+    const live = { Path: 'C:\\Windows', [name]: 'D:\\custom-home', HOST_ONLY_SENTINEL: 'x' };
+    expect(composeRuntimeEnvironment({ policy: {}, live, windowsLogon: logonRegistry({ Path: sz('C:\\Windows') }), platform: 'win32' }).env)
+      .toEqual({ Path: 'C:\\Windows', [name]: 'D:\\custom-home', NO_PROXY: '127.0.0.1,localhost' });
+  });
+
   it('an adapter conflict rule removes base names only when pass supplied the trigger', () => {
     const rule = (passed: ReadonlySet<string>) => passed.has('ANTHROPIC_BASE_URL') ? ['ANTHROPIC_*', 'CLAUDE_CODE_USE_BEDROCK'] : [];
     const shell = { PATH: '/usr/bin', CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_MODEL: 'shell-model' };
