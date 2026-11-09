@@ -236,4 +236,26 @@ describe('daemon owner store mutex: a store-scoped lock, immune to foreign liste
       await held.release();
     }
   }, 60_000);
+
+  it('G: releasing the lease removes the long-path fallback directory too', async () => {
+    if (process.platform === 'win32') return; // a pipe leaves no directory behind
+    // The lock's fallback directory is keyed by the store alone, so every store
+    // that ever took the long-path branch used to keep one for the life of the
+    // machine: `release()` unlinked the socket and left the 0700 parent behind.
+    const root = await tmpDir();
+    let storeDir = root;
+    while (Buffer.byteLength(path.join(storeDir, 'mutex.sock'), 'utf8') <= 100) {
+      storeDir = path.join(storeDir, 'deeper-store-directory-segment');
+    }
+    await mkdir(storeDir, { recursive: true, mode: 0o700 });
+    const endpoint = storeMutexEndpoint(storeDir, createHash('sha256').update(storeDir).digest('hex'));
+    const fallbackDir = path.dirname(endpoint);
+    expect(fallbackDir).not.toBe(storeDir); // the long-path branch actually ran
+    fallbackDirectories.push(fallbackDir);
+
+    const lease = await acquireDaemonOwner(storeDir, 'doctor');
+    expect(await stat(fallbackDir).then((s) => s.isDirectory())).toBe(true);
+    await lease.release();
+    await expect(stat(fallbackDir)).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 60_000);
 });
