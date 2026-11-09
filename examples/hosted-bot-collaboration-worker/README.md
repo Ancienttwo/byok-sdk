@@ -107,11 +107,17 @@ node --import tsx src/device-runner.ts `
   --runtime stub
 ```
 
-Use the same root for that device's enrollment and Agent homes. The runner uses the SDK's OS machine identity probe
-and OS credential custody: the user's macOS Keychain or Windows Credential Manager. It supplies no synthetic identity
-or in-memory credential backend. A locked or unavailable credential store fails the run. A different root does not
-create a second physical machine identity, and the SDK refuses a store not bound to the existing enrollment. Use the
-dedicated user's original root; this CLI does not implicitly replace another store's enrollment.
+Use the same root for that device's enrollment and Agent homes. The runner uses the SDK's best-effort OS machine
+identity probe and OS credential custody: the user's macOS Keychain or Windows Credential Manager. It supplies no
+synthetic identity or in-memory credential backend. The unpackaged Windows runner requires the client's `koffi`
+optional dependency; install optional dependencies and verify it loads on the acceptance machine. If `koffi` is missing
+or cannot load, custody fails closed. A locked or unavailable credential store also fails the run.
+
+The machine-id probe can return no identity when the OS identifier is unavailable. For cross-device acceptance, check
+that the enrolled device's `device.machine_id` is non-null in Postgres; a `ready` event alone does not prove that fact.
+A different root does not create a second physical machine identity, and the SDK refuses a store not bound to the
+existing enrollment. Use the dedicated user's original root; this CLI does not implicitly replace another store's
+enrollment.
 
 Stdout is JSON lines, suitable for capturing through an operator's remote terminal (`hc run` / `hc exec`):
 
@@ -138,7 +144,8 @@ For an explicitly approved real-runtime run, change only `--runtime stub` to `--
 That selects the SDK's bundled runtime adapters (Pi, Claude and Codex); the Host's execution template selects the
 runtime and model, and the runtime must already be installed and authenticated on the device. The runner makes no
 model call during setup. A real task completes through its runtime, and `finished` follows the daemon's completed
-event. Stdin `finish` is rejected in real mode. Failures and cancellations emit an `error` event with fixed text.
+event. A stdin `finish` in real mode stops the daemon and exits the runner with status 1. Failures and cancellations
+emit an `error` event with the task id and fixed text.
 This CLI does not grant approval for model calls or establish cross-device acceptance evidence.
 
 Send `{"type":"stop"}` on stdin, close stdin, or press Ctrl-C to stop and release the daemon. SIGTERM also stops it.

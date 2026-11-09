@@ -8,7 +8,10 @@
  * accepts, answers the delegation, and A's report Turn runs on device 1.
  */
 import { randomUUID } from 'node:crypto';
-import { access, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { access, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { PassThrough } from 'node:stream';
 import path from 'node:path';
@@ -29,6 +32,38 @@ const OWNER = { id: 'owner', kind: 'human' } as const;
 const runnerArgs = ['--server-url', 'http://127.0.0.1:1234', '--pairing-code', 'test-pairing-secret', '--root', '/tmp/runner', '--runtime', 'stub'];
 
 describe('device runner boundaries', () => {
+  it.each(['direct', 'symlink'])('keeps every stdout line JSON with SDK diagnostics through a %s entry', async mode => {
+    const root = await mkdtemp(path.join(tmpdir(), 'hw-runner-entry-'));
+    const entry = fileURLToPath(new URL('./device-runner.ts', import.meta.url));
+    const preload = path.join(root, 'diagnostics.mjs');
+    await writeFile(preload, `
+      process.once('beforeExit', () => {
+        console.log('SDK log diagnostic');
+        console.info('[byok/client] E2EE member verified');
+        console.debug('SDK debug diagnostic');
+        process.stdout.write(JSON.stringify({ type: 'probe' }) + '\\n');
+      });
+    `);
+    try {
+      const directory = path.join(root, 'runner');
+      if (mode === 'symlink') await symlink(path.dirname(entry), directory, 'junction');
+      const target = mode === 'symlink' ? path.join(directory, 'device-runner.ts') : entry;
+      const tsx = createRequire(import.meta.url).resolve('tsx');
+      const result = await new Promise<{ code: number | string | null | undefined; stdout: string; stderr: string }>(resolve => {
+        execFile(process.execPath, ['--import', tsx, '--import', preload, target, '--runtime', 'invalid'], (error, stdout, stderr) => {
+          resolve({ code: error?.code, stdout, stderr });
+        });
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('device-runner failed; check arguments, local custody, runtime and Host state.');
+      expect(result.stdout.trim().split('\n').map(line => JSON.parse(line))).toEqual([{ type: 'probe' }]);
+      for (const diagnostic of ['SDK log diagnostic', '[byok/client] E2EE member verified', 'SDK debug diagnostic']) {
+        expect(result.stderr).toContain(diagnostic);
+        expect(result.stdout).not.toContain(diagnostic);
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it.each(['stub', 'real'])('selects %s explicitly and leaves OS identity and custody to the SDK', runtime => {
     const options = runnerOptions([...runnerArgs.slice(0, -1), runtime]);
     expect(options.runtime).toBe(runtime);
@@ -75,7 +110,7 @@ describe('device runner boundaries', () => {
       listener({ kind: 'failed', taskId: 'task', ts: '', reason: 'secret', retryable: false });
       listener({ kind: 'cancelled', taskId: 'task', ts: '', reason: 'secret' });
       expect(send.mock.calls.map(([event]) => event)).toEqual([{ type: 'started', taskId: 'task', agentId: 'agent' },
-        { type: 'finished', taskId: 'task' }, ...Array(2).fill({ type: 'error', message: 'runtime task did not complete' })]);
+        { type: 'finished', taskId: 'task' }, ...Array(2).fill({ type: 'error', taskId: 'task', message: 'runtime task did not complete' })]);
       await expect(device.finish('task', {})).rejects.toThrow('only available with the stub');
       vi.mocked(adapter.prepare).mockResolvedValueOnce({ kind: 'reject', reason: 'refused', retryable: false });
       expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'refused', retryable: false });

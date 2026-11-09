@@ -10,7 +10,7 @@ export type DeviceEvent =
   | { type: 'ready'; deviceId: string }
   | { type: 'started'; taskId: string; agentId: string }
   | { type: 'finished'; taskId: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; taskId?: string; message: string };
 export type DeviceCommand = { type: 'finish'; taskId: string; document: unknown } | { type: 'stop' };
 export type RuntimeMode = 'stub' | 'real';
 
@@ -56,7 +56,7 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
   const unsubscribe = daemon.subscribe(event => {
     if (runtime === 'real' && event.kind === 'completed') send({ type: 'finished', taskId: event.taskId });
     if (runtime === 'real' && (event.kind === 'failed' || event.kind === 'cancelled')) {
-      send({ type: 'error', message: 'runtime task did not complete' });
+      send({ type: 'error', taskId: event.taskId, message: 'runtime task did not complete' });
     }
   });
   return {

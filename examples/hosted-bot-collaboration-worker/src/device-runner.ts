@@ -1,7 +1,6 @@
 /** Example-private JSON-lines CLI: node --import tsx src/device-runner.ts. */
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { Readable, Writable } from 'node:stream';
 import { createDeviceSession, deviceConfig, type DeviceCommand, type DeviceEvent, type RuntimeMode } from './device-session.js';
@@ -72,7 +71,9 @@ export async function runDeviceRunner(args: string[], input: Readable, output: W
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+if (import.meta.main) {
+  // SDK diagnostics (including E2EE member verification) must not share the JSON event stream.
+  for (const method of ['log', 'info', 'debug'] as const) console[method] = console.error.bind(console);
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.once('SIGINT', stop);
