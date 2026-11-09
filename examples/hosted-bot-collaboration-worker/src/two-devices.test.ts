@@ -265,8 +265,8 @@ describe('device runner boundaries', () => {
         await device.begin('task', 'private', true); await device.finish('task'); await device.close();
         expect(member.approve).toHaveBeenCalledWith('physical');
         expect(member.putScope).toHaveBeenCalledWith('scope-zero-hit', {}, ['task-input', 'task-output']);
-        expect(hc.mock.calls[0]![0]).toEqual(['run', '--bg', '--json', '--no-notify', '--on', 'device', '--cwd', '/sdk',
-          'node', '--import', 'tsx', 'examples/hosted-bot-collaboration-worker/src/device-runner.ts', '--server-url', 'https://host.invalid',
+        expect(hc.mock.calls[0]![0]).toEqual(['run', '--bg', '--json', '--no-notify', '--on', 'device', '--cwd', '/sdk/examples/hosted-bot-collaboration-worker',
+          'node', '--import', 'tsx', 'src/device-runner.ts', '--server-url', 'https://host.invalid',
           '--pairing-code', 'pair-secret', '--verification-secret', 'A'.repeat(26), '--root', '/root/device', '--runtime', 'stub']);
       } else await expect(opened).rejects.toThrow(/remote canary|canary device transport/);
       expect(hc).toHaveBeenCalledWith(['kill', 'device/t1']);

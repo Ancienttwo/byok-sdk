@@ -21,8 +21,9 @@ export async function openRemoteCanaryDevice(cloud: CanaryCloud, tenant: TenantI
   }
   const member = await HostedMember.create(cloud, tenant);
   const { code } = await cloud.createPairingCode(tenant, { productId: 'hosted-collaboration-worker' });
-  const { address } = await call<{ address: string }>(['run', '--bg', '--json', '--no-notify', '--on', config.machine, '--cwd', config.cwd,
-    'node', '--import', 'tsx', 'examples/hosted-bot-collaboration-worker/src/device-runner.ts',
+  const { address } = await call<{ address: string }>(['run', '--bg', '--json', '--no-notify', '--on', config.machine,
+    '--cwd', `${config.cwd}/examples/hosted-bot-collaboration-worker`,
+    'node', '--import', 'tsx', 'src/device-runner.ts',
     '--server-url', base, '--pairing-code', code, '--verification-secret', member.verificationSecret,
     '--root', config.root, '--runtime', 'stub']);
   const send = (command: DeviceCommand) => hc(['send', address, JSON.stringify(command)]);
