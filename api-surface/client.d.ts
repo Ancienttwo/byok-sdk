@@ -13795,6 +13795,8 @@ export interface CopySdkNativeAssetsOptions {
     readonly outDir: string;
     readonly platform: 'win32' | 'darwin';
     readonly arch: 'x64' | 'arm64';
+    /** Absolute path to a local copy of the pinned Koffi tgz (for example a CI cache). The same integrity and addon checks apply and nothing is fetched. */
+    readonly archivePath?: string;
 }
 /** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
 export declare function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]>;

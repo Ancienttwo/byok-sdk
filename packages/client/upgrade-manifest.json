@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "12b96a410da20ec56c1e7b05943024d675e12b3f4e420cc258425d46367bdbef"
+    "snapshotSha256": "bcf64394fff57f7e846e5e8165f697e46d09f99acb95da04085ed039716d4658"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "native-assets-archive-path",
+      "impact": "additive",
+      "summary": "copySdkNativeAssets accepts an optional absolute archivePath to a local copy of the pinned Koffi tgz. It runs the same SHA-512 integrity and addon SHA-256 checks and never calls fetch. Without it, behavior is unchanged.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1567",
+      "items": [
+        "export:@byok-sdk/client#CopySdkNativeAssetsOptions"
+      ]
+    },
     {
       "id": "keys-profile-store-migration",
       "impact": "additive",
@@ -38,6 +47,11 @@
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/client#CopySdkNativeAssetsOptions",
+      "change": "changed",
+      "entry": "native-assets-archive-path"
+    },
     {
       "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
       "change": "changed",

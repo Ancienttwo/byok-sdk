@@ -39,6 +39,25 @@ it('does not extract or write an archive with mismatched integrity', async () =>
   const dir = await root(); vi.stubGlobal('fetch', vi.fn(async () => new Response('not the official archive')));
   await expect(copySdkNativeAssets({ outDir: dir, platform: 'win32', arch: 'x64' })).rejects.toThrow('integrity mismatch'); expect(await fs.readdir(dir)).toEqual([]);
 });
+it('copies from archivePath without fetching, and a changed byte fails integrity', async () => {
+  const { createHash } = await import('node:crypto'); const { gzipSync } = await import('node:zlib');
+  const addon = Buffer.from('addon bytes'); const meta = Buffer.from(JSON.stringify({ name: 'pkg', version: '3.3.7' }));
+  const member = (name: string, body: Buffer) => { const header = Buffer.alloc(512); header.write(name); header.write(`${body.length.toString(8).padStart(11, '0')}\0`, 124); header[156] = 48;
+    return Buffer.concat([header, body, Buffer.alloc(Math.ceil(body.length / 512) * 512 - body.length)]); };
+  const bytes = gzipSync(Buffer.concat([member('package/package.json', meta), member('package/win32_x64/koffi.node', addon), Buffer.alloc(1024)]));
+  const pin = { package: 'pkg', version: '3.3.7', url: 'unused', sha256: createHash('sha256').update(addon).digest('hex'), integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}` };
+  vi.resetModules(); vi.doMock('../sdk-native-assets-pin', () => ({ KOFFI: pin }));
+  vi.doMock('../util/agent-memory-helper-release', () => ({ copyAgentMemoryHelperAssets: async () => [] }));
+  const fetch = vi.fn(async () => { throw new Error('network disabled'); }); vi.stubGlobal('fetch', fetch);
+  const { copySdkNativeAssets: copy } = await import('../sdk-native-assets');
+  const archivePath = path.join(await root(), 'koffi.tgz'); await fs.writeFile(archivePath, bytes);
+  const out = path.join(await root(), 'out');
+  expect(await copy({ outDir: out, platform: 'win32', arch: 'x64', archivePath })).toContain('win32-x64/koffi.node');
+  expect(await fs.readFile(path.join(out, 'win32-x64/koffi.node'))).toEqual(addon);
+  bytes.writeUInt8(bytes.readUInt8(bytes.length >> 1) ^ 1, bytes.length >> 1); await fs.writeFile(archivePath, bytes);
+  await expect(copy({ outDir: path.join(await root(), 'out2'), platform: 'win32', arch: 'x64', archivePath })).rejects.toThrow('integrity mismatch');
+  expect(fetch).not.toHaveBeenCalled(); vi.doUnmock('../sdk-native-assets-pin'); vi.doUnmock('../util/agent-memory-helper-release');
+});
 it('publishes the actual reserved helper routing keys including describe', () => {
   expect(sdkDistributionManifest.reservedHelperKinds).toContain('agent-memory-describe'); expect(sdkDistributionManifest.piRuntimePin).toBeTruthy();
   for (const kind of sdkDistributionManifest.reservedHelperKinds) {

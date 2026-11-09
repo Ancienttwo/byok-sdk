@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2342280,
+      "budgetBytes": 2342763,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -407,7 +407,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Single-file Host build: esbuild packaging plugin and SDK asset copy",
-      "budgetBytes": 26734,
+      "budgetBytes": 27207,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
