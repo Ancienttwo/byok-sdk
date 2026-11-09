@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createPrivateTempDir, ensurePiProjectionDir, ensureSecureDir } from '../../util/secure-dir';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { CONTROLLED_PI_DIRECTORY_ENV_NAMES } from './mcp-environment';
+import { BUNDLED_SUBAGENT_DIR, isNodeSea } from './bundled-subagent-runtime';
 
 /** The SDK-owned Pi entry a launch starts. */
 export type PiRuntimeLaunchKind = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
@@ -102,10 +103,25 @@ export async function resolvePiRuntimeLaunch(options: {
   try {
     if (options.keysSessionDir !== undefined) projectionDir = await createProjectionDir(options.scratch.sdkDir, options.sessionCwd);
     const invocation = options.resolveInvocation();
+    let command = invocation.command;
+    if (isNodeSea() && source === 'pi-auth-store' && options.kind === 'pi-rpc'
+      && invocation.entry === undefined && invocation.fixedArgs?.[0] === '__byok_sdk_helper') {
+      // Upstream uses execPath directly only when it is named node. A private
+      // hardlink keeps that identity through fork without changing any PATH.
+      const root = path.join(options.scratch.sdkDir, BUNDLED_SUBAGENT_DIR);
+      await fs.mkdir(root, { mode: 0o700 });
+      command = path.join(root, process.platform === 'win32' ? 'node.exe' : 'node');
+      try { await fs.link(await fs.realpath(invocation.command), command); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EXDEV') throw failure('pi_background_unavailable: Node SEA and SDK scratch must be on the same volume for the launch-private node hardlink');
+        throw error;
+      }
+      env.PI_PACKAGE_DIR ??= path.dirname(invocation.command);
+    }
     return Object.freeze({
       scratch: options.scratch,
       kind: options.kind,
-      command: invocation.command,
+      command,
       ...(invocation.entry === undefined ? {} : { entry: invocation.entry }),
       fixedArgs: Object.freeze([...(invocation.fixedArgs ?? [])]),
       cwd: await realSessionPath(options.sessionCwd),

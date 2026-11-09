@@ -12,6 +12,7 @@ export { openPiRpcSession } from './pi-session-runtime';
 import { webExtension } from './pi-extension-factories.js';
 import { loadPiSubagentsAsset, loadPiSubagentsExtensions, writePiSubagentsHostSdk } from '../adapters/pi/subagents';
 import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
+import { BUNDLED_SUBAGENT_DIR, isNodeSea, prepareBundledSubagents, refuseInterpreterBackground } from '../adapters/pi/bundled-subagent-runtime';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import { parseToolAuthorizationIpcConfig, setToolAuthorizationGateEnv, type ToolAuthorizationIpcConfig } from '../tool-authorization-ipc';
@@ -283,17 +284,18 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
       const fileScopeExtension = fileURLToPath(new URL('./pi-subagent-file-scope.js', import.meta.url));
       extensionFactories.push(...await loadPiSubagentsExtensions(config.toolAuthorization, gateExtension, fileScoped ? fileScopeExtension : undefined));
     } else {
-      // Background runs have no runner a bundled product can host (#1589): on
-      // a Bun-compiled product pi-subagents would re-execute the product
-      // itself with Pi CLI arguments. Its Pi executable override is read only
-      // on spawn paths, never by in-process foreground children. It names the
-      // launch-private directory, which holds this launch's config, so the
-      // spawn always fails and the tool call reports it.
-      process.env.PI_SUBAGENT_PI_BINARY = resolve(dirname(args.configPath));
-      // pi-subagents' own Pi root setting: foreground children get the product's Pi, and no foreign Pi above the product is used.
       const assetRoot = bundledAssetRoot();
-      process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = await writePiSubagentsHostSdk(join(resolve(dirname(args.configPath)), 'pi-subagents-host-sdk'), assetRoot);
-      const asset = await loadPiSubagentsAsset(assetRoot, config.toolAuthorization, fileScoped);
+      const sea = isNodeSea();
+      const compiled = sea || (process.versions.bun !== undefined && /^(?:\/\$bunfs\/|B:[\\/]~BUN[\\/])/u.test(process.argv[1] ?? ''));
+      let subagentAssets = assetRoot;
+      if (compiled) {
+        const root = sea ? dirname(process.execPath) : join(resolve(dirname(args.configPath)), BUNDLED_SUBAGENT_DIR);
+        subagentAssets = await prepareBundledSubagents(root, assetRoot);
+      } else {
+        process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = await writePiSubagentsHostSdk(join(resolve(dirname(args.configPath)), 'pi-subagents-host-sdk'), assetRoot);
+        extensionFactories.push(refuseInterpreterBackground);
+      }
+      const asset = await loadPiSubagentsAsset(subagentAssets, config.toolAuthorization, fileScoped);
       subagentExtensionPaths.push(asset.extensionPath);
       extensionFactories.push(...asset.factories);
     }

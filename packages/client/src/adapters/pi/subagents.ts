@@ -99,21 +99,23 @@ const EXPORT_NAME = /^[A-Za-z_$][\w$]*$/u;
  * product could otherwise pick a foreign Pi installed above it. This writes a
  * package named like Pi in `dir`, a directory private to this launch. It
  * re-exports the product's own in-process Pi module and carries Pi's manifest
- * fields but none of its peers, so foreground children run on the product's
- * Pi and pi-subagents refuses every background run. Returns the package root.
+ * fields and no peers. Interpreter-bundle children use this bridge alone, so
+ * their background runs are refused. Compiled products extend the same private
+ * root with their embedded peer modules before starting background runners.
+ * Returns the package root.
  */
 export async function writePiSubagentsHostSdk(dir: string, assetRoot: string): Promise<string> {
   const pi = await import('@earendil-works/pi-coding-agent') as Record<string, unknown>;
   (globalThis as Record<symbol, unknown>)[Symbol.for(HOST_SDK_GLOBAL_KEY)] = pi;
   const manifest = JSON.parse(readFileSync(path.join(assetRoot, 'package.json'), 'utf8')) as { name: string; version: string; piConfig?: unknown };
   const names = Object.keys(pi).filter(name => name !== 'default' && EXPORT_NAME.test(name));
-  mkdirSync(dir, { mode: 0o700 });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: manifest.name, version: manifest.version, type: 'module',
     ...(manifest.piConfig === undefined ? {} : { piConfig: manifest.piConfig }), exports: { '.': './index.js' } }), { flag: 'wx' });
   writeFileSync(path.join(dir, 'index.js'), [
     `const pi = globalThis[Symbol.for(${JSON.stringify(HOST_SDK_GLOBAL_KEY)})];`,
     "if (pi === undefined) throw new Error('pi_subagents_host_sdk_unavailable: this package is the Pi of one byok-sdk bundled host and loads only inside it');",
-    `export const { ${names.join(', ')} } = pi;`,
+    ...names.map((name, index) => `const value${index} = pi[${JSON.stringify(name)}]; export { value${index} as ${name} };`),
     ...('default' in pi ? ['export default pi.default;'] : []),
   ].join('\n') + '\n', { flag: 'wx' });
   return dir;

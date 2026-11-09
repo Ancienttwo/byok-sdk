@@ -7,6 +7,7 @@ import { sdkDistributionManifest } from '../sdk-native-assets';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin } from '../sdk-reserved-helper-host';
 import { sdkReservedHelperArgumentCount } from '../sdk-reserved-helper-context';
@@ -48,6 +49,56 @@ describe('SDK-reserved helper host composition', () => {
     expect(() => resolveSdkReservedHelperBin('agent-message-mcp', {
       mode: 'self-executable', executable: 'relative-product',
     })).toThrow(/absolute executable path/);
+  });
+
+  it('does not execute foreign runner paths, preloads, or malformed executable argv', async () => {
+    const root = path.dirname(await fixture('node', 'unused executable'));
+    const pkg = path.join(root, 'assets', 'pi-subagents');
+    const bootstrap = path.join(pkg, 'src/runs/background/subagent-runner-bootstrap.js');
+    const binary = path.join(pkg, 'src/runs/background/binary-bootstrap.js');
+    const preload = path.join(pkg, 'runner-peer-preload.mjs');
+    const supervisor = path.join(pkg, 'workflow-script-process.cjs');
+    const worker = path.join(pkg, 'workflow-script-worker.cjs');
+    const acorn = path.join(pkg, 'node_modules/acorn/dist/acorn.js');
+    for (const file of [bootstrap, binary, preload, supervisor, worker, acorn]) {
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, 'throw new Error("foreign code executed");');
+    }
+    const foreign = await fixture('subagent-runner-bootstrap.js', 'throw new Error("foreign code executed");');
+    const originalBuiltin = process.getBuiltinModule;
+    vi.spyOn(process, 'getBuiltinModule').mockImplementation(((name: string) => name === 'node:sea'
+      ? { isSea: () => true } : originalBuiltin(name)) as typeof originalBuiltin);
+    const executable = process.execPath, argv = [...process.argv];
+    const bun = Object.getOwnPropertyDescriptor(process.versions, 'bun');
+    const scope = globalThis as { PI_BUNDLED_NODE?: boolean };
+    const bundled = scope.PI_BUNDLED_NODE;
+    try {
+      process.execPath = path.join(root, 'node');
+      const uri = (file: string) => pathToFileURL(file).href;
+      for (const input of [
+        ['--import', uri(preload), foreign, '/config.json'],
+        ['--import', uri(foreign), bootstrap, '/config.json'],
+        ['--import', uri(preload), bootstrap, 'relative.json'],
+        ['--import', uri(preload), bootstrap, '/config.json', 'extra'],
+        ['--permission', '--allow-worker', `--allow-fs-read=${supervisor}`, `--allow-fs-read=${foreign}`,
+          `--allow-fs-read=${acorn}`, supervisor, acorn],
+        ['--permission', '--allow-worker', `--allow-fs-read=${supervisor}`, `--allow-fs-read=${worker}`,
+          `--allow-fs-read=${acorn}`, foreign, acorn],
+      ]) await expect(runSdkReservedHelperCommand(input)).resolves.toBe(false);
+      Object.defineProperty(process.versions, 'bun', { value: '1.4.3', configurable: true });
+      process.argv[1] = '/$bunfs/root/product';
+      vi.stubEnv('BYOK_PI_SUBAGENT_RUNTIME_DIR', root);
+      vi.stubEnv('PI_SUBAGENT_RUNNER_CONFIG', 'relative.json');
+      const fixed = ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-session', '--mode', 'rpc', '--extension'];
+      await expect(runSdkReservedHelperCommand([...fixed, binary])).resolves.toBe(false);
+      await expect(runSdkReservedHelperCommand([...fixed, foreign])).resolves.toBe(false);
+      expect(scope.PI_BUNDLED_NODE).toBe(bundled);
+    } finally {
+      process.execPath = executable; process.argv = argv;
+      if (bun === undefined) delete (process.versions as { bun?: string }).bun;
+      else Object.defineProperty(process.versions, 'bun', bun);
+      vi.unstubAllEnvs();
+    }
   });
 
   it('inserts an explicit interpreter entry before the same fixed helper prefix', () => {

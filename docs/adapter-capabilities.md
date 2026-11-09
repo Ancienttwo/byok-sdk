@@ -50,6 +50,22 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 | Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
 
+## Pi background subagents in packaged products (#1589)
+
+Bun-compiled executables and Node SEA support native background subagents and
+workflows through the product's embedded Pi and the exact pi-subagents 0.87.0
+assets. G1 workflow-child admission and per-tool child authorization retain
+the ordinary `auto` contract. Node SEA uses a private executable hardlink named
+`node`; the executable and SDK scratch must share a volume. PATH is unchanged.
+Node/Bun interpreter + bundle products offer foreground children and explicitly
+refuse background runs because the runner cannot re-enter their bundle entry.
+
+SEA workflows deliberately run without Node's permission sandbox, matching
+upstream's Bun worker path. VM restrictions, G1 and required child extensions
+remain; after a VM escape, Node's denial of ungranted reads, writes, subprocesses
+and extra workers is absent. This is a residual risk, not a sandbox capability.
+See [Pi subagents](spec.md#pi-subagents) for the exact dispatch and risk contract.
+
 ## OpenCode implementation and qualification (#1538)
 
 `OpenCodeAdapter` is an opt-in custom harness (`harnessId: 'opencode'`). Its

@@ -4030,8 +4030,7 @@ poll the cloud read API. With no draft producer, only a terminal marker appears.
 
 Pi subagents are the upstream `pi-subagents` package (exact client dependency,
 0.87.0), loaded by the ordinary RPC host when the credential source is
-`pi-auth-store` (see the `keys-profile` lane above), and never by the sealed
-host. The SDK vendors and patches none of it. pi-subagents reads its own
+`pi-auth-store` (see the `keys-profile` lane above). The SDK vendors and patches none of it. pi-subagents reads its own
 package files at run time, so a product bundler never inlines it. The installed
 host imports the installed package through opaque specifiers. A single-file
 product's bundled re-entry loads the copy in its Pi asset root (below) through
@@ -4039,8 +4038,8 @@ Pi's own extension loader, which supplies the Pi modules of the product bundle.
 
 Foreground children are in-process Pi sessions inside the parent host. In the
 installed host, background runs use pi-subagents' detached Node runner from the
-installed package. Neither re-enters the SDK: there is no `pi-subagent-print` or
-`pi-subagent-runner` helper kind. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
+installed package. Compiled products re-enter their executable as described
+below; no `pi-subagent-print` or `pi-subagent-runner` helper kind is added. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
 fan-out limits. The SDK adds no second limit and no money or token spend cap.
 
 Under the `auto` tool authorization gate, the parent session registers
@@ -4093,7 +4092,9 @@ from a `subagent` call. It skips the call for schedule ticks, auto-resume,
 extension, so each of their tool calls is gated, but no launch check of their
 `cwd`, gate commands or output runs. This is the same as 0.83.1.
 
-A single-file product offers foreground subagents only. `copyPiRuntimeAssets`
+Bun-compiled executables and Node SEA products offer foreground and background
+subagents, including workflows. Interpreter + bundle products offer foreground
+subagents only. `copyPiRuntimeAssets`
 writes `pi-subagents/` into the Pi asset root: the client's exact pi-subagents
 package with the closure of its runtime dependencies in its own `node_modules`,
 about 22 MB. Beside it, `pi-subagent-extensions/` holds the SDK gate and
@@ -4104,37 +4105,58 @@ An asset root without the copy, or with another version, fails the launch with
 `pi_bundled_assets_unavailable`. The copy is SDK build output, so the check
 is its name and version, not a content digest.
 
-pi-subagents loads the Pi SDK of its foreground children, and decides whether
-a background run can start, from the Pi package root it finds. It reads
-`PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` before it searches the ancestors of
-the entry point and its own resolution, which could otherwise find a foreign
-Pi installed above the product. The bundled host sets that variable to a
-package it writes into its launch-private directory. The package carries Pi's
-name, version and `piConfig` and re-exports the product's own in-process Pi
-module, but holds none of Pi's peers. Foreground children therefore always run
-on the product's Pi, and pi-subagents refuses every background run in the
-interpreter + bundle form ("Background children require the host npm package
-… with its dependencies"). The Bun-compiled form re-executes `process.execPath`
-for a background run, which would start the product itself with Pi CLI
-arguments. So the bundled host also sets pi-subagents' Pi executable override,
-`PI_SUBAGENT_PI_BINARY`, to the same launch-private directory, which always
-exists and cannot be spawned. Only spawn paths read that override, never
-foreground children. A background launch then fails before any runner starts
-("async runner did not produce a pid"), and the tool call returns the error.
-The other users of the override fail the same way and never re-execute the
-product: Herdr project panes, Rex local placement and the live model probe of
-the profile check. Pi's bash tool passes the host environment to the commands
-it runs, and pi-subagents children build their own bash tools, so the SDK
-cannot strip both variables from them. A `pi` that a user starts inside the
-agent's bash therefore fails to load pi-subagents (the generated package loads
-only inside its host) and cannot spawn a background runner; it never loads a
-foreign Pi.
+The bundled host sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to a
+launch-private package that carries Pi's name, version and `piConfig` and
+re-exports the product's own Pi. A foreign Pi installed above the product is
+never selected. Compiled products also capture Pi's embedded peer namespaces
+through Pi's extension loader and expose them to the detached runner. They
+copy pi-subagents and the SDK child extensions into that private tree, outside
+the release Pi manifest's ancestry, so upstream cannot mistake the release
+asset manifest for an installed Pi SDK.
 
-Background subagents in a single-file product need an upstream seam (#1589,
-item 2): a host runner command for background runs
-(nicobailon/pi-subagents#3105), and a way for the host to state that its Pi is
-the embedded one and that it hosts no background runs, instead of the package
-root setting above. Both are deferred.
+Bun-compiled products set `PI_SUBAGENT_PI_BINARY` to the product and recognize
+only upstream's fixed Pi CLI arguments, the exact canonical path of their
+private `binary-bootstrap.js`, and an absolute `PI_SUBAGENT_RUNNER_CONFIG`.
+Pi's loader runs the unchanged upstream binary bootstrap, which owns runner
+startup, execution and disposal.
+
+A Node SEA Pi host starts through a launch-private hardlink named `node`
+(`node.exe` on Windows). Upstream then uses `process.execPath` directly. PATH
+is unchanged, including in ordinary tools and nested child environments. The
+executable and SDK scratch directory must share a volume; otherwise launch
+fails with `pi_background_unavailable` and an explicit same-volume error.
+The product recognizes the exact canonical paths of its private
+`runner-peer-preload.mjs` and `subagent-runner-bootstrap.js`, restores upstream's
+script/config argv, and runs them with embedded Node. The workflow supervisor
+is recognized by exact canonical equality with the private
+`workflow-script-process.cjs`, worker and Acorn files; its root is recovered
+from the private executable path even though upstream clears the fork's
+environment. Other argv continues through ordinary product dispatch.
+
+**Residual risk, owner-selected route C (#1589):** SEA workflow execution
+does not enable Node's `--permission` sandbox. SEA receives those flags as
+application arguments, and the SDK deliberately does not treat them as active
+or propagate them as worker permissions. This matches upstream's Bun worker
+path, which also has no Node permission layer. If workflow code escapes its
+VM realm, Node no longer denies file reads outside the worker/Acorn grants,
+file writes, subprocess creation or extra workers. The VM realm restrictions,
+G1 `subagent_launch` admission, each native child's per-tool approval, and the
+required gate/file-scope child extensions still apply. Those approval hooks
+mediate Pi tool events; they do not police arbitrary JavaScript APIs after a
+VM escape. Installed-package Node workflows retain upstream's permission
+model.
+
+Interpreter + bundle products retain a foreground-only private Pi bridge
+without detached peers. A background request is refused with
+`pi_background_unavailable`: the runner cannot re-enter a bundle run by an
+interpreter; the supported background forms are a Bun-compiled executable and
+Node SEA. No new public export, option or config key is required.
+
+The product dispatcher accepts only these pinned runner shapes. Other Pi CLI
+operations, including Herdr project panes, Rex local placement and profile
+model probes, do not gain a general Pi CLI re-entry. A separately invoked
+ambient Pi cannot use the product's process-local peer bridge or select a
+foreign SDK through it.
 
 ## Local native interaction contract
 
