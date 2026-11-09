@@ -243,9 +243,9 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('does not advertise sealed-payload-v1 for a verified member on a Host that does not declare e2ee.member', async () => {
-    const info = vi.spyOn(console, 'info');
+    const warn = vi.spyOn(console, 'warn');
     const { server, adapter, deviceId, member } = await start({ e2ee: false });
-    await vi.waitFor(() => expect(info).toHaveBeenCalledWith(expect.stringMatching(/^\[byok\/client\] E2EE member \S+ verified/u)), BUDGET_MS);
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^\[byok\/client\] E2EE member \S+ verified/u)), BUDGET_MS);
     // the receiver checks the offer's `sealing` gate against the flags this daemon advertises, and it never advertises sealed-payload-v1 here.
     server.send(await sealedOffer(member, 'undeclared', server.nextSeq(), deviceId, 'run'));
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'undeclared');
