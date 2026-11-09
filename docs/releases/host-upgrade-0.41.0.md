@@ -10,10 +10,16 @@ Use this checklist for a Host moving from 0.40.0 to 0.41.0. Earlier Hosts must f
 2. In the single process that starts first, call `migrateProviderProfileStore(path)` before any process opens the store. It returns `'migrated'` after a rebuild and `'unchanged'` for a current store or a missing file. The call takes the exclusive write lock even on a current store. It fails with `SQLITE_BUSY` only while another process is writing; an idle connection does not block it, which is why step 1 is required.
 3. Open `SqliteProviderProfileStore` with this version.
 
+`inspectProviderProfileStore(path)` reports such a store as `migration-required`. A Host that upgrades through `createServiceInstallation` lists the store in its precheck, which exits 0 for `migration-required` (2 only for `new-path-repair` or `rejected`), and supplies a `migrate(versionDir)` program that calls the candidate's `migrateProviderProfileStore(path)`. The installation runs it after the store snapshot and before the switch, then runs the precheck again; a failed migration restores the snapshot and restarts the old version (`store_migration_failed`). Without `migrate`, the upgrade stops with `store_migration_required` and the store is unchanged.
+
 The migration runs in one SQLite transaction under the exclusive write lock. It copies every profile row verbatim, including the profile ref that names the provider key in the credential store, and the enabled state. Keys stay in the credential store and users do not re-enter them. Custody rows stay in place. The call fails in two ways, and both leave the store as it was:
 
 - `PROVIDER_STORE_SCHEMA_STALE`: the store has another schema difference, or the copied rows did not verify. It cannot be migrated; keep it, provision a separate current-schema store and re-enter keys.
 - Any other error, such as `SQLITE_BUSY` or an I/O error, is operational. The transaction rolled back; close the other processes that use the store and call the migration again. Do not provision a new store for it.
+
+## Single-file Pi asset root
+
+A single-file product rebuilds its Pi asset root with `copyPiRuntimeAssets` from this client, as on every upgrade. The root now also holds `pi-subagents/` (the client's exact pi-subagents 0.87.0 with its runtime dependencies) and `pi-subagent-extensions/`, about 22 MB more. Ship both directories with the product. A Pi launch from an asset root built by an earlier client fails with `pi_bundled_assets_unavailable`. The product's Pi then offers foreground subagents under the same rules as the installed host; background subagent runs are refused with a tool error. See the spec section [Pi subagents](../spec.md#pi-subagents).
 
 ## Wire v6
 
@@ -59,7 +65,7 @@ Values at each adapter's qualified version. "No source" means the bit is `true` 
 | dsh 0.2.2-rc.1 | `true` | `true` | `true` (no source) | `true` | `false` | No guarantee for the separately installed hook bridge |
 | Grok 1.0.52 | `false` | `false` | `false` | `false` | `false` | Sources Grok may load (from its guide and `grok inspect` discovery; no live session shows the prompt): `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and `extra_rule_dirs`; the Claude and Cursor instruction and rule files unless `compatInstructions: 'disabled'`; their skills and hooks cells always; their MCP cells unless `agentUserMcpServers: 'excluded'` |
 | Hermes 0.22.2+2364.g0b10b9f | `true` | `true` | `true` | `true` | `true` | None of the five sources |
-| OpenCode (unqualified) | `false` | `false` | `false` | `false` | `false` | User context, MCP configuration and native transcripts |
+| OpenCode 2.2.6 (`platforms: ['darwin']`) | `false` | `false` | `false` | `false` | `false` | User context, MCP configuration and native transcripts |
 | Pi 1.5.0, RPC lane (`excluded`) | `true` | `true` (no source) | `true` (no source) | `true` | `true` | Host-authorized `agentSkillPaths` and `agentExtensionPaths`, by design |
 | Pi 1.5.0, `durableLane` | `false` | `false` | `false` | `false` | `false` | No guarantee: Agent resources run only on the RPC lane (#1197) |
 

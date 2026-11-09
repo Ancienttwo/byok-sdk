@@ -1,5 +1,5 @@
 import { OPENCODE_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/opencode/opencode-capabilities.ts';
-import { OPENCODE_QUALIFICATION } from '../../packages/client/src/adapters/opencode/opencode-version.ts';
+import { QUALIFIED_OPENCODE_VERSION } from '../../packages/client/src/adapters/opencode/opencode-version.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -33,7 +33,7 @@ export const COLUMNS = [
   ['dsh', DSH_RUNTIME_CAPABILITIES, QUALIFIED_DSH_VERSION, DSH_ABSENT_ISOLATION_SOURCES],
   ['Grok', GROK_RUNTIME_CAPABILITIES, QUALIFIED_GROK_VERSION, GROK_ABSENT_ISOLATION_SOURCES],
   ['Hermes', HERMES_RUNTIME_CAPABILITIES, QUALIFIED_HERMES_VERSION, HERMES_ABSENT_ISOLATION_SOURCES],
-  ['OpenCode (unqualified)', OPENCODE_RUNTIME_CAPABILITIES, OPENCODE_QUALIFICATION, {}],
+  ['OpenCode', OPENCODE_RUNTIME_CAPABILITIES, QUALIFIED_OPENCODE_VERSION, {}],
   ['Pi', PI_RUNTIME_CAPABILITIES, piPin, PI_ABSENT_ISOLATION_SOURCES],
   ['Pi (`durableLane`)', PI_DURABLE_RUNTIME_CAPABILITIES, piPin, PI_ABSENT_ISOLATION_SOURCES],
 ];

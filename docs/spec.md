@@ -1575,7 +1575,7 @@ Host UI or native tools. SDK source is now v9 (see the v9 cut); downstream paire
 remain separate actions. No v7 reader, mode default or fallback is retained.
 
 Fresh Pi execution keeps Pi's default native tools, the SDK web and todo
-extensions, the installed pi-subagents extension (see "Pi subagents") and the
+extensions, the pi-subagents extension (see "Pi subagents") and the
 user's own extensions and skills. For Agent tasks on the
 ordinary RPC lane, local `PiAdapterOptions.agentUserContext: 'excluded'`
 removes user extensions, skills, templates, themes and session resource
@@ -2587,7 +2587,7 @@ and the SDK todo locale assets against their build manifest. A mismatch, or a
 target that is not empty, fails closed. The asset root then holds the pi
 `package.json`, the pi themes and export resources at the paths pi uses for the
 form, the photon WASM file and the SDK todo locale assets with their license
-and provenance files. The photon loader of pi reads its WASM file beside the
+and provenance files, and the pi-subagents copy described in "Pi subagents". The photon loader of pi reads its WASM file beside the
 executable; without it, pi skips image resizing. The asset root is a build
 output of the product. The product must not mix asset roots of two pins.
 Bundled pi loads the user's own Pi packages and extensions from the user's
@@ -4015,17 +4015,18 @@ poll the cloud read API. With no draft producer, only a terminal marker appears.
 ## Pi subagents
 
 Pi subagents are the upstream `pi-subagents` package (exact client dependency,
-0.83.1), loaded by the ordinary RPC host from its installed package. The SDK
-vendors and patches none of it. pi-subagents reads its own package files at run
-time, so the host imports it through opaque specifiers that a product bundler
-cannot inline, and loads it only when the host is installed (not a single-file
-product's bundled re-entry, and never in the sealed host) and the credential
-source is `pi-auth-store` (see the `keys-profile` lane above).
+0.87.0), loaded by the ordinary RPC host when the credential source is
+`pi-auth-store` (see the `keys-profile` lane above), and never by the sealed
+host. The SDK vendors and patches none of it. pi-subagents reads its own
+package files at run time, so a product bundler never inlines it. The installed
+host imports the installed package through opaque specifiers. A single-file
+product's bundled re-entry loads the copy in its Pi asset root (below) through
+Pi's own extension loader, which supplies the Pi modules of the product bundle.
 
-Foreground children are in-process Pi sessions inside the parent host; background
-runs use pi-subagents' detached Node runner from the installed package. Neither
-re-enters the SDK: there is no `pi-subagent-print` or `pi-subagent-runner` helper
-kind. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
+Foreground children are in-process Pi sessions inside the parent host. In the
+installed host, background runs use pi-subagents' detached Node runner from the
+installed package. Neither re-enters the SDK: there is no `pi-subagent-print` or
+`pi-subagent-runner` helper kind. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
 fan-out limits. The SDK adds no second limit and no money or token spend cap.
 
 Under the `auto` tool authorization gate, the parent session registers
@@ -4039,10 +4040,87 @@ to bind its extensions and the launch is rejected. pi-subagents refuses an
 external-cli, external-job or machine placement before it starts, because those
 runners cannot load the gate. Under `all` the host registers nothing.
 
-A single-file product has no pi-subagents: its bundled re-entry offers no
-`subagent` tool. Restoring foreground subagents there needs pi-subagents shipped
-as an asset Pi package; background subagents there need an upstream host runner
-command seam. Both are deferred (tasks/todos.md).
+Before each workflow child starts, pi-subagents calls its hidden
+`subagent_launch` tool from inside the `subagent` call that runs the workflow,
+including an async workflow after that call returned. The call starts nothing.
+The model can reach the same name through `tool_search` or a codemode script,
+so the name alone proves nothing (#1511). Pi marks a call made by another tool
+with `parentToolCallId`, which the model never supplies. Under `auto`, each
+session's gate hook remembers the `subagent` calls the gate allowed, until
+`session_shutdown`. It refuses any `subagent_launch` whose parent is not one of
+them with `tool_authorization_denied`, before it reaches the gate: no parent,
+a parent that is not `subagent` (codemode), a denied or still-pending
+`subagent` call, or a parent from before the shutdown. It also refuses a launch whose input is not
+the pinned 0.87.0 schema: the required strings `workflowRunId` and `key`; the
+optional strings `agent`, `task`, `model` and `resume`; the optional booleans
+`async` and `worktree`; the non-empty paths `cwd` and `output`; and `commands`,
+whose entries hold a `command` string, a non-empty `cwd` and a string-valued
+`env`. Unknown keys and wrong types are refused. An admitted launch goes to the gate like other calls. The gate
+judges each part as the call it stands for. The child `cwd` is a write target,
+resolved through symlinks, so a sensitive path stays at the floor and a cwd
+outside the workspace asks. A resumed child carries no `cwd`; it reuses its
+stored run cwd, which the call does not show, so it asks. Each gate command
+(`commands[].command`, which the parent runs after the child) is judged as a
+bash command, and its own `cwd` (the child `cwd` when it states none) as a
+write target like the child `cwd`. `output`, which the parent writes, is a write
+target. The launch asks when any part would ask as that bash call or write. Its
+approval card names every effect: the risky ones first with their reasons,
+then the others; effects that do not fit on the card are counted, not dropped.
+`alwaysAsk` rules apply. `allowWithoutAsking` rules apply to no part of
+`subagent_launch`, so a Host rule can make the launch stricter but never
+looser: the name is shared with a call the model can reach, so an allow rule
+on it would be unsafe (#1511). A Host with only `subagent` rules gets one ask
+per `subagent` call, not one per child, except in a file-scoped session: there
+the child `cwd` is outside the file scope's tools, so each workflow child asks.
+
+pi-subagents calls `subagent_launch` only for children started by a workflow
+from a `subagent` call. It skips the call for schedule ticks, auto-resume,
+`/prompt-workflow` and RPC starts. Those children still load the gate
+extension, so each of their tool calls is gated, but no launch check of their
+`cwd`, gate commands or output runs. This is the same as 0.83.1.
+
+A single-file product offers foreground subagents only. `copyPiRuntimeAssets`
+writes `pi-subagents/` into the Pi asset root: the client's exact pi-subagents
+package with the closure of its runtime dependencies in its own `node_modules`,
+about 22 MB. Beside it, `pi-subagent-extensions/` holds the SDK gate and
+file-scope child extensions, which every native child loads by path. The
+bundled host passes the package's `pi.extensions` entry to Pi as an additional
+extension path and registers the required child extensions from the same copy.
+An asset root without the copy, or with another version, fails the launch with
+`pi_bundled_assets_unavailable`. The copy is SDK build output, so the check
+is its name and version, not a content digest.
+
+pi-subagents loads the Pi SDK of its foreground children, and decides whether
+a background run can start, from the Pi package root it finds. It reads
+`PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` before it searches the ancestors of
+the entry point and its own resolution, which could otherwise find a foreign
+Pi installed above the product. The bundled host sets that variable to a
+package it writes into its launch-private directory. The package carries Pi's
+name, version and `piConfig` and re-exports the product's own in-process Pi
+module, but holds none of Pi's peers. Foreground children therefore always run
+on the product's Pi, and pi-subagents refuses every background run in the
+interpreter + bundle form ("Background children require the host npm package
+… with its dependencies"). The Bun-compiled form re-executes `process.execPath`
+for a background run, which would start the product itself with Pi CLI
+arguments. So the bundled host also sets pi-subagents' Pi executable override,
+`PI_SUBAGENT_PI_BINARY`, to the same launch-private directory, which always
+exists and cannot be spawned. Only spawn paths read that override, never
+foreground children. A background launch then fails before any runner starts
+("async runner did not produce a pid"), and the tool call returns the error.
+The other users of the override fail the same way and never re-execute the
+product: Herdr project panes, Rex local placement and the live model probe of
+the profile check. Pi's bash tool passes the host environment to the commands
+it runs, and pi-subagents children build their own bash tools, so the SDK
+cannot strip both variables from them. A `pi` that a user starts inside the
+agent's bash therefore fails to load pi-subagents (the generated package loads
+only inside its host) and cannot spawn a background runner; it never loads a
+foreign Pi.
+
+Background subagents in a single-file product need an upstream seam (#1589,
+item 2): a host runner command for background runs
+(nicobailon/pi-subagents#3105), and a way for the host to state that its Pi is
+the embedded one and that it hosts no background runs, instead of the package
+root setting above. Both are deferred.
 
 ## Local native interaction contract
 

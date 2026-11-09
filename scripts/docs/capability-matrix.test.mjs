@@ -13,7 +13,7 @@ test('generation is deterministic and repairs a hand-edited cell', () => {
   assert.equal(generateDoc(doc.replace(table, table.replace('| `toolAuthorizationAuto` | yes', '| `toolAuthorizationAuto` | no'))), doc);
 });
 test('every column is a bundled adapter and every cell is yes, yes (no source) or no', () => {
-  assert.deepEqual(COLUMNS.map(([name]) => name), ['agy', 'Claude', 'Codex', 'dsh', 'Grok', 'Hermes', 'OpenCode (unqualified)', 'Pi', 'Pi (`durableLane`)']);
+  assert.deepEqual(COLUMNS.map(([name]) => name), ['agy', 'Claude', 'Codex', 'dsh', 'Grok', 'Hermes', 'OpenCode', 'Pi', 'Pi (`durableLane`)']);
   for (const line of matrixTable().split('\n').slice(3)) {
     for (const cell of line.split('|').slice(3, -1)) assert.match(cell.trim(), /^(yes|yes \(no source\)|no)$/u);
   }

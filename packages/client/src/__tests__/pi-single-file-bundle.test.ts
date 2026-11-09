@@ -407,8 +407,8 @@ await response.arrayBuffer();
  * #701: a Host that bundles its whole CLI as one CommonJS file in a single
  * esbuild pass (no ESM pass first). The bundle must load the Pi host and run a
  * real RPC session through the SDK-reserved helper, with no redirect or with
- * the sealed redirect. pi-subagents loads only from its installed package, so
- * a bundled product offers no subagent tool. CommonJS output has no `import.meta`; Pi reads
+ * the sealed redirect. The ordinary host offers the subagent tool from the
+ * pi-subagents copy in the Pi asset root; the sealed host never does. CommonJS output has no `import.meta`; Pi reads
  * `import.meta.url` when it evaluates, so the Host defines it from `__filename`.
  *
  * #724: `import.meta.url` is the only property the Host defines. The bundle
@@ -553,7 +553,8 @@ describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
       expect(toolNames.length, stderr).toBeGreaterThan(0);
       for (const names of toolNames) {
         expect(names).toContain('read');
-        expect(names).not.toContain('subagent');
+        if (redirect === undefined) expect(names).toContain('subagent');
+        else expect(names).not.toContain('subagent');
       }
 
       // #700: the request above ran through Node's built-in undici, not through Pi's npm copy.

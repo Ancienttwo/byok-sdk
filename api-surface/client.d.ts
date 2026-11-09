@@ -1313,7 +1313,10 @@ export interface CopyPiRuntimeAssetsOptions {
  *
  * The Pi package must be the exact official pin. The Pi export resources must
  * match their recorded SHA-256 digests, and the SDK todo locale assets must
- * match their build manifest; a mismatch fails closed. Returns the written
+ * match their build manifest; a mismatch fails closed. The root also holds the
+ * client's exact pi-subagents with its runtime dependencies and the SDK
+ * extensions its native children load, so the product's Pi offers foreground
+ * subagents. Returns the written
  * file paths, relative to `outDir`, in sorted order.
  */
 export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;
@@ -11716,12 +11719,21 @@ export interface ServiceInstallationOptions {
      * The candidate's store precheck, run from its staged `versionDir` while
      * every writer is stopped. It prints `{ "stores": ServiceStoreVerdict[] }`
      * (`byok-agent upgrade check --store --json` prints the SDK's own stores in
-     * this shape) and exits 0 or 2. Every store the candidate rewrites must be
+     * this shape) and exits 2 when a store is `new-path-repair` or `rejected`,
+     * 0 otherwise. Every store the candidate rewrites must be
      * listed, Host stores included: the snapshot covers exactly the listed
      * stores. Output that breaks {@link ServiceStoreVerdict}'s rules is
      * `precheck_failed`.
      */
     precheck(versionDir: string): ServiceProgram;
+    /**
+     * The candidate's store migration, run from its staged `versionDir` after
+     * the snapshot when the precheck reports a store as `migration-required`;
+     * exit 0 is success. The precheck then runs again and must report every
+     * store `accepted` or `absent`. Without it, a `migration-required` store is
+     * `store_migration_required` and nothing is switched.
+     */
+    migrate?(versionDir: string): ServiceProgram;
     /**
      * Resolves when the started version is healthy and throws when it is not.
      * Default: the daemon's control socket reports a live `lifecycle` — `running`
@@ -11784,11 +11796,13 @@ export interface ServiceInstallation {
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
      * Stages the payload, writes the pending receipt, stops the service, runs
-     * the candidate's precheck, snapshots the listed stores, switches
+     * the candidate's precheck, snapshots the listed stores, runs `migrate`
+     * and the precheck again when a store is `migration-required`, switches
      * `current` (the old one becomes `previous`), starts it and checks its
      * health. A store refusal stops before the switch and restarts the old
-     * version; a failed health check restores the old version and its snapshot
-     * together; a death after the receipt leaves `recover()` that work.
+     * version; a failed migration restores the snapshot first; a failed health
+     * check restores the old version and its snapshot together; a death after
+     * the receipt leaves `recover()` that work.
      */
     upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
     /**
@@ -11820,6 +11834,8 @@ declare const ERROR_MESSAGES: {
     readonly snapshot_failed: 'The store snapshot could not be written. Nothing was switched; free space or remove what cannot be copied, then retry.';
     readonly store_repair_required: 'The candidate needs a new store path and a new pairing. Nothing was switched; decide before upgrading.';
     readonly store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.';
+    readonly store_migration_required: 'The candidate opens a store only after its migration, and no migrate program is configured. Nothing was switched and the store is unchanged.';
+    readonly store_migration_failed: 'The candidate\'s store migration failed or left a store it does not accept. The store snapshot was restored and nothing was switched.';
     readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
     readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
@@ -13778,6 +13794,8 @@ export interface CopySdkNativeAssetsOptions {
     readonly outDir: string;
     readonly platform: 'win32' | 'darwin';
     readonly arch: 'x64' | 'arm64';
+    /** Absolute path to a local copy of the pinned Koffi tgz (for example a CI cache). The same integrity and addon checks apply and nothing is fetched. */
+    readonly archivePath?: string;
 }
 /** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
 export declare function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]>;

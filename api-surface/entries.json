@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2330501,
+      "budgetBytes": 2339581,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -121,7 +121,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 523299,
+      "budgetBytes": 523494,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -407,7 +407,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Single-file Host build: esbuild packaging plugin and SDK asset copy",
-      "budgetBytes": 26734,
+      "budgetBytes": 29705,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -643,7 +643,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 541148,
+      "budgetBytes": 546447,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -702,6 +702,7 @@
         "@earendil-works/pi-ai/api/anthropic-messages",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-ai/api/openai-responses",
+        "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite/node"
       ],
       "thirdParty": [
@@ -881,6 +882,11 @@
           "rule": "opaque import()"
         },
         {
+          "file": "packages/client/dist/bin/pi-runtime-host.js",
+          "line": 34,
+          "rule": "opaque import()"
+        },
+        {
           "file": "pi-web-access/dist/index.js",
           "line": 27685,
           "rule": "opaque import()"
@@ -922,7 +928,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 499018,
+      "budgetBytes": 500790,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1794,7 +1800,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 243937,
+      "budgetBytes": 244562,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2434,7 +2440,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2307663,
+      "budgetBytes": 2313842,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

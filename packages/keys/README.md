@@ -121,6 +121,67 @@ profile that declares `'openai-responses'` or `inputLimits`. It also refuses
 carry them. A profile without `thinkingLevelMap` passes: the prepared wire may
 leave the map out.
 
+### Your own OpenAI-compatible gateway
+
+A gateway that you run yourself, for example magpie, is an external
+authority. It translates the protocol for the upstream service. The SDK
+projects only the profile's `base_url` and `pi_model`. It does not rewrite
+requests for a gateway or infer settings from the gateway's model list.
+
+This profile reaches OpenCode Go through a local gateway:
+
+```ts
+await registry.configure({
+  profile_ref: 'gateway-opencode-go',
+  provider_kind: 'custom',
+  adapter: 'openai_compatible',
+  auth_mode: 'bearer',
+  base_url: 'http://127.0.0.1:3425/v1',
+  model: 'opencode-go/deepseek-v4.1-flash',
+  display_name: 'OpenCode Go via local gateway',
+  capabilities: [],
+  pi_model: {
+    contextWindow: 1_000_000,
+    maxTokens: 384_000,
+    reasoning: true,
+    thinkingLevel: 'high',
+    thinkingLevelMap: {
+      off: null, minimal: null, low: 'low', medium: null,
+      high: 'high', xhigh: null, max: 'max',
+    },
+    compat: { sendSessionAffinityHeaders: true },
+  },
+}, gatewayKey);
+```
+
+- `model` is the gateway's model id.
+- Take `contextWindow`, `maxTokens`, `reasoning` and `thinkingLevelMap` from
+  the gateway's own model list for that id.
+- `gatewayKey` is the gateway's key, not an OpenCode credential. Read it from
+  the gateway's local configuration and hand it to `configure`, which writes
+  it to the OS credential store. Use `auth_mode: 'bearer'`: the `pi-prepared`
+  and `pi-durable` entries refuse a keyless profile, see
+  [Pi provider launcher](#pi-provider-launcher).
+- An `http` `base_url` is accepted only for a loopback host.
+
+`compat.sendSessionAffinityHeaders` makes Pi send its session id in the
+`session_id`, `x-client-request-id` and `x-session-affinity` headers. The
+gateway turns that session id into the `x-opencode-session` header that
+OpenCode Go requires, so every request of one Pi session carries the same
+OpenCode session. The prepared runtime entry refuses this compat key, so this
+profile does not run on `pi-prepared`. The recorded run used `pi-rpc`.
+
+The direct `opencode-go` vendor profile currently has a reasoning replay
+defect, see [#1586](https://github.com/Ancienttwo/byok-sdk/issues/1586).
+Pi 1.5.0 replays thinking in the field the gateway used. A gateway that
+returns thinking as `reasoning_content`, as magpie does, gets that field back
+in the replayed assistant message, including the message that carries a tool
+call. At `thinkingLevel: 'high'` the model may answer a simple turn without
+thinking. The recorded replay run used `'max'`.
+
+One run through magpie is recorded in
+[OpenCode Go via a local gateway](../../docs/researches/2026-11-09-opencode-go-via-gateway.md).
+
 The SQLite profile schema changes in this candidate. Existing stores are
 rejected and preserved: explicitly provision a separate current-schema store
 after reviewing the old configuration. Do not delete an old store or infer its

@@ -82,12 +82,21 @@ export interface ServiceInstallationOptions {
    * The candidate's store precheck, run from its staged `versionDir` while
    * every writer is stopped. It prints `{ "stores": ServiceStoreVerdict[] }`
    * (`byok-agent upgrade check --store --json` prints the SDK's own stores in
-   * this shape) and exits 0 or 2. Every store the candidate rewrites must be
+   * this shape) and exits 2 when a store is `new-path-repair` or `rejected`,
+   * 0 otherwise. Every store the candidate rewrites must be
    * listed, Host stores included: the snapshot covers exactly the listed
    * stores. Output that breaks {@link ServiceStoreVerdict}'s rules is
    * `precheck_failed`.
    */
   precheck(versionDir: string): ServiceProgram;
+  /**
+   * The candidate's store migration, run from its staged `versionDir` after
+   * the snapshot when the precheck reports a store as `migration-required`;
+   * exit 0 is success. The precheck then runs again and must report every
+   * store `accepted` or `absent`. Without it, a `migration-required` store is
+   * `store_migration_required` and nothing is switched.
+   */
+  migrate?(versionDir: string): ServiceProgram;
   /**
    * Resolves when the started version is healthy and throws when it is not.
    * Default: the daemon's control socket reports a live `lifecycle` — `running`
@@ -152,11 +161,13 @@ export interface ServiceInstallation {
   install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
   /**
    * Stages the payload, writes the pending receipt, stops the service, runs
-   * the candidate's precheck, snapshots the listed stores, switches
+   * the candidate's precheck, snapshots the listed stores, runs `migrate`
+   * and the precheck again when a store is `migration-required`, switches
    * `current` (the old one becomes `previous`), starts it and checks its
    * health. A store refusal stops before the switch and restarts the old
-   * version; a failed health check restores the old version and its snapshot
-   * together; a death after the receipt leaves `recover()` that work.
+   * version; a failed migration restores the snapshot first; a failed health
+   * check restores the old version and its snapshot together; a death after
+   * the receipt leaves `recover()` that work.
    */
   upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
   /**
@@ -189,6 +200,8 @@ const ERROR_MESSAGES = {
   snapshot_failed: 'The store snapshot could not be written. Nothing was switched; free space or remove what cannot be copied, then retry.',
   store_repair_required: 'The candidate needs a new store path and a new pairing. Nothing was switched; decide before upgrading.',
   store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.',
+  store_migration_required: 'The candidate opens a store only after its migration, and no migrate program is configured. Nothing was switched and the store is unchanged.',
+  store_migration_failed: 'The candidate\'s store migration failed or left a store it does not accept. The store snapshot was restored and nothing was switched.',
   health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.',
   rollback_unhealthy: 'The previous version was restored but failed its health check too.',
   no_rollback: 'There is no previous version with a store snapshot to roll back to.',
@@ -243,7 +256,7 @@ const STORE_KINDS: ReadonlySet<unknown> = new Set([undefined, 'file', 'directory
 const TREE_COPY = { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false, preserveTimestamps: true, mode: fsConstants.COPYFILE_FICLONE } as const;
 /** How long a stale-token probe waits for the control endpoint to accept or refuse. */
 const CONTROL_PROBE_TIMEOUT_MS = 1_000;
-const VERDICTS: ReadonlySet<StoreCompatibilityVerdict> = new Set(['accepted', 'new-path-repair', 'rejected', 'absent']);
+const VERDICTS: ReadonlySet<StoreCompatibilityVerdict> = new Set(['accepted', 'migration-required', 'new-path-repair', 'rejected', 'absent']);
 
 /** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
 async function readInstallPointer(installRoot: string, name: Pointer): Promise<string | undefined> {
@@ -531,8 +544,30 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       throw new ServiceInstallationError('precheck_failed');
     }
     if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict) || overlaps(stores)) throw new ServiceInstallationError('precheck_failed');
-    if (stores.some((store) => store.verdict !== 'accepted' && store.verdict !== 'absent') !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
+    if (stores.some(isRefused) !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
     return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
+  }
+
+  /**
+   * Runs the Host's migration of the candidate's stores, after the snapshot
+   * and while every writer is stopped, then the precheck again. Any failure
+   * restores the snapshot before it is thrown, so the old version restarts
+   * on the store it left.
+   */
+  async function migrateStores(to: string, stores: readonly ServiceStoreVerdict[]): Promise<ServiceStoreVerdict[]> {
+    if (opts.migrate === undefined) throw new ServiceInstallationError('store_migration_required', stores);
+    try {
+      const { code } = await runProgram(opts.migrate(path.join(versionsDir, to)));
+      if (code !== 0) throw new ServiceInstallationError('store_migration_failed', stores);
+      const migrated = await precheck(to);
+      if (!migrated.every((store) => store.verdict === 'accepted' || store.verdict === 'absent')) {
+        throw new ServiceInstallationError('store_migration_failed', migrated);
+      }
+      return migrated;
+    } catch (error) {
+      await restoreSnapshot(to);
+      throw error;
+    }
   }
 
   /**
@@ -639,6 +674,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       const previous = await readPointer('previous');
       const kept = previous === undefined ? {} : { previous };
 
+      // A failed attempt after its snapshot leaves snapshots/<to>. Remove it
+      // before the intent: recover() restores any snapshot it finds for `to`,
+      // and an old one would overwrite what `from` wrote since.
+      await fs.rm(path.join(snapshotsDir, to), { recursive: true, force: true });
       // Write-ahead: the service may be stopped from here on, so the intent
       // must be on disk before the stop. A death between this write and the
       // switch leaves recover() a pending receipt to finish or roll back;
@@ -650,11 +689,12 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         release = await stopQuiescent();
         try {
           stores = await precheck(to);
-          const refused = stores.find((store) => store.verdict === 'new-path-repair' || store.verdict === 'rejected');
+          const refused = stores.find(isRefused);
           if (refused !== undefined) {
             throw new ServiceInstallationError(refused.verdict === 'new-path-repair' ? 'store_repair_required' : 'store_rejected', stores);
           }
           await snapshot(to, stores);
+          if (stores.some((store) => store.verdict === 'migration-required')) stores = await migrateStores(to, stores);
         } catch (error) {
           await release().catch(() => undefined);
           throw error;
@@ -821,6 +861,11 @@ function isServiceStoreVerdict(value: unknown): value is ServiceStoreVerdict {
   const store = value as Record<string, unknown>;
   return typeof store.store === 'string' && STORE_ID.test(store.store) && typeof store.path === 'string' && path.isAbsolute(store.path)
     && STORE_KINDS.has(store.kind) && typeof store.reason === 'string' && VERDICTS.has(store.verdict as StoreCompatibilityVerdict);
+}
+
+/** A verdict that stops the upgrade before the snapshot; `migration-required` is not one. */
+function isRefused(store: ServiceStoreVerdict): boolean {
+  return store.verdict === 'new-path-repair' || store.verdict === 'rejected';
 }
 
 /** Whether two stores share a path or one lies inside a directory store. */

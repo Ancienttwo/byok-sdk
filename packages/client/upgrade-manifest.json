@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "7b4bdbd5aa3ffd791d8ba9e2ab94c16312800c730303e781737c1213fc27bd54"
+    "snapshotSha256": "5b3b7d660e081f6b8b9315e2b4b0767ea0f2e2fbe723f4005dbf5a11329180ec"
   },
   "configFields": {
     "status": "tracked",
@@ -84,13 +84,48 @@
         "export:@byok-sdk/protocol#PairResponseSchema",
         "export:@byok-sdk/protocol#TokenResponseSchema"
       ]
+    },
+    {
+      "id": "native-assets-archive-path",
+      "impact": "additive",
+      "summary": "copySdkNativeAssets accepts an optional absolute archivePath to a local copy of the pinned Koffi tgz. It runs the same SHA-512 integrity and addon SHA-256 checks and never calls fetch. Without it, behavior is unchanged.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1567",
+      "items": [
+        "export:@byok-sdk/client#CopySdkNativeAssetsOptions"
+      ]
+    },
+    {
+      "id": "store-migration-required-verdict",
+      "impact": "additive",
+      "summary": "A store precheck can report migration-required: the candidate opens the store after its explicit migration. inspectProviderProfileStore reports it for a profile store with an earlier provider_kind CHECK set. A service installation runs the Host's new migrate program after the store snapshot, then the precheck again; without migrate the upgrade fails with store_migration_required, and a failed migration restores the snapshot (store_migration_failed). A precheck exits 2 only for new-path-repair or rejected.",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#stores",
+      "items": [
+        "export:@byok-sdk/client#ServiceInstallationErrorCode",
+        "export:@byok-sdk/client#ServiceInstallationOptions",
+        "export:@byok-sdk/core#StoreCompatibilityVerdict"
+      ]
     }
   ],
   "changes": [
     {
+      "item": "export:@byok-sdk/client#CopySdkNativeAssetsOptions",
+      "change": "changed",
+      "entry": "native-assets-archive-path"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeIsolationCapabilities",
       "change": "changed",
       "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
     },
     {
       "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
@@ -106,6 +141,11 @@
       "item": "export:@byok-sdk/core#PresenceRuntimeCapabilities",
       "change": "changed",
       "entry": "wire-v6-isolation-sources"
+    },
+    {
+      "item": "export:@byok-sdk/core#StoreCompatibilityVerdict",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
     },
     {
       "item": "export:@byok-sdk/keys#ProviderProfileStoreMigration",
