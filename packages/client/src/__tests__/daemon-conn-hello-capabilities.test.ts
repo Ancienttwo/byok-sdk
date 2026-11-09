@@ -134,7 +134,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       // The capability matrix (#1103) rides on the same object.
       toolAuthorizationAuto: true,
       preparedLane: true,
-      isolation: { userInstructions: true, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: false, sessionPersistence: false },
+      isolation: { userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: true, userHookContext: true, userMcpServers: false, sessionPersistence: false },
     });
 
     // Claude still supports plan; its private confirm/approval MCP path has been removed.

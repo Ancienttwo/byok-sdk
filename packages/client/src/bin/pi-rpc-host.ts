@@ -96,7 +96,7 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
     fail(`config must contain exactly ${keys.join(', ')}`);
   }
   if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 11) fail('unsupported config format/version');
-  const resources = parsePiAgentResources({ userContext: raw.agentUserContext, skillPaths: raw.agentSkillPaths, extensionPaths: raw.agentExtensionPaths });
+  const resources = parsePiAgentResources({ agentUserContext: raw.agentUserContext, skillPaths: raw.agentSkillPaths, extensionPaths: raw.agentExtensionPaths });
   const credentialSource = raw.credentialSource;
   if (typeof credentialSource !== 'string' || !(CREDENTIAL_SOURCES as readonly string[]).includes(credentialSource)) {
     fail(`config.credentialSource must be one of [${CREDENTIAL_SOURCES.join(', ')}]`);
@@ -105,14 +105,14 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
     fail('config.cwd must be a normalized absolute path');
   }
   const agentHome = raw.agentHome;
-  if (resources.userContext === 'excluded'
+  if (resources.agentUserContext === 'excluded'
     ? typeof agentHome !== 'string' || !isAbsolute(agentHome) || resolve(agentHome) !== agentHome
     : agentHome !== null) {
     fail('config.agentHome must be a normalized absolute path under excluded user context and null otherwise');
   }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   const fileScope = raw.fileScope === null ? null : parseSerializedFileScopeGrant(raw.fileScope, fail);
-  if (fileScope?.mode === 'memory' && (resources.userContext !== 'excluded'
+  if (fileScope?.mode === 'memory' && (resources.agentUserContext !== 'excluded'
     || agentHome !== raw.cwd || fileScope.home.path !== raw.cwd
     || resources.skillPaths.length !== 0 || resources.extensionPaths.length !== 0
     || raw.toolAuthorization !== null || Object.keys(mcp.mcpServers).length !== 0
@@ -122,7 +122,7 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   return {
     format: 'byok.pi.rpc-launch', version: 11,
     credentialSource: credentialSource as PiRpcHostConfig['credentialSource'], cwd: raw.cwd, mcp,
-    agentUserContext: resources.userContext,
+    agentUserContext: resources.agentUserContext,
     agentHome: agentHome as string | null,
     agentSkillPaths: resources.skillPaths,
     agentExtensionPaths: resources.extensionPaths,
