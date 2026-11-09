@@ -10,7 +10,7 @@ import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credent
 import { runPiSessionRuntime } from './pi-session-runtime';
 export { openPiRpcSession } from './pi-session-runtime';
 import { webExtension } from './pi-extension-factories.js';
-import { loadPiSubagentsAsset, loadPiSubagentsExtensions } from '../adapters/pi/subagents';
+import { loadPiSubagentsAsset, loadPiSubagentsExtensions, writePiSubagentsHostSdk } from '../adapters/pi/subagents';
 import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
@@ -293,7 +293,10 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
       // launch-private directory, which holds this launch's config, so the
       // spawn always fails and the tool call reports it.
       process.env.PI_SUBAGENT_PI_BINARY = resolve(dirname(args.configPath));
-      const asset = await loadPiSubagentsAsset(bundledAssetRoot(), config.toolAuthorization, fileScoped);
+      // pi-subagents' own Pi root setting: foreground children get the product's Pi, and no foreign Pi above the product is used.
+      const assetRoot = bundledAssetRoot();
+      process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = await writePiSubagentsHostSdk(join(resolve(dirname(args.configPath)), 'pi-subagents-host-sdk'), assetRoot);
+      const asset = await loadPiSubagentsAsset(assetRoot, config.toolAuthorization, fileScoped);
       subagentExtensionPaths.push(asset.extensionPath);
       extensionFactories.push(...asset.factories);
     }

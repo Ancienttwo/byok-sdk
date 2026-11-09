@@ -86,7 +86,7 @@ if (process.argv[2] !== 'task') {
   const input = JSON.parse(await fs.readFile(process.argv[3], 'utf8'));
   const report = { stage: 'lookup' };
   try {
-    try { await import(input.piSpecifier); report.lookup = 'resolved'; } catch (error) { report.lookup = String(error); }
+    try { report.lookup = (await import(input.piSpecifier)).FOREIGN === true ? 'foreign' : 'resolved'; } catch (error) { report.lookup = String(error); }
     report.defaultDetect = await new sdk.PiAdapter().detect();
     // The Host sets PI_CODING_AGENT_DIR itself, so the runtime gets it only through pass (#1095); the asset root is packageDir (#1315).
     const adapter = new sdk.PiAdapter({ runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR', 'PAYLOAD_TEST_PRODUCT_REEXEC'] }, sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
@@ -229,7 +229,14 @@ async function buildHost(host: HostCase, release: string, buildDir: string, skip
 
 describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', () => {
   it.skipIf(BUN_BIN === undefined).for(['interpreter+bundle (bun)', 'interpreter+bundle (node)', 'compiled-executable'] as const)('runs a Pi task from the %s host form with no package lookup', { timeout: 180_000 }, async (form, { skip }) => {
-    const release = await tempRoot('byok-host-payload-release-');
+    // #1589: a foreign Pi installed above the product; pi-subagents must never load it.
+    const outer = await tempRoot('byok-host-payload-release-');
+    const release = path.join(outer, 'release'); await fs.mkdir(release);
+    const foreignPi = path.join(outer, 'node_modules', '@earendil-works', 'pi-coding-agent');
+    await fs.mkdir(foreignPi, { recursive: true });
+    await fs.writeFile(path.join(foreignPi, 'package.json'), JSON.stringify({ name: PI_SPECIFIER, version: '1.5.0', type: 'module', exports: { '.': './index.js' } }));
+    // It has no SDK: a child session created from it fails, so the foreground child below proves the product's Pi ran it.
+    await fs.writeFile(path.join(foreignPi, 'index.js'), 'export const FOREIGN = true;\n');
     const buildDir = await tempRoot('byok-host-payload-build-');
     const runDir = await tempRoot('byok-host-payload-run-');
     const bodies: string[] = [];
@@ -297,7 +304,8 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       expect(report.error, `failed at ${report.stage}`).toBeUndefined();
       expect(report.stage).toBe('done');
       // Package lookup is denied, and the default adapter reproduces the reported probe failure.
-      expect(report.lookup).toMatch(/Cannot find (package|module)/u);
+      // The only Pi package a lookup can find is the foreign one above the release.
+      expect(report.lookup).toMatch(/^foreign$|Cannot find (package|module)/u);
       expect(report.defaultDetect).toEqual({ kind: 'probe-failed' });
       // The default provider's models.json apiKey is pi's login (#345).
       expect(report.detect).toEqual({
@@ -324,7 +332,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       // The compiled form's Pi executable override is the launch-private directory, which cannot be spawned.
       expect(results[1]).toMatch(form === 'compiled-executable'
         ? /Failed to start async run .*async runner did not produce a pid/u
-        : /Failed to start async run .*Background children require a supported standalone Pi host or the installed npm package/u);
+        : /Failed to start async run .*Background children require the host npm package \(@earendil-works\/pi-coding-agent\) with its dependencies/u);
       expect(existsSync(reexecMarker)).toBe(false);
       // The user's extension loaded against the Pi runtime in the bundle.
       expect(JSON.parse(await fs.readFile(extensionMarker, 'utf8'))).toEqual({ version: '1.5.0', schema: 'object', api: 'function' });

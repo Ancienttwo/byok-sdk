@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
@@ -86,6 +86,37 @@ export async function loadPiSubagentsAsset(
   const extensionDir = path.join(assetRoot, PI_SUBAGENT_EXTENSIONS_ASSET_DIR);
   return { extensionPath, factories: [requireChildExtensions(registerRequiredChildExtensions, path.join(extensionDir, PI_SUBAGENT_GATE_FILE),
     fileScoped ? path.join(extensionDir, PI_SUBAGENT_FILE_SCOPE_FILE) : undefined)] };
+}
+
+const HOST_SDK_GLOBAL_KEY = 'byok-sdk.pi-subagents.host-sdk';
+const EXPORT_NAME = /^[A-Za-z_$][\w$]*$/u;
+
+/**
+ * pi-subagents loads the Pi SDK of its foreground children, and decides
+ * whether background runs can start, from the Pi package root it finds. It
+ * reads `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` before it searches the
+ * ancestors of the entry point and the copy's own resolution. So a bundled
+ * product could otherwise pick a foreign Pi installed above it. This writes a
+ * package named like Pi in `dir`, a directory private to this launch. It
+ * re-exports the product's own in-process Pi module and carries Pi's manifest
+ * fields but none of its peers, so foreground children run on the product's
+ * Pi and pi-subagents refuses every background run. Returns the package root.
+ */
+export async function writePiSubagentsHostSdk(dir: string, assetRoot: string): Promise<string> {
+  const pi = await import('@earendil-works/pi-coding-agent') as Record<string, unknown>;
+  (globalThis as Record<symbol, unknown>)[Symbol.for(HOST_SDK_GLOBAL_KEY)] = pi;
+  const manifest = JSON.parse(readFileSync(path.join(assetRoot, 'package.json'), 'utf8')) as { name: string; version: string; piConfig?: unknown };
+  const names = Object.keys(pi).filter(name => name !== 'default' && EXPORT_NAME.test(name));
+  mkdirSync(dir, { mode: 0o700 });
+  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: manifest.name, version: manifest.version, type: 'module',
+    ...(manifest.piConfig === undefined ? {} : { piConfig: manifest.piConfig }), exports: { '.': './index.js' } }), { flag: 'wx' });
+  writeFileSync(path.join(dir, 'index.js'), [
+    `const pi = globalThis[Symbol.for(${JSON.stringify(HOST_SDK_GLOBAL_KEY)})];`,
+    "if (pi === undefined) throw new Error('pi_subagents_host_sdk_unavailable: this package is the Pi of one byok-sdk bundled host and loads only inside it');",
+    `export const { ${names.join(', ')} } = pi;`,
+    ...('default' in pi ? ['export default pi.default;'] : []),
+  ].join('\n') + '\n', { flag: 'wx' });
+  return dir;
 }
 
 function requireChildExtensions(
