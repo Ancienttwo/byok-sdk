@@ -61,8 +61,12 @@ substrate, with **node:24.22.1** and **oven/bun:1.4.3**; this is container
 runtime evidence, not a Linux CI result. Windows ran through
 `hc exec --on win-ci`, with Node **24.22.1**, Bun **1.4.3**, and the SDK's
 integrity-pinned koffi **3.3.7** native deployment. The Linux and Windows
-products were built from the SDK's production `dist` and its real reserved
-helper dispatcher, with no spike source transformations or upstream patches.
+products were built from implementation commit `35caca7f0`, the SDK's production
+`dist` and its real reserved helper dispatcher, with no spike source
+transformations or upstream patches. The subsequent merge of train commit
+`0c926da23` changed Codex retention and generated budgets, with no change to
+these Pi source files; the merged tree reran all 68 affected tests and the
+required build/type/API/version/upgrade checks successfully.
 
 Bun's unchanged upstream runner emits a nonfatal diagnostic that its
 proxy-aware dispatcher could not call `undici.install`. The loopback runs
@@ -104,8 +108,9 @@ risk explicitly.
   unchanged and every closure budget equals its measured size.
 - `bun run check:version-authority` — passed.
 - `bun run check:upgrade-manifest` — passed, with **3023 tracked items** and no
-  declaration change. The behavior is named in the changelog/spec; no
-  synthetic manifest entry is added for an unchanged tracked declaration.
+  declaration change from this lane. The train's Codex-retention entries are
+  retained. The behavior is named in the changelog/spec; no synthetic manifest
+  entry is added for an unchanged tracked declaration.
 - Active LSP coverage of all eight changed TypeScript files reported no
   TypeScript diagnostics. Auxiliary pattern findings include the deliberate
   `Reflect.get(globalThis, 'Headers')` used by the existing undici-initialization
