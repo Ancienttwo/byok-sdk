@@ -3407,6 +3407,9 @@ export type LocalStoreId = 'server-sqlite' | 'client-journal' | 'keys-profile-st
  * What the build that ran the check does when it opens the store:
  *
  * - `accepted`: it opens the store and keeps its data.
+ * - `migration-required`: it does not open the store as it is, but after this
+ *   build's explicit migration the store keeps all of its data and opens.
+ *   Older builds cannot open the migrated store.
  * - `new-path-repair`: it refuses the store as an older format. Start on a new
  *   path and pair or provision again; the old files stay as they are.
  * - `rejected`: it refuses the store for another reason (a newer format, a
@@ -3414,7 +3417,7 @@ export type LocalStoreId = 'server-sqlite' | 'client-journal' | 'keys-profile-st
  *   it; `code` and `reason` say what the store reported.
  * - `absent`: there is no store at the path yet, so nothing blocks the switch.
  */
-export type StoreCompatibilityVerdict = 'accepted' | 'new-path-repair' | 'rejected' | 'absent';
+export type StoreCompatibilityVerdict = 'accepted' | 'migration-required' | 'new-path-repair' | 'rejected' | 'absent';
 export interface StoreCompatibility {
     readonly store: LocalStoreId;
     /** The store file that was inspected. */

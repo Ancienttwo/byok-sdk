@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LocalStoreId, StoreCompatibility } from '@byok-sdk/core';
 import { inspectDaemonStores } from '../diagnostics/store-compatibility';
 import { runUpgradeFromCheckCommand, runUpgradeStoreCheckCommand, UPGRADE_CHECK_REFUSED_EXIT_CODE } from '../bin/commands/upgrade';
@@ -18,6 +18,13 @@ import { openLocalDurableStorage } from '../adapters/pi-durable/storage';
  * #1102: the daemon store precheck (journal + pi-durable replicas) and `byok-agent upgrade check --store`.
  * #1316: `byok-agent upgrade check --from` over the archived manifests.
  */
+
+/** Verdicts the daemon stores never give today (`migration-required`) reach the CLI through this override. */
+const inspected = vi.hoisted(() => ({ override: undefined as StoreCompatibility[] | undefined }));
+vi.mock('../diagnostics/store-compatibility', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../diagnostics/store-compatibility')>();
+  return { ...original, inspectDaemonStores: async (...args: Parameters<typeof original.inspectDaemonStores>) => inspected.override ?? original.inspectDaemonStores(...args) };
+});
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const REPO = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -36,10 +43,11 @@ interface UpgradeManifest {
 
 const index = JSON.parse(readFileSync(join(FIXTURES, 'index.json'), 'utf8')) as FixtureIndex;
 const manifest = JSON.parse(readFileSync(join(REPO, 'packages/client/upgrade-manifest.json'), 'utf8')) as UpgradeManifest;
-const ACCEPTANCE_VERDICT: Record<string, string> = { accept: 'accepted', 'new-path-repair': 'new-path-repair', reject: 'rejected' };
+const ACCEPTANCE_VERDICT: Record<string, string> = { accept: 'accepted', migrate: 'migration-required', 'new-path-repair': 'new-path-repair', reject: 'rejected' };
 
 const scratch: string[] = [];
 afterEach(() => {
+  inspected.override = undefined;
   for (const directory of scratch.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
@@ -287,6 +295,16 @@ describeSqlite('byok-agent upgrade check --store', () => {
     expect(code).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
     expect(UPGRADE_CHECK_REFUSED_EXIT_CODE).toBe(2);
     expect(lines[1]).toMatch(/^rejected client-journal .*daemon\.db code=JournalUnavailableError — /);
+  });
+
+  it('exits 0 for a migration-required store and says to run the migration first', async () => {
+    inspected.override = [{ store: 'client-journal', path: '/store/daemon.db', verdict: 'migration-required', reason: 'migrate first' }];
+    const lines: string[] = [];
+    expect(await runUpgradeStoreCheckCommand({ storeDir: tempDir(), json: false, log: (line) => lines.push(line) })).toBe(0);
+    expect(lines.slice(1)).toEqual([
+      'migration-required client-journal /store/daemon.db — migrate first',
+      'Run this build\'s store migration before it opens a migration-required store.',
+    ]);
   });
 });
 

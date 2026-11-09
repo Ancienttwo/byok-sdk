@@ -96,7 +96,7 @@ export const UNIONS = [
 /**
  * On-disk stores whose format a new build may refuse. `format` returns the
  * identity string recorded in the snapshot; the acceptance policy of a change
- * (accept | new-path-repair | reject) is declared on its manifest entry.
+ * (accept | migrate | new-path-repair | reject) is declared on its manifest entry.
  */
 export const STORES = [
   {

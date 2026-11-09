@@ -49,8 +49,11 @@ The file is not a package export, so resolve it next to `package.json`.
   byok-sdk issue or PR URL.
 - `acceptance` is required on an entry that changes a store. It says what the
   new release does with a file the previous release wrote: `accept`,
-  `new-path-repair` (start on a new path and pair or enroll again) or
-  `reject` (refused at open, left unchanged; the operator resolves it).
+  `migrate` (the inspector reports `migration-required`: opened after the new
+  release's explicit migration, keeping its data), `new-path-repair` (start
+  on a new path and pair or enroll again) or `reject` (refused at open, left
+  unchanged; the operator resolves it). Every value except `accept` makes the
+  entry breaking.
 - `from`, `to`, `configFields` and `changes` are generated. `changes` lists
   every changed item with the entry that covers it. Store, bin, example,
   config and interprocess items carry their `before` and `after` values;
@@ -206,21 +209,36 @@ stores calls their inspectors itself. Every inspector returns the
 - `accepted`: the build opens the store and keeps its data. pi-durable
   migrates an older replica forward on open; the old build cannot read it
   afterwards.
+- `migration-required`: the build does not open the store as it is, but after
+  its explicit migration the store keeps all of its data and opens; the old
+  build cannot open the migrated store. keys reports it when
+  `migrateProviderProfileStore` migrates a private copy that the store then
+  opens.
 - `new-path-repair`: refused as an older format (server `schema_version`,
-  keys `PROVIDER_STORE_SCHEMA_STALE`). Start on a new path and pair or
-  provision again.
+  keys `PROVIDER_STORE_SCHEMA_STALE` from the open or from the migration).
+  Start on a new path and pair or provision again.
 - `rejected`: refused for another reason, such as a newer format, a damaged
   file, or a journal from before `withheld_bytes`. `code` and `reason` carry
   what the store reported, and the operator resolves it.
 - `absent`: no store at the path.
 
-The CLI exits 0 when every store is `accepted` or `absent`, and 2 otherwise.
+The CLI exits 2 when a store is `new-path-repair` or `rejected`, and 0
+otherwise. For a `migration-required` store it also prints a line saying to
+run the migration first.
 Stop the owner of a store before checking it: a file that changes while it is
 copied makes the check fail with an error instead of a verdict.
 
 A service installation (`createServiceInstallation`, #1097) runs the
 candidate's precheck program, which prints `{ "stores": ServiceStoreVerdict[] }`
-and exits 0 or 2 by the same rule (#1328). `ServiceStoreVerdict` is
+and exits 0 or 2 by the same rule (#1328). When a store is
+`migration-required`, the installation runs the Host's `migrate` program from
+the staged candidate after the snapshot, then the precheck again, which must
+report every store `accepted` or `absent` (#1577). Without `migrate` the
+upgrade is `store_migration_required` and the store is unchanged. A `migrate`
+that exits non-zero, or a second precheck that still refuses a store, restores
+the snapshot and is `store_migration_failed`. Either way the receipt is
+`failed` and the old version is started again; a death during the migration
+leaves the `pending` receipt, and `recover()` restores the snapshot. `ServiceStoreVerdict` is
 `StoreCompatibility` widened for a Host:
 
 - `store` is an SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`,

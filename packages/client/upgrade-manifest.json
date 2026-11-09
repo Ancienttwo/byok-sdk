@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.40.0",
-    "snapshotSha256": "8f458b18ee9bcd5d0bb249b1deab606060b794068931e0c0ff9e580650b0ed9a"
+    "snapshotSha256": "bcf64394fff57f7e846e5e8165f697e46d09f99acb95da04085ed039716d4658"
   },
   "configFields": {
     "status": "tracked",
@@ -33,6 +33,17 @@
         "export:@byok-sdk/keys#ProviderProfileStoreMigration",
         "export:@byok-sdk/keys#migrateProviderProfileStore"
       ]
+    },
+    {
+      "id": "store-migration-required-verdict",
+      "impact": "additive",
+      "summary": "A store precheck can report migration-required: the candidate opens the store after its explicit migration. inspectProviderProfileStore reports it for a profile store with an earlier provider_kind CHECK set. A service installation runs the Host's new migrate program after the store snapshot, then the precheck again; without migrate the upgrade fails with store_migration_required, and a failed migration restores the snapshot (store_migration_failed). A precheck exits 2 only for new-path-repair or rejected.",
+      "migration": "docs/releases/host-upgrade-0.41.0.md#stores",
+      "items": [
+        "export:@byok-sdk/client#ServiceInstallationErrorCode",
+        "export:@byok-sdk/client#ServiceInstallationOptions",
+        "export:@byok-sdk/core#StoreCompatibilityVerdict"
+      ]
     }
   ],
   "changes": [
@@ -40,6 +51,21 @@
       "item": "export:@byok-sdk/client#CopySdkNativeAssetsOptions",
       "change": "changed",
       "entry": "native-assets-archive-path"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
+    },
+    {
+      "item": "export:@byok-sdk/core#StoreCompatibilityVerdict",
+      "change": "changed",
+      "entry": "store-migration-required-verdict"
     },
     {
       "item": "export:@byok-sdk/keys#ProviderProfileStoreMigration",
