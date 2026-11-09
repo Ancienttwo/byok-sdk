@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
@@ -21,6 +23,47 @@ test('reviewed graph covers every workspace and all local dependency edges', () 
     }
   }
   assert.deepEqual(workspaceGraph, actual);
+});
+
+test('#654: browser tooling admits only the private Worker example pins, command and core workspace edge', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-browser-vectors-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const dir = 'examples/hosted-bot-collaboration-worker', path = `${dir}/package.json`;
+  const baseline = { name: workspaceGraph[dir].name, private: true, version: '0.0.1', scripts: {}, dependencies: {}, devDependencies: {} };
+  const pins = { '@vitest/browser-playwright': '5.1.0', playwright: '1.64.1' };
+  const scripts = { 'test:browser': 'vitest run --config src/browser/vitest.config.ts' };
+  const dependencies = { '@byok-sdk/core': 'workspace:*' };
+  mkdirSync(dirname(join(cwd, path)), { recursive: true });
+  const write = value => writeFileSync(join(cwd, path), JSON.stringify(value));
+  const git = (...args) => {
+    const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr); return result.stdout.trim();
+  };
+  write(baseline); git('init'); git('add', '.');
+  git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
+  const context = { cwd, base: git('rev-parse', 'HEAD') };
+  const approved = { ...baseline, scripts, dependencies, devDependencies: pins };
+  for (const value of [approved, { ...baseline, devDependencies: pins }, { ...baseline, scripts }, { ...baseline, dependencies }]) {
+    write(value);
+    assert.deepEqual(selectImpact([path], context).dirs, [dir]);
+  }
+  for (const value of [
+    { ...approved, private: false },
+    ...Object.keys(pins).flatMap(name => [
+      { ...approved, devDependencies: { ...pins, [name]: `^${pins[name]}` } },
+      { ...approved, devDependencies: { ...pins, [name]: '1.0.0' } },
+      { ...approved, devDependencies: { [name]: pins[name] } },
+    ]),
+    { ...approved, dependencies: { ...dependencies, ...pins }, devDependencies: {} },
+    { ...approved, devDependencies: { ...pins, other: '1.0.0' } },
+    { ...approved, scripts: { 'test:browser': 'echo pass' } },
+    { ...approved, dependencies: { '@byok-sdk/core': '^1.0.0' } },
+  ]) {
+    write(value); assert.throws(() => selectImpact([path], context), /private|reviewed fields/i);
+  }
+  for (const relative of ['src/browser/vitest.config.ts', 'src/browser/vectors.browser.ts']) {
+    assert.deepEqual(selectImpact([`${dir}/${relative}`]).dirs, [dir]);
+  }
 });
 
 test('docs and known CI contracts select light checks, not release families', () => {

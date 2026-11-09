@@ -267,6 +267,21 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     const added = admitRegisteredPrivateLock(before, after, { base, cwd, workspaceGraph });
     const impact = dependencyLockImpact(before, after, { cwd });
     return { ...impact, dirs: [...new Set([...added, ...impact.dirs])] };
+  } else if (path === `${HOSTED_WORKER.dir}/package.json`) {
+    // #654 W4: the browser member page imports core's sealed-payload entry directly.
+    if (before.dependencies?.['@byok-sdk/core'] === undefined && after.dependencies?.['@byok-sdk/core'] === 'workspace:*') {
+      delete after.dependencies['@byok-sdk/core'];
+    }
+    // #654 W3: only this pair of exact browser-tool pins, in the private example's devDependencies.
+    const pins = { '@vitest/browser-playwright': '5.1.0', playwright: '1.64.1' };
+    if (Object.entries(pins).every(([name, pin]) => before.devDependencies?.[name] === undefined
+      && after.devDependencies?.[name] === pin)) {
+      for (const name of Object.keys(pins)) delete after.devDependencies[name];
+    }
+    if (before.scripts?.['test:browser'] === undefined
+      && after.scripts?.['test:browser'] === 'vitest run --config src/browser/vitest.config.ts') {
+      delete after.scripts['test:browser'];
+    }
   } else if (path === 'examples/bot-collaboration/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The bot collaboration fixture must stay private');
     // #658: the private fixture cloud edge.
