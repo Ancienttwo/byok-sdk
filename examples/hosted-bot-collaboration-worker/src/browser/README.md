@@ -5,7 +5,7 @@ and run `bun run build`. Then:
 
 ```sh
 cd examples/hosted-bot-collaboration-worker
-bun node_modules/playwright/cli.js install chromium firefox webkit
+bun ../../node_modules/playwright/cli.js install chromium firefox webkit
 bun run test:browser
 ```
 
@@ -45,5 +45,11 @@ Windows is separate evidence from system Safari on macOS. The member page is
 layer M with its own acceptance procedure. A local run alone does not complete
 #654's physical-device and browser acceptance.
 
-The browser tooling is pinned only in this private example's devDependencies.
-It adds no runtime dependency to any published package and changes no public API.
+The browser tooling is pinned in the private root workspace's devDependencies;
+root and example Vitest are pinned to the matching version. This keeps browser
+and Node tests, including cross-workspace test helpers, in the same Vitest peer
+context. The Node suite includes a check that its Vitest module resolves to the
+same physical package as the root. Playwright and playwright-core have no install
+lifecycle hooks, so `bun ci`/`bun install` does not download browsers; only the
+explicit install command above downloads them. No published package gains a
+runtime dependency, and the runner changes no public API.
