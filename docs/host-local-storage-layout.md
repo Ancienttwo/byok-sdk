@@ -192,15 +192,14 @@ same `session-ledger` lower bound as `pi-session-dir`.
 `codex-session-store` is the Codex rollouts that `agentUserContext: 'excluded'`
 keeps in `<home>/.byok/codex/sessions` and `archived_sessions`. A
 `rollout-<time>-<thread id>.jsonl` goes once its last write is older than the
-TTL. A folder is removed only when this pass emptied it by deleting a rollout
-beneath it, it sits under `sessions/` or `archived_sessions/`, and its path
-below that root is `YYYY`, `YYYY/MM` or `YYYY/MM/DD` (digits only): the day
-folder first, then its month and year if they are empty too. The store roots,
-other empty folders, other files and links stay. The sweep reads only those
-date folders, and rollouts only at the day level; anything else an Agent
-creates under the store is never read. A walk longer than one pass deadline
-resumes at the folder and file where it stopped, and a daemon restart starts it
-over. The sweep runs under the idle-home lease, so a home with a
+TTL. The sweep never removes a folder: empty date folders stay in place. It
+reads only the date folders `YYYY/MM/DD` (digits only) under `sessions/` and
+`archived_sessions/`, and rollouts only at the day level; anything else an
+Agent creates under the store is never read, and a store root or date folder
+that is a link or has a link above it fails the sweep for that home without
+reading through it. A day folder is streamed under the pass budget, and a walk
+longer than one pass deadline resumes from the retained cursor of the folder
+where it stopped; a daemon restart starts it over. The sweep runs under the idle-home lease, so a home with a
 running or resuming task is skipped and its threads are kept. A thread that
 keeps chatting stays resumable. A rollout is also kept while the home's
 `session-ledger` file for its thread is younger than the ledger TTL, because a
