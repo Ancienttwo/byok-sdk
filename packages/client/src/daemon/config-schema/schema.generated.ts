@@ -225,6 +225,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "agy-session-store": {
                   "type": "number"
                 },
+                "codex-session-store": {
+                  "type": "number"
+                },
                 "confirmed-journal": {
                   "type": "number"
                 },

@@ -207,7 +207,7 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
 
   it('holds the agy-session-store TTL to the session ledger only for a daemon with an agy session store', async () => {
     const DAY = 86_400_000;
-    const storage = () => ({ scratchRoot: testScratchRoot(), retention: { ttlMs: { 'session-ledger': 45 * DAY, 'pi-session-dir': 46 * DAY } } });
+    const storage = () => ({ scratchRoot: testScratchRoot(), retention: { ttlMs: { 'session-ledger': 45 * DAY, 'pi-session-dir': 46 * DAY, 'codex-session-store': 46 * DAY } } });
     const home = await tmpDir('byok-agy-ttl-home-');
 
     // agy configured but not listed builds no adapter, so it holds no session store either.

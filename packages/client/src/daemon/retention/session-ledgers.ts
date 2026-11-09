@@ -29,6 +29,11 @@ export function isPiSessionFileName(name: string): boolean {
   return piSessionRefFromFileName(name) !== undefined;
 }
 
+/** Codex names a rollout `rollout-<local time>-<thread id>.jsonl`, in `YYYY/MM/DD` folders; the Agent's other files in the store stay. */
+export function isCodexRolloutFileName(name: string): boolean {
+  return /^rollout-.+\.jsonl$/u.test(name);
+}
+
 /** Removes matching files whose last write is at least `maxAgeMs` old. Content is never parsed. */
 export async function pruneByLastWrite(input: {
   readonly directory: string;

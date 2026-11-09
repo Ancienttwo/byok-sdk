@@ -129,6 +129,7 @@ until it has one. TTLs are `storage.retention.ttlMs[<class>]`.
 | `terminal-evidence` | TTL 30 days by last append | SDK, idle home |
 | `pi-session-dir` | TTL 31 days by last write; at least `session-ledger` plus one day | SDK |
 | `agy-session-store` | TTL 31 days by last write; with an `AgyAdapter`, at least `session-ledger` plus one day | SDK |
+| `codex-session-store` | TTL 31 days by last write; at least `session-ledger` plus one day | SDK, idle home |
 | `agent-home-lease` | 1 per home | SDK |
 | `skill-pack-current` | 1 revision per installed pack | Host, by uninstalling the pack |
 | `journal` | Exempt: live-task ack and recovery rows; confirmed rows expire as `confirmed-journal` and maintenance compacts the file | SDK |
@@ -137,7 +138,6 @@ until it has one. TTLs are `storage.retention.ttlMs[<class>]`.
 | `quarantine` | Exempt: the only evidence of a corrupt journal or health file; one entry per corruption event, not per task | Operator, after `byok-agent doctor` |
 | `agent-content` | Exempt: Host product data | Host |
 | `byok-authority` | Exempt: a fixed set of SDK records per home with bounded log tails; grows with Agent count, not task count | Host, with the Agent home |
-| `agent-runtime-sessions` | Exempt: a runtime's own transcripts of an Agent's threads under `<home>/.byok/codex/` (Codex `agentUserContext: 'excluded'`), kept so a later task can resume. Unbounded: they grow with every task and accumulate until the Host removes the Agent home | Host, with the Agent home |
 | `store-authority` | Exempt: fixed device records and self-bounded logs (`audit.jsonl` rewrites past 10 MiB) | SDK, with the store |
 | `runtime-session-external` | Exempt: Claude, Codex, Grok and Pi-login session records under the runtime's own config directory, mixed with the user's sessions; never measured or deleted | Host: `ClaudeAdapterOptions.agentSessionPersistence: 'disabled'` for Claude, the runtime's own session management otherwise |
 
@@ -188,6 +188,17 @@ write. Settings and the rest stay, and `conversation_summaries.db` keeps its
 rows. A resume holds a lease the sweep cannot take, and the sweep rechecks the
 last write under that lease. A daemon with an `AgyAdapter` holds the TTL to the
 same `session-ledger` lower bound as `pi-session-dir`.
+
+`codex-session-store` is the Codex rollouts that `agentUserContext: 'excluded'`
+keeps in `<home>/.byok/codex/sessions` and `archived_sessions`. A
+`rollout-*.jsonl` goes once its last write is older than the TTL; other files
+stay. The sweep runs under the idle-home lease, so a home with a running or
+resuming task is skipped and its threads are kept. A thread that keeps
+chatting stays resumable; one idle past the TTL is pruned, and a resume of it
+fails closed through the non-retryable missing-thread path. A config whose
+`codex-session-store` TTL is less than the `session-ledger` TTL plus one day
+fails with `LocalStorageConfigError`, so a ledger entry never names a pruned
+thread. Raise the TTL to keep idle threads longer.
 
 Custom adapters that own swept session data implement
 `PreparedRuntimeOperation.acquireSessionLease(sessionRef)`. A custom caller must
