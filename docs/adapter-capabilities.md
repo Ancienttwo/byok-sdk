@@ -53,17 +53,17 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 ## OpenCode implementation and qualification (#1538)
 
 `OpenCodeAdapter` is an opt-in custom harness (`harnessId: 'opencode'`). Its
-descriptor declares `platforms: ['darwin']` (#1593); Windows and Linux stay
+descriptor declares `platforms: ['darwin', 'win32']` (#1593); Linux stays
 undeclared. `platforms` is OS-grained, so `darwin` covers both arches. The
-evidence differs by platform: the native 2.2.6 canary passed first task,
-same-session resume, cleanup and the free-model canary on macOS x64 only. The
-runtime contract (`opencode1` and `opencode2` legs, see
-[Runtime contract suite](runtime-contract.md)) passed on macOS arm64 and
-Windows x64, on OpenCode 1.19.5 and 2.2.6, against a loopback OpenAI-compatible
-provider. It checks detection, the project instruction file and egress, so it
-is not completion, resume, cwd refusal, permission refusal, cancellation and
-disposal evidence; Windows is declared only after those cases pass in CI there
-([research note](researches/2026-11-09-opencode-platform-qualification.md)). The compatibility floors are v1 1.18.35 and v2 2.0.26. The
+native 2.2.6 canary passed first task, same-session resume, cleanup and the
+free-model canary on macOS x64. The runtime contract (`opencode1` and
+`opencode2` legs, see [Runtime contract suite](runtime-contract.md)) adds the
+lifecycle cases on OpenCode 1.19.5 and 2.2.6 against a loopback
+OpenAI-compatible provider: completion, same-session resume with a different
+workspace refused, a refused permission request, cancellation of a running
+shell tool, and no surviving OpenCode process after close. They passed on macOS
+arm64 and Windows x64, and the Windows legs run in CI (`opencode-real-windows`).
+Evidence and commands are in the [research note](researches/2026-11-09-opencode-platform-qualification.md). The compatibility floors are v1 1.18.35 and v2 2.0.26. The
 default version policy qualifies `2.2.6` and warns on any other accepted
 version (`OPENCODE_VERSION_POLICY`, `unqualified: 'warn'`); only a Host may
 declare `block`. Unrecognized, below-floor and prerelease tokens still fail the

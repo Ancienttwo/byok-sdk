@@ -2184,6 +2184,49 @@ jobs:
       - name: Run the agy runtime contract suite
         run: bun run --filter @byok-sdk/client test:runtime-contract -- src/__tests__/runtime-contract/agy.contract.ts
 
+  # #1593: the OpenCode runtime contract and lifecycle cases against the
+  # qualified OpenCode lines on Windows, behind the loopback model. No
+  # credential or paid call is used.
+  opencode-real-windows:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'opencode-real-windows') }}
+    name: OpenCode adapter against real OpenCode on Windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      BYOK_RUNTIME_CONTRACT: qualified
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup fixed Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Verify pinned Bun archive
+        shell: node {0}
+        run: *verify-bun
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install dependencies
+        run: bun ci
+
+      - name: Build client dependencies
+        run: bun run build
+
+      - name: Install the qualified OpenCode 1.x CLI
+        run: node scripts/ci/runtime-contract-install.mjs opencode1 qualified
+      - name: Install the qualified OpenCode 2.x CLI
+        run: node scripts/ci/runtime-contract-install.mjs opencode2 qualified
+
+      - name: Run the OpenCode runtime contract suites
+        run: bun run --filter @byok-sdk/client test:runtime-contract -- src/__tests__/runtime-contract/opencode1.contract.ts src/__tests__/runtime-contract/opencode2.contract.ts
+
   # #1103: the runtime contract suite, one leg per adapter, against the
   # qualified CLI that scripts/ci/runtime-contract-install.mjs reads from the
   # adapter's own QUALIFIED_* constant (Pi: byok.piRuntimePin, bundled). Model
@@ -2229,7 +2272,7 @@ jobs:
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "packaging-consistency", "npm-release-pack", "release-pack-migrate", "service-upgrade-smoke", "linux-systemd-smoke", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "agy-real-windows", "runtime-contract"]
+    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "packaging-consistency", "npm-release-pack", "release-pack-migrate", "service-upgrade-smoke", "linux-systemd-smoke", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "agy-real-windows", "opencode-real-windows", "runtime-contract"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

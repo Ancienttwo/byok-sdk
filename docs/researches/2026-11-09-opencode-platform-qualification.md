@@ -128,4 +128,24 @@ The free-usage limit still blocked the native canary, so arm64 and Windows were 
 
 Command (macOS): `BYOK_RUNTIME_CONTRACT=qualified BYOK_CONTRACT_OPENCODE<1|2>_BIN=<opencode> bunx vitest run --config src/__tests__/runtime-contract/vitest.config.ts src/__tests__/runtime-contract/opencode<1|2>.contract.ts`, with the binary unpacked from the registry tarball (its sha512 for 2.2.6 matches the record above). Windows ran the same command from `C:\Users\win\byok-tools\wc1593` at the branch head, with both lines installed by `npm install --save-exact`. On Windows `BYOK_CONTRACT_OPENCODE<n>_BIN` must name the package's `opencode.exe`: the npm `.bin\opencode.cmd` shim made detect return `not-executable` in the first run.
 
-Findings: the adapter's spawn environment keeps the `HOME` and `XDG_*` overrides, so the provider table reaches OpenCode. OpenCode 1.x installs the configured provider package from `registry.npmjs.org` on first use (declared as an egress host of its leg); 2.x bundles it. The descriptor stays `['darwin']`: the contract does not cover the lifecycle cases the qualification rule requires on Windows, so `win32` is not declared. The contract does not exercise resume, cancellation, permission refusal or disposal. The earlier native run on macOS x64 (2.2.6) covered the first task, same-session resume (different-cwd resume refused) and process and scratch cleanup after close; it observed no permission request and its later cancellation checks were stopped. Cancellation, permission refusal and disposal are not yet evidenced on any line.
+Findings: the adapter's spawn environment keeps the `HOME` and `XDG_*` overrides, so the provider table reaches OpenCode. OpenCode 1.x installs the configured provider package from `registry.npmjs.org` on first use (declared as an egress host of its leg); 2.x bundles it. The contract in this section covers detect, one turn and egress only; the lifecycle cases follow in the next section.
+
+## Lifecycle cases and `win32` (#1593, 2026-11-10)
+
+The shared harness gained four OpenCode cases (`opencode.resume`, `opencode.permission`, `opencode.cancel`, `opencode.dispose`; `opencode-contract.ts`), the cases `docs/adapter-capabilities.md` requires on every advertised OS and line. They run through `OpenCodeAdapter` against the same loopback provider; permission is configured as `permission.bash: ask` for the refusal case and `allow` for the cancellation case.
+
+| Platform | OpenCode | Result |
+| --- | --- | --- |
+| macOS 26.5 arm64 | 1.19.5 | 3 contract + 4 lifecycle passed, 13 skipped |
+| macOS 26.5 arm64 | v2.2.6 | 3 contract + 4 lifecycle passed, 13 skipped |
+| Windows 11 10.0.26100 x64 | 1.19.5 (`opencode.exe`) | 3 contract + 4 lifecycle passed, 13 skipped |
+| Windows 11 10.0.26100 x64 | v2.2.6 (`opencode.exe`) | 3 contract + 4 lifecycle passed, 13 skipped |
+
+- `opencode.resume`: a second turn with the first turn's `sessionRef` returns the same ref and its request carries the first turn's text; a resume from a different workspace fails.
+- `opencode.permission`: the model asks for the shell tool (`bash` on 1.x, `shell` on 2.x); the permission request is refused, `refused.txt` is never written and the turn ends. On 1.x the turn ends without a second model request.
+- `opencode.cancel`: a running `hold.mjs` (started by the absolute Node path, which runs in bash and PowerShell without PATH) is interrupted; the turn ends and the process exits.
+- `opencode.dispose`: after `close()` no `opencode acp` or `serve --service` process started by the run is alive.
+
+Windows runs used `bunx vitest run --config src/__tests__/runtime-contract/vitest.config.ts src/__tests__/runtime-contract/opencode<1|2>.contract.ts` at the branch head on win-ci with `BYOK_CONTRACT_OPENCODE<n>_BIN` set to the packages' `opencode.exe`. The first Windows run failed `opencode.cancel` because the tool's PowerShell could not find `node` on `PATH` (`The term 'node' is not recognized`); the case now starts the hold command by absolute path. The CI job `opencode-real-windows` installs both lines through `runtime-contract-install.mjs` and runs the same files on `windows-latest`. With these results the descriptor declares `win32`.
+
+The earlier native run on macOS x64 (2.2.6) covered the first task, same-session resume (different-cwd resume refused) and process and scratch cleanup after close, observed no permission request, and its cancellation checks were stopped. The contract now supplies cancellation, permission refusal and disposal evidence on macOS arm64 and Windows x64.
