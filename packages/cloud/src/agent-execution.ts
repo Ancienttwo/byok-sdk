@@ -18,13 +18,6 @@ function executionTargetRule(
   if (!hasRuntime && !hasHarness) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'runtime or harnessId is required', path: ['runtime'] });
   }
-  if (hasHarness && (hasRuntime || payload.dispatchSelection !== undefined)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'harnessId conflicts with built-in runtime selection',
-      path: ['harnessId'],
-    });
-  }
 }
 
 /**

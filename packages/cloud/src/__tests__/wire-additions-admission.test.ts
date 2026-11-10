@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { WIRE_ADDITIONS, createEnvelope, isServerToDaemonType, requiredReceiverCapabilities, type MessageType } from '@byok-sdk/protocol';
+import { HostOfferPlainPayloadSchema, HostOfferSealedPayloadSchema, WIRE_ADDITIONS, createEnvelope, isServerToDaemonType, requiredReceiverCapabilities, type MessageType } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import { AgentExecutionInputSchema, SealedAgentExecutionInputSchema } from '../agent-execution';
@@ -126,13 +126,15 @@ const gatedLines = readFileSync(corpusPath, 'utf8')
   })
   .filter((entry) => isServerToDaemonType(entry.type) && entry.flags.length > 0 && !CLOUD_EMITTED.includes(entry.type));
 
+/** Parse the Host payload without changing the wire corpus (#1671). */
+function hostPayload(entry: (typeof gatedLines)[number]) {
+  if (entry.variant === 'fresh execution') return AgentExecutionInputSchema.shape.payload.safeParse(entry.payload);
+  if (entry.variant === 'sealed execution') return SealedAgentExecutionInputSchema.shape.payload.safeParse(entry.payload);
+  return (entry.payload.sealing === undefined ? HostOfferPlainPayloadSchema : HostOfferSealedPayloadSchema).safeParse(entry.payload);
+}
+
 /** Whether the line's surface has a hosted entry that accepts its payload. */
-const submitExpressible = (entry: (typeof gatedLines)[number]): boolean => {
-  if (entry.variant === 'fresh execution') return AgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
-  // #654: the sealed fresh lane has the same rules in its own hosted entry.
-  if (entry.variant === 'sealed execution') return SealedAgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
-  return true;
-};
+const submitExpressible = (entry: (typeof gatedLines)[number]): boolean => entry.type !== 'task.offer' || hostPayload(entry).success;
 
 async function deviceWith(capabilities: readonly string[]): Promise<{ harness: CloudHarness; deviceId: string }> {
   const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
@@ -150,13 +152,14 @@ async function errorCode(run: Promise<unknown>): Promise<string | undefined> {
   }
 }
 
-/** The fresh payload schema's one refusal for a corpus line without `terminalProjection`. */
-async function expectTerminalProjectionRequired(run: Promise<unknown>): Promise<void> {
+/** Every wire-only offer is refused with the Host schema's specific issues, before capability reads. */
+async function expectHostInputRefusal(run: Promise<unknown>, entry: (typeof gatedLines)[number]): Promise<void> {
   const error = await run.then(() => undefined, (caught: unknown) => caught);
   expect(error).toBeInstanceOf(ZodError);
-  expect((error as ZodError).issues).toEqual([
-    expect.objectContaining({ code: 'invalid_type', path: ['payload', 'terminalProjection'] }),
-  ]);
+  const parsed = hostPayload(entry);
+  expect(parsed.success).toBe(false);
+  const prefix = entry.variant === 'fresh execution' || entry.variant === 'sealed execution' ? ['payload'] : [];
+  expect((error as ZodError).issues).toEqual(parsed.error!.issues.map(issue => ({ ...issue, path: [...prefix, ...issue.path] })));
 }
 
 describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
@@ -203,7 +206,7 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
           message: expect.stringContaining(flag),
         });
       } else {
-        await expectTerminalProjectionRequired(run);
+        await expectHostInputRefusal(run, entry);
         expect(capabilityReads).toHaveBeenCalledTimes(0);
       }
       expect(await harness.cloud.readTaskAttempt(TENANT_A, 'gated')).toBeUndefined();
@@ -219,7 +222,7 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
       const { harness, deviceId } = await deviceWith(entry.flags);
       const run = ENQUEUE[type]!(harness, deviceId, entry.payload as never);
       if (submitExpressible(entry)) expect(await errorCode(run)).not.toBe('agent_capability_missing');
-      else await expectTerminalProjectionRequired(run);
+      else await expectHostInputRefusal(run, entry);
     },
   );
 });
