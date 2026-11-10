@@ -10,6 +10,7 @@ import type { spawnOwnedLineProcess } from '../../packages/client/src/runtime/ow
 import type { buildRuntimeEnvironment } from '../../packages/client/src/runtime/environment.js';
 import type { CodexProjection, CodexRecord } from '../../packages/client/src/adapters/codex/projection.js';
 import type { SessionNotFoundError as VendorSessionNotFoundError } from '../../packages/client/vendor/oar/45488e7/contracts/session-not-found-error.js';
+import type { SessionUnavailableError as VendorSessionUnavailableError } from '../../packages/client/vendor/oar/45488e7/contracts/session-unavailable-error.js';
 import type * as TreeBridge from '../../packages/client/src/runtime/oar-process-tree.js';
 import type * as VendorTree from '../../packages/client/vendor/oar/45488e7/shared/executable/process-tree.js';
 
@@ -254,6 +255,11 @@ import type { opencodeSession as vendorOpenCodeSession } from '../../packages/cl
 export type CheckOpenCodeVendor = Assert<Equal<typeof vendorOpenCodeSession, VendorStartAcp>>;
 export type CheckOpenCodeBridge = Assert<Equal<typeof AcpBridge.opencodeSession, AcpBridge.StartAcpSession>>;
 
+export type CheckCodexUnavailable = Assert<Equal<Bridge.SessionUnavailableError, VendorSessionUnavailableError>>;
+export type CheckAcpUnavailable = Assert<Equal<AcpBridge.SessionUnavailableError, VendorSessionUnavailableError>>;
+export type CheckDshUnavailable = Assert<Equal<DshBridge.SessionUnavailableError, VendorSessionUnavailableError>>;
+export type CheckCodexRuntimeFailure = Assert<Equal<Bridge.RuntimeFailureError, VendorRuntimeFailureError>>;
+export type CheckCodexUnsupportedOption = Assert<Equal<Bridge.UnsupportedOptionError, VendorUnsupportedOptionError>>;
 export type CheckCodexStartErrors = Assert<Equal<ErrorExports<typeof Bridge>, keyof OarStartErrorClasses>>;
 export type CheckAcpStartErrors = Assert<Equal<ErrorExports<typeof AcpBridge>, keyof OarStartErrorClasses>>;
 export type CheckDshStartErrors = Assert<Equal<ErrorExports<typeof DshBridge>, keyof OarStartErrorClasses>>;

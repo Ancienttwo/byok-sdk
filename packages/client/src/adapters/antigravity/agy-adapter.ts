@@ -1,7 +1,7 @@
-import { oarStartFailure } from '../oar-start-failure';
 import type { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { oarStartFailure } from '../oar-start-failure';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import type { McpEventIdentities } from '../../mcp/event-identity';

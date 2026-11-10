@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Fixed (client; #1678):** Codex resume of an archived thread is non-retryable; a thread in use remains retryable.
+- **Fixed (client; #1678)** — Codex resume of an archived thread is non-retryable; a thread in use remains retryable.
 
 - **Fixed (client; #1677)** — Claude with session persistence disabled declines resume offers before claim; dsh declines unsupported MCP servers before claim; agy observes Host toolsets so MCP tool events and authorization rules identify their server and tool.
 

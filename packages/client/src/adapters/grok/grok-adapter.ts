@@ -1,10 +1,10 @@
-import { oarStartFailure } from '../oar-start-failure';
 import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
 import type { RuntimeTaskInput } from '../../types';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { oarStartFailure } from '../oar-start-failure';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import {
