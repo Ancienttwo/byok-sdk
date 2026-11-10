@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { CreateAgentSessionResult, ExtensionFactory, InlineExtension } from '@earendil-works/pi-coding-agent';
@@ -131,10 +132,21 @@ export async function loadPiSubagentsAsset(
   }
   const extensionPath = path.join(dir, extensions[0]);
   if (gate === null) return { extensionPath, factories: [] };
-  const { registerRequiredChildExtensions } = await import(pathToFileURL(path.join(dir, registration)).href) as typeof import('pi-subagents/required-child-extensions');
+  const registrationFile = path.join(dir, registration);
+  // A Node SEA compiles its main script as an embedder module, whose import()
+  // loads built-in modules only (Node 25.7+, nodejs/node#61654); require(esm)
+  // through createRequire is the documented file loader there. A SEA has no
+  // second loader: a failed require fails the launch.
+  const { registerRequiredChildExtensions } = (isNodeSea()
+    ? createRequire(registrationFile)(registrationFile)
+    : await import(pathToFileURL(registrationFile).href)) as typeof import('pi-subagents/required-child-extensions');
   const extensionDir = path.join(assetRoot, PI_SUBAGENT_EXTENSIONS_ASSET_DIR);
   return { extensionPath, factories: [requireChildExtensions(registerRequiredChildExtensions, path.join(extensionDir, PI_SUBAGENT_GATE_FILE),
     fileScoped ? path.join(extensionDir, PI_SUBAGENT_FILE_SCOPE_FILE) : undefined)] };
+}
+
+export function isNodeSea(): boolean {
+  return process.versions.bun === undefined && process.getBuiltinModule('node:sea').isSea();
 }
 
 const HOST_SDK_GLOBAL_KEY = 'byok-sdk.pi-subagents.host-sdk';

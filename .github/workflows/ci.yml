@@ -238,6 +238,16 @@ jobs:
         with:
           node-version: '26'
 
+      # #1741: the node-sea Pi host form builds its SEA from SEA_NODE. Node 26
+      # changed import() in a SEA main script (nodejs/node#61654), so this leg
+      # names its own binary instead of relying on the interpreter vitest runs on.
+      - name: Build the node-sea host form from Node 26
+        if: matrix.node == '26'
+        run: |
+          SEA_NODE="$(node -p 'process.execPath')"
+          "$SEA_NODE" --version
+          echo "SEA_NODE=$SEA_NODE" >> "$GITHUB_ENV"
+
       # Every setup-bun step reads the exact version from root packageManager (Bun 1.4.2).
       - name: Verify pinned Bun archive
         shell: node {0}
