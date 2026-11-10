@@ -337,6 +337,21 @@ test('Hermes adapter, fake and custody launcher paths select the Windows Hermes 
   }
 });
 
+test('OpenCode adapter, its contract and the shared spawn code select the OpenCode Windows job (#1593)', () => {
+  for (const path of [
+    'packages/client/src/adapters/opencode/opencode-adapter.ts',
+    'packages/client/src/__tests__/runtime-contract/opencode-contract.ts',
+    'packages/client/src/__tests__/runtime-contract/opencode1.contract.ts',
+    'packages/client/src/runtime/owned-terminal-process.ts',
+    'packages/client/src/runtime/owned-line-process.ts',
+    'packages/client/src/runtime/environment.ts',
+    'packages/client/src/runtime/oar-process-tree.js',
+    'packages/client/src/adapters/runtime-invocation.ts',
+    'packages/client/src/adapters/detect-outcome.ts',
+    'packages/client/src/util/async-queue.ts',
+  ]) assert.ok(selectImpact([path]).families.includes('opencode-real-windows'), path);
+});
+
 test('Hermes adapter, real run and custody launcher paths select the real Hermes Windows job (#608)', () => {
   for (const path of [
     'packages/client/src/adapters/hermes/gateway-pipe-win32.ts',

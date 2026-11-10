@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { expect } from 'vitest';
@@ -96,15 +96,54 @@ async function waitFor<T>(read: () => Promise<T | undefined>, ms: number, what: 
   }
 }
 
+/** The pid of a `pid command` row; `ps` right-aligns its pid column, so leading spaces are not a field. */
+const pidOf = (row: string): string => row.trim().split(/\s+/)[0] ?? '';
+
 /** The OpenCode runtime processes (`acp`, `serve --service`) alive now, as `pid command` rows. */
 function openCodeProcesses(): string[] {
   if (process.platform === 'win32') {
     const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
       "Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^opencode' } | ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }"], { encoding: 'utf8' });
-    return out.split(/\r?\n/).filter(Boolean);
+    return out.split(/\r?\n/).map(row => row.trim()).filter(Boolean);
   }
   return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' }).split('\n')
-    .filter(line => /opencode/.test(line) && /(?:\bacp\b|serve --service)/.test(line));
+    .map(row => row.trim()).filter(line => /opencode/.test(line) && /(?:\bacp\b|serve --service)/.test(line));
+}
+
+/**
+ * Records the ACP frames of the OpenCode processes an adapter starts: the
+ * permission requests OpenCode sends and the replies the adapter writes back.
+ */
+function acpSpy() {
+  const requests: Array<{ id: unknown; params: unknown }> = [];
+  const replies: Array<{ id: unknown; result: unknown }> = [];
+  const spawnFn = ((command: string, args: readonly string[], options: SpawnOptions) => {
+    const child: ChildProcess = spawn(command, [...args], options);
+    let buffer = '';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString();
+      for (let end = buffer.indexOf('\n'); end >= 0; end = buffer.indexOf('\n')) {
+        const line = buffer.slice(0, end);
+        buffer = buffer.slice(end + 1);
+        try {
+          const frame = JSON.parse(line) as { id?: unknown; method?: string; params?: unknown };
+          if (frame.method === 'session/request_permission') requests.push({ id: frame.id, params: frame.params });
+        } catch { /* not a JSON frame */ }
+      }
+    });
+    const write = child.stdin?.write.bind(child.stdin);
+    if (child.stdin && write) {
+      child.stdin.write = ((chunk: string | Buffer, ...rest: unknown[]) => {
+        try {
+          const frame = JSON.parse(chunk.toString()) as { id?: unknown; method?: string; result?: unknown };
+          if (frame.id !== undefined && frame.method === undefined && frame.result !== undefined) replies.push({ id: frame.id, result: frame.result });
+        } catch { /* not a JSON frame */ }
+        return (write as (...args: unknown[]) => boolean)(chunk, ...rest);
+      }) as typeof child.stdin.write;
+    }
+    return child;
+  }) as typeof spawn;
+  return { spawnFn, requests, replies };
 }
 
 /**
@@ -115,7 +154,7 @@ function openCodeProcesses(): string[] {
  */
 export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' | 'opencode2'>, target: { bin: string; mode: string; expectedVersion: string }, openCodeEnv: (label: string, baseURL: string, bash?: 'allow' | 'ask') => Promise<{ box: { root: string; workspace: string }; env: NodeJS.ProcessEnv }>) {
   const resolveBin = () => ({ command: target.bin, source: 'env' as const });
-  const adapter = () => new OpenCodeAdapter({ resolveBin, models: [`loopback/${MODEL}`] });
+  const adapter = (spawnFn?: typeof spawn) => new OpenCodeAdapter({ resolveBin, models: [`loopback/${MODEL}`], ...(spawnFn === undefined ? {} : { spawnFn }) });
   const HELD = 'BYOK-CONTRACT-OPENCODE-RESUME-1d7c';
 
   /** Turn 1, a resumed turn 2 in the same workspace, and a resume from another workspace. */
@@ -160,16 +199,17 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
     const provider = await startLoopbackProvider('openai-chat', script, MODEL);
     try {
       const { box, env } = await openCodeEnv(`${runtime}-permission`, provider.baseUrl, 'ask');
-      const events = await runTurn(adapter(), 'Run the shell command.', { workspaceDir: box.workspace, agentHome: box.workspace, env: { ...env, ...recorder.env } });
+      const spy = acpSpy();
+      const events = await runTurn(adapter(spy.spawnFn), 'Run the shell command.', { workspaceDir: box.workspace, agentHome: box.workspace, env: { ...env, ...recorder.env } });
       const written = await fs.access(path.join(box.workspace, 'refused.txt')).then(() => true, () => false);
-      return { events, written, issued };
+      return { events, written, issued, requests: spy.requests, replies: spy.replies };
     } finally { await provider.close(); }
   });
 
   /** A running shell tool, interrupted, then closed: the turn stops and nothing of the run survives. */
   const cancelled = once(async () => {
     const recorder = await fileEgress();
-    const before = new Set(openCodeProcesses().map(row => row.split(' ')[0]));
+    const before = new Set(openCodeProcesses().map(pidOf));
     const box = await createSandbox(`${runtime}-cancel`);
     const pidFile = path.join(box.workspace, 'hold.pid').replace(/\\/g, '/');
     if (/\s/.test(process.execPath)) throw new Error(`the Node path must not contain whitespace: ${process.execPath}`);
@@ -194,11 +234,26 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
         .catch((error: Error) => { throw new Error(`${error.message}; events: ${log.slice(-8).join(' | ')}`); }));
       await session.interrupt();
       await drained;
+      // Before close(): a close would reap the process and hide a cancel that left it running.
+      const exitedBeforeClose = await waitFor(async () => isAlive(tool) ? undefined : true, 10_000, 'the shell tool to exit after the interrupt').catch(() => false);
       await session.close();
-      const toolGone = await waitFor(async () => isAlive(tool) ? undefined : true, 10_000, 'the shell tool to exit').catch(() => false);
+      const toolGone = exitedBeforeClose || await waitFor(async () => isAlive(tool) ? undefined : true, 10_000, 'the shell tool to exit').catch(() => false);
       if (!toolGone) try { process.kill(tool, 'SIGKILL'); } catch { /* already gone */ }
-      const leaked = await waitFor(async () => { const rows = openCodeProcesses().filter(row => !before.has(row.split(' ')[0]!)); return rows.length === 0 ? [] : undefined; }, 10_000, 'the OpenCode processes to exit').catch(() => openCodeProcesses().filter(row => !before.has(row.split(' ')[0]!)));
-      return { events, toolGone, leaked };
+      const leaked = await waitFor(async () => { const rows = openCodeProcesses().filter(row => !before.has(pidOf(row))); return rows.length === 0 ? [] : undefined; }, 10_000, 'the OpenCode processes to exit').catch(() => openCodeProcesses().filter(row => !before.has(pidOf(row))));
+      return { events, toolGone, exitedBeforeClose, leaked };
+    } finally { await provider.close(); }
+  });
+
+  /** A normal completed turn: after close() nothing of the run survives either. */
+  const completed = once(async () => {
+    const recorder = await fileEgress();
+    const before = new Set(openCodeProcesses().map(pidOf));
+    const provider = await startLoopbackProvider('openai-chat', () => ({ kind: 'text', chunks: CONTRACT_REPLY_CHUNKS }), MODEL);
+    try {
+      const { box, env } = await openCodeEnv(`${runtime}-complete`, provider.baseUrl);
+      const events = await runTurn(adapter(), 'Say hello.', { workspaceDir: box.workspace, agentHome: box.workspace, env: { ...env, ...recorder.env } });
+      const leaked = await waitFor(async () => { const rows = openCodeProcesses().filter(row => !before.has(pidOf(row))); return rows.length === 0 ? [] : undefined; }, 10_000, 'the OpenCode processes to exit').catch(() => openCodeProcesses().filter(row => !before.has(pidOf(row))));
+      return { events, leaked };
     } finally { await provider.close(); }
   });
 
@@ -211,20 +266,24 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
         expect(resumedRef).toBe(sessionRef);
         expect(events.at(-1)).toBe('turn_end');
         expect(history).toBe(true);
-        expect(refusal, 'resume from another workspace must fail').toBeDefined();
+        expect(refusal, 'resume from another workspace must fail').toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', message: expect.stringContaining('resumes it only there') });
       }, 240_000)],
       'opencode.permission': ['a permission request is refused: the shell command does not run and the turn still ends', check(async () => {
-        const { events, written, issued } = await refused();
+        const { events, written, issued, requests, replies } = await refused();
         expect(events.at(-1)?.type).toBe('turn_end');
         expect(written).toBe(false);
         expect(issued, 'the model asked for the shell tool').toBe(true);
+        // OpenCode asked for the command, and the adapter's reply was a refusal of that very request.
+        expect(requests).toEqual([expect.objectContaining({ params: expect.objectContaining({ toolCall: expect.objectContaining({ kind: 'execute', title: 'echo refused > refused.txt' }) }) })]);
+        expect(replies).toEqual([{ id: requests[0]!.id, result: { outcome: { outcome: 'cancelled' } } }]);
       }, 240_000)],
       'opencode.cancel': ['interrupting a running shell tool ends the turn and the tool process', check(async () => {
-        const { events, toolGone } = await cancelled();
+        const { events, exitedBeforeClose } = await cancelled();
         expect(events.at(-1)).toBe('turn_end');
-        expect(toolGone).toBe(true);
+        expect(exitedBeforeClose, 'the shell tool exited after the interrupt, before close()').toBe(true);
       }, 240_000)],
-      'opencode.dispose': ['after close no OpenCode acp or serve --service process survives', check(async () => {
+      'opencode.dispose': ['after close, following a completed turn and following an interrupt, no OpenCode acp or serve --service process survives', check(async () => {
+        expect((await completed()).leaked).toEqual([]);
         expect((await cancelled()).leaked).toEqual([]);
       }, 240_000)],
     } as const,

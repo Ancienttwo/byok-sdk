@@ -279,6 +279,12 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/adapters\/opencode\//,
     /^packages\/client\/src\/adapters\/agent-persona\.ts$/,
     /^packages\/client\/src\/runtime\/acp-session-runtime\.(?:js|d\.ts)$/,
+    // The shared spawn, environment, ownership and cleanup code the adapter runs on.
+    /^packages\/client\/src\/runtime\/(?:environment|owned-line-process|owned-terminal-process)\.ts$/,
+    /^packages\/client\/src\/runtime\/oar-process-tree\.(?:js|d\.ts)$/,
+    /^packages\/client\/src\/adapters\/(?:runtime-invocation|runtime-executable|detect-outcome)\.ts$/,
+    /^packages\/client\/src\/(?:runtime-failure|runtime-version-policy|login-shell-environment)\.ts$/,
+    /^packages\/client\/src\/util\/(?:async-queue|jsonl-lines)\.ts$/,
     /^packages\/client\/src\/__tests__\/runtime-contract\/(?:opencode[12]\.contract|opencode-contract|contract|loopback)\.ts$/,
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes\/opencode|shared\/acp)\//,
     /^scripts\/ci\/runtime-contract-install(?:\.test)?\.mjs$/,
