@@ -44,8 +44,8 @@ function setup(version = '1.18.35', extra: Record<string, string> = {}) {
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
   const adapter = new OpenCodeAdapter({ models, resolveBin: () => ({ command: fake, source: 'env' }), runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*'] } });
   const facts = (): Array<Record<string, any>> => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-  const start = async (instruction: string, sessionRef?: string) => {
-    const session = await startPreparedOperation(adapter, { instruction, ...(sessionRef === undefined ? {} : { sessionRef }) }, { workspaceDir: cwd, env });
+  const start = async (instruction: string, sessionRef?: string, mcpServers?: { host: { command: string } }) => {
+    const session = await startPreparedOperation(adapter, { instruction, ...(sessionRef === undefined ? {} : { sessionRef }) }, { workspaceDir: cwd, env, ...(mcpServers === undefined ? {} : { mcpServers }) });
     sessions.push(session);
     return session;
   };
@@ -93,13 +93,16 @@ for (const version of ['1.18.35', 'opencode v2.0.26']) {
       const gate = path.join(box.cwd, 'release-rate-limit');
       box.env.FAKE_ACP_SESSION_STORE = path.join(box.cwd, 'native-session.json');
       box.env.FAKE_ACP_RATE_GATE = gate;
-      const session = await box.start('opencode-limit');
+      const session = await box.start('opencode-limit', undefined, { host: { command: 'fixture-mcp' } });
       const published = session.sessionRef;
       writeFileSync(gate, 'release');
       const events = await collect(session);
       expect(session.sessionRef).toBe(published);
       expect(box.facts().filter(fact => fact.kind === 'native-session').map(fact => fact.sessionId)).toEqual([published]);
       expect(box.facts().filter(fact => fact.kind === 'open' && fact.method === 'session/resume').map(fact => fact.params.sessionId)).toEqual([published]);
+      expect(box.facts().filter(fact => fact.kind === 'open').map(fact => fact.params.mcpServers)).toEqual([
+        [{ name: 'host', command: 'fixture-mcp', args: [], env: [] }], [{ name: 'host', command: 'fixture-mcp', args: [], env: [] }],
+      ]);
       const switchEvent = events.find(event => event.type === 'error');
       expect(switchEvent?.type === 'error' && JSON.parse(switchEvent.message)).toEqual({ event: 'model_switch', from: models[0], to: models[1], reason: 'rate_limited' });
       expect(events).toContainEqual({ type: 'progress', text: 'fallback reply' });
@@ -151,14 +154,30 @@ it('cleans a detached descendant before reporting success', async () => {
   expect(() => process.kill(pid, 0)).toThrow();
 });
 
-it('registers an opt-in adapter with truthful capabilities, and rejects unqualified Host toolsets', async () => {
+it('registers an opt-in adapter with truthful capabilities', async () => {
   const box = setup();
   const [adapter] = createRuntimeAdapters({ runtimeAllowlist: ['opencode'], runtimes: { opencode: { models, executable: fake } } });
   expect(adapter!.descriptor).toEqual(expect.objectContaining({ id: 'opencode', platforms: ['darwin', 'win32'], capabilities: OPENCODE_RUNTIME_CAPABILITIES, versionPolicy: { qualifiedVersion: '2.2.6', unqualified: 'warn' } }));
   expect(validateRuntimeDetectResult(await box.adapter.detect())).toMatchObject({ kind: 'available', version: '1.18.35', rawVersion: '1.18.35\n', executableSource: 'config' });
-  const detect = vi.spyOn(box.adapter, 'runtimeEnvironment');
-  expect(await box.adapter.prepare({ offer: { instruction: 'hello' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [], mcpServers: { host: { command: 'unused' } } })).toMatchObject({ kind: 'reject' });
-  expect(detect).not.toHaveBeenCalled();
+  expect(OPENCODE_RUNTIME_CAPABILITIES.mcpToolsets).toBe(false);
+});
+
+it.each(['1.19.5', 'opencode v2.2.6'])('passes admitted MCP servers on new and resumed %s sessions', async version => {
+  const box = setup(version);
+  const server = { command: '/fixture/mcp', args: ['--stdio'], env: { TASK_SECRET: 'fixture-secret' } };
+  const resources = { workspaceDir: box.cwd, env: box.env, mcpServers: { host: server } };
+  const first = await startPreparedOperation(box.adapter, { instruction: 'hello' }, resources); sessions.push(first);
+  await collect(first); await first.close();
+  const second = await startPreparedOperation(box.adapter, { instruction: 'hello', sessionRef: first.sessionRef }, resources); sessions.push(second);
+  await collect(second);
+  const opens = box.facts().filter(fact => fact.kind === 'open');
+  expect(opens.map(fact => fact.method)).toEqual(['session/new', 'session/resume']);
+  for (const open of opens) expect(open.params.mcpServers).toEqual([{ name: 'host', command: server.command, args: server.args, env: [{ name: 'TASK_SECRET', value: 'fixture-secret' }] }]);
+});
+
+it.each([{ '': { command: 'server' } }, { host: { command: '' } }, { host: { command: 'server', env: { KEY: null } } }])('rejects malformed MCP authority during preparation', async mcpServers => {
+  const box = setup(); const result = await box.adapter.prepare({ offer: { instruction: 'hello' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [], mcpServers: mcpServers as any });
+  expect(result).toMatchObject({ kind: 'reject', retryable: false }); expect(existsSync(box.log)).toBe(false);
 });
 
 it('resolves a PATH executable, then the installer location, without configuration reads', () => {
