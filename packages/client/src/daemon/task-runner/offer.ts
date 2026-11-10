@@ -108,7 +108,7 @@ export async function handleOffer(
   ): void => {
     host.setRuntimeUnavailable(taskId, runtimeUnavailable);
     try {
-      const result = host.dispatchSync({
+      host.dispatchSync({
         type: 'admission.declined',
         taskId,
         atMs: Date.now(),
@@ -117,26 +117,6 @@ export async function handleOffer(
         retryable,
         ...(code === undefined ? {} : { code }),
       });
-      // The legacy paths below send the decline themselves; the host only
-      // sends when the reducer accepted the transition. Falling back keeps a
-      // row that is stale in a later slice's phase a legacy send, not a drop.
-      //
-      // #1099 S4: once the reducer has settled the task (a cancel already
-      // declined it, or a terminal is selected), a later stage's late error
-      // must not produce a second task.decline.
-      const settled = host.current(taskId);
-      if (result.disposition !== 'applied'
-        && (settled === undefined || (settled.terminal === undefined && settled.phase !== 'declined'))) {
-        this['decline'](
-          taskId,
-          admission,
-          reason,
-          retryable,
-          offerContext.agentRef as AgentRef | undefined,
-          code,
-          runtimeUnavailable,
-        );
-      }
     } finally {
       host.setRuntimeUnavailable(taskId, undefined);
     }
