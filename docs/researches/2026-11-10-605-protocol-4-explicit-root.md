@@ -2,11 +2,14 @@
 
 Refs #605; reuses the retained-chain primitive and per-flush injection cases
 from closed PR #1083 (`8c9e63856a88ac1da53ea007474065ce06f5da05`). Base:
-`11a7532ea73f72c85b41942863deb6219e9e0eef` on `train/next-minor`.
-This is a Draft implementation for the owner's contract review. It does not
+`0e6c4453988b2df66c6677eaf3f4f7604ebc43ab` on `train/next-minor`.
+The owner signed the full protocol-4 contract on 2026-11-10, including the
+mandatory public argument and the root-durability precondition
+([record](https://github.com/Ancienttwo/byok-sdk/pull/1650#issuecomment-6762093837)).
+This implementation remains Draft for the coordinator's reviews. It does not
 establish Windows OS-crash or power-loss durability, and it does not enable B.
 
-## Contract for the owner to sign
+## Owner-signed contract
 
 The private JSON-lines `open` request has exactly these fields:
 
@@ -48,8 +51,8 @@ as both home and ancestor. It is a probe of the selected root, not a task home.
 helper open. W2-B flushes that directory and the chain below it; it does not
 flush its parent or prove that the root's own directory entry is durable.
 Existing Agent-home root materialization is unchanged and may create a missing
-root. Whether a separate root-initialization change should cover that case is
-an open owner decision. This Draft claims no proof for creating the root itself.
+root. Root initialization: [#1652](https://github.com/Ancienttwo/byok-sdk/issues/1652).
+This Draft claims no proof for creating the root itself.
 
 Public breaking signatures, on the next MINOR train:
 
@@ -60,9 +63,9 @@ Public breaking signatures, on the next MINOR train:
 - The exported helper protocol/version constants change from `3`/`"3"` to
   `4`/`"4"`.
 
-No public Agent-home config or lease field is added. The owner must sign the
+No public Agent-home config or lease field is added. The owner signed the
 field contract, selected root authority, durability precondition and version
-cut before this Draft can be considered for merge.
+cut; Windows B still awaits the separately required recovery evidence.
 
 ## Barrier behavior
 
