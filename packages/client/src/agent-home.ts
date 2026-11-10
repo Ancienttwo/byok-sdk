@@ -11,6 +11,7 @@ import {
   type TerminalAgentHomeProjection,
 } from '@byok-sdk/protocol';
 import { atomicWriteFile } from './util/atomic-write';
+import { processSignalState } from './adapters/process-tree';
 import {
   AGENT_HOME_READER_RUN_MAX_RETAINED,
   AGENT_HOME_READER_RUNS_DIRECTORY,
@@ -1339,7 +1340,7 @@ function processAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+    return processSignalState(error) !== 'gone';
   }
 }
 
