@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { hash } from '@byok-sdk/server/execution-core';
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
+import { hash, taskId } from '@byok-sdk/server/execution-core';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { DelegationError, type DelegationCancelResult, type TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
 import { DeviceBindingError } from './binding';
@@ -40,6 +43,18 @@ async function scoped(bound = true, coalesce = false) {
   const commandKeys = async () => (await opened!.pool.query<{ key: string }>(`SELECT key FROM "${store().schema}".command WHERE scope = $1 ORDER BY key`,
     [storedKey(scope)])).rows.map(row => JSON.parse(row.key) as string);
   return { scope, entry, as, synced, commandKeys };
+}
+
+/** A scope where the Main Bot's owner Turn delegated to Bot `b` on the same device, and a sync froze B's request Turn. */
+async function delegated() {
+  const scope = await scoped();
+  await store().seed(scope.scope, state => { state.team.bots.b = { ...state.team.bots.main!, id: 'b', name: 'B', role: 'Reviewer', mainBot: false, execution: template('device', 'b') }; });
+  const root = await scope.entry.input(scope.as(), 'main', 'r1', 'Ask b');
+  const evidence = { terminal: { envelope: { task_id: taskId(root, 0), type: 'task.complete', payload: { document: { delegate: [{ to: 'b', request: 'Check' }] } } } } as unknown as DeviceTerminal,
+    attempt: { taskId: taskId(root, 0) } as unknown as TaskAttempt };
+  await store().finish(scope.scope, root, evidence, () => VECTOR_NOW);
+  await store().sync(scope.scope, { ...SYNC_OPTIONS, now: VECTOR_NOW, history: undefined });
+  return { ...scope, id: hash([taskId(root, 0), 'delegate', 0]) };
 }
 
 describe.skipIf(POSTGRES_URL === undefined)('H authenticated command entry on real Postgres (#793 S10)', () => {
@@ -148,6 +163,52 @@ describe.skipIf(POSTGRES_URL === undefined)('H authenticated command entry on re
     const state = await store().read(scope);
     expect(state.inputBatches![batch]).toMatchObject({ state: 'sealed', sealReason: 'cancel' });
     expect(Object.values(state.turns).filter(turn => turn.id !== 't1')).toEqual([expect.objectContaining({ status: 'failed', conclusion: 'cancelled' })]);
+  });
+
+  it('answers a repeated delegation cancel as L does: one commit, then cancel_pending and already_settled with nothing written', async () => {
+    const { scope, entry, as, id } = await delegated();
+    const intent = () => opened!.pool.query<{ cancel_reason: string | null; conclusion: string | null; tries: number }>(
+      `SELECT cancel_reason, conclusion, tries FROM "${store().schema}".intent WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(id)]).then(r => r.rows[0]);
+    // A tried intent keeps its cancel reason until its terminal, so the cancel stays pending.
+    await opened!.pool.query(`UPDATE "${store().schema}".intent SET submission = 'uncertain', tries = 1 WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(id)]);
+    await expect(entry.cancelDelegation(as(), id)).resolves.toEqual({ delegationId: id, result: 'cancelled' });
+    const committed = await store().dump(scope), row = await intent();
+    expect(row).toMatchObject({ cancel_reason: 'cancelled' });
+    await expect(entry.cancelDelegation(as(), id)).resolves.toEqual({ delegationId: id, result: 'cancel_pending' });
+    expect(await store().dump(scope)).toBe(committed);
+    expect(await intent()).toEqual(row);
+    await opened!.pool.query(`UPDATE "${store().schema}".intent SET conclusion = 'cancelled' WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(id)]);
+    await store().sync(scope, { ...SYNC_OPTIONS, now: VECTOR_NOW, history: undefined });
+    const settled = await store().dump(scope);
+    await expect(entry.cancelDelegation(as(), id)).resolves.toEqual({ delegationId: id, result: 'already_settled', verdict: 'cancelled' });
+    expect(await store().dump(scope)).toBe(settled);
+  });
+
+  it('refuses a delegation cancel with a DelegationError code, and writes nothing', async () => {
+    const { scope, entry, as, id } = await delegated();
+    await store().seed(scope, state => { state.delegations[id]!.status = 'reply_held'; });
+    const before = await store().dump(scope);
+    await expect(entry.cancelDelegation(as(), id)).rejects.toMatchObject({ name: 'DelegationError', key: id, code: 'not_cancellable' });
+    await expect(entry.cancelDelegation(as(), 'missing')).rejects.toBeInstanceOf(DelegationError);
+    await expect(entry.cancelDelegation(as(), 'missing')).rejects.toMatchObject({ key: 'missing', code: 'unknown_delegation' });
+    expect(await store().dump(scope)).toBe(before);
+  });
+
+  it('answers a repeated Turn cancel: cancelled once, then already_settled with the conclusion and nothing written', async () => {
+    const { scope, entry, as, synced } = await scoped();
+    const id = await entry.input(as(), 'main', 'k1', 'Hello');
+    await expect(entry.cancelTurn(as(), id)).resolves.toEqual({ turnId: id, result: 'cancelled' });
+    const before = await store().dump(scope), syncs = synced.length;
+    await expect(entry.cancelTurn(as(), id)).resolves.toEqual({ turnId: id, result: 'already_settled', conclusion: 'cancelled' });
+    expect(await store().dump(scope)).toBe(before);
+    expect(synced).toHaveLength(syncs);
+  });
+
+  it('returns the results of L as types, and offers the four owner actions', () => {
+    type Entry = HostedCommandEntry<unknown>;
+    expectTypeOf<Awaited<ReturnType<Entry['cancelTurn']>>>().toEqualTypeOf<TurnCancelResult>();
+    expectTypeOf<Awaited<ReturnType<Entry['cancelDelegation']>>>().toEqualTypeOf<DelegationCancelResult>();
+    expectTypeOf<Pick<Entry, 'setBotAutonomy' | 'cancelTurn' | 'cancelDelegation' | 'abandonDelegation'>>().not.toBeNever();
   });
 
   it('throws another decision for a decided card after the sync, as L', async () => {
