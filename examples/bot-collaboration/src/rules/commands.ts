@@ -9,7 +9,7 @@ import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } fr
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
 import { acceptMessage, type MessageDisposition, type MessageFields } from './message';
 import { expireCard } from './cards';
-import type { Autonomy } from './autonomy';
+import { autonomyGate, type Autonomy } from './autonomy';
 import { commit, revisionOf, type CommandRecord, type CommitRequest, type CommitResult, type CommitState, type Disposition, type OutboxIntent } from './commit';
 
 // The collaboration commands and their decisions as pure rules (#739 D1). `commitCommand` runs one command
@@ -288,7 +288,7 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
     }
     case 'outcome':
       applyTurnOutcome(state, command.turnId, command.taskId, command.document, { ...need(ports.outcome, command.kind),
-        now: ports.now, publish, ...(deliver ? { deliver } : {}) });
+        now: ports.now, publish, autonomy: autonomyGate(state, command.turnId, command.taskId, ports.now, publish), ...(deliver ? { deliver } : {}) });
       return accepted();
     case 'message': return acceptMessage(state, command.turnId, command.message, ports.now, deliver, ports.hostMessage);
     case 'occurrence':

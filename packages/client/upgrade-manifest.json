@@ -7,13 +7,31 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "f5aceea85bd783eb7bb2838851d4641dfb422b9f8e385a2e661fb8056703d9ad"
+    "snapshotSha256": "64d136190013eba042a083029527924eb0ea596dc1893dbad957c640677cb9d6"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "example-bot-collaboration-autonomy",
+      "impact": "additive",
+      "summary": "Fix: the hosted Host (examples/hosted-bot-collaboration) now enforces Bot autonomy as the local Host does. An observing Bot records would-do entities instead of running create_routine, a cross-Bot delegate or room_call. A Host that vendors the example runs HostedCollaborationStore.migrate() once on every existing schema before the new code serves (it replaces entity_kind_check and moves any wouldDo rows left in a scope frame by an older L import into would_do entity rows), then calls setBotAutonomy(credential, botId, 'auto') for each Bot that must keep acting on its own.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "example:bot-collaboration"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
+      "after": "K8 0.0.1 src-sha256=51f2b8f3e9a40ab5",
+      "entry": "example-bot-collaboration-autonomy"
+    }
+  ]
 }

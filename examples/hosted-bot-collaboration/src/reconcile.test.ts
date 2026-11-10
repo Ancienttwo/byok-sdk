@@ -186,6 +186,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     expect([revisionOf(await store().read(scope)), await commands(scope)]).toEqual([0, []]);
   });
 
+  it('records an observing Bot\'s create_routine as a would-do entity and projection and creates no routine (#1229)', async () => {
+    const { scope, input } = await tried(state => { delete state.team.bots.main!.autonomy; }), sdk = fakePort();
+    sdk.deliver(input, { status: 'complete', ownerDeviceId: 'device' });
+    sdk.complete(input, { create_routine: [{ localId: 'new_routine_1', schedule: { hour: 9, minute: 0, tz: 'UTC' }, prompt: 'Daily report' }] });
+    expect(await run(sdk.port)).toEqual({ concluded: 1, failed: [] });
+    const count = async (sql: string) => (await opened!.pool.query<{ n: string }>(sql, [storedKey(scope)])).rows[0]!.n;
+    expect(await count(`SELECT count(*)::text AS n FROM ${table('routine')} WHERE scope = $1`)).toBe('0');
+    expect(await count(`SELECT count(*)::text AS n FROM ${table('entity')} WHERE scope = $1 AND kind = 'would_do'`)).toBe('1');
+    expect(await count(`SELECT count(*)::text AS n FROM ${table('outbox')} WHERE scope = $1 AND kind = 'projection' AND key LIKE '"would-do:%'`)).toBe('1');
+    expect((await opened!.pool.query<{ frame: string }>(`SELECT frame::text FROM ${table('scope')} WHERE scope = $1`, [storedKey(scope)])).rows[0]!.frame)
+      .toContain('"wouldDo":{}');
+  });
+
   it('reports a scope where the pass recorded a first claim with no conclusion, and not a claim recorded before (#793 D2f-5)', async () => {
     const { scope, input } = await tried(), sdk = fakePort();
     const changed: string[] = [], pass = () => new HostedReconciler(opened!.pool, store().schema, store(),
