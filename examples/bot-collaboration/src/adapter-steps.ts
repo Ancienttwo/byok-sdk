@@ -26,7 +26,10 @@ export function routeTerminal(state: CollaborationState, key: string, handler: s
   return { kind: 'bot_turn' };
 }
 
-/** Runs a Host intent handler in the terminal transaction. `run` is undefined when no handler has this name. */
+/**
+ * Runs a Host intent handler in the terminal transaction. `run` is undefined when no handler has this name.
+ * L rejects missing handlers at startup; H has no startup check across every scope, so the terminal fails closed here.
+ */
 export function runHostIntentHandler(key: string, name: string, run: (() => unknown) | undefined): void {
   if (run === undefined) throw new IntentOutcomeError(key, 'handler_failed', `Unknown Host intent handler: ${name}`);
   let result: unknown;
