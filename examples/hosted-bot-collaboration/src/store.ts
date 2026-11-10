@@ -17,7 +17,7 @@ import { botOutcomePorts, syncHead, syncTail, type IntentOutcomeError } from '@b
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefusal, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
-import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
+import { DDL, STORE_VERSION } from './ddl';
 import { delegationCancelAnswer, turnCancelAnswer, type DelegationCancelResult, type TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
 import { cancelIntent, commandIntentFacts, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { syncDreamSlice } from './dreams';
@@ -271,30 +271,14 @@ export class HostedCollaborationStore {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`hosted-collaboration:${this.schema}`]);
       await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
       await client.query(DDL);
-      // Older H frames (including L imports) can contain dreams. Move them once, under the same scope locks as writes.
-      // Keep JSON key order: jsonb replacement would change the byte-preserving snapshot/export contract.
-      const legacy = await client.query<{ scope: string; state_version: number; frame: string; has_row: boolean }>(
-        `SELECT s.scope, s.state_version, s.frame::text, d.scope IS NOT NULL AS has_row FROM scope s
-         LEFT JOIN dream_state d ON d.scope = s.scope WHERE s.frame::jsonb ? 'dreams' ORDER BY s.scope FOR UPDATE OF s`);
       const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-      for (const row of legacy.rows) {
-        if (!SUPPORTED_STORE_VERSIONS.has(row.state_version)) throw new HostedStoreVersionError(row.state_version);
-        const frame = JSON.parse(row.frame) as Record<string, unknown>, dreams = frame.dreams;
-        if (row.has_row && object(dreams) && Object.keys(dreams).length === 0) continue;
-        if (row.has_row || !object(dreams) || Object.keys(dreams).length !== 2 || !object(dreams.bots) || !object(dreams.open)) {
-          throw new Error(`Cannot migrate dreams for ${row.scope}: conflicting row or invalid frame`);
-        }
-        await client.query('INSERT INTO dream_state (scope, body) VALUES ($1, $2::json)', [row.scope, JSON.stringify(dreams)]);
-        frame.dreams = {};
-        await client.query('UPDATE scope SET frame = $2::json WHERE scope = $1', [row.scope, JSON.stringify(frame)]);
-      }
       // An L import on older code kept `wouldDo` in the frame. It is a mapped entity kind now, so a write would empty the
       // frame map and lose the rows. Move each one into an entity row, once, under the same scope locks.
       const held = await client.query<{ scope: string; state_version: number; frame: string }>(
         `SELECT scope, state_version, frame::text FROM scope WHERE frame::jsonb -> 'wouldDo' IS NOT NULL AND frame::jsonb -> 'wouldDo' <> '{}'::jsonb
          ORDER BY scope FOR UPDATE`);
       for (const row of held.rows) {
-        if (!SUPPORTED_STORE_VERSIONS.has(row.state_version)) throw new HostedStoreVersionError(row.state_version);
+        if (row.state_version !== STORE_VERSION) throw new HostedStoreVersionError(row.state_version);
         const frame = JSON.parse(row.frame) as Record<string, unknown>, wouldDo = frame.wouldDo;
         if (!object(wouldDo)) throw new Error(`Cannot migrate would-do rows for ${row.scope}: invalid frame`);
         let ordinal = 0;
@@ -1523,7 +1507,7 @@ export class HostedCollaborationStore {
   /** The stored state of a scope in the caller's transaction. A scope row of an unknown store version is refused. */
   private async snapshot(client: PoolClient, key: string): Promise<CollaborationState> {
     const head = await client.query<{ state_version: number; frame: string }>('SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1', [key]);
-    if (head.rows[0] && !SUPPORTED_STORE_VERSIONS.has(head.rows[0].state_version)) throw new HostedStoreVersionError(head.rows[0].state_version);
+    if (head.rows[0] && head.rows[0].state_version !== STORE_VERSION) throw new HostedStoreVersionError(head.rows[0].state_version);
     const rows = await this.load(client, key, head.rows[0]?.frame ?? EMPTY_FRAME, undefined);
     return stateOf({ collaboration: assemble(rows) as unknown as Json });
   }

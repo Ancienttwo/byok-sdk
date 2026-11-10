@@ -5,7 +5,6 @@ import { LISTS, MAPS, ROOM_MESSAGE } from './layout';
  * the scope lock and before any write (#798 Q4). It is not the `CollaborationState.version` literal.
  */
 export const STORE_VERSION = 2;
-export const SUPPORTED_STORE_VERSIONS: ReadonlySet<number> = new Set([STORE_VERSION]);
 
 const names = (values: readonly string[]) => values.map(value => `'${value}'`).join(', ');
 

@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { SUPPORTED_STORE_VERSIONS } from './ddl';
+import { STORE_VERSION } from './ddl';
 import { inSchema } from './transaction';
 import type { HostedCollaborationStore, SyncResult } from './store';
 
@@ -50,9 +50,9 @@ export class HostedDueScheduler {
       const due = await inSchema(this.pool, this.store.schema, client => client.query<DueRow>(
         // The text form has its own name: an output column named `due_at` would make ORDER BY sort the text. An exported
         // scope, or one with an uncommitted import, commits no sync (#975), so it is left out.
-        `SELECT scope, due_at::text AS due FROM scope WHERE due_at <= $1 AND state_version = ANY($3::integer[]) AND switch_export IS NULL AND switch_import IS NULL
+        `SELECT scope, due_at::text AS due FROM scope WHERE due_at <= $1 AND state_version = $3 AND switch_export IS NULL AND switch_import IS NULL
           AND (retry_at IS NULL OR retry_at <= $1) AND (due_at, scope) > ($4, $5) ORDER BY due_at, scope LIMIT $2`,
-        [now, batch, [...SUPPORTED_STORE_VERSIONS], ...cursor]), true);
+        [now, batch, STORE_VERSION, ...cursor]), true);
       for (const row of due.rows) {
         cursor = [Number(row.due), row.scope];
         if (pass.synced >= batch) break;

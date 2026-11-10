@@ -202,9 +202,36 @@ The hosted `HostedCommandEntry.cancelTurn` and `cancelDelegation` return `TurnCa
 
 The owner switch records and errors are defined once, in `@byok-sdk/example-bot-collaboration/migration` (#1667): `SwitchHeader`, `SwitchReceipt`, `SwitchExportMark`, `exportMarkOf`, `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError`. The roots of both packages still export the classes and `SwitchReceipt` (and the hosted root `SwitchExportMark`), but the local `./switch` and `./topology` modules and the hosted `./switch` and `./binding` modules no longer do; a deep import moves to `./migration`. `DeviceSwitchingError` takes `target: 'L' | 'H'`. The messages of `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError` changed and their `code` values did not, so match on `code`. The local `refuseImported` now throws `SwitchImportedError` (`switch_imported`) instead of a plain `Error`.
 
+## Bot collaboration legacy ledger branches
+
+The examples no longer read three old stored shapes (#1669). Before the upgrade, while the Host still runs v0.41.0, prove that none remains; the new code has no branch that reads them.
+
+- H store: run `migrate()` once with v0.41.0 H for each schema. Then find the schemas with `SELECT table_schema FROM information_schema.columns WHERE table_name='scope' AND column_name='state_version'` and run this read-only query for each one. `unmigrated_dreams` must be 0 in every row; otherwise do not upgrade.
+
+  ```sql
+  SELECT s.state_version, count(*) AS scopes, count(*) FILTER (WHERE s.frame::jsonb ? 'dreams' AND d.scope IS NULL) AS unmigrated_dreams
+  FROM "<schema>".scope s LEFT JOIN "<schema>".dream_state d ON d.scope = s.scope GROUP BY s.state_version
+  ```
+
+  The new H `migrate()` no longer moves frame `dreams` into `dream_state` (the `wouldDo` move stays). A scope row whose `state_version` is not `STORE_VERSION` is still refused with `HostedStoreVersionError`.
+
+- L ledger: run this read-only query (`sqlite3 -readonly <file> <SQL>`) on each `HostLedger` file. `legacy_home` must be 0 in every row. If it is not, keep running the current Host until those home writes end, and query again.
+
+  ```sql
+  SELECT tenant, json_extract(body,'$.application.collaboration.version') AS version,
+    (SELECT count(*) FROM json_each(body,'$.application.collaboration.team.homeOperations') o
+     WHERE json_extract(o.value,'$.status')='pending' AND json_extract(o.value,'$.sent') IS NOT 1 AND json_extract(o.value,'$.retryAt') IS NOT NULL) AS legacy_home
+  FROM host_ledger
+  ```
+
+  A pending Agent home write now counts as possibly sent, and blocks a switch export with `home_sent`, only when it is marked `sent`; a `retryAt` alone no longer counts.
+
+- Vendored Hosts: `src/history.ts` is removed from the `vendor host` layer. A Host that copied it imports `HISTORY_MAX_BYTES` and `HISTORY_MAX_ITEMS` from `rules/history` instead.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
+- [ ] Run the H `unmigrated_dreams` and L `legacy_home` queries on v0.41.0; both must be 0 before the upgrade (#1669).
 - [ ] Pin the Host's direct and resolved SDK dependencies to the release graph.
 - [ ] Apply the Host's backup, stop, precheck, smoke and rollback gates, adjusted to the final release.
 - [ ] Check Codex retention settings and resume behavior where `agentUserContext: 'excluded'` is enabled.

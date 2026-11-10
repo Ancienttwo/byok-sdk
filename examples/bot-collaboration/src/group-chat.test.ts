@@ -5,7 +5,7 @@ import { autoBots, openTeam, type TestTeam } from './team.test-support';
 import { ROOM_GRACE_MS } from './rooms';
 import { stateOf } from './model';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/server/execution-core';
-import { HISTORY_MAX_BYTES } from './history';
+import { HISTORY_MAX_BYTES } from './rules/history';
 import type { BotProfile } from './team-model';
 
 // Hints are an optimization. The real mailbox and HTTP poll remain authoritative.

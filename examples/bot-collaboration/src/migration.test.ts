@@ -333,7 +333,6 @@ describe('switch export format (#975)', () => {
   it('moves an unsent pending Agent home write and refuses one that may have reached a device', () => {
     expect(() => sealSwitchExport(content(state => { state.team.homeOperations.push(home(1), home(2, { status: 'applied', sent: true })); }))).not.toThrow();
     refused(() => sealSwitchExport(content(state => { state.team.homeOperations.push(home(1, { sent: true })); })), 'home_sent');
-    refused(() => sealSwitchExport(content(state => { state.team.homeOperations.push(home(1, { retryAt: 10 })); })), 'home_sent');
   });
 
   it('refuses a pending projection, which H receivers deduplicate under the source scope', () => {

@@ -5,7 +5,7 @@ import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, 
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { IntentOutcomeError, outcomeFailure, botOutcomePorts, routeTerminal, runHostIntentHandler } from '@byok-sdk/example-bot-collaboration/adapter-steps';
 import { revisionOf, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { SUPPORTED_STORE_VERSIONS } from './ddl';
+import { STORE_VERSION } from './ddl';
 import { deliverCancels } from './intents';
 import { commitStored } from './retention';
 import { storedKey } from './layout';
@@ -76,8 +76,8 @@ export class HostedReconciler {
     // limit, as in the submit scan.
     const due = await inSchema(this.pool, this.schema, client => client.query<{ scope: string; key: string }>(
       `SELECT i.scope, i.key FROM intent i JOIN scope s ON s.scope = i.scope
-        WHERE s.state_version = ANY($3::integer[]) AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'reserved' AND i.reconcile_at <= $1
-        ORDER BY i.reconcile_at, i.scope, i.key LIMIT $2`, [this.now(), this.options.batch ?? 100, [...SUPPORTED_STORE_VERSIONS]]), true);
+        WHERE s.state_version = $3 AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'reserved' AND i.reconcile_at <= $1
+        ORDER BY i.reconcile_at, i.scope, i.key LIMIT $2`, [this.now(), this.options.batch ?? 100, STORE_VERSION]), true);
     const pass: ReconcilePass = { concluded: 0, failed: [] }, changed = new Set<string>();
     for (const row of due.rows) {
       try {
