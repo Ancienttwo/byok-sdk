@@ -12,24 +12,21 @@ import (
 var strictSync = platformStrictSync
 var beforeFinalCAS = func() {}
 
-// Bind each link to retained parent/child roots. The last root must be the
-// already pinned home. Never grant authority for a separately reopened inode.
-func syncHomeChain(home string, expected *os.Root) error {
-	canonical, err := filepath.EvalSymlinks(home)
-	if err != nil {
-		return err
-	}
+// Bind each link to retained parent/child roots. Preserve Unix's traversal to
+// the home volume boundary, but refuse if it cannot cover the selected ancestor.
+// The last root must be the already pinned home.
+func syncHomeChain(selected []string, expected *os.Root) error {
 	expectedInfo, err := expected.Stat(".")
 	if err != nil {
 		return err
 	}
 	var chain []string
-	for cursor := canonical; ; cursor = filepath.Dir(cursor) {
+	for cursor := selected[0]; ; cursor = filepath.Dir(cursor) {
 		info, err := os.Stat(cursor)
 		if err != nil {
 			return err
 		}
-		same, err := sameVolume(expectedInfo, info)
+		same, err := sameEntryVolume(expectedInfo, info)
 		if err != nil {
 			return err
 		}
@@ -42,8 +39,8 @@ func syncHomeChain(home string, expected *os.Root) error {
 			break
 		}
 	}
-	if len(chain) == 0 {
-		return errors.New("home volume changed")
+	if len(chain) < len(selected) {
+		return failure("ancestor_volume_mismatch", "ancestor root crosses the home volume boundary")
 	}
 	return syncPinnedHomeChain(chain, expected)
 }

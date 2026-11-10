@@ -171,7 +171,7 @@ export async function bindAgentMemoryFilesystem(this: TaskRunner, context: Agent
     filesystem = openAgentMemoryFilesystemHelper({
       helperBin,
       assetRoot: this['deps'].agentMemoryHelperAssetRoot,
-      ancestorRoot: this['deps'].agentHome!.layout.hostRootInput(),
+      ancestorRoot: this['tasks'].get(context.taskId)!.agentBinding.resolution.hostStorageRoot,
       canonicalHome: context.canonicalHome,
       homeIdentity: context.homeIdentity,
     });

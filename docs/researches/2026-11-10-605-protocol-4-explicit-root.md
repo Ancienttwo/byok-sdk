@@ -3,7 +3,7 @@
 Refs #605 and Draft PR [#1650](https://github.com/Ancienttwo/byok-sdk/pull/1650).
 The implementation reuses the retained-chain primitive and per-flush injection
 cases from closed PR #1083 (`8c9e63856a88ac1da53ea007474065ce06f5da05`). The
-current train integration is `202ac1f49afb98e8f29542d7c18ed691f9ae448f`.
+current train integration is `b77c6976492dbd769b1253e76ad49b1eb912a51d`.
 
 The owner signed the full contract on 2026-11-10, including the mandatory public
 argument and root-durability precondition
@@ -43,8 +43,8 @@ There is no protocol-3 reader, omitted-root default or fallback.
 
 The daemon's one authority is `AgentHomeResolution.hostStorageRoot`:
 `AgentHomeLayout.resolveRoot` obtains its canonical spelling and `resolve`
-creates `agentsRoot` and home below it. Task opens use the same layout
-authority; export uses its acquired binding; the intent/commit backend captures
+creates `agentsRoot` and home below it. Task and export opens use their acquired
+binding's `resolution.hostStorageRoot`; the intent/commit backend captures
 the canonical layout root at composition. The admission volume probe opens that
 selected root itself as both home and ancestor, rather than a task home.
 
@@ -76,8 +76,13 @@ child opens. Every retained directory must share the pinned home's volume;
 the terminal object must match the already-pinned home. Flush ancestor to
 home, check relations, then flush home to ancestor. Every flush is mandatory,
 and no directory above the selected ancestor is flushed by this Windows
-barrier. macOS retains its existing same-volume home-chain barrier and also
-validates the explicit ancestor relation.
+barrier. Unix retains its existing same-volume traversal and validates the
+explicit ancestor relation. Contract clarification from acceptance review:
+**Unix refuses a cross-volume selected ancestor** with
+`ancestor_volume_mismatch` before flushing or granting a session. The traversal
+must cover the entire selected chain before it can stop at the home volume
+boundary; it can still flush same-volume parents above the selected ancestor,
+as before.
 
 Agent-home initialization creates `.byok` during lease acquisition and `notes`
 before binding the memory helper. Open adds a barrier for each real directory
@@ -103,8 +108,9 @@ removes the extended drive prefix or converts the extended UNC prefix for both
 names, preserving component case. The requested home must still match the
 pinned object. Existing relation, volume and final-home checks remain required.
 Query/normalization failure returns bounded `root_resolution_failed`; there is
-no Windows pathname fallback. Unix retains `EvalSymlinks`; the other production
-use in `syncHomeChain` runs only on Unix. Diagnostic-only uses grant no authority.
+no Windows pathname fallback. Unix retains `EvalSymlinks` in its chain-name
+resolution and passes that validated chain into the existing volume traversal.
+Diagnostic-only uses grant no authority.
 
 The original junction assertions remain. A new Windows guard covers resolution
 from the pinned home, DOS/UNC normalization and closed name-handle failure.
@@ -119,6 +125,17 @@ B seam. Those tests are not A7 evidence.
 
 ## Verification evidence
 
+Acceptance-review delta: the real Unix `openSession` path originally granted a
+session after only 6/4 flushes when the existing device-comparison seam reported
+a different volume at the selected ancestor/an intermediate parent. The
+regression now requires `ancestor_volume_mismatch`, no session and zero flushes,
+then retries successfully with the seam restored. The shared real-open test
+compares the identity and order of every chain flush in both passes and every
+initialization flush on Unix and Windows, and injects failure at each one.
+The daemon MCP integration deliberately gives maintenance `hostRootInput()` a
+different existing ancestor and checks that opens still use the task binding's
+canonical `resolution.hostStorageRoot`.
+
 - Merged build, typecheck, API surface, version authority and upgrade-manifest
   checks passed. The manifest gate records that the next release must be MINOR.
 - Go race tests passed and the Windows amd64 test binary cross-compiled.
@@ -128,7 +145,7 @@ B seam. Those tests are not A7 evidence.
   generated pin. Real-worktree source/pin tests passed 4/4, followed by a normal
   merged-worktree native build/repro/pin verification. The stage was deleted.
 - Native source digest:
-  `412481b72e8872d75cf6954c83073b38b87dab6a7410c41cedc9940aed5aff20`.
+  `5e7aeb6473b08904da97f822aa5d0dc7d6c318ada355e43184f030bb805c80d0`.
 - Final local affected TS run, with regenerated native artifacts: 28 files,
   354 tests passed, 38 skipped (31.32 s).
 - The broader local workspace run passed the full client suite (483 files,
@@ -138,10 +155,12 @@ B seam. Those tests are not A7 evidence.
 - Both macOS hosted helper jobs passed on the merged implementation. Hosted
   Windows SDK TS helper/processor checks and Node/Bun runtime smoke passed
   before the stale raw-junction-smoke version assertion described above.
-- Measured closure sizes on the updated train: client 2,353,844 bytes,
-  agent-memory 73,835, and byok-agent 2,324,080. Approved increases remain exactly
-  +494, +259 and +494 over the updated base. README rows were regenerated from
-  the merged build; no selector or workflow edits belong to this PR's own diff.
+- Measured closure sizes after the binding-authority review fix: client
+  2,353,844 → 2,353,872 bytes, agent-memory unchanged at 73,835, and
+  byok-agent 2,324,080 → 2,324,108. The coordinator approved exactly +28 on
+  those two caps for task-runner binding-resolution access; total increases
+  over train are +522, +259 and +522. README rows were regenerated from the
+  build; no selector or workflow edits belong to this PR's own diff.
 
 The coordinator requested an isolated K8 comparison on the same macOS arm64
 machine, Node 24.18.0 and Bun 1.4.3, sequentially with no overlapping heavy task

@@ -390,9 +390,13 @@ func openSession(req openRequest) (*session, *protocolError) {
 	if runtime.GOOS == "windows" {
 		err = syncPinnedHomeChain(chain, root)
 	} else {
-		err = syncHomeChain(req.Root, root)
+		err = syncHomeChain(chain, root)
 	}
 	if err != nil {
+		var barrierFailure *protocolError
+		if errors.As(err, &barrierFailure) {
+			return nil, barrierFailure
+		}
 		return nil, failure("io_failure", "home directory barrier failed")
 	}
 	if err := syncInitializedDirectories(root); err != nil {

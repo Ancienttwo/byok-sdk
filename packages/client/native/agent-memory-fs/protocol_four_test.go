@@ -76,13 +76,49 @@ func TestOpenRequiresEveryChainAndInitializationFlush(t *testing.T) {
 		t.Fatalf("baseline open: %#v", failure)
 	}
 	_ = active.root.Close()
-	if runtime.GOOS == "windows" && len(flushed) != 12 {
-		t.Fatalf("flush count=%d, want 8 chain + 4 initialization", len(flushed))
+	chain, err := selectedHomeChain(home, ancestor, root)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for index, name := range []string{".byok", ".", "notes", "."} {
-		info, err := root.Stat(name)
-		if err != nil || !os.SameFile(info, flushed[len(flushed)-4+index]) {
-			t.Fatalf("initialization flush %d did not flush %s: %v", index, name, err)
+	if runtime.GOOS != "windows" {
+		homeInfo, err := root.Stat(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Unix retains its original same-volume coverage above the selected
+		// ancestor as well. Derive expected objects from device IDs, not from
+		// the barrier under test, and compare both passes by file identity.
+		for cursor := filepath.Dir(ancestor); cursor != ancestor; cursor = filepath.Dir(cursor) {
+			info, err := os.Stat(cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			same, err := sameVolume(homeInfo, info)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !same {
+				break
+			}
+			chain = append(chain, cursor)
+			if filepath.Dir(cursor) == cursor {
+				break
+			}
+		}
+	}
+	var expected []string
+	for index := len(chain) - 1; index >= 0; index-- {
+		expected = append(expected, chain[index])
+	}
+	expected = append(expected, chain...)
+	expected = append(expected, filepath.Join(home, ".byok"), home, filepath.Join(home, "notes"), home)
+	if len(flushed) != len(expected) {
+		t.Fatalf("flush count=%d want=%d", len(flushed), len(expected))
+	}
+	for index, name := range expected {
+		info, err := os.Stat(name)
+		if err != nil || !os.SameFile(info, flushed[index]) {
+			t.Fatalf("flush %d did not flush %s: %v", index, name, err)
 		}
 	}
 	for failAt := 1; failAt <= len(flushed); failAt++ {

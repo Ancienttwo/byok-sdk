@@ -8,6 +8,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { agentMemoryIntentOperationDigest } from '@byok-sdk/core';
 import { createEnvelope, type AgentMemoryIntentV1, type AgentMemoryIntentCompletion } from '@byok-sdk/protocol';
 import { expect, it, vi } from 'vitest';
+import { AgentHomeLayout } from '../agent-home';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { copyAgentMemoryHelperAssets, resolveAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
 import * as helperClient from '../daemon/agent-memory-fs-helper';
@@ -32,6 +33,7 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
   const client = new Client({ name: 'relocated-memory-test', version: '1' }, { capabilities: {} });
   const open = vi.spyOn(helperClient, 'openAgentMemoryFilesystemHelper'); // observe real calls; never replace the backend
   let daemon: ReturnType<typeof createDaemonWithAdapters> | undefined;
+  let restoreRootInput: (() => void) | undefined;
   try {
     await copyAgentMemoryHelperAssets({ outDir: assetRoot, platform: process.platform === 'win32' ? 'win32' : 'darwin' });
     const helperBin = resolveAgentMemoryFilesystemHelper(assetRoot);
@@ -86,6 +88,10 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
       { taskId: 'relocated-memory-task', seq: server.nextSeq() }));
     const started = await server.waitFor(event => event.task_id === 'relocated-memory-task' && (event.type === 'task.started' || event.type === 'task.decline'));
     expect(started.type, JSON.stringify(started.payload)).toBe('task.started');
+    // Maintenance discovery can differ from the acquired task binding. MCP
+    // opens must use that binding's canonical resolution as their authority.
+    const rootInput = vi.spyOn(AgentHomeLayout.prototype, 'hostRootInput').mockReturnValue(await fs.realpath(root));
+    restoreRootInput = () => rootInput.mockRestore();
     const mcp = adapter.startCalls[0]!.ctx.mcpServers!.byokagentmemory!;
     await client.connect(new StdioClientTransport({ command: mcp.command, args: [...(mcp.args ?? [])], env: { ...mcp.env, PATH: process.env.PATH! } }));
     const recall = await client.callTool({ name: 'memory_recall', arguments: { path: 'MEMORY.md' } });
@@ -99,6 +105,7 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
     const ancestorRoot = await fs.realpath(path.join(root, 'homes'));
     for (const [input] of open.mock.calls) expect(input).toMatchObject({ assetRoot, helperBin, ancestorRoot });
   } finally {
+    restoreRootInput?.();
     await client.close();
     await daemon?.stop();
     await server.close();
