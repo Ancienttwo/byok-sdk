@@ -6,7 +6,7 @@ import { HermesAdapter, type HermesModelSelection } from '../../adapters/hermes/
 import { hermesVersionLine, QUALIFIED_HERMES_VERSION } from '../../adapters/hermes/hermes-version';
 import { HERMES_ABSENT_ISOLATION_SOURCES } from '../../adapters/hermes/hermes-capabilities';
 import {
-  baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
+  baseEnv, check, contractTarget, createSandbox, defineRuntimeCases, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
   expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, withProcessEnv, writeSubmitResultServer,
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, searchThenCall, startLoopbackProvider } from './loopback';
@@ -15,6 +15,7 @@ const target = contractTarget('hermes', QUALIFIED_HERMES_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 // The runtime environment drops BYOK_* names, so the key variable has its own prefix.
 const KEY_ENV = 'RC_CONTRACT_MODEL_KEY';
+const PRODUCT_KEY_ENV = 'SDK_HERMES_PROVIDER_KEY';
 const PROJECT_MARKER = 'BYOK-CONTRACT-HERMES-PROJECT-62ab';
 const USER_MARKER = 'BYOK-CONTRACT-HERMES-USER-c3f0';
 const SKILL_MARKER = 'BYOK-CONTRACT-HERMES-SKILL-48d1';
@@ -92,6 +93,7 @@ async function writeUserHome(userHome: string, root: string, extra: { user?: { c
   await fs.writeFile(path.join(userHome, 'skills', 'contract-skill', 'SKILL.md'), `---\nname: contract-skill\ndescription: ${SKILL_MARKER}\n---\n\n# Skill\n\n${SKILL_MARKER}\n`);
   await fs.writeFile(path.join(userHome, 'memories', 'MEMORY.md'), `${MEMORY_MARKER}\n`);
   await fs.writeFile(path.join(userHome, 'memories', 'USER.md'), `${PROFILE_MARKER}\n`);
+  if (extra.baseUrl !== undefined) await fs.writeFile(path.join(userHome, '.env'), `${KEY_ENV}=runtime-contract-placeholder\n`);
   await fs.writeFile(path.join(userHome, 'config.yaml'), [
     'display:', '  personality: contract-style',
     'agent:', '  personalities:', `    contract-style: ${JSON.stringify(STYLE_MARKER)}`,
@@ -121,8 +123,8 @@ async function turn() {
     const user = await writeSubmitResultServer(box.root, userReceipt, 'user_tool');
     await writeUserHome(path.join(box.home, '.hermes'), box.root, { user: { command: user.command, args: user.args ?? [] } });
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
-    const runtime = await adapter({ provider: 'custom', model: 'contract-model', baseUrl: provider.baseUrl, keyEnv: KEY_ENV });
-    const env = { ...await hermesEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
+    const runtime = await adapter({ provider: 'custom', model: 'contract-model', baseUrl: provider.baseUrl, keyEnv: PRODUCT_KEY_ENV });
+    const env = { ...await hermesEnv(box.home), [PRODUCT_KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
     const events = await runTurn(runtime, 'Call the submit_result tool, then finish.', { workspaceDir: box.workspace, env, mcpServers: { host } }, 600_000);
     return { events, provider, calls: await readReceipt(receipt), userSpawned: spawned(userReceipt) };
   } finally {
@@ -145,7 +147,7 @@ async function controlTurn() {
     await fs.rm(home, { recursive: true, force: true });
     await writeUserHome(home, box.root, { baseUrl: provider.baseUrl });
     const args = ['chat', '-q', 'Reply.', '-Q'];
-    const env = { ...await hermesEnv(box.home), ...recorder.env, [KEY_ENV]: 'runtime-contract-placeholder', HERMES_HOME: home };
+    const env = { ...await hermesEnv(box.home), ...recorder.env, HERMES_HOME: home };
     const output = await new Promise<string>(resolve => {
       execFile(target.bin, args, { encoding: 'utf8', env, cwd: box.workspace, timeout: 600_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => resolve(JSON.stringify({ error: error?.message, stdout: stdout.slice(-2000), stderr: stderr.slice(-2000) })));
     });
@@ -160,6 +162,15 @@ const control = once(controlTurn);
 const descriptor = new HermesAdapter({ home: path.resolve('/hermes-descriptor-only') }).descriptor;
 // The first detect() builds the Hermes environment in the new root.
 const FIRST_DETECT_MS = 900_000;
+
+defineRuntimeCases(`hermes provider key (${target.mode} ${target.expectedVersion})`, {
+  'provider.processEnv': ['the adapter sends the process environment key to the model', check(async () => {
+    const { provider } = await contractTurn();
+    const requests = provider.requests.filter(request => request.model);
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests.map(request => request.authorization)).toEqual(requests.map(() => 'Bearer runtime-contract-placeholder'));
+  }, FIRST_DETECT_MS)],
+});
 
 defineRuntimeContract(`hermes runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, {
   'detect.version': check(async () => {

@@ -85,6 +85,8 @@ export interface ProviderRequest {
   readonly text: string;
   /** The `x-goog-api-key` header, for the Gemini wire. */
   readonly apiKey?: string | string[] | undefined;
+  /** Authorization header on the loopback endpoint. */
+  readonly authorization?: string | undefined;
   readonly tools: readonly ProviderTool[];
   /** Tool results already in the conversation. */
   readonly toolResults: number;
@@ -287,7 +289,7 @@ export async function startLoopbackProvider(wire: ProviderWire, script: Provider
       let body: Json = {};
       try { body = text ? JSON.parse(text) as Json : {}; } catch { /* recorded as text only */ }
       const model_ = isModelRequest(wire, method, path);
-      const recorded: ProviderRequest = { method, path, text, apiKey: request.headers['x-goog-api-key'], model: model_, ...(model_ ? view(wire, body) : { tools: [], toolResults: 0 }) };
+      const recorded: ProviderRequest = { method, path, text, apiKey: request.headers['x-goog-api-key'], authorization: request.headers.authorization, model: model_, ...(model_ ? view(wire, body) : { tools: [], toolResults: 0 }) };
       requests.push(recorded);
       if (!model_) {
         if (method === 'GET' && path.endsWith('/models')) {
