@@ -57,6 +57,23 @@ async function onPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>): 
   }
 }
 
+describe('session limits', () => {
+  it.each([
+    ['Claude', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new ClaudeAdapter(limits), false],
+    ['Codex', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new CodexAdapter(limits), true],
+    ['Grok', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new GrokAdapter(limits), true],
+    ['agy', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new AgyAdapter({ home: path.join(os.tmpdir(), 'agy-limits'), ...limits }), true],
+    ['dsh', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new DshAdapter({ home: path.join(os.tmpdir(), 'dsh-limits'), model: { provider: 'deepseek', model: 'test', keyEnv: 'TEST_KEY' }, ...limits }), true],
+    ['Hermes', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new HermesAdapter({ home: path.join(os.tmpdir(), 'hermes-limits'), ...limits }), false],
+  ] as const)('%s validates limits', (label, create, retained) => {
+    expect(() => create({ interruptTimeoutMs: 0.5 })).not.toThrow();
+    for (const interruptTimeoutMs of [0, Number.NaN, 2_147_483_648]) {
+      expect(() => create({ interruptTimeoutMs })).toThrow(`invalid ${label} interrupt timeout`);
+    }
+    if (retained) expect(() => create({ maxRetainedBytes: 1.5 })).toThrow(`invalid ${label} retention budget`);
+  });
+});
+
 describe('selection target', () => {
   it('declares agy steering', async () => {
     const descriptor = builtIns(await tempDir()).agy.descriptor;

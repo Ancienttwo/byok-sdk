@@ -1,3 +1,4 @@
+import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits';
 import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import type { RuntimeTaskInput } from '../../types';
@@ -46,7 +47,6 @@ import { assertCodexFileCredentials, createCodexAgentHome } from './agent-user-c
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
-const DEFAULT_RETAINED_BYTES = 16 * 1024 * 1024;
 const DEFAULT_OPERATION_MS = 30_000;
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
 export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
@@ -154,6 +154,8 @@ export class CodexAdapter implements RuntimeAdapter {
   }); }
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
   private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
+  private readonly interruptTimeoutMs: number;
+  private readonly maxRetainedBytes: number;
   constructor(private readonly options: CodexAdapterOptions = {}) {
     if (options.sandbox !== undefined) assertCodexSandboxSetting(options.sandbox, 'CodexAdapterOptions.sandbox');
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'CodexAdapterOptions.runtimeEnvironment');
@@ -162,17 +164,8 @@ export class CodexAdapter implements RuntimeAdapter {
     if (options.agentUserContext !== undefined && options.agentUserContext !== 'inherit' && options.agentUserContext !== 'excluded')
       throw new TypeError('CodexAdapterOptions.agentUserContext must be inherit or excluded');
     this.options = { ...options, ...(options.nativeInteractions === undefined ? {} : { nativeInteractions: snapshotNativeInteractionHostOptions(options.nativeInteractions) }) };
-    if (
-      !Number.isSafeInteger(options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES) ||
-      (options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES) < 1
-    )
-      throw new TypeError('invalid Codex retention budget');
-    if (
-      !Number.isFinite(options.interruptTimeoutMs ?? 1000) ||
-      (options.interruptTimeoutMs ?? 1000) <= 0 ||
-      (options.interruptTimeoutMs ?? 1000) > 2_147_483_647
-    )
-      throw new TypeError('invalid Codex interrupt timeout');
+    this.maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'Codex');
+    this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'Codex');
     if (
       !Number.isFinite(options.operationTimeoutMs ?? DEFAULT_OPERATION_MS) ||
       (options.operationTimeoutMs ?? DEFAULT_OPERATION_MS) <= 0 ||
@@ -287,9 +280,9 @@ export class CodexAdapter implements RuntimeAdapter {
       input.scratch,
       workspace,
       model,
-      this.options.interruptTimeoutMs ?? 1000,
+      this.interruptTimeoutMs,
       this.options.operationTimeoutMs ?? DEFAULT_OPERATION_MS,
-      this.options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES,
+      this.maxRetainedBytes,
       input.manifest.sessionRef === undefined,
       this.options.nativeInteractions,
       input.manifest.sessionRef,

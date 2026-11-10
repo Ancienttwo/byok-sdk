@@ -1,7 +1,6 @@
 import { runtimeVersionPolicyIssues } from './runtime-version-policy';
+import { DAEMON_CONFIG_RUNTIME_IDS } from './daemon-config-runtime-ids.generated';
 import type { DaemonConfigIssue } from './daemon/config-schema/validate';
-
-const RUNTIMES = ['pi', 'claude', 'codex', 'grok', 'dsh', 'agy', 'opencode'] as const;
 
 /**
  * Semantic checks the generated JSON schema cannot express (#1103): a
@@ -14,7 +13,7 @@ export function versionPolicyConfigIssues(config: unknown): DaemonConfigIssue[] 
   const runtimes = (config as Record<string, unknown>).runtimes;
   if (runtimes === null || typeof runtimes !== 'object' || Array.isArray(runtimes)) return [];
   const issues: DaemonConfigIssue[] = [];
-  for (const id of RUNTIMES) {
+  for (const id of DAEMON_CONFIG_RUNTIME_IDS) {
     const runtime = (runtimes as Record<string, unknown>)[id];
     if (runtime === null || typeof runtime !== 'object' || Array.isArray(runtime)) continue;
     const policy = (runtime as Record<string, unknown>).versionPolicy;

@@ -1,3 +1,4 @@
+import { resolveInterruptTimeoutMs } from '../session-limits';
 import { ownHermesLauncher, prepareHermesCustody, hermesCustodyArgs, type HermesByokLauncher, type PreparedHermesCustody } from './hermes-custody';
 import type { RuntimeTaskInput } from '../../types';
 export type { HermesByokLauncher } from './hermes-custody';
@@ -182,6 +183,7 @@ export class HermesAdapter implements RuntimeAdapter {
   private readonly options: HermesAdapterOptions;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
   private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
+  private readonly interruptTimeoutMs: number;
   /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
   private readonly liveHomes = new Set<string>();
 
@@ -207,7 +209,7 @@ export class HermesAdapter implements RuntimeAdapter {
     if (options.model !== undefined) assertHermesModelSelection(options.model, 'HermesAdapterOptions.model');
     assertDeadline(options.probeTimeoutMs, 'Hermes probe timeout');
     assertDeadline(options.gatewayReadyTimeoutMs, 'Hermes gateway ready timeout');
-    assertDeadline(options.interruptTimeoutMs, 'Hermes interrupt timeout');
+    this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'Hermes');
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'HermesAdapterOptions.runtimeEnvironment');
     this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
       descriptor: HERMES_VERSION_POLICY,
@@ -321,7 +323,7 @@ export class HermesAdapter implements RuntimeAdapter {
     if (!cwd) throw authority('hermes manifest has no sealed cwd');
     const workspace = await fs.realpath(cwd);
     const { createHermesSession } = await import('#byok-hermes-session');
-    const session = createHermesSession(input.scratch, this.root, this.liveHomes, this.options.interruptTimeoutMs ?? 1_000, {
+    const session = createHermesSession(input.scratch, this.root, this.liveHomes, this.interruptTimeoutMs, {
       AcpConnection, AcpMethodNotFound, AcpRpcError, RuntimeExecutionFailure, RuntimeDisposalFailure,
       PolicyUnsupportedError, SteerUnsupportedError, isRuntimeExecutionFailure, infrastructure,
       identifyHermesGateway: (home, options) => identifyHermesGateway(home, { ...options, nativeAssetRoot: this.options.nativeAssetRoot }),
