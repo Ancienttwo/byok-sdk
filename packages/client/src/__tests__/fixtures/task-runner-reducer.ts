@@ -342,7 +342,7 @@ export const ROW_FIXTURES: ReadonlyMap<string, RowFixture> = new Map<string, Row
   ['M4', fixture(makeEvent('message.accepted'), {
     task: { phase: 'terminalizing', terminal: terminalState() },
   })],
-  ['F-OFFER', fixture(makeEvent('offer.sealed_opened'), { task: { phase: 'running' } })],
+  ['F-OFFER', fixture(makeEvent('offer.received', { offer: createOfferFacts() }), { task: { phase: 'running' } })],
   ['F-ADMISSION', fixture(makeEvent('admission.begin'), { task: { phase: 'running' } })],
   ['F-CLAIM', fixture(makeEvent('claim.sent'), { task: { phase: 'running' } })],
   ['F-STARTUP', fixture(makeEvent('startup.registered'), { task: { phase: 'running' } })],
