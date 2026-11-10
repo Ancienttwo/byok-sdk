@@ -72,7 +72,11 @@ export function syncHead(state: CollaborationState, coalesce: CoalescePolicy | u
   expireCards(state, now);
 }
 
-/** Cleans reply tokens and projects every input batch and inbound destination after the sync's Turn steps. */
+/**
+ * Cleans reply tokens and projects every input batch and inbound destination after the sync's Turn steps.
+ * H's finishDelivery also cleans reply tokens, corresponding to L's cleanup in each flush pass.
+ * #1229 item 3: one projection per destination; an unchanged destination keeps the same projection id and value.
+ */
 export function syncTail(state: CollaborationState, conclusions: IntentConclusions | undefined, now: number, emit: Publish): void {
   if (conclusions !== undefined) cleanReplyTokens(conclusions, state, now);
   projectInputBatches(state, emit);
