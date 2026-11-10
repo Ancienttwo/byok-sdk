@@ -105,11 +105,15 @@ describe('device runner boundaries', () => {
     const factory = vi.spyOn(runtimeAdapters, 'createRuntimeAdapters').mockReturnValue([adapter]);
     const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => {
       wrapped = adapters[0]!;
-      return { subscribe: (callback: client.DaemonEventListener) => { listener = callback; return () => {}; }, stop: vi.fn() } as unknown as client.Daemon;
+      return { subscribe: (callback: client.DaemonEventListener) => { listener = callback; return () => {}; }, stop: vi.fn(),
+        pair: vi.fn(async () => ({ deviceId: 'device' })), start: vi.fn(),
+        status: () => ({ lifecycle: { phase: 'running', connection: 'open' } }),
+      } as unknown as client.Daemon;
     });
     try {
       const device = createDeviceSession(deviceConfig('http://localhost', '/tmp/real-runner'), 'real', send);
       expect(factory).toHaveBeenCalledWith({});
+      await device.pair('code');
       await wrapped.detect(); await wrapped.runtimeEnvironment(); wrapped.projectMcpEnvironment!({});
       const prepared = await wrapped.prepare({} as client.RuntimeAdapterPrepareInput);
       if (prepared.kind !== 'prepared') throw new Error('expected prepared');
@@ -122,7 +126,7 @@ describe('device runner boundaries', () => {
       listener({ kind: 'completed', taskId: 'task', ts: '', summary: 'secret', sessionRef: 'secret' });
       listener({ kind: 'failed', taskId: 'task', ts: '', reason: 'secret', retryable: false });
       listener({ kind: 'cancelled', taskId: 'task', ts: '', reason: 'secret' });
-      expect(send.mock.calls.map(([event]) => event)).toEqual([{ type: 'started', taskId: 'task', agentId: 'agent' },
+      expect(send.mock.calls.map(([event]) => event)).toEqual([{ type: 'ready', deviceId: 'device' }, { type: 'started', taskId: 'task', agentId: 'agent' },
         { type: 'finished', taskId: 'task' }, ...Array(2).fill({ type: 'error', taskId: 'task', message: 'runtime task did not complete' })]);
       await expect(device.finish('task', {})).rejects.toThrow('only available with the stub');
       await expect(device.canary('task', 'private', true)).rejects.toThrow('only available with the stub');
@@ -138,31 +142,38 @@ describe('device runner boundaries', () => {
       status: () => ({ lifecycle: phase === 'connecting' ? { phase: 'running', connection: ++reads > 1 ? 'open' : 'connecting' }
         : { phase: phase === 'timeout' ? 'running' : phase, connection: 'connecting' } }),
     } as unknown as client.Daemon;
-    const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockReturnValue(daemon);
+    let wrapped!: client.RuntimeAdapter;
+    const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => { wrapped = adapters[0]!; return daemon; });
     const send = vi.fn();
     vi.useFakeTimers();
     try {
       const device = createDeviceSession(deviceConfig('http://localhost', '/tmp/ready-runner'), 'stub', send);
+      expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'member binding pending', retryable: false });
       const paired = device.pair('secret');
       const assertion = phase === 'connecting' ? expect(paired).resolves.toBeUndefined() : expect(paired).rejects.toThrow('did not become ready');
       await vi.advanceTimersByTimeAsync(30_025);
       await assertion;
       expect(daemon.pair).toHaveBeenCalledWith('secret', undefined);
       expect(send.mock.calls).toEqual(phase === 'connecting' ? [[{ type: 'ready', deviceId: 'device' }]] : []);
+      if (phase === 'connecting') expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toMatchObject({ kind: 'prepared' });
       await expect(device.canary('missing-task', 'private', true)).rejects.toThrow('--canary-controls');
       await expect(device.finish('missing-task', {})).rejects.toThrow('no runtime session');
       await device.stop();
+      expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'member binding failed', retryable: false });
     } finally { vi.useRealTimers(); compose.mockRestore(); }
   });
 
   it.each([true, false])('runs canary content steps after steer and approval (sealed=%s)', async sealed => {
     const root = await mkdtemp(path.join(tmpdir(), 'hw-canary-'));
     let wrapped!: client.RuntimeAdapter;
-    const daemon = { subscribe: () => () => {}, stop: vi.fn(), status: () => ({ activeTaskCount: 0 }) } as unknown as client.Daemon;
+    const daemon = { subscribe: () => () => {}, stop: vi.fn(), pair: vi.fn(async () => ({ deviceId: 'device' })), start: vi.fn(),
+      status: () => ({ activeTaskCount: 0, lifecycle: { phase: 'running', connection: 'open' } }),
+    } as unknown as client.Daemon;
     const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => { wrapped = adapters[0]!; return daemon; });
     const send = vi.fn(), approve = vi.fn(async () => ({ approved: true }));
     try {
       const device = createDeviceSession(deviceConfig('http://localhost', root), 'stub', send, {}, false, true);
+      await device.pair('code');
       const prepared = await wrapped.prepare({} as client.RuntimeAdapterPrepareInput);
       if (prepared.kind !== 'prepared') throw new Error('expected prepared');
       const session = await prepared.operation.start({ kind: 'instruction', instruction: 'private canary',
@@ -189,7 +200,9 @@ describe('device runner boundaries', () => {
 
   it.each(['instruction', 'prepared', 'failed-result'])('automatically echoes only an instruction and emits its UTF-8 hash: %s', async mode => {
     let wrapped!: client.RuntimeAdapter;
-    const daemon = { subscribe: () => () => {}, stop: vi.fn() } as unknown as client.Daemon;
+    const daemon = { subscribe: () => () => {}, stop: vi.fn(), pair: vi.fn(async () => ({ deviceId: 'device' })), start: vi.fn(),
+      status: () => ({ lifecycle: { phase: 'running', connection: 'open' } }),
+    } as unknown as client.Daemon;
     const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => { wrapped = adapters[0]!; return daemon; });
     const output = new PassThrough(), text = 'private canary 你好\nsecond line';
     let printed = '';
@@ -198,6 +211,7 @@ describe('device runner boundaries', () => {
       expect(runnerOptions([...runnerArgs, '--stub-canary']).stubCanary).toBe(true);
       const device = createDeviceSession(deviceConfig('http://localhost', '/tmp/auto-canary'), 'stub',
         event => output.write(JSON.stringify(event) + '\n'), {}, true);
+      await device.pair('code');
       const prepared = await wrapped.prepare({} as client.RuntimeAdapterPrepareInput);
       if (prepared.kind !== 'prepared') throw new Error('expected prepared');
       const session = await prepared.operation.start({ kind: mode === 'prepared' ? 'prepared' : 'instruction', instruction: text,
@@ -210,7 +224,7 @@ describe('device runner boundaries', () => {
       if (mode === 'prepared') { expect(finish).not.toHaveBeenCalled(); expect(fail).toHaveBeenCalledOnce(); }
       else expect(finish).toHaveBeenCalledExactlyOnceWith({ text });
       expect(printed.trim().split('\n').map(line => JSON.parse(line))).toEqual([
-        { type: 'started', taskId: 'task', agentId: '' },
+        { type: 'ready', deviceId: 'device' }, { type: 'started', taskId: 'task', agentId: '' },
         mode === 'instruction' ? { type: 'canary-result', taskId: 'task', sha256: createHash('sha256').update(text, 'utf8').digest('hex') }
           : { type: 'error', taskId: 'task', message: mode === 'prepared' ? 'stub canary requires an instruction task' : 'stub canary result failed' },
       ]);
@@ -221,10 +235,13 @@ describe('device runner boundaries', () => {
 
   it.each(['refused', 'missing-channel', 'aborted-steer', 'aborted-approval', 'closed'])('refuses incomplete canary execution: %s', async mode => {
     let wrapped!: client.RuntimeAdapter;
-    const daemon = { subscribe: () => () => {}, stop: vi.fn() } as unknown as client.Daemon;
+    const daemon = { subscribe: () => () => {}, stop: vi.fn(), pair: vi.fn(async () => ({ deviceId: 'device' })), start: vi.fn(),
+      status: () => ({ lifecycle: { phase: 'running', connection: 'open' } }),
+    } as unknown as client.Daemon;
     const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => { wrapped = adapters[0]!; return daemon; });
     try {
       const device = createDeviceSession(deviceConfig('http://localhost', '/tmp/canary-refused'), 'stub', vi.fn(), {}, false, true);
+      await device.pair('code');
       const prepared = await wrapped.prepare({} as client.RuntimeAdapterPrepareInput);
       if (prepared.kind !== 'prepared') throw new Error('expected prepared');
       const session = await prepared.operation.start({ kind: 'instruction', instruction: 'private', manifest: { taskId: 'task' },
@@ -353,13 +370,15 @@ describe('device runner boundaries', () => {
     } finally { compose.mockRestore(); }
   });
 
-  it.each(['match', 'different', 'missing', 'missing-record', 'late-match', 'expired', 'interrupted'])('binds local approval to the relayed public anchor: %s', async mode => {
+  it.each(['match', 'different', 'missing', 'missing-record', 'late-match', 'expired', 'interrupted', 'bound-before-ready'])('binds local approval to the relayed public anchor: %s', async mode => {
     const fakeCloud = { appendMemberChainEntries: vi.fn() } as unknown as CanaryCloud;
     const browser = await HostedMember.create(fakeCloud, 'tenant' as never), other = await HostedMember.create(fakeCloud, 'tenant' as never);
     const state = { tenantId: 'tenant', deviceId: 'physical', member: { ...other.member, deviceId: 'physical' } };
     const read = vi.spyOn(DeviceMemberRecords.prototype, 'readState').mockResolvedValue(state);
+    let connectionOpen = mode !== 'bound-before-ready';
     const daemon = { subscribe: () => () => {}, pair: vi.fn(async () => ({ deviceId: 'physical' })), start: vi.fn(), stop: vi.fn(),
-      status: () => ({ lifecycle: { phase: 'running', connection: 'open' } }) } as unknown as client.Daemon;
+      status: vi.fn(() => ({ lifecycle: { phase: 'running', connection: connectionOpen ? 'open' : 'connecting' } })),
+    } as unknown as client.Daemon;
     let wrapped!: client.RuntimeAdapter;
     const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => { wrapped = adapters[0]!; return daemon; }), send = vi.fn();
     try {
@@ -379,8 +398,15 @@ describe('device runner boundaries', () => {
       const controller = new AbortController();
       if (mode === 'expired') await vi.advanceTimersByTimeAsync(600_001);
       const started = device.start(controller.signal);
-      const matches = mode === 'match' || mode === 'late-match';
+      const matches = mode === 'match' || mode === 'late-match' || mode === 'bound-before-ready';
       const assertion = matches ? expect(started).resolves.toBeUndefined() : expect(started).rejects.toThrow('did not bind');
+      if (mode === 'bound-before-ready') {
+        await vi.advanceTimersByTimeAsync(1);
+        expect(daemon.status).toHaveBeenCalled();
+        expect(send.mock.calls.some(([event]) => event.type === 'ready')).toBe(false);
+        expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'member binding pending', retryable: false });
+        connectionOpen = true;
+      }
       if (mode === 'late-match') {
         await vi.advanceTimersByTimeAsync(30_001);
         expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toMatchObject({ kind: 'reject', reason: 'member binding pending', retryable: false });
@@ -395,6 +421,7 @@ describe('device runner boundaries', () => {
         expect(send).toHaveBeenCalledWith({ type: 'error', message: 'member relay did not bind the locally approved browser key' });
       }
       await device.stop();
+      expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'member binding failed', retryable: false });
     } finally { vi.useRealTimers(); read.mockRestore(); compose.mockRestore(); }
   });
 

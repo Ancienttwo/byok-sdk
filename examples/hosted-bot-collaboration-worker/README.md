@@ -192,7 +192,8 @@ failed member verification fails closed. This mode emits one additional metadata
 
 `paired` means the device registered its member bundle. The operator member can now verify its MAC, approve it and put
 scope keys. It precedes `ready`; for E2EE, `ready` also requires the persisted relay approver key to match the locally
-compared key. Scope-key readiness is still established by the Host's capability read.
+compared key. In both member and non-member runs, runtime admission opens only as `ready` is emitted; it stays closed
+while startup is still waiting for the connection. Scope-key readiness is established by the Host's capability read.
 
 For the deployed sealed canary, keep the W1 driver, member keys, Postgres/R2 credentials, bearer and tail capture on
 mini-cf, following [the deployed canary setup](src/fixtures/sealed-canary/README.md). Prepare the device with the tagged
@@ -264,8 +265,10 @@ Compare these digits with the page's ten groups of five **before** confirming ei
 `{"type":"approve"}` to the device, then confirm on the page so it signs `add(device)` and relays the client MAC.
 The device can now start and resume member verification. Before emitting `ready`, it reads the public persisted
 `anchor.approverSigningPublicJwk` and compares its canonical `kty/crv/x/y` fields with the approved key; a different or
-missing anchor stops the daemon and emits a fixed error. Runtime admission reads the same binding promise as startup:
-while pending or failed, `prepare()` rejects permanently, so no runtime can start before the approved anchor matches.
+missing anchor stops the daemon and emits a fixed error. A successful binding alone does not open admission: the
+single admission gate stays pending until the connection is open and `ready` is emitted, for both member and non-member
+runs. Before that, `prepare()` returns `member binding pending` with `retryable:false`; a binding failure or `stop()`
+closes the gate with `member binding failed` and `retryable:false`.
 Submit work only after `ready`: tasks offered before it are terminally declined and are not retried.
 A sealed offer may still be opened in process memory before this refusal; nothing leaves the
 process and no runtime starts. On a mismatch send `{"type":"reject"}`; the

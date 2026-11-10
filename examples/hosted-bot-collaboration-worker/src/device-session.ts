@@ -97,10 +97,15 @@ function reportStarts(adapter: RuntimeAdapter, send: (event: DeviceEvent) => voi
   };
 }
 
-function memberBinding() {
-  let resolve!: (bound: boolean) => void;
-  const promise = new Promise<boolean>(done => { resolve = done; });
-  return { promise, resolve };
+function admissionGate() {
+  let admitted: boolean | undefined;
+  return {
+    get promise() { return Promise.resolve(admitted); },
+    resolve(next: boolean) {
+      // Failure is terminal for this gate, including stop after readiness.
+      if (admitted !== false) admitted = next;
+    },
+  };
 }
 
 export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, send: (event: DeviceEvent) => void,
@@ -121,10 +126,9 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
       }).catch(() => { send({ type: 'error', taskId, message: 'stub canary result failed' }); });
     });
   };
-  let binding = memberBinding();
-  binding.resolve(true);
+  let gate = admissionGate();
   const lifetime = new AbortController();
-  const admission = () => Promise.race([binding.promise, Promise.resolve(undefined)]);
+  const admission = () => gate.promise;
   const daemon = createDaemonWithAdapters(stubCanary ? { ...config, agentMemoryMcp: 'off' } : config,
     adapters.map(adapter => reportStarts(adapter, send, admission, autoFinish)), overrides);
   const unsubscribe = daemon.subscribe(event => {
@@ -148,17 +152,17 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
           if (!comparedKey || key.kty !== comparedKey.kty || key.crv !== comparedKey.crv || key.x !== comparedKey.x || key.y !== comparedKey.y) {
             throw new Error('relayed member does not match local approval');
           }
-          binding.resolve(true);
-          return;
+          return true;
         }
         await delay(Math.min(25, pairingDeadline - Date.now()), undefined, { signal });
       }
       throw new Error('member relay anchor missing');
     } catch {
-      binding.resolve(false);
+      gate.resolve(false);
       const message = 'member relay did not bind the locally approved browser key';
       send({ type: 'error', message });
       await daemon.stop();
+      return false;
     }
   }
   async function start(signal: AbortSignal = lifetime.signal) {
@@ -167,10 +171,9 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
     const startupSignal = AbortSignal.any([signal, lifetime.signal]);
     startupSignal.throwIfAborted();
     await daemon.start();
-    if (memberPairing) await bindComparedMember(pairedDeviceId, AbortSignal.any([
+    if (memberPairing && !(await bindComparedMember(pairedDeviceId, AbortSignal.any([
       startupSignal, AbortSignal.timeout(Math.max(0, pairingDeadline - Date.now())),
-    ]));
-    if (!(await binding.promise)) throw new MemberComparisonError('member relay did not bind the locally approved browser key');
+    ])))) throw new MemberComparisonError('member relay did not bind the locally approved browser key');
     for (const deadline = Date.now() + 30_000; ;) {
       startupSignal.throwIfAborted();
       const lifecycle = daemon.status().lifecycle;
@@ -179,12 +182,14 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
       await delay(25, undefined, { signal: startupSignal });
     }
     send({ type: 'ready', deviceId: pairedDeviceId });
+    startupSignal.throwIfAborted();
+    gate.resolve(true);
   }
   return {
     daemon, start,
     async pair(code: string, verificationSecret?: string) {
       memberPairing = verificationSecret !== undefined;
-      binding = memberBinding();
+      gate = admissionGate();
       if (memberPairing) {
         const initiated = Date.now();
         try {
@@ -192,10 +197,10 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
           if (!Number.isFinite(ttl) || ttl <= 0) throw new Error('invalid pairing TTL');
           pairingDeadline = initiated + ttl;
         } catch {
-          binding.resolve(false);
+          gate.resolve(false);
           throw new MemberComparisonError('member comparison requires the pinned SDK pairing-verification TTL');
         }
-      } else binding.resolve(true);
+      }
       const { deviceId } = await daemon.pair(code, verificationSecret === undefined ? undefined : { verificationSecret });
       pairedDeviceId = deviceId;
       comparedKey = undefined;
@@ -248,6 +253,6 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
       }
       send({ type: 'finished', taskId });
     },
-    async stop() { lifetime.abort(); binding.resolve(false); unsubscribe(); await daemon.stop(); },
+    async stop() { lifetime.abort(); gate.resolve(false); unsubscribe(); await daemon.stop(); },
   };
 }
