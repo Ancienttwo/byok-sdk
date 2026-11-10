@@ -24,7 +24,7 @@ const FIXTURE_ROOT = path.dirname(fileURLToPath(new URL('./fixtures/agent-conten
 async function makeRoot(prefix = 'byok-content-read-'): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   roots.push(root);
-  return root;
+  return fs.realpath(root);
 }
 
 afterEach(async () => {
@@ -397,6 +397,15 @@ describe('Agent content-read policy engine', () => {
     await expect(restarted.readback()).resolves.toEqual([receipt]);
     await expect(restarted.append({ ...receipt, relativeTarget: 'notes/other.md' }))
       .rejects.toBeInstanceOf(AgentContentAuditStoreError);
+  });
+
+  (process.platform === 'win32' ? it.skip : it)('rejects a symlinked audit directory without writing outside the home', async () => {
+    const home = await makeRoot();
+    const outside = await makeRoot();
+    await fs.symlink(outside, path.join(home, '.byok'), 'dir');
+    await expect(AgentContentAuditStore.forCanonicalAgentHome(home).append(deniedReceipt('symlink')))
+      .rejects.toBeInstanceOf(AgentContentAuditStoreError);
+    expect(await fs.readdir(outside)).toEqual([]);
   });
 
   it('serializes concurrent exact requestId replays from independently-created same-Agent stores', async () => {

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { agentHomeReaderRunDirectory, validateAgentRef, type AgentRef } from '../agent-home';
+import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, agentHomeReaderRunDirectory, ensureDirectoryNoSymlink, validateAgentRef, type AgentRef } from '../agent-home';
 
 export type AgentTerminalCause = 'complete' | 'failed' | 'cancelled';
 
@@ -300,34 +300,14 @@ async function evidenceDirectory(homeInput: string): Promise<string> {
     throw new AgentSessionHandoffStoreError('Agent home must be absolute');
   }
   const cwd = await fs.realpath(homeInput);
-  let cursor = cwd;
-  for (const component of ['.byok', 'runtime-sessions']) {
-    cursor = path.join(cursor, component);
-    try {
-      const stat = await fs.lstat(cursor);
-      if (!stat.isDirectory() || stat.isSymbolicLink()) {
-        throw new AgentSessionHandoffStoreError(`Agent session evidence path is not a real directory: ${cursor}`);
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      try {
-        await fs.mkdir(cursor, { mode: 0o700 });
-      } catch (mkdirError) {
-        if ((mkdirError as NodeJS.ErrnoException).code !== 'EEXIST') throw mkdirError;
-        // A concurrent attempt created it first: accept only a real directory.
-        const raced = await fs.lstat(cursor);
-        if (!raced.isDirectory() || raced.isSymbolicLink()) {
-          throw new AgentSessionHandoffStoreError(`Agent session evidence path is not a real directory: ${cursor}`);
-        }
-      }
+  try {
+    return await ensureDirectoryNoSymlink(cwd, path.join(cwd, AGENT_HOME_INTERNAL_DIRECTORY, 'runtime-sessions'));
+  } catch (error) {
+    if (error instanceof AgentHomeResolutionError) {
+      throw new AgentSessionHandoffStoreError(`Agent session evidence path is not a real directory: ${error.message}`);
     }
+    throw error;
   }
-  const canonical = await fs.realpath(cursor);
-  const relative = path.relative(cwd, canonical);
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new AgentSessionHandoffStoreError('Agent session evidence path escaped the canonical Agent home');
-  }
-  return canonical;
 }
 
 /**
