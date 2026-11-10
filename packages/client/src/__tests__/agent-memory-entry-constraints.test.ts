@@ -127,9 +127,8 @@ describe('the embedded agent-memory entry module graph', () => {
       'util/agent-memory-helper-release-pin.ts',
       'util/agent-memory-helper-release.ts',
       'util/atomic-write.ts',
-      'util/exec-runner.ts',
       'util/path-mutation-gate.ts',
-      'util/secure-dir.ts',
+      'util/private-unix-socket.ts',
     ]);
   });
 
