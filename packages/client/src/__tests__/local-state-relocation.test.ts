@@ -176,7 +176,23 @@ describe('localStateRelocation', () => {
     await fulfilled[0]!.value.release();
   });
 
-  it('refuses a symlink alias in every requested root before destination effects', async () => {
+  it.skipIf(process.platform === 'win32')('folds trusted aliases in all four roots into physical lease fields', async () => {
+    const root = await makeRoot();
+    await fs.chmod(root, 0o700);
+    const physical = relocationInput(root);
+    const alias = path.join(root, 'alias');
+    await fs.symlink(root, alias, 'dir');
+    const lease = await localStateRelocation.acquire(relocationInput(alias));
+    try {
+      expect(lease).toMatchObject(physical);
+      await expect(fs.lstat(physical.destinationStoreDir)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(fs.lstat(physical.destinationHostStorageRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await lease.release();
+    }
+  });
+
+  it('refuses untrusted aliases in every requested root before destination effects', async () => {
     const pathFields = [
       'sourceStoreDir',
       'sourceHostStorageRoot',
@@ -191,9 +207,15 @@ describe('localStateRelocation', () => {
       const alias = path.join(root, `${pathField}-alias`);
       await fs.mkdir(realTarget);
       await fs.symlink(realTarget, alias, 'dir');
+      await fs.chmod(root, 0o777);
 
       await expect(localStateRelocation.acquire({ ...input, [pathField]: alias }))
         .rejects.toBeInstanceOf(LocalStateRelocationIntegrityError);
+      if (process.platform !== 'win32') {
+        await expect(localStateRelocation.acquire({ ...input, [pathField]: alias }))
+          .rejects.toThrow(`${pathField}: configured path`);
+      }
+      expect(await fs.readdir(realTarget)).toEqual([]);
       if (pathField !== 'destinationStoreDir') {
         await expect(fs.lstat(input.destinationStoreDir)).rejects.toMatchObject({ code: 'ENOENT' });
       }

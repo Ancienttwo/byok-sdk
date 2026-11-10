@@ -1184,6 +1184,8 @@ The #654 design gives the digest rules for sealed categories (§9.3).
 
 ## Residual risks (explicit)
 
+- On POSIX a configured root follows a symbolic link only when the link and the directory holding it are owned by root or the daemon user and that directory is not writable by others unless sticky. Links inside a trusted link's target, and links swapped in after the path is folded at startup, are not checked again; keep configured roots out of directories other users can write.
+
 - The daemon trusts the owner of `storeDir`: that principal can replace `control.token` and `device.json` and so impersonate the control endpoint. Keep `storeDir` in a directory only the daemon's user can write.
 - The `/tmp` fallback directory name carries no uid: a same-named directory another user left behind refuses the bind (`private_dir_foreign_owner`). Remove that directory or shorten `storeDir`.
 - An image without `/tmp` cannot bind the fallback socket of a `storeDir` longer than the socket budget; shorten `storeDir`.

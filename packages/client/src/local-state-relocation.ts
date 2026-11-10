@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { ConfiguredPathLinkError, foldNameAliases } from './util/fold-name-aliases';
 import { AGENT_HOME_DIRECTORY, AGENT_HOME_INTERNAL_DIRECTORY } from './agent-home';
 import {
   assertDaemonStoreQuiescent,
@@ -170,12 +171,22 @@ async function acquire(input: LocalStateRelocationInput): Promise<LocalStateRelo
   assertAbsolutePath(input.destinationStoreDir, 'destinationStoreDir');
   assertAbsolutePath(input.destinationHostStorageRoot, 'destinationHostStorageRoot');
 
+  const foldRoot = (value: string, label: string): string => {
+    try {
+      return process.platform === 'win32' ? path.resolve(value) : foldNameAliases(value);
+    } catch (error) {
+      if (error instanceof ConfiguredPathLinkError) {
+        throw new LocalStateRelocationIntegrityError(`${label}: ${error.message}`);
+      }
+      throw error;
+    }
+  };
   const requested = {
     productId: input.productId,
-    sourceStoreDir: path.resolve(input.sourceStoreDir),
-    sourceHostStorageRoot: path.resolve(input.sourceHostStorageRoot),
-    destinationStoreDir: path.resolve(input.destinationStoreDir),
-    destinationHostStorageRoot: path.resolve(input.destinationHostStorageRoot),
+    sourceStoreDir: foldRoot(input.sourceStoreDir, 'sourceStoreDir'),
+    sourceHostStorageRoot: foldRoot(input.sourceHostStorageRoot, 'sourceHostStorageRoot'),
+    destinationStoreDir: foldRoot(input.destinationStoreDir, 'destinationStoreDir'),
+    destinationHostStorageRoot: foldRoot(input.destinationHostStorageRoot, 'destinationHostStorageRoot'),
   };
 
   const requestedPaths = {
