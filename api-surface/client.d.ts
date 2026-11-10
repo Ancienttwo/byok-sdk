@@ -15186,6 +15186,12 @@ export declare class SecureDirHardeningError extends Error {
     readonly dir: string;
     constructor(dir: string, reason: string);
 }
+/** An owned directory whose mode is not 0700 and cannot be set to it; `cause` is the chmod error when chmod failed. */
+export declare class SecureDirModeError extends Error {
+    readonly dir: string;
+    readonly code = "secure_dir_mode";
+    constructor(dir: string, cause?: unknown);
+}
 export declare class SecureFileHardeningError extends Error {
     readonly filePath: string;
     constructor(filePath: string, reason: string);
@@ -15223,13 +15229,20 @@ export declare class SecureFileHardeningError extends Error {
  *   clear, typed, actionable rejection — pairing simply fails rather than
  *   silently leaving an unprotected device keypair/access token on disk.
  *
- * Non-win32 (darwin/linux) behavior is completely unchanged — the POSIX
- * `mkdir`/`chmod` calls above are the only enforcement there, and never
- * throw on their own best-effort `chmod` failure (that one stays
- * genuinely benign — an `EPERM` against a directory this process doesn't
- * own — see the inline comment on it).
+ * On POSIX the directory is created 0700, and an existing one whose mode is
+ * not 0700 is chmod'ed to it; a failed chmod or a mode that is still wrong
+ * throws {@link SecureDirModeError}. A directory that is already 0700 is not
+ * chmod'ed, so a sandbox that denies chmod does not refuse it. Use
+ * {@link ensureSecureStoreRoot} for the store root, which may be foreign-owned.
  */
 export declare function ensureSecureDir(dir: string, opts?: EnsureSecureDirOptions): Promise<void>;
+/**
+ * {@link ensureSecureDir} for the store root. A root owned by another user
+ * keeps the mode its owner set (no chmod, no refusal); one the process owns
+ * follows the {@link ensureSecureDir} rule. The role is the caller's choice,
+ * never inferred from the path.
+ */
+export declare function ensureSecureStoreRoot(dir: string, opts?: EnsureSecureDirOptions): Promise<void>;
 /**
  * The keys Pi projection DACL: {@link buildIcaclsArgs} plus OWNER RIGHTS
  * (S-1-3-4) with READ_CONTROL only and no inheritance flags. That ACE takes

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureDir } from '../util/secure-dir';
+import { ensureSecureStoreRoot } from '../util/secure-dir';
 import { sameContent } from '../util/file-state';
 
 export type OperationalHealthState = 'healthy' | 'degraded' | 'recovering';
@@ -288,7 +288,7 @@ export class OperationalHealthTracker {
       // `control.token`). A failed hardening is not marked; the write fails
       // closed and the tracker becomes unavailable.
       if (!this.#dirHardened) {
-        await ensureSecureDir(path.dirname(this.#filePath));
+        await ensureSecureStoreRoot(path.dirname(this.#filePath));
         this.#dirHardened = true;
       }
       await atomicWriteFile(this.#filePath, body, { mode: 0o600, fsync: true });

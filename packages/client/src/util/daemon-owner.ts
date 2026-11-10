@@ -3,7 +3,7 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
 import { sameContent } from './file-state';
-import { ensureSecureDir } from './secure-dir';
+import { ensureSecureStoreRoot } from './secure-dir';
 import { listenPrivateUnixSocket, privateSocketEndpoint, PrivateSocketInUseError, reclaimPrivateSocketFallbackDirectory } from './private-unix-socket';
 import {
   acquirePathMutationGate,
@@ -377,7 +377,7 @@ export async function acquireDaemonOwner(
     // No target path is created until the fixed OS-temp path gate is held.
     // Relocation uses the same gate and therefore cannot pass inspection
     // between this directory creation and owner publication.
-    await ensureSecureDir(storeDir);
+    await ensureSecureStoreRoot(storeDir);
     const canonicalStoreDir = await fs.realpath(storeDir);
     // The retained store mutex still owns stale-owner recovery and the full
     // daemon lifetime. The path gate is narrower: publication only.

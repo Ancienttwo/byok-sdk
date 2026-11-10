@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureDir } from '../util/secure-dir';
+import { ensureSecureStoreRoot } from '../util/secure-dir';
 import { listenPrivateUnixSocket, PrivateSocketInUseError, reclaimPrivateSocketFallbackDirectory } from '../util/private-unix-socket';
 import {
   computeClientAuth,
@@ -420,7 +420,7 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
   // POSIX modes (the `{mode: 0o700}` this replaces) restrict nothing there.
   // See `util/secure-dir.ts`'s own doc comment; `control.token` (written
   // below, once the bind succeeds) inherits this directory's ACL.
-  await ensureSecureDir(opts.storeDir);
+  await ensureSecureStoreRoot(opts.storeDir);
 
   const token = randomBytes(32).toString('hex'); // in-memory only until the bind below actually succeeds
   const tokenPath = controlTokenPath(opts.storeDir);

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1732)** — `ensureSecureDir` no longer swallows a failed chmod: an owned directory whose mode is not 0700 is set to 0700, and one that cannot be set is refused with `SecureDirModeError` (`secure_dir_mode`, chmod error as `cause`). A directory already 0700 is not chmod'ed. The store root (`ensureSecureStoreRoot`) follows the same rule only when the process owns it; a foreign-owned storeDir keeps the mode its owner set. New refusals: an owned directory on a mount that ignores chmod, and, under a sandbox that denies chmod, an owned directory whose mode is not 0700.
+
 - **Fixed (client; #1732)** — A natural Unix socket (in the store directory) is now verified to be a socket and set to 0600, failing the listen with `socket_mode` instead of swallowing a chmod error. New refusal: listen fails where a sandbox or MAC policy denies chmod. Fallback sockets no longer have their file chmod'ed; their verified 0700 parent directory is the guard. Residual risk: between the `lstat` and the chmod, another user with write access to the store directory can at most get the process to chmod a file it owns to 0600.
 
 - **Changed (client; #1693)** — Offer decline is sent only through the task runner reducer; the two legacy decline fallbacks and `TaskRunner.decline` are removed. The `task.decline` payload is unchanged.
