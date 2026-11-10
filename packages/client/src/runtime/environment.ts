@@ -193,20 +193,28 @@ function matchesAny(name: string, patterns: readonly string[], caseInsensitive: 
   return patterns.some((pattern) => matchesPattern(name, pattern, caseInsensitive));
 }
 
-function copyAdmitted(
-  ambient: Readonly<Record<string, string | undefined>>,
+function admitNames(
+  source: Readonly<Record<string, string | undefined>>,
+  admitted: (name: string) => boolean,
   platform: NodeJS.Platform,
-  admitted: (name: string, caseInsensitive: boolean) => boolean,
+  denied?: Set<string>,
 ): Record<string, string> {
-  // F1: win32 only — see `matchesPattern`'s own doc comment for why OS-cased
-  // keys make case-sensitive matching silently wrong there specifically.
-  // A mixed-case `Byok_Secret` is denied there exactly as `BYOK_SECRET` is.
   const caseInsensitive = platform === 'win32';
   const result: Record<string, string> = {};
-  for (const [name, value] of Object.entries(ambient)) {
-    if (value === undefined) continue;
-    if (admitted(name, caseInsensitive) && !matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive)) {
-      result[name] = value;
+  const names = Object.keys(source);
+  // Node sends the lexicographically first spelling of a win32 name to a child.
+  if (caseInsensitive) names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+  for (const name of names) {
+    const value = source[name];
+    if (value === undefined || !admitted(name)) continue;
+    if (matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive)) denied?.add(name);
+    else {
+      // Use canonical names for SDK reads as well as child lookups.
+      // Prefix entries (LC_*, XDG_*) canonicalize the whole name to upper case.
+      const pattern = caseInsensitive ? WINDOWS_CANONICAL_NAMES.find((pattern) => matchesPattern(name, pattern, true)) : undefined;
+      let canonical = name;
+      if (pattern !== undefined) canonical = pattern.endsWith('*') ? name.toUpperCase() : pattern;
+      if (!Object.hasOwn(result, canonical)) result[canonical] = value;
     }
   }
   return result;
@@ -264,7 +272,7 @@ export interface RuntimeEnvironment {
 export class RuntimeEnvironmentUnavailableError extends Error {
   readonly code = 'runtime_environment_unavailable' as const;
   constructor(readonly reason: ServiceEnvironmentUnavailableCode) {
-    super(`runtime environment unavailable: the base capture failed (${reason})`);
+    super(`runtime environment unavailable: the base capture failed (${reason}); set runtimeEnvironment.base to 'allowlist' to build runtime environments without the login-shell snapshot or the Windows logon registry`);
     this.name = 'RuntimeEnvironmentUnavailableError';
   }
 }
@@ -584,38 +592,18 @@ export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput)
   const caseInsensitive = platform === 'win32';
   const { policy, live } = input;
   const denied = new Set<string>();
-  const admit = (source: Readonly<Record<string, string | undefined>>, admitted: (name: string) => boolean): Record<string, string> => {
-    const result: Record<string, string> = {};
-    const names = Object.keys(source);
-    // Node sends the lexicographically first spelling of a win32 name to a child.
-    if (caseInsensitive) names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
-    for (const name of names) {
-      const value = source[name];
-      if (value === undefined || !admitted(name)) continue;
-      if (matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive)) denied.add(name);
-      else {
-        // Use canonical names for SDK reads as well as child lookups.
-        // Prefix entries (LC_*, XDG_*) canonicalize the whole name to upper case.
-        const pattern = caseInsensitive ? WINDOWS_CANONICAL_NAMES.find((pattern) => matchesPattern(name, pattern, true)) : undefined;
-        let canonical = name;
-        if (pattern !== undefined) canonical = pattern.endsWith('*') ? name.toUpperCase() : pattern;
-        if (!Object.hasOwn(result, canonical)) result[canonical] = value;
-      }
-    }
-    return result;
-  };
   let base: Record<string, string>;
   let baseSource: RuntimeEnvironmentSource;
   if (policy.base === 'allowlist') {
     const patterns = allowlistPatterns(platform, policy.allow ?? []);
-    base = admit(live, (name) => matchesAny(name, patterns, caseInsensitive));
+    base = admitNames(live, (name) => matchesAny(name, patterns, caseInsensitive), platform, denied);
     baseSource = 'allowlist';
   } else if (platform === 'win32') {
     const logon = input.windowsLogon;
     if (logon?.source === 'unavailable') throw new RuntimeEnvironmentUnavailableError('logon-registry-unavailable');
     if (logon?.source !== 'registry') throw new TypeError('a win32 login-shell runtime environment requires the logon registry values');
     base = {
-      ...admit(live, (name) => !WINDOWS_LOGON_NAMES.has(name.toUpperCase()) && matchesAny(name, WINDOWS_SESSION_NAMES, caseInsensitive)),
+      ...admitNames(live, (name) => !WINDOWS_LOGON_NAMES.has(name.toUpperCase()) && matchesAny(name, WINDOWS_SESSION_NAMES, caseInsensitive), platform, denied),
       ...windowsLogonBase(logon, live),
     };
     baseSource = 'windows-session';
@@ -623,11 +611,11 @@ export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput)
     const status = input.snapshot?.status;
     if (status?.source === 'unavailable') throw new RuntimeEnvironmentUnavailableError(status.code);
     if (status?.source !== 'login-shell' || input.snapshot?.env === undefined) throw new TypeError('a login-shell runtime environment requires a captured snapshot');
-    base = admit(input.snapshot.env, () => true);
+    base = admitNames(input.snapshot.env, () => true, platform, denied);
     baseSource = 'login-shell';
   }
   const passPatterns = policy.pass ?? [];
-  const passed = admit(live, (name) => matchesAny(name, passPatterns, caseInsensitive));
+  const passed = admitNames(live, (name) => matchesAny(name, passPatterns, caseInsensitive), platform, denied);
   // win32 names are case-insensitive, so a rule sees them in upper case and its exact-name triggers match any spelling.
   const removed = input.conflicts?.(new Set(Object.keys(passed).map((name) => caseInsensitive ? name.toUpperCase() : name))) ?? [];
   const env: Record<string, string> = {};
@@ -710,5 +698,5 @@ function allowlistPatterns(platform: NodeJS.Platform, allow: readonly string[]):
 export function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions): Record<string, string> {
   const platform = options.platform ?? process.platform;
   const allowPatterns = allowlistPatterns(platform, options.allow ?? []);
-  return copyAdmitted(options.ambient, platform, (name, caseInsensitive) => matchesAny(name, allowPatterns, caseInsensitive));
+  return admitNames(options.ambient, (name) => matchesAny(name, allowPatterns, platform === 'win32'), platform);
 }

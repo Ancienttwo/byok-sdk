@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changed (client; #1685)** — `RuntimeEnvironmentUnavailableError` now suggests setting `runtimeEnvironment.base` to `allowlist` when the login-shell snapshot or Windows logon registry capture fails.
+
 - **Fixed (client; #1675)** — If a relay sends a steer to a runtime that declares no steering channel, the daemon logs and acknowledges it instead of retrying indefinitely and blocking later messages.
 
 - **Fixed (client; #1563)** — An OpenCode prompt failure that names its cause in the ACP error's `data.errorName` now reports the structured class on `task.fail`: `provider.free-limit`, `go-limit`, `budget-limit`, `model-budget-limit` and `quota` are `quota`, and `provider.rate-limit` is `rate_limited`, where both were `unknown`. A failure classified only from its message stays `unknown` and no longer switches to the next model candidate. The reader is carried in the vendored OAR from botiverse/oar#710 until upstream merges it; only `provider.free-limit` has been observed live.

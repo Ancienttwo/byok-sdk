@@ -104,7 +104,15 @@ describe('buildAllowlistedEnv', () => {
     });
 
     const result = buildAllowlistedEnv({ ambient: osCasedEnv, platform: 'win32' });
-    expect(result).toEqual(osCasedEnv);
+    expect(result).toEqual({ PATH: osCasedEnv.Path, COMSPEC: osCasedEnv.ComSpec, SYSTEMDRIVE: osCasedEnv.SystemDrive, PROGRAMFILES: osCasedEnv.ProgramFiles });
+  });
+
+  it('win32 canonicalizes duplicate names in sorted order like runtime composition', () => {
+    const live = { Path: 'a', PATH: 'b', Byok_Secret: 'secret' };
+    const result = buildAllowlistedEnv({ ambient: live, platform: 'win32', allow: ['Byok_Secret'] });
+    expect(result).toEqual({ PATH: 'b' });
+    expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['Byok_Secret'] }, live, platform: 'win32' }).env)
+      .toEqual({ ...result, NO_PROXY: '127.0.0.1,localhost' });
   });
 
   it('F1: hard-denies BYOK_* case-insensitively on win32, so a mixed-case Byok_X / byok_secret cannot leak through even via an explicit allow entry', () => {
@@ -113,7 +121,7 @@ describe('buildAllowlistedEnv', () => {
       platform: 'win32',
       allow: ['byok_secret', 'Byok_X'],
     });
-    expect(result).toEqual({ Path: 'C:\\Windows' });
+    expect(result).toEqual({ PATH: 'C:\\Windows' });
   });
 
   it('F1: keeps matching byte-exact/case-sensitive on non-win32 — an OS-cased key spelled the way win32 would spell it (Path) does NOT match the PATH pattern there', () => {
@@ -246,6 +254,12 @@ describe('composeRuntimeEnvironment (#1095)', () => {
       DYLD_INSERT_LIBRARIES: '/tmp/x.dylib',
     }, {}, 'linux');
     expect(result).toEqual({ PATH: '/usr/bin', NODE_OPTIONS: '--require /tmp/x.js', LD_PRELOAD: '/tmp/x.so', DYLD_INSERT_LIBRARIES: '/tmp/x.dylib', ...LOOPBACK });
+  });
+
+  it('explains the allowlist remedy when base capture fails', () => {
+    const error = new RuntimeEnvironmentUnavailableError('timeout');
+    expect(error.message).toContain("runtimeEnvironment.base to 'allowlist'");
+    expect(error).toMatchObject({ code: 'runtime_environment_unavailable', reason: 'timeout' });
   });
 
   it('a failed capture fails closed with the capture code; allowlist needs no snapshot', () => {
