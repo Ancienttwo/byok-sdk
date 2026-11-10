@@ -93,13 +93,6 @@ _ops/
 .repo-harness/
 .codex/*
 .claude/worktrees/
-
-# Retired runtime state that still exists; repo-harness upgrade lists these files
-.claude/.session-id
-.claude/.trace.jsonl
-.ai/harness/active-plan
-.ai/harness/handoff/current.md
-.ai/harness/handoff/resume.md
 # END: repo-harness generated-runtime
 
 # wrangler local-dev scratch (worker-smoke E2E); state itself goes to --persist-to tmp
