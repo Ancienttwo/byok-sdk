@@ -27,11 +27,11 @@ import { CLOUD_CAPABILITIES, createByokCloud, createHmacTokenSigner, createInPro
 import { createByokPool, createPostgresCloudStores, createPostgresCoreStores, PostgresProofReceiptRetentionAuthority } from '@byok-sdk/cloud-dataplane/runtime';
 import { COALESCE_DEFAULTS } from '@byok-sdk/example-bot-collaboration/coalesce';
 import type { FrozenSubmitPort } from '@byok-sdk/server/execution-core';
-import { EntryRefusedError, HostedCollaborationStore, HostedCommandEntry, HostedDeviceObserver, HostedDueScheduler, HostedReconciler,
+import { EntryRefusedError, HostedCollaborationStore, HostedCommandEntry, HostedDeviceObserver, HostedDueScheduler, HostedOutboxSender, HostedReconciler,
   HostedReplyChecker, HostedRoutineScheduler, HostedSubmitter, hostedMessageConsumer, UnauthenticatedError, type HostedSyncOptions,
-  type HostedTaskPort } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
+  type HostedTaskPort, type SendFailure } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 import { releaseAfterBody } from './body-lifetime';
-import { readHostScope, readHostScopeByToken, sha256Hex, type HostScope } from './host-scopes';
+import { hostProjections, readHostScope, readHostScopeByToken, sha256Hex, type HostScope } from './host-scopes';
 
 // The Workers runtime surface this Worker touches, written out because the example typechecks against Node types only.
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void }
@@ -209,7 +209,16 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
       return store.sync(scope, { ...SYNC, now });
     };
     const passes = async (): Promise<PassReport> => {
-      const changed = new Set<string>(), concluded = new Set<string>();
+      const changed = new Set<string>(), concluded = new Set<string>(), sentChanged = new Set<string>();
+      const sender = new HostedOutboxSender(hostPool, store, { projections: hostProjections(hostPool, env.HOST_SCHEMA), changed: scope => { sentChanged.add(scope); },
+        homes: scope => {
+          const tenant = tenantOf(scope);
+          return {
+            read: request => cloud.getAgentHomeProjectionStatus(tenant, request.deviceId, { requestId: request.payload.requestId,
+              agentRef: request.payload.agentRef, projectionHash: request.payload.projectionHash }),
+            enqueue: request => cloud.enqueueAgentHomeProjection(tenant, request.deviceId, request.payload),
+          };
+        } });
       // The clock times these passes, so the scheduler checks the clock's interval against the K8 late bound.
       const routines = new HostedRoutineScheduler(hostPool, store, { intervalMs: clockMs(env), changed: scope => { changed.add(scope); } });
       const submitter = new HostedSubmitter(hostPool, env.H_SCHEMA, { port: taskPort, changed: scope => { concluded.add(scope); },
@@ -234,10 +243,15 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
       // call (the queued expiry, or a sealed row with no sealed lane) has its scope synced here, so its Turn settles too.
       const submit = await submitter.run();
       const submitSynced = await syncAll(concluded);
+      // After the submitter: a Bot's home step makes it ready, and its next Turn freezes in the sync that follows. The Worker
+      // has no channel and no connector, so a delivery or card row fails here (the sender's own message), not silently.
+      const sent = await sender.run();
+      const sendSynced = await syncAll(sentChanged);
       return { routineStart, routines: { fired: routinePass.fired, fenced: failures(routinePass.fenced), failed: failures(routinePass.failed) },
         reconcile: { concluded: reconcile.concluded, failed: failures(reconcile.failed) }, synced,
         due: { synced: duePass.synced, stalled: duePass.stalled, failed: failures(duePass.failed) },
-        submit: { tried: submit.tried, failed: failures(submit.failed), synced: submitSynced } };
+        submit: { tried: submit.tried, failed: failures(submit.failed), synced: submitSynced },
+        send: { steps: sent.steps, failed: sendFailures(sent.failed), synced: sendSynced } };
     };
     return { cloud, store, scope, scopeByToken, passes, syncScope, close };
   } catch (error) {
@@ -254,6 +268,8 @@ export interface PassReport {
   due: { synced: number; stalled: string[]; failed: Failure[] };
   /** `synced`: the scopes of the intents that the submitter concluded with no SDK call, synced after it. */
   submit: { tried: number; failed: Failure[]; synced: Synced[] };
+  /** The outbox sender: `failed` lists the rows it could not send, a card or delivery row (no port) among them; `synced`: the scopes it changed. */
+  send: { steps: number; failed: Failure[]; synced: Synced[] };
 }
 interface Synced { scope: string; error?: string }
 interface Failure { scope: string; id?: string; error: string }
@@ -261,6 +277,8 @@ const text = (error: unknown): string => error instanceof Error ? error.message 
 function failures(list: readonly { scope: string; error: unknown; routineId?: string; turnId?: string }[]): Failure[] {
   return list.map(item => ({ scope: item.scope, ...(item.routineId || item.turnId ? { id: item.routineId || item.turnId } : {}), error: text(item.error) }));
 }
+const sendFailures = (list: readonly SendFailure[]): Failure[] =>
+  list.map(item => ({ scope: item.scope, id: typeof item.id === 'string' ? item.id : JSON.stringify(item.id), error: text(item.error) }));
 function optional<K extends string>(key: K, value: number | undefined): Partial<Record<K, number>> {
   return value === undefined ? {} : { [key]: value } as Record<K, number>;
 }

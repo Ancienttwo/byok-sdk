@@ -143,10 +143,16 @@ describe('DshAdapter detect and prepare', () => {
     expect(await adapter.detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
   });
 
-  it('rejects a dispatch selection and a missing binary', async () => {
-    const { adapter } = await setup();
-    const offer = { instruction: 'x', dispatchSelection: { providerProfileRef: 'p' } } as unknown as RuntimeTaskInput;
-    await expect(adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [] })).resolves.toMatchObject({ kind: 'reject', retryable: false });
+  it('validates MCP servers before probing dsh', async () => {
+    const resolveBin = vi.fn(() => ({ command: fixture, source: 'path' as const }));
+    const { adapter } = await setup({ resolveBin });
+    const prepare = (name: string) => adapter.prepare({ offer: { instruction: 'x' }, descriptor: adapter.descriptor, requiredToolsetIds: [], mcpServers: { [name]: { command: 'mcp' }, byokagentresult: { command: 'mcp' } } });
+    expect(await prepare('x'.repeat(33))).toEqual({ kind: 'reject', reason: 'dsh cannot attach the task MCP servers: DSH MCP server names must match [A-Za-z0-9_-]{1,32}; OAR does not rename them', retryable: false });
+    expect(resolveBin).not.toHaveBeenCalled();
+    expect((await prepare('x'.repeat(32))).kind).toBe('prepared');
+  });
+
+  it('rejects a missing binary', async () => {
     const missing = new DshAdapter({ home: await tempDir('bd-'), model: MODEL, resolveBin: () => ({ command: path.join(os.tmpdir(), 'no-such-dsh'), source: 'path' }), runtimeEnvironment: { base: 'allowlist' } });
     await expect(missing.prepare({ offer: { instruction: 'x' }, descriptor: missing.descriptor, requiredToolsetIds: [] })).resolves.toEqual({ kind: 'reject', reason: 'dsh installation refused: not-found', retryable: false });
   });
@@ -187,8 +193,10 @@ describe('DshAdapter sessions', () => {
     ['env', { command: '/usr/bin/env', env: { TOKEN: 'x' } }],
     ['http', { type: 'http', url: 'http://127.0.0.1:9/mcp' }],
   ])('refuses an MCP entry with %s before dsh starts, without a retry', async (_label, server) => {
-    const { open, facts } = await setup();
-    await expect(open({ instruction: 'x' }, { mcpServers: { host: server } })).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    const { adapter, facts } = await setup();
+    expect(await adapter.prepare({ offer: { instruction: 'x' }, descriptor: adapter.descriptor, requiredToolsetIds: [], mcpServers: { host: server } as never })).toEqual({
+      kind: 'reject', reason: 'dsh cannot attach the task MCP servers: DSH session MCP supports stdio command and args only; HTTP, env and headers have no verified persistence boundary', retryable: false,
+    });
     expect((await facts()).some((fact) => fact.kind === 'start')).toBe(false);
   });
 

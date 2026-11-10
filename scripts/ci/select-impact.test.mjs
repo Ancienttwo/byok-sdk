@@ -392,6 +392,17 @@ test('vendored Hermes paths select both real installer jobs', () => {
   }
 });
 
+test('vendored npm runtime manifests and locks select the runtime contract matrix', () => {
+  for (const runtime of ['dsh', 'claude', 'codex', 'grok', 'opencode1', 'opencode2']) {
+    for (const file of ['package.json', 'package-lock.json']) {
+      const path = `scripts/ci/vendor/npm-runtimes/${runtime}/${file}`;
+      const impact = selectImpact([path]);
+      assert.deepEqual(impact.files, [path]);
+      assert.ok(impact.families.includes('runtime-contract'), path);
+    }
+  }
+});
+
 test('owned helper build scripts keep release packaging qualification', () => {
   for (const path of ['packages/client/scripts/build-agent-memory-helper.mjs', 'packages/client/scripts/check-agent-memory-helper-build.mjs', 'packages/client/scripts/agent-memory-helper-source.mjs']) {
     const families = selectImpact([path]).families;

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "bbdde4f7b6a33b449742af8f7f0224b11218335ac1668ede9d3a9087548d785f"
+    "snapshotSha256": "50db0fcffd7c03e0977d4f7d25306fd1e099b4492672c56149b6396540de251e"
   },
   "configFields": {
     "status": "tracked",
@@ -45,6 +45,15 @@
       "items": [
         "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper"
       ]
+    },
+    {
+      "id": "example-bot-collaboration-autonomy",
+      "impact": "additive",
+      "summary": "Fix: the hosted Host (examples/hosted-bot-collaboration) now enforces Bot autonomy as the local Host does. An observing Bot records would-do entities instead of running create_routine, a cross-Bot delegate or room_call. A Host that vendors the example runs HostedCollaborationStore.migrate() once on every existing schema before the new code serves (it replaces entity_kind_check and moves any wouldDo rows left in a scope frame by an older L import into would_do entity rows), then calls setBotAutonomy(credential, botId, 'auto') for each Bot that must keep acting on its own.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "example:bot-collaboration"
+      ]
     }
   ],
   "changes": [
@@ -54,6 +63,13 @@
       "before": "optional schema-sha256=26156d226d19d4c6",
       "after": "optional schema-sha256=e89f34f2223d0907",
       "entry": "codex-session-store"
+    },
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
+      "after": "K8 0.0.1 src-sha256=51f2b8f3e9a40ab5",
+      "entry": "example-bot-collaboration-autonomy"
     },
     {
       "item": "export:@byok-sdk/client#ExpiringClassId",

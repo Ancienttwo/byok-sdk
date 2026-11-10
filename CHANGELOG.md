@@ -4,6 +4,12 @@
 
 - **Added (keys, client; #1586)** — `pi_model.providerId: 'opencode-go'` explicitly selects Pi's OpenCode Go reasoning replay and session headers for RPC and durable profiles, including local gateways. It requires an explicit `api: 'openai-completions'`; models not served by OpenCode Go must omit it. Profiles without it retain their namespaced Pi id. The prepared lane refuses the field. Every keys-profile RPC launch now refuses a model-runtime configuration/composition error before model resolution or session creation instead of accepting a built-in fallback. Durable workers take the provider id from the launcher's private IPC binding to the sealed profile ref.
 
+- **Fixed (client; #1677)** — Claude with session persistence disabled declines resume offers before claim; dsh declines unsupported MCP servers before claim; agy observes Host toolsets so MCP tool events and authorization rules identify their server and tool.
+
+- **Fixed (client; #1699)** — Runtime cleanup on macOS accepts an owned process group's EPERM only after the process-table poll confirms that no live members remain, avoiding durable Pi interrupt failures while zombies await reaping.
+
+- **Fixed (client; #1676)** — Offers requiring resume, dispatch selection, prepared input or MCP toolsets are declined before claim when the selected runtime does not declare the required capabilities.
+
 - **Changed (client; #1685)** — `RuntimeEnvironmentUnavailableError` now suggests setting `runtimeEnvironment.base` to `allowlist` when the login-shell snapshot or Windows logon registry capture fails.
 
 - **Fixed (client; #1675)** — If a relay sends a steer to a runtime that declares no steering channel, the daemon logs and acknowledges it instead of retrying indefinitely and blocking later messages.
@@ -15,6 +21,16 @@
 - **Fixed (cloud; #1671)** — All seven Host offer lanes reject a memory-reader selecting `read-write` or `read-write-if-admitted`, a `runtime` that differs from `dispatchSelection.runtimeId`, and `harnessId` combined with built-in runtime selection before admission. Each call, including retries and prepared offers, throws `ZodError` at `agentMemory`, `runtime` or `harnessId` (prefixed by `payload` on the two execution submission lanes). An `agentMessageContext` without `messageEgress` now throws `ByokCloudError` with code `coordination_input_invalid`.
 
 - **Fixed (client; #1683)** — Control and store-mutex Unix sockets now share private-directory checks, stale recovery and binding. A symlink, non-directory or foreign-owned `/tmp` fallback directory raises `PrivateDirectoryRefusedError`; a non-socket endpoint raises `PrivateSocketPathError` without removing it; a live or uncertain listener raises `PrivateSocketInUseError` (mapped to the existing control/mutex busy error). Control sockets no longer reject `storeDir` merely for its ownership or symlink status: its owner already controls `control.token` and `device.json`. Keep the store in a directory only the daemon user can write. Endpoint paths and Windows pipe names are unchanged.
+
+- **Fixed (client; #1684)** — Audit directory creation no longer follows symlinks inside the Agent home. Audit and session handoff directory creation now sync each parent directory during the walk. Audit appends fail with `ENOENT` when the Agent home does not exist; callers constructing `AgentContentAuditStore(filePath)` must supply a physical path for the file’s grandparent directory. `forCanonicalAgentHome` already does so.
+
+- **Fixed (examples; #1663)** — The hosted Bot collaboration Worker now runs `HostedOutboxSender` in every pass, after the submitter: projections reach the new `host_projection` table, and a Bot with a pending home operation becomes ready, so its Turn freezes. A card or delivery row, which the Worker has no port for, is listed in the pass report's `send.failed` instead of staying silent. Operator step: before serving the new code, run `hostProjectionDdl(HOST_SCHEMA)` once from Node (`CREATE TABLE IF NOT EXISTS`, safe to repeat); the first pass then sends the backlog, at most 100 rows per pass.
+
+- **Added (examples; #1663)** — `@byok-sdk/example-hosted-bot-collaboration` exports `HostedOutboxSender` and the types `SenderOptions`, `ProjectionPort`, `HostedHomePort`, `SendPass` and `SendFailure`.
+
+- **Fixed (examples; #1662)** — `examples/hosted-bot-collaboration` now enforces Bot autonomy: an outcome of a Bot in `observe` no longer runs `create_routine`, a cross-Bot `delegate` or `room_call`; it stores a `would_do` entity and a `would-do:<id>` projection instead, as the local Host does. `decideCommand` builds the gate (`autonomyGate` in `rules/autonomy`) on its outbox-collecting publish, so the would-do projection is part of the commit result and its replay on both Hosts. Operator steps: (1) run `HostedCollaborationStore.migrate()` once on every existing schema before the new code serves, because it replaces `entity_kind_check` and moves any `wouldDo` rows that an older L import left in a scope frame into `would_do` entity rows; without it the first would-do write fails with `violates check constraint "entity_kind_check"`; (2) every existing Bot is now `observe`, so call `setBotAutonomy` with `'auto'` for each Bot that must keep acting on its own.
+
+- **Added (examples; #1662)** — `HostedCommandEntry.setBotAutonomy(credential, botId, autonomy)`, owner only.
 
 - **Fixed (client; #1563)** — An OpenCode prompt failure that names its cause in the ACP error's `data.errorName` now reports the structured class on `task.fail`: `provider.free-limit`, `go-limit`, `budget-limit`, `model-budget-limit` and `quota` are `quota`, and `provider.rate-limit` is `rate_limited`, where both were `unknown`. A failure classified only from its message stays `unknown` and no longer switches to the next model candidate. The reader is carried in the vendored OAR from botiverse/oar#710 until upstream merges it; only `provider.free-limit` has been observed live.
 

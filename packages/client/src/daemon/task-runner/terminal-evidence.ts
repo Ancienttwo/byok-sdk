@@ -121,8 +121,6 @@ export async function persistAgentTerminalEvidence(
   if (cause === 'cancelled' || (cause === 'failed' && !taskMessageSendAttempted(this, active.taskId))) {
     await active.messageOutbox?.revoke(active.taskId);
   }
-  active.terminalCause = cause;
-  active.terminalReason = reason;
   await this['measureReaderMemoryChange'](active);
   await measureResidentMemorySize(active);
   const agentRef = active.agentRef;

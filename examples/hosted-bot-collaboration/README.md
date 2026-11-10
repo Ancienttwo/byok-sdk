@@ -320,6 +320,7 @@ L runs its pass, and returns L's value. A refusal writes its audit line first (`
 `Action refused unverified_sender: …`) and throws `EntryRefusedError`. `roomInput` takes any verified principal and drops a
 bot principal's mentions (R5); every other method needs the scope's owner. L trusts the caller of `setMainBot`,
 `updateRoom`, `retryPersona` and its routine API; here every call comes from a request, so they need the owner too.
+`setBotAutonomy(credential, botId, 'observe' | 'auto')` is the owner's switch for a Bot's autonomy (#1229): a Bot in `observe` records `create_routine`, a cross-Bot `delegate` and `room_call` as `would_do` entities with a `would-do:<id>` projection, and applies none of them. A new Bot starts in `observe`.
 `decide` throws a refusal or another decision for a decided card after the sync, as L. The Host's own calls
 (`personaReady` through `persona_ready`, a team snapshot, retention, compaction, device binding) stay store calls.
 

@@ -29,14 +29,16 @@ async function fixture() {
   const events: Array<{ phase: Phase; operation: Operation }> = [];
   const opened: string[] = [];
   let fault: { phase: Phase; operation: Operation } | undefined;
+  let ledgerOpened = false;
   const open = fs.open.bind(fs);
   vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
     const file = String(args[0]); opened.push(file);
     const phase: Phase | undefined = file === home ? 'home' : file === internal ? '.byok'
       : file === directory ? 'runtime-sessions' : path.dirname(file) === directory && file.endsWith('.jsonl') ? 'ledger' : undefined;
+    if (phase === 'ledger') ledgerOpened = true;
     if (phase) {
       events.push({ phase, operation: 'open' });
-      if (fault?.phase === phase && fault.operation === 'open') throw new Error(`injected ${phase} open EIO`);
+      if (ledgerOpened && fault?.phase === phase && fault.operation === 'open') throw new Error(`injected ${phase} open EIO`);
     }
     const handle = await open(...args);
     if (phase) {
@@ -45,23 +47,23 @@ async function fixture() {
       const close = handle.close.bind(handle);
       vi.spyOn(handle, 'sync').mockImplementation(async () => {
         events.push({ phase, operation: 'sync' });
-        if (fault?.phase === phase && fault.operation === 'sync') throw new Error(`injected ${phase} sync EIO`);
+        if (ledgerOpened && fault?.phase === phase && fault.operation === 'sync') throw new Error(`injected ${phase} sync EIO`);
         await sync();
       });
       vi.spyOn(handle, 'close').mockImplementation(async () => {
         await close(); handles.delete(handle); events.push({ phase, operation: 'close' });
-        if (fault?.phase === phase && fault.operation === 'close') throw new Error(`injected ${phase} close EIO`);
+        if (ledgerOpened && fault?.phase === phase && fault.operation === 'close') throw new Error(`injected ${phase} close EIO`);
       });
     }
     return handle;
   });
   const input = { agentRef: { agentId: 'handoff-agent', profileRevision: '7' }, taskId: 'task-1',
     sessionRef: 'runtime-session-1', runtimeId: 'pi', cwd: home, leaseId: 'lease-1' };
-  return { home, directory, input, events, opened, setFault(value: typeof fault) { fault = value; } };
+  return { home, directory, input, events, opened, setFault(value: typeof fault) { fault = value; ledgerOpened = false; } };
 }
 
 function assertCompleteBarrier(events: Awaited<ReturnType<typeof fixture>>['events']) {
-  expect(events).toEqual(chain.flatMap(phase => (['open', 'sync', 'close'] as const).map(operation => ({ phase, operation }))));
+  expect(events).toEqual([...(POSIX ? ['home', '.byok'] as Phase[] : []), ...chain].flatMap(phase => (['open', 'sync', 'close'] as const).map(operation => ({ phase, operation }))));
 }
 
 describe('new 14-4 candidate: durable handoff directory publication', () => {
@@ -82,6 +84,15 @@ describe('new 14-4 candidate: durable handoff directory publication', () => {
     expect(await store.history(h.input)).toHaveLength(2);
   });
 
+  it.skipIf(!POSIX).each(['.byok', 'runtime-sessions'])('rejects a symlinked %s without writing outside the home', async component => {
+    const h = await fixture();
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-handoff-outside-')); roots.push(outside);
+    if (component === 'runtime-sessions') await fs.mkdir(path.join(h.home, '.byok'));
+    await fs.symlink(outside, path.join(h.home, ...(component === '.byok' ? ['.byok'] : ['.byok', component])), 'dir');
+    await expect(new AgentSessionHandoffStore().record(h.input)).rejects.toBeInstanceOf(AgentSessionHandoffStoreError);
+    expect(await fs.readdir(outside)).toEqual([]);
+  });
+
   describe.skipIf(!POSIX)('POSIX directory barrier faults', () => {
     for (const phase of ['runtime-sessions', '.byok', 'home'] as const) {
       it.each(['record', 'terminal', 'task-terminal'] as const)(`refuses %s completion until ${phase} sync recovers, including existing-directory retry`, async kind => {
@@ -97,11 +108,11 @@ describe('new 14-4 candidate: durable handoff directory publication', () => {
         await expect(publish()).rejects.toBeInstanceOf(AgentSessionHandoffStoreError);
         expect(completions).toEqual([]); expect(handles.size).toBe(0);
         expect((await fs.readdir(h.directory)).some(name => name.endsWith('.jsonl'))).toBe(true);
-        laterAttempt = true; h.events.length = 0;
+        laterAttempt = true; h.setFault({ phase, operation: 'sync' }); h.events.length = 0;
         await expect(publish()).rejects.toThrow(`injected ${phase} sync EIO`);
         expect(completions).toEqual([]); expect(handles.size).toBe(0);
         expect(h.events.filter(event => event.operation === 'sync').map(event => event.phase))
-          .toEqual(chain.slice(0, chain.indexOf(phase) + 1));
+          .toEqual(['home', '.byok', ...chain.slice(0, chain.indexOf(phase) + 1)]);
         h.setFault(undefined); h.events.length = 0;
         const result = await publish();
         assertCompleteBarrier(h.events);

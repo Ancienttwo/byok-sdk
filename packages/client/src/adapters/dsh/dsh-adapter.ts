@@ -17,7 +17,7 @@ import {
 } from '../../types';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { dshSession, RuntimeFailureError, SessionNotFoundError, UnsupportedOptionError, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime';
+import { dshMcpRows, dshSession, RuntimeFailureError, SessionNotFoundError, UnsupportedOptionError, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 import { AsyncQueue } from '../../util/async-queue';
@@ -216,7 +216,11 @@ export class DshAdapter implements RuntimeAdapter {
 
   /** Cheap admission, as Hermes: the version probe only. The acp profile probe belongs to `detect()`. */
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    if (input.offer.dispatchSelection !== undefined) return { kind: 'reject', reason: 'dsh does not accept a dispatch selection; the Host configures its model', retryable: false };
+    try {
+      dshMcpRows(Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server })), '.');
+    } catch (error) {
+      return { kind: 'reject', reason: `dsh cannot attach the task MCP servers: ${(error as Error).message}`, retryable: false };
+    }
     const command = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin).bin.command;
     const { env: base } = await this.runtimeEnvironment();
     const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, dshEnvironment(base, this.root, this.sandbox));
@@ -228,7 +232,6 @@ export class DshAdapter implements RuntimeAdapter {
 
   private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('dsh requires a resolved instruction');
-    if (input.manifest.dispatchSelection !== undefined) throw authority('prepared dsh operation received a manifest with a dispatch selection');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('dsh manifest has no sealed cwd');
     const resume = input.manifest.sessionRef;

@@ -129,6 +129,11 @@ export class HostedCommandEntry<C> {
     const { scope } = await this.owned(credential, 'updateRoom', roomId);
     await this.keyless(scope, { kind: 'update_room', roomId, update });
   }
+  /** Owner switch of one Bot between `observe` and `auto` (#1229). Only outcomes recorded after the switch are affected. */
+  async setBotAutonomy(credential: C, botId: string, autonomy: Extract<KeylessCommand, { kind: 'set_autonomy' }>['autonomy']): Promise<void> {
+    const { scope } = await this.owned(credential, 'setBotAutonomy', botId);
+    await this.keyless(scope, { kind: 'set_autonomy', botId, autonomy });
+  }
   async retryPersona(credential: C, botId: string): Promise<void> {
     const { scope } = await this.owned(credential, 'retryPersona', botId);
     await this.keyless(scope, { kind: 'retry_persona', botId });

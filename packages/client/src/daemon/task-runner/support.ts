@@ -22,7 +22,6 @@ import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../ty
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable';
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home';
 import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-home-readers';
-import type { AgentTerminalCause } from '../agent-session-handoff-store';
 import type { BlobResolver } from '../blob-client';
 import { ExecutionRecordAccumulator, type ExecutionRecord } from '../execution-record';
 import type { DeclaredSessionMembers } from '../session-contract';
@@ -45,6 +44,12 @@ export const AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS = 20;
 
 /** Inline artifact payloads must stay under this many UTF-8 bytes — mirrors the frozen `TaskArtifactPayloadSchema.inline` limit in `packages/protocol` (see docs/protocol.md §7). Anything bigger goes through the blob client. */
 export const MAX_INLINE_ARTIFACT_BYTES = 64 * 1024;
+
+export function pendingCancelBeforeActive(this: TaskRunner, taskId: string): { readonly reason: string | undefined } | undefined {
+  return this['pendingCancelled'].has(taskId)
+    ? { reason: this['pendingCancelled'].get(taskId) }
+    : undefined;
+}
 
 /**
  * What one prepared Execution has observed about its provider calls so far.
@@ -144,8 +149,6 @@ export interface ActiveTask {
   residentMemoryStart?: { readonly content: string; readonly revision: string };
   /** The offer chose `agentMemoryCommit`, so `.byok/` holds this Attempt's start copy (#1440). */
   agentMemoryCommit?: boolean;
-  terminalCause?: AgentTerminalCause;
-  terminalReason?: string;
   agentTerminalPersisted?: boolean;
   agentTerminalEvidenceFailureReported?: boolean;
   batcher: ProgressBatcher;
@@ -369,8 +372,23 @@ export function orderByPreference(candidates: readonly RuntimeAdapter[], prefere
   return [...candidates].sort((a, b) => (rank.get(a.descriptor.id) ?? preference.length) - (rank.get(b.descriptor.id) ?? preference.length));
 }
 
-export function adapterSupportsMcpToolsets(descriptor: RuntimeAdapterDescriptor): boolean {
-  return descriptor.capabilities.mcpToolsets === true;
+export type RuntimeRequirements = { readonly mcpToolsets: boolean; readonly resume: boolean; readonly dispatchSelection: boolean; readonly preparedInput: boolean };
+
+export const requirementPhrases: Record<keyof RuntimeRequirements, string> = {
+  mcpToolsets: 'project required MCP toolsets',
+  resume: 'resume a session',
+  dispatchSelection: 'take a dispatch selection',
+  preparedInput: 'run a prepared input',
+};
+
+export function unmetRequirements(descriptor: RuntimeAdapterDescriptor, requirements: RuntimeRequirements): (keyof RuntimeRequirements)[] {
+  const supported: RuntimeRequirements = {
+    mcpToolsets: descriptor.capabilities.mcpToolsets === true,
+    resume: descriptor.capabilities.resume === true,
+    dispatchSelection: descriptor.supportsDispatchSelection === true,
+    preparedInput: descriptor.capabilities.preparedLane === true,
+  };
+  return (Object.keys(requirementPhrases) as (keyof RuntimeRequirements)[]).filter((key) => requirements[key] && !supported[key]);
 }
 
 /**

@@ -8,7 +8,7 @@ import { ExecutionRecordAccumulator } from '../execution-record';
 import type { DeclaredSessionMembers } from '../session-contract';
 import { ProgressBatcher } from '../progress-batcher';
 import type { ActiveTask, OfferPhaseContext } from './support';
-import { outboundErrorMessage } from './support';
+import { outboundErrorMessage, pendingCancelBeforeActive } from './support';
 import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferHeld, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
@@ -163,7 +163,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   const activatedMessageRecord = active.messageOutbox === undefined
     ? undefined
     : await this['activateAgentMessage'](active.messageOutbox, taskId, session.sessionRef,
-      () => !this['pendingCancelled'].has(taskId) && !blobAbort.signal.aborted);
+      () => pendingCancelBeforeActive.call(this, taskId) === undefined && !blobAbort.signal.aborted);
 
   // Finding F4, checkpoint 2 ("consulted when start() resolves"): a
   // task.cancel arrived while prepared-operation start() was in flight — i.e. AFTER
@@ -180,7 +180,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   // cancelled terminal and never sends task.started. Strict FIFO is what
   // guarantees the cancel was reduced before this completion event.
   const host = hostFor(this);
-  const markerReason = this['pendingCancelled'].get(taskId);
+  const markerReason = pendingCancelBeforeActive.call(this, taskId)?.reason;
   if (host.current(taskId)?.cancel.requested === true || markerReason !== undefined) {
     if (host.current(taskId)?.cancel.requested !== true) {
       host.dispatchSync({

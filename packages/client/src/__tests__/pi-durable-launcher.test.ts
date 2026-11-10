@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, realpath, rm, readFile, stat, writeFile } from 'node:fs
 import { writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { execFileSync, spawn as nativeSpawn, type ChildProcess } from 'node:child_process';
+import { disposeDurableShellGroups } from '../adapters/pi-durable/process-groups';
 import path from 'node:path';
 import os from 'node:os';
 import type { AgentEvent } from '@byok-sdk/protocol';
@@ -20,12 +21,13 @@ import type { ToolAuthorizationGate, ToolCall, ToolFileScope } from '../tool-aut
 import { resolveFileScopeGrant } from '../file-scope-guard';
 import { bindFileScopeGate } from '../file-scope-gate-binding';
 import type { ScopedFileDenial } from '../file-scope-tools';
+vi.mock('node:child_process', { spy: true });
 const ownedGroups=new Set<number>();
 const roots: string[] = [], servers: Server[] = [], sessions: Session[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
   for (const session of sessions.splice(0)) await session.close();
-  for(const group of ownedGroups){try{process.kill(-group,'SIGKILL');}catch(error){if((error as NodeJS.ErrnoException).code!=='ESRCH')throw error;}}ownedGroups.clear();
+  await disposeDurableShellGroups(ownedGroups);
   for (const server of servers.splice(0)) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
@@ -189,7 +191,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     const until = Date.now() + 4000;
     while (Date.now() < until) {
       try { if ((await readFile(path.join(f.home, 'marker'), 'utf8')) === 'once') break; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; /* The worker has not written the marker yet; retry until the deadline. */ }
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     expect(await readFile(path.join(f.home, 'marker'), 'utf8')).toBe('once');
@@ -217,6 +219,21 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     expect(f.children).toHaveLength(1);expect(f.calls()).toBe(1);expect(f.journal).toEqual(['respawn-intent:1']);expect(events.at(-1)?.type).toBe('error');
     await new Promise(resolve=>setTimeout(resolve,150));expect(f.calls()).toBe(1);
   },30_000);
+  it('disposes an owned zombie-only group when its signal returns EPERM', async () => {
+    const pgid = 999_999;
+    const groups = new Set([pgid]);
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }); });
+    const snapshot = vi.mocked(execFileSync).mockReturnValue(`${process.pid} 1 ${process.pid} S\n${pgid} 1 ${pgid} Z\n`);
+    try {
+      await expect(disposeDurableShellGroups(groups)).resolves.toBeUndefined();
+      expect(groups.size).toBe(0);
+      expect(kill).toHaveBeenCalledWith(-pgid, 'SIGKILL');
+      expect(snapshot).toHaveBeenCalledWith('/bin/ps', ['-eo', 'pid=,ppid=,pgid=,stat='], { encoding: 'utf8' });
+    } finally {
+      kill.mockRestore();
+      snapshot.mockRestore();
+    }
+  });
   it.each(['model','tool'])('interrupt during %s disposes the worker and tool group without further effects', async phase=>{
     const f=await fixture((res,n)=>{if(phase==='tool'&&n===1)tool(res,`echo $$ > tool-pid; while true; do printf tick >> cancel-effects; sleep 0.05; done`);});
     await vi.waitFor(()=>expect(f.calls()).toBe(1),{timeout:4_000,interval:20});

@@ -122,9 +122,10 @@ export interface ClaudeAdapterOptions {
    * For an Agent task (`task.offer`), `disabled` starts Claude with
    * `--no-session-persistence`, so Claude does not save the session
    * transcript under `<config dir>/projects/`. Such a session cannot be
-   * resumed: an Agent task that carries a `sessionRef` fails before Claude
-   * starts. Follow-ups in the same task still work. Other tasks are
-   * unchanged. Default `enabled`.
+   * resumed: the descriptor declares `resume: false`, so the daemon declines
+   * an offer carrying a `sessionRef` before claim with the non-retryable
+   * reason `runtime "claude" cannot resume a session`. Follow-ups in the same
+   * task still work. Other tasks are unchanged. Default `enabled`.
    */
   agentSessionPersistence?: 'enabled' | 'disabled';
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
@@ -192,6 +193,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       platforms: ['darwin', 'linux', 'win32'],
       capabilities: {
         ...CLAUDE_RUNTIME_CAPABILITIES,
+        ...(options.agentSessionPersistence === 'disabled' ? { resume: false } : {}),
         isolation: {
           ...CLAUDE_RUNTIME_CAPABILITIES.isolation!,
           ...(options.agentUserContext === 'excluded' ? {} : {
@@ -315,14 +317,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
     try {
       throwIfCancelled();
       const persistSession = startInput.manifest.agentRef === undefined || this.options.agentSessionPersistence !== 'disabled';
-      // With persistence off, Claude saved no transcript to resume. Refused
-      // before any write, so the task never runs as a silent fresh session.
-      if (!persistSession && startInput.manifest.sessionRef !== undefined) {
-        throw new RuntimeExecutionFailure({
-          phase: 'start', category: 'authority', retry: 'non-retryable',
-          reason: 'claude Agent session persistence is disabled, so the task cannot resume a session',
-        });
-      }
       // Built before any write, so a refusal leaves no file behind.
       const userContextSettings = this.options.agentUserContext === 'excluded' && startInput.manifest.agentRef !== undefined
         ? claudeAgentUserContextSettings(startInput.manifest, startInput.env, process.platform, os.homedir, dir => {
@@ -651,7 +645,6 @@ class ClaudeSession implements Session {
     const workspaceDir = this.workspaceDir;
     const control = this.control;
     const mcpIdentity = this.mcpIdentity;
-    const session = this;
     return {
       [Symbol.asyncIterator](): AsyncIterator<AgentEvent | MessageDraftDelta> {
         const inner = client.events[Symbol.asyncIterator]();

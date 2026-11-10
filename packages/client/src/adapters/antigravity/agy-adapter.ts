@@ -93,6 +93,7 @@ export class AgyAdapter implements RuntimeAdapter {
     return freezeRuntimeAdapterDescriptor({
       id: 'agy',
       supportsDispatchSelection: false,
+      requiresMcpToolsetToolObservation: true,
       platforms: ['darwin', 'linux', 'win32'],
       capabilities: AGY_RUNTIME_CAPABILITIES,
       ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
@@ -151,7 +152,6 @@ export class AgyAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    if (input.offer.dispatchSelection !== undefined) return { kind: 'reject', reason: 'agy does not accept a dispatch selection; the Host configures its model', retryable: false };
     const detected = await this.detect();
     if (detected.kind !== 'available') {
       return { kind: 'reject', reason: `agy installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`, retryable: false };
@@ -166,7 +166,6 @@ export class AgyAdapter implements RuntimeAdapter {
 
   private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('agy requires a resolved instruction');
-    if (input.manifest.dispatchSelection !== undefined) throw authority('prepared agy operation received a manifest with a dispatch selection');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('agy manifest has no sealed cwd');
     const apiKey = input.env.GEMINI_API_KEY;

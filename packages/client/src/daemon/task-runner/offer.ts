@@ -6,9 +6,10 @@ import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home'
 import type { OfferPhaseContext } from './support';
 import { settleAgentMemoryCommitCopy } from './agent-memory';
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable';
-import { offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage } from './support';
+import { offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage, pendingCancelBeforeActive } from './support';
 import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
+import { offerAlreadyHandled } from './offer-admission';
 import { bindOfferWorkspace } from './offer-workspace';
 import { sealOfferManifest, claimOffer, startOfferRuntime } from './offer-launch';
 import type { OfferAdmissionTiming } from './offer-admission-timing';
@@ -87,9 +88,7 @@ export async function handleOffer(
   // same offer while its first prepared operation is still in flight (or
   // well after it already succeeded) would start a SECOND adapter session
   // for the same task, orphaning the first.
-  if (this['tasks'].has(taskId) || this['startupOwnership'].has(taskId) || this['inFlightOffers'].has(taskId) || this['finishedTaskIds'].has(taskId) || this['strictDeclinedTaskIds'].has(taskId)) {
-    return;
-  }
+  if (offerAlreadyHandled.call(this, taskId)) return;
 
   // #1099 S3: the reducer owns the offer/admission phase, the decline
   // decision and the per-task lifecycle from here through `admission.claimable`.
@@ -261,7 +260,7 @@ export async function handleOffer(
     if (current?.phase === 'declined' || current?.terminal !== undefined || current?.cancel.requested === true) return true;
     // The bounded marker keeps the pre-claim cancel reason and non-retryable
     // pair exactly as before; admission-stage cancels decline through O5.
-    const cancelled = this['pendingCancelled'].has(taskId);
+    const cancelled = pendingCancelBeforeActive.call(this, taskId) !== undefined;
     decline(cancelled ? 'cancelled before claim' : this['stoppingOffers'] ? 'daemon is shutting down' : 'runtime startup deadline exceeded', !cancelled);
     return true;
   };

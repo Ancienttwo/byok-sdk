@@ -10,6 +10,7 @@ import { BOT_TURN_OUTCOME_CONTRACT } from '@byok-sdk/protocol';
 import { OFFER_WAIT_MS, syncTurn, type SyncFacts, type SyncOptions, type SyncStep } from './rules/sync';
 import type { Conclusion, DelegationTimers, ReplyReadback } from './rules/delegation';
 import type { Json } from './rules/turn';
+import { wouldDoRows } from './rules/autonomy';
 import type { CoalescePolicy } from './rules/coalesce';
 import { ROOM_GRACE_MS, roomFields, roomInput, type Seat } from './rules/rooms';
 import { projectionRequestId, type HomeReadback } from './team';
@@ -38,7 +39,9 @@ export const VECTOR_NOW = 1000;
 export type SeedTeam = 'local' | 'external' | 'rooms';
 export function seedCollaboration(state: CollaborationState, team: SeedTeam = 'local'): void {
   state.team.bots.main = { id: 'main', name: 'Main', role: 'Team owner', persona: '', model: 'default', mainBot: true, archived: false,
-    revision: '1', readyRevision: '1', execution: template('device', 'main') };
+    revision: '1', readyRevision: '1', execution: template('device', 'main'),
+    // A new Bot starts in `observe` (#1229); the vectors that run autonomous actions seed the Main Bot as `auto`.
+    autonomy: 'auto' };
   state.turns.t1 = { id: 't1', root: 't1', botId: 'main', source: 'user', request: 'Work', hop: 0, status: 'processing', authority: 'owner' };
   state.budgets.t1 = { continuation: 0, delegation: 0 };
   state.schemas.t1 = outcomeSchema('main', state, state.turns.t1);
@@ -262,6 +265,19 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
       const local = await open('external'), stored = await local.stored();
       await expect(settle(() => local.commit(request(local, ...withRooms(team(2, main), []))))).rejects.toThrow('Snapshot rooms need the external rooms mode');
       expect(await local.stored()).toBe(stored);
+    });
+
+    it('records an observing Bot\'s create_routine once as a would-do row and creates no routine (#1229)', async () => {
+      const subject = await open(), document = { create_routine: [{ localId: 'new_routine_1', schedule: { hour: 9, minute: 0, tz: 'UTC' }, prompt: 'Daily report' }] };
+      await subject.commit(request(subject, 'observe', { kind: 'set_autonomy', botId: 'main', autonomy: 'observe' }));
+      const first = await subject.commit(request(subject, 'task-1', { kind: 'outcome', turnId: 't1', taskId: 'task-1', document }));
+      const replay = await subject.commit(request(subject, 'task-1', { kind: 'outcome', turnId: 't1', taskId: 'task-1', document }));
+      const state = await subject.state();
+      expect(wouldDoRows(state)).toEqual([expect.objectContaining({ botId: 'main', action: 'create_routine', index: 0 })]);
+      // The would-do projection is part of the commit result, so a recorded replay carries it too. L records no callback command.
+      expect(first.outbox).toEqual([{ kind: 'projection', id: `would-do:${wouldDoRows(state)[0]!.id}` }]);
+      if (replay.revision === first.revision) expect(replay).toEqual(first);
+      expect(state.rejected).toEqual([]);
     });
 
     it('returns the outbox rows that the commit wrote', async () => {

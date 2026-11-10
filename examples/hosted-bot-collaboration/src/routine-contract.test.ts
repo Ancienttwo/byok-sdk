@@ -42,7 +42,9 @@ async function hostedSubject(): Promise<RoutineSubject> {
   let clock = Date.UTC(2026, 0, 1, 3);
   await store().seed(scope, state => {
     state.team.bots.main = { id: 'main', name: 'Main Bot', role: 'Team owner', persona: '', model: 'default', mainBot: true, archived: false,
-      revision, readyRevision: revision, execution: structuredClone(execution) };
+      revision, readyRevision: revision, execution: structuredClone(execution),
+      // The routine vectors run the autonomous action itself, and a new Bot starts in `observe` (#1229).
+      autonomy: 'auto' };
   });
   await store().bindDevice(scope, 'device');
   const submitter = new HostedSubmitter(opened!.pool, store().schema, { port: () => fakePort(), now: () => clock, leaseMs: 60_000, backoffMs: 1000 });

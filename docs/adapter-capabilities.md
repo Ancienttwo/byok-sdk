@@ -891,14 +891,9 @@ The adapter starts one Claude process per task, so the flag also covers every
 follow-up of the task. The default, `'enabled'`, sets nothing, and other tasks
 are unchanged.
 
-Such a session cannot be resumed. An Agent task that carries a
-`sessionRef` (a resume, an Agent handoff or a memory-reader resume) fails
-before Claude starts, writes no file and runs no fresh session in its place.
-The failure is a non-retryable `authority` failure with the reason `claude
-Agent session persistence is disabled, so the task cannot resume a session`.
-The daemon still records the session handoff of such a task, so a later offer
-with that `sessionRef` reaches the adapter and fails there. The descriptor
-keeps `resume: true`, because ordinary tasks can still resume.
+Such a session cannot be resumed. With this option the descriptor declares
+`resume: false`, and an offer carrying a `sessionRef` is declined before claim
+with the non-retryable reason `runtime "claude" cannot resume a session`.
 
 Auto memory also writes under `projects/<encoded cwd>/memory/`. This option
 does not turn it off; `agentUserContext: 'excluded'` does, and the two
@@ -1172,7 +1167,7 @@ and `versionPolicy`). The other options stay on the `DshAdapter` constructor.
   the session `cwd`. `TMPDIR` is the execution scratch too.
 - Host toolsets: dsh takes stdio `command` and `args` only. An entry with
   `type: 'http'`, non-empty `env` or `headers`, or a name outside
-  `[A-Za-z0-9_-]{1,32}` is refused before dsh starts, without a retry. A Host
+  `[A-Za-z0-9_-]{1,32}` is declined before claim, without a retry. A Host
   that configures env for its own server cannot run it under dsh. Do not put a
   token in `args` instead: dsh persistence of MCP entries is unaudited. Entries
   are sent again on every resume.
@@ -1279,8 +1274,11 @@ optional `model` and `versionPolicy`). The other options stay on the
   switches to a stored Google login when one exists is not verified, and the
   APPDATA redirection does not affect Windows Credential Manager. Whether agy
   reads the macOS keychain was not checked, and the SDK does not isolate it.
-- Host toolsets: agy rejects Host toolset entries carrying `env` or `headers`;
-  a Host that configures env for its own server cannot run it under agy. agy
+- Host toolsets: agy requires MCP tool observation during admission, so tool
+  events and authorization rules can identify the server and tool. Observation
+  failures decline the offer before claim. agy rejects Host toolset entries
+  carrying `env` or `headers`; a Host that configures env for its own server
+  cannot run it under agy. agy
   persists session MCP entries in its conversation database; upstream found env
   and header values there in plain text after close (botiverse/oar#392). Treat
   `args` the same way: do not put tokens in `args`.

@@ -1,4 +1,11 @@
 import type { spawnOwnedLineProcess } from './owned-line-process';
+export declare function dshMcpRows(
+  servers: readonly (
+    | { readonly name: string; readonly command: string; readonly args?: readonly string[]; readonly env?: Readonly<Record<string, string>> }
+    | { readonly name: string; readonly type: 'http'; readonly url: string; readonly headers?: Readonly<Record<string, string>> }
+  )[] | undefined,
+  cwd: string,
+): readonly Record<string, unknown>[];
 export interface DshControl {
   // ControlResult also permits an exit response with a numeric or null code.
   response: { body: { kind: string; code?: string | number | null; reason?: string } };

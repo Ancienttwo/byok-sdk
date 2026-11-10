@@ -1,7 +1,7 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { AGENT_HOME_INTERNAL_DIRECTORY } from '../agent-home';
+import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../agent-home';
 import type {
   AgentContentAuditReceipt,
   AgentContentActorKind,
@@ -218,20 +218,6 @@ function assertAbsoluteFilePath(filePath: string): string {
   return path.resolve(filePath);
 }
 
-async function ensureDirectoryNoSymlink(directory: string): Promise<void> {
-  const absolute = path.resolve(directory);
-  // The host's temp or application root may itself be a platform alias (for
-  // example macOS /var -> /private/var). Rejecting every ancestor symlink
-  // would make a valid canonical Agent home unusable. The ledger's own
-  // directory is still checked as a real directory; the content-read target
-  // path has the stricter component-by-component symlink policy.
-  await fs.mkdir(absolute, { recursive: true, mode: 0o700 });
-  const stat = await fs.lstat(absolute);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new AgentContentAuditStoreError(`content audit directory is not a real directory: ${absolute}`);
-  }
-}
-
 async function assertAuditFile(filePath: string): Promise<void> {
   try {
     const stat = await fs.lstat(filePath, { bigint: true });
@@ -272,7 +258,14 @@ export class AgentContentAuditStore {
   async append(receipt: AgentContentAuditReceipt): Promise<AgentContentAuditReceipt> {
     const validated = validateReceipt(receipt);
     return this.enqueue(async () => {
-      await ensureDirectoryNoSymlink(path.dirname(this.filePath));
+      try {
+        await ensureDirectoryNoSymlink(path.dirname(path.dirname(this.filePath)), path.dirname(this.filePath));
+      } catch (error) {
+        if (error instanceof AgentHomeResolutionError) {
+          throw new AgentContentAuditStoreError(`content audit directory is not a real directory: ${path.dirname(this.filePath)}`);
+        }
+        throw error;
+      }
       await assertAuditFile(this.filePath);
       // Validate the existing ledger before appending. A corrupt or widened
       // ledger is integrity failure, never a reason to add more records.

@@ -216,6 +216,7 @@ export type CheckCodexFailureVendor = Assert<Assignable<typeof vendorCodexFailur
 // 'queue' and 'withdraw' are omitted on purpose, as for Codex. The runtime reports steer; the vendored session always returns it for the qualified dsh.
 import type * as DshBridge from '../../packages/client/src/runtime/dsh-session-runtime.js';
 import type { dshSession as vendorDshSession, DshSessionHooks } from '../../packages/client/vendor/oar/45488e7/runtimes/dsh/session.js';
+import type { dshMcpRows as vendorDshMcpRows } from '../../packages/client/vendor/oar/45488e7/runtimes/dsh/mcp.js';
 import type { DshLineProcess } from '../../packages/client/vendor/oar/45488e7/runtimes/dsh/launch.js';
 
 type VendorDshArgs = Parameters<typeof vendorDshSession>;
@@ -230,7 +231,8 @@ type DshBridgeSession = {
   records(): readonly DshBridge.DshRecord[];
   dispose: AdapterSession['dispose'];
 };
-export type CheckDshExports = Assert<Equal<keyof typeof DshBridge, 'dshSession' | 'SessionNotFoundError' | 'RuntimeFailureError' | 'UnsupportedOptionError'>>;
+export type CheckDshExports = Assert<Equal<keyof typeof DshBridge, 'dshSession' | 'dshMcpRows' | 'SessionNotFoundError' | 'RuntimeFailureError' | 'UnsupportedOptionError'>>;
+export type CheckDshMcpRows = Assert<Equal<typeof DshBridge.dshMcpRows, typeof vendorDshMcpRows>>;
 export type CheckDshOptions = Assert<Equal<Mutable<DshBridgeArgs[2]>, DshBridgeOptions>>;
 export type CheckDshVendorOptions = Assert<Assignable<DshBridgeArgs[2], VendorDshArgs[2]>>;
 export type CheckDshHooks = Assert<Assignable<DshHooksFromBridge, Partial<Mutable<DshSessionHooks>> | undefined>>;

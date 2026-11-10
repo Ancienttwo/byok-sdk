@@ -83,7 +83,7 @@ import {
 } from './agent-memory';
 import type { AgentMemoryCommitStore } from './agent-memory-commit';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
-import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry } from './task-runner/support';
+import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry, RuntimeRequirements } from './task-runner/support';
 import { offerSettlements, trackOffer, taskTearingDown } from './task-runner/support';
 import { MAX_TRACKED_TASK_IDS } from './task-runner/state';
 import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message';
@@ -624,51 +624,8 @@ export class TaskRunner {
   /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
   private readonly inFlightBlobAborts = new Map<string, AbortController>();
   /**
-   * Finding P2 (Fix 2c): taskIds that have reached a terminal outcome
-   * (Complete/Failed/Cancelled) this session — populated in `finish()`.
-   * While `ConnectionManager`'s stalled-cursor long-poll re-pull is frozen
-   * behind an unrelated failing seq, it can legitimately redeliver an
-   * ALREADY-succeeded `task.offer` — the client's own cursor hasn't advanced
-   * past it yet (docs/protocol.md §9's "cursor advance timing" rule
-   * explicitly relies on redelivered handlers being idempotent for exactly
-   * this reason). `handleOffer` must treat a redelivered offer for a taskId
-   * that's already active (`this.tasks`) or already finished (this set) as
-   * a no-op — never a second prepared-operation `start()` call, which would orphan the
-   * first session.
-   *
-   * M3-B: unbounded otherwise — a long-lived daemon that's finished many
-   * thousands of tasks over its uptime would keep every single taskId
-   * forever. Bounded to `MAX_TRACKED_TASK_IDS` via `addFinishedTaskId`
-   * below, oldest evicted first. Safe for the redelivery-idempotency
-   * invariant above because the stalled-cursor scenario above redelivers
-   * this device's own recent backlog for one connection, not an arbitrary
-   * point in this daemon's whole history — this device would have to claim
-   * and finish `MAX_TRACKED_TASK_IDS` more tasks before a genuinely-still-
-   * pending redelivery for an older taskId even arrives, let alone gets
-   * processed, for eviction to ever remove an entry that redelivery still
-   * needed.
-   *
-   * Finding #5 (honesty follow-up): unlike `pendingCancelled`, plain
-   * oldest-first eviction IS correct here — every entry in this set is
-   * already fully resolved (finish() only adds a taskId after it reached a
-   * terminal outcome), so there is no "in-flight" entry an eviction could
-   * corrupt out from under a running `handleOffer()`. The assumption above
-   * is a HEURISTIC bound, not a proof: it holds as long as no single
-   * connection's genuinely-still-pending redelivery backlog ever exceeds
-   * `MAX_TRACKED_TASK_IDS` finished tasks, which is a real (if distant)
-   * possibility for an extremely long-stalled connection, not a
-   * mathematical impossibility. Should it ever be violated, the failure
-   * mode is strictly milder than `pendingCancelled`'s own pre-fix bug: a
-   * redelivered `task.offer` for an evicted, already-finished taskId would
-   * re-run `handleOffer` from scratch — at worst a duplicate
-   * claim/start/complete for a task that already succeeded once — never a
-   * task that should be dead starting a brand-new session against explicit
-   * cancellation intent.
-   */
-  private readonly finishedTaskIds = new Set<string>();
-  /**
    * Bounded local receive dedup for strict legacy declines. A decline is not a
-   * task terminal receipt, so it must never enter `finishedTaskIds`; retaining
+   * task terminal receipt, so it must never enter the reducer's `finished` list; retaining
    * it separately keeps replay idempotent without claiming or finishing work.
    */
   private readonly strictDeclinedTaskIds = new Set<string>();
@@ -1703,23 +1660,6 @@ export class TaskRunner {
     return releasePreparationPin.call(this, taskId);
   }
 
-  /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap. */
-  private markFinishedTaskId(taskId: string): void {
-    this.finishedTaskIds.add(taskId);
-    if (this.finishedTaskIds.size > MAX_TRACKED_TASK_IDS) {
-      const oldest = this.finishedTaskIds.values().next().value;
-      if (oldest !== undefined) this.finishedTaskIds.delete(oldest);
-    }
-  }
-
-  /** Terminal cleanup: record the bounded id and end the reducer entry too. */
-  private addFinishedTaskId(taskId: string): void {
-    this.markFinishedTaskId(taskId);
-    // The reducer host is bounded too: a finished task's per-task state is
-    // archived, not retained for the daemon's lifetime.
-    hostFor(this).endTask(taskId);
-  }
-
   private addStrictDeclinedTaskId(taskId: string): void {
     this.strictDeclinedTaskIds.add(taskId);
     if (this.strictDeclinedTaskIds.size > MAX_TRACKED_TASK_IDS) {
@@ -1729,8 +1669,9 @@ export class TaskRunner {
   }
 
   /**
-   * Selects which adapter runs this offer, gated on CAPABILITY (MCP toolset
-   * projection, when required) and PRESENCE (`adapter.detect()`) — pre-claim,
+   * Selects which adapter runs this offer, gated on required capabilities
+   * (MCP toolsets, resume, dispatch selection and prepared input) and
+   * presence (`adapter.detect()`) — pre-claim,
    * in both the explicit-runtime and auto-select branches.
    *
    * Explicit-runtime branch (`requestedRuntime` set): allowlist and
@@ -1750,9 +1691,9 @@ export class TaskRunner {
    */
   private pickAdapter(
     requestedRuntime: string | undefined,
-    requiresMcpToolsets: boolean,
+    requirements: RuntimeRequirements,
     signal: AbortSignal,
   ): Promise<PickResult> {
-    return pickAdapter.call(this, requestedRuntime, requiresMcpToolsets, signal);
+    return pickAdapter.call(this, requestedRuntime, requirements, signal);
   }
 }

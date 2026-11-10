@@ -85,9 +85,10 @@ export interface ClaudeAdapterOptions {
      * For an Agent task (`task.offer`), `disabled` starts Claude with
      * `--no-session-persistence`, so Claude does not save the session
      * transcript under `<config dir>/projects/`. Such a session cannot be
-     * resumed: an Agent task that carries a `sessionRef` fails before Claude
-     * starts. Follow-ups in the same task still work. Other tasks are
-     * unchanged. Default `enabled`.
+     * resumed: the descriptor declares `resume: false`, so the daemon declines
+     * an offer carrying a `sessionRef` before claim with the non-retryable
+     * reason `runtime "claude" cannot resume a session`. Follow-ups in the same
+     * task still work. Other tasks are unchanged. Default `enabled`.
      */
     agentSessionPersistence?: 'enabled' | 'disabled';
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
@@ -5426,8 +5427,8 @@ export interface DaemonConfig {
      * M5 batch-3 (workstream 1): explicit auto-select priority order for
      * `TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)
      * — tried in listed order; the first candidate that is both PRESENT
-     * (`adapter.detect()`) and CAPABLE (declares MCP toolset projection when
-     * the offer requires it) wins. Unset defaults to
+     * (`adapter.detect()`) and CAPABLE (declares the required MCP toolsets,
+     * resume, dispatch selection and prepared input capabilities) wins. Unset defaults to
      * `DEFAULT_RUNTIME_PREFERENCE` (`task-runner.ts`): `['claude', 'codex',
      * 'pi']` — pi LAST, deliberately.
      *

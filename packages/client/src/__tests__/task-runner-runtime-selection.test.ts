@@ -13,6 +13,8 @@ import type { RuntimeAdapter, RuntimeOperationStartInput } from '../types';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
+import { TaskRunner } from '../daemon/task-runner';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
 
 const PI_FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
@@ -46,6 +48,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await daemon?.stop();
     daemon = undefined;
     await server.close();
@@ -68,6 +71,66 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     await daemon.start();
     return daemon;
   }
+
+  it.each(['pi', 'hermes'] as const)('declines %s resume before preparing or claiming', async (id) => {
+    const adapter = new StubRuntimeAdapter(id, { kind: 'available' }, { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true });
+    const prepare = vi.spyOn(adapter, 'prepare');
+    await setup([adapter]);
+    const taskId = 'unsupported-resume';
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x', ...(id === 'pi' ? { runtime: id } : { harnessId: id }) }, { taskId, seq: server.nextSeq() }));
+    const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
+    expect(decline.payload).toMatchObject({ reason: `runtime "${id}" cannot resume a session`, retryable: false });
+    expect(decline.payload).not.toHaveProperty('runtimeUnavailable');
+    expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === taskId)).toBe(false);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('declines auto selection when no candidate supports resume', async () => {
+    vi.spyOn(TaskRunner.prototype as unknown as { agentMemoryMcpAdmitted: () => boolean }, 'agentMemoryMcpAdmitted').mockReturnValue(true);
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true });
+    const prepare = vi.spyOn(adapter, 'prepare');
+    await setup([adapter]);
+    const taskId = 'auto-unsupported-resume';
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x', agentMemory: 'none' }, { taskId, seq: server.nextSeq() }));
+    const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
+    expect(decline.payload).toMatchObject({ reason: 'no available runtime on this device can resume a session', retryable: true });
+    expect(decline.payload).not.toHaveProperty('runtimeUnavailable');
+    expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === taskId)).toBe(false);
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it('auto selection skips a runtime that cannot resume and starts a capable one', async () => {
+    const claude = new StubRuntimeAdapter('claude', { kind: 'available' }, { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true });
+    const pi = new StubRuntimeAdapter('pi');
+    const prepare = vi.spyOn(claude, 'prepare');
+    const handoff = vi.spyOn(AgentSessionHandoffStore.prototype, 'requireMatch').mockImplementation(async (expected) => ({ ...expected, taskId: 'prior-task', leaseId: 'prior-lease', updatedAt: new Date().toISOString() }));
+    try {
+      await setup([claude, pi]);
+      const taskId = 'auto-resume-capable';
+      server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x' }, { taskId, seq: server.nextSeq() }));
+      const claim = await server.waitFor((e) => e.type === 'task.claim' && e.task_id === taskId);
+      expect(claim.payload).toMatchObject({ runtime: 'pi' });
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+      expect(prepare).not.toHaveBeenCalled();
+      expect(pi.startCalls).toHaveLength(1);
+    } finally { handoff.mockRestore(); }
+  });
+
+  it('declines an undeclared dispatch selection before preparing or claiming', async () => {
+    const base = new StubRuntimeAdapter('claude');
+    let supportsSelection = true;
+    const adapter: RuntimeAdapter = { get descriptor() { return { ...base.descriptor, supportsDispatchSelection: supportsSelection }; }, detect: () => base.detect(), prepare: vi.fn((input) => base.prepare(input)), runtimeEnvironment: () => base.runtimeEnvironment() };
+    await setup([adapter]);
+    supportsSelection = false;
+    const taskId = 'unsupported-selection';
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'claude', providerId: null, modelId: 'model' } }, { taskId, seq: server.nextSeq() }));
+    const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
+    expect(decline.payload).toMatchObject({ reason: 'runtime "claude" cannot take a dispatch selection', retryable: false });
+    expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === taskId)).toBe(false);
+    expect(adapter.prepare).not.toHaveBeenCalled();
+    expect(base.startCalls).toHaveLength(0);
+  });
 
   describe('default auto-select order (no runtimePreference configured)', () => {
     it('claude wins over pi when both are present (pi is the fallback, not the default)', async () => {
