@@ -83,6 +83,7 @@ test('OAR dsh JS bridge re-exports the checked vendored values', () => {
     ];
   });
   assert.deepEqual(reexports, [
+    ['../../vendor/oar/45488e7/runtimes/dsh/mcp.js', [['dshMcpRows', 'dshMcpRows']]],
     ['../../vendor/oar/45488e7/runtimes/dsh/session.js', [['dshSession', 'dshSession']]],
     ['../../vendor/oar/45488e7/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
     ['../../vendor/oar/45488e7/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],

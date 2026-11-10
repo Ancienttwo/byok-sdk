@@ -192,6 +192,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       platforms: ['darwin', 'linux', 'win32'],
       capabilities: {
         ...CLAUDE_RUNTIME_CAPABILITIES,
+        ...(options.agentSessionPersistence === 'disabled' ? { resume: false } : {}),
         isolation: {
           ...CLAUDE_RUNTIME_CAPABILITIES.isolation!,
           ...(options.agentUserContext === 'excluded' ? {} : {
@@ -315,14 +316,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
     try {
       throwIfCancelled();
       const persistSession = startInput.manifest.agentRef === undefined || this.options.agentSessionPersistence !== 'disabled';
-      // With persistence off, Claude saved no transcript to resume. Refused
-      // before any write, so the task never runs as a silent fresh session.
-      if (!persistSession && startInput.manifest.sessionRef !== undefined) {
-        throw new RuntimeExecutionFailure({
-          phase: 'start', category: 'authority', retry: 'non-retryable',
-          reason: 'claude Agent session persistence is disabled, so the task cannot resume a session',
-        });
-      }
       // Built before any write, so a refusal leaves no file behind.
       const userContextSettings = this.options.agentUserContext === 'excluded' && startInput.manifest.agentRef !== undefined
         ? claudeAgentUserContextSettings(startInput.manifest, startInput.env, process.platform, os.homedir, dir => {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1677)** — Claude with session persistence disabled declines resume offers before claim; dsh declines unsupported MCP servers before claim; agy observes Host toolsets so MCP tool events and authorization rules identify their server and tool.
+
 - **Fixed (client; #1699)** — Runtime cleanup on macOS accepts an owned process group's EPERM only after the process-table poll confirms that no live members remain, avoiding durable Pi interrupt failures while zombies await reaping.
 
 - **Fixed (client; #1676)** — Offers requiring resume, dispatch selection, prepared input or MCP toolsets are declined before claim when the selected runtime does not declare the required capabilities.

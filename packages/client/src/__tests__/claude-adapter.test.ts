@@ -858,30 +858,10 @@ describe('ClaudeAdapter agentSessionPersistence', () => {
     expect(spawned[0]).not.toContain('--no-session-persistence');
   });
 
-  it.each([
-    ['an Agent writer', async (ctx: PreparedOperationResources) => ctx],
-    ['a memory reader', async (ctx: PreparedOperationResources) => {
-      const runDir = path.join(ctx.workspaceDir, '.byok', 'runs', 't1');
-      await fs.mkdir(runDir, { recursive: true });
-      return { ...ctx, workspaceDir: runDir, agentHome: undefined, reader: { canonicalHome: ctx.workspaceDir } };
-    }],
-  ])('refuses to resume %s before spawning or writing any file', async (_label, shape) => {
-    const { adapter, spawned } = recordingAdapter({ agentSessionPersistence: 'disabled', agentUserContext: 'excluded' });
-    const ctx = await persistingAgentCtx({ FAKE_CLAUDE_SESSION_ID: 'agent-session-1' });
-    ctx.mcpServers = { salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'] } };
-    ctx.mcpToolsetTools = observationOf({ salesko: ['find_leads'] });
-    const owned = await testExecutionScratch();
-    let filesAtRelease: string[] | undefined;
-    const scratch = { ...owned, release: async () => { filesAtRelease ??= await fs.readdir(owned.sdkDir); await owned.release(); } };
-    const failure = await startAdapter(adapter, { ...baseTask, sessionRef: 'agent-session-1' }, { ...await shape(ctx), scratch }).catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
-    expect((failure as Error).message).toBe('claude Agent session persistence is disabled, so the task cannot resume a session');
-    expect(spawned).toEqual([]);
-    expect(filesAtRelease).toEqual([]);
-    expect(await projectFiles(ctx.configDir)).toEqual([]);
-  });
-});
+  it('declares resume unavailable when Agent session persistence is disabled', () => {
+    expect(new ClaudeAdapter({ agentSessionPersistence: 'disabled' }).descriptor.capabilities.resume).toBe(false);
+    expect(new ClaudeAdapter().descriptor.capabilities.resume).toBe(true);
+  });});
 
 describe('ClaudeAdapter against the real installed claude binary (no network/task dispatch required)', () => {
   it('detect() returns a well-formed result whether or not claude is actually installed on PATH here', async () => {
