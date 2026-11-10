@@ -103,7 +103,7 @@ describe('createRuntimeAdapters', () => {
   it.each(['inherit', 'excluded'] as const)('projects %s user context through the factory', agentUserContext => {
     const adapters = createRuntimeAdapters({ runtimes: { pi: { agentUserContext }, claude: { agentUserContext }, codex: { agentUserContext } } });
     expect(adapters.map(({ descriptor }) => [descriptor.id, descriptor.capabilities.isolation?.userInstructions, descriptor.capabilities.isolation?.userMemory]))
-      .toEqual(['pi', 'claude', 'codex'].map(id => [id, agentUserContext === 'excluded', agentUserContext === 'excluded']));
+      .toEqual(['pi', 'claude', 'codex'].map(id => [id, agentUserContext === 'excluded', id === 'pi' || agentUserContext === 'excluded']));
   });
 
   it('builds the adapter set createDaemon builds from the same configuration', () => {

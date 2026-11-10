@@ -195,8 +195,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
         isolation: {
           ...CLAUDE_RUNTIME_CAPABILITIES.isolation!,
           ...(options.agentUserContext === 'excluded' ? {} : {
-            userInstructions: false, userOutputStyle: false, userMemory: false,
+            userInstructions: false, userOutputStyle: false, userMemory: false, userMcpServers: false,
           }),
+          ...(options.agentSessionPersistence === 'disabled' ? {} : { sessionPersistence: false }),
         },
         ...(this.nativeOptions === undefined ? {} : { nativeInteractions: CLAUDE_NATIVE_INTERACTION_CAPABILITIES }),
       },

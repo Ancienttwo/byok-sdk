@@ -303,7 +303,7 @@ export class PiAdapter implements RuntimeAdapter {
         isolation: {
           ...PI_RUNTIME_CAPABILITIES.isolation!,
           ...(this.agentResources.agentUserContext === 'excluded' ? {} : {
-            userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false,
+            userInstructions: false, userSkills: false, userHookContext: false,
           }),
         },
       },
