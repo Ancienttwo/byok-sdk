@@ -120,7 +120,13 @@ async function cancelDiagnostics(workspace: string, home: string, log: readonly 
     const name = row.replace(/ \(\d+B\)$/, '');
     tails.push(`--- ${name}\n${(await fs.readFile(path.join(home, name), 'utf8').catch(() => '')).split(/\r?\n/).slice(-40).join('\n')}`);
   }
-  return `\nworkspace: ${[await exists('hold.mjs'), await exists('hold.pid')].join(' ')}; node=${process.execPath}\nevents:\n${log.join('\n')}\nhome files: ${(await listFiles(home)).join(', ')}\n${tails.join('\n')}`;
+  // The shell tool's recorded state (shell, exit, time) lives in OpenCode's database as JSON text; OpenCode logs none of it.
+  const stored: string[] = [];
+  for (const file of ['opencode.db-wal', 'opencode.db']) {
+    const text = (await fs.readFile(path.join(home, '.local', 'share', 'opencode', file)).catch(() => Buffer.alloc(0))).toString('latin1');
+    for (const match of text.matchAll(/[\x20-\x7e]{0,400}hold\.mjs[\x20-\x7e]{0,900}/g)) if (stored.length < 4) stored.push(`${file}: ${match[0]}`);
+  }
+  return `\nworkspace: ${[await exists('hold.mjs'), await exists('hold.pid')].join(' ')}; node=${process.execPath}\nevents:\n${log.join('\n')}\nhome files: ${(await listFiles(home)).join(', ')}\n${tails.join('\n')}\nstored shell records:\n${stored.join('\n')}`;
 }
 
 /** The pid of a `pid command` row; `ps` right-aligns its pid column, so leading spaces are not a field. */
