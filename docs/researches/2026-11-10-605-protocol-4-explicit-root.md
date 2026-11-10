@@ -1,13 +1,15 @@
 # #605 L1: protocol 4 and Windows explicit-root open barrier
 
-Refs #605; reuses the retained-chain primitive and per-flush injection cases
-from closed PR #1083 (`8c9e63856a88ac1da53ea007474065ce06f5da05`). Base:
-`0e6c4453988b2df66c6677eaf3f4f7604ebc43ab` on `train/next-minor`.
-The owner signed the full protocol-4 contract on 2026-11-10, including the
-mandatory public argument and the root-durability precondition
+Refs #605 and Draft PR [#1650](https://github.com/Ancienttwo/byok-sdk/pull/1650).
+The implementation reuses the retained-chain primitive and per-flush injection
+cases from closed PR #1083 (`8c9e63856a88ac1da53ea007474065ce06f5da05`). The
+current train integration is `202ac1f49afb98e8f29542d7c18ed691f9ae448f`.
+
+The owner signed the full contract on 2026-11-10, including the mandatory public
+argument and root-durability precondition
 ([record](https://github.com/Ancienttwo/byok-sdk/pull/1650#issuecomment-6762093837)).
-This implementation remains Draft for the coordinator's reviews. It does not
-establish Windows OS-crash or power-loss durability, and it does not enable B.
+The PR remains Draft for the coordinator's reviews. This work does not establish
+Windows OS-crash or power-loss durability and does not enable B.
 
 ## Owner-signed contract
 
@@ -31,122 +33,134 @@ The private JSON-lines `open` request has exactly these fields:
 Unix identity remains `{ "kind": "unix", "dev": "<uint64 decimal>",
 "ino": "<uint64 decimal>" }`. `root` retains its Agent-home meaning.
 `ancestorRoot` is required, non-null, nonempty, absolute, at most 4096 bytes,
-and contains no NUL. It must resolve to an ancestor of `root` (home itself is
-valid for a direct caller's deliberately selected boundary). The daemon never
+and contains no NUL. It must resolve to an ancestor of `root`; home itself is
+valid for a direct caller's deliberately selected boundary. The daemon never
 substitutes home for the enrolled root. Unknown fields, missing/null required
 fields, and every request protocol other than 4 are rejected. Responses use
-protocol 4 and the open result reports helper version `"4"`; the daemon rejects
-any other response protocol or helper version. Upgrade daemon and helper
-together. There is no protocol-3 reader, omitted-root default or fallback.
+protocol 4 and open reports helper version `"4"`; the daemon rejects any other
+response protocol or helper version. Upgrade daemon and helper together.
+There is no protocol-3 reader, omitted-root default or fallback.
 
-The daemon's one authority for this field is
-`AgentHomeResolution.hostStorageRoot`: `AgentHomeLayout.resolveRoot` obtains
-its canonical spelling and `resolve` creates `agentsRoot` and home below it.
-Task helper opens use that same layout authority; export uses its acquired
-binding; the intent/commit backend captures the canonical layout root at daemon
-composition. The admission volume probe deliberately opens that root itself
-as both home and ancestor. It is a probe of the selected root, not a task home.
+The daemon's one authority is `AgentHomeResolution.hostStorageRoot`:
+`AgentHomeLayout.resolveRoot` obtains its canonical spelling and `resolve`
+creates `agentsRoot` and home below it. Task opens use the same layout
+authority; export uses its acquired binding; the intent/commit backend captures
+the canonical layout root at composition. The admission volume probe opens that
+selected root itself as both home and ancestor, rather than a task home.
 
 **Precondition:** `hostStorageRoot` must already exist durably before the first
-helper open. W2-B flushes that directory and the chain below it; it does not
-flush its parent or prove that the root's own directory entry is durable.
-Existing Agent-home root materialization is unchanged and may create a missing
-root. Root initialization: [#1652](https://github.com/Ancienttwo/byok-sdk/issues/1652).
-This Draft claims no proof for creating the root itself.
+helper open. W2-B flushes that directory and its chain below; it does not flush
+its parent or prove durability of the root's own directory entry. Existing
+Agent-home root materialization is unchanged and may create a missing root.
+Root initialization: [#1652](https://github.com/Ancienttwo/byok-sdk/issues/1652).
+No proof is claimed for creating the root itself.
 
-Public breaking signatures, on the next MINOR train:
+Breaking signatures, on the next MINOR train:
 
 - `openAgentMemoryFilesystemHelper({ helperBin, canonicalHome, ancestorRoot,
   homeIdentity, assetRoot? })` requires `ancestorRoot`.
 - `helperAgentMemoryIntentBackend(helperBin, ancestorRoot, assetRoot?)` requires
-  the root as its second argument; `assetRoot` moves to third.
-- The exported helper protocol/version constants change from `3`/`"3"` to
-  `4`/`"4"`.
+  the root second; optional `assetRoot` moves to third.
+- Exported helper protocol/version constants become `4`/`"4"`.
 
-No public Agent-home config or lease field is added. The owner signed the
-field contract, selected root authority, durability precondition and version
-cut; Windows B still awaits the separately required recovery evidence.
+No public Agent-home config or lease field is added. The upgrade manifest
+covers the changed public helper-open export and links the [Host upgrade
+section](../releases/host-upgrade-next-minor.md#agent-memory-helper-protocol-4).
+There is no extracted upgrade-manifest item for this private helper protocol;
+its version cut is included in that entry's migration text.
 
-## Barrier behavior
+## Barrier and Windows path resolution
 
-Windows open validates its existing local-NTFS and leased-home identity gates,
-then retains the ancestor-to-home chain through descriptor-relative child
-opens. Every retained directory must be on the same volume as the pinned home.
-The terminal object must match the already-pinned home. The first flush pass
-runs ancestor to home; relation checks follow; the second runs home to
-ancestor. Every flush is mandatory. No directory above `ancestorRoot` is
-flushed by that Windows chain barrier. macOS retains its existing same-volume
-home-chain barrier and also validates the explicit ancestor relation.
+Windows open retains the ancestor-to-home chain through descriptor-relative
+child opens. Every retained directory must share the pinned home's volume;
+the terminal object must match the already-pinned home. Flush ancestor to
+home, check relations, then flush home to ancestor. Every flush is mandatory,
+and no directory above the selected ancestor is flushed by this Windows
+barrier. macOS retains its existing same-volume home-chain barrier and also
+validates the explicit ancestor relation.
 
-Agent-home initialization creates `.byok` while acquiring the lease and
-`notes` before exposing the memory helper. Open adds an initialization barrier
-for each real directory present: pin and verify the child, flush the child,
-recheck its parent entry, flush home, and recheck the entry again. Repeat opens
-also flush existing directories, so retrying a failed initialization does not
-skip the barrier. Missing entries are not created by the helper. Wrong-type or
-link entries gain no directory authority and remain subject to the existing
-operation/restore checks; open must still permit the repair path for malformed
-`notes`. Failure closes the pinned home before any session is exposed.
+Agent-home initialization creates `.byok` during lease acquisition and `notes`
+before binding the memory helper. Open adds a barrier for each real directory
+present: pin and verify the child, flush it, recheck its parent entry, flush
+home, and recheck the entry again. Repeat opens also flush existing directories,
+so retry does not skip a previously failed barrier. Missing entries are not
+created by the helper. Wrong-type/link entries gain no directory authority and
+remain subject to the existing operation/restore checks; malformed `notes`
+must remain repairable. Failure closes the pinned home before publishing a
+session.
 
-Windows `strictLedgerBarrier` remains false and the production daemon does not
-advertise `agent-memory-intent.v1`. Processor tests use the existing explicit
-W4/W5 test-only B seam. Those tests are not A7 power-loss evidence.
+The existing junction-ancestor fixture failed on Windows after initial wiring.
+Changing its ancestor field from an alias to the canonical parent did not fix
+it. [Hosted Windows job 129706074753](https://github.com/Ancienttwo/byok-sdk/actions/runs/42779537199/job/129706074753)
+reproduced the failure; the existing W2 diagnostic independently showed
+`filepath.EvalSymlinks` failing through the junction while native handle opens
+and flushes succeeded.
 
-## Verification and limits
+Windows therefore resolves both chain names with `GetFinalPathNameByHandleW`,
+using `FILE_NAME_NORMALIZED | VOLUME_NAME_DOS` (flags zero): home from the pinned
+handle, ancestor from an explicitly opened `ancestorRoot`. One normalizer
+removes the extended drive prefix or converts the extended UNC prefix for both
+names, preserving component case. The requested home must still match the
+pinned object. Existing relation, volume and final-home checks remain required.
+Query/normalization failure returns bounded `root_resolution_failed`; there is
+no Windows pathname fallback. Unix retains `EvalSymlinks`; the other production
+use in `syncHomeChain` runs only on Unix. Diagnostic-only uses grant no authority.
 
-Local macOS arm64:
+The original junction assertions remain. A new Windows guard covers resolution
+from the pinned home, DOS/UNC normalization and closed name-handle failure.
+Hosted Windows Go jobs on windows-latest and windows-2022 passed after this
+change, providing red/green evidence against the original failure. A remaining
+raw junction-smoke caller still expected protocol 3; its version and required
+ancestor field were updated to 4 without changing sentinel/refusal assertions.
 
-- `bun run build`, `bun run typecheck`, Go `go test ./...`, and Windows amd64
-  test-binary cross-compilation passed.
-- After the rebase, all 28 affected TS files passed: 354 tests passed and 38
-  skipped, including runtime discovery. The full client suite then passed
-  483 files / 6,489 tests (94 tests skipped); other workspace suites are still
-  running. This full-client run used the pre-handle-fix native artifact;
-  affected helper tests must also run with the regenerated artifact.
-- The native release was built at two independent source paths for all three
-  targets; bytes and generated pin matched. Source-digest release tests passed.
-- `check:api-surface` and `check:version-authority` passed after the deliberate
-  golden update. The coordinator approved only these measured closure increases:
-  client 2,353,342 → 2,353,836 bytes (+494), agent-memory 73,576 → 73,835 (+259),
-  and byok-agent 2,323,578 → 2,324,072 (+494); the README table was regenerated.
-- `check:release-pack` initially refused the uncommitted tree as designed; it
-  must run on the committed Draft head.
+Windows `strictLedgerBarrier` remains false and production does not advertise
+`agent-memory-intent.v1`. Processor tests retain the explicit W4/W5 test-only
+B seam. Those tests are not A7 evidence.
 
-The first actual win-ci Go run (Go 1.26.5, Windows amd64, normal user) passed
-all new protocol, explicit-chain and initialization tests, including every
-injected flush. Its ancestor-junction fixture failed. Using the original
-canonical ancestor authority did not fix it: [hosted Windows job
-129706074753](https://github.com/Ancienttwo/byok-sdk/actions/runs/42779537199/job/129706074753)
-reproduced the failure at `TestWindowsOpenWithJunctionFixtures/ancestor-junction`.
-The existing W2 diagnostic in that job independently showed
-`filepath.EvalSymlinks` failing on a junction-ancestor home while every native
-handle open and flush succeeded.
+## Verification evidence
 
-The fix resolves both Windows chain names with `GetFinalPathNameByHandleW`
-using `FILE_NAME_NORMALIZED | VOLUME_NAME_DOS` (flags zero): home comes from the
-already-pinned handle, ancestor from an explicitly opened `ancestorRoot`.
-One normalizer removes the extended drive prefix or converts the extended UNC
-prefix for both names; it preserves component case. The requested home must
-still identify the pinned object, and the retained-chain relation, volume and
-final-home checks remain mandatory. Query/normalization failure returns the
-specific bounded `root_resolution_failed` error with no pathname fallback.
-Unix retains `EvalSymlinks`; the other production use in `syncHomeChain` is
-only called on Unix. Diagnostic-only uses are not admission paths.
+- Merged build, typecheck, API surface, version authority and upgrade-manifest
+  checks passed. The manifest gate records that the next release must be MINOR.
+- Go race tests passed and the Windows amd64 test binary cross-compiled.
+- All three native targets passed two-path reproducibility. An isolated stage
+  initially generated the handle-fix pin while the full suite owned `dist`;
+  its source digest was checked against the real native tree before copying the
+  generated pin. Real-worktree source/pin tests passed 4/4, followed by a normal
+  merged-worktree native build/repro/pin verification. The stage was deleted.
+- Native source digest:
+  `412481b72e8872d75cf6954c83073b38b87dab6a7410c41cedc9940aed5aff20`.
+- Final local affected TS run, with regenerated native artifacts: 28 files,
+  354 tests passed, 38 skipped (31.32 s).
+- The broader local workspace run passed the full client suite (483 files,
+  6,489 tests, 94 skipped), then failed in K8 cross-bot tests under accumulated
+  load. That full-client run preceded the final Windows handle fix; subsequent
+  affected tests and hosted helper jobs exercise the regenerated artifact.
+- Both macOS hosted helper jobs passed on the merged implementation. Hosted
+  Windows SDK TS helper/processor checks and Node/Bun runtime smoke passed
+  before the stale raw-junction-smoke version assertion described above.
+- Measured closure sizes on the updated train: client 2,353,844 bytes,
+  agent-memory 73,835, and byok-agent 2,324,080. Approved increases remain exactly
+  +494, +259 and +494 over the updated base. README rows were regenerated from
+  the merged build; no selector or workflow edits belong to this PR's own diff.
 
-A new Windows regression covers junction-ancestor resolution from the pinned
-home, shared DOS/UNC normalization, and closed name-handle failure. The original
-junction assertions remain. Local Go race and Windows amd64 cross-compilation
-passed after the fix. All three native targets were rebuilt with the normal
-repository scripts in an isolated stage, including two-path reproducibility;
-the stage source digest was checked against the real native tree before
-copying the generated pin. The worktree source/pin tests passed (4/4).
-Regenerated source digest:
-`412481b72e8872d75cf6954c83073b38b87dab6a7410c41cedc9940aed5aff20`.
-Hosted Windows green and actual win-ci processor verification remain pending.
+The coordinator requested an isolated K8 comparison on the same macOS arm64
+machine, Node 24.18.0 and Bun 1.4.3, sequentially with no overlapping heavy task
+from this seat. Each checkout had its own dependency install, build and native
+assets:
 
-The coordinator paused all win-ci activity after its connection hung during
-large stdin transfers, then restored serialized access. This seat still waits
-for its explicit turn. The remote scratch to remove then is `C:\Users\win\byok-tmp\l1-605-t26m`. Future file transfers must use `hc file`.
-Actual Windows TS processor verification, final Go rerun, release-pack and
-full-suite results will be appended before final handoff. CI on the Draft head
-is the acceptance authority; local and process-kill checks cannot close A7.
+| Checkout | Exact SHA | Result |
+| --- | --- | --- |
+| L1, protocol-4 assets | `e5489c634d8314bca5ac7c02647eba5e43d73014` | 79 files / 720 tests passed, 566.19 s |
+| Train baseline, protocol-3 assets | `202ac1f49afb98e8f29542d7c18ed691f9ae448f` | 79 files / 720 tests passed, 497.50 s |
+
+Command: `bun run --filter @byok-sdk/example-bot-collaboration test`. No
+branch-only isolated failure was found. The failed full-workspace run is not
+counted as a pass.
+
+Per the coordinator's 2026-11-10 decision, final-head hosted windows-latest and
+windows-2022 Go jobs plus the Windows SDK processor/helper and runtime smoke
+checks are sufficient Windows evidence for this Draft. No further win-ci run
+is required for L1; physical-machine/storage-profile evidence belongs to the
+later A7 VM work. Final-head CI and packaging outcomes are recorded on PR
+#1650, the verification authority. Neither local tests nor process kills close
+A7 or justify enabling B.
