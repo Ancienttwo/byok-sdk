@@ -1187,6 +1187,7 @@ The #654 design gives the digest rules for sealed categories (§9.3).
 - The daemon trusts the owner of `storeDir`: that principal can replace `control.token` and `device.json` and so impersonate the control endpoint. Keep `storeDir` in a directory only the daemon's user can write.
 - The `/tmp` fallback directory name carries no uid: a same-named directory another user left behind refuses the bind (`private_dir_foreign_owner`). Remove that directory or shorten `storeDir`.
 - An image without `/tmp` cannot bind the fallback socket of a `storeDir` longer than the socket budget; shorten `storeDir`.
+- **Private socket paths retain two local directory-write race windows.** A foreign-owned socket in a store directory another uid can write can be probed and unlinked, and replacing a fallback directory between `lstat` and `chmod` can redirect the `chmod`. Each window requires a local actor who can write that directory and existed before this change. Keep `storeDir` in a directory only the daemon's user can write.
 
 - **A same-user process can resolve approvals or read device credentials.**
   Stated above, repeated here because it's the single most powerful local
