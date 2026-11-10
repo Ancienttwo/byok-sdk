@@ -179,8 +179,8 @@ and a terminal committed through the store also project an immediately due scope
 User Turns use the shared K8 `userFirst` rule and autonomous set: they overtake unsubmitted routine,
 bot_request and dream intents in their Agent FIFO. Submitted work keeps its order. H does not
 yet apply L's `admitDeviceSlot` reservation. Dream records live in one `dream_state` row per scope,
-read and written in the same transaction as its intents. `store.migrate()` creates the table and
-atomically moves existing frame dreams into it once, refusing a conflicting row or invalid frame.
+read and written in the same transaction as its intents. `store.migrate()` creates the table; it no longer
+moves frame dreams into it, so a store with frame dreams runs v0.41.0 `migrate()` first (#1669).
 Dream state does not count toward the 4096-byte frame limit. Discarding an uncommitted import
 also removes its dream row.
 
