@@ -31,7 +31,9 @@ export function openCodeContract(
 
   async function openCodeEnv(label: string, baseURL: string, bash: 'allow' | 'ask' = 'allow') {
     const box = await createSandbox(label);
-    const env = baseEnv(box.home);
+    // PowerShell, which OpenCode 2.x runs shell tools in on Windows, exits 0 without running the command when PATHEXT is unset (#1696); the
+    // runtime environment the SDK builds for win32 always carries it (runtime/environment.ts), so the contract's environment does too.
+    const env = { ...baseEnv(box.home), ...(process.platform === 'win32' && process.env.PATHEXT !== undefined ? { PATHEXT: process.env.PATHEXT } : {}) };
     const config = {
       $schema: 'https://opencode.ai/config.json', autoupdate: false, permission: { bash, edit: bash }, share: 'disabled', model: `loopback/${MODEL}`, small_model: `loopback/${MODEL}`,
       provider: { loopback: { npm: '@ai-sdk/openai-compatible', name: 'Loopback', options: { baseURL, apiKey: 'runtime-contract-placeholder' }, models: { [MODEL]: { name: 'Contract', tool_call: true, limit: { context: 32_000, output: 4096 } } } } },
