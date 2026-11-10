@@ -338,6 +338,10 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       && isDeepStrictEqual(after.exports?.[key], K8_DREAM_EXPORTS[key]))) {
       for (const key of Object.keys(K8_DREAM_EXPORTS)) delete after.exports[key];
     }
+    // #1664: both adapters import this exact shared assembly entry.
+    if (before.exports?.['./adapter-steps'] === undefined && after.exports?.['./adapter-steps'] === './src/adapter-steps.ts') {
+      delete after.exports['./adapter-steps'];
+    }
   } else if (path === 'examples/byok-mcp-server/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The MCP server example must stay private');
     // #1375: the routine calendar moved to protocol, so the core edge goes.
