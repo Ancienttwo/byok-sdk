@@ -124,10 +124,6 @@ export function terminalEffectsHost(this: TaskRunner): TaskRunnerHost {
     }
   });
 
-  host.registerHandler('mark.finished', (_envelope, context) => {
-    if (context.taskId !== undefined) this['markFinishedTaskId'](context.taskId);
-  });
-
   host.registerHandler('await.close', async (envelope, context) => {
     const active = activeOf(context.taskId);
     if (active === undefined) return undefined;
