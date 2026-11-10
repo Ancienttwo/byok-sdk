@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Changed (client; #1693)** — Offer decline is sent only through the task runner reducer; the two legacy decline fallbacks and `TaskRunner.decline` are removed. The `task.decline` payload is unchanged.
+- **Fixed (client; #1732)** — A private Unix socket whose mode cannot be set to 0600 now fails the listen with `private_socket_mode` and closes the listener instead of staying bound with its existing mode.
 
 - **Fixed (client; #1732)** — A private socket or path-mutation gate directory whose mode cannot be set to 0700 is now refused with `private_dir_mode` instead of being used with its existing mode.
 
