@@ -511,8 +511,8 @@ the wire (`packages/client/src/daemon/control-protocol.ts`,
   ever calls `handleClientHello`/`handleClientAuth` while `phase !== 'ready'`
   and routes to `dispatch()` only once it is.
 - **Permissions**: `storeDir` and the socket's own parent directory are
-  0700; the socket file and `control.token` are 0600 (`control-server.ts`'s
-  `startControlServer`/`bindControlEndpoint`).
+  0700. The natural socket file and `control.token` are 0600 (`control-server.ts`'s
+  `startControlServer`/`bindControlEndpoint`). Fallback sockets are guarded by the verified 0700 parent directory.
 - **Windows (finding F7, hardened further by finding R4)**: POSIX modes
   restrict nothing on win32 — Node's `fs.chmod` there only toggles the
   read-only attribute, never the ACL/DACL. `storeDir`'s actual
