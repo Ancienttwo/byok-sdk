@@ -4,5 +4,6 @@
   "compatibility_date": "2026-08-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "assets": { "directory": "./member-assets", "binding": "ASSETS", "run_worker_first": true, "html_handling": "none" },
   "hyperdrive": [{ "binding": "BYOK_PG", "id": "REPLACE_WITH_CANARY_HYPERDRIVE_ID" }]
 }
