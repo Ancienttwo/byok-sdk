@@ -1147,9 +1147,12 @@ function controlOfflineSummary(health: OperationalHealthFileInspection): string 
   const refusal = health.status === 'valid' ? health.controlEndpointRefusal : undefined;
   if (!refusal) return 'daemon offline';
   const head = `control endpoint refused: ${refusal.code} ${refusal.path} (recorded ${refusal.at}); `;
-  if (refusal.code === 'socket_mode' || refusal.code === 'private_dir_mode') {
-    const mode = refusal.code === 'socket_mode' ? '0600' : '0700';
-    return `${head}the filesystem or a sandbox/MAC policy refused setting the mode to ${mode}; move storeDir to a filesystem that honours chmod or allow chmod`;
+  if (refusal.code === 'socket_mode') {
+    return `${head}the filesystem or a sandbox/MAC policy refused setting the mode to 0600; move storeDir to a filesystem that honours chmod or allow chmod`;
+  }
+  // The refused directory is the socket's fallback directory, never storeDir, so moving storeDir does not help.
+  if (refusal.code === 'private_dir_mode') {
+    return `${head}the filesystem or a sandbox/MAC policy refused setting the mode to 0700; shorten storeDir so the socket needs no fallback directory, or allow chmod on ${refusal.path}`;
   }
   return `${head}remove ${refusal.path} if no byok process uses it`
     + (refusal.code === 'socket_path_not_socket' ? '' : ', or shorten storeDir');

@@ -21,7 +21,10 @@ export class PrivateDirectoryRefusedError extends Error {
       : code === 'private_dir_not_directory' ? 'path is not a directory'
       : code === 'private_dir_mode' ? 'mode could not be set to 0700'
       : `directory is owned by uid ${ownerUid}, not process uid ${processUid}`;
-    super(`refusing private directory "${path}": ${reason}; remove ${path} if no byok process uses it, or shorten storeDir`, cause === undefined ? undefined : { cause });
+    const advice = code === 'private_dir_mode'
+      ? `shorten storeDir so the socket needs no fallback directory, or allow chmod on ${path}`
+      : `remove ${path} if no byok process uses it, or shorten storeDir`;
+    super(`refusing private directory "${path}": ${reason}; ${advice}`, cause === undefined ? undefined : { cause });
     this.name = 'PrivateDirectoryRefusedError';
   }
 }

@@ -351,6 +351,11 @@ describe('diagnostics collector', () => {
     await tracker.noteControlEndpoint({ code: 'socket_mode', path: '/tmp/byok-0123456789abcdef/control.sock' });
     const mode = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
     expect(mode.checks.find((check) => check.id === 'control')?.summary).toContain('refused setting the mode to 0600');
+
+    await tracker.noteControlEndpoint({ code: 'private_dir_mode', path: '/tmp/byok-0123456789abcdef' });
+    const dirMode = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(dirMode.checks.find((check) => check.id === 'control')?.summary)
+      .toContain('shorten storeDir so the socket needs no fallback directory, or allow chmod on /tmp/byok-0123456789abcdef');
   });
 
   it('reports valid health and bounds quarantine inventory', async () => {
