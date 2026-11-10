@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://byok-sdk.dev/schemas/agent-memory-a7-result.v1.json",
-  "title": "A7 revision result",
+  "title": "A7 revision result (documentation only)",
+  "$comment": "Reference documentation only. The runner, verifier and comparison do not execute this schema; verify.mjs enforces evidence semantics with the pinned strict checker.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "role", "before", "revision", "mode", "storageProfile", "helperManifestDigest", "seed", "triggers", "evidence", "status", "cuts", "completeReceipts", "acked", "cleanup", "failures", "evidenceDigest"],

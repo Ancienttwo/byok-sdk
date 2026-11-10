@@ -29,9 +29,10 @@ function checkout(repo, role) {
 // No VM power-control API is present. Only the owner cuts/restarts the VM.
 class OwnerVmDriver {
   fault = 'power-loss';
-  constructor(profile, listen, port, recorder) {
+  constructor(profile, listen, port, recorder, reconnectTimeoutMs) {
     this.storageProfile = { id: profile.id, description: JSON.stringify(profile), dropsUnflushedWrites: profile.dropsUnflushedWrites };
     this.recorder = recorder;
+    this.reconnectTimeoutMs = reconnectTimeoutMs;
     this.console = createInterface({ input: process.stdin, output: process.stderr });
     this.server = net.createServer();
     this.server.listen(port, listen);
@@ -41,7 +42,7 @@ class OwnerVmDriver {
     await this.listening;
     console.error('A7: start/reboot the disposable guest device now; waiting for its connection.');
     const connected = once(this.server, 'connection');
-    const timer = setTimeout(() => this.server.emit('error', new Error('guest boot timed out')), 600_000);
+    const timer = setTimeout(() => this.server.emit('error', new Error(`guest boot timed out after ${this.reconnectTimeoutMs} ms`)), this.reconnectTimeoutMs);
     try { [this.socket] = await connected; } finally { clearTimeout(timer); }
     this.ended = once(this.socket, 'close').then(() => undefined);
     return { link: { input: this.socket, output: this.socket }, ended: this.ended };
@@ -166,6 +167,10 @@ async function run(config, configFile) {
   if (!Number.isSafeInteger(config.rounds) || config.rounds < 1 || config.rounds > 1000
     || !Number.isSafeInteger(config.seed) || config.seed < 1
     || !Number.isSafeInteger(config.maxDelayMs) || config.maxDelayMs < 1) throw new Error('invalid rounds, seed, or maxDelayMs');
+  if (config.mode === 'owner-vm-power-cut' && (!Number.isSafeInteger(config.reconnectTimeoutMs)
+    || config.reconnectTimeoutMs < 1 || config.reconnectTimeoutMs > 2_147_483_647)) {
+    throw new Error('owner VM mode requires reconnectTimeoutMs in 1..2147483647');
+  }
   const { ProcessKillDriver } = await load(repo, `${W5}/drivers.ts`);
   const { runExperiment } = await load(repo, `${W5}/experiment.ts`);
   const { HostJournal, PowercutHost } = await load(repo, `${W5}/host.ts`);
@@ -176,7 +181,8 @@ async function run(config, configFile) {
   const metadata = { kind: 'metadata', schema: SCHEMA, before: BEFORE, role: config.role, revision,
     helperManifestDigest: digest(helperManifest), helperManifest, mode: config.mode, storageProfile: config.storageProfile,
     seed: config.seed, triggers: triggers.map(describeTrigger), host: { platform: process.platform, osBuild: os.release(), runtime: process.version },
-    ownerAuthorization: config.ownerAuthorization ?? null };
+    ownerAuthorization: config.ownerAuthorization ?? null,
+    reconnectTimeoutMs: config.mode === 'owner-vm-power-cut' ? config.reconnectTimeoutMs : null };
   if (config.mode === 'owner-vm-power-cut' && (typeof config.ownerAuthorization !== 'string' || config.ownerAuthorization.trim() === '')) throw new Error('owner VM authorization reference is required');
   // Evidence directory is exclusive, preventing an accidental mixed/reused run.
   mkdirSync(config.output);
@@ -190,7 +196,7 @@ async function run(config, configFile) {
   if (config.mode === 'process-kill') {
     mkdirSync(config.store); // must not already exist
     raw = new ProcessKillDriver({ command: process.execPath, args: [path.join(HERE, 'run.mjs'), 'device', '--config', configFile] });
-  } else raw = new OwnerVmDriver(config.storageProfile, config.listen, config.port, recorder);
+  } else raw = new OwnerVmDriver(config.storageProfile, config.listen, config.port, recorder, config.reconnectTimeoutMs);
   const driver = observe(raw, recorder, metadata);
   try {
     console.error(config.mode === 'process-kill' ? 'HARNESS VALIDATION ONLY — NOT A7' : 'OWNER VM RUN — recorded storage profile only');

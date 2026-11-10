@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,19 +12,15 @@ import { observe } from './run.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const scratch = mkdtempSync(path.join(os.tmpdir(), 'byok-a7-verifier-'));
-let repo = root;
+const repo = path.join(scratch, 'before');
 after(() => {
-  if (repo !== root) execFileSync('git', ['-C', root, 'worktree', 'remove', '--force', repo]);
+  execFileSync('git', ['-C', root, 'worktree', 'remove', '--force', repo]);
   rmSync(scratch, { recursive: true, force: true });
 });
-if (execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() !== BEFORE) {
-  repo = path.join(scratch, 'before');
-  execFileSync('git', ['-C', root, 'worktree', 'add', '--detach', repo, BEFORE], { stdio: 'pipe' });
-  // Bun's isolated workspace links live in each package, so a root
-  // node_modules link alone cannot load the pinned parser's dependencies.
-  execFileSync('bun', ['ci'], { cwd: repo, stdio: 'pipe' });
-  execFileSync('bun', ['run', '--filter', '@byok-sdk/keys', '--filter', '@byok-sdk/protocol', '--filter', '@byok-sdk/core', 'build'], { cwd: repo, stdio: 'pipe' });
-}
+execFileSync('git', ['-C', root, 'worktree', 'add', '--detach', repo, BEFORE], { stdio: 'pipe' });
+// Keep the checker and the tracked-file refusal fixture in an owned checkout.
+execFileSync('bun', ['ci'], { cwd: repo, stdio: 'pipe' });
+execFileSync('bun', ['run', '--filter', '@byok-sdk/keys', '--filter', '@byok-sdk/protocol', '--filter', '@byok-sdk/core', 'build'], { cwd: repo, stdio: 'pipe' });
 const EMPTY = 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 const BASE = `sha256:${'b'.repeat(64)}`;
 const STAMP = '2026-11-10T00:00:00.000Z';
@@ -55,7 +51,7 @@ function fixture(operation = 'replace') {
   return { events, record, snapshot, rows: () => events.map((event) => ({ event, digest: 'test' })) };
 }
 const serialize = (record) => Buffer.from(bridge(repo, 'serialize', { records: [record] })).toString('base64');
-const check = (fixture) => verify(fixture.rows(), repo);
+const check = (fixture, checkerRepo = repo) => verify(fixture.rows(), checkerRepo);
 
 test('independent recorder preserves timestamps, receipt digests, and rejects edits/truncation', () => {
   const file = path.join(scratch, 'evidence.jsonl');
@@ -105,6 +101,18 @@ test('all storage profile fields are required', () => {
   }
 });
 
+test('VM configuration requires a reconnect window within the timer range', () => {
+  const file = path.join(scratch, 'vm-config.json');
+  for (const reconnectTimeoutMs of [undefined, 0, -1, 1.5, 2_147_483_648]) {
+    writeFileSync(file, JSON.stringify({ repo, role: 'before', mode: 'owner-vm-power-cut', storageProfile: profile,
+      rounds: 1, seed: 5, maxDelayMs: 400, reconnectTimeoutMs }));
+    const result = spawnSync('bun', [fileURLToPath(new URL('run.mjs', import.meta.url)), 'run', '--config', file], { encoding: 'utf8', timeout: 10_000 });
+    assert.ifError(result.error);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /requires reconnectTimeoutMs in 1\.\.2147483647/);
+  }
+});
+
 test('verifies durable empty replace and durable delete with the real strict checker', () => {
   for (const operation of ['replace', 'delete']) {
     const result = check(fixture(operation));
@@ -138,21 +146,66 @@ test('allows raw interrupted-write temporaries but requires final helper cleanup
   assert.equal(check(f).status, 'failed');
 });
 
-test('refuses incomplete evidence, wrong profile/revision, and an unacknowledged recovery', () => {
-  for (const mutate of [
-    (f) => f.events.pop(),
-    (f) => f.events.splice(f.events.findIndex((event) => event.kind === 'cleanup'), 1),
-    (f) => { f.events[0].triggers.push('delay:10ms'); },
-    (f) => f.events.splice(f.events.findIndex((event) => event.entry?.kind === 'acked'), 1),
-  ]) {
-    const f = fixture(); mutate(f);
-    assert.equal(check(f).status, 'failed');
-  }
-  for (const field of ['revision', 'osBuild']) {
+test('refuses incomplete evidence, wrong profile/revision, and an unacknowledged recovery', async (t) => {
+  const event = (f, kind) => f.events.find((row) => row.kind === kind);
+  const entry = (f, kind) => f.events.find((row) => row.entry?.kind === kind).entry;
+  const vm = (f) => Object.assign(f.events[0], { mode: 'owner-vm-power-cut', ownerAuthorization: 'synthetic fixture only' });
+  const cases = [
+    ['missing metadata', (f) => { f.events[0].schema = 'other'; }, /missing A7 metadata/],
+    ['invalid revision metadata', (f) => { f.events[0].before = 'b'.repeat(40); }, /invalid revision or schedule/],
+    ['non-pinned checker', (f) => { f.checkerRepo = root; }, /clean pinned before revision/],
+    ['dirty pinned checker', (f) => {
+      const file = path.join(repo, 'README.md'), original = readFileSync(file);
+      f.restore = () => writeFileSync(file, original);
+      writeFileSync(file, Buffer.concat([original, Buffer.from('\nmodified checker fixture\n')]));
+    }, /clean pinned before revision/],
+    ['missing owner authorization', (f) => { f.events[0].mode = 'owner-vm-power-cut'; }, /missing owner VM authorization/],
+    ['missing report', (f) => { f.events.pop(); }, 'experiment did not finish'],
+    ['missing cleanup', (f) => { f.events.splice(9, 1); }, 'missing final helper cleanup snapshot'],
+    ['incomplete schedule', (f) => { f.events[0].triggers.push('delay:10ms'); }, 'incomplete trigger schedule'],
+    ['unacknowledged recovery', (f) => { f.events.splice(5, 1); }, 'recovery left an intent unacknowledged'],
+    ['ack without stored receipt', (f) => { f.events.splice(4, 1); }, /no earlier stored receipt/],
+    ['ack before its receipt', (f) => { const [receipt] = f.events.splice(4, 1); f.events.splice(5, 0, receipt); }, /no earlier stored receipt/],
+    ...Object.entries({ intentId: '123e4567-e89b-42d3-a456-426614174001', operationDigest: `sha256:${'c'.repeat(64)}`,
+      path: 'notes/b.md', operation: 'delete', agentRef: { ...intent.agentRef, profileRevision: '2' } }).map(([field, value]) =>
+      [`receipt completion mismatches ${field}`, (f) => { entry(f, 'receipt').completion[field] = value; }, /completion does not match the issued intent/]),
+    ...['revision', 'osBuild'].map((field) => [`guest ${field} mismatch`, (f) => { f.events[1][field] = 'other'; }, /identity\/profile mismatch/]),
+    ['duplicate issued intent', (f) => { f.events.splice(4, 0, structuredClone(f.events[3])); }, /duplicate issued intent/],
+    ['unissued reference', (f) => { entry(f, 'receipt').intentId = 'unissued'; }, /references an unissued intent/],
+    ['failed notice', (f) => { f.events.splice(-1, 0, { kind: 'journal', entry: { kind: 'failed', intentId: intent.intentId, reason: 'notice failed' } }); }, 'notice failed'],
+    ['conflicting repeat', (f) => { f.events.splice(-1, 0, { kind: 'journal', entry: { kind: 'repeat', intentId: intent.intentId, disposition: 'conflict' } }); }, 'conflict'],
+    ['snapshot order', (f) => { f.events[8].boot = 2; }, /missing or unordered reboot snapshot/],
+    ['snapshot without cut', (f) => { f.events.splice(6, 1); }, /snapshot has no matching cut/],
+    ...[['platform', 'linux'], ['arch', 'arm64']].map(([field, value]) =>
+      [`non-Windows-x64 ${field}`, (f) => { vm(f); f.events[2].snapshot[field] = value; }, /Windows x64 guest/]),
+    ['non-fresh store', (f) => { f.events[2].snapshot.homes = f.snapshot.homes; }, /store was not fresh/],
+    ['duplicate cleanup', (f) => { f.events.splice(9, 0, structuredClone(f.events[9])); }, /duplicate cleanup snapshot/],
+    ['cleanup boot mismatch', (f) => { event(f, 'cleanup').boot = 0; }, /cleanup boot mismatch/],
+    ['duplicate report', (f) => { f.events.push(structuredClone(event(f, 'report'))); }, /duplicate experiment report/],
+    ...['not CUT', 'CUT'].map((confirmation) => [`invalid or unmatched confirmation ${confirmation}`, (f) =>
+      { f.events.splice(6, 0, { kind: 'cut-confirmed', confirmation }); }, /invalid owner cut confirmation/]),
+    ['unknown event', (f) => { f.events.splice(-1, 0, { kind: 'unknown' }); }, /unknown evidence event/],
+    ['stopped early', (f) => { event(f, 'report').report.stoppedEarly = 'recovery failed'; }, 'experiment reported a failure'],
+    ['reported violations', (f) => { event(f, 'report').report.violations = 1; }, 'experiment reported a failure'],
+    ['missing owner cut requests', vm, 'owner cut requests/confirmations do not match'],
+    ['identity without snapshot', (f) => { f.events.splice(-1, 0, { ...f.events[7], boot: 2 }); }, 'guest identity has no snapshot'],
+    ['missing cut report', (f) => { event(f, 'report').report.cuts = []; }, 'incomplete trigger schedule'],
+    ['cut trigger mismatch', (f) => { entry(f, 'cut').trigger = 'host:fetch@1'; }, 'cut schedule mismatch'],
+    ['cut round mismatch', (f) => { entry(f, 'cut').round = 1; }, 'cut schedule mismatch'],
+    ['lost cleanup home', (f) => { event(f, 'cleanup').snapshot.homes = []; }, 'cleanup lost an issued Agent home'],
+  ];
+  for (const [name, mutate, expected] of cases) await t.test(name, () => {
     const f = fixture();
-    f.events[1][field] = 'other';
-    assert.throws(() => check(f), /identity\/profile mismatch/);
-  }
+    try {
+      mutate(f);
+      if (expected instanceof RegExp) assert.throws(() => check(f, f.checkerRepo), expected);
+      else {
+        const result = check(f);
+        assert.equal(result.status, 'failed');
+        assert.ok(JSON.stringify(result.failures).includes(expected), JSON.stringify(result.failures));
+      }
+    } finally { f.restore?.(); }
+  });
 });
 
 test('VM-mode evidence requires an explicit completed-cut confirmation', () => {

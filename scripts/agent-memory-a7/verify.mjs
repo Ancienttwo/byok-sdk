@@ -31,7 +31,8 @@ export function verify(rows, repo) {
   if (metadata.mode === 'owner-vm-power-cut' && (typeof metadata.ownerAuthorization !== 'string' || metadata.ownerAuthorization.trim() === '')) throw new Error('missing owner VM authorization record');
   const failures = [];
   const journal = [];
-  const issued = new Set();
+  const issued = new Map();
+  const receipts = new Set();
   const cuts = [];
   let identities = 0;
   let snapshots = 0;
@@ -44,9 +45,19 @@ export function verify(rows, repo) {
       const entry = event.entry;
       if (entry.kind === 'issued') {
         if (issued.has(entry.intent.intentId)) throw new Error('duplicate issued intent');
-        issued.add(entry.intent.intentId);
+        issued.set(entry.intent.intentId, entry.intent);
       } else if (['receipt', 'acked', 'repeat', 'failed'].includes(entry.kind) && !issued.has(entry.intentId)) {
         throw new Error('Host evidence references an unissued intent');
+      }
+      if (entry.kind === 'receipt') {
+        const intent = issued.get(entry.intentId);
+        if (['intentId', 'operationDigest', 'path', 'operation', 'agentRef']
+          .some((field) => !isDeepStrictEqual(entry.completion?.[field], intent[field]))) {
+          throw new Error('receipt completion does not match the issued intent');
+        }
+        receipts.add(entry.intentId);
+      } else if (entry.kind === 'acked' && !receipts.has(entry.intentId)) {
+        throw new Error('acknowledged intent has no earlier stored receipt');
       }
       if (entry.kind === 'failed' || (entry.kind === 'repeat' && entry.disposition === 'conflict')) failures.push(entry);
       journal.push(entry);
@@ -69,6 +80,7 @@ export function verify(rows, repo) {
       }
       snapshots++;
     } else if (event.kind === 'cleanup') {
+      if (cleanup !== undefined) throw new Error('duplicate cleanup snapshot');
       cleanup = event;
       if (event.boot !== snapshots - 1) throw new Error('cleanup boot mismatch');
     } else if (event.kind === 'report') {
@@ -102,7 +114,7 @@ export function verify(rows, repo) {
     if (expected.size !== 0) failures.push('cleanup lost an issued Agent home');
   }
   const acked = new Set(journal.filter((entry) => entry.kind === 'acked').map((entry) => entry.intentId));
-  if ([...issued].some((id) => !acked.has(id))) failures.push('recovery left an intent unacknowledged');
+  if ([...issued.keys()].some((id) => !acked.has(id))) failures.push('recovery left an intent unacknowledged');
   const processKill = metadata.mode === 'process-kill';
   let evidence = 'harness-validation-not-A7';
   if (!processKill) evidence = metadata.storageProfile.dropsUnflushedWrites ? 'profile-limited-power-loss' : 'profile-limited-vm-power-off';

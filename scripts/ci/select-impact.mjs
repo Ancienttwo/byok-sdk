@@ -660,13 +660,13 @@ export function selectImpact(paths, context = {}) {
     if (path === 'packages/client/scripts/packed-cli-mcp-smoke.mjs' || path === 'packages/client/scripts/fixtures/packed-cli-mcp-codex.mjs') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
-    // #1105: the retention soak is a dev-only artifact producer run by its own
-    // workflow, not by a package test suite.
     // #605 L2: the standalone verifier builds its pinned fixture itself.
     // run-targeted executes it with Node in the existing targeted job.
     if (/^scripts\/agent-memory-a7\/(?:(?:bridge|evidence|run|verify|verifier\.test)\.mjs|result\.schema\.json)$/.test(path)) {
       scripts = true; continue;
     }
+    // #1105: the retention soak is a dev-only artifact producer run by its own
+    // workflow, not by a package test suite.
     if (path === 'scripts/soak/client-retention-soak.mjs') { scripts = true; continue; }
     // The operator collector writes official-pi-closure.json, which is mapped
     // on its own; nothing runs or imports the collector.
