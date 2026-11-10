@@ -1,6 +1,9 @@
 import { expect, it } from 'vitest';
 import { advanceRooms, advanceRoomSeats, applySpeech, memberMentions, roomInput, ROOM_GRACE_MS, setMemberMentions, updateRoom,
   type RoomsState, type SeatFacts } from './rooms';
+import type { AutonomyGate } from './autonomy';
+/** These cases apply every autonomous action, as a Bot in `auto` does. */
+const auto: AutonomyGate = { autonomy: 'auto', record: () => { throw new Error('auto records nothing'); } };
 /** These cases do not read the room projections. */
 const noPublish = (): void => {};
 
@@ -84,7 +87,7 @@ it('applies a room_call batch as a unit: a refused batch changes no seat, an acc
   rejected.length = 0;
   const refused = round(['a']);
   advanceRooms(refused.slice, {}, 0);
-  applySpeech(refused.slice, refused.seats[0]!, { speech: { kind: 'pass' }, room_call: { members: ['b', 'ghost'] } }, 'task-1', 1, noPublish, accept);
+  applySpeech(refused.slice, refused.seats[0]!, { speech: { kind: 'pass' }, room_call: { members: ['b', 'ghost'] } }, 'task-1', 1, noPublish, accept, auto);
   expect(rejected).toEqual(['room_call: Bot is archived or absent']);
   expect(refused.slice.seats[refused.seats[0]!]).toMatchObject({ status: 'pass', released: true });
   expect(refused.slice.rounds[refused.id]).toMatchObject({ seats: [refused.seats[0]], counts: { a: 1 } });
@@ -92,7 +95,7 @@ it('applies a room_call batch as a unit: a refused batch changes no seat, an acc
 
   const { slice, id, seats: [seat] } = round(['a']);
   advanceRooms(slice, {}, 0);
-  applySpeech(slice, seat!, { speech: { kind: 'post', text: 'Over to b' }, room_call: { members: ['b'] } }, 'task-2', 1, noPublish, accept);
+  applySpeech(slice, seat!, { speech: { kind: 'post', text: 'Over to b' }, room_call: { members: ['b'] } }, 'task-2', 1, noPublish, accept, auto);
   expect(rejected).toHaveLength(1);
   const called = slice.rounds[id]!.seats[1]!;
   expect(slice.seats[called]).toMatchObject({ botId: 'b', status: 'waiting', triggerMessageId: seat });
@@ -108,7 +111,7 @@ it('#1393: publishes each seat once as it becomes terminal, and the root once al
   const { slice, id, seats: [a, b], published, publish } = round(['a', 'b']);
   const requests: string[] = [], state = { team: slice, turns: {} }, step = (facts: Record<string, SeatFacts>, now: number) => advanceRoomSeats(state, facts, now, (_id, _botId, request) => { requests.push(request); }, publish);
   step({}, 0);
-  applySpeech(slice, a!, { speech: { kind: 'pass' }, room_call: { members: ['c'] } }, 'task-a', 1, publish, accept);
+  applySpeech(slice, a!, { speech: { kind: 'pass' }, room_call: { members: ['c'] } }, 'task-a', 1, publish, accept, auto);
   const c = slice.rounds[id]!.seats[2]!;
   const seat = (seatId: string, botId: string, status: string, reason?: string) => [`room-seat:r:${seatId}`,
     { roomId: 'r', root: id, roundId: id, seatId, botId, status, late: false, ...(reason ? { reason } : {}) }];

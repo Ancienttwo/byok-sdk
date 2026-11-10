@@ -229,7 +229,7 @@ function observeStart(seat: Seat, now: number): void {
  * A seat that the speech makes terminal is published after the `room_call`, which can add seats to its root (#1393).
  */
 export function applySpeech(team: RoomsState, seatId: string, document: Pick<BotTurnOutcome, 'speech' | 'room_call'>, taskId: string, now: number,
-  publish: Publish, accept: (action: string, work: () => void) => void, gate?: AutonomyGate): void {
+  publish: Publish, accept: (action: string, work: () => void) => void, gate: AutonomyGate): void {
   const seat = team.seats[seatId]!;
   const round = team.rounds[seat.roundId]!, room = team.rooms[round.roomId]!;
   const settled = seatSettled(seat);

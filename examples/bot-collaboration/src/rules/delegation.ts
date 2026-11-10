@@ -228,7 +228,7 @@ export function reserveUnits(n: number): number { return n + Math.max(n, 1); }
  * #1229: an observing Bot records a cross-Bot item as would-do: no delegation row, no bot_request Turn, no budget unit.
  */
 export function applyDelegate(state: DelegationState, turn: Turn, taskId: string, outcome: BotTurnOutcome, seat: boolean,
-  now: number, emit: Publish, accept: (action: string, work: () => void) => void, gate?: AutonomyGate): { successor: boolean } {
+  now: number, emit: Publish, accept: (action: string, work: () => void) => void, gate: AutonomyGate): { successor: boolean } {
   let successor = false;
   const rows: Delegation[] = [];
   const accepted: Delegation[] = [];

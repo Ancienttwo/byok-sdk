@@ -3,6 +3,9 @@ import { hash, type LedgerState } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { stateOf, type Turn } from './model';
 import { advanceRooms, applySpeech, roomInput, ROOM_GRACE_MS } from './rooms';
+import type { AutonomyGate } from './rules/autonomy';
+/** These cases apply every autonomous action, as a Bot in `auto` does. */
+const auto: AutonomyGate = { autonomy: 'auto', record: () => { throw new Error('auto records nothing'); } };
 import { applyManagement, roomFields } from './team';
 import { outcomeSchema, turnContext } from './schema';
 import { HISTORY_MAX_BYTES } from './history';
@@ -25,7 +28,7 @@ function setup(count = 3, admin?: string) {
   const advance = (now = 0) => advanceRooms(ledger, state, now, add, noPublish);
   const speech = (id: string, members?: string[], now = 0, text?: string) => applySpeech(state, state.turns[id]!, {
     speech: text === undefined ? { kind: 'pass' } : { kind: 'post', text }, ...(members ? { room_call: { members } } : {}),
-  }, `task-${id}`, now, noPublish, accept);
+  }, `task-${id}`, now, noPublish, accept, auto);
   return { ledger, state, rejected, accept, advance, speech };
 }
 
