@@ -53,3 +53,13 @@ export declare function codexSession(
 ): Promise<RawCodexSession>;
 /** One request on the session's own app-server client. */
 export type CodexOpenStepRequest = (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+export declare class SessionUnavailableError extends Error {
+  readonly name: 'SessionUnavailableError';
+  readonly sessionId: string;
+  readonly reason: 'archived' | 'in_use';
+  readonly cause: { readonly method: string; readonly native: Readonly<Record<string, unknown>> };
+  constructor(sessionId: string, message: string, details: { readonly reason: 'archived' | 'in_use'; readonly method: string; readonly native: Readonly<Record<string, unknown>> });
+}
+export declare class RuntimeFailureError extends Error { readonly name: 'RuntimeFailureError'; readonly failure: string; }
+export declare class UnsupportedOptionError extends Error { readonly name: 'UnsupportedOptionError'; readonly option: string; }

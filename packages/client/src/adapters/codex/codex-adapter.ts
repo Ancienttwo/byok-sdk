@@ -1,3 +1,5 @@
+import * as codexRuntime from '../../runtime/codex-session-runtime';
+import { oarStartFailure } from '../oar-start-failure';
 import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import type { RuntimeTaskInput } from '../../types';
@@ -32,7 +34,6 @@ import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import {
   codexSession,
-  SessionNotFoundError,
   type RawCodexSession,
 } from '../../runtime/codex-session-runtime';
 import { codexFailure } from '../../runtime/oar-failure-runtime';
@@ -367,27 +368,7 @@ export class CodexAdapter implements RuntimeAdapter {
           cause: disposal,
         });
       }
-      // A failed record stream is the cause; the open or prompt error is its consequence.
-      const error = session.halted ?? thrown;
-      // A resume of a missing thread cannot succeed on retry: fail closed.
-      if (error instanceof SessionNotFoundError)
-        throw new RuntimeExecutionFailure({
-          phase: 'start',
-          category: 'authority',
-          retry: 'non-retryable',
-          reason: error.message,
-        });
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: isRuntimeExecutionFailure(error)
-          ? error.category
-          : 'infrastructure',
-        retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
-        reason: error instanceof Error ? error.message : 'codex open failed',
-        failure: isRuntimeExecutionFailure(error)
-          ? error.failure
-          : { class: session.exitedOnItsOwn ? 'runtime_exited' : 'unknown' },
-      });
+      throw oarStartFailure(session.halted ?? thrown, { classes: codexRuntime, exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'codex' });
     }
   }
 }

@@ -1807,6 +1807,8 @@ misconfiguration. A production counter is no longer on that list.
 
 ### Post-admission runtime failure authority
 
+OAR start error classification is owned by `packages/client/src/adapters/oar-start-failure.ts`. An archived resume target is an authority failure and non-retryable; a target in use is an infrastructure failure and retryable.
+
 After claim, every expected adapter failure crosses one of two boundaries as a
 `RuntimeExecutionFailure`: `start` before a `Session` is published, or `run`
 from the published Session's event iterator. The failure carries two

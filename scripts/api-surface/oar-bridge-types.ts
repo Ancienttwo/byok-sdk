@@ -1,3 +1,5 @@
+import type { OarStartErrorClasses } from '../../packages/client/src/adapters/oar-start-failure';
+type ErrorExports<M> = Extract<keyof M, `${string}Error`>;
 // Check source types across the private JS/declaration boundary.
 // The bridge exposes a smaller surface than the full OAR adapter.
 import type * as Bridge from '../../packages/client/src/runtime/codex-session-runtime.js';
@@ -61,7 +63,7 @@ type BridgeSession = {
 
 // Exact checks catch removed members, extra members, and wider local types.
 // Named aliases identify the failed seam in compiler output.
-export type CheckFunctionExports = Assert<Equal<keyof typeof Bridge, 'codexSession' | 'SessionNotFoundError'>>;
+export type CheckFunctionExports = Assert<Equal<keyof typeof Bridge, 'codexSession' | keyof OarStartErrorClasses>>;
 export type CheckNotFoundInstance = Assert<Equal<Bridge.SessionNotFoundError, VendorSessionNotFoundError>>;
 export type CheckNotFoundConstructor = Assert<Equal<
   ConstructorParameters<typeof Bridge.SessionNotFoundError>,
@@ -154,7 +156,7 @@ type AcpBridgeSession = {
   dispose: AdapterSession['dispose'];
 };
 
-export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError' | 'RuntimeFailureError' | 'UnsupportedOptionError' | 'grokSession' | 'antigravitySession' | 'opencodeSession'>>;
+export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, keyof OarStartErrorClasses | 'grokSession' | 'antigravitySession' | 'opencodeSession'>>;
 export type CheckAcpRuntimeFailure = Assert<Assignable<VendorRuntimeFailureError, AcpBridge.RuntimeFailureError>>;
 export type CheckAcpRuntimeFailureFields = Assert<Equal<Pick<VendorRuntimeFailureError, 'name'>, Pick<AcpBridge.RuntimeFailureError, 'name'>>>;
 export type CheckAcpUnsupportedOption = Assert<Assignable<VendorUnsupportedOptionError, AcpBridge.UnsupportedOptionError>>;
@@ -231,7 +233,7 @@ type DshBridgeSession = {
   records(): readonly DshBridge.DshRecord[];
   dispose: AdapterSession['dispose'];
 };
-export type CheckDshExports = Assert<Equal<keyof typeof DshBridge, 'dshSession' | 'dshMcpRows' | 'SessionNotFoundError' | 'RuntimeFailureError' | 'UnsupportedOptionError'>>;
+export type CheckDshExports = Assert<Equal<keyof typeof DshBridge, 'dshSession' | 'dshMcpRows' | keyof OarStartErrorClasses>>;
 export type CheckDshMcpRows = Assert<Equal<typeof DshBridge.dshMcpRows, typeof vendorDshMcpRows>>;
 export type CheckDshOptions = Assert<Equal<Mutable<DshBridgeArgs[2]>, DshBridgeOptions>>;
 export type CheckDshVendorOptions = Assert<Assignable<DshBridgeArgs[2], VendorDshArgs[2]>>;
@@ -251,3 +253,7 @@ export type CheckDshNotFound = Assert<Equal<DshBridge.SessionNotFoundError, Vend
 import type { opencodeSession as vendorOpenCodeSession } from '../../packages/client/vendor/oar/45488e7/runtimes/opencode/session.js';
 export type CheckOpenCodeVendor = Assert<Equal<typeof vendorOpenCodeSession, VendorStartAcp>>;
 export type CheckOpenCodeBridge = Assert<Equal<typeof AcpBridge.opencodeSession, AcpBridge.StartAcpSession>>;
+
+export type CheckCodexStartErrors = Assert<Equal<ErrorExports<typeof Bridge>, keyof OarStartErrorClasses>>;
+export type CheckAcpStartErrors = Assert<Equal<ErrorExports<typeof AcpBridge>, keyof OarStartErrorClasses>>;
+export type CheckDshStartErrors = Assert<Equal<ErrorExports<typeof DshBridge>, keyof OarStartErrorClasses>>;

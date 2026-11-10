@@ -1,3 +1,4 @@
+import { oarStartFailure } from '../oar-start-failure';
 import type { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,7 +18,7 @@ import {
   type RuntimeVersionPolicy,
   type Session,
 } from '../../types';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { AcpPermissionRequest, AcpPermissionResponse, AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
@@ -233,21 +234,7 @@ export class AgyAdapter implements RuntimeAdapter {
       } catch (disposal) {
         throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
       }
-      // A failed record stream is the cause; the open or prompt error is its consequence.
-      const error = session.halted ?? thrown;
-      // A refused option (an MCP entry with env or headers, an unconfirmed resume cwd) or a missing session cannot succeed on retry.
-      if (error instanceof acp.SessionNotFoundError || error instanceof acp.UnsupportedOptionError)
-        throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: error.message });
-      if (error instanceof acp.RuntimeFailureError)
-        throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: error.message,
-          failure: { class: runtimeFailureClassOf(error.failure) } });
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: isRuntimeExecutionFailure(error) ? error.category : 'infrastructure',
-        retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
-        reason: error instanceof Error ? error.message : 'agy open failed',
-        failure: isRuntimeExecutionFailure(error) ? error.failure : { class: session.exitedOnItsOwn ? 'runtime_exited' : 'unknown' },
-      });
+      throw oarStartFailure(session.halted ?? thrown, { classes: acp, exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'agy' });
     }
   }
 }
