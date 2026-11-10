@@ -475,7 +475,8 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       // Package lookup is denied, and the default adapter reproduces the reported probe failure.
       // The only Pi package a lookup can find is the foreign one above the release.
       // A Node 25.7+ SEA main script's import() loads built-in modules only (#1741).
-      expect(report.lookup).toMatch(/^foreign$|Cannot find (package|module)|No such built-in module/u);
+      expect(report.lookup).toMatch(form === 'node-sea' ? /^foreign$|Cannot find (package|module)|No such built-in module/u
+        : /^foreign$|Cannot find (package|module)/u);
       expect(report.defaultDetect).toEqual({ kind: 'probe-failed' });
       // The default provider's models.json apiKey is pi's login (#345).
       expect(report.detect).toEqual({
