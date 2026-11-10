@@ -19,6 +19,7 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
@@ -40,13 +41,13 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 });
 
-async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[]): Promise<TaskRunner> {
+async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], missingFlag?: string): Promise<TaskRunner> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-refusal-'));
   dirs.push(dir);
   // The Host skipped the gate in these tests, and the daemon's own advertised-flag
   // check is not the subject: advertise every flag so the offer reaches the sealed decline.
   return new TaskRunner({...testAgentHomeDeps(), ...freshOfferEgressDeps(),
-    advertisedCapabilities: advertiseEveryDeviceFlag,
+    advertisedCapabilities: () => advertiseEveryDeviceFlag().filter((flag) => flag !== missingFlag),
     getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     deviceId: 'sealed-refusal-device', send: (event) => { sent.push(event); },
@@ -58,6 +59,20 @@ async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[]): Promis
     localAgentRelease: Object.freeze({ version: '0.24.0-rc.1' }),
   });
 }
+
+describe('strict offer decline redelivery', () => {
+  it('declines a redelivered plaintext offer with a missing capability only once', async () => {
+    const sent: Envelope[] = [];
+    const runner = await runnerWith(new StubRuntimeAdapter('pi'), sent, 'agent-egress-policy');
+    const payload = { agentRef: freshTestAgentRef(), session: { mode: 'resume' as const, sessionRef: 'session-1' }, instruction: 'x', runtime: 'pi' as const, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
+    await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId: 'plain-decline', seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId: 'plain-decline', seq: 2 }));
+    const declines = sent.filter((envelope) => envelope.type === 'task.decline');
+    expect(declines).toHaveLength(1);
+    expect(declines[0]!.payload).toMatchObject({ reason: 'offer_capability_missing: this daemon does not advertise agent-egress-policy', retryable: false });
+    expect(declines[0]!.payload).not.toHaveProperty('code');
+  });
+});
 
 describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', () => {
   it.each(sealedOffers)(
