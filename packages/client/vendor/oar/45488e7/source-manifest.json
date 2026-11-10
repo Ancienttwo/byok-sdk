@@ -452,6 +452,12 @@
       "vendoredSha256": "f75a7b8a17363b953efadd0d4ae79ac55b6dc327354b7caa6c3cd81bf960f6ea"
     },
     {
+      "path": "runtimes/opencode/failure.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/failure.ts",
+      "upstreamSha256": "f20f44de095eb1ab6354974a13369570ab17347bd99d858fa2f55d2d38e34316",
+      "vendoredSha256": "f20f44de095eb1ab6354974a13369570ab17347bd99d858fa2f55d2d38e34316"
+    },
+    {
       "path": "runtimes/opencode/options.ts",
       "sourcePath": "packages/oar/src/runtimes/opencode/options.ts",
       "upstreamSha256": "7ef5a8fd08b2ad299f5c5bd35fae0dd3ed5594b13b745bc091334e4d54dc74e6",
@@ -468,8 +474,8 @@
       "path": "runtimes/opencode/session.ts",
       "sourcePath": "packages/oar/src/runtimes/opencode/session.ts",
       "upstreamSha256": "177bdb2de8c2f2acb2732ec00bca50918d95a4d06c907ffeb527f37d62a3e551",
-      "vendoredSha256": "e0e6227ce2db995e44caf5a19187a496e75aa3929f620b7b5950d2a89969e1cd",
-      "delta": "Inject SDK-owned line and terminal processes, explicit environment and hooks; require the probed release token; run bounded prompt configuration queries through the owned terminal seam without sealSession. Clear the prompt-cleanup disposal cache on rejection so later disposal retries reclaim terminals, while concurrent and successful calls share the cached promise."
+      "vendoredSha256": "24adf5e6a37cb6c9a71e8339ce41c66cafddfb5ebceb1aa7724bbd1655027d5e",
+      "delta": "Inject SDK-owned line and terminal processes, explicit environment and hooks; require the probed release token; run bounded prompt configuration queries through the owned terminal seam without sealSession. Clear the prompt-cleanup disposal cache on rejection so later disposal retries reclaim terminals, while concurrent and successful calls share the cached promise. Carry OAR #710: import opencodeFailureOutcome from ./failure.js and set it as the profile's failureOutcome (two lines; drop them at the re-vendor that brings #710)."
     },
     {
       "path": "runtimes/opencode/version.ts",

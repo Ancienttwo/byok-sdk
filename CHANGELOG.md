@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1563)** — An OpenCode prompt failure that names its cause in the ACP error's `data.errorName` now reports the structured class on `task.fail`: `provider.free-limit`, `go-limit`, `budget-limit`, `model-budget-limit` and `quota` are `quota`, and `provider.rate-limit` is `rate_limited`, where both were `unknown`. A failure classified only from its message stays `unknown` and no longer switches to the next model candidate. The reader is carried in the vendored OAR from botiverse/oar#710 until upstream merges it; only `provider.free-limit` has been observed live.
+
 - **Added (client; #1593)** — The OpenCode descriptor also declares `platforms: ['win32']`. The OpenCode runtime contract gains lifecycle cases (same-session resume with a different workspace refused, a refused permission request, cancellation of a running shell tool, no surviving OpenCode process after close) and runs on Windows in CI. Both release lines passed them on macOS arm64 and Windows x64. See the [qualification evidence](docs/researches/2026-11-09-opencode-platform-qualification.md).
 
 - **Added (client; #1593)** — A runtime contract (`opencode1` and `opencode2` legs) runs OpenCode 1.19.5 and 2.2.6 against a loopback provider in CI. It passed on macOS arm64 and Windows x64; the descriptor's `platforms` is unchanged (`['darwin']`). See the [qualification evidence](docs/researches/2026-11-09-opencode-platform-qualification.md).

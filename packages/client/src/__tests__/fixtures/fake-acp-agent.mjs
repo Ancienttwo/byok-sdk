@@ -86,13 +86,19 @@ async function prompt(message) {
   log({ kind: 'prompt', text: full });
   // The daemon may put rules before the task; the last line selects the scenario.
   const input = full.trim().split('\n').at(-1) ?? '';
+  // opencode's structured failures: data.errorName decides the class; a name outside the table leaves it to the words.
+  if (input.startsWith('opencode-error:')) {
+    const [errorName, ...words] = input.slice('opencode-error:'.length).split('|');
+    error(message.id, -32603, `Internal error: ${words.join('|')}`, { service: 'session', errorName }); return;
+  }
   if (input.startsWith('opencode-limit')) {
     if (input === 'opencode-limit-after-output') text('already emitted');
     if (input === 'opencode-limit-after-thought') update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking' } });
     if (opencodeModel === 'fixture/first' || input === 'opencode-limit-always') {
       const gate = process.env.FAKE_ACP_RATE_GATE;
       while (gate && !existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
-      error(message.id, -32603, 'Rate limit exceeded'); return;
+      // opencode names the cause in data.errorName; `opencode-limit-text` carries only the words.
+      error(message.id, -32603, 'Rate limit exceeded', input === 'opencode-limit-text' ? undefined : { service: 'session', errorName: 'provider.rate-limit' }); return;
     }
     text('fallback reply'); result(message.id, { stopReason: 'end_turn' }); return;
   }
