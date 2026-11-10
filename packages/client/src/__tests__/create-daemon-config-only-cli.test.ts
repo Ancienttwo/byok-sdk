@@ -187,7 +187,7 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     }]);
     expect(effective.toolAuthorization).toEqual({ mode: 'static', byRuntime: { grok: 'all' }, localToolApproval: 'host-only' });
     expect(constructed.grok).toEqual([expect.objectContaining({
-      compatInstructions: 'disabled', agentUserMcpServers: 'excluded', versionPolicy, versionPolicySource: 'daemon-config',
+      compatInstructions: 'disabled', agentUserMcpServers: 'excluded', versionPolicy,
     })]);
     expect([...constructed.pi, ...constructed.claude, ...constructed.codex]).toEqual([]);
 

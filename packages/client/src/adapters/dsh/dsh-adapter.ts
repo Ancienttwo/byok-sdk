@@ -94,8 +94,6 @@ export interface DshAdapterOptions {
   runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
-  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-  versionPolicySource?: 'adapter-option' | 'daemon-config';
   resolveBin?: () => ResolvedBin;
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
@@ -166,12 +164,7 @@ export class DshAdapter implements RuntimeAdapter {
     this.maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'dsh');
     this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'dsh');
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'DshAdapterOptions.runtimeEnvironment');
-    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
-      descriptor: DSH_VERSION_POLICY,
-      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-        ? { daemonConfig: options.versionPolicy }
-        : { adapterOption: options.versionPolicy }),
-    }).policy;
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(DSH_VERSION_POLICY, options.versionPolicy);
     this.root = root;
     this.sandbox = sandbox;
     this.options = { ...options, model: Object.freeze({ ...options.model }) };

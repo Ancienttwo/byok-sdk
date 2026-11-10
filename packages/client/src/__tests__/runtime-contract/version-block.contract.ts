@@ -53,18 +53,18 @@ describe('runtime contract: synthetic Host version block (#1103)', () => {
   });
 
   it('declines before claim, without prepare or start, for an installed blocked version', async () => {
-    const resolution = resolveRuntimeVersionPolicy({ descriptor: DESCRIPTOR_DEFAULT, adapterOption: HOST_POLICY });
-    expect(resolution.policy).toEqual(HOST_POLICY);
-    expect(runtimeVersionVerdict(resolution.policy, '1.5.2')).toEqual({
+    const policy = resolveRuntimeVersionPolicy(DESCRIPTOR_DEFAULT, HOST_POLICY);
+    expect(policy).toEqual(HOST_POLICY);
+    expect(runtimeVersionVerdict(policy, '1.5.2')).toEqual({
       state: 'block', qualifiedVersion: '1.4.0', matched: '1.5.',
     });
 
     const stub = new StubRuntimeAdapter('codex', {
-      kind: 'available', version: '1.5.2', ...runtimeVersionDetectionFields(resolution.policy, '1.5.2'),
+      kind: 'available', version: '1.5.2', ...runtimeVersionDetectionFields(policy, '1.5.2'),
     });
     let prepareCalls = 0;
     const adapter: RuntimeAdapter = {
-      descriptor: freezeRuntimeAdapterDescriptor({ ...stub.descriptor, versionPolicy: resolution.policy }),
+      descriptor: freezeRuntimeAdapterDescriptor({ ...stub.descriptor, versionPolicy: policy }),
       detect: () => stub.detect(),
       runtimeEnvironment: async () => testRuntimeEnvironment(),
       prepare: async (input): Promise<RuntimeAdapterPrepareResult> => {

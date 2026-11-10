@@ -171,6 +171,10 @@ No Host configuration change is required (#1688). `RuntimeEnvironmentReport` gai
 
 K8 rules now build the Bot autonomy gate themselves (#1665). A Host adapter that builds its own `OutcomePorts` removes the `autonomy` member; a direct caller of `applySpeech` or `applyDelegate` passes an `AutonomyGate`. A refusal for a missing Host port is now `MissingPortError` from `rules/commands.ts`, with `code` `missing_port` and the port `kind`; the message text is unchanged, so match on `code` instead of the message.
 
+## Version policy source
+
+The eight built-in adapter option types (`AgyAdapterOptions`, `ClaudeAdapterOptions`, `CodexAdapterOptions`, `DshAdapterOptions`, `GrokAdapterOptions`, `HermesAdapterOptions`, `OpenCodeAdapterOptions`, `PiAdapterOptions`) no longer accept the internal `versionPolicySource` option (#1682). A Host that constructs an adapter directly deletes `versionPolicySource` from the options object. `versionPolicy` itself, `DaemonConfig.runtimes.<id>.versionPolicy` and the version verdicts they produce are unchanged: a Host policy still replaces the descriptor default wholesale.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.

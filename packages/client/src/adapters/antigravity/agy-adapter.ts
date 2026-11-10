@@ -61,8 +61,6 @@ export interface AgyAdapterOptions {
   runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
-  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-  versionPolicySource?: 'adapter-option' | 'daemon-config';
   resolveBin?: () => ResolvedBin;
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
@@ -114,12 +112,7 @@ export class AgyAdapter implements RuntimeAdapter {
     this.maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'agy');
     this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'agy');
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'AgyAdapterOptions.runtimeEnvironment');
-    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
-      descriptor: AGY_VERSION_POLICY,
-      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-        ? { daemonConfig: options.versionPolicy }
-        : { adapterOption: options.versionPolicy }),
-    }).policy;
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(AGY_VERSION_POLICY, options.versionPolicy);
     this.root = root;
     this.options = { ...options };
     brandAgySessionStore(this, agyStoreDir(root));

@@ -10,7 +10,6 @@ import {
   runtimeVersionDetectionFields,
   runtimeVersionPolicyIssues,
   runtimeVersionVerdict,
-  type RuntimeVersionPolicyResolution,
 } from '../runtime-version-policy';
 import type { RuntimeVersionPolicy } from '../types';
 
@@ -20,7 +19,7 @@ const policy = (overrides: Partial<RuntimeVersionPolicy> = {}): RuntimeVersionPo
   ...overrides,
 });
 
-function resolutionIssues(run: () => RuntimeVersionPolicyResolution) {
+function resolutionIssues(run: () => RuntimeVersionPolicy | undefined) {
   try { run(); } catch (error) {
     expect(error).toBeInstanceOf(InvalidRuntimeVersionPolicyError);
     return (error as InvalidRuntimeVersionPolicyError).issues;
@@ -81,28 +80,23 @@ describe('runtime version policy evaluation (#1103)', () => {
 describe('resolveRuntimeVersionPolicy (#1103 O5)', () => {
   const descriptor = policy({ qualifiedVersion: 'descriptor', unqualified: 'warn', warn: [{ kind: 'exact', version: 'd' }] });
   const adapterOption = policy({ qualifiedVersion: 'adapter', unqualified: 'warn', allow: [{ kind: 'exact', version: 'a' }] });
-  const daemonConfig = policy({ qualifiedVersion: 'daemon', unqualified: 'block', block: [{ kind: 'prefix', prefix: '0.16.' }] });
 
-  it('picks daemonConfig > adapterOption > descriptor and never merges fields', () => {
-    const resolved = resolveRuntimeVersionPolicy({ descriptor, adapterOption, daemonConfig });
-    expect(resolved.source).toBe('daemon-config');
-    expect(resolved.policy).toEqual(daemonConfig);
-    expect(resolved.policy).not.toHaveProperty('allow');
-    expect(resolved.policy).not.toHaveProperty('warn');
-    expect(resolved.overridden).toEqual(['descriptor', 'adapter-option']);
-    expect(Object.isFrozen(resolved.policy)).toBe(true);
-    expect(Object.isFrozen(resolved.policy!.block)).toBe(true);
+  it('picks the Host policy over the descriptor and never merges fields', () => {
+    const resolved = resolveRuntimeVersionPolicy(descriptor, adapterOption);
+    expect(resolved).toEqual(adapterOption);
+    expect(resolved).not.toHaveProperty('warn');
+    expect(Object.isFrozen(resolved)).toBe(true);
+    expect(Object.isFrozen(resolved!.allow)).toBe(true);
   });
 
-  it('falls through to each lower layer wholesale', () => {
-    expect(resolveRuntimeVersionPolicy({ descriptor, adapterOption })).toMatchObject({ source: 'adapter-option', policy: adapterOption, overridden: ['descriptor'] });
-    expect(resolveRuntimeVersionPolicy({ descriptor })).toMatchObject({ source: 'descriptor', policy: descriptor, overridden: [] });
-    expect(resolveRuntimeVersionPolicy({})).toEqual({ source: 'none', overridden: [] });
+  it('falls through to the descriptor wholesale', () => {
+    expect(resolveRuntimeVersionPolicy(descriptor, undefined)).toEqual(descriptor);
+    expect(resolveRuntimeVersionPolicy(undefined, undefined)).toBeUndefined();
   });
 
   it('freezes a copy, not the caller object', () => {
     const source = policy({ allow: [{ kind: 'exact', version: '1.0.1' }] });
-    const { policy: resolved } = resolveRuntimeVersionPolicy({ adapterOption: source });
+    const resolved = resolveRuntimeVersionPolicy(undefined, source);
     expect(resolved).not.toBe(source);
     expect(resolved!.allow).not.toBe(source.allow);
     expect(resolved).toEqual(source);
@@ -112,16 +106,15 @@ describe('resolveRuntimeVersionPolicy (#1103 O5)', () => {
     ['a descriptor block', policy({ block: [{ kind: 'exact', version: '1.0.1' }] })],
     ['a descriptor unqualified block', policy({ unqualified: 'block' })],
   ])('rejects %s (block_requires_host)', (_label, descriptorPolicy) => {
-    const issues = resolutionIssues(() => resolveRuntimeVersionPolicy({ descriptor: descriptorPolicy }));
+    const issues = resolutionIssues(() => resolveRuntimeVersionPolicy(descriptorPolicy, undefined));
     expect(issues).toEqual([expect.objectContaining({ reason: 'block_requires_host' })]);
   });
 
-  it('validates every present candidate, even a losing one', () => {
-    const issues = resolutionIssues(() => resolveRuntimeVersionPolicy({
-      descriptor: policy(),
-      adapterOption: policy({ block: [{ kind: 'prefix', prefix: '0.16' }] }),
-      daemonConfig,
-    }));
+  it('validates the Host policy as a Host layer', () => {
+    const issues = resolutionIssues(() => resolveRuntimeVersionPolicy(
+      policy(),
+      policy({ block: [{ kind: 'prefix', prefix: '0.16' }] }),
+    ));
     expect(issues).toEqual([expect.objectContaining({ reason: 'invalid_spec', path: 'adapterOption.versionPolicy.block[0].prefix' })]);
   });
 });

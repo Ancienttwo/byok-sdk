@@ -229,14 +229,14 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
         ...(pi?.durableLane === true ? { durableLane: true } : {}),
         ...(pi?.agentUserContext === undefined ? {} : { agentUserContext: pi.agentUserContext }),
         ...(pi?.packageDir === undefined ? {} : { packageDir: pi.packageDir }),
-        ...(pi?.versionPolicy === undefined ? {} : { versionPolicy: pi.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+        ...(pi?.versionPolicy === undefined ? {} : { versionPolicy: pi.versionPolicy }),
       });
     case 'claude':
       return new ClaudeAdapter({
         nativeAssetRoot: config.nativeAssetRoot, ...environment,
         ...(claude?.agentUserContext === undefined ? {} : { agentUserContext: claude.agentUserContext }),
         ...(claude?.agentSessionPersistence === undefined ? {} : { agentSessionPersistence: claude.agentSessionPersistence }),
-        ...(claude?.versionPolicy === undefined ? {} : { versionPolicy: claude.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+        ...(claude?.versionPolicy === undefined ? {} : { versionPolicy: claude.versionPolicy }),
       });
     case 'codex':
       return new CodexAdapter({
@@ -244,14 +244,14 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
         ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }),
         ...(codex?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: codex.agentUserMcpServers }),
         ...(codex?.agentUserContext === undefined ? {} : { agentUserContext: codex.agentUserContext }),
-        ...(codex?.versionPolicy === undefined ? {} : { versionPolicy: codex.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+        ...(codex?.versionPolicy === undefined ? {} : { versionPolicy: codex.versionPolicy }),
       });
     case 'grok':
       return new GrokAdapter({
         nativeAssetRoot: config.nativeAssetRoot, ...environment,
         ...(grok?.compatInstructions === undefined ? {} : { compatInstructions: grok.compatInstructions }),
         ...(grok?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: grok.agentUserMcpServers }),
-        ...(grok?.versionPolicy === undefined ? {} : { versionPolicy: grok.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+        ...(grok?.versionPolicy === undefined ? {} : { versionPolicy: grok.versionPolicy }),
       });
     case 'dsh':
       return buildDshAdapter(config, environment);
@@ -263,7 +263,7 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
       try {
         return new OpenCodeAdapter({ models: options.models, nativeAssetRoot: config.nativeAssetRoot, ...environment,
           ...(options.executable === undefined ? {} : { resolveBin: () => ({ command: options.executable!, source: 'env' as const }) }),
-          ...(options.versionPolicy === undefined ? {} : { versionPolicy: options.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+          ...(options.versionPolicy === undefined ? {} : { versionPolicy: options.versionPolicy }),
         });
       } catch (error) {
         if (error instanceof TypeError) throw new DaemonConfigInvalidError([invalid('runtimes.opencode', error.message)]);
@@ -286,7 +286,7 @@ function buildDshAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<
     return new DshAdapter({
       home: dsh.home, model: dsh.model, nativeAssetRoot: config.nativeAssetRoot, ...environment,
       ...(dsh.sandbox === undefined ? {} : { sandbox: dsh.sandbox }),
-      ...(dsh.versionPolicy === undefined ? {} : { versionPolicy: dsh.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+      ...(dsh.versionPolicy === undefined ? {} : { versionPolicy: dsh.versionPolicy }),
     });
   } catch (error) {
     if (error instanceof TypeError) throw new DaemonConfigInvalidError([invalid('runtimes.dsh', `DaemonConfig.runtimes.dsh is invalid: ${error.message}`)]);
@@ -304,7 +304,7 @@ function buildAgyAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<
     return new AgyAdapter({
       home: agy.home, nativeAssetRoot: config.nativeAssetRoot, ...environment,
       ...(agy.model === undefined ? {} : { model: agy.model }),
-      ...(agy.versionPolicy === undefined ? {} : { versionPolicy: agy.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+      ...(agy.versionPolicy === undefined ? {} : { versionPolicy: agy.versionPolicy }),
     });
   } catch (error) {
     if (error instanceof TypeError) throw new DaemonConfigInvalidError([invalid('runtimes.agy', `DaemonConfig.runtimes.agy is invalid: ${error.message}`)]);

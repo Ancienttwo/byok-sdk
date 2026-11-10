@@ -91,8 +91,6 @@ export interface HermesAdapterOptions {
   interruptTimeoutMs?: number;
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
-  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-  versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 
 function assertDeadline(value: number | undefined, label: string): void {
@@ -211,12 +209,7 @@ export class HermesAdapter implements RuntimeAdapter {
     assertDeadline(options.gatewayReadyTimeoutMs, 'Hermes gateway ready timeout');
     this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'Hermes');
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'HermesAdapterOptions.runtimeEnvironment');
-    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
-      descriptor: HERMES_VERSION_POLICY,
-      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-        ? { daemonConfig: options.versionPolicy }
-        : { adapterOption: options.versionPolicy }),
-    }).policy;
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(HERMES_VERSION_POLICY, options.versionPolicy);
     this.root = root;
     this.options = { ...options, ...(options.byokLauncher === undefined ? {} : { byokLauncher: ownHermesLauncher(options.byokLauncher) }), ...(options.model === undefined ? {} : { model: Object.freeze({ ...options.model }) }) };
   }

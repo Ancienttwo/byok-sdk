@@ -48,8 +48,9 @@ export type RuntimeVersionSpec =
   | { readonly kind: 'prefix'; readonly prefix: string };
 
 /**
- * Pure, serializable version policy (#1103). The descriptor default, an
- * adapter option and `DaemonConfig.runtimes.<id>.versionPolicy` are complete
+ * Pure, serializable version policy (#1103). The descriptor default and the
+ * Host policy (the adapter option; `createDaemon` passes
+ * `DaemonConfig.runtimes.<id>.versionPolicy` as that option) are complete
  * objects that replace one another wholesale through
  * `resolveRuntimeVersionPolicy`; a field is never merged across them.
  */

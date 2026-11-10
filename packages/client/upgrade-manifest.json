@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "00e3e00e6b43a7d3be92ca0343c009cda12bc9ddc43d75a0fa75e99b4d453de5"
+    "snapshotSha256": "3ebe1b9b639066774f4fc758cbbae89e5800eb678bb1b561eca2f36acb3cde97"
   },
   "configFields": {
     "status": "tracked",
@@ -105,6 +105,30 @@
         "export:@byok-sdk/client#RuntimeEnvironmentReport",
         "export:@byok-sdk/client/adapters#RuntimeEnvironmentReport"
       ]
+    },
+    {
+      "id": "version-policy-source",
+      "impact": "breaking",
+      "summary": "The eight built-in adapter option types (Agy, Claude, Codex, Dsh, Grok, Hermes, OpenCode, Pi) drop the internal option that tagged whether versionPolicy came from the adapter option or daemon config. A Host that constructs an adapter directly deletes that tag from the options object (see the migration section for its name); versionPolicy and the version verdicts it produces are unchanged.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#version-policy-source",
+      "items": [
+        "export:@byok-sdk/client#AgyAdapterOptions",
+        "export:@byok-sdk/client#ClaudeAdapterOptions",
+        "export:@byok-sdk/client#CodexAdapterOptions",
+        "export:@byok-sdk/client#DshAdapterOptions",
+        "export:@byok-sdk/client#GrokAdapterOptions",
+        "export:@byok-sdk/client#HermesAdapterOptions",
+        "export:@byok-sdk/client#OpenCodeAdapterOptions",
+        "export:@byok-sdk/client#PiAdapterOptions",
+        "export:@byok-sdk/client/adapters#AgyAdapterOptions",
+        "export:@byok-sdk/client/adapters#ClaudeAdapterOptions",
+        "export:@byok-sdk/client/adapters#CodexAdapterOptions",
+        "export:@byok-sdk/client/adapters#DshAdapterOptions",
+        "export:@byok-sdk/client/adapters#GrokAdapterOptions",
+        "export:@byok-sdk/client/adapters#HermesAdapterOptions",
+        "export:@byok-sdk/client/adapters#OpenCodeAdapterOptions",
+        "export:@byok-sdk/client/adapters#PiAdapterOptions"
+      ]
     }
   ],
   "changes": [
@@ -128,14 +152,29 @@
       "entry": "adapter-session-limits"
     },
     {
+      "item": "export:@byok-sdk/client#AgyAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
+    },
+    {
       "item": "export:@byok-sdk/client#ClaudeAdapter",
       "change": "changed",
       "entry": "adapter-session-limits"
     },
     {
+      "item": "export:@byok-sdk/client#ClaudeAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
+    },
+    {
       "item": "export:@byok-sdk/client#CodexAdapter",
       "change": "changed",
       "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
@@ -148,6 +187,11 @@
       "entry": "adapter-session-limits"
     },
     {
+      "item": "export:@byok-sdk/client#DshAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
+    },
+    {
       "item": "export:@byok-sdk/client#ExpiringClassId",
       "change": "changed",
       "entry": "codex-session-store"
@@ -158,9 +202,29 @@
       "entry": "adapter-session-limits"
     },
     {
+      "item": "export:@byok-sdk/client#GrokAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
+    },
+    {
       "item": "export:@byok-sdk/client#HermesAdapter",
       "change": "changed",
       "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client#HermesAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
+    },
+    {
+      "item": "export:@byok-sdk/client#OpenCodeAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
+    },
+    {
+      "item": "export:@byok-sdk/client#PiAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
     },
     {
       "item": "export:@byok-sdk/client#ProtectedClassId",
@@ -183,9 +247,19 @@
       "entry": "adapter-session-limits"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#ClaudeAdapter",
       "change": "changed",
       "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
     },
     {
       "item": "export:@byok-sdk/client/adapters#CodexAdapter",
@@ -193,9 +267,19 @@
       "entry": "adapter-session-limits"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#DshAdapter",
       "change": "changed",
       "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#DshAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
     },
     {
       "item": "export:@byok-sdk/client/adapters#GrokAdapter",
@@ -203,9 +287,29 @@
       "entry": "adapter-session-limits"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#GrokAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#HermesAdapter",
       "change": "changed",
       "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#HermesAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#OpenCodeAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",
+      "change": "changed",
+      "entry": "version-policy-source"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentReport",

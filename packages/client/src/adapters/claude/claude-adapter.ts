@@ -131,8 +131,6 @@ export interface ClaudeAdapterOptions {
   agentSessionPersistence?: 'enabled' | 'disabled';
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
-  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-  versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 
 /**
@@ -176,12 +174,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       throw new TypeError('ClaudeAdapterOptions.agentSessionPersistence must be enabled or disabled');
     this.nativeOptions = options.nativeInteractions === undefined ? undefined : snapshotNativeInteractionHostOptions(options.nativeInteractions);
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'ClaudeAdapterOptions.runtimeEnvironment');
-    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
-      descriptor: CLAUDE_VERSION_POLICY,
-      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-        ? { daemonConfig: options.versionPolicy }
-        : { adapterOption: options.versionPolicy }),
-    }).policy;
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(CLAUDE_VERSION_POLICY, options.versionPolicy);
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
       supportsDispatchSelection: true,
