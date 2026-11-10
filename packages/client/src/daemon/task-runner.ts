@@ -1729,8 +1729,9 @@ export class TaskRunner {
   }
 
   /**
-   * Selects which adapter runs this offer, gated on CAPABILITY (MCP toolset
-   * projection, when required) and PRESENCE (`adapter.detect()`) — pre-claim,
+   * Selects which adapter runs this offer, gated on required capabilities
+   * (MCP toolsets, resume, dispatch selection and prepared input) and
+   * presence (`adapter.detect()`) — pre-claim,
    * in both the explicit-runtime and auto-select branches.
    *
    * Explicit-runtime branch (`requestedRuntime` set): allowlist and

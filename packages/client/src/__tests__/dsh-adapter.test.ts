@@ -143,7 +143,7 @@ describe('DshAdapter detect and prepare', () => {
     expect(await adapter.detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
   });
 
-  it('rejects a dispatch selection and a missing binary', async () => {
+  it('rejects a missing binary', async () => {
     const missing = new DshAdapter({ home: await tempDir('bd-'), model: MODEL, resolveBin: () => ({ command: path.join(os.tmpdir(), 'no-such-dsh'), source: 'path' }), runtimeEnvironment: { base: 'allowlist' } });
     await expect(missing.prepare({ offer: { instruction: 'x' }, descriptor: missing.descriptor, requiredToolsetIds: [] })).resolves.toEqual({ kind: 'reject', reason: 'dsh installation refused: not-found', retryable: false });
   });
