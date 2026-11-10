@@ -36,6 +36,15 @@
         "export:@byok-sdk/client#resolveStorageConfig",
         "export:@byok-sdk/client#ProtectedClassId"
       ]
+    },
+    {
+      "id": "agent-memory-helper-protocol-4",
+      "impact": "breaking",
+      "summary": "Direct callers of openAgentMemoryFilesystemHelper must pass the required ancestorRoot from the canonical AgentHomeResolution.hostStorageRoot that owns canonicalHome. Upgrade the daemon and its SDK helper assets together: open requires protocol 4 and ancestorRoot, reports helper version 4, and rejects every other request/response protocol or helper version without a protocol-3 reader or default root. Source integrations using helperAgentMemoryIntentBackend must pass ancestorRoot second and move optional assetRoot to third. hostStorageRoot must already exist durably before the first open; creating that root is outside the barrier and tracked in #1652. Windows intent B remains false pending A7 recovery evidence.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-helper-protocol-4",
+      "items": [
+        "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper"
+      ]
     }
   ],
   "changes": [
@@ -60,6 +69,11 @@
       "item": "export:@byok-sdk/client#resolveStorageConfig",
       "change": "changed",
       "entry": "codex-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",
+      "change": "changed",
+      "entry": "agent-memory-helper-protocol-4"
     },
     {
       "item": "export:@byok-sdk/keys#ModelProviderProfileSchema",
