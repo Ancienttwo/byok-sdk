@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { canonical, concludeOccurrence, hash, occurrenceIntentKey, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
-  type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/server/execution-core';
+  type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine, type RoutineCommands } from '@byok-sdk/server/execution-core';
 import { BOT_DREAM, botRoutines, endable, owned, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
   type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
 import { admitBotToolsets, applyHomeTerminal, applyManagement, applyModels, failHomeFlush, homeEnqueued, homeHead, inactive, planHomeRetry, requireMain, updateBot,
@@ -13,6 +13,7 @@ import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from 
 import { checkDreamInstruction, dreamPolicy, recordDream, reconcileDreamRoutines, type DreamingOptions, type DreamSync } from '@byok-sdk/example-bot-collaboration/dream';
 import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
   commandBots, seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { botOutcomePorts, type IntentOutcomeError } from '@byok-sdk/example-bot-collaboration/adapter-steps';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefusal, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
@@ -20,7 +21,7 @@ import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { syncDreamSlice } from './dreams';
 import { decideMessage, messageCommandId, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDecision } from './messages';
-import { decideFinish, type HostedIntentHandler, type IntentOutcomeError, type TaskEvidence } from './reconcile';
+import { decideFinish, type HostedIntentHandler, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
 import { dueRoutine, hostedRoutineCommands, hostJobCommands, hostJobRowKey, loadSlice, planSlice, recordDue, switchDueVersions,
   writeSlice } from './routines';
@@ -64,8 +65,6 @@ export interface HostConfig {
   /** As L: absent means daily dreaming on; false disables it for this scope. */
   dreaming?: DreamingOptions | false;
 }
-/** The outcome ports of the routine actions of a callback command. The store builds the committed intents and `manage`. */
-export type OutcomeRoutinePorts = Omit<NonNullable<CommandPorts['outcome']>, 'committed' | 'manage'>;
 /**
  * The command ports that the store builds on the state of the open transaction, as L `commitOwner` builds them (K8 host.ts),
  * from the scope's Host config. `manage` is the outcome team management of one task. No caller supplies a port (#793 S9).
@@ -402,10 +401,10 @@ export class HostedCollaborationStore {
    * The commit body, which takes the callback commands too, with the given routine ports of an outcome. Host code only: the
    * shared K8 vectors reach it through a test subclass, as L's vector subject commits through `commitInLedger`.
    */
-  protected commitIn(scope: string, request: CommitRequest<Command>, clock: () => number, outcome?: OutcomeRoutinePorts): Promise<CommitResult> {
+  protected commitIn(scope: string, request: CommitRequest<Command>, clock: () => number, routines?: RoutineCommands): Promise<CommitResult> {
     const command = request.command;
-    return this.commitWith(scope, request, clock, (_state, ports) => outcome && command.kind === 'outcome'
-      ? { outcome: { ...outcome, manage: ports.manage(command.taskId) } } : {});
+    return this.commitWith(scope, request, clock, (_state, ports) => routines && command.kind === 'outcome'
+      ? { outcome: botOutcomePorts({ taskId: command.taskId, routines, manage: ports.manage(command.taskId), roomPosts: false }) } : {});
   }
 
   /**

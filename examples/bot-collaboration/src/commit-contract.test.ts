@@ -22,6 +22,7 @@ import { syncTurn } from './rules/sync';
 import { checkReply, replyCheckDue, type Conclusion, type ReplyCheck } from './rules/delegation';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { writeSnapshotBot } from './team';
+import { botOutcomePorts } from './adapter-steps';
 
 /** The intent fact fields that the memory store keeps. */
 const pick = (row: { conclusion?: Conclusion; cancelReason?: 'cancelled' }) =>
@@ -39,10 +40,12 @@ afterAll(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-function ports(state: CollaborationState, publish: CommandPorts['publish']): CommandPorts {
+function ports(state: CollaborationState, publish: CommandPorts['publish'], command?: Command): CommandPorts {
   return { now: () => VECTOR_NOW, publish, admitInput: fields => admitUserInput(state, fields, undefined, VECTOR_NOW),
     teamBot: row => writeSnapshotBot(state, row, { default: template('device', 'main') }),
-    outcome: { committed: { intent: () => undefined }, manage: () => {}, createRoutine: () => {}, updateRoutine: () => {}, cancelRoutine: () => {} } };
+    ...(command?.kind === 'outcome' ? { outcome: { committed: { intent: () => undefined },
+      ...botOutcomePorts({ taskId: command.taskId, manage: () => {}, roomPosts: false,
+        routines: { create: () => {}, update: () => {}, lifecycle: () => {}, list: () => [] } }) } } : {}) };
 }
 /** Rows that retention moved, and permanent tombstones, kept in memory like the K4 row port. */
 interface MemoryArchive { rows: Record<string, { value: Json; expiresAt?: number }>; retired: string[] }
@@ -72,7 +75,7 @@ function memorySubject(team?: SeedTeam): RetentionSubject & SyncSubject {
       const next = structuredClone(stored), rows = memoryStore(next.archive);
       let admitted: AdmittedIds | undefined;
       const result = commitCommand(next.state, request, { scope: 'memory', recordCallbacks: true,
-        archived: id => rows.get('commands', id) as CommandRecord | undefined, admitted: ids => { admitted = ids; } }, ports(next.state, publishTo(next.outbox)));
+        archived: id => rows.get('commands', id) as CommandRecord | undefined, admitted: ids => { admitted = ids; } }, ports(next.state, publishTo(next.outbox), request.command));
       refuseRetired(admitted, rows.isRetired);
       stored = next;
       return result;
@@ -122,7 +125,7 @@ function ledgerSubject(team?: SeedTeam): RetentionSubject & SyncSubject & { ledg
   ledger.transaction(s => { seedCollaboration(stateOf(s.application), team); });
   return {
     scope: ledger.tenant, ledger,
-    commit: request => commitInLedger(ledger, request, (s: LedgerState) => ports(stateOf(s.application), (id, value) => project(s, id, value))),
+    commit: request => commitInLedger(ledger, request, (s: LedgerState) => ports(stateOf(s.application), (id, value) => project(s, id, value), request.command)),
     retain: (input, limits) => retainInLedger(ledger, input, limits),
     change: edit => { ledger.transaction(s => { edit(stateOf(s.application)); }); },
     // The Host sync loop runs the same function for each Turn.
@@ -231,7 +234,7 @@ function settlementSubject(): SettlementSubject & { ledger: HostLedger } {
   return {
     ...base,
     commit: request => commitInLedger(ledger, request, (s: LedgerState) => {
-      const own = ports(stateOf(s.application), (id, value) => project(s, id, value));
+      const own = ports(stateOf(s.application), (id, value) => project(s, id, value), request.command);
       return { ...own, intents: intentRows(s), outcome: { ...own.outcome!, committed: intentRows(s) } };
     }),
     settle: (now, timers) => {

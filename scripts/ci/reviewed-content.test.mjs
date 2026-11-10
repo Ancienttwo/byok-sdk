@@ -710,6 +710,19 @@ test('#975 slice 5: the K8 manifest admits the switch entry only on top of the e
   }
 });
 
+test('#1664: K8 adds only the shared adapter-steps export', t => {
+  const f = fixture(t), path = 'examples/bot-collaboration/package.json';
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1',
+    exports: { './model': './src/model.ts' } };
+  f.write(path, manifest);
+  rebase(f, 'K8 before shared adapter steps');
+  const exports = { ...manifest.exports, './adapter-steps': './src/adapter-steps.ts' };
+  f.write(path, { ...manifest, exports });
+  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
+  f.write(path, { ...manifest, exports: { ...exports, './other': './src/other.ts' } });
+  assert.throws(() => selectImpact([path], f), /more than/, 'an extra export');
+});
+
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
   const f = fixture(t);
   const path = 'examples/bot-collaboration/package.json';

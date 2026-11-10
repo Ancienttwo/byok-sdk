@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
+import type { RoutineCommands } from '@byok-sdk/server/execution-core';
 import type { Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { CommitRequest, CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { TEST_HOST } from './memory-subject.test-support';
-import { HostedCollaborationStore, type OutcomeRoutinePorts } from './store';
+import { HostedCollaborationStore } from './store';
 
 // The same gate as the dataplane suites (packages/cloud-dataplane/src/__tests__/support/dataplane.ts):
 // without BYOK_TEST_POSTGRES_URL the Postgres suites skip; under BYOK_REQUIRE_DATAPLANE=1 that is a failure.
@@ -19,8 +20,8 @@ if (process.env.BYOK_REQUIRE_DATAPLANE === '1' && POSTGRES_URL === undefined) {
  * vectors send an `outcome` through it, as L's vector subject commits through `commitInLedger`.
  */
 export class VectorStore extends HostedCollaborationStore {
-  override commitIn(scope: string, request: CommitRequest<Command>, clock: () => number, outcome?: OutcomeRoutinePorts): Promise<CommitResult> {
-    return super.commitIn(scope, request, clock, outcome);
+  override commitIn(scope: string, request: CommitRequest<Command>, clock: () => number, routines?: RoutineCommands): Promise<CommitResult> {
+    return super.commitIn(scope, request, clock, routines);
   }
 }
 

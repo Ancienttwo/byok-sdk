@@ -2,8 +2,7 @@ import type { PoolClient } from 'pg';
 import { applyPlan, auditCalendarError, canonical, hash, nextWake, recordOccurrence, routineCommands, routineWakeKey, scheduleNext, switchVersion,
   versionSwitchDue, type FrozenExecutionInput, type RetryPolicy, type HostJobHandler, type Intent, type Json, type LedgerState, type Occurrence, type Routine,
   type RoutineCommands, type RoutineDefinition } from '@byok-sdk/server/execution-core';
-import { BOT_DREAM, BOT_ROUTINE, createDefinition, owned, routineCalendar, routineTurn, updateDefinition } from '@byok-sdk/example-bot-collaboration/routines';
-import type { CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { BOT_DREAM, BOT_ROUTINE, routineCalendar, routineTurn } from '@byok-sdk/example-bot-collaboration/routines';
 import { storedKey } from './layout';
 
 /**
@@ -231,15 +230,5 @@ export function hostJobCommands(slice: RoutineSlice, now: number, hostJobs: Read
       if (!commands.list().find(row => row.definition.id === id)?.definition.hostJob) throw new Error('No Host job routine has this id');
       commands.lifecycle(id, lifecycle);
     },
-  };
-}
-/** The outcome ports of the routine actions of task `taskId`, with the K8 Bot policy, as L binds them (K8 host.ts:291-293). */
-export function outcomeRoutinePorts(slice: RoutineSlice, now: number, taskId: string): Pick<NonNullable<CommandPorts['outcome']>,
-  'createRoutine' | 'updateRoutine' | 'cancelRoutine'> {
-  const commands = hostedRoutineCommands(slice, now);
-  return {
-    createRoutine: (turn, action, index) => commands.create(createDefinition(commands.list(), turn.botId, taskId, index, action, turn.authority ?? 'bot')),
-    updateRoutine: (turn, action) => commands.update(updateDefinition(commands.list(), turn.botId, action)),
-    cancelRoutine: (turn, action) => commands.lifecycle(owned(commands.list(), turn.botId, action.routineId).definition.id, 'completed'),
   };
 }

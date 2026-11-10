@@ -6,7 +6,8 @@ export { hostedMessageConsumer, type AgentMessageConsumer, type AgentMessageInpu
   type MessageConsumerOptions, type MessageDecision } from './messages';
 export type { MessageDisposition } from '@byok-sdk/example-bot-collaboration/rules/message';
 export { freezeIntent, HostedSubmitter, type IntentFreeze, type SubmitFailure, type SubmitPass, type SubmitterOptions } from './intents';
-export { HostedReconciler, IntentOutcomeError, type HostedIntentHandler, type HostedIntentTransaction, type HostedTaskPort, type ReconcileFailure, type ReconcilePass, type ReconcilerOptions, type TaskEvidence } from './reconcile';
+export { IntentOutcomeError } from '@byok-sdk/example-bot-collaboration/adapter-steps';
+export { HostedReconciler, type HostedIntentHandler, type HostedIntentTransaction, type HostedTaskPort, type ReconcileFailure, type ReconcilePass, type ReconcilerOptions, type TaskEvidence } from './reconcile';
 export { DeviceBindingError, DeviceSwitchingError, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 export { SwitchExportedError, SwitchImportedError, type SwitchExportMark, type SwitchImportMark, type SwitchReceipt } from './switch';
 export { connectedDevices, HostedDeviceObserver, type DeviceObserverOptions, type HostedDevicePort } from './devices';

@@ -3,26 +3,15 @@ import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, type FrozenExecutionInput, type FrozenSubmitPort,
   type Json } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { dreamOf } from '@byok-sdk/example-bot-collaboration/dream';
+import { IntentOutcomeError, outcomeFailure, botOutcomePorts, routeTerminal, runHostIntentHandler } from '@byok-sdk/example-bot-collaboration/adapter-steps';
 import { revisionOf, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { deliverCancels } from './intents';
 import { commitStored } from './retention';
 import { storedKey } from './layout';
-import { loadSlice, outcomeRoutinePorts, switchDueVersions, writeSlice } from './routines';
+import { hostedRoutineCommands, loadSlice, switchDueVersions, writeSlice } from './routines';
 import { inSchema, lockScope, type Decision, type HostedCollaborationStore, type Publish, type StorePorts } from './store';
 
-/**
- * A K4 terminal that H cannot apply, as L's `IntentOutcomeError` (K8 host.ts, #882 Q6f): its key is neither a Bot Turn
- * nor a Host intent, its Host handler failed or is not configured here, or the outcome commit of its Bot Turn threw. The
- * terminal transaction rolls back, so the intent stays open at the head of its FIFO, and each reconciliation refuses it
- * again until the outcome applies or the owner calls `failStuckIntent` (#955).
- */
-export class IntentOutcomeError extends Error {
-  constructor(readonly key: string, readonly code: 'unknown_intent' | 'handler_failed' | 'outcome_failed', message: string) {
-    super(message); this.name = 'IntentOutcomeError';
-  }
-}
 /** What a Host intent handler gets in the terminal transaction (#955). `publish` writes a projection row in the same commit. */
 export interface HostedIntentTransaction {
   readonly intent: { readonly key: string; readonly taskId: string };
@@ -286,25 +275,25 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   if (attempt.cancellation || envelope.type === 'task.cancelled') conclusion = 'cancelled';
   else if (envelope.type === 'task.complete' && envelope.payload.sealed === undefined) {
     const document = envelope.payload.document;
-    if (row.handler !== null) {
-      applyHostOutcome(turnId, hostIntents.get(row.handler), row.handler, document, { intent: { key: turnId, taskId: row.task_id }, terminal,
-        publish: base.publish });
+    const route = routeTerminal(state, turnId, row.handler ?? undefined);
+    if (route.kind === 'host_intent') {
+      const handler = hostIntents.get(route.handler);
+      runHostIntentHandler(turnId, route.handler, handler && (() => handler(document, { intent: { key: turnId, taskId: row.task_id }, terminal,
+        publish: base.publish })));
       // As K4 `publish`: each value is a projection row of this commit.
       outbox = [...published.keys()].map(id => ({ kind: 'projection', id }));
       await refuseStoredConflicts(client, scopeKey, turnId, 'handler_failed', outbox, published);
-    } else if (!dreamOf(state, turnId)) {
-      // Owned dreams bypass this parser: their result is device memory, and sync consumes the conclusion.
-      // Not a key that K8 wrote. It must never settle as a success.
-      if (!Object.hasOwn(state.turns, turnId)) throw new IntentOutcomeError(turnId, 'unknown_intent', 'No Bot Turn or Host intent has this key');
+    } else if (route.kind === 'bot_turn') {
       // commitStored reads the committed intents before this row concludes, as L reads its ledger before the terminal transaction writes.
       const slice = await loadSlice(client, scopeKey), head = revisionOf(state);
       let result;
       try {
         result = await commitStored(client, scope, state, { scope, commandId: row.task_id,
           command: { kind: 'outcome', turnId, taskId: row.task_id, document: document as Json } },
-        { ...base, outcome: { manage: manage(row.task_id), ...outcomeRoutinePorts(slice, now, row.task_id) } }, channel);
+        { ...base, outcome: botOutcomePorts({ taskId: row.task_id, routines: hostedRoutineCommands(slice, now),
+          manage: manage(row.task_id), roomPosts: false }) }, channel);
       } catch (cause) {
-        throw new IntentOutcomeError(turnId, 'outcome_failed', cause instanceof Error ? cause.message : String(cause));
+        throw outcomeFailure(turnId, cause);
       }
       await writeSlice(client, scopeKey, slice);
       outbox = result.revision === head + 1 ? result.outbox : [];
@@ -336,22 +325,5 @@ async function refuseStoredConflicts(client: PoolClient, scopeKey: string, key: 
     if (stored && (stored.kind !== 'projection' || canonical(JSON.parse(stored.body!) as Json) !== canonical(value))) {
       throw new IntentOutcomeError(key, code, 'Projection identity conflict');
     }
-  }
-}
-
-/** Runs the handler of a Host intent in the terminal transaction, as L's `applyHostOutcome` (K8 host.ts). */
-function applyHostOutcome(key: string, handler: HostedIntentHandler | undefined, name: string, document: unknown,
-  transaction: HostedIntentTransaction): void {
-  // L refuses to open with an open Host intent whose handler it lacks. H has no such startup check over every scope, so the
-  // terminal fails closed here.
-  if (!handler) throw new IntentOutcomeError(key, 'handler_failed', `Unknown Host intent handler: ${name}`);
-  let result: unknown;
-  try { result = handler(document, transaction); } catch (cause) {
-    throw new IntentOutcomeError(key, 'handler_failed', cause instanceof Error ? cause.message : String(cause));
-  }
-  // The handler shares the terminal transaction, so it must not resolve later. Its promise must not reject unhandled.
-  if (result && typeof (result as { then?: unknown }).then === 'function') {
-    void Promise.resolve(result).catch(() => {});
-    throw new IntentOutcomeError(key, 'handler_failed', 'Host intent handler must be synchronous');
   }
 }
