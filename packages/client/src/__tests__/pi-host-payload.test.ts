@@ -13,6 +13,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import exportLayout from '../adapters/pi/pi-export-asset-layout.json';
 import todoLayout from '../adapters/pi/todo-locale-layout.json';
 import { REQUIRE_BUN_ENV, resolveBunBin } from './support/test-bun-bin';
+import { writeKoffiAssetRoot } from '../../../../scripts/testing/sdk-koffi-asset-root.mjs';
 import { startLoopbackProvider } from './runtime-contract/loopback';
 
 const execFileAsync = promisify(execFile);
@@ -100,24 +101,8 @@ describe('copyPiRuntimeAssets', () => {
  */
 const HOST_ENTRY_SOURCE = `
 import fs from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import nodePath from 'node:path';
 import util from 'node:util';
 import * as sdk from ${JSON.stringify(CLIENT_DIST)};
-// #1710 diagnosis: where the host child looks for koffi, and what loading it throws.
-async function koffiDiagnosis(input) {
-  const probe = async load => { try { return { ok: await load() }; } catch (error) { return { error: util.inspect(error, { depth: 8 }) }; } };
-  const bases = { cwd: nodePath.join(process.cwd(), 'probe.cjs'), entry: nodePath.resolve(process.argv[1] ?? process.execPath), execPath: process.execPath };
-  const resolution = {};
-  for (const [name, base] of Object.entries(bases)) {
-    const req = createRequire(base);
-    resolution[name] = { base, paths: req.resolve.paths('koffi'), koffi: await probe(() => req.resolve('koffi')),
-      koffiWin32: await probe(() => req.resolve('@koromix/koffi-win32-x64/package.json')) };
-  }
-  return { cwd: process.cwd(), execPath: process.execPath, argv1: process.argv[1], importMetaUrl: import.meta.url,
-    nativeAssetRootPassed: input.nativeAssetRoot ?? null, resolution,
-    dynamicImportKoffi: await probe(async () => { const koffi = await import(input.koffiSpecifier); (koffi.default ?? koffi).load('kernel32.dll'); return 'kernel32 loaded'; }) };
-}
 async function main() {
 if (process.env.PAYLOAD_TEST_CHILD_START && process.argv[2] === '--no-extensions') await fs.appendFile(process.env.PAYLOAD_TEST_CHILD_START, 'runner started\\n');
 if (process.argv[2] !== 'task') {
@@ -128,13 +113,13 @@ if (process.argv[2] !== 'task') {
 } else {
   const input = JSON.parse(await fs.readFile(process.argv[3], 'utf8'));
   const report = { stage: 'lookup' };
-  if (process.platform === 'win32') report.koffiDiagnosis = await koffiDiagnosis(input);
   try {
     try { report.lookup = (await import(input.piSpecifier)).FOREIGN === true ? 'foreign' : 'resolved'; } catch (error) { report.lookup = String(error); }
     report.defaultDetect = await new sdk.PiAdapter().detect();
     // The Host sets PI_CODING_AGENT_DIR itself, so the runtime gets it only through pass (#1095); the asset root is packageDir (#1315).
     const adapter = new sdk.PiAdapter({ runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR', 'PAYLOAD_TEST_PRODUCT_REEXEC', 'PAYLOAD_TEST_CHILD_START'] }, sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
-      ...(input.bundleEntry ? { entry: process.argv[1] } : {}) }, ...(input.piPackageDir === undefined ? {} : { packageDir: input.piPackageDir }) });
+      ...(input.bundleEntry ? { entry: process.argv[1] } : {}) }, ...(input.piPackageDir === undefined ? {} : { packageDir: input.piPackageDir }),
+      ...(input.nativeAssetRoot === undefined ? {} : { nativeAssetRoot: input.nativeAssetRoot }) });
     report.stage = 'detect'; report.detect = await adapter.detect();
     report.stage = 'prepare';
     const prepared = await adapter.prepare({ offer: { instruction: input.instruction }, descriptor: adapter.descriptor,
@@ -197,7 +182,7 @@ export default function userExtension(pi: ExtensionAPI): void {
 }
 
 interface HostReport {
-  stage: string; error?: string; errorDetail?: string; koffiDiagnosis?: unknown; lookup?: string;
+  stage: string; error?: string; errorDetail?: string; lookup?: string;
   defaultDetect?: { kind: string }; detect?: unknown;
   launch?: { command: string; entry?: string; fixedArgs: string[] };
   pathPreserved?: boolean; sameExecutable?: boolean; privateSubagentRuntime?: boolean;
@@ -229,6 +214,8 @@ interface HostLayout {
   readonly entry?: string;
   /** `PiAdapterOptions.packageDir`, when the asset root is not beside the executable. */
   readonly piPackageDir?: string;
+  /** `PiAdapterOptions.nativeAssetRoot`: a bundled Windows product loads koffi from the SDK native assets, not from a package. */
+  readonly nativeAssetRoot?: string;
   readonly files: readonly string[];
 }
 
@@ -261,6 +248,13 @@ async function relocationFailure(interpreter: string): Promise<string | undefine
  * asset root. A Node that cannot be relocated skips the case through `skip`.
  */
 async function buildHost(host: HostCase, release: string, buildDir: string, skip: (note: string) => never): Promise<HostLayout> {
+  const layout = await buildHostPayload(host, release, buildDir, skip);
+  if (process.platform !== 'win32') return layout;
+  const sdk = await loadClient();
+  return { ...layout, nativeAssetRoot: await writeKoffiAssetRoot(path.join(buildDir, 'native'), sdk.sdkNativeAssetTargets['win32-x64']) };
+}
+
+async function buildHostPayload(host: HostCase, release: string, buildDir: string, skip: (note: string) => never): Promise<HostLayout> {
   const sdk = await loadClient();
   await fs.writeFile(path.join(buildDir, 'host-entry.ts'), HOST_ENTRY_SOURCE);
   if (host === 'interpreter+bundle (bun)' || host === 'interpreter+bundle (node)') {
@@ -362,7 +356,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         const refused = name === 'host-exact' || name === 'host-bg' || watchdog, reportPath = path.join(run, 'report.json'), input = path.join(run, 'input.json');
         await fs.writeFile(input, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: watchdog ? `/subagents-watchdog ${name === 'watchdog-on' ? 'on' : 'session on'}`
           : name === 'host-exact' ? slash : name === 'host-bg' ? `${slash} --bg` : name === 'host-mid' ? `Literal text: ${slash}` : marker,
-          cwd, env, scratchRoot: testScratchRoot(), report: reportPath, statusProbe: !refused }));
+          cwd, env, scratchRoot: testScratchRoot(), report: reportPath, statusProbe: !refused, nativeAssetRoot: host.nativeAssetRoot }));
         await execFileAsync(host.command, ['task', input], { cwd: run, env, timeout: 60_000 });
         const report = JSON.parse(await fs.readFile(reportPath, 'utf8')) as HostReport;
         const launches = report.gateCalls!.filter(call => call.toolName === 'subagent_launch');
@@ -468,15 +462,14 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       const env = { PATH: process.env.PATH ?? '', HOME: home, USER: os.userInfo().username, TMPDIR: runDir, PI_CODING_AGENT_DIR: agentDir,
         npm_config_registry: deadRegistry, BUN_CONFIG_DEFAULT_REGISTRY: deadRegistry, PAYLOAD_TEST_PRODUCT_REEXEC: reexecMarker };
       const reportPath = path.join(runDir, 'report.json'); const inputPath = path.join(runDir, 'input.json');
-      await fs.writeFile(inputPath, JSON.stringify({ piSpecifier: PI_SPECIFIER, koffiSpecifier: 'koffi', instruction: 'Reply with the host payload marker.',
-        bundleEntry: host.entry !== undefined, piPackageDir: host.piPackageDir, cwd, env, scratchRoot: testScratchRoot(), report: reportPath }));
+      await fs.writeFile(inputPath, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: 'Reply with the host payload marker.',
+        bundleEntry: host.entry !== undefined, piPackageDir: host.piPackageDir, nativeAssetRoot: host.nativeAssetRoot, cwd, env, scratchRoot: testScratchRoot(), report: reportPath }));
 
       await execFileAsync(host.command, [...host.prefix, 'task', inputPath], { cwd: runDir, env, timeout: 60_000 }).catch(async (error: unknown) => {
         throw new Error(`host task failed: ${String(error)}\nreport: ${await fs.readFile(reportPath, 'utf8').catch(() => 'none')}`);
       });
       const report = JSON.parse(await fs.readFile(reportPath, 'utf8')) as HostReport;
-      if (process.platform === 'win32') console.log(`[#1710 ${form}] errorDetail:\n${report.errorDetail ?? 'none'}\nkoffiDiagnosis:\n${JSON.stringify(report.koffiDiagnosis, null, 2)}`);
-      expect(report.error, `failed at ${report.stage}`).toBeUndefined();
+      expect(report.error, `failed at ${report.stage}: ${report.errorDetail}`).toBeUndefined();
       expect(report.stage).toBe('done');
       // Package lookup is denied, and the default adapter reproduces the reported probe failure.
       // The only Pi package a lookup can find is the foreign one above the release.
