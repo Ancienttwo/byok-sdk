@@ -680,17 +680,15 @@ async function startAndActivateRuntime(
   } catch (err) {
     const disposalFailure = isRuntimeStartupDisposalFailure(err);
     const host = hostFor(this);
-    // Either the reducer already reduced the in-flight cancel (X3b) or the
-    // offer-window marker still carries it.
-    const cancelled = pendingCancelBeforeActive.call(this, taskId) !== undefined
-      || host.current(taskId)?.cancel.requested === true;
+    const pendingCancel = pendingCancelBeforeActive.call(this, taskId);
+    const cancelled = pendingCancel !== undefined;
     if (disposalFailure || cancelled) {
       if (cancelled) {
         this['revokeAgentMessageContext'](taskId);
         this['revokeAgentResultContext'](taskId);
       }
       const cancellation = createEnvelope('task.cancelled', {
-        reason: pendingCancelBeforeActive.call(this, taskId)?.reason,
+        reason: pendingCancel?.reason,
         ...terminalIdentity(this['claimedHarnesses'].get(taskId)),
         agentRef: agentBinding.resolution.agentRef,
       }, { taskId });
@@ -708,7 +706,6 @@ async function startAndActivateRuntime(
           await this['pendingMessageTasks'].get(taskId)?.outbox.revoke(taskId);
           this['deps'].send(cancellation);
           cancellationSettled = true;
-          this['pendingCancelled'].delete(taskId);
           host.endTask(taskId);
         } } : nativeSessions ? { settle: async () => {
           if (disposalFailure) await err.retryDisposal();
@@ -723,17 +720,9 @@ async function startAndActivateRuntime(
         },
       });
       held.owner = 'startup';
-      // #1099 S4: startup ownership (C0) is registered before C7 decides the
-      // outcome. A cancel that raced the start (the legacy checkpoint marker)
-      // is reduced as X3 first, so C7 selects cancelled and never failed.
+      // Startup ownership is registered before C7 selects the outcome.
       host.dispatchSync({ type: 'startup.registered', taskId, atMs: Date.now() });
-      const cancelReason = pendingCancelBeforeActive.call(this, taskId)?.reason;
-      if (cancelled) {
-        host.dispatchSync({
-          type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire',
-          ...(cancelReason === undefined ? {} : { reason: cancelReason }),
-        });
-      }
+      const cancelReason = pendingCancel?.reason;
       host.dispatchSync({
         type: 'runtime.start_failed',
         taskId,

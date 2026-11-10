@@ -38,28 +38,11 @@ async function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[]): Promis
 }
 
 /**
- * White-box view onto `TaskRunner`'s private M3-B bounded `pendingCancelled`
- * collection and its `setPendingCancelled` helper — `private` is TypeScript-only
- * and erased at runtime, so this reaches straight past it instead of growing
- * `TaskRunner`'s real public surface just to make these internals testable.
- * Mirrors the same direct-field-access style `task-runner-cancel-race.test.ts`
- * uses for `activeTaskCount`, just for fields that don't have a public getter.
- */
-interface TaskRunnerInternals {
-  pendingCancelled: Map<string, string | undefined>;
-  setPendingCancelled(taskId: string, reason: string | undefined): void;
-}
-
-function internals(runner: TaskRunner): TaskRunnerInternals {
-  return runner as unknown as TaskRunnerInternals;
-}
-
-/**
  * M3-B (bounded-list/map pruning): reducer `finished` and `pendingCancelled`
  * used to gain one entry per finished/cancelled task forever — harmless for
  * a short CLI invocation, a slow memory leak for the long-lived background
- * daemon M3 turns this into. These tests exercise reducer dispatch and the
- * pending-cancel helper to prove growth is capped without needing to drive
+ * daemon M3 turns this into. These tests exercise reducer dispatch to prove
+ * growth is capped without needing to drive
  * thousands of full offer->start->turn_end->complete cycles through the
  * stub adapter, and separately prove — through the real `handleEnvelope`
  * path — that bounding never discards an entry either collection's own
@@ -92,18 +75,19 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const runner = await makeRunner(adapter, sent);
-    const rn = internals(runner);
+    const host = hostFor(runner);
 
     const total = MAX_TRACKED_TASK_IDS * 3; // N >> cap
     for (let i = 0; i < total; i++) {
-      rn.setPendingCancelled(`cancelled-${i}`, `reason-${i}`);
+      host.dispatchSync({ type: 'cancel.received', taskId: `cancelled-${i}`, atMs: i, source: 'wire', reason: `reason-${i}` });
     }
 
-    expect(rn.pendingCancelled.size).toBe(MAX_TRACKED_TASK_IDS);
-    expect(rn.pendingCancelled.has('cancelled-0')).toBe(false);
-    expect(rn.pendingCancelled.has(`cancelled-${total - MAX_TRACKED_TASK_IDS - 1}`)).toBe(false);
-    expect(rn.pendingCancelled.has(`cancelled-${total - MAX_TRACKED_TASK_IDS}`)).toBe(true);
-    expect(rn.pendingCancelled.get(`cancelled-${total - 1}`)).toBe(`reason-${total - 1}`);
+    const pending = host.runnerSnapshot().pendingCancelled;
+    expect(pending).toHaveLength(MAX_TRACKED_TASK_IDS);
+    expect(pending.some(entry => entry.taskId === 'cancelled-0')).toBe(false);
+    expect(pending.some(entry => entry.taskId === `cancelled-${total - MAX_TRACKED_TASK_IDS - 1}`)).toBe(false);
+    expect(pending.some(entry => entry.taskId === `cancelled-${total - MAX_TRACKED_TASK_IDS}`)).toBe(true);
+    expect(pending.at(-1)?.reason).toBe(`reason-${total - 1}`);
   });
 
   it('a just-finished task keeps redelivery idempotency even after the cap is already full of older finished tasks', async () => {
@@ -192,16 +176,16 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const runner = await makeRunner(adapter, sent);
-    const rn = internals(runner);
+    const host = hostFor(runner);
 
     // Fill to exactly the cap with older, never-consumed pending cancels —
     // exactly the "leak" shape M3-B closes (see pendingCancelled's own doc
     // comment: a cancel for a taskId nobody ever claims is never consumed).
     // The map is already "full" before the real race below.
     for (let i = 0; i < MAX_TRACKED_TASK_IDS; i++) {
-      rn.setPendingCancelled(`old-cancel-${i}`, 'never consumed');
+      host.dispatchSync({ type: 'cancel.received', taskId: `old-cancel-${i}`, atMs: i, source: 'wire', reason: 'never consumed' });
     }
-    expect(rn.pendingCancelled.size).toBe(MAX_TRACKED_TASK_IDS);
+    expect(host.runnerSnapshot().pendingCancelled).toHaveLength(MAX_TRACKED_TASK_IDS);
 
     const releaseStart = adapter.blockStart();
     const taskId = 'task-race-window-bounded';
@@ -223,9 +207,7 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
     expect(runner.activeTaskCount).toBe(0);
 
-    // This insert pushes pendingCancelled one over cap, evicting the single
-    // oldest synthetic entry ('old-cancel-0') — taskId itself, being the
-    // newest entry, cannot be the one evicted by its own insertion.
+    // The active offer's cancel lives on its task, independently of the full list.
     const cancelPromise = runner.handleEnvelope(cancelEnvelope);
 
     releaseStart(); // let adapter.start() finally resolve
@@ -239,18 +221,16 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     expect(adapter.sessions[0]?.closeCalled).toBe(true);
     expect(runner.activeTaskCount).toBe(0);
 
-    // The entry this race needed was consumed (deleted) by handleOffer's
-    // checkpoint 2, not evicted — it's gone because it was used, not because
-    // the cap pushed it out from under the in-flight offer.
-    expect(rn.pendingCancelled.has(taskId)).toBe(false);
-    expect(rn.pendingCancelled.size).toBe(MAX_TRACKED_TASK_IDS - 1);
+    // The task's cancellation did not consume an unrelated pending entry.
+    expect(host.runnerSnapshot().pendingCancelled.some(entry => entry.taskId === taskId)).toBe(false);
+    expect(host.runnerSnapshot().pendingCancelled).toHaveLength(MAX_TRACKED_TASK_IDS);
   });
 
   it('finding #5 (Codex counterexample): an in-flight pendingCancelled marker survives MAX_TRACKED_TASK_IDS unrelated cancels inserted AFTER it, so the cancel is still honored once the blocked offer resolves', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const runner = await makeRunner(adapter, sent);
-    const rn = internals(runner);
+    const host = hostFor(runner);
 
     // Block task A in adapter.start() — A's own handleOffer() is now
     // in-flight (this.tasks has no entry for it yet; the offer hasn't
@@ -271,23 +251,18 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     await runner.handleEnvelope(
       createEnvelope('task.cancel', { reason: 'cancel A while blocked' }, { taskId, seq: 2 }),
     );
-    expect(rn.pendingCancelled.has(taskId)).toBe(true);
+    expect(host.current(taskId)?.cancel.requested).toBe(true);
 
-    // Now deliver MAX_TRACKED_TASK_IDS more cancels for completely unrelated
-    // taskIds nobody ever offered (each is a no-op harmless entry per
-    // `pendingCancelled`'s own doc comment) — exactly Codex's counterexample:
-    // under naive "evict the single oldest entry" eviction, A's marker (the
-    // very oldest, since it was inserted first) would be evicted purely
-    // because of this unrelated churn, well before A's own offer ever
-    // resolves.
+    // Unrelated cancels fill the bounded runner list; A's cancellation is
+    // stored on its own task and cannot be evicted by that churn.
     for (let i = 0; i < MAX_TRACKED_TASK_IDS; i++) {
       await runner.handleEnvelope(
         createEnvelope('task.cancel', { reason: 'unrelated churn' }, { taskId: `unrelated-${i}`, seq: 3 + i }),
       );
     }
-    expect(rn.pendingCancelled.size).toBe(MAX_TRACKED_TASK_IDS); // capped...
+    expect(host.runnerSnapshot().pendingCancelled).toHaveLength(MAX_TRACKED_TASK_IDS); // capped...
     // Cancellation may already be sealed while the late runtime remains owned.
-    expect(sent.some(e => e.type === 'task.cancelled' && e.task_id === taskId) || rn.pendingCancelled.has(taskId)).toBe(true);
+    expect(sent.some(e => e.type === 'task.cancelled' && e.task_id === taskId) || host.current(taskId)?.cancel.requested === true).toBe(true);
 
     releaseStart(); // let adapter.start() finally resolve
     await offerPromise;
@@ -309,7 +284,7 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     // Process close precedes the SDK scratch cleanup receipt. Keep ownership
     // visible until both complete; cancellation still never publishes started.
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0), { timeout: 3_000 });
-    expect(rn.pendingCancelled.has(taskId)).toBe(false); // consumed by checkpoint 2, not evicted
+    expect(host.runnerSnapshot().pendingCancelled.some(entry => entry.taskId === taskId)).toBe(false);
 
     const sentBeforeRedelivery = sent.length;
     await runner.handleEnvelope(createEnvelope('task.offer', offerEnvelope.payload, {

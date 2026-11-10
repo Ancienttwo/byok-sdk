@@ -174,22 +174,12 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   // outcome exactly like a post-registration cancel would (M1 gap #6:
   // task.cancelled, not task.fail).
   //
-  // #1099 S4: the reducer owns the decision. A cancel recorded while start
-  // was in flight (X3, or the legacy checkpoint marker deferred until the
-  // startup owner exists) makes runtime.started take C6: it selects the
-  // cancelled terminal and never sends task.started. Strict FIFO is what
-  // guarantees the cancel was reduced before this completion event.
+  // A cancel reduced while start was in flight makes runtime.started take
+  // C6: it selects the cancelled terminal and never sends task.started.
   const host = hostFor(this);
-  const markerReason = pendingCancelBeforeActive.call(this, taskId)?.reason;
-  if (host.current(taskId)?.cancel.requested === true || markerReason !== undefined) {
-    if (host.current(taskId)?.cancel.requested !== true) {
-      host.dispatchSync({
-        type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire',
-        ...(markerReason === undefined ? {} : { reason: markerReason }),
-      });
-    }
-    const reason = host.current(taskId)?.cancel.reason ?? markerReason;
-    this['pendingCancelled'].delete(taskId);
+  const cancelled = pendingCancelBeforeActive.call(this, taskId);
+  if (cancelled !== undefined) {
+    const reason = cancelled.reason;
     // Register the task first: the plan (and C6's effects) must find it.
     this['startupOwnership'].transferToActive(taskId);
     this['tasks'].set(taskId, active);

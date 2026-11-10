@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changed (client; #1692)** — Cancellation after a non-active task selects its terminal no longer retains a pending marker. If a claimed task receives multiple cancellation reasons during startup, the first reason is retained.
+
 - **Changed (client; #1691)** — Strict offer declines and their bounded redelivery tracking now use the task runner reducer while preserving decline payloads.
 
 - **Changed (client; #1680)** — Grok, agy, Codex and Hermes share internal session lifecycle helpers for cancellation deadlines and retryable cleanup.
