@@ -36,7 +36,7 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | no | yes | yes |
-| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | no | yes | yes |
+| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no | no |
 | Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | no | yes | yes |
 | Prepared lane | `preparedLane` | no | no | no | no | no | no | no | yes | no |
@@ -137,10 +137,11 @@ persistent OpenCode transcript directory, so no SDK retention store is created.
 Steering and interactive permissions are unsupported on both lines. The ACP
 boundary cancels permission requests. V1 retains OAR's session-local appended
 persona overlay and cleanup; v2 refuses Agent-memory readers before execution
-because that appended instruction channel is unavailable. The adapter carries
-Host MCP servers through ACP, but `mcpToolsets` remains false until both lines
-pass task isolation and tool-call qualification; Hosts must not rely on this path
-yet. Native user MCP remains inherited. V2 `execute` calls remain opaque without a proven
+because that appended instruction channel is unavailable. Task-scoped Host MCP
+servers are passed through ACP on each open, including resume and model fallback.
+The loopback contract exercised a tool call and task isolation on OpenCode 1.19.5
+and 2.2.6 on macOS arm64 and Windows x64. Native user MCP remains inherited.
+V2 `execute` calls remain opaque without a proven
 native tool identity; the SDK never derives MCP names from code. Child call IDs
 carry the native child session id to avoid merging their calls with root calls.
 Child-session text is excluded from root answer progress. The SDK's flat event

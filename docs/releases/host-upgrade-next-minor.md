@@ -52,7 +52,7 @@ with `keys_profile_model_composition_failed`.
 
 ## OpenCode Host MCP toolsets
 
-No Host action is required for this change (#1632). The OpenCode adapter passes an admitted task's MCP servers to ACP on session open and resume, but its `mcpToolsets` capability remains `false` until both supported release lines pass tool-call and isolation qualification. Hosts should continue to treat task-scoped Host MCP toolsets as unavailable for OpenCode. OpenCode v2 still refuses Agent `memory-reader` tasks because its session-local appended instruction channel is unqualified.
+No Host configuration change is required (#1632). OpenCode now advertises `mcpToolsets: true` and passes an admitted task's Host MCP servers through ACP on session open and resume. A Host may offer configured toolsets to OpenCode using the existing toolset selection. The loopback contract exercised OpenCode 1.19.5 and 2.2.6 on macOS arm64 and Windows x64. OpenCode v2 still refuses Agent `memory-reader` tasks because its session-local appended instruction channel is unqualified.
 
 ## Release and verification checklist
 

@@ -159,7 +159,7 @@ it('registers an opt-in adapter with truthful capabilities', async () => {
   const [adapter] = createRuntimeAdapters({ runtimeAllowlist: ['opencode'], runtimes: { opencode: { models, executable: fake } } });
   expect(adapter!.descriptor).toEqual(expect.objectContaining({ id: 'opencode', platforms: ['darwin', 'win32'], capabilities: OPENCODE_RUNTIME_CAPABILITIES, versionPolicy: { qualifiedVersion: '2.2.6', unqualified: 'warn' } }));
   expect(validateRuntimeDetectResult(await box.adapter.detect())).toMatchObject({ kind: 'available', version: '1.18.35', rawVersion: '1.18.35\n', executableSource: 'config' });
-  expect(OPENCODE_RUNTIME_CAPABILITIES.mcpToolsets).toBe(false);
+  expect(OPENCODE_RUNTIME_CAPABILITIES.mcpToolsets).toBe(true);
 });
 
 it.each(['1.19.5', 'opencode v2.2.6'])('passes admitted MCP servers on new and resumed %s sessions', async version => {
