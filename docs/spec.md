@@ -1831,7 +1831,7 @@ independent closed axes: `category` is `semantic`, `infrastructure`, or
 `authority`; `retry` is explicitly `retryable` or `non-retryable` and is never
 derived from category or reason text.
 
-OAR start error classification for Grok, agy, Codex and OpenCode is owned by `packages/client/src/adapters/oar-start-failure.ts`. An archived resume target is an authority failure and non-retryable; a target in use is an infrastructure failure and retryable.
+OAR start error classification for Grok, agy, Codex, dsh and OpenCode is owned by `packages/client/src/adapters/oar-start-failure.ts`. An archived resume target is an authority failure and non-retryable; a target in use is an infrastructure failure and retryable.
 
 - Vendor-native terminal task failure is semantic and non-retryable unless the
   provider supplies structured retry authority.

@@ -1,7 +1,7 @@
 import type { spawn as nodeSpawn } from 'node:child_process';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { AsyncQueue } from '../../util/async-queue';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeDisposalFailure, runtimeFailureClassOf, type RuntimeFailurePhase } from '../../runtime-failure';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeDisposalFailure, runtimeFailureClassOf } from '../../runtime-failure';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
@@ -38,7 +38,7 @@ export interface OpenCodeAdapterOptions {
 }
 
 const authority = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
-const infrastructure = (reason: string, phase: RuntimeFailurePhase = 'run') => new RuntimeExecutionFailure({ phase, category: 'infrastructure', retry: 'non-retryable', reason });
+const infrastructure = (reason: string) => new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason });
 
 /** Native OpenCode ACP, addressed through harnessId `opencode`; never touches user configuration or login storage. */
 export class OpenCodeAdapter implements RuntimeAdapter {
