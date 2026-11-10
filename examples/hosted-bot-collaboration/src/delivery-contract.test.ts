@@ -12,7 +12,8 @@ import { TEST_HOST } from './memory-subject.test-support';
 import { hostedMessageConsumer, type AgentMessageInput } from './messages';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedOutboxSender } from './sender';
-import { HostedCollaborationStore, inSchema, type InboundIdentity } from './store';
+import { HostedCollaborationStore, type InboundIdentity } from './store';
+import { inSchema } from './transaction';
 
 // #793 D2b-out-2: the K8 delivery vectors on H, with the outbox sender on real Postgres.
 const DIRECT = { kind: 'direct', id: 'main' } as const;

@@ -11,7 +11,7 @@ import { storedKey } from './layout';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
 import { HostedRoutineScheduler, type SchedulerOptions } from './scheduler';
-import { inSchema, lockScope } from './store';
+import { inSchema, lockScope } from './transaction';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;

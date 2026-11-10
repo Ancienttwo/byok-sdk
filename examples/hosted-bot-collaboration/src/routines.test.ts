@@ -11,7 +11,8 @@ import { assemble, FRAME_MAX_BYTES, split, storedKey } from './layout';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedReconciler, type TaskEvidence } from './reconcile';
 import { hostedRoutineCommands, INTENT_OF, loadSlice, OCCURRENCE_OF, recordDue, writeSlice } from './routines';
-import { HostedCollaborationStore, inSchema, lockScope } from './store';
+import { HostedCollaborationStore } from './store';
+import { inSchema, lockScope } from './transaction';
 import { testHostConfig } from './memory-subject.test-support';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;

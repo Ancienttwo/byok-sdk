@@ -13,7 +13,7 @@ import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { idOf, storedKey } from './layout';
 import { retiredIntents, retiredTurns } from './retention';
 import { switchDueVersions, type RoutineSlice } from './routines';
-import { inSchema, lockScope } from './store';
+import { inSchema, lockScope } from './transaction';
 
 /**
  * What a Turn freezes: the `freeze` step input of the sync rule, or a promoted routine occurrence. `key` is the Turn id.

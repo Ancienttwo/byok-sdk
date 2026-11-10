@@ -15,7 +15,7 @@ import { openStore, POSTGRES_URL, VectorStore } from './postgres.test-support';
 import { HostedReconciler, type HostedTaskPort, type TaskEvidence } from './reconcile';
 import { connectedDevices, HostedDeviceObserver, type HostedDevicePort } from './devices';
 import { HostedReplyChecker } from './replies';
-import { inSchema, lockScope } from './store';
+import { inSchema, lockScope } from './transaction';
 
 // #793 D2f-5: the K8 delegation settlement in the H sync, and the cancel fact that a terminal's outcome freezes.
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;

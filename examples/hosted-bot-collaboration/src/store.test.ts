@@ -7,7 +7,8 @@ import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { CommandRecord, CommitRequest } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { commitVectors, seedCollaboration, SYNC_OPTIONS, type CommitSubject, type SeedTeam } from '@byok-sdk/example-bot-collaboration/test-support';
-import { CallbackCommandError, HostedCollaborationStore, HostedStoreVersionError } from './store';
+import { CallbackCommandError, HostedCollaborationStore } from './store';
+import { HostedStoreVersionError } from './transaction';
 import { memorySubject, testHostConfig, VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 

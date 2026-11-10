@@ -12,7 +12,8 @@ import { freezeIntent, type IntentFreeze } from './intents';
 import { storedKey } from './layout';
 import { VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { HostedCollaborationStore, inSchema, lockScope } from './store';
+import { HostedCollaborationStore } from './store';
+import { inSchema, lockScope } from './transaction';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;

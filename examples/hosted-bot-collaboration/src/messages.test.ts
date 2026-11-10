@@ -9,7 +9,7 @@ import { storedKey } from './layout';
 import { vectorClock } from './memory-subject.test-support';
 import { hostedMessageConsumer, type AgentMessageInput } from './messages';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { HostedStoreVersionError, inSchema, lockScope } from './store';
+import { HostedStoreVersionError, inSchema, lockScope } from './transaction';
 
 // The H port of the K4 Host-side message vectors (host-execution-core/src/message.test.ts), which hold the Host half
 // of the #651 exact-accepted invariant: a replay gets the same decision, and only the exact accepted message is accepted.

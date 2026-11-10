@@ -20,6 +20,7 @@ import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type Inte
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { syncDreamSlice } from './dreams';
+import { HostedStoreVersionError, inSchema, lockScope, SCHEMA } from './transaction';
 import { decideMessage, messageCommandId, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDecision } from './messages';
 import { decideFinish, type HostedIntentHandler, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
@@ -36,10 +37,6 @@ import { sealSwitchExport, SwitchExportError, verifySwitchExport, type SwitchExp
 import { exportMarkOf, hostedSwitchContent, importMarkOf, SwitchExportedError, SwitchImportedError, writeSwitchRows, type SwitchExportMark,
   type SwitchImportMark, type SwitchReceipt } from './switch';
 
-/** A stored scope row of a store version that this code does not support. Nothing was written. */
-export class HostedStoreVersionError extends Error {
-  constructor(readonly version: number) { super(`Unsupported hosted collaboration store version ${version}`); this.name = 'HostedStoreVersionError'; }
-}
 export type Publish = (id: string, value: Json) => void;
 /** `now` is the clock of the writer. A transaction that settles a delivery must give it, for the outbox index. */
 export type Decision<T> = { value: T; outbox: OutboxIntent[]; now?: number };
@@ -195,7 +192,6 @@ export type HostJobOutcome = { summary: Json; unsupported: boolean } | { error: 
 /** The stored text of a failed outbox step: the error message, cut to 1024 characters. */
 export const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error)).slice(0, 1024);
 
-const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
 /**
  * Snapshots the Turn and room seat ids of `state` and the input count of each input batch. The returned function gives the
  * device of each Bot of a row that adds work since: a new Turn that is not concluded (a cancel concludes the Turn that it
@@ -1705,46 +1701,6 @@ async function setHomeDue(client: PoolClient, scopeKey: string, row: string, at:
   await client.query(`UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL`, [scopeKey, row, at]);
 }
 
-/** Runs `work` in one transaction with `search_path` set to `schema`. A throw rolls back every row. */
-export async function inSchema<T>(pool: Pool, schema: string, work: (client: PoolClient) => Promise<T>, readOnly = false): Promise<T> {
-  if (!SCHEMA.test(schema)) throw new Error('Invalid hosted collaboration schema name');
-  const client = await pool.connect();
-  let broken: Error | undefined;
-  try {
-    await client.query(readOnly ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN');
-    await client.query(`SET LOCAL search_path TO "${schema}"`);
-    if (!readOnly) locks.set(client, { scopes: new Set(), switchStep: false });
-    const value = await work(client);
-    if (!readOnly) await refuseSwitched(client, locks.get(client)!);
-    await client.query('COMMIT');
-    return value;
-  } catch (error) {
-    // A client whose rollback failed is broken: release it with the error, so the pool drops it.
-    broken = await client.query('ROLLBACK').then(() => undefined, (failure: unknown) => failure instanceof Error ? failure : new Error(String(failure)));
-    throw error;
-  } finally {
-    locks.delete(client);
-    client.release(broken);
-  }
-}
-
-/** The scopes that each open write transaction of `inSchema` locked, and whether it is a switch step (#975). */
-const locks = new WeakMap<PoolClient, { scopes: Set<string>; switchStep: boolean }>();
-/**
- * The switch fence (#975): a transaction that locked an exported scope, or one with an uncommitted import, does not
- * commit, so H writes nothing to it. It runs right before the commit, so the work's own refusals come first, as each L
- * write refuses after its own (K8 `writeLedger`). Only the switch steps (`lockScope` with `'switch'`) pass: the export,
- * the commit away and the abort, and the import, its commit and its discard.
- */
-async function refuseSwitched(client: PoolClient, lock: { scopes: Set<string>; switchStep: boolean }): Promise<void> {
-  if (!lock.scopes.size || lock.switchStep) return;
-  const found = await client.query<{ exported: unknown; imported: unknown }>(`SELECT switch_export AS exported, switch_import AS imported FROM scope
-    WHERE scope = ANY($1::text[]) AND (switch_export IS NOT NULL OR switch_import IS NOT NULL) LIMIT 1`, [[...lock.scopes]]);
-  const row = found.rows[0];
-  if (row?.exported != null) throw new SwitchExportedError(exportMarkOf(row.exported).digest);
-  if (row?.imported != null) throw new SwitchImportedError(importMarkOf(row.imported).digest);
-}
-
 /** Takes the scope lock as a switch step (#975) and reads the scope's export mark and import record. */
 async function switchRecords(client: PoolClient, key: string): Promise<{ exported?: SwitchExportMark; imported?: SwitchImportMark }> {
   await lockScope(client, key, 'switch');
@@ -1754,19 +1710,3 @@ async function switchRecords(client: PoolClient, key: string): Promise<{ exporte
     ...(row.imported == null ? {} : { imported: importMarkOf(row.imported) }) };
 }
 
-/**
- * Locks an existing scope row for the rest of the transaction and returns its frame. Every writer of a scope
- * takes this lock first. A scope row of an unknown store version is refused before any write. The lock joins the switch
- * fence of the transaction, so it runs only in a write transaction of `inSchema`; `step` marks a switch step.
- */
-export async function lockScope(client: PoolClient, scopeKey: string, step?: 'switch'): Promise<string> {
-  const lock = locks.get(client);
-  if (!lock) throw new Error('A scope lock needs a write transaction of inSchema');
-  lock.scopes.add(scopeKey);
-  if (step) lock.switchStep = true;
-  const head = await client.query<{ state_version: number; frame: string }>(
-    'SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1 FOR UPDATE', [scopeKey]);
-  if (!head.rows[0]) throw new Error('Unknown hosted collaboration scope');
-  if (!SUPPORTED_STORE_VERSIONS.has(head.rows[0].state_version)) throw new HostedStoreVersionError(head.rows[0].state_version);
-  return head.rows[0].frame;
-}
