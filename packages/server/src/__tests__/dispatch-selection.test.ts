@@ -172,6 +172,17 @@ describe('dispatchSelection authority', () => {
     }
   });
 
+  it.each([null, undefined])('submits %s to the kernel without a facade TypeError', async (input) => {
+    const started = await start();
+    const [actual, expected] = await Promise.all([
+      started.byok.executions.submit(input as never), started.kernel.submitAgentExecution(TENANT, input as never),
+    ].map(call => call.catch(error => error)));
+    expect(actual.constructor).toBe(expected.constructor);
+    expect(actual).toMatchObject({ name: 'ZodError', issues: [{ code: 'invalid_type', path: [] }] });
+    expect(actual.issues).toEqual(expected.issues);
+    expect((await started.byok.tasks.list()).tasks).toEqual([]);
+  });
+
   it.each([
     { taskId: '' }, { taskId: 42 }, { deviceId: '' }, { deviceId: undefined },
     { agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } },

@@ -718,6 +718,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     executions: {
       async submit(input) {
+        if (input === null || input === undefined) return cloud.submitAgentExecution(tenant, input);
         const { taskId } = input;
         if (dispatching.has(taskId)) throw new ByokCloudError('coordination_input_invalid', 'submission for this taskId is already in progress; retain the original binding');
         dispatching.add(taskId);
