@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { Transform } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -31,6 +32,7 @@ class OwnerVmDriver {
   constructor(profile, listen, port, recorder) {
     this.storageProfile = { id: profile.id, description: JSON.stringify(profile), dropsUnflushedWrites: profile.dropsUnflushedWrites };
     this.recorder = recorder;
+    this.console = createInterface({ input: process.stdin, output: process.stderr });
     this.server = net.createServer();
     this.server.listen(port, listen);
     this.listening = once(this.server, 'listening');
@@ -46,15 +48,22 @@ class OwnerVmDriver {
   }
   async cut() {
     this.recorder.append({ kind: 'cut-request', instruction: 'owner VM power off; never guest shutdown/pause/suspend' });
-    console.error('A7 CUT READY: owner must hard power off ONLY the disposable VM now. Then reboot it.');
+    console.error('A7 CUT READY: owner must hard power off ONLY the disposable VM now.');
+    const confirmation = await this.console.question('Once it is OFF, type CUT and press Enter before rebooting: ');
+    if (confirmation !== 'CUT') throw new Error('owner did not confirm the completed VM power cut');
+    this.recorder.append({ kind: 'cut-confirmed', confirmation });
+    // A powered-off guest cannot FIN its TCP connection. Drop the Host side
+    // only after the owner's explicit completed-cut observation.
+    this.socket.destroy();
     await this.ended;
   }
   async stop() { await this.ended; }
-  async close() { this.socket?.destroy(); this.server.close(); }
+  async close() { this.console.close(); this.socket?.destroy(); this.server.close(); }
 }
 
-function observe(driver, recorder, expected) {
+export function observe(driver, recorder, expected) {
   let boot = -1;
+  let cutting = false;
   let fail;
   const failure = new Promise((_resolve, reject) => { fail = reject; });
   failure.catch(() => {});
@@ -63,6 +72,7 @@ function observe(driver, recorder, expected) {
     fault: driver.fault, storageProfile: driver.storageProfile,
     async start() {
       const currentBoot = ++boot;
+      cutting = false;
       const run = await driver.start();
       let buffer = '';
       let identified = false;
@@ -90,20 +100,22 @@ function observe(driver, recorder, expected) {
             done();
           } catch (error) {
             fail(error);
+            run.link.input.unpipe(this);
             this.push(null);
             done();
           }
         },
         flush(done) {
-          if (buffer.length !== 0) fail(new Error('truncated device message'));
+          if (buffer.length !== 0 && !cutting) fail(new Error('truncated device message outside an intentional cut'));
           done();
         },
       });
-      run.link.input.once('error', (error) => { fail(error); input.end(); });
+      run.link.input.once('error', (error) => { if (!cutting) fail(error); input.end(); });
+      run.link.input.once('close', () => input.end());
       run.link.input.pipe(input);
       return { ...run, link: { input, output: run.link.output } };
     },
-    cut: () => driver.cut(), stop: () => driver.stop(), close: () => driver.close(),
+    cut: () => { cutting = true; return driver.cut(); }, stop: () => driver.stop(), close: () => driver.close(),
   };
 }
 
@@ -210,9 +222,9 @@ function prepare(repo, afterRef, output) {
   }
 }
 
-const [command, ...args] = process.argv.slice(2);
-if (command === 'prepare' && args.length === 3) prepare(realpathSync(args[0]), args[1], path.resolve(args[2]));
-else {
+async function main(argv) {
+  const [command, ...args] = argv;
+  if (command === 'prepare' && args.length === 3) return prepare(realpathSync(args[0]), args[1], path.resolve(args[2]));
   const { values } = parseArgs({ args, options: { config: { type: 'string' } } });
   if (!values.config) throw new Error('usage: bun run.mjs prepare <repo> <after-ref> <new-output-dir> | run|device --config <file.json>');
   const configFile = realpathSync(values.config);
@@ -221,3 +233,4 @@ else {
   else if (command === 'device') await device(realpathSync(config.repo), realpathSync(config.store), config.connect, config.role);
   else throw new Error('command must be prepare, run or device');
 }
+if (import.meta.main) await main(process.argv.slice(2));

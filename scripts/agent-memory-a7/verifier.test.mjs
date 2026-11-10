@@ -3,10 +3,12 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
 import { BEFORE, SCHEMA, Recorder, readEvidence, validateProfile } from './evidence.mjs';
 import { bridge, compare, verify } from './verify.mjs';
+import { observe } from './run.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const scratch = mkdtempSync(path.join(os.tmpdir(), 'byok-a7-verifier-'));
@@ -72,6 +74,28 @@ test('independent recorder preserves timestamps, receipt digests, and rejects ed
   assert.throws(() => readEvidence(file), /truncated/);
 });
 
+test('records complete messages and discards a partial message only at an intentional cut', async () => {
+  for (const intentional of [true, false]) {
+    const input = new PassThrough();
+    const rows = [];
+    const raw = { start: async () => ({ link: { input, output: new PassThrough() } }), cut: async () => input.destroy() };
+    const driver = observe(raw, { append: (row) => rows.push(row) }, { revision: BEFORE, helperManifestDigest: 'manifest', storageProfile: profile });
+    let failure;
+    driver.failure.catch((error) => { failure = error; });
+    const run = await driver.start();
+    const forwarded = [];
+    const ended = (async () => { for await (const chunk of run.link.input) forwarded.push(chunk.toString()); })();
+    input.write(`W5 ${JSON.stringify({ type: 'a7-identity', revision: BEFORE, helperManifestDigest: 'manifest', osBuild: profile.osBuild })}\nW5 {"partial":`);
+    if (intentional) await driver.cut();
+    else input.end();
+    await ended;
+    assert.equal(rows.length, 1);
+    assert.ok(!forwarded.join('').includes('partial'));
+    if (intentional) assert.equal(failure, undefined);
+    else assert.match(failure.message, /truncated device message outside an intentional cut/);
+  }
+});
+
 test('all storage profile fields are required', () => {
   assert.equal(validateProfile(profile), profile);
   for (const field of Object.keys(profile)) {
@@ -129,6 +153,17 @@ test('refuses incomplete evidence, wrong profile/revision, and an unacknowledged
     f.events[1][field] = 'other';
     assert.throws(() => check(f), /identity\/profile mismatch/);
   }
+});
+
+test('VM-mode evidence requires an explicit completed-cut confirmation', () => {
+  const f = fixture();
+  f.events[0].mode = 'owner-vm-power-cut';
+  f.events[0].ownerAuthorization = 'synthetic verifier fixture; no VM operation';
+  const index = f.events.findIndex((event) => event.entry?.kind === 'cut');
+  f.events.splice(index, 0, { kind: 'cut-request' }, { kind: 'cut-confirmed', confirmation: 'CUT' });
+  assert.equal(check(f).status, 'passed');
+  f.events.splice(index + 1, 1);
+  assert.equal(check(f).status, 'failed');
 });
 
 test('pairs only the same profile and workload, retaining a failing before result', () => {

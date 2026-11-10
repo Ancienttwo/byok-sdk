@@ -38,6 +38,7 @@ export function verify(rows, repo) {
   let cleanup;
   let report;
   let cutRequests = 0;
+  let cutConfirmations = 0;
   for (const { event } of rows.slice(1)) {
     if (event.kind === 'journal') {
       const entry = event.entry;
@@ -74,12 +75,15 @@ export function verify(rows, repo) {
       if (report !== undefined) throw new Error('duplicate experiment report');
       report = event.report;
     } else if (event.kind === 'cut-request') cutRequests++;
-    else throw new Error(`unknown evidence event ${event.kind}`);
+    else if (event.kind === 'cut-confirmed') {
+      if (event.confirmation !== 'CUT' || cutRequests !== cutConfirmations + 1) throw new Error('invalid owner cut confirmation');
+      cutConfirmations++;
+    } else throw new Error(`unknown evidence event ${event.kind}`);
   }
   if (rows.at(-1)?.event.kind !== 'report' || !report) failures.push('experiment did not finish');
   if (report?.stoppedEarly || report?.violations !== 0) failures.push('experiment reported a failure');
   const recordedCuts = journal.filter((entry) => entry.kind === 'cut');
-  if (metadata.mode === 'owner-vm-power-cut' && cutRequests !== recordedCuts.length) failures.push('owner cut requests do not match observed cuts');
+  if (metadata.mode === 'owner-vm-power-cut' && (cutRequests !== recordedCuts.length || cutConfirmations !== recordedCuts.length)) failures.push('owner cut requests/confirmations do not match observed cuts');
   if (identities !== snapshots) failures.push('guest identity has no snapshot');
   if (recordedCuts.length !== metadata.triggers.length || cuts.length !== metadata.triggers.length
     || report?.cuts.length !== cuts.length) failures.push('incomplete trigger schedule/reboot verification');
