@@ -8019,6 +8019,12 @@ export type OperationalHealthFileInspection = {
     crashCount: number;
     currentRunStartedAt?: string;
     lastCrashAt?: string;
+    /** The typed codes of `PrivateDirectoryRefusedError` and `PrivateSocketPathError`; lifecycle passes `err.code`, so the compiler holds them in step. */
+    controlEndpointRefusal?: {
+        code: 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner' | 'socket_path_not_socket';
+        path: string;
+        at: string;
+    };
 } | {
     status: 'corrupt';
     sizeBytes: number;
@@ -8054,6 +8060,10 @@ export declare class OperationalHealthTracker {
     #private;
     constructor(storeDir: string, options?: OperationalHealthOptions);
     startRun(): Promise<OperationalHealthSnapshot>;
+    /** Before `startRun` the refusal waits for the run marker write; afterwards a change is persisted at once. */
+    noteControlEndpoint(refusal: Omit<NonNullable<Extract<OperationalHealthFileInspection, {
+        status: 'valid';
+    }>['controlEndpointRefusal']>, 'at'> | undefined): Promise<void>;
     recordFailure(source: OperationalFailureSource): Promise<void>;
     recordSuccess(_source: OperationalFailureSource): Promise<void>;
     markCleanStop(): Promise<void>;

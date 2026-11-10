@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changed (client; #1688)** — When the daemon runs without its control endpoint after a typed refusal (`private_dir_symlink`, `private_dir_not_directory`, `private_dir_foreign_owner`, `socket_path_not_socket`), `byok-agent doctor` reports the code, path and recording time instead of `daemon offline`. The refusal is kept under an optional `controlEndpoint` key in `operational-health.json` until the next successful bind removes it; `OperationalHealthFileInspection` exposes it as `controlEndpointRefusal`. A health file without a refusal is byte-for-byte unchanged.
+
 - **Fixed (client; #1679)** — The six adapters now validate `interruptTimeoutMs` consistently; agy, dsh and Hermes also accept fractional milliseconds.
 
 - **Fixed (client; #1695)** — Redelivered offers for tasks that failed after claim but before becoming active no longer claim the task again after startup cleanup. Runtime start and activation failures now retain the task in the bounded finished collection.

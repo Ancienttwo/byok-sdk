@@ -131,6 +131,10 @@ No Host configuration change is required (#1632). OpenCode now advertises `mcpTo
 
 Hosts that vendor K8 must also copy `src/adapter-steps.ts` in Layer 2 (#1664). The local and hosted adapters use it for terminal routing, synchronous Host intent handling and Bot outcome port assembly. The hosted example now exports K8's `IntentOutcomeError` class; use that shared class for `instanceof` checks.
 
+## Doctor names a refused control endpoint
+
+No Host configuration change is required (#1688). When the daemon refuses its control endpoint with `private_dir_symlink`, `private_dir_not_directory`, `private_dir_foreign_owner` or `socket_path_not_socket`, it keeps running without the endpoint and records the code and path under a `controlEndpoint` key in `operational-health.json`. The key exists only while the endpoint is refused; the next successful bind removes it. `byok-agent doctor` then reports `control endpoint refused: <code> <path>` instead of `daemon offline`. `OperationalHealthFileInspection` gains an optional `controlEndpointRefusal` on its `valid` branch. An older daemon reads a health file that still has this key as corrupt, so downgrade only after a daemon run that bound its endpoint.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.

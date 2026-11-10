@@ -60,7 +60,12 @@ export interface SupportBundle {
   lifecycle:
     | { status: 'unknown' }
     | { status: 'known'; source: 'live' | 'audit'; phase: DaemonLifecycle['phase']; connection?: 'connecting' | 'open'; reason?: DaemonHaltReason };
-  health: DiagnosticsSnapshot['health'];
+  /** A control endpoint refusal keeps its code and time; its path is a store-derived path and stays out. */
+  health:
+    | Exclude<DiagnosticsSnapshot['health'], { status: 'valid' }>
+    | (Omit<Extract<DiagnosticsSnapshot['health'], { status: 'valid' }>, 'controlEndpointRefusal'> & {
+        controlEndpointRefusal?: { code: NonNullable<Extract<DiagnosticsSnapshot['health'], { status: 'valid' }>['controlEndpointRefusal']>['code']; at: string };
+      });
   /** Issue #392: the last `start`'s `environment-resolved` record — closed values and a shell basename only. */
   environment: DiagnosticsSnapshot['environment'];
   /** #1095: each runtime environment's name and removal counts — never a name or value. */
@@ -167,6 +172,12 @@ async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recent
   }
 }
 
+function projectHealth(health: DiagnosticsSnapshot['health']): SupportBundle['health'] {
+  if (health.status !== 'valid' || !health.controlEndpointRefusal) return health;
+  const { path: _path, ...refusal } = health.controlEndpointRefusal;
+  return { ...health, controlEndpointRefusal: refusal };
+}
+
 function projectControl(control: DiagnosticsSnapshot['control']): SupportBundle['control'] {
   if (control.status === 'offline') return { status: 'offline' };
   const operationalHealth =
@@ -232,7 +243,7 @@ export async function createSupportBundle(
     runtimeSource: snapshot.runtimeSource,
     control: projectControl(snapshot.control),
     lifecycle: projectLifecycle(snapshot.lifecycle),
-    health: snapshot.health,
+    health: projectHealth(snapshot.health),
     environment: snapshot.environment,
     runtimeEnvironment: snapshot.runtimeEnvironment,
     journal: snapshot.journal,

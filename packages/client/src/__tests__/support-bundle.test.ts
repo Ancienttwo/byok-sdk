@@ -14,6 +14,7 @@ import { appendAuditRecord, auditLogPath } from '../daemon/audit-log';
 import { DAEMON_RECORD_KINDS } from '../daemon/daemon-record';
 import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper';
 import { RUNTIMES_ENVIRONMENT_METHOD } from '../daemon/control-protocol';
+import { OperationalHealthTracker } from '../daemon/operational-health';
 import {
   createSupportBundle,
   isSupportBundleOutputInStore,
@@ -84,8 +85,14 @@ describe('support bundle privacy and bounds', () => {
     await fs.mkdir(quarantineDir);
     await fs.writeFile(path.join(quarantineDir, 'SENTINEL_QUARANTINE_FILENAME'), 'SENTINEL_QUARANTINE_BYTES');
 
+    const health = new OperationalHealthTracker(dir, { clock: () => new Date('2026-08-09T00:00:00.000Z') });
+    await health.noteControlEndpoint({ code: 'private_dir_symlink', path: '/Users/SENTINEL_REFUSAL_PATH/store' });
+    await health.startRun();
+
     const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
     const serialized = JSON.stringify(bundle);
+    expect(bundle.health).toMatchObject({ status: 'valid', controlEndpointRefusal: { code: 'private_dir_symlink', at: '2026-08-09T00:00:00.000Z' } });
+    expect(serialized).not.toContain('SENTINEL_REFUSAL_PATH');
     const doctorLines: string[] = [];
     await runDoctorCommand(config(dir), {
       json: true,

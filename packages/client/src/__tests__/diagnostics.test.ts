@@ -318,6 +318,29 @@ describe('diagnostics collector', () => {
     expect(await fs.readdir(dir)).toEqual([OPERATIONAL_HEALTH_FILENAME]);
   });
 
+  it('names a recorded control endpoint refusal instead of daemon offline', async () => {
+    const dir = await tempDir();
+    const tracker = new OperationalHealthTracker(dir, { clock: () => new Date('2026-08-09T00:00:00.000Z') });
+    await tracker.noteControlEndpoint({ code: 'private_dir_symlink', path: '/tmp/byok-0123456789abcdef' });
+    await tracker.startRun();
+
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+
+    expect(snapshot.checks.find((check) => check.id === 'control')).toEqual({
+      id: 'control',
+      status: 'warn',
+      summary: 'control endpoint refused: private_dir_symlink /tmp/byok-0123456789abcdef (recorded 2026-08-09T00:00:00.000Z); '
+        + 'remove /tmp/byok-0123456789abcdef if no byok process uses it, or shorten storeDir',
+    });
+
+    await tracker.noteControlEndpoint({ code: 'socket_path_not_socket', path: '/tmp/byok-0123456789abcdef/control.sock' });
+    const socket = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(socket.checks.find((check) => check.id === 'control')?.summary).toBe(
+      'control endpoint refused: socket_path_not_socket /tmp/byok-0123456789abcdef/control.sock (recorded 2026-08-09T00:00:00.000Z); '
+        + 'remove /tmp/byok-0123456789abcdef/control.sock if no byok process uses it',
+    );
+  });
+
   it('reports valid health and bounds quarantine inventory', async () => {
     const dir = await tempDir();
     const tracker = new OperationalHealthTracker(dir, { runId: () => 'run', pid: 1 });
