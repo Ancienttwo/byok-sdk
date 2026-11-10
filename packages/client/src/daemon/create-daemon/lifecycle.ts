@@ -5,7 +5,7 @@ import { DeviceRecordRePairRequiredError } from '../store';
 import { DeviceStoreBindingMismatchError } from '../daemon-errors';
 import { CursorUnreadableError } from '../cursor-store';
 import { AuthRequestAbortedError, DeviceRevokedError } from '../auth-manager';
-import { PrivateDirectoryRefusedError, PrivateSocketPathError } from '../../util/private-unix-socket';
+import { PrivateDirectoryRefusedError, PrivateSocketModeError, PrivateSocketPathError } from '../../util/private-unix-socket';
 import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS } from './support';
 import type { DaemonScope } from './scope';
 
@@ -49,7 +49,7 @@ export async function replaceControlServer(daemonScope: DaemonScope, required: b
     daemonState.controlServerHandle.setMethods(methods);
     return;
   }
-  let refusal: PrivateDirectoryRefusedError | PrivateSocketPathError | undefined;
+  let refusal: PrivateDirectoryRefusedError | PrivateSocketPathError | PrivateSocketModeError | undefined;
   try {
     daemonState.controlServerHandle = await startControlServer({ storeDir, productId: config.productId, methods });
   } catch (err) {
@@ -59,7 +59,7 @@ export async function replaceControlServer(daemonScope: DaemonScope, required: b
     );
     daemonState.controlServerHandle = undefined;
     // doctor cannot ask a daemon without an endpoint, so a typed refusal is recorded in the health file.
-    if (!(err instanceof PrivateDirectoryRefusedError || err instanceof PrivateSocketPathError)) return;
+    if (!(err instanceof PrivateDirectoryRefusedError || err instanceof PrivateSocketPathError || err instanceof PrivateSocketModeError)) return;
     refusal = err;
   }
   await operationalHealth.noteControlEndpoint(refusal && { code: refusal.code, path: refusal.path }).catch(warnHealthPersistFailure);

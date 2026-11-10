@@ -161,7 +161,7 @@ H vendors also receive one outbox projection row per stored inbound destination 
 
 ## Doctor names a refused control endpoint
 
-No Host configuration change is required (#1688). When the daemon refuses its control endpoint with `private_dir_symlink`, `private_dir_not_directory`, `private_dir_foreign_owner`, `private_dir_mode` or `socket_path_not_socket`, it keeps running without the endpoint and records the code and path under a `controlEndpoint` key in `operational-health.json`. The key exists only while the endpoint is refused; the next successful bind removes it. `byok-agent doctor` then reports `control endpoint refused: <code> <path>` instead of `daemon offline`. `OperationalHealthFileInspection` gains an optional `controlEndpointRefusal` on its `valid` branch. An older daemon reads a health file that still has this key as corrupt, so downgrade only after a daemon run that bound its endpoint.
+No Host configuration change is required (#1688). When the daemon refuses its control endpoint with `private_dir_symlink`, `private_dir_not_directory`, `private_dir_foreign_owner`, `private_dir_mode`, `socket_path_not_socket` or `socket_mode`, it keeps running without the endpoint and records the code and path under a `controlEndpoint` key in `operational-health.json`. The key exists only while the endpoint is refused; the next successful bind removes it. `byok-agent doctor` then reports `control endpoint refused: <code> <path>` instead of `daemon offline`. `OperationalHealthFileInspection` gains an optional `controlEndpointRefusal` on its `valid` branch. An older daemon reads a health file that still has this key as corrupt, so downgrade only after a daemon run that bound its endpoint.
 
 ## Runtime environment lanes in doctor
 
