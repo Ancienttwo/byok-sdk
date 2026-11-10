@@ -74,7 +74,7 @@ shared plan in `opencode-contract.ts`. OpenCode reads its provider table from
 OpenAI-compatible provider that points at the loopback model. The adapter
 declares no `mcpToolsets`, `messageDraft`, auto gate or isolation guarantee,
 and reports no `authPresent`, so those cases are skipped with that reason; the
-checks are `detect.version`, `instructions.project` and egress. The 1.x line
+checks are `detect.version`, `instructions.project` and egress. OpenCode also has four cases of its own in `opencode-contract.ts`: `opencode.resume` (the same native session continues with its history; a different workspace is refused), `opencode.permission` (a shell command under `permission.bash: ask` is refused and does not run), `opencode.cancel` (interrupting a running shell tool ends the turn and the tool process) and `opencode.dispose` (no OpenCode `acp` or `serve --service` process survives the close). The Windows legs run in CI job `opencode-real-windows`. The 1.x line
 installs the configured provider package from `registry.npmjs.org` on first
 use, which its leg declares as an egress host. The v1 version is not the
 adapter's qualified version, so its leg expects the unqualified-version
