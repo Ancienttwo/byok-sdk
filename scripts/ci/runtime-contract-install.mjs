@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -107,20 +107,40 @@ function npm(args, options = {}) {
   return execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, { encoding: 'utf8', ...(process.platform === 'win32' ? { shell: true } : {}), ...options });
 }
 
-export function installNpm(runtime, mode, version, dir, npmCommand = npm) {
+const npmRuntimeLocks = join(root, 'scripts/ci/vendor/npm-runtimes');
+// pi-ai 1.5.2 was published without its matching pi-schema on 2026-11-10.
+const DSH_LOCK_BEFORE = '2026-11-10T12:20:45.000Z';
+
+export function updateNpmLock(runtime, version, vendor = npmRuntimeLocks, npmCommand = npm) {
+  const pkg = NPM_PACKAGES[runtime];
+  if (pkg === undefined) throw new Error(`no npm runtime ${JSON.stringify(runtime)}`);
+  if (!isExactVersion(version)) throw new Error(`${pkg.name}: not an exact version: ${JSON.stringify(version)}`);
+  const dir = join(vendor, runtime);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ private: true, dependencies: { [pkg.name]: version } }, null, 2)}\n`);
+  // Discard the old resolution so this command actually regenerates the tree.
+  rmSync(join(dir, 'package-lock.json'), { force: true });
+  npmCommand(['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund', ...(runtime === 'dsh' ? [`--before=${DSH_LOCK_BEFORE}`] : [])], { cwd: dir, stdio: 'inherit' });
+}
+
+export function installNpm(runtime, mode, version, dir, npmCommand = npm, vendor = npmRuntimeLocks) {
   const { name, bin, winBin } = NPM_PACKAGES[runtime];
   const exact = mode === 'latest' ? npmCommand(['view', name, 'version'], { stdio: ['ignore', 'pipe', 'inherit'] }).trim() : version;
   if (!isExactVersion(exact)) throw new Error(`${name}: not an exact version: ${JSON.stringify(exact)}`);
-  let before;
-  if (mode === 'qualified') {
-    const times = JSON.parse(npmCommand(['view', name, 'time', '--json'], { stdio: ['ignore', 'pipe', 'inherit'] }));
-    before = times?.[exact];
-    if (typeof before !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(before) || !Number.isFinite(Date.parse(before)))
-      throw new Error(`${name}@${exact}: missing or invalid publish time`);
-  }
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'package.json'), '{"private":true}\n');
-  npmCommand(['install', '--no-audit', '--no-fund', '--save-exact', ...(before === undefined ? [] : [`--before=${before}`]), `${name}@${exact}`], { cwd: dir, stdio: 'inherit' });
+  if (mode === 'qualified') {
+    const source = join(vendor, runtime);
+    const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8'));
+    const lock = JSON.parse(readFileSync(join(source, 'package-lock.json'), 'utf8'));
+    if (manifest.dependencies?.[name] !== exact || lock.packages?.['']?.dependencies?.[name] !== exact || lock.packages?.[`node_modules/${name}`]?.version !== exact)
+      throw new Error(`${name}: npm runtime lock does not match qualified version ${exact}`);
+    copyFileSync(join(source, 'package.json'), join(dir, 'package.json'));
+    copyFileSync(join(source, 'package-lock.json'), join(dir, 'package-lock.json'));
+    npmCommand(['ci', '--no-audit', '--no-fund'], { cwd: dir, stdio: 'inherit' });
+  } else {
+    writeFileSync(join(dir, 'package.json'), '{"private":true}\n');
+    npmCommand(['install', '--no-audit', '--no-fund', '--save-exact', `${name}@${exact}`], { cwd: dir, stdio: 'inherit' });
+  }
   // On Windows the `.bin` entry is a `.cmd` shim, which the adapter cannot execute; use the package's own executable.
   const installed = process.platform === 'win32' && winBin !== undefined ? join(dir, 'node_modules', ...winBin.split('/')) : join(dir, 'node_modules', '.bin', bin);
   return { bin: installed, version: exact };
@@ -220,7 +240,10 @@ export async function install(runtime, mode, { dir, githubEnv = process.env.GITH
 
 if (import.meta.main) {
   const [runtime, mode] = process.argv.slice(2);
-  install(runtime, mode).catch(error => {
+  const action = runtime === '--update-lock'
+    ? qualifiedVersions().then(versions => updateNpmLock(mode, versions[mode]))
+    : install(runtime, mode);
+  action.catch(error => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });

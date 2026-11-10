@@ -349,6 +349,7 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/__tests__\/runtime-contract\//,
     /^scripts\/ci\/runtime-contract-install(?:\.test)?\.mjs$/,
     /^scripts\/ci\/vendor\/hermes\//,
+    /^scripts\/ci\/vendor\/npm-runtimes\//,
     // The reserved helpers' context file: their entries, argv and reader.
     /^packages\/client\/src\/(?:daemon\/task-runner\/mcp-contexts|sdk-reserved-helper-context|bin\/sdk-reserved-helper-runners|bin\/byok-agent-(?:message|result|memory)-mcp|lifecycle\/sdk-reserved-helper-command)\.ts$/,
   ],
@@ -788,6 +789,7 @@ export function selectImpact(paths, context = {}) {
     if (path === 'scripts/vitest/tmp-root.test.mjs') { scripts = true; continue; }
     if (path === 'scripts/ci/security-advisories-fixtures/vulnerable-bun.lock') { scripts = true; continue; }
     if (/^scripts\/ci\/vendor\/hermes\/(?:\.gitattributes|manifest\.json|[a-f0-9]{40}\/install\.(?:sh|ps1))$/.test(path)) { scripts = true; continue; }
+    if (/^scripts\/ci\/vendor\/npm-runtimes\/(?:dsh|claude|codex|grok|opencode1|opencode2)\/package(?:-lock)?\.json$/.test(path)) { scripts = true; continue; }
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }
     const golden = /^api-surface\/([a-z-]+)\.d\.ts$/.exec(path);
     if (golden) {

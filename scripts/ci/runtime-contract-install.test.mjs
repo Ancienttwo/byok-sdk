@@ -59,29 +59,45 @@ test('an npm install takes one exact version, prereleases included', () => {
   for (const version of ['latest', '^1.0.0', '1.0', '0.2.1-rc.5\n', '0.2.1-', '0.2.1-rc..5', '0.2.1+build']) assert.ok(!isExactVersion(version), JSON.stringify(version));
 });
 
-test('qualified npm installs use the exact release publish time and fail closed when absent', () => {
+test('qualified npm installs use the lock and reject version drift', () => {
   const work = mkdtempSync(join(tmpdir(), 'rc-npm-'));
+  const source = join(work, 'vendor', 'dsh');
+  const name = '@deepseek-ai/dsh';
+  const version = '0.2.2-rc.1';
+  const manifest = { private: true, dependencies: { [name]: version } };
+  const lock = { packages: { '': { dependencies: manifest.dependencies }, [`node_modules/${name}`]: { version } } };
   const calls = [];
-  const fakeNpm = (args) => {
-    calls.push(args);
-    return args[0] === 'view' ? JSON.stringify({ '0.2.2-rc.1': '2026-01-02T03:04:05.000Z' }) : '';
-  };
+  mkdirSync(source, { recursive: true });
+  writeFileSync(join(source, 'package.json'), JSON.stringify(manifest));
+  writeFileSync(join(source, 'package-lock.json'), JSON.stringify(lock));
+  const fakeNpm = (args, options) => { calls.push({ args, options }); return args[0] === 'view' ? version : ''; };
   try {
-    installNpm('dsh', 'qualified', '0.2.2-rc.1', join(work, 'qualified'), fakeNpm);
-    assert.deepEqual(calls, [
-      ['view', '@deepseek-ai/dsh', 'time', '--json'],
-      ['install', '--no-audit', '--no-fund', '--save-exact', '--before=2026-01-02T03:04:05.000Z', '@deepseek-ai/dsh@0.2.2-rc.1'],
-    ]);
-    calls.length = 0;
-    assert.throws(() => installNpm('dsh', 'qualified', '0.2.2-rc.2', join(work, 'missing'), fakeNpm), /@deepseek-ai\/dsh@0\.2\.2-rc\.2: missing or invalid publish time/);
+    const target = join(work, 'qualified');
+    installNpm('dsh', 'qualified', version, target, fakeNpm, join(work, 'vendor'));
+    assert.deepEqual(calls[0].args, ['ci', '--no-audit', '--no-fund']);
+    assert.equal(calls[0].options.cwd, target);
+    assert.deepEqual(JSON.parse(readFileSync(join(target, 'package-lock.json'), 'utf8')), lock);
+    assert.throws(() => installNpm('dsh', 'qualified', '0.2.2-rc.2', join(work, 'drift'), fakeNpm, join(work, 'vendor')), /lock does not match qualified version/);
     assert.equal(calls.length, 1);
     calls.length = 0;
-    installNpm('dsh', 'latest', 'ignored', join(work, 'latest'), (args) => {
-      calls.push(args);
-      return args[0] === 'view' ? '0.2.2-rc.1' : '';
-    });
-    assert.deepEqual(calls[0], ['view', '@deepseek-ai/dsh', 'version']);
-    assert.ok(!calls[1].some(arg => arg.startsWith('--before=')));
+    installNpm('dsh', 'latest', 'ignored', join(work, 'latest'), fakeNpm);
+    assert.deepEqual(calls.map(call => call.args), [
+      ['view', name, 'version'], ['install', '--no-audit', '--no-fund', '--save-exact', `${name}@${version}`],
+    ]);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test('vendored npm runtime locks match the qualified versions', async () => {
+  const versions = await qualifiedVersions();
+  const work = mkdtempSync(join(tmpdir(), 'rc-locks-'));
+  try {
+    for (const runtime of ['dsh', 'claude', 'codex', 'grok', 'opencode1', 'opencode2']) {
+      const calls = [];
+      installNpm(runtime, 'qualified', versions[runtime], join(work, runtime), args => calls.push(args));
+      assert.deepEqual(calls, [['ci', '--no-audit', '--no-fund']], runtime);
+    }
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
