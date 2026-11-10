@@ -5,7 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, POSIX_GATE_ROOT, setPosixGateRootForTests, type PathMutationGate } from '../util/path-mutation-gate';
+import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, POSIX_GATE_ROOT, type PathMutationGate } from '../util/path-mutation-gate';
+import { useProductionGateRootForFile } from './support/production-gate-root';
 import { resolveBunBin } from './support/test-bun-bin';
 import { PrivateDirectoryRefusedError } from '../util/private-unix-socket';
 
@@ -16,6 +17,8 @@ import { PrivateDirectoryRefusedError } from '../util/private-unix-socket';
  * two processes do; the child-process cases run the bundled gate under Node
  * and under Bun.
  */
+// Child processes bundle the gate with its production root; this file asserts it and cross-process exclusion.
+useProductionGateRootForFile();
 const supported = process.platform === 'darwin' || process.platform === 'linux';
 const GATE_SOURCE = fileURLToPath(new URL('../util/path-mutation-gate.ts', import.meta.url));
 const BUN = resolveBunBin();
@@ -112,9 +115,6 @@ async function settle(promise: Promise<PathMutationGate>): Promise<PathMutationG
 }
 
 beforeAll(async () => {
-  // Child processes bundle the gate with its production root, so this file takes
-  // its locks there too: it asserts the real default and cross-process exclusion.
-  setPosixGateRootForTests(undefined);
   work = await nodeFs.mkdtemp(path.join(os.tmpdir(), 'byok-gate-work-'));
   bundle = path.join(work, 'gate.mjs');
   await build({ entryPoints: [GATE_SOURCE], bundle: true, platform: 'node', format: 'esm', outfile: bundle, logLevel: 'silent' });

@@ -17,6 +17,10 @@ import {
 } from '../lifecycle/service-unit';
 import { acquireDaemonOwner, type DaemonOwnerLease } from '../util/daemon-owner';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs, UNMARKED_UNIT, type MemoryServiceFs } from './support/service-fs';
+import { useProductionGateRootForFile } from './support/production-gate-root';
+
+// Its cross-process case runs a child that takes the service-lifecycle gate with the production gate root.
+useProductionGateRootForFile();
 
 const OWNER_RECORD = '/store/service/lifecycle-owner.json';
 /** The product-bundled WinSW binary `def().windows.winswBin` names. */
