@@ -12,6 +12,10 @@ import { createRetentionRegistry } from '../daemon/retention/producers';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { StoragePressure } from '../daemon/retention/pressure';
 import { testScratchRoot } from './fixtures/execution-scratch';
+import { useProductionGateRootForFile } from './support/production-gate-root';
+
+// Its child runs the session-writer bin with the production gate root.
+useProductionGateRootForFile();
 
 const clientRoot = resolve(import.meta.dirname, '../..');
 const root = mkdtempSync(join(clientRoot, 'node_modules/.pi-session-writer-'));

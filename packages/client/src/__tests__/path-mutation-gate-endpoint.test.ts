@@ -5,7 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
+import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, POSIX_GATE_ROOT, type PathMutationGate } from '../util/path-mutation-gate';
+import { useProductionGateRootForFile } from './support/production-gate-root';
 import { resolveBunBin } from './support/test-bun-bin';
 import { PrivateDirectoryRefusedError } from '../util/private-unix-socket';
 
@@ -16,6 +17,8 @@ import { PrivateDirectoryRefusedError } from '../util/private-unix-socket';
  * two processes do; the child-process cases run the bundled gate under Node
  * and under Bun.
  */
+// Child processes bundle the gate with its production root; this file asserts it and cross-process exclusion.
+useProductionGateRootForFile();
 const supported = process.platform === 'darwin' || process.platform === 'linux';
 const GATE_SOURCE = fileURLToPath(new URL('../util/path-mutation-gate.ts', import.meta.url));
 const BUN = resolveBunBin();
@@ -130,9 +133,13 @@ afterAll(async () => {
 });
 
 describe.runIf(supported)('path-mutation gate: one OS lock per handle (#1149)', () => {
+  it.runIf(process.platform === 'darwin')('the production gate root is /tmp/byok-pm-<uid>', () => {
+    expect(POSIX_GATE_ROOT).toBe(`/tmp/byok-pm-${process.getuid!()}`);
+  });
+
   it.skipIf(process.platform !== 'darwin')('uses the shared typed refusal for a foreign-owned gate root', async () => {
     const realLstat = nodeFs.lstat;
-    const dir = '/tmp/byok-pm-' + process.getuid?.();
+    const dir = POSIX_GATE_ROOT;
     vi.spyOn(nodeFs, 'lstat').mockImplementation(async (name, ...rest) => {
       const stat = await realLstat(name, ...(rest as []));
       return name === dir ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
@@ -188,7 +195,7 @@ describe.runIf(supported)('path-mutation gate: one OS lock per handle (#1149)', 
     const inodes = new Set<number>();
     for (let cycle = 0; cycle < 100; cycle += 1) {
       const gate = await acquirePathMutationGate({ scope: 'store', targetPath });
-      inodes.add(statSync(path.join(`/tmp/byok-pm-${process.getuid!()}`, `${gate.identity}.lock`)).ino);
+      inodes.add(statSync(path.join(POSIX_GATE_ROOT, `${gate.identity}.lock`)).ino);
       await gate.release();
     }
     expect(inodes.size).toBe(1);

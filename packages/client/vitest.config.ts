@@ -17,7 +17,7 @@ export default defineConfig({
   test: {
     // One short per-run TMPDIR, removed in teardown; see scripts/vitest/tmp-root.mjs.
     globalSetup: ['../../scripts/vitest/tmp-root.mjs'],
-    setupFiles: ['./src/__tests__/setup-device-credentials.ts', './src/__tests__/setup-runtime-environment.ts'],
+    setupFiles: ['./src/__tests__/setup-device-credentials.ts', './src/__tests__/setup-runtime-environment.ts', './src/__tests__/setup-gate-root.ts'],
     maxWorkers: 4,
     testTimeout: 10_000,
   },
