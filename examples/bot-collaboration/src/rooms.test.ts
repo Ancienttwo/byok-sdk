@@ -8,7 +8,7 @@ import type { AutonomyGate } from './rules/autonomy';
 const auto: AutonomyGate = { autonomy: 'auto', record: () => { throw new Error('auto records nothing'); } };
 import { applyManagement, roomFields } from './team';
 import { outcomeSchema, turnContext } from './schema';
-import { HISTORY_MAX_BYTES } from './history';
+import { HISTORY_MAX_BYTES } from './rules/history';
 import { BOT_TURN_OUTCOME_CONTRACT, validateResultOutcome } from '@byok-sdk/protocol';
 /** These cases do not read the room projections. */
 const noPublish = (): void => {};

@@ -9,7 +9,7 @@ import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-co
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import type { SeatFacts, settleDelegations, SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { activeBinding, DeviceBindingError, deviceRefusals } from './binding';
-import { SUPPORTED_STORE_VERSIONS } from './ddl';
+import { STORE_VERSION } from './ddl';
 import { idOf, storedKey } from './layout';
 import { retiredIntents, retiredTurns } from './retention';
 import { switchDueVersions, type RoutineSlice } from './routines';
@@ -320,10 +320,10 @@ export class HostedSubmitter {
     // uncommitted import (#975).
     const due = await inSchema(this.pool, this.schema, client => client.query<{ scope: string; key: string }>(
       `SELECT i.scope, i.key FROM intent i JOIN scope s ON s.scope = i.scope
-        WHERE s.state_version = ANY($3::integer[]) AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
+        WHERE s.state_version = $3 AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
         AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
           AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
-        ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100, [...SUPPORTED_STORE_VERSIONS]]), true);
+        ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100, STORE_VERSION]), true);
     const pass: SubmitPass = { tried: 0, failed: [] }, changed = new Set<string>();
     for (const row of due.rows) {
       try { if (await this.try(row.scope, row.key, changed)) pass.tried++; }

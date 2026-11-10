@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
-import { SUPPORTED_STORE_VERSIONS } from './ddl';
+import { STORE_VERSION } from './ddl';
 import { exportMarkOf, SwitchExportedError, SwitchImportedError } from '@byok-sdk/example-bot-collaboration/migration';
 import { importMarkOf } from './switch';
 
@@ -63,6 +63,6 @@ export async function lockScope(client: PoolClient, scopeKey: string, step?: 'sw
   const head = await client.query<{ state_version: number; frame: string }>(
     'SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1 FOR UPDATE', [scopeKey]);
   if (!head.rows[0]) throw new Error('Unknown hosted collaboration scope');
-  if (!SUPPORTED_STORE_VERSIONS.has(head.rows[0].state_version)) throw new HostedStoreVersionError(head.rows[0].state_version);
+  if (head.rows[0].state_version !== STORE_VERSION) throw new HostedStoreVersionError(head.rows[0].state_version);
   return head.rows[0].frame;
 }

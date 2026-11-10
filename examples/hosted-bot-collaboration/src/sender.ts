@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { validateJson, type Json } from '@byok-sdk/server/execution-core';
 import type { ChannelPort } from '@byok-sdk/example-bot-collaboration/channel';
 import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { SUPPORTED_STORE_VERSIONS } from './ddl';
+import { STORE_VERSION } from './ddl';
 import { SwitchExportedError } from '@byok-sdk/example-bot-collaboration/migration';
 import { checkHomeReadback, homeRequests, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { inSchema, lockScope } from './transaction';
@@ -126,8 +126,8 @@ export class HostedOutboxSender {
     // limit, as in the submitter.
     const due = await inSchema(this.pool, this.store.schema, client => client.query<DueRow>(
       `SELECT o.scope, o.key, o.kind FROM outbox o JOIN scope s ON s.scope = o.scope
-        WHERE s.state_version = ANY($1::integer[]) AND s.switch_export IS NULL AND s.switch_import IS NULL AND o.settled_at IS NULL AND o.next_at <= $2
-        ORDER BY o.next_at, o.scope, o.ordinal LIMIT $3`, [[...SUPPORTED_STORE_VERSIONS], this.now(), this.batch]), true);
+        WHERE s.state_version = $1 AND s.switch_export IS NULL AND s.switch_import IS NULL AND o.settled_at IS NULL AND o.next_at <= $2
+        ORDER BY o.next_at, o.scope, o.ordinal LIMIT $3`, [STORE_VERSION, this.now(), this.batch]), true);
     const pass: SendPass = { steps: 0, failed: [] }, changed = new Set<string>();
     for (const row of due.rows) {
       const scope = JSON.parse(row.scope) as string, id = JSON.parse(row.key) as OutboxId;

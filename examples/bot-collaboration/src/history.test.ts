@@ -5,7 +5,7 @@ import { stateOf, type Turn } from './model';
 import { applyManagement, roomFields } from './team';
 import { roomInput, advanceRooms, applySpeech } from './rooms';
 import { DEFAULT_HANDOFF_BUDGETS, turnContext } from './schema';
-import { HISTORY_MAX_BYTES } from './history';
+import { HISTORY_MAX_BYTES } from './rules/history';
 import type { AutonomyGate } from './rules/autonomy';
 /** These cases apply every autonomous action, as a Bot in `auto` does. */
 const auto: AutonomyGate = { autonomy: 'auto', record: () => { throw new Error('auto records nothing'); } };

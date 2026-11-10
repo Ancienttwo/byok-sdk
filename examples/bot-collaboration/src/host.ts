@@ -32,7 +32,7 @@ import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
 import { advanceRoomsAndTurns, memberMentions, roomMessageProjection, roomMessages, type MemberMentions, type Mentions, type RoomMessage } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
-import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
+import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './rules/history';
 import { flushHomes, type HomeServer } from './home-projections';
 import { admitBot, admitDevice, botDeviceRefusal, checkTopology, DeviceModeError, deviceRefusal, deviceTopology, homeSent, switchDrained, switchStep, switchWork,
   type DeviceTopology,

@@ -72,14 +72,9 @@ export function switchWork(s: LedgerState, deviceId: string): SwitchWork {
       .map(op => op.sequence),
   };
 }
-/**
- * A home write that may have reached the server: marked before its first send, or (in a ledger written before the mark)
- * with the retry time that a send sets. The `retryAt` branch, and the same read in `checkCollaboration` (`migration.ts`),
- * go with Bot collaboration state version 4 (`model.ts` accepts only 3), whose loader refuses a version 3 ledger or
- * marks such a write `sent` when it upgrades one.
- */
+/** A home write that may have reached the server: marked before its first send. */
 export function homeSent(op: HomeOperation): boolean {
-  return op.sent === true || op.retryAt !== undefined;
+  return op.sent === true;
 }
 export function switchDrained(work: SwitchWork): boolean {
   return !work.intents.length && !work.turns.length && !work.batches.length && !work.homeOperations.length;

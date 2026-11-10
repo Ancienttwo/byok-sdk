@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Breaking (examples; #1669)** — The Bot collaboration examples drop three branches that read old stored shapes. Hosted `migrate()` no longer moves frame `dreams` into `dream_state`; run v0.41.0 `migrate()` before the upgrade. The hosted store accepts only `STORE_VERSION` (`SUPPORTED_STORE_VERSIONS` is removed) and still refuses any other version with `HostedStoreVersionError`. A pending Agent home write counts as possibly sent (`homeSent`, switch export `home_sent`) only when it is marked `sent`, not when it only has a `retryAt`. The re-export `src/history.ts` is removed; import from `rules/history`. The upgrade guide lists the read-only checks that must return 0 first.
+
 - **Breaking (examples; #1667)** — The owner switch contract is defined once, in `@byok-sdk/example-bot-collaboration/migration`: `SwitchHeader`, `SwitchReceipt`, `SwitchExportMark`, `exportMarkOf`, `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError(deviceId, target: 'L' | 'H', revision)`. The local and hosted packages re-export the classes and types from there, so both Hosts throw the same class with the same `code` for the same refusal. The local `refuseImported` now throws `SwitchImportedError` (`switch_imported`) instead of a plain `Error`. The three error messages changed, and no `code` did.
 
 - **Fixed (client; #1741)** — A Node SEA product built on Node 25.7 or later can launch Pi with native subagents again. Inside a SEA, the Pi host now loads the bundled pi-subagents child-extension registration through `module.createRequire()` instead of `import()`, which a SEA main script can use only for built-in modules on those Node versions. Bun-compiled and interpreter products are unchanged.
