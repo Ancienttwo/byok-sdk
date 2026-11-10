@@ -172,14 +172,15 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
     const before = new Set(openCodeProcesses().map(row => row.split(' ')[0]));
     const box = await createSandbox(`${runtime}-cancel`);
     const pidFile = path.join(box.workspace, 'hold.pid').replace(/\\/g, '/');
+    if (/\s/.test(process.execPath)) throw new Error(`the Node path must not contain whitespace: ${process.execPath}`);
     const holder = path.join(box.workspace, 'hold.mjs');
     await fs.writeFile(holder, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);\n`);
     const script: ProviderScript = request => {
       const tool = request.toolResults === 0 ? request.tools.find(candidate => SHELL_TOOLS.has(candidate.name)) : undefined;
       if (request.toolResults === 0 && request.tools.length > 0 && tool === undefined) throw new Error(`no shell tool offered: ${JSON.stringify(request.tools.map(t => t.name))}`);
       return tool === undefined ? { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS } : { kind: 'tool', tool, args: {
-        // The same words run in bash, cmd and PowerShell: the tool's cwd is the workspace.
-        command: 'node hold.mjs', description: 'Hold the shell tool',
+        // A bare absolute path with forward slashes runs in bash, cmd and PowerShell, and needs no PATH; the tool's cwd is the workspace.
+        command: `${process.execPath.replace(/\\/g, '/')} hold.mjs`, description: 'Hold the shell tool',
       } };
     };
     const provider = await startLoopbackProvider('openai-chat', script, MODEL);
