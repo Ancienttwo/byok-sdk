@@ -1,7 +1,9 @@
 import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, realpathSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { startLoopbackProvider } from './runtime-contract/loopback';
 import { resolveFileScopeGrant } from '../file-scope-guard';
 import { serializeFileScopeGrant } from '../file-scope-launch';
 import { tmpdir } from 'node:os';
@@ -70,6 +72,74 @@ function evaluate(body: string) {
 }
 
 describe('SDK ordinary Pi RPC entry', () => {
+  it.each(['prompt', 'steer', 'follow_up'] as const)('refuses child commands at %s while preserving skills, templates and resolved command aliases (#1642)', async (entry) => {
+    const f = fixture(), agent = f.env.PI_CODING_AGENT_DIR;
+    mkdirSync(join(agent, 'skills/approved'), { recursive: true }); mkdirSync(join(agent, 'prompts'));
+    writeFileSync(join(agent, 'skills/approved/SKILL.md'), '---\nname: approved\ndescription: Approved test skill\n---\nRPC_SKILL_BODY_1642');
+    writeFileSync(join(agent, 'prompts/approved.md'), 'RPC_TEMPLATE_BODY_1642');
+    const marker = join(f.root, 'other-command-ran'), extension = join(f.root, 'other-run.ts');
+    writeFileSync(extension, `import {writeFileSync} from 'node:fs'; export default pi => pi.registerCommand('run', {handler:async()=>{writeFileSync(${JSON.stringify(marker)},'other command');}});`);
+    const serialized = serializePiHostConfig({ ...f.config, agentExtensionPaths: [extension] });
+    writeFileSync(f.configPath, serialized.bytes);
+    const provider = await startLoopbackProvider('openai-chat', () => ({ kind: 'text', chunks: ['done'] }));
+    writeFileSync(join(agent, 'models.json'), JSON.stringify({ providers: { probe: { api: 'openai-completions', baseUrl: provider.baseUrl,
+      apiKey: 'synthetic', models: [{ id: 'contract-model', name: 'probe', contextWindow: 8192, maxTokens: 32, input: ['text'], reasoning: false }] } } }));
+    let settled = () => {};
+    const client = new PiRpcClient({ command: bun, cwd: f.sealed, env: f.env,
+      args: [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'probe', '--model', 'contract-model'],
+      onFrame: frame => { if (frame.type === 'agent_settled') settled(); } });
+    try {
+      const commands = (await client.send({ type: 'get_commands' })).data as { commands: { name: string; sourceInfo: { path: string } }[] };
+      const own = commands.commands.filter(command => command.sourceInfo.path === '<inline:byok-subagents>');
+      const launch = own.find(command => command.name.startsWith('run:'))!;
+      expect(own.map(command => command === launch ? 'run' : command.name).sort()).toEqual([
+        'run', 'prompt-workflow', 'subagents-refine', 'subagents-check-profile', 'subagents-refresh-provider-models', 'subagents-generate-profiles',
+        'subagents', 'subagent-cost', 'subagents-doctor', 'subagents-inspect-rpc', 'subagents-guide', 'subagents-fleet', 'subagents-detach',
+        'subagents-stop', 'subagents-steer', 'subagents-models', 'subagents-profiles', 'subagents-load-profile', 'subagents-watchdog',
+      ].sort());
+      expect(launch).toBeDefined();
+      for (const name of [launch.name, 'prompt-workflow', 'subagents-refine', 'subagents-check-profile', 'subagents-refresh-provider-models', 'subagents-generate-profiles']) {
+        for (const suffix of ['', ' --bg']) {
+          const denied = await client.send({ type: entry, message: `/${name} proof-child REFUSED_1642${suffix}` });
+          expect(denied).toMatchObject({ success: false, error: expect.stringContaining(`pi_host_command_denied: /${name}`) });
+        }
+      }
+      expect(provider.requests).toEqual([]);
+      expect((await client.send({ type: 'get_state' })).data).toMatchObject({ messageCount: 0, pendingMessageCount: 0 });
+      const other = commands.commands.find(command => command.sourceInfo.path === extension)!;
+      expect((await client.send({ type: 'prompt', message: `/${other.name}` })).success).toBe(true);
+      expect(existsSync(marker)).toBe(true);
+      for (const [text, expanded] of [['/skill:approved', 'RPC_SKILL_BODY_1642'], ['/approved', 'RPC_TEMPLATE_BODY_1642']]) {
+        const done = new Promise<void>(resolve => { settled = resolve; });
+        expect((await client.send({ type: entry, message: text })).success).toBe(true);
+        if (entry !== 'prompt') expect((await client.send({ type: 'prompt', message: 'Drain the queued input.' })).success).toBe(true);
+        await done;
+        expect(provider.requests.some(request => request.text.includes(expanded!))).toBe(true);
+      }
+      // The factory applies the same boundary after native session replacement.
+      expect((await client.send({ type: 'new_session' })).success).toBe(true);
+      expect((await client.send({ type: entry, message: `/${launch.name} proof-child REPLACEMENT_1642` })).success).toBe(false);
+      expect(readdirSync(f.root, { recursive: true }).some(file => String(file).endsWith('status.json'))).toBe(false);
+    } finally { await client.dispose(); await provider.close(); }
+  }, 30_000);
+
+  it('classifies every slash command registered by pinned pi-subagents, including child-process probes (#1642)', () => {
+    const inventory = {
+      run: 'refused: native child', 'prompt-workflow': 'refused: workflow children', 'subagents-refine': 'refused: proposal child',
+      'subagents-check-profile': 'refused: Pi probe process', 'subagents-refresh-provider-models': 'refused: Pi probe processes',
+      'subagents-generate-profiles': 'refused: refresh can spawn Pi probes',
+      subagents: 'allowed: metadata administration', 'subagent-cost': 'allowed: cost report', 'subagents-doctor': 'allowed: diagnostics',
+      'subagents-inspect-rpc': 'allowed: inspect existing child', 'subagents-guide': 'allowed: packaged guide',
+      'subagents-fleet': 'allowed: inspect existing fleet', 'subagents-detach': 'allowed: detach existing child',
+      'subagents-stop': 'allowed: stop existing child', 'subagents-steer': 'allowed: existing child, steeringRecovery=false',
+      'subagents-models': 'allowed: mappings', 'subagents-profiles': 'allowed: list profiles', 'subagents-load-profile': 'allowed: settings only',
+      'subagents-watchdog': 'allowed: watchdog config and in-process reviewer, not a subagent runner', 'pi-subagents-bridge': 'allowed: separate pane bridge, no child launch',
+    };
+    const pkg = resolve(dirname(createRequire(import.meta.url).resolve('pi-subagents')), '..'), src = join(pkg, 'src');
+    const registered = readdirSync(src, { recursive: true }).filter(file => String(file).endsWith('.js'))
+      .flatMap(file => [...readFileSync(join(src, String(file)), 'utf8').matchAll(/pi\s*\.\s*registerCommand\s*\(\s*(['"])([^'"]+)\1/gu)].map(match => match[2]));
+    expect(registered.sort()).toEqual(Object.keys(inventory).sort());
+  });
   it.skipIf(process.platform === 'win32')('emits one session readiness receipt from the memory RPC host before accepting commands', async () => {
     const f = fixture();
     const grant = await resolveFileScopeGrant({ fileScope: { mode: 'memory' }, home: { path: f.cwd, identity: statSync(f.cwd, { bigint: true }) }, attempt: { homeAccess: 'writer' } });

@@ -81,6 +81,8 @@ export async function runPiSessionRuntime(options: {
   customTools?: CreateAgentSessionOptions['customTools'];
   /** Fixed, fresh memory-only lane; it cannot resume or replace a transcript. */
   memoryLane?: ReturnType<typeof import('./pi-memory-lane').createPiMemoryLane>;
+  /** Apply host boundaries to every initial or replacement session. */
+  configureSession?: (session: CreateAgentSessionResult['session']) => void;
   /** Called once after creation/assertion, before the RPC loop can accept a prompt. */
   onSessionReady?: (session: PiToolLoadoutSession & { readonly sessionId: string }) => void;
   /** Pre-prompt registry assertion for a scoped session; throwing disposes and refuses to run. */
@@ -229,6 +231,7 @@ export async function runPiSessionRuntime(options: {
       model: resolved?.model, thinkingLevel: options.thinking ?? resolved?.thinkingLevel,
       tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools, customTools: options.customTools,
     });
+    options.configureSession?.(created.session);
     if (options.tools === undefined && options.noTools === undefined) resetResumedPiTools(created.session, services.settingsManager, options.cwd);
     // A replacement is visible to RPC while session_start is awaiting. Keep
     // the ordinary scoped boundary established before it can become current.

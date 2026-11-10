@@ -4036,6 +4036,21 @@ host imports the installed package through opaque specifiers. A single-file
 product's bundled re-entry loads the copy in its Pi asset root (below) through
 Pi's own extension loader, which supplies the Pi modules of the product bundle.
 
+Host text submitted through RPC `prompt`, `steer` or `follow_up`, including
+queued input, cannot invoke pi-subagents commands that start a child:
+`/run` (including `--bg` and `--fork`), `/prompt-workflow`, `/subagents-refine`,
+`/subagents-check-profile`, `/subagents-refresh-provider-models` and
+`/subagents-generate-profiles`. The last three can start Pi model-probe
+processes. The host refuses the command with a failed RPC response carrying
+`pi_host_command_denied`, before its handler runs. The check uses the command
+Pi resolves, including disambiguated aliases, and its extension source; another
+extension's command with the same name keeps its own behavior. Host text is
+never rewritten. Skill commands (`/skill:`), file prompt templates and other
+extension commands keep their existing expansion. Model text and tool-result
+text containing a slash command stay content. Host-requested children start
+through the `subagent` tool; under `auto`, workflow children also require the
+nested `subagent_launch` admission described below (#1642).
+
 Foreground children are in-process Pi sessions inside the parent host. In the
 installed host, background runs use pi-subagents' detached Node runner from the
 installed package. Bun-compiled products re-enter their executable as described
@@ -4088,9 +4103,10 @@ the child `cwd` is outside the file scope's tools, so each workflow child asks.
 
 pi-subagents calls `subagent_launch` only for children started by a workflow
 from a `subagent` call. It skips the call for schedule ticks, auto-resume,
-`/prompt-workflow` and RPC starts. Those children still load the gate
-extension, so each of their tool calls is gated, but no launch check of their
-`cwd`, gate commands or output runs. This is the same as 0.83.1.
+`/prompt-workflow` and RPC starts outside that tool path. The ordinary SDK
+Host prompt boundary refuses the child-starting commands listed above. Other
+upstream starts still load the gate extension, so each of their tool calls is
+gated, but no launch check of their `cwd`, gate commands or output runs.
 
 Bun-compiled executables with install-root assets offer foreground and
 background subagents, including workflows. Node SEA and interpreter + bundle

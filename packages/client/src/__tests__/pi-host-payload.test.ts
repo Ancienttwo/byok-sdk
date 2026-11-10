@@ -13,6 +13,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import exportLayout from '../adapters/pi/pi-export-asset-layout.json';
 import todoLayout from '../adapters/pi/todo-locale-layout.json';
 import { REQUIRE_BUN_ENV, resolveBunBin } from './support/test-bun-bin';
+import { startLoopbackProvider } from './runtime-contract/loopback';
 
 const execFileAsync = promisify(execFile);
 const BUN_BIN = resolveBunBin();
@@ -101,6 +102,7 @@ const HOST_ENTRY_SOURCE = `
 import fs from 'node:fs/promises';
 import * as sdk from ${JSON.stringify(CLIENT_DIST)};
 async function main() {
+if (process.env.PAYLOAD_TEST_CHILD_START && process.argv[2] === '--no-extensions') await fs.appendFile(process.env.PAYLOAD_TEST_CHILD_START, 'runner started\\n');
 if (process.argv[2] !== 'task') {
   if (!await sdk.runSdkReservedHelperCommand(process.argv.slice(2))) {
     if (process.env.PAYLOAD_TEST_PRODUCT_REEXEC) await fs.appendFile(process.env.PAYLOAD_TEST_PRODUCT_REEXEC, JSON.stringify(process.argv.slice(2)) + '\\n');
@@ -113,7 +115,7 @@ if (process.argv[2] !== 'task') {
     try { report.lookup = (await import(input.piSpecifier)).FOREIGN === true ? 'foreign' : 'resolved'; } catch (error) { report.lookup = String(error); }
     report.defaultDetect = await new sdk.PiAdapter().detect();
     // The Host sets PI_CODING_AGENT_DIR itself, so the runtime gets it only through pass (#1095); the asset root is packageDir (#1315).
-    const adapter = new sdk.PiAdapter({ runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR', 'PAYLOAD_TEST_PRODUCT_REEXEC'] }, sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
+    const adapter = new sdk.PiAdapter({ runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR', 'PAYLOAD_TEST_PRODUCT_REEXEC', 'PAYLOAD_TEST_CHILD_START'] }, sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
       ...(input.bundleEntry ? { entry: process.argv[1] } : {}) }, ...(input.piPackageDir === undefined ? {} : { packageDir: input.piPackageDir }) });
     report.stage = 'detect'; report.detect = await adapter.detect();
     report.stage = 'prepare';
@@ -139,6 +141,13 @@ if (process.argv[2] !== 'task') {
     for await (const event of session.events) {
       report.events.push(event); await fs.writeFile(input.report, JSON.stringify(report));
       if (event.type === 'turn_end') break;
+    }
+    if (input.statusProbe) {
+      await session.followUp({ instruction: 'STATUS_PROBE_1642' });
+      for await (const event of session.events) {
+        report.events.push(event);
+        if (event.type === 'turn_end') break;
+      }
     }
     report.privateSubagentRuntime = (await fs.readdir(scratch.sdkDir)).includes('pi-subagent-runtime');
     report.runnerStatuses = await Promise.all((await fs.readdir(scratch.runtimeDir, { recursive: true })).filter(file => file.endsWith('/status.json') || file.endsWith('\\status.json'))
@@ -293,6 +302,68 @@ async function buildHost(host: HostCase, release: string, buildDir: string, skip
 }
 
 describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', () => {
+  it.skipIf(BUN_BIN === undefined)('keeps Host slash commands out of child launch while model and tool text stays literal in a compiled product (#1642)', { timeout: 180_000 }, async () => {
+    const root = await tempRoot('byok-host-command-'), release = path.join(root, 'release'), build = path.join(root, 'build');
+    await fs.mkdir(release); await fs.mkdir(build);
+    const host = await buildHost('compiled-executable', release, build, note => { throw new Error(note); });
+    for (const name of ['host-exact', 'host-bg', 'host-mid', 'model-text', 'tool-result', 'workflow-control']) {
+      const run = path.join(root, name), agent = path.join(run, 'agent'), cwd = path.join(run, 'workspace'), home = path.join(run, 'home');
+      await fs.mkdir(path.join(agent, 'agents'), { recursive: true }); await fs.mkdir(cwd); await fs.mkdir(home);
+      const marker = `PROOF_1642_${name}`, slash = `/run payload-child ${marker}`;
+      let sent = false, waited = false, status = false;
+      const childRequests: string[] = [];
+      const provider = await startLoopbackProvider('openai-chat', request => {
+        if (!request.tools.some(tool => tool.name === 'subagent')) {
+          childRequests.push(request.text); return { kind: 'text', chunks: [`CHILD_${marker}`] };
+        }
+        const latest = [...JSON.parse(request.text).messages].reverse().find(message => message.role === 'user');
+        if (JSON.stringify(latest?.content).includes('STATUS_PROBE_1642')) {
+          if (!status) { status = true; return { kind: 'tool', tool: { name: 'subagent' }, args: { action: 'status' } }; }
+          return { kind: 'text', chunks: ['STATUS_DONE'] };
+        }
+        if (!sent) {
+          sent = true;
+          if (name === 'model-text') return { kind: 'text', chunks: [slash] };
+          if (name === 'tool-result') return { kind: 'tool', tool: { name: 'read' }, args: { path: 'slash-result.txt' } };
+          if (name === 'workflow-control') return { kind: 'tool', tool: { name: 'subagent' }, args: { workflow: './proof.js', async: true } };
+        }
+        if (name === 'workflow-control' && !waited) { waited = true; return { kind: 'tool', tool: { name: 'bg_wait' }, args: { all: true, timeoutMs: 30_000 } }; }
+        return { kind: 'text', chunks: [`PARENT_${marker}`] };
+      });
+      try {
+        await fs.writeFile(path.join(agent, 'models.json'), JSON.stringify({ providers: { 'host-stub': { api: 'openai-completions', baseUrl: provider.baseUrl,
+          apiKey: 'synthetic', models: [{ id: 'contract-model', name: 'Loopback proof', input: ['text'], reasoning: false, contextWindow: 8192, maxTokens: 256 }] } } }));
+        await fs.writeFile(path.join(agent, 'settings.json'), JSON.stringify({ defaultProvider: 'host-stub', defaultModel: 'contract-model' }));
+        await fs.writeFile(path.join(agent, 'agents/payload-child.md'), '---\nname: payload-child\ndescription: Loopback proof child\nmodel: host-stub/contract-model\ntools: read\n---\nReply to the task.');
+        await fs.writeFile(path.join(cwd, 'slash-result.txt'), slash);
+        await fs.writeFile(path.join(cwd, 'proof.js'), `return runs.run("proof", {agent:"payload-child",task:${JSON.stringify(marker)}});`);
+        const childStart = path.join(run, 'runner-started');
+        const env = { PATH: process.env.PATH ?? '', HOME: home, USER: os.userInfo().username, TMPDIR: run, PI_CODING_AGENT_DIR: agent,
+          PAYLOAD_TEST_CHILD_START: childStart, npm_config_registry: 'http://127.0.0.1:9', BUN_CONFIG_DEFAULT_REGISTRY: 'http://127.0.0.1:9' };
+        const refused = name === 'host-exact' || name === 'host-bg', reportPath = path.join(run, 'report.json'), input = path.join(run, 'input.json');
+        await fs.writeFile(input, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: name === 'host-exact' ? slash : name === 'host-bg' ? `${slash} --bg`
+          : name === 'host-mid' ? `Literal text: ${slash}` : marker, cwd, env, scratchRoot: testScratchRoot(), report: reportPath, statusProbe: !refused }));
+        await execFileAsync(host.command, ['task', input], { cwd: run, env, timeout: 60_000 });
+        const report = JSON.parse(await fs.readFile(reportPath, 'utf8')) as HostReport;
+        const launches = report.gateCalls!.filter(call => call.toolName === 'subagent_launch');
+        if (refused) {
+          expect(report.error).toContain('pi_host_command_denied: /run');
+          expect(report.stage).toBe('start'); expect(report.gateCalls).toEqual([]); expect(provider.requests).toEqual([]);
+        } else {
+          expect(report.error).toBeUndefined(); expect(report.stage).toBe('done');
+          const bodies = provider.requests.map(request => request.text).join('\n');
+          expect(bodies, JSON.stringify(report.runnerStatuses)).toContain(name === 'workflow-control' ? `CHILD_${marker}` : slash);
+          expect(report.events?.some(event => event.type === 'tool_result' && JSON.stringify(event).includes('Status target:'))).toBe(true);
+          if (name === 'model-text') expect(report.events?.filter(event => event.type === 'progress').map(event => event.text).join('')).toContain(slash);
+          if (name === 'tool-result') expect(report.events?.some(event => event.type === 'tool_result' && JSON.stringify(event).includes(slash))).toBe(true);
+        }
+        expect(childRequests).toHaveLength(name === 'workflow-control' ? 1 : 0);
+        expect(launches).toHaveLength(name === 'workflow-control' ? 1 : 0);
+        expect(existsSync(childStart)).toBe(name === 'workflow-control');
+        expect(report.runnerStatuses ?? []).toHaveLength(name === 'workflow-control' ? 2 : 0);
+      } finally { await provider.close(); }
+    }
+  });
   it.skipIf(BUN_BIN === undefined).for(['interpreter+bundle (bun)', 'interpreter+bundle (node)', 'compiled-executable', 'compiled-executable (configured assets)', 'node-sea'] as const)('runs a Pi task from the %s host form with no package lookup', { timeout: 180_000 }, async (form, { skip }) => {
     // #1589: a foreign Pi installed above the product; pi-subagents must never load it.
     const outer = await tempRoot('byok-host-payload-release-');
