@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
+import type { CreateAgentSessionResult, ExtensionFactory, InlineExtension } from '@earendil-works/pi-coding-agent';
 import { dependencies as clientDependencies } from '../../../package.json';
 import type { ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc';
 
@@ -25,6 +25,54 @@ type RegisterRequiredChildExtensions = typeof import('pi-subagents/required-chil
 
 /** Launch-evidence id of the SDK gate in every native Pi subagent child. */
 export const PI_SUBAGENT_GATE_EXTENSION_ID = 'byok-tool-authorization';
+/** Stable source identity for the installed extension's resolved commands. */
+export const PI_SUBAGENT_HOST_EXTENSION = 'byok-subagents';
+
+// pi-subagents 0.87.0: delegation/refinement, model probes and watchdog
+// executors (workspace LSP process and reviewer). Inventory is pinned by tests.
+const CHILD_START_COMMANDS = new Set([
+  'run', 'prompt-workflow', 'subagents-refine', 'subagents-check-profile',
+  'subagents-refresh-provider-models', 'subagents-generate-profiles', 'subagents-watchdog',
+]);
+
+type PiCommandParser = (this: { _extensionRunner: { getCommand(name: string): void } }, text: string) => void;
+
+/** Keep Host commands out of executor paths without a tool_call approval. */
+export function refusePiSubagentHostCommands(session: CreateAgentSessionResult['session'], sources: readonly string[]): void {
+  // SAFETY: Pi 1.5.0's private method owns first-space parsing. Its runtime
+  // type is checked below; pin tests must re-check it on every Pi upgrade.
+  const parse = (session as unknown as { _throwIfExtensionCommand?: PiCommandParser })._throwIfExtensionCommand;
+  if (typeof parse !== 'function') {
+    throw new Error('pi_host_command_boundary_unavailable: pinned Pi parser _throwIfExtensionCommand is unavailable');
+  }
+  const guarded = new WeakSet<typeof session.extensionRunner>();
+  const boundary = <Args extends [string, ...unknown[]], Result>(method: (...args: Args) => Promise<Result>, expands?: (...args: Args) => boolean) => async (...args: Args): Promise<Result> => {
+    // Reload replaces the runner; session replacement installs this boundary
+    // through the runtime factory. Pi alone parses text and resolves aliases.
+    const runner = session.extensionRunner;
+    if (!guarded.has(runner)) {
+      const getCommand = runner.getCommand.bind(runner);
+      runner.getCommand = (name) => {
+        const command = getCommand(name);
+        if (command && sources.includes(command.sourceInfo.path) && CHILD_START_COMMANDS.has(command.name)) {
+          throw new Error(`pi_host_command_denied: /${command.invocationName} can start a child outside launch approval; use the subagent tool`);
+        }
+        return command;
+      };
+      guarded.add(runner);
+    }
+    if (args[0].startsWith('/') && expands?.(...args) !== false) {
+      // Resolve before prompt() can defer during agent_settled. Returning no
+      // command after an allowed lookup prevents Pi's generic queue refusal;
+      // the guarded real registry still throws for a denied command.
+      parse.call({ _extensionRunner: { getCommand: name => { runner.getCommand(name); } } }, args[0]);
+    }
+    return method(...args);
+  };
+  session.prompt = boundary(session.prompt.bind(session), (_text, options) => options?.expandPromptTemplates !== false);
+  session.steer = boundary(session.steer.bind(session));
+  session.followUp = boundary(session.followUp.bind(session));
+}
 /** Launch-evidence id of the file-scope extension required only by a scoped parent. */
 export const PI_SUBAGENT_FILE_SCOPE_EXTENSION_ID = 'byok-file-scope';
 
@@ -44,11 +92,12 @@ export async function loadPiSubagentsExtensions(
   gate: ToolAuthorizationIpcConfig | null,
   gateExtensionPath: string,
   fileScopeExtensionPath?: string,
-): Promise<ExtensionFactory[]> {
+): Promise<InlineExtension[]> {
   const { default: subagents } = await import(PI_SUBAGENTS) as typeof import('pi-subagents');
-  if (gate === null) return [subagents];
+  const extension = { name: PI_SUBAGENT_HOST_EXTENSION, factory: subagents };
+  if (gate === null) return [extension];
   const { registerRequiredChildExtensions } = await import(PI_SUBAGENTS_REQUIRED_CHILD_EXTENSIONS) as typeof import('pi-subagents/required-child-extensions');
-  return [subagents, requireChildExtensions(registerRequiredChildExtensions, gateExtensionPath, fileScopeExtensionPath)];
+  return [extension, requireChildExtensions(registerRequiredChildExtensions, gateExtensionPath, fileScopeExtensionPath)];
 }
 
 /**

@@ -10,7 +10,7 @@ import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credent
 import { runPiSessionRuntime } from './pi-session-runtime';
 export { openPiRpcSession } from './pi-session-runtime';
 import { webExtension } from './pi-extension-factories.js';
-import { loadPiSubagentsAsset, loadPiSubagentsExtensions, writePiSubagentsHostSdk } from '../adapters/pi/subagents';
+import { loadPiSubagentsAsset, loadPiSubagentsExtensions, writePiSubagentsHostSdk, refusePiSubagentHostCommands, PI_SUBAGENT_HOST_EXTENSION } from '../adapters/pi/subagents';
 import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
 import { BUNDLED_SUBAGENT_DIR, pinBunSubagentAssets, prepareBundledSubagents, refuseBundledBackground } from '../adapters/pi/bundled-subagent-runtime';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
@@ -325,6 +325,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   await runPiSessionRuntime({
     cwd: config.cwd, session: args.session, sessionDir,
     onSessionReady: ready,
+    configureSession: session => refusePiSubagentHostCommands(session, [`<inline:${PI_SUBAGENT_HOST_EXTENSION}>`, ...subagentExtensionPaths]),
     provider: args.provider, model: args.model, thinking: args.thinking,
     ...(resourceAgentDir === undefined ? {} : { resourceAgentDir }),
     resourceLoaderOptions: {
