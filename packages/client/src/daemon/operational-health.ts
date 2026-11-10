@@ -26,7 +26,7 @@ interface RunMarker {
 
 type ControlEndpointRefusal = NonNullable<Extract<OperationalHealthFileInspection, { status: 'valid' }>['controlEndpointRefusal']>;
 const CONTROL_ENDPOINT_REFUSAL_CODES = [
-  'private_dir_symlink', 'private_dir_not_directory', 'private_dir_foreign_owner', 'private_dir_mode', 'socket_path_not_socket',
+  'private_dir_symlink', 'private_dir_not_directory', 'private_dir_foreign_owner', 'private_dir_mode', 'socket_path_not_socket', 'socket_mode',
 ] as const satisfies readonly ControlEndpointRefusal['code'][];
 // Compile-time exhaustiveness: a code of the union missing from the list fails here.
 type NoMissingCode<Missing extends never> = Missing;
@@ -110,9 +110,9 @@ export type OperationalHealthFileInspection =
       crashCount: number;
       currentRunStartedAt?: string;
       lastCrashAt?: string;
-      /** The typed codes of `PrivateDirectoryRefusedError` and `PrivateSocketPathError`; lifecycle passes `err.code`, so the compiler holds them in step. */
+      /** The typed codes of `PrivateDirectoryRefusedError`, `PrivateSocketPathError` and `PrivateSocketModeError`; lifecycle passes `err.code`, so the compiler holds them in step. */
       controlEndpointRefusal?: {
-        code: 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner' | 'private_dir_mode' | 'socket_path_not_socket';
+        code: 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner' | 'private_dir_mode' | 'socket_path_not_socket' | 'socket_mode';
         path: string;
         at: string;
       };

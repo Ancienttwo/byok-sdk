@@ -219,4 +219,29 @@ describe('control socket fallback: a typed refusal is recorded for doctor', () =
       warn.mockRestore();
     }
   }, 60_000);
+
+  it.skipIf(process.platform === 'win32')('a natural socket whose mode cannot be set to 0600 records socket_mode with its path', async () => {
+    const storeDir = `/tmp/byok-${randomBytes(8).toString('hex')}`;
+    await fs.mkdir(storeDir, { mode: 0o700 });
+    dirsToRemove.push(storeDir);
+    const operationalHealth = new OperationalHealthTracker(storeDir);
+    const daemonState: { controlServerHandle?: ControlServerHandle } = {};
+    const scope = { daemonState, controlMethods: pingMethods(), storeDir, config: { productId: 'acme' }, operationalHealth } as unknown as DaemonScope;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const realChmod = fs.chmod.bind(fs);
+    const chmod = vi.spyOn(fs, 'chmod').mockImplementation(async (target, mode) => {
+      if (String(target).endsWith('control.sock')) throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+      return realChmod(target, mode);
+    });
+    try {
+      await replaceControlServer(scope, false);
+      expect(daemonState.controlServerHandle).toBeUndefined();
+      await operationalHealth.startRun();
+      expect(await inspectOperationalHealthFile(storeDir))
+        .toMatchObject({ status: 'valid', controlEndpointRefusal: { code: 'socket_mode', path: path.join(storeDir, 'control.sock') } });
+    } finally {
+      chmod.mockRestore();
+      warn.mockRestore();
+    }
+  });
 });
