@@ -15,7 +15,7 @@ import (
 
 func cleanupSession(t *testing.T, home string) *session {
 	t.Helper()
-	active, err := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identityForTest(t, home)})
+	active, err := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identityForTest(t, home)})
 	if err != nil {
 		t.Fatal(err)
 	}

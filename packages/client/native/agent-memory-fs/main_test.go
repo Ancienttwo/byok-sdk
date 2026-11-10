@@ -60,6 +60,7 @@ func TestVersionAndOpenProtocol(t *testing.T) {
 		"protocol":         protocolVersion,
 		"op":               "open",
 		"root":             home,
+		"ancestorRoot":     filepath.Dir(home),
 		"expectedIdentity": identityForTest(t, home),
 	})
 	requireSuccess(t, open)
@@ -85,6 +86,7 @@ func TestOpenRejectsMismatchedTaggedIdentity(t *testing.T) {
 		"protocol":         protocolVersion,
 		"op":               "open",
 		"root":             home,
+		"ancestorRoot":     filepath.Dir(home),
 		"expectedIdentity": expected,
 	})
 	requireFailure(t, response, "root_identity_mismatch")
@@ -98,11 +100,12 @@ func TestServeRejectsMalformedRequestWithoutLeakingInput(t *testing.T) {
 	home := newMemoryHome(t)
 	helper := startHelper(t)
 	response := helper.request(map[string]any{
-		"id":       "bad",
-		"protocol": protocolVersion,
-		"op":       "open",
-		"root":     home,
-		"content":  "private-content-must-not-echo",
+		"id":           "bad",
+		"protocol":     protocolVersion,
+		"op":           "open",
+		"root":         home,
+		"ancestorRoot": filepath.Dir(home),
+		"content":      "private-content-must-not-echo",
 	})
 	requireFailure(t, response, "malformed_request")
 	if strings.Contains(response.Error.Message, home) || strings.Contains(response.Error.Message, "private-content") {
@@ -379,6 +382,7 @@ func TestRootParentAndLeafSymlinkSwapsCannotTouchOutsideSentinel(t *testing.T) {
 			"protocol":         protocolVersion,
 			"op":               "open",
 			"root":             home,
+			"ancestorRoot":     filepath.Dir(home),
 			"expectedIdentity": expected,
 		})
 		if response.OK || (response.Error.Code != "unsafe_root" && response.Error.Code != "root_identity_mismatch") {
@@ -510,6 +514,7 @@ func (h *helperProcess) open(home string) wireResponse {
 		"protocol":         protocolVersion,
 		"op":               "open",
 		"root":             home,
+		"ancestorRoot":     filepath.Dir(home),
 		"expectedIdentity": identityForTest(h.t, home),
 	})
 }

@@ -117,7 +117,9 @@ func TestWindowsOpenWithJunctionFixtures(t *testing.T) {
 				makeReparsePoint(t, "junction", filepath.Join(home, ".byok"), outside)
 				reached = ".byok"
 			}
-			active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: root, ExpectedIdentity: expected})
+			// The ancestor authority is the original canonical parent, even when
+			// the requested home spelling reaches it through an ancestor junction.
+			active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: root, AncestorRoot: parent, ExpectedIdentity: expected})
 			if placement == "root-junction" {
 				if active != nil || failure == nil || failure.code != "unsafe_root" {
 					t.Fatalf("junction home admitted: session=%v error=%v", active, failure)

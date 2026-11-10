@@ -94,7 +94,7 @@ export async function provenAgentMemoryBackend(daemonScope: DaemonScope): Promis
     if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) return undefined;
     backend = helperBin === undefined
       ? NATIVE_AGENT_MEMORY_INTENT_BACKEND
-      : helperAgentMemoryIntentBackend(helperBin, config.agentMemoryHelperAssetRoot);
+      : helperAgentMemoryIntentBackend(helperBin, await fs.realpath(agentHomeManager.layout.hostRootInput()), config.agentMemoryHelperAssetRoot);
   } catch (error) {
     // Intents need this helper. Commit on success is asked of every Agent-home
     // daemon, and only its capability depends on the proof.
@@ -109,7 +109,7 @@ export async function provenAgentMemoryBackend(daemonScope: DaemonScope): Promis
     try {
       const canonicalHome = await fs.realpath(config.agentHome.hostStorageRoot);
       const stat = await fs.stat(canonicalHome, { bigint: true });
-      const probe = await openAgentMemoryFilesystemHelper({ helperBin, assetRoot: config.agentMemoryHelperAssetRoot, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } });
+      const probe = await openAgentMemoryFilesystemHelper({ helperBin, assetRoot: config.agentMemoryHelperAssetRoot, ancestorRoot: canonicalHome, canonicalHome, homeIdentity: { dev: stat.dev, ino: stat.ino } });
       await probe.close();
     } catch (error) {
       console.error(`[byok/client] agent memory intents and commit on success are off: the memory helper failed its volume probe: ${error instanceof Error ? error.message : String(error)}`);

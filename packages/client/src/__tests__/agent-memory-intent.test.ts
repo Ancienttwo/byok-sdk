@@ -1683,7 +1683,7 @@ describe('WP2I-S2 backend proof and fail-closed entry', () => {
 
   itForeignHelper('refuses a foreign helper rather than granting it either proof', () => {
     const message = isAgentMemoryFilesystemHelperSupported() ? 'SDK release artifact' : 'SDK Agent memory helper is not admitted on this platform';
-    expect(() => helperAgentMemoryIntentBackend(process.platform === 'win32' ? process.execPath : '/bin/sh')).toThrow(message);
+    expect(() => helperAgentMemoryIntentBackend(process.platform === 'win32' ? process.execPath : '/bin/sh', os.tmpdir())).toThrow(message);
   });
 
   it('retains both native Linux backend proofs', () => {
@@ -1964,7 +1964,7 @@ describe('WP2I-S2 native descriptor backend (Linux)', () => {
 describe('WP2I-S2 SDK helper backend', () => {
   itMacHelper('applies replace and delete through the real SDK ledger and does not repeat an acknowledged CAS', async () => {
     const w = await world();
-    const backend = helperAgentMemoryIntentBackend(helperBin!);
+    const backend = helperAgentMemoryIntentBackend(helperBin!, w.homes.layout.hostRootInput());
     const replace = await makeIntent({ path: 'notes/host-a.md', operation: 'replace', base: EMPTY, content: 'durable helper value' });
     w.host.add(replace);
     const result = await w.processor({ backend })(notice(replace));
@@ -1991,7 +1991,7 @@ describe('WP2I-S2 SDK helper backend', () => {
     await w.writeMemory('notes/host-a.md', 'current');
     const before = await fs.stat(w.memoryFile('notes/host-a.md'), { bigint: true });
     const binding = await w.homes.acquire(AGENT);
-    const filesystem = await openAgentMemoryFilesystemHelper({ helperBin: helperBin!, canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity });
+    const filesystem = await openAgentMemoryFilesystemHelper({ helperBin: helperBin!, ancestorRoot: binding.resolution.hostStorageRoot, canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity });
     try {
       const home = agentMemoryHomeBinding({ canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity, filesystem });
       await expect(compareAndSwapAgentMemoryHomeFile(home, { operation: 'replace', path: 'notes/host-a.md', expectedRevision: sha('stale'), content: 'next' })).rejects.toBeInstanceOf(AgentMemoryRevisionConflictError);
@@ -2004,7 +2004,7 @@ describe('WP2I-S2 SDK helper backend', () => {
     expect(await w.readMemory('notes/host-a.md')).toBe('current');
     expect((await fs.readdir(path.join(w.canonicalHome, 'notes'))).filter((name) => name.startsWith('.byok-'))).toEqual([]);
 
-    const helper = helperAgentMemoryIntentBackend(helperBin!);
+    const helper = helperAgentMemoryIntentBackend(helperBin!, w.homes.layout.hostRootInput());
     expect(helper.conflictProvesNoRename).toBe(true);
     const intent = await makeIntent({ path: 'notes/host-a.md', operation: 'replace', base: sha('stale'), content: 'x' });
     w.host.add(intent);
@@ -2031,7 +2031,7 @@ describe('WP2I-S2 SDK helper backend', () => {
  * seam proves the processor logic over the real Windows helper ledger, not B.
  */
 function processorHelperBackend(): AgentMemoryIntentBackend {
-  const helper = helperAgentMemoryIntentBackend(helperBin!);
+  const helper = helperAgentMemoryIntentBackend(helperBin!, os.tmpdir());
   return process.platform === 'win32' ? { ...helper, strictLedgerBarrier: true } : helper;
 }
 

@@ -115,7 +115,7 @@ func runCrashChild(home string) error {
 	if err != nil {
 		return err
 	}
-	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identity})
+	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identity})
 	if failure != nil {
 		return failure
 	}

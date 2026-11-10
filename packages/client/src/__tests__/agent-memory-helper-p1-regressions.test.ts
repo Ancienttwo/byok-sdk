@@ -60,8 +60,8 @@ const helperHarness = vi.hoisted(() => {
           stdout.emit('data', Buffer.from(`${JSON.stringify({
             id: request.id,
             ok: true,
-            protocol: 3,
-            result: { helperVersion: '3', identity: request.expectedIdentity },
+            protocol: 4,
+            result: { helperVersion: '4', identity: request.expectedIdentity },
           })}\n`));
           return;
         }
@@ -143,6 +143,7 @@ describe('Agent memory helper P1 regressions', () => {
         const filesystem = await openAgentMemoryFilesystemHelper({
           helperBin: '/opt/byok-agent-memory-fs',
           canonicalHome: '/tmp/byok-agent-memory-helper-epipe',
+          ancestorRoot: '/tmp',
           homeIdentity: { dev: 1n, ino: 2n },
         });
         const expectedRevision = `sha256:${'0'.repeat(64)}`;

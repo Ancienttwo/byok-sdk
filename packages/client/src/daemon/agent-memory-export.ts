@@ -27,7 +27,7 @@ export async function exportAgentMemoryHome(
     await homes.initializeTaskFree(binding);
     options.signal?.throwIfAborted();
     if (helper !== undefined) filesystem = await openAgentMemoryFilesystemHelper({
-      helperBin: helper.bin, assetRoot: helper.assetRoot,
+      helperBin: helper.bin, assetRoot: helper.assetRoot, ancestorRoot: binding.resolution.hostStorageRoot,
       canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity,
     });
     const snapshot = await captureAgentMemoryHomeSnapshot({

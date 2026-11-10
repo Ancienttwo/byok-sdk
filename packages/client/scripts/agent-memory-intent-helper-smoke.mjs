@@ -64,7 +64,7 @@ const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'byok-intent-helper-')
 try {
   const file = process.platform === 'win32' ? 'win32-x64.exe' : `darwin-${process.arch}`;
   const helperBin = fileURLToPath(new URL(`../dist/native/agent-memory-fs/${file}`, import.meta.url));
-  const helper = helperAgentMemoryIntentBackend(helperBin);
+  const helper = helperAgentMemoryIntentBackend(helperBin, root);
   assert.equal(helper.strictLedgerBarrier, process.platform !== 'win32');
   const backend = process.platform === 'win32' ? { ...helper, strictLedgerBarrier: true } : helper;
   const homes = new AgentHomeManager({ hostStorageRoot: root });

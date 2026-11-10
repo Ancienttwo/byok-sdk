@@ -22,7 +22,7 @@ import { TestServer } from './fixtures/test-server';
 const helperBin = builtAgentMemoryFilesystemHelperBin();
 // Windows has the helper but no power-loss proof, so it never declares the flag.
 const supported = isAgentMemorySecureFilesystemAvailable(helperBin !== undefined) && process.platform !== 'win32';
-const backend = helperBin === undefined ? NATIVE_AGENT_MEMORY_INTENT_BACKEND : helperAgentMemoryIntentBackend(helperBin);
+const backend = helperBin === undefined ? NATIVE_AGENT_MEMORY_INTENT_BACKEND : helperAgentMemoryIntentBackend(helperBin, os.tmpdir());
 const roots: string[] = [];
 async function temp(prefix: string): Promise<string> {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));

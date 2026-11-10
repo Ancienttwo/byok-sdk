@@ -19,6 +19,6 @@ for (const { name, goos, goarch, file, digestAlgorithm } of agentMemoryHelperTar
   entries[name] = { file, digestAlgorithm, digest: agentMemoryHelperTargetDigest(name, readFileSync(target)) };
 }
 writeFileSync(new URL('manifest.json', output), `${JSON.stringify({
-  version: 2, helperVersion: '3', protocol: 3, go: 'go1.26.5', flags,
+  version: 2, helperVersion: '4', protocol: 4, go: 'go1.26.5', flags,
   sourceDigest: agentMemoryHelperSourceDigest(source), signingPolicy: 'product-resigning-allowed', entries,
 }, null, 2)}\n`);

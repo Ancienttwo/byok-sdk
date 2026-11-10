@@ -39,7 +39,7 @@ func pinnedNTFSSession(t *testing.T) (string, *session) {
 	if err := os.WriteFile(filepath.Join(home, "MEMORY.md"), []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identityForTest(t, home)})
+	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identityForTest(t, home)})
 	if failure != nil {
 		t.Fatalf("open: %#v", failure)
 	}

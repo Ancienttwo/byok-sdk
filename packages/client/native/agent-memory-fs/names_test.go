@@ -45,7 +45,7 @@ func pinnedOperation(active *session, operation, path, revision string) *protoco
 
 func openNamesSession(t *testing.T, home string) *session {
 	t.Helper()
-	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identityForTest(t, home)})
+	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identityForTest(t, home)})
 	if failure != nil {
 		t.Fatalf("open failed: %v", failure)
 	}

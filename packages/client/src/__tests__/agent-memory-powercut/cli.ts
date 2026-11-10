@@ -108,7 +108,7 @@ async function main(argv: readonly string[]): Promise<number> {
       if (values.store === undefined) throw new Error('--store is required');
       const store = realpathSync(values.store);
       const socket = values.connect === undefined ? undefined : await connect(values.connect);
-      await runDevice(store, socket === undefined ? { input: process.stdin, output: process.stdout } : { input: socket, output: socket }, powercutBackend());
+      await runDevice(store, socket === undefined ? { input: process.stdin, output: process.stdout } : { input: socket, output: socket }, powercutBackend(store));
       socket?.end();
       return 0;
     }

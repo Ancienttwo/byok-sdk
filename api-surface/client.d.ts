@@ -2763,8 +2763,8 @@ export interface AgentMemoryRestoreCleanup {
 // ==== @byok-sdk/client dist/daemon/agent-memory-fs-helper.d.ts ====
 import type { AgentHomeLease } from '../agent-home';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
-export declare const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 3;
-export declare const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = "3";
+export declare const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 4;
+export declare const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = "4";
 export declare function isAgentMemoryFilesystemHelperSupported(): boolean;
 /** Private helper protocol identity. Decimal strings keep all 64 bits. */
 export type AgentMemoryHelperIdentity = Readonly<{
@@ -2783,6 +2783,7 @@ export declare function openAgentMemoryFilesystemHelper(input: Readonly<{
     helperBin: string;
     assetRoot?: string | undefined;
     canonicalHome: string;
+    ancestorRoot: string;
     homeIdentity: AgentHomeLease['homeIdentity'];
 }>): Promise<AgentMemoryFilesystem>;
 // ==== @byok-sdk/client dist/daemon/agent-memory-intent.d.ts ====
@@ -2867,7 +2868,7 @@ export declare const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBacken
  * macOS helper has the strict barrier proof. Windows has no OS-crash or
  * power-loss proof, so it never advertises intents.
  */
-export declare function helperAgentMemoryIntentBackend(helperBin: string, assetRoot?: string): AgentMemoryIntentBackend;
+export declare function helperAgentMemoryIntentBackend(helperBin: string, ancestorRoot: string, assetRoot?: string): AgentMemoryIntentBackend;
 export interface AgentMemoryIntentProcessorOptions {
     readonly tenantId: string;
     readonly deviceId: string;
