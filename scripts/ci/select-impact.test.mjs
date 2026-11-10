@@ -271,6 +271,7 @@ test('a platform family is selected only by a path it owns', () => {
     'credential-isolation-audit': 'packages/keys/src/index.ts',
     'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
     'agy-real-windows': 'packages/client/src/__tests__/runtime-contract/agy.contract.ts',
+    'opencode-real-windows': 'packages/client/src/__tests__/runtime-contract/opencode-contract.ts',
     'runtime-contract': 'packages/client/src/__tests__/runtime-contract/contract.ts',
     'npm-release-pack': 'packages/keys/src/pi-projection-windows.test.ts',
   };
@@ -334,6 +335,21 @@ test('Hermes adapter, fake and custody launcher paths select the Windows Hermes 
   for (const path of ['packages/client/src/adapters/codex/codex-adapter.ts', 'packages/keys/src/pi-provider-launcher.ts', 'packages/client/src/__tests__/hermes-pipe-open-errors.test.ts']) {
     assert.ok(!selectImpact([path]).families.includes('windows-client'), path);
   }
+});
+
+test('OpenCode adapter, its contract and the shared spawn code select the OpenCode Windows job (#1593)', () => {
+  for (const path of [
+    'packages/client/src/adapters/opencode/opencode-adapter.ts',
+    'packages/client/src/__tests__/runtime-contract/opencode-contract.ts',
+    'packages/client/src/__tests__/runtime-contract/opencode1.contract.ts',
+    'packages/client/src/runtime/owned-terminal-process.ts',
+    'packages/client/src/runtime/owned-line-process.ts',
+    'packages/client/src/runtime/environment.ts',
+    'packages/client/src/runtime/oar-process-tree.js',
+    'packages/client/src/adapters/runtime-invocation.ts',
+    'packages/client/src/adapters/detect-outcome.ts',
+    'packages/client/src/util/async-queue.ts',
+  ]) assert.ok(selectImpact([path]).families.includes('opencode-real-windows'), path);
 });
 
 test('Hermes adapter, real run and custody launcher paths select the real Hermes Windows job (#608)', () => {
@@ -603,7 +619,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 21);
+  assert.equal(knownFamilies.length, 22);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {

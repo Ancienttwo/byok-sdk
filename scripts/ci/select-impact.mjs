@@ -189,7 +189,7 @@ export const knownFamilies = Object.freeze([
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'packaging-consistency', 'npm-release-pack',
   'release-pack-migrate', 'service-upgrade-smoke', 'linux-systemd-smoke', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
-  'hermes-real-windows', 'agy-real-windows', 'runtime-contract',
+  'hermes-real-windows', 'agy-real-windows', 'opencode-real-windows', 'runtime-contract',
 ]);
 // A routine PR selects a platform family only when it changes a path that the
 // family owns: its tests, smoke scripts and the source they qualify. Package
@@ -272,6 +272,21 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/runtime\/acp-session-runtime\.(?:js|d\.ts)$/,
     /^packages\/client\/src\/__tests__\/runtime-contract\/(?:agy\.contract|contract|loopback)\.ts$/,
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes\/antigravity|shared\/acp)\//,
+    /^scripts\/ci\/runtime-contract-install(?:\.test)?\.mjs$/,
+  ],
+  // #1593: the OpenCode runtime contract on Windows, its lifecycle cases and the code it qualifies.
+  'opencode-real-windows': [
+    /^packages\/client\/src\/adapters\/opencode\//,
+    /^packages\/client\/src\/adapters\/agent-persona\.ts$/,
+    /^packages\/client\/src\/runtime\/acp-session-runtime\.(?:js|d\.ts)$/,
+    // The shared spawn, environment, ownership and cleanup code the adapter runs on.
+    /^packages\/client\/src\/runtime\/(?:environment|owned-line-process|owned-terminal-process)\.ts$/,
+    /^packages\/client\/src\/runtime\/oar-process-tree\.(?:js|d\.ts)$/,
+    /^packages\/client\/src\/adapters\/(?:runtime-invocation|runtime-executable|detect-outcome)\.ts$/,
+    /^packages\/client\/src\/(?:runtime-failure|runtime-version-policy|login-shell-environment)\.ts$/,
+    /^packages\/client\/src\/util\/(?:async-queue|jsonl-lines)\.ts$/,
+    /^packages\/client\/src\/__tests__\/runtime-contract\/(?:opencode[12]\.contract|opencode-contract|contract|loopback)\.ts$/,
+    /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes\/opencode|shared\/acp)\//,
     /^scripts\/ci\/runtime-contract-install(?:\.test)?\.mjs$/,
   ],
   'packageability-smoke': [
