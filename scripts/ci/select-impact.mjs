@@ -662,6 +662,11 @@ export function selectImpact(paths, context = {}) {
     }
     // #1105: the retention soak is a dev-only artifact producer run by its own
     // workflow, not by a package test suite.
+    // #605 L2: the standalone verifier builds its pinned fixture itself.
+    // run-targeted executes it with Node in the existing targeted job.
+    if (/^scripts\/agent-memory-a7\/(?:(?:bridge|evidence|run|verify|verifier\.test)\.mjs|result\.schema\.json)$/.test(path)) {
+      scripts = true; continue;
+    }
     if (path === 'scripts/soak/client-retention-soak.mjs') { scripts = true; continue; }
     // The operator collector writes official-pi-closure.json, which is mapped
     // on its own; nothing runs or imports the collector.

@@ -124,7 +124,7 @@ export function compare(before, after) {
   return { schema: SCHEMA, before, after, status: before.status === 'passed' && after.status === 'passed' ? 'passed' : 'failed', scope: 'Recorded storage profile only; owner acceptance and Windows intent B remain separate.' };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   const [command, ...args] = process.argv.slice(2);
   let result;
   if (command === 'verify' && args.length === 3) result = verify(readEvidence(args[0]), path.resolve(args[1]));

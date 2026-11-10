@@ -18,6 +18,7 @@ if (plan.files.some(path => /^scripts\/release\/registry-/.test(path))) extraTes
 if (plan.files.some(path => path.startsWith('packages/client/vendor/oar/')
   || /^scripts\/api-surface\/(?:check-oar-bridge\.test\.mjs|oar-bridge-types\.ts|tsconfig\.oar-bridge\.json)$/.test(path))) extraTests.push('scripts/api-surface/check-oar-bridge.test.mjs');
 if (plan.files.some(path => path === 'scripts/vitest/tmp-root.mjs' || path === 'scripts/vitest/tmp-root.test.mjs')) extraTests.push('scripts/vitest/tmp-root.test.mjs');
+if (plan.files.some(path => path.startsWith('scripts/agent-memory-a7/'))) extraTests.push('scripts/agent-memory-a7/verifier.test.mjs');
 extraTests.push(...scriptChecksForPaths(plan.files).tests);
 if (extraTests.length) {
   const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...new Set(extraTests)], { stdio: 'inherit', env: process.env });
