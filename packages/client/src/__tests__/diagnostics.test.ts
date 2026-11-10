@@ -293,11 +293,19 @@ describe('diagnostics collector', () => {
         async () => { throw new Error('unknown method'); },
         async () => ({ runtimes: [{ runtimeId: 'claude', status: 'built', names: [{ name: 'HOME', source: 'login-shell', value: '/home/user' }], removed: [] }] }),
         async () => ({ runtimes: [{ runtimeId: 'claude', status: 'built', names: [{ name: 'A=B', source: 'pass' }], removed: [] }] }),
+        async () => ({ runtimes: [{ runtimeId: 'pi', status: 'built', names: [], removed: [], lanes: [{ lane: 'pi-keys-profile', narrowedBy: 'keys-launcher', removed: [] }] }] }),
+        async () => ({ runtimes: [{ runtimeId: 'pi', status: 'built', names: [], removed: [], lanes: [{ lane: 'pi-rpc', narrowedBy: 'sdk', removed: [] }] }] }),
       ]) {
         const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: () => connected({}, answer) });
         expect(snapshot.control.status).toBe('online');
         expect(snapshot.runtimeEnvironment).toEqual({ status: 'unknown', reason: 'request-failed' });
       }
+      const lanes = { runtimes: [{ runtimeId: 'pi', status: 'built', names: [], removed: [], lanes: [
+        { lane: 'pi-prepared', narrowedBy: 'sdk', removed: ['PI_OFFLINE'] }, { lane: 'pi-keys-profile', narrowedBy: 'keys-launcher' },
+      ] }] };
+      const json: string[] = [];
+      await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({}, async () => lanes), json: true, log: (line) => json.push(line) });
+      expect((JSON.parse(json.join('')) as { runtimeEnvironment: unknown }).runtimeEnvironment).toEqual({ status: 'known', ...lanes });
       const failed: string[] = [];
       await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({}, async () => { throw new Error('unknown method'); }), log: (line) => failed.push(line) });
       expect(failed).toContain('runtime-environment: unknown (the daemon did not report it)');

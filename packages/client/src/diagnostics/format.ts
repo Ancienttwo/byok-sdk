@@ -322,6 +322,11 @@ export function formatRuntimeEnvironmentLines(result: DoctorRuntimeEnvironment):
       lines.push(`runtime-environment ${runtime.runtimeId}: ${runtime.names.length} names, ${runtime.removed.length} removed`);
       for (const { name, source } of runtime.names) lines.push(`  ${name} (${source})`);
       for (const { name, rule } of runtime.removed) lines.push(`  removed ${name} (${rule})`);
+      for (const lane of runtime.lanes ?? []) {
+        lines.push(lane.narrowedBy === 'sdk'
+          ? `  lane ${lane.lane} removes ${lane.removed.join(', ') || '(none)'}`
+          : `  lane ${lane.lane}: the keys launcher passes only its fixed names; runtimeEnvironment.pass names do not reach Pi`);
+      }
     }
   }
   return lines;

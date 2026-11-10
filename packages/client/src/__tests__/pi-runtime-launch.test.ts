@@ -206,3 +206,27 @@ it('prepared launch on the Pi auth store keeps every provider credential name pi
     expect(resources.env).not.toHaveProperty('UNRELATED_SECRET');
   } finally { await resources.release(); }
 });
+
+it('reports the prepared lane as exactly the names its launch drops, and the keys-profile lane by name (#1688)', async () => {
+  const f = await fixture();
+  vi.stubEnv('PI_OFFLINE', 'offline-value-sentinel');
+  vi.stubEnv('PI_CODING_AGENT_DIR', f.root);
+  try {
+    const adapter = new PiAdapter({
+      runtimeEnvironment: { base: 'allowlist', pass: ['PI_CODING_AGENT_DIR', 'PI_OFFLINE'] },
+      byokLauncher: { command: process.execPath, profileDbPath: path.join(f.root, 'profiles.sqlite'), sessionDir: path.join(f.root, 'sessions') },
+    });
+    const { env, report } = await adapter.runtimeEnvironment();
+    const [prepared, keys] = report.lanes!;
+    if (prepared?.narrowedBy !== 'sdk') throw new Error('expected the prepared lane first');
+    expect(prepared.lane).toBe('pi-prepared');
+    expect(prepared.removed).toContain('PI_OFFLINE');
+    expect(prepared.removed).not.toContain('PI_CODING_AGENT_DIR');
+    expect(keys).toEqual({ lane: 'pi-keys-profile', narrowedBy: 'keys-launcher' });
+    expect(JSON.stringify(report)).not.toContain('offline-value-sentinel');
+    const launch = await resolvePiRuntimeLaunch({ ...f.options, kind: 'pi-prepared', env });
+    try {
+      expect(Object.keys(env).filter((name) => !Object.hasOwn(launch.env, name)).sort()).toEqual(prepared.removed);
+    } finally { await launch.release(); }
+  } finally { vi.unstubAllEnvs(); }
+});

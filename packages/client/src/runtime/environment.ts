@@ -256,6 +256,27 @@ export type RuntimeEnvironmentRemovalRule = 'deny' | 'conflict';
 export interface RuntimeEnvironmentReport {
   readonly names: readonly { readonly name: string; readonly source: RuntimeEnvironmentSource }[];
   readonly removed: readonly { readonly name: string; readonly rule: RuntimeEnvironmentRemovalRule }[];
+  /** Launch lanes that give the runtime less than `names`; absent when the adapter has none. */
+  readonly lanes?: readonly RuntimeEnvironmentLaneReport[];
+}
+
+/**
+ * A launch lane that narrows the runtime environment. An `sdk` lane lists the
+ * names it removes; the keys launcher's fixed list lives in `@byok-sdk/keys`,
+ * so its lane is reported by name only.
+ */
+export type RuntimeEnvironmentLaneReport =
+  | { readonly lane: 'pi-prepared' | 'hermes-custody'; readonly narrowedBy: 'sdk'; readonly removed: readonly string[] }
+  | { readonly lane: 'pi-keys-profile'; readonly narrowedBy: 'keys-launcher' };
+
+/** The `sdk` lane that launches with `buildAllowlistedEnv({ ambient: env, allow })`: `removed` is every name of `env` it drops, sorted. */
+export function sdkLaneReport(
+  lane: 'pi-prepared' | 'hermes-custody',
+  env: Readonly<Record<string, string>>,
+  allow: readonly string[],
+): RuntimeEnvironmentLaneReport {
+  const kept = buildAllowlistedEnv({ ambient: env, allow });
+  return { lane, narrowedBy: 'sdk', removed: Object.keys(env).filter((name) => !Object.hasOwn(kept, name)).sort() };
 }
 
 /** One build: the environment and its {@link RuntimeEnvironmentReport}. `env` is a fresh object. */

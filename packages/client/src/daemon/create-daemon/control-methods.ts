@@ -94,6 +94,11 @@ async function describeRuntimeEnvironments(adapters: readonly RuntimeAdapter[]):
         status: 'built',
         names: report.names.map(({ name, source }) => ({ name, source })),
         removed: report.removed.map(({ name, rule }) => ({ name, rule })),
+        ...(report.lanes === undefined ? {} : {
+          lanes: report.lanes.map((lane) => lane.narrowedBy === 'sdk'
+            ? { lane: lane.lane, narrowedBy: lane.narrowedBy, removed: [...lane.removed] }
+            : { lane: lane.lane, narrowedBy: lane.narrowedBy }),
+        }),
       };
     } catch (error) {
       if (error instanceof RuntimeEnvironmentUnavailableError) return { runtimeId, status: 'unavailable', code: error.reason };
