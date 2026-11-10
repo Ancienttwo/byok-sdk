@@ -178,7 +178,8 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
       const tool = request.toolResults === 0 ? request.tools.find(candidate => SHELL_TOOLS.has(candidate.name)) : undefined;
       if (request.toolResults === 0 && request.tools.length > 0 && tool === undefined) throw new Error(`no shell tool offered: ${JSON.stringify(request.tools.map(t => t.name))}`);
       return tool === undefined ? { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS } : { kind: 'tool', tool, args: {
-        command: `"${process.execPath.replace(/\\/g, '/')}" "${holder.replace(/\\/g, '/')}"`, description: 'Hold the shell tool',
+        // The same words run in bash, cmd and PowerShell: the tool's cwd is the workspace.
+        command: 'node hold.mjs', description: 'Hold the shell tool',
       } };
     };
     const provider = await startLoopbackProvider('openai-chat', script, MODEL);
