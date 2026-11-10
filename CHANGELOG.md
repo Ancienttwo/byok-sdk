@@ -2,10 +2,9 @@
 
 ## Unreleased
 
+- **Fixed (client; #1732)** — A natural Unix socket (in the store directory) is now verified to be a socket and set to 0600, failing the listen with `socket_mode` instead of swallowing a chmod error. New refusal: listen fails where a sandbox or MAC policy denies chmod. Fallback sockets no longer have their file chmod'ed; their verified 0700 parent directory is the guard. Residual risk: between the `lstat` and the chmod, another user with write access to the store directory can at most get the process to chmod a file it owns to 0600.
+
 - **Changed (client; #1693)** — Offer decline is sent only through the task runner reducer; the two legacy decline fallbacks and `TaskRunner.decline` are removed. The `task.decline` payload is unchanged.
-- **Fixed (client; #1732)** — A private Unix socket whose mode cannot be set to 0600 now fails the listen with `private_socket_mode` and closes the listener instead of staying bound with its existing mode.
-- **Fixed (client; #1732)** — The private Unix socket file is no longer chmod'ed to 0600 with errors swallowed; the verified 0700 owner-only parent directory is the access guard.
-- **Fixed (client; #1732)** — A natural Unix socket (in the store directory) is now verified to be a socket and set to 0600, failing the listen with `socket_mode` instead of swallowing a chmod error. New refusal: listen fails where a sandbox or MAC policy denies chmod. Fallback sockets no longer have their file chmod'ed; their verified 0700 parent directory is the guard.
 
 - **Fixed (client; #1732)** — A private socket or path-mutation gate directory whose mode cannot be set to 0700 is now refused with `private_dir_mode` instead of being used with its existing mode.
 
