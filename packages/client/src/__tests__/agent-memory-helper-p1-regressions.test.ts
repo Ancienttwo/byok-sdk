@@ -76,12 +76,22 @@ const helperHarness = vi.hoisted(() => {
     return child;
   });
 
-  return { spawn, lastChild: () => lastChild, requests: () => requests };
+  const execFile = vi.fn((_bin: string, args: string[], _options: unknown,
+    callback: (error: Error | null, stdout: string, stderr: string) => void) => {
+    expect(args).toEqual(['root-barrier']);
+    const stdin = Object.assign(new Emitter(), {
+      end: vi.fn(() => queueMicrotask(() => callback(null, '', ''))),
+    });
+    return { stdin };
+  });
+
+  return { spawn, execFile, lastChild: () => lastChild, requests: () => requests };
 });
 
 vi.mock('node:child_process', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:child_process')>()),
   spawn: helperHarness.spawn,
+  execFile: helperHarness.execFile,
 }));
 
 // Transport-only fault injection. Deployment admission has its own real
