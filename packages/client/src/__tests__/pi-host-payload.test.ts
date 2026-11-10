@@ -306,7 +306,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
     const root = await tempRoot('byok-host-command-'), release = path.join(root, 'release'), build = path.join(root, 'build');
     await fs.mkdir(release); await fs.mkdir(build);
     const host = await buildHost('compiled-executable', release, build, note => { throw new Error(note); });
-    for (const name of ['host-exact', 'host-bg', 'host-mid', 'model-text', 'tool-result', 'workflow-control']) {
+    for (const name of ['host-exact', 'host-bg', 'watchdog-on', 'watchdog-session', 'host-mid', 'model-text', 'tool-result', 'workflow-control']) {
       const run = path.join(root, name), agent = path.join(run, 'agent'), cwd = path.join(run, 'workspace'), home = path.join(run, 'home');
       await fs.mkdir(path.join(agent, 'agents'), { recursive: true }); await fs.mkdir(cwd); await fs.mkdir(home);
       const marker = `PROOF_1642_${name}`, slash = `/run payload-child ${marker}`;
@@ -340,14 +340,16 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         const childStart = path.join(run, 'runner-started');
         const env = { PATH: process.env.PATH ?? '', HOME: home, USER: os.userInfo().username, TMPDIR: run, PI_CODING_AGENT_DIR: agent,
           PAYLOAD_TEST_CHILD_START: childStart, npm_config_registry: 'http://127.0.0.1:9', BUN_CONFIG_DEFAULT_REGISTRY: 'http://127.0.0.1:9' };
-        const refused = name === 'host-exact' || name === 'host-bg', reportPath = path.join(run, 'report.json'), input = path.join(run, 'input.json');
-        await fs.writeFile(input, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: name === 'host-exact' ? slash : name === 'host-bg' ? `${slash} --bg`
-          : name === 'host-mid' ? `Literal text: ${slash}` : marker, cwd, env, scratchRoot: testScratchRoot(), report: reportPath, statusProbe: !refused }));
+        const watchdog = name === 'watchdog-on' || name === 'watchdog-session';
+        const refused = name === 'host-exact' || name === 'host-bg' || watchdog, reportPath = path.join(run, 'report.json'), input = path.join(run, 'input.json');
+        await fs.writeFile(input, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: watchdog ? `/subagents-watchdog ${name === 'watchdog-on' ? 'on' : 'session on'}`
+          : name === 'host-exact' ? slash : name === 'host-bg' ? `${slash} --bg` : name === 'host-mid' ? `Literal text: ${slash}` : marker,
+          cwd, env, scratchRoot: testScratchRoot(), report: reportPath, statusProbe: !refused }));
         await execFileAsync(host.command, ['task', input], { cwd: run, env, timeout: 60_000 });
         const report = JSON.parse(await fs.readFile(reportPath, 'utf8')) as HostReport;
         const launches = report.gateCalls!.filter(call => call.toolName === 'subagent_launch');
         if (refused) {
-          expect(report.error).toContain('pi_host_command_denied: /run');
+          expect(report.error).toContain(`pi_host_command_denied: /${watchdog ? 'subagents-watchdog' : 'run'}`);
           expect(report.stage).toBe('start'); expect(report.gateCalls).toEqual([]); expect(provider.requests).toEqual([]);
         } else {
           expect(report.error).toBeUndefined(); expect(report.stage).toBe('done');

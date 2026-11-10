@@ -28,11 +28,11 @@ export const PI_SUBAGENT_GATE_EXTENSION_ID = 'byok-tool-authorization';
 /** Stable source identity for the installed extension's resolved commands. */
 export const PI_SUBAGENT_HOST_EXTENSION = 'byok-subagents';
 
-// pi-subagents 0.87.0: native delegation/refinement and profile commands that
-// spawn a Pi model-probe process. The command inventory is pinned by tests.
+// pi-subagents 0.87.0: delegation/refinement, model probes and watchdog
+// executors (workspace LSP process and reviewer). Inventory is pinned by tests.
 const CHILD_START_COMMANDS = new Set([
   'run', 'prompt-workflow', 'subagents-refine', 'subagents-check-profile',
-  'subagents-refresh-provider-models', 'subagents-generate-profiles',
+  'subagents-refresh-provider-models', 'subagents-generate-profiles', 'subagents-watchdog',
 ]);
 
 /** Keep Host commands out of executor paths without a tool_call approval. */

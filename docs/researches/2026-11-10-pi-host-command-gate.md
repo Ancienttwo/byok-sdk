@@ -21,7 +21,7 @@ protects the child's subsequent tools, not the launch.
 Turning off `expandPromptTemplates` also disables `/skill:` and file prompt
 templates. That would break the existing authorized-skill RPC regression in
 `pi-rpc-host.test.ts`, so that path was rejected. The SDK instead rejects the
-six commands below using Pi's actual resolved registry entry and source.
+seven commands below using Pi's actual resolved registry entry and source.
 There is no SDK parser or text rewrite. Rejecting the registry lookup before
 Pi's handler error catcher produces a failed RPC response with
 `pi_host_command_denied`, rather than success with an extension notification.
@@ -51,7 +51,9 @@ context; their text is not submitted to this command dispatcher.
 ## Pinned command inventory
 
 The drift test scans every upstream source registration and also checks the
-live ordinary-host registry. A new registration requires classification.
+live ordinary-host registry. It then exercises the real boundary against every
+classified command on all three ingress methods, asserting the exact allowed
+and refused sets. A new registration requires classification.
 `pi-subagents-bridge` belongs to the separate pane bridge and is not registered
 by the ordinary root extension.
 
@@ -75,8 +77,19 @@ by the ordinary root extension.
 | `subagents-models` | Allowed: model mappings |
 | `subagents-profiles` | Allowed: list saved profiles |
 | `subagents-load-profile` | Allowed: settings and current model selection |
-| `subagents-watchdog` | Allowed: watchdog configuration and its in-process reviewer, not a subagent runner |
+| `subagents-watchdog` | Refused: enables workspace language-server processes and an independent model reviewer/tool loop |
 | `pi-subagents-bridge` | Allowed: separate pane bridge dispatch, no subagent launch |
+
+The watchdog classification includes its delayed effects. In pinned upstream
+`watchdog/register-main.js:241-262`, `on` persists enablement and `session on`
+sets a session override. `watchdog/runtime.js:314-340` invokes diagnostics at
+`agent_end`; LSP is enabled by default. `watchdog/lsp-diagnostics.js:63-75,395`
+resolves a workspace `node_modules/.bin/typescript-language-server` before PATH
+and spawns it. `watchdog/review.js:280-292` creates a separate Agent with its own
+read-tool loop, outside the parent session authorization hooks. The initial
+classification missed these effects; the command is refused before either
+enablement handler runs. RPC regressions use both exact enable forms and
+assert that settings remain unchanged and no model request occurs.
 
 ## Runtime evidence
 
@@ -96,14 +109,18 @@ those recorders are disconnected.
 | --- | --- | ---: | --- |
 | Exact Host `/run` | Failed start: `pi_host_command_denied` | 0 | None |
 | Host `/run --bg` | Failed start: `pi_host_command_denied` | 0 | None |
+| Host `/subagents-watchdog on` | Failed start: `pi_host_command_denied` | 0 | None |
+| Host `/subagents-watchdog session on` | Failed start: `pi_host_command_denied` | 0 | None |
 | Host mid-text `/run` | Literal user content; no runs in status | 0 | None |
 | Model text `/run` | Literal assistant output; no runs in status | 0 | None |
 | File-tool result `/run` | Literal result and subsequent model input; no runs in status | 0 | Read only, then explicit status query |
 | Workflow tool control | Workflow and child complete | 1 | `subagent`, then nested `subagent_launch` |
 
-A separately retained compiled probe produced executable SHA-256
+The initial six-case probe, before the watchdog review correction, produced
+executable SHA-256
 `4ecc2f5a57a9b5a3dee05a8e7ec53cd87cf6c14e2f00798d04f0140a1448427f`.
-Its verifier confirmed the same six outcomes. The workflow control's
+Its verifier confirmed the six original outcomes. The rebuilt compiled
+regression adds the two watchdog refusals above. The workflow control's
 `subagent_launch` had `parentToolCallId: call_1`; the child and workflow both
 recorded `state: complete`. The synthetic child returns a marker without the
 upstream structured acceptance report, so the separate post-execution
@@ -117,7 +134,7 @@ Commands run against the change:
 ```sh
 bun run build
 bun run typecheck
-bun run --cwd packages/client test src/__tests__/pi-rpc-host.test.ts src/__tests__/pi-host-payload.test.ts src/__tests__/pi-subagent-extension-order.test.ts src/__tests__/pi-scoped-subagent.test.ts src/__tests__/pi-tool-authorization.test.ts
+bun run --cwd packages/client test src/__tests__/pi-rpc-host.test.ts src/__tests__/pi-host-payload.test.ts src/__tests__/pi-subagent-extension-order.test.ts src/__tests__/pi-scoped-subagent.test.ts src/__tests__/pi-tool-authorization.test.ts --maxWorkers=1
 bun run check:api-surface
 ```
 
@@ -125,11 +142,14 @@ Build, typecheck and API checks passed. The affected suites passed 77 tests;
 two existing payload forms were skipped because the local Homebrew Node is
 not relocatable and no official Node SEA binary was configured. The required
 Bun-compiled regression ran. No public declaration changed. The private Pi
-host closure grew by 1,211 bytes, from 555,793 to 557,004; its exact budget and
+host closure grew by 1,232 bytes, from 555,793 to 557,025; its exact budget and
 generated README row were updated.
 
 Red-green proof: temporarily omitting the session boundary caused all three
 RPC-entry regressions to fail. `prompt` unexpectedly returned success for
 `/run:2`; `steer` and `follow_up` returned the native queue error instead of
 the SDK refusal. Restoring the boundary made all three pass. No existing
-assertion was removed or relaxed.
+assertion was removed or relaxed. The watchdog regression was also run against
+its earlier allowed classification: `prompt` returned success for watchdog,
+while the two queue entries returned Pi's generic queue error, so all three
+specific-refusal assertions failed before the product rebuild.

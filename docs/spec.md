@@ -4037,11 +4037,14 @@ product's bundled re-entry loads the copy in its Pi asset root (below) through
 Pi's own extension loader, which supplies the Pi modules of the product bundle.
 
 Host text submitted through RPC `prompt`, `steer` or `follow_up`, including
-queued input, cannot invoke pi-subagents commands that start a child:
-`/run` (including `--bg` and `--fork`), `/prompt-workflow`, `/subagents-refine`,
-`/subagents-check-profile`, `/subagents-refresh-provider-models` and
-`/subagents-generate-profiles`. The last three can start Pi model-probe
-processes. The host refuses the command with a failed RPC response carrying
+queued input, cannot invoke pi-subagents commands that start a child or
+watchdog executors: `/run` (including `--bg` and `--fork`), `/prompt-workflow`,
+`/subagents-refine`, `/subagents-check-profile`, `/subagents-refresh-provider-models`,
+`/subagents-generate-profiles` and `/subagents-watchdog`. The three profile
+commands can start Pi model-probe processes. Enabling watchdog can start a
+workspace language server and a separate model reviewer with its own tool loop,
+which does not pass through the session tool-authorization hooks. The host
+refuses the command with a failed RPC response carrying
 `pi_host_command_denied`, before its handler runs. The check uses the command
 Pi resolves, including disambiguated aliases, and its extension source; another
 extension's command with the same name keeps its own behavior. Host text is

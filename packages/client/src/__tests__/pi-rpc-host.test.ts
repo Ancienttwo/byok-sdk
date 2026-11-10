@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, realpathSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { startLoopbackProvider } from './runtime-contract/loopback';
+import { refusePiSubagentHostCommands } from '../adapters/pi/subagents';
 import { resolveFileScopeGrant } from '../file-scope-guard';
 import { serializeFileScopeGrant } from '../file-scope-launch';
 import { tmpdir } from 'node:os';
@@ -98,12 +99,16 @@ describe('SDK ordinary Pi RPC entry', () => {
         'subagents-stop', 'subagents-steer', 'subagents-models', 'subagents-profiles', 'subagents-load-profile', 'subagents-watchdog',
       ].sort());
       expect(launch).toBeDefined();
-      for (const name of [launch.name, 'prompt-workflow', 'subagents-refine', 'subagents-check-profile', 'subagents-refresh-provider-models', 'subagents-generate-profiles']) {
-        for (const suffix of ['', ' --bg']) {
-          const denied = await client.send({ type: entry, message: `/${name} proof-child REFUSED_1642${suffix}` });
+      const settings = join(agent, 'settings.json');
+      const before = existsSync(settings) ? readFileSync(settings, 'utf8') : undefined;
+      for (const name of [launch.name, 'prompt-workflow', 'subagents-refine', 'subagents-check-profile', 'subagents-refresh-provider-models', 'subagents-generate-profiles', 'subagents-watchdog']) {
+        const args = name === 'subagents-watchdog' ? ['on', 'session on'] : ['proof-child REFUSED_1642', 'proof-child REFUSED_1642 --bg'];
+        for (const arg of args) {
+          const denied = await client.send({ type: entry, message: `/${name} ${arg}` });
           expect(denied).toMatchObject({ success: false, error: expect.stringContaining(`pi_host_command_denied: /${name}`) });
         }
       }
+      expect(existsSync(settings) ? readFileSync(settings, 'utf8') : undefined).toBe(before);
       expect(provider.requests).toEqual([]);
       expect((await client.send({ type: 'get_state' })).data).toMatchObject({ messageCount: 0, pendingMessageCount: 0 });
       const other = commands.commands.find(command => command.sourceInfo.path === extension)!;
@@ -123,22 +128,36 @@ describe('SDK ordinary Pi RPC entry', () => {
     } finally { await client.dispose(); await provider.close(); }
   }, 30_000);
 
-  it('classifies every slash command registered by pinned pi-subagents, including child-process probes (#1642)', () => {
+  it('classifies every slash command registered by pinned pi-subagents, including child-process probes (#1642)', async () => {
     const inventory = {
       run: 'refused: native child', 'prompt-workflow': 'refused: workflow children', 'subagents-refine': 'refused: proposal child',
       'subagents-check-profile': 'refused: Pi probe process', 'subagents-refresh-provider-models': 'refused: Pi probe processes',
-      'subagents-generate-profiles': 'refused: refresh can spawn Pi probes',
+      'subagents-generate-profiles': 'refused: refresh can spawn Pi probes', 'subagents-watchdog': 'refused: workspace LSP process and reviewer tools',
       subagents: 'allowed: metadata administration', 'subagent-cost': 'allowed: cost report', 'subagents-doctor': 'allowed: diagnostics',
       'subagents-inspect-rpc': 'allowed: inspect existing child', 'subagents-guide': 'allowed: packaged guide',
       'subagents-fleet': 'allowed: inspect existing fleet', 'subagents-detach': 'allowed: detach existing child',
       'subagents-stop': 'allowed: stop existing child', 'subagents-steer': 'allowed: existing child, steeringRecovery=false',
       'subagents-models': 'allowed: mappings', 'subagents-profiles': 'allowed: list profiles', 'subagents-load-profile': 'allowed: settings only',
-      'subagents-watchdog': 'allowed: watchdog config and in-process reviewer, not a subagent runner', 'pi-subagents-bridge': 'allowed: separate pane bridge, no child launch',
+      'pi-subagents-bridge': 'allowed: separate pane bridge, no child launch',
     };
     const pkg = resolve(dirname(createRequire(import.meta.url).resolve('pi-subagents')), '..'), src = join(pkg, 'src');
     const registered = readdirSync(src, { recursive: true }).filter(file => String(file).endsWith('.js'))
       .flatMap(file => [...readFileSync(join(src, String(file)), 'utf8').matchAll(/pi\s*\.\s*registerCommand\s*\(\s*(['"])([^'"]+)\1/gu)].map(match => match[2]));
     expect(registered.sort()).toEqual(Object.keys(inventory).sort());
+    const commands = Object.keys(inventory).map(name => ({ name, invocationName: name, sourceInfo: { path: 'pinned-subagents' } }));
+    for (const entry of ['prompt', 'steer', 'followUp'] as const) {
+      const runner = { getCommand: (name: string) => commands.find(command => command.name === name) };
+      const invoke = async (name: string) => runner.getCommand(name)?.name;
+      const session = { extensionRunner: runner, prompt: invoke, steer: invoke, followUp: invoke };
+      refusePiSubagentHostCommands(session as never, ['pinned-subagents']);
+      const allowed: string[] = [], refused: string[] = [];
+      for (const { name } of commands) {
+        try { expect(await session[entry](name)).toBe(name); allowed.push(name); }
+        catch (error) { expect(String(error)).toContain(`pi_host_command_denied: /${name}`); refused.push(name); }
+      }
+      expect(allowed.sort()).toEqual(Object.entries(inventory).filter(([, reason]) => reason.startsWith('allowed:')).map(([name]) => name).sort());
+      expect(refused.sort()).toEqual(Object.entries(inventory).filter(([, reason]) => reason.startsWith('refused:')).map(([name]) => name).sort());
+    }
   });
   it.skipIf(process.platform === 'win32')('emits one session readiness receipt from the memory RPC host before accepting commands', async () => {
     const f = fixture();
