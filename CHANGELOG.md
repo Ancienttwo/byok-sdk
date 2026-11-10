@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changed (client; #1685)** — `RuntimeEnvironmentUnavailableError` now suggests setting `runtimeEnvironment.base` to `allowlist` when the login-shell snapshot or Windows logon registry capture fails.
+
 - **Fixed (client; #1675)** — If a relay sends a steer to a runtime that declares no steering channel, the daemon logs and acknowledges it instead of retrying indefinitely and blocking later messages.
 
 - **Fixed (client; #1673)** — Devices reject invalid offer selections before reserving an Agent home or reporting it busy: a memory-reader cannot select a writing memory mode, `runtime` must match `dispatchSelection.runtimeId`, and `harnessId` cannot accompany a built-in runtime selection. These declines are non-retryable even when the home is full; prepared offers also enforce the reader rule.
