@@ -35,7 +35,9 @@ test('vendored Hermes installers match the qualified commit and checksums', asyn
   try {
     mkdirSync(join(work, manifest.commit));
     for (const file of ['install.sh', 'install.ps1']) {
-      const bytes = readFileSync(vendoredHermesInstaller(version, file));
+      const actualPath = vendoredHermesInstaller(version, file);
+      assert.match(execFileSync('git', ['check-attr', 'text', '--', actualPath], { encoding: 'utf8' }), /text: unset/);
+      const bytes = readFileSync(actualPath);
       writeFileSync(join(work, manifest.commit, file), bytes);
     }
     writeFileSync(join(work, 'manifest.json'), JSON.stringify(manifest));

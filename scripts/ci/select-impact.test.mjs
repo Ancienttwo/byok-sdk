@@ -351,7 +351,7 @@ test('Hermes adapter, real run and custody launcher paths select the real Hermes
 });
 
 test('vendored Hermes paths select both real installer jobs', () => {
-  for (const path of ['manifest.json', `${'a'.repeat(40)}/install.sh`, `${'a'.repeat(40)}/install.ps1`]) {
+  for (const path of ['.gitattributes', 'manifest.json', `${'a'.repeat(40)}/install.sh`, `${'a'.repeat(40)}/install.ps1`]) {
     const impact = selectImpact([`scripts/ci/vendor/hermes/${path}`]);
     assert.deepEqual(impact.files, [`scripts/ci/vendor/hermes/${path}`]);
     for (const family of ['hermes-real-windows', 'runtime-contract']) assert.ok(impact.families.includes(family), path);

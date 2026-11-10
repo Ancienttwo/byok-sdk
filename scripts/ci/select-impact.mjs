@@ -765,7 +765,7 @@ export function selectImpact(paths, context = {}) {
     }
     if (path === 'scripts/vitest/tmp-root.test.mjs') { scripts = true; continue; }
     if (path === 'scripts/ci/security-advisories-fixtures/vulnerable-bun.lock') { scripts = true; continue; }
-    if (/^scripts\/ci\/vendor\/hermes\/(?:manifest\.json|[a-f0-9]{40}\/install\.(?:sh|ps1))$/.test(path)) { scripts = true; continue; }
+    if (/^scripts\/ci\/vendor\/hermes\/(?:\.gitattributes|manifest\.json|[a-f0-9]{40}\/install\.(?:sh|ps1))$/.test(path)) { scripts = true; continue; }
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }
     const golden = /^api-surface\/([a-z-]+)\.d\.ts$/.exec(path);
     if (golden) {
