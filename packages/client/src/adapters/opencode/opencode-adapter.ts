@@ -28,8 +28,6 @@ export interface OpenCodeAdapterOptions {
   runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /** No default qualification policy exists until native OS/line canaries pass. */
   versionPolicy?: RuntimeVersionPolicy;
-  /** Internal: marks the source of a daemon-configured policy. */
-  versionPolicySource?: 'adapter-option' | 'daemon-config';
   resolveBin?: () => ResolvedBin;
   nativeAssetRoot?: string;
   spawnFn?: typeof nodeSpawn;
@@ -52,11 +50,7 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     const maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'opencode');
     const interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'opencode');
     this.environment = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'OpenCodeAdapterOptions.runtimeEnvironment');
-    this.policy = resolveRuntimeVersionPolicy({
-      descriptor: OPENCODE_VERSION_POLICY,
-      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-        ? { daemonConfig: options.versionPolicy } : { adapterOption: options.versionPolicy }),
-    }).policy;
+    this.policy = resolveRuntimeVersionPolicy(OPENCODE_VERSION_POLICY, options.versionPolicy);
     this.options = { ...options, models: Object.freeze([...options.models]), maxRetainedBytes, interruptTimeoutMs };
   }
 

@@ -85,8 +85,6 @@ export interface GrokAdapterOptions {
   agentUserMcpServers?: 'inherit' | 'excluded';
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
-  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-  versionPolicySource?: 'adapter-option' | 'daemon-config';
   resolveBin?: () => ResolvedBin;
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
@@ -134,12 +132,7 @@ export class GrokAdapter implements RuntimeAdapter {
       throw new TypeError('GrokAdapterOptions.compatInstructions must be inherit or disabled');
     if (options.agentUserMcpServers !== undefined && options.agentUserMcpServers !== 'inherit' && options.agentUserMcpServers !== 'excluded')
       throw new TypeError('GrokAdapterOptions.agentUserMcpServers must be inherit or excluded');
-    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
-      descriptor: GROK_VERSION_POLICY,
-      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-        ? { daemonConfig: options.versionPolicy }
-        : { adapterOption: options.versionPolicy }),
-    }).policy;
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(GROK_VERSION_POLICY, options.versionPolicy);
     this.options = { ...options };
   }
 

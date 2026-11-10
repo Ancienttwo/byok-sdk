@@ -136,8 +136,6 @@ export interface PiAdapterOptions {
   ) => Promise<void>;
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
-  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-  versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 
 /** The variable Pi reads its asset root from; the SDK writes it from `PiAdapterOptions.packageDir` only. */
@@ -283,12 +281,7 @@ export class PiAdapter implements RuntimeAdapter {
 
   constructor(private readonly options: PiAdapterOptions = {}) {
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'PiAdapterOptions.runtimeEnvironment');
-    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
-      descriptor: PI_VERSION_POLICY,
-      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-        ? { daemonConfig: options.versionPolicy }
-        : { adapterOption: options.versionPolicy }),
-    }).policy;
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(PI_VERSION_POLICY, options.versionPolicy);
     this.agentResources = parsePiAgentResources({
       agentUserContext: options.agentUserContext === undefined ? 'inherit' : options.agentUserContext,
       skillPaths: options.agentSkillPaths === undefined ? [] : options.agentSkillPaths,

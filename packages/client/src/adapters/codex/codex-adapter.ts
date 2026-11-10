@@ -117,8 +117,6 @@ export interface CodexAdapterOptions {
   agentUserContext?: 'inherit' | 'excluded';
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
-  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-  versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 
 /**
@@ -173,12 +171,7 @@ export class CodexAdapter implements RuntimeAdapter {
       (options.operationTimeoutMs ?? DEFAULT_OPERATION_MS) > 2_147_483_647
     )
       throw new TypeError('invalid Codex operation timeout');
-    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
-      descriptor: CODEX_VERSION_POLICY,
-      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
-        ? { daemonConfig: options.versionPolicy }
-        : { adapterOption: options.versionPolicy }),
-    }).policy;
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(CODEX_VERSION_POLICY, options.versionPolicy);
   }
   runtimeEnvironment(): Promise<RuntimeEnvironment> {
     return buildRuntimeEnvironment(this.environmentPolicy);

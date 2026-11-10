@@ -19,8 +19,6 @@ export interface AgyAdapterOptions {
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
-    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-    versionPolicySource?: 'adapter-option' | 'daemon-config';
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
@@ -95,8 +93,6 @@ export interface ClaudeAdapterOptions {
     agentSessionPersistence?: 'enabled' | 'disabled';
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
-    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-    versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
@@ -509,8 +505,6 @@ export interface CodexAdapterOptions {
     agentUserContext?: 'inherit' | 'excluded';
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
-    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-    versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export declare class CodexAdapter implements RuntimeAdapter {
@@ -609,8 +603,6 @@ export interface DshAdapterOptions {
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
-    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-    versionPolicySource?: 'adapter-option' | 'daemon-config';
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
@@ -694,8 +686,6 @@ export interface GrokAdapterOptions {
     agentUserMcpServers?: 'inherit' | 'excluded';
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
-    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-    versionPolicySource?: 'adapter-option' | 'daemon-config';
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
@@ -771,8 +761,6 @@ export interface HermesAdapterOptions {
     interruptTimeoutMs?: number;
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
-    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-    versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 /**
  * Hermes Agent over ACP stdio (`hermes acp`). The `hermes acp` process is a
@@ -879,8 +867,6 @@ export interface OpenCodeAdapterOptions {
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** No default qualification policy exists until native OS/line canaries pass. */
     versionPolicy?: RuntimeVersionPolicy;
-    /** Internal: marks the source of a daemon-configured policy. */
-    versionPolicySource?: 'adapter-option' | 'daemon-config';
     resolveBin?: () => ResolvedBin;
     nativeAssetRoot?: string;
     spawnFn?: typeof nodeSpawn;
@@ -1047,8 +1033,6 @@ export interface PiAdapterOptions {
     validateProviderProfileBinding?: (binding: ProviderProfileBinding, launcher: PiByokLauncherConfig) => Promise<void>;
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
-    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
-    versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 /** The variable Pi reads its asset root from; the SDK writes it from `PiAdapterOptions.packageDir` only. */
 export declare const PI_PACKAGE_DIR_ENV = "PI_PACKAGE_DIR";
@@ -14313,8 +14297,9 @@ export type RuntimeVersionSpec = {
     readonly prefix: string;
 };
 /**
- * Pure, serializable version policy (#1103). The descriptor default, an
- * adapter option and `DaemonConfig.runtimes.<id>.versionPolicy` are complete
+ * Pure, serializable version policy (#1103). The descriptor default and the
+ * Host policy (the adapter option; `createDaemon` passes
+ * `DaemonConfig.runtimes.<id>.versionPolicy` as that option) are complete
  * objects that replace one another wholesale through
  * `resolveRuntimeVersionPolicy`; a field is never merged across them.
  */
