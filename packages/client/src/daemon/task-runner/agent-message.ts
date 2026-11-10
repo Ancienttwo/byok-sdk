@@ -10,7 +10,7 @@ import { DAEMON_TASK_FAILURE } from '../task-failure';
 import type { TaskRunner } from '../task-runner';
 import { hostFor } from './host';
 import { beginTerminal } from './finish';
-import { agentMessageSealing, taskMessageSendAttempted } from './support';
+import { agentMessageSealing, pendingCancelBeforeActive, taskMessageSendAttempted } from './support';
 import { successfulCompletionPlan } from './event-pump';
 
 export async function publishAgentMessage(this: TaskRunner, input: {
@@ -30,7 +30,7 @@ export async function publishAgentMessage(this: TaskRunner, input: {
   if (context === undefined) throw new Error('task has no active required Agent message contract');
   const isCurrent = () => {
     if (this['messageContextByToken'].get(input.contextToken) !== taskId
-      || this['messageContextByTask'].get(taskId) !== input.contextToken || this['pendingCancelled'].has(taskId)) return false;
+      || this['messageContextByTask'].get(taskId) !== input.contextToken || pendingCancelBeforeActive.call(this, taskId) !== undefined) return false;
     const current = this['tasks'].get(taskId);
     return current === undefined
       ? active === undefined && this['pendingMessageTasks'].get(taskId) === pending
@@ -61,7 +61,7 @@ export async function publishAgentMessage(this: TaskRunner, input: {
 
 export function describeAgentResult(this: TaskRunner, input: AgentResultDescribeParams): AgentResultDescribeResult {
   const context = this['resultContextByToken'].get(input.contextToken);
-  if (context === undefined || this['resultContextByTask'].get(context.taskId) !== context || this['pendingCancelled'].has(context.taskId)) {
+  if (context === undefined || this['resultContextByTask'].get(context.taskId) !== context || pendingCancelBeforeActive.call(this, context.taskId) !== undefined) {
     throw new Error('invalid or expired Agent result task context');
   }
   return {
@@ -80,7 +80,7 @@ export async function submitAgentResult(this: TaskRunner, input: AgentResultSubm
   const active = this['tasks'].get(taskId);
   const isCurrent = (): boolean => {
     if (this['resultContextByToken'].get(input.contextToken) !== context
-      || this['resultContextByTask'].get(taskId) !== context || this['pendingCancelled'].has(taskId)) return false;
+      || this['resultContextByTask'].get(taskId) !== context || pendingCancelBeforeActive.call(this, taskId) !== undefined) return false;
     const current = this['tasks'].get(taskId);
     return current === undefined ? active === undefined : (active === undefined || current === active) && this['canPublishAgentMessage'](current);
   };
