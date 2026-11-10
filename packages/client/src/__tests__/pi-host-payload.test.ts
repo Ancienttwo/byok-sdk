@@ -141,6 +141,8 @@ if (process.argv[2] !== 'task') {
       if (event.type === 'turn_end') break;
     }
     report.privateSubagentRuntime = (await fs.readdir(scratch.sdkDir)).includes('pi-subagent-runtime');
+    report.runnerStatuses = await Promise.all((await fs.readdir(scratch.runtimeDir, { recursive: true })).filter(file => file.endsWith('/status.json') || file.endsWith('\\status.json'))
+      .map(async file => JSON.parse(await fs.readFile(scratch.runtimeDir + '/' + file, 'utf8'))));
     report.runnerErrors = await Promise.all((await fs.readdir(scratch.runtimeDir, { recursive: true })).filter(file => file.endsWith('runner.stderr.log'))
       .map(file => fs.readFile(scratch.runtimeDir + '/' + file, 'utf8')));
     report.stage = 'close'; await session.close();
@@ -172,7 +174,7 @@ interface HostReport {
   defaultDetect?: { kind: string }; detect?: unknown;
   launch?: { command: string; entry?: string; fixedArgs: string[] };
   pathPreserved?: boolean; sameExecutable?: boolean; privateSubagentRuntime?: boolean;
-  events?: AgentEvent[]; runnerErrors?: string[];
+  events?: AgentEvent[]; runnerErrors?: string[]; runnerStatuses?: { state?: string; steps?: { error?: string }[] }[];
   gateCalls?: { toolName: string; nativeAgentId?: string }[];
 }
 
@@ -207,7 +209,7 @@ interface HostLayout {
  * A host form and, for `interpreter+bundle`, the interpreter that runs the
  * bundle: Bun, or Node as in issue #341.
  */
-type HostCase = 'interpreter+bundle (bun)' | 'interpreter+bundle (node)' | 'compiled-executable' | 'node-sea';
+type HostCase = 'interpreter+bundle (bun)' | 'interpreter+bundle (node)' | 'compiled-executable' | 'compiled-executable (configured assets)' | 'node-sea';
 
 /**
  * Why a copied interpreter does not run from the release directory, or
@@ -281,13 +283,17 @@ async function buildHost(host: HostCase, release: string, buildDir: string, skip
     return { command: executable, prefix: [], files: [...new Set([path.basename(executable), ...assets.map(file => file.split('/')[0]!)])].sort() };
   }
   const form = 'compiled-executable';
-  const assets = await sdk.copyPiRuntimeAssets({ outDir: release, form });
+  const configured = host === 'compiled-executable (configured assets)';
+  const assetRoot = configured ? path.join(release, 'pi-assets') : release;
+  const assets = await sdk.copyPiRuntimeAssets({ outDir: assetRoot, form });
   await execFileAsync(BUN_BIN!, ['build', 'host-entry.ts', '--compile', '--outfile', executable], { cwd: buildDir });
-  return { command: executable, prefix: [], files: [...new Set([path.basename(executable), ...assets.map(file => file.split('/')[0]!)])].sort() };
+  return { command: executable, prefix: [], ...(configured ? { piPackageDir: assetRoot } : {}),
+    files: configured ? [path.basename(executable), 'pi-assets'].sort()
+      : [...new Set([path.basename(executable), ...assets.map(file => file.split('/')[0]!)])].sort() };
 }
 
 describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', () => {
-  it.skipIf(BUN_BIN === undefined).for(['interpreter+bundle (bun)', 'interpreter+bundle (node)', 'compiled-executable', 'node-sea'] as const)('runs a Pi task from the %s host form with no package lookup', { timeout: 180_000 }, async (form, { skip }) => {
+  it.skipIf(BUN_BIN === undefined).for(['interpreter+bundle (bun)', 'interpreter+bundle (node)', 'compiled-executable', 'compiled-executable (configured assets)', 'node-sea'] as const)('runs a Pi task from the %s host form with no package lookup', { timeout: 180_000 }, async (form, { skip }) => {
     // #1589: a foreign Pi installed above the product; pi-subagents must never load it.
     const outer = await tempRoot('byok-host-payload-release-');
     const release = path.join(outer, 'release'); await fs.mkdir(release);
@@ -300,7 +306,9 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
     const runDir = await tempRoot('byok-host-payload-run-');
     const bodies: string[] = [];
     const childBodies: string[] = [];
+    const configuredMarker = path.join(runDir, 'configured-bootstrap-executed');
     const background = form === 'compiled-executable';
+    const workflowText = '```js workflow\nreturn runs.run("main", { agent: "payload-child", task: "Read child-input.txt and reply.", model: "host-stub/host-payload-model" });\n```';
     const provider = createServer((request, response) => {
       let body = '';
       request.on('data', chunk => { body += String(chunk); });
@@ -317,19 +325,25 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         bodies.push(body);
         if (bodies.length < 3) completion(response, String(bodies.length), subagentCall(bodies.length === 2));
         else if (background && [3, 5, 6].includes(bodies.length)) completion(response, `wait-${bodies.length}`, { name: 'bg_wait', arguments: JSON.stringify({ timeoutMs: 30_000 }) });
-        else if ((background && bodies.length === 4) || (form === 'node-sea' && bodies.length === 3)) completion(response, 'workflow',
-          { name: 'subagent', arguments: JSON.stringify({ workflow: true, ...(background ? { async: true } : {}) }) },
-          '```js workflow\nreturn runs.run("main", { agent: "payload-child", task: "Read child-input.txt and reply.", model: "host-stub/host-payload-model" });\n```');
-        else if (form === 'node-sea' && bodies.length === 4) {
+        else if ((background && bodies.length === 4) || (!background && bodies.length === 3)) completion(response, 'workflow',
+          { name: 'subagent', arguments: JSON.stringify({ workflow: true, ...(background ? { async: true } : {}) }) }, workflowText);
+        else if (!background && bodies.length === 4) {
           const call = subagentCall(true), args = JSON.parse(call.arguments); delete args.async;
           completion(response, 'default-background', { ...call, arguments: JSON.stringify(args) });
         }
+        else if (!background && bodies.length === 5) completion(response, 'foreground-workflow',
+          { name: 'subagent', arguments: JSON.stringify({ workflow: true, async: false }) }, workflowText);
+        else if (form === 'compiled-executable (configured assets)' && bodies.length === 6) completion(response, 'wait-missing-assets',
+          { name: 'bg_wait', arguments: JSON.stringify({ timeoutMs: 15_000 }) });
         else completion(response, 'HOST_PAYLOAD_OK');
       });
     });
     await new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve));
     try {
       const host = await buildHost(form, release, buildDir, skip);
+      if (form === 'compiled-executable (configured assets)') await fs.writeFile(
+        path.join(host.piPackageDir!, 'pi-subagents/src/runs/background/binary-bootstrap.js'),
+        `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(configuredMarker)}, 'executed'); export default function bootstrap() {}`);
       // The download holds only the product and its Pi asset root. No node_modules.
       expect((await fs.readdir(release)).sort()).toEqual(host.files);
 
@@ -382,7 +396,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         versionVerdict: { state: 'allow', qualifiedVersion: '1.5.0' },
       });
       expect(report.pathPreserved).toBe(true);
-      if (form === 'node-sea') {
+      if (!background) {
         expect(report.privateSubagentRuntime).toBe(false);
         expect(report.sameExecutable).toBe(true);
         expect((await fs.readdir(release)).sort()).toEqual(host.files);
@@ -391,9 +405,8 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         fixedArgs: ['__byok_sdk_helper', 'pi-rpc'] });
       const events = report.events!;
       expect(events.filter(event => event.type === 'error')).toEqual([]);
-      expect(events.filter(event => event.type === 'progress').map(event => event.text).join('')).toBe(background || form === 'node-sea'
-        ? '```js workflow\nreturn runs.run("main", { agent: "payload-child", task: "Read child-input.txt and reply.", model: "host-stub/host-payload-model" });\n```HOST_PAYLOAD_OK'
-        : 'HOST_PAYLOAD_OK');
+      expect(events.filter(event => event.type === 'progress').map(event => event.text).join(''))
+        .toBe(workflowText.repeat(background ? 1 : 2) + 'HOST_PAYLOAD_OK');
       expect(events.at(-1)).toEqual({ type: 'turn_end' });
       expect(bodies.length).toBeGreaterThanOrEqual(background ? 7 : 3);
       expect(bodies[0]).toContain('Reply with the host payload marker.');
@@ -408,19 +421,33 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         expect(report.gateCalls).toContainEqual({ toolName: 'subagent_launch' });
         expect(results.join('\n')).not.toContain('pi_background_unavailable');
         expect(results.join('\n')).toContain('No active async runs');
-      } else if (form === 'node-sea') {
-        expect(results).toHaveLength(4);
-        for (const result of results.slice(1)) {
-          for (const text of ['pi_background_unavailable', 'Node SEA', '0.87.0', 'resolveNodeExecutable',
-            'fork on process.execPath', 'cannot stand in for Node', 'Foreground subagents work', 'Bun-compiled product']) expect(result).toContain(text);
+      } else {
+        const missing = form === 'compiled-executable (configured assets)';
+        expect(results).toHaveLength(missing ? 6 : 5);
+        if (missing) {
+          expect(results[3]).toContain('Async: payload-child');
+          expect(results[3]).not.toContain('pi_background_unavailable');
+          expect(results[5]).toMatch(/failed/iu);
+          expect(results[5]).toContain('No runs remain in flight');
+          expect(report.runnerStatuses!.some(status => status.state === 'failed' && status.steps?.some(step =>
+            step.error?.includes('pi_background_unavailable: background Pi subagents and workflows require the shipped pi-subagents and pi-subagent-extensions assets beside the real executable.'))),
+            JSON.stringify(report.runnerStatuses)).toBe(true);
+        }
+        for (const [index, result] of results.entries()) {
+          if (index === 0 || (missing && (index === 3 || index === 5))) continue;
+          expect(result).toContain('pi_background_unavailable');
+          expect(result).toContain('Foreground non-workflow subagents work');
+          if (form === 'node-sea') for (const text of ['Node SEA', '0.87.0', 'resolveNodeExecutable',
+            'fork on process.execPath', 'cannot stand in for Node', 'Bun-compiled product']) expect(result).toContain(text);
+          else if (form === 'compiled-executable (configured assets)') {
+            expect(result).toContain('assets beside the real executable');
+            expect(result).toContain('configured Pi assets');
+          } else expect(result).toContain('the background runner cannot re-enter a bundle run by an interpreter');
         }
         expect(report.gateCalls!.some(call => call.toolName === 'subagent_launch')).toBe(false);
-      } else {
-        expect(results).toHaveLength(2);
-        expect(results[1]).toContain('the background runner cannot re-enter a bundle run by an interpreter');
-        expect(results[1]).toContain('Bun-compiled product');
       }
       expect(existsSync(reexecMarker)).toBe(false);
+      expect(existsSync(configuredMarker)).toBe(false);
       if (form === 'compiled-executable') {
         const foreignRoot = await tempRoot('byok-hostile-bun-root-');
         const foreignBootstrap = path.join(foreignRoot, 'assets/pi-subagents/src/runs/background/binary-bootstrap.js');
@@ -436,7 +463,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         try {
           await fs.symlink(foreignBootstrap, installed, 'file');
           await expect(execFileAsync(host.command, [...fixed, installed], { env: runnerEnv, timeout: 10_000 }))
-            .rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('invalid SDK Pi runner re-entry') });
+            .rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('untrusted bundled subagent asset') });
         } finally { await fs.rm(installed, { force: true }); await fs.rename(installed + '.saved', installed); }
         expect(existsSync(marker)).toBe(false);
       }

@@ -1,10 +1,11 @@
 # Packaged Pi subagents: Bun background and SEA foreground
 
 Final scope for #1589 with pi-subagents **0.87.0** and official Pi **1.5.0**:
-Bun-compiled products run foreground children, detached background children and
-background workflows. Node SEA and Node/Bun interpreter-plus-bundle products
-retain foreground children and explicitly refuse background launches. No SDK
-release version is assigned by this work.
+Bun-compiled products with install-root assets run foreground children,
+detached background children and workflows. Node SEA and interpreter bundles
+retain foreground non-workflow children and refuse background and every
+workflow call. Bun without install-root assets keeps foreground non-workflow
+children through configured Pi assets. No SDK release version is assigned.
 
 ## Runtime boundary
 
@@ -17,21 +18,33 @@ The SEA refusal explains the pinned upstream behavior: its background runner
 uses `resolveNodeExecutable`, and its workflow supervisor uses `fork` on
 `process.execPath`. A SEA product cannot stand in for Node. The error names
 foreground subagents and a Bun-compiled product as working alternatives.
-Explicit async calls and default-background workflow calls are blocked by the
-SDK's `tool_call` hook before execution. For an ordinary child with omitted
-`async`, upstream resolves its configured mode; a background launch fails the
-missing-peer preflight before spawning and receives the same SDK explanation.
-This preserves foreground defaults rather than guessing the agent's mode.
-Interpreter bundles retain the actionable bundle re-entry explanation.
+Explicit async calls and every workflow call, including `async:false`, are
+blocked by the refusal hook before execution. Ordinary children with omitted
+`async` preserve upstream mode resolution. SEA/interpreter background requests
+fail upstream's missing-peer preflight and receive the SDK explanation.
+
+When either install-root asset directory is absent, Bun uses configured Pi
+assets for foreground non-workflow subagents; present invalid assets still
+fail closed. Explicit async and all workflows are refused up front. For a
+call left to async-by-default, Bun auto-detection still selects the product
+even without `PI_SUBAGENT_PI_BINARY`. The upstream async receipt is retained.
+The reserved runner rejects the absent install assets with the same reason
+before loading code from the configured root. Upstream stale-run reconciliation
+persists `state: failed` and the reason in `steps[].error`; `bg_wait` reports
+one failed job with no runs in flight. No success-to-error projection or
+alternate background code root is used.
 
 Bun uses the unchanged upstream binary bootstrap and its fixed Pi CLI argv.
 Its code authority is `dirname(realpath(process.execPath))`, with the shipped
 `pi-subagents` and SDK child extension trees beneath it. Environment-selected
 roots and writable runtime manifests cannot choose code. Symlinks and
-noncanonical paths are rejected. BigInt device/inode identities are captured
-from the trusted install tree and checked before loading; file size and mtime
-are also checked. An atomic same-content replacement fails verification.
-Launch data and generated peer bridges remain private.
+noncanonical paths are rejected. The install root has the same filesystem
+trust as the product binary. Each process captures and checks its own BigInt
+device/inode, size and mtime pins to detect in-process swaps before loading.
+The runner does not authenticate against the host's earlier pins, and these
+checks cannot detect replacement before process startup. No identity is passed
+across processes. An atomic same-content replacement within one process fails
+its verification. Launch data and generated peer bridges remain private.
 
 Pi's TypeScript extension loader captures the product's embedded namespaces.
 Generated aliases avoid binding names such as TypeBox's `Symbol` in a module
@@ -69,10 +82,10 @@ upstream's permission model. SEA background workflows are refused.
 - `bun run build` and `bun run typecheck`: passed.
 - `dist-subpath-closure.test.ts`, `pi-runtime-launch.test.ts`,
   `sdk-reserved-helper-host.test.ts`, `pi-tool-authorization.test.ts`:
-  **68 passed**. Includes no-link startup with simulated EXDEV and EPERM,
-  malformed and formerly valid SEA runner argv, trusted Bun roots and G1.
+  **71 passed**. Includes unchanged command/sdkDir startup, missing and invalid
+  install-root combinations, rejected SEA argv, in-process Bun swaps and G1.
 - Full `pi-host-payload.test.ts`, with official Node **24.22.1** selected by
-  `SEA_NODE` and Bun **1.4.3**: **8 passed**. Uses production SDK dist and its
+  `SEA_NODE` and Bun **1.4.3**: **9 passed**. Uses production SDK dist and its
   real reserved helper dispatcher, no spike source transform.
 - API surface, version authority and upgrade manifest: passed. All nine
   declaration goldens unchanged; closure budgets equal measured bytes.
@@ -85,18 +98,24 @@ No paid provider or real credential was used.
 | macOS arm64 product | Child requests | G1 workflow launch | Child read approvals | PATH |
 | --- | ---: | --- | ---: | --- |
 | Bun compiled | 6 | allowed | 3 distinct children | unchanged |
+| Bun compiled, configured assets only | 2 | workflows refused | 1 foreground child | unchanged |
 | Node SEA | 2 | refused before workflow execution | 1 foreground child | unchanged |
 | Node interpreter + bundle | 2 | background refused | 1 foreground child | unchanged |
 | Bun interpreter + bundle | 2 | background refused | 1 foreground child | unchanged |
 
 SEA completed its foreground task using the original product command, created
 no private subagent runtime, and left its installation inventory unchanged.
-Explicit background, default-background workflow and default async child
-requests all returned the stated reason without additional child requests.
-Bun completed foreground, background and workflow children and rejected a
-hostile environment root and a symlinked expected bootstrap without executing
-the foreign marker. Unit checks retain extension/directory symlink and inode
-replacement coverage. The foreign-Pi guard and user-extension ABI check remain.
+Explicit background and workflows with default or false `async` are refused
+for all unsupported product forms. Default-async ordinary children preserve
+their upstream behavior. The configured-assets Bun case records the native
+receipt, waits for failed completion, checks the durable step error for the
+missing-assets reason, and verifies a sentinel in its configured bootstrap
+was never executed. No additional child provider request occurs.
+Bun with install-root assets completed foreground, background and workflow
+children and rejected a hostile environment root and a symlinked bootstrap
+without executing the foreign marker. Unit checks retain symlink and
+in-process inode replacement coverage. The foreign-Pi and extension ABI checks
+remain.
 
 **Windows repair rerun is pending.** Owner-directed win-ci access remains
 suspended, and no win-ci or win-ci/t2 connection was made. Earlier Windows and
@@ -106,7 +125,7 @@ extension-symlink cases before the final scope change; the final local matrix
 above is macOS only. Bun's nonfatal upstream `undici.install` diagnostic was
 observed; loopback success does not qualify proxy transport.
 
-Added source relative to the integrated train: **188 product / 241 test lines**,
+Added source relative to the integrated train: **198 product / 276 test lines**,
 across existing test files only. Architecture boundaries and tracked upgrade
 declarations are unchanged. This work references #1589 and leaves it open;
 independent acceptance review covers the complete repair delta from

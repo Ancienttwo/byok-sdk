@@ -91,6 +91,8 @@ describe('SDK-reserved helper host composition', () => {
       ]) await expect(runSdkReservedHelperCommand(input)).rejects.toThrow('invalid SDK Pi runner re-entry');
       Object.defineProperty(process.versions, 'bun', { value: '1.4.3', configurable: true });
       process.argv[1] = '/$bunfs/root/product';
+      await fs.cp(pkg, path.join(root, 'pi-subagents'), { recursive: true });
+      await fs.mkdir(path.join(root, 'pi-subagent-extensions'));
       const hostileRoot = path.dirname(foreign);
       const hostileBinary = path.join(hostileRoot, 'assets/pi-subagents/src/runs/background/binary-bootstrap.js');
       await fs.mkdir(path.dirname(hostileBinary), { recursive: true });
@@ -111,7 +113,7 @@ describe('SDK-reserved helper host composition', () => {
     }
   });
 
-  it.each(['bootstrap', 'extension', 'directory', 'replacement'] as const)('pins install-root Bun assets and refuses %s substitution', async kind => {
+  it.each(['bootstrap', 'extension', 'directory', 'replacement', 'missing-package', 'missing-extensions', 'missing-both', 'missing-with-symlink'] as const)('checks install-root Bun assets for %s', async kind => {
     const executable = await fixture('product', 'unused executable');
     const root = path.dirname(executable);
     const pkg = path.join(root, 'pi-subagents');
@@ -127,7 +129,16 @@ describe('SDK-reserved helper host composition', () => {
     const original = process.execPath;
     try {
       process.execPath = executable;
-      const trusted = pinBunSubagentAssets();
+      if (kind.startsWith('missing-')) {
+        await fs.rm(kind === 'missing-extensions' ? gates : pkg, { recursive: true });
+        if (kind === 'missing-both') await fs.rm(gates, { recursive: true });
+        if (kind === 'missing-with-symlink') {
+          await fs.rm(gates, { recursive: true }); await fs.symlink(path.dirname(foreign), gates, 'dir');
+          expect(() => pinBunSubagentAssets()).toThrow('untrusted bundled subagent asset');
+        } else expect(pinBunSubagentAssets()).toBeUndefined();
+        return;
+      }
+      const trusted = pinBunSubagentAssets()!;
       expect(trusted.root).toBe(await fs.realpath(root));
       trusted.verify();
       if (kind === 'replacement') {

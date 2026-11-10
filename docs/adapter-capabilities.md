@@ -52,19 +52,29 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 
 ## Pi background subagents in packaged products (#1589)
 
-Bun-compiled executables support native background subagents and workflows
-through the product's embedded Pi and the exact pi-subagents 0.87.0 assets.
-The installed code is anchored to the product's real executable directory;
-symlinks and changed asset identities are rejected. G1 workflow-child admission
-and per-tool child authorization retain the ordinary `auto` contract.
+Bun-compiled executables with shipped install-root assets support native
+background subagents and workflows through embedded Pi and pi-subagents 0.87.0.
+The real executable's directory is the code anchor and has the binary's
+filesystem trust. Symlinks are rejected; each process's dev/ino pins detect
+in-process swaps before loading. They do not authenticate the runner against
+host pins or detect replacement before process startup. G1 workflow-child
+admission and child authorization retain the ordinary `auto` contract.
+
+When install-root asset directories are absent, Bun still runs foreground
+non-workflow subagents from configured Pi assets. Explicit async and all
+workflow calls are refused up front. An ordinary default-async call may return
+its upstream receipt, then fail as an async job with the same missing-assets
+reason when reserved runner re-entry rejects it before loading code. Present
+but invalid assets remain fatal; no other background root is selected.
 
 Node SEA retains foreground subagents and explicitly refuses background
 subagents and workflows: pi-subagents 0.87.0 resolves its runner through Node
 and forks its supervisor on `process.execPath`; a SEA product cannot stand in
 for Node. No executable alias or hardlink is created, so EXDEV/EPERM cannot
 affect foreground startup. Node/Bun interpreter + bundle products also retain
-foreground children and refuse background runs. The refusal names the working
-foreground mode and Bun-compiled background product. PATH is unchanged.
+foreground non-workflow children and refuse background runs and all workflows,
+including `async:false`. The refusal names the working foreground mode and a
+Bun-compiled product with shipped install-root assets. PATH is unchanged.
 
 Bun workflows keep upstream's VM restrictions without Node's permission layer.
 G1 and required child extensions remain; those tool-event checks do not police

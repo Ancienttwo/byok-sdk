@@ -4092,9 +4092,10 @@ from a `subagent` call. It skips the call for schedule ticks, auto-resume,
 extension, so each of their tool calls is gated, but no launch check of their
 `cwd`, gate commands or output runs. This is the same as 0.83.1.
 
-Bun-compiled executables offer foreground and background subagents, including
-workflows. Node SEA and interpreter + bundle products offer foreground
-subagents and refuse background launches. `copyPiRuntimeAssets`
+Bun-compiled executables with install-root assets offer foreground and
+background subagents, including workflows. Node SEA and interpreter + bundle
+products offer foreground non-workflow subagents; they refuse background
+launches and every workflow, including `async:false`. `copyPiRuntimeAssets`
 writes `pi-subagents/` into the Pi asset root: the client's exact pi-subagents
 package with the closure of its runtime dependencies in its own `node_modules`,
 about 22 MB. Beside it, `pi-subagent-extensions/` holds the SDK gate and
@@ -4120,11 +4121,28 @@ only upstream's fixed Pi CLI arguments, the exact canonical installed
 authority is `dirname(realpath(process.execPath))/pi-subagents`, with the SDK
 child extensions beside it. An environment-selected root or writable runtime
 manifest cannot choose code to load. The installed package and extensions
-reject symlinks; device/inode identities are captured from that trusted source
-and rechecked before loading. Launch data and generated peer bridges stay
-private. Other configured Pi data roots do not change this code authority.
-Pi's loader runs the unchanged upstream binary bootstrap, which owns runner
-startup, execution and disposal.
+reject symlinks. The install root has the same filesystem trust as the binary.
+Each process captures and rechecks its own device/inode, size and mtime pins
+to detect swaps within that process before loading. The runner does not
+authenticate against the host's earlier pins; no cross-process identity is
+passed, and replacing install files before a process starts is outside these
+swap checks. Launch data and generated peer bridges stay private. Other
+configured Pi data roots do not change this code authority. Pi's loader runs
+the unchanged upstream binary bootstrap, which owns startup and disposal.
+
+If either install-root asset directory is absent, the Bun host instead keeps
+foreground non-workflow subagents working from `bundledAssetRoot()` (including
+`runtimes.pi.packageDir`). This is a foreground-only branch, never another
+background code root. Explicit async calls and every workflow, including
+`async:false`, are refused at `tool_call`, explaining that background
+subagents and workflows need the shipped `pi-subagents` and
+`pi-subagent-extensions` assets beside the real executable. For an ordinary
+call left to async-by-default, upstream may return an async receipt. Its
+reserved runner then exits with the same missing-assets reason before loading
+any configured-root code. Upstream records the job as failed with that reason
+in the step error; `bg_wait` finishes rather than hanging. The receipt is not
+rewritten into an error. Present but symlinked, noncanonical or changed assets
+continue to fail closed, even when the other directory is absent.
 
 Node SEA starts its foreground host with the original executable and creates
 no `node` hardlink or executable alias, at startup or on demand. Link permissions
@@ -4133,8 +4151,8 @@ background requests return `pi_background_unavailable`: pi-subagents 0.87.0
 uses `resolveNodeExecutable` for its background runner and `fork` on
 `process.execPath` for its workflow supervisor, and a SEA binary cannot stand
 in for Node. The message names foreground subagents and a Bun-compiled product
-as working alternatives. Explicit background requests and default-background
-workflow requests are blocked at `tool_call`, before execution. When an ordinary
+as working alternatives. Explicit background requests and every workflow,
+including `async:false`, are blocked at `tool_call`, before execution. When an ordinary
 child's `async` is omitted, upstream resolves its configured mode; its missing-peer
 preflight refuses a background launch before spawning, and the SDK gives the
 same explanation. Foreground children keep their existing mode resolution.

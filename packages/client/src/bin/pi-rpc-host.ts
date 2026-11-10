@@ -287,9 +287,10 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
       const assetRoot = bundledAssetRoot();
       const bunExecutable = process.versions.bun !== undefined && /^(?:\/\$bunfs\/|B:[\\/]~BUN[\\/])/u.test(process.argv[1] ?? '');
       let subagentAssets = assetRoot;
-      if (bunExecutable) {
+      const trustedBun = bunExecutable ? pinBunSubagentAssets() : undefined;
+      if (trustedBun !== undefined) {
         const root = join(resolve(dirname(args.configPath)), BUNDLED_SUBAGENT_DIR);
-        subagentAssets = await prepareBundledSubagents(root, assetRoot, pinBunSubagentAssets());
+        subagentAssets = await prepareBundledSubagents(root, assetRoot, trustedBun);
       } else {
         process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = await writePiSubagentsHostSdk(join(resolve(dirname(args.configPath)), 'pi-subagents-host-sdk'), assetRoot);
         extensionFactories.push(refuseBundledBackground);

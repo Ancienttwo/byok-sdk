@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import * as bundledSubagents from '../adapters/pi/bundled-subagent-runtime';
 import { piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
 
 const roots: string[] = [];
@@ -44,18 +43,15 @@ describe('client runtime launch resources', () => {
     } finally { await resources.release(); }
   });
 
-  it.each(['EXDEV', 'EPERM'])('starts a SEA foreground host without linking even when link would fail with %s', async code => {
+  it('starts the foreground host with the original executable and an unchanged sdkDir', async () => {
     const f = await fixture();
     const { keysSessionDir: _unused, ...options } = f.options;
-    vi.spyOn(bundledSubagents, 'isNodeSea').mockReturnValue(true);
-    const link = vi.spyOn(fs, 'link').mockRejectedValue(Object.assign(new Error('link unavailable'), { code }));
     const before = await fs.readdir(options.scratch.sdkDir);
     const launch = await resolvePiRuntimeLaunch({ ...options,
       resolveInvocation: () => ({ command: process.execPath, fixedArgs: ['__byok_sdk_helper', 'pi-rpc'] }) });
     try {
       expect(launch.command).toBe(process.execPath);
       expect(launch.env.PATH).toBe(options.env.PATH);
-      expect(link).not.toHaveBeenCalled();
       expect(await fs.readdir(options.scratch.sdkDir)).toEqual(before);
     } finally { await launch.release(); }
   });

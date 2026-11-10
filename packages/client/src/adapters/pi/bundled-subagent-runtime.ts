@@ -10,20 +10,24 @@ export interface TrustedBunSubagentAssets {
   verify(): void;
 }
 
-/** The executable's install location is the authority; writable runtime metadata is not. */
-export function pinBunSubagentAssets(): TrustedBunSubagentAssets {
+/** The install root has the binary's filesystem trust; pins detect swaps within this process only. */
+export function pinBunSubagentAssets(): TrustedBunSubagentAssets | undefined {
   const root = path.dirname(realpathSync(process.execPath));
   const identities = new Map<string, { dev: bigint; ino: bigint; directory: boolean; size: bigint; mtimeNs: bigint }>();
   const fail = (file: string): never => { throw new Error('pi_subagents_host_sdk_unavailable: untrusted bundled subagent asset ' + file); };
-  const capture = (file: string): void => {
-    const stat = lstatSync(file, { bigint: true });
+  const capture = (file: string, stat = lstatSync(file, { bigint: true })): void => {
     if (stat.isSymbolicLink() || realpathSync(file) !== path.resolve(file) || (!stat.isDirectory() && !stat.isFile())) fail(file);
     identities.set(file, { dev: stat.dev, ino: stat.ino, directory: stat.isDirectory(), size: stat.size, mtimeNs: stat.mtimeNs });
     if (stat.isDirectory()) for (const entry of readdirSync(file)) capture(path.join(file, entry));
   };
-  capture(path.join(root, PI_SUBAGENTS_ASSET_DIR));
-  capture(path.join(root, PI_SUBAGENT_EXTENSIONS_ASSET_DIR));
-  return { root, verify: () => {
+  let absent = false;
+  for (const dir of [PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENT_EXTENSIONS_ASSET_DIR]) {
+    const file = path.join(root, dir), stat = lstatSync(file, { bigint: true, throwIfNoEntry: false });
+    if (stat === undefined) { absent = true; continue; }
+    if (!stat.isDirectory()) fail(file);
+    capture(file, stat);
+  }
+  const trusted: TrustedBunSubagentAssets = { root, verify: () => {
     for (const [file, expected] of identities) {
       const actual = lstatSync(file, { bigint: true });
       if (actual.isSymbolicLink() || realpathSync(file) !== file || actual.dev !== expected.dev || actual.ino !== expected.ino
@@ -31,6 +35,8 @@ export function pinBunSubagentAssets(): TrustedBunSubagentAssets {
           || actual.size !== expected.size || actual.mtimeNs !== expected.mtimeNs))) fail(file);
     }
   } };
+  trusted.verify();
+  return absent ? undefined : trusted;
 }
 
 const PEERS_KEY = 'byok-sdk.pi-subagents.peers';
@@ -39,6 +45,7 @@ const BINARY_BOOTSTRAP = 'src/runs/background/binary-bootstrap.js';
 const BINARY_ARGS = ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-session', '--mode', 'rpc', '--extension'];
 const HOST_PEER = '@earendil-works/pi-coding-agent';
 const EXPORT_NAME = /^[A-Za-z_$][\w$]*$/u;
+const MISSING_BUN_ASSETS = 'pi_background_unavailable: background Pi subagents and workflows require the shipped pi-subagents and pi-subagent-extensions assets beside the real executable. Foreground non-workflow subagents work from the configured Pi assets; ship those asset directories beside the executable to enable background execution.';
 
 export function isNodeSea(): boolean {
   return process.versions.bun === undefined && process.getBuiltinModule('node:sea').isSea();
@@ -65,7 +72,7 @@ async function loadPeers(root: string): Promise<Record<string, Record<string, un
   return peers;
 }
 
-/** Private launch data; Bun executes code from independently pinned install assets. */
+/** Private launch data; Bun executes code from the filesystem-trusted install root. */
 export async function prepareBundledSubagents(root: string, assetRoot: string, trustedBun: TrustedBunSubagentAssets): Promise<string> {
   mkdirSync(root, { recursive: true, mode: 0o700 });
   // The installed runner owns its peer catalogue; keep it and TypeBox outside client dist.
@@ -115,14 +122,15 @@ export async function prepareBundledSubagents(root: string, assetRoot: string, t
   return trustedBun.root;
 }
 
-/** Refuse known background requests before execution; retain upstream's normalized-mode preflight for omitted async. */
+/** Refuse explicit async and every workflow; preserve upstream resolution of omitted async. */
 export const refuseBundledBackground: ExtensionFactory = pi => {
   const reason = isNodeSea()
-    ? 'pi_background_unavailable: Node SEA cannot run background Pi subagents or workflows: pi-subagents 0.87.0 uses resolveNodeExecutable for its background runner and fork on process.execPath for its workflow supervisor; a SEA binary cannot stand in for Node. Foreground subagents work; use a Bun-compiled product for background subagents and workflows.'
-    : 'pi_background_unavailable: the background runner cannot re-enter a bundle run by an interpreter. Foreground subagents work; use a Bun-compiled product for background subagents and workflows.';
+    ? 'pi_background_unavailable: Node SEA cannot run background Pi subagents or workflows: pi-subagents 0.87.0 uses resolveNodeExecutable for its background runner and fork on process.execPath for its workflow supervisor; a SEA binary cannot stand in for Node. Foreground non-workflow subagents work; use a Bun-compiled product with shipped assets for background subagents and workflows.'
+    : isBunExecutable()
+      ? MISSING_BUN_ASSETS
+      : 'pi_background_unavailable: the background runner cannot re-enter a bundle run by an interpreter. Foreground non-workflow subagents work; use a Bun-compiled product with shipped assets for background subagents and workflows.';
   pi.on('tool_call', event => {
-    if (event.toolName === 'subagent' && (event.input.async === true
-      || (event.input.workflow !== undefined && event.input.async !== false))) return { block: true, reason };
+    if (event.toolName === 'subagent' && (event.input.async === true || event.input.workflow !== undefined)) return { block: true, reason };
   });
   pi.on('tool_result', event => {
     if (event.toolName !== 'subagent' || !event.isError) return;
@@ -147,11 +155,12 @@ export async function runBundledSubagentCommand(argv: readonly string[]): Promis
   const invalid = (): never => { throw new Error('pi_background_unavailable: invalid SDK Pi runner re-entry'); };
   if (!bun) return invalid();
   const pkg = path.join(path.dirname(realpathSync(process.execPath)), PI_SUBAGENTS_ASSET_DIR);
-  if (argv.length === 8 && BINARY_ARGS.every((arg, index) => argv[index] === arg)
-    && sameFile(argv[7], path.join(pkg, BINARY_BOOTSTRAP))) {
+  if (argv.length === 8 && BINARY_ARGS.every((arg, index) => argv[index] === arg)) {
     const config = process.env.PI_SUBAGENT_RUNNER_CONFIG;
     if (config === undefined || !path.isAbsolute(config)) return invalid();
     const trusted = pinBunSubagentAssets();
+    if (trusted === undefined) throw new Error(MISSING_BUN_ASSETS);
+    if (!sameFile(argv[7], path.join(pkg, BINARY_BOOTSTRAP))) return invalid();
     (globalThis as { PI_BUNDLED_NODE?: boolean }).PI_BUNDLED_NODE = true;
     Reflect.get(globalThis, 'Headers');
     const { DefaultResourceLoader, getAgentDir } = await import('@earendil-works/pi-coding-agent');
