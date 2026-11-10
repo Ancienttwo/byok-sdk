@@ -42,14 +42,6 @@ export class PrivateSocketInUseError extends Error {
   }
 }
 
-export class PrivateSocketModeError extends Error {
-  readonly code = 'private_socket_mode';
-  constructor(public readonly path: string, cause?: unknown) {
-    super(`refusing socket "${path}": mode could not be set to 0600; remove ${path} if no byok process uses it`, cause === undefined ? undefined : { cause });
-    this.name = 'PrivateSocketModeError';
-  }
-}
-
 export function privateSocketEndpoint(
   kind: keyof typeof PRIVATE_SOCKET_FALLBACK_PREFIXES,
   natural: string,
@@ -147,21 +139,6 @@ export async function listenPrivateUnixSocket(server: net.Server, endpoint: stri
       throw error;
     }
   }
-  try {
-    await ensureSocketMode(endpoint);
-  } catch (error) {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    throw error;
-  }
-}
-
-async function ensureSocketMode(endpoint: string): Promise<void> {
-  if (process.getuid === undefined) return;
-  if (((await fs.lstat(endpoint)).mode & 0o777) === 0o600) return;
-  await fs.chmod(endpoint, 0o600).catch((error: unknown) => {
-    throw new PrivateSocketModeError(endpoint, error);
-  });
-  if (((await fs.lstat(endpoint)).mode & 0o777) !== 0o600) throw new PrivateSocketModeError(endpoint);
 }
 
 /** Non-recursive: leave directories containing a successor's socket or any other file alone. */

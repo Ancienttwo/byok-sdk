@@ -82,26 +82,6 @@ describe('private Unix sockets', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('closes the listener when the socket mode cannot be set to 0600', async () => {
-    const { sock } = await fallbackDir();
-    const server = net.createServer();
-    servers.push(server);
-    const realLstat = fs.lstat;
-    const failure = Object.assign(new Error('EPERM'), { code: 'EPERM' });
-    const lstatSpy = vi.spyOn(fs, 'lstat').mockImplementation(async (name, ...rest) => {
-      const stat = await realLstat(name, ...(rest as []));
-      return name === sock && stat.isSocket() ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { mode: (stat.mode & ~0o777) | 0o644 }) : stat;
-    });
-    const chmodSpy = vi.spyOn(fs, 'chmod').mockRejectedValue(failure);
-    try {
-      await expect(listenPrivateUnixSocket(server, sock)).rejects.toMatchObject({ code: 'private_socket_mode', path: sock, cause: failure });
-      expect(server.listening).toBe(false);
-    } finally {
-      lstatSpy.mockRestore();
-      chmodSpy.mockRestore();
-    }
-  });
-
   it.skipIf(process.platform === 'win32')('closes a bound listener if the fallback ownership changes after listen', async () => {
     const { dir, sock } = await fallbackDir();
     const server = net.createServer();
@@ -176,13 +156,13 @@ describe('private Unix sockets', () => {
     expect((await fs.lstat(sock)).isSocket()).toBe(true);
   });
 
-  it.skipIf(process.platform === 'win32')('sets fallback and socket permissions on a successful bind', async () => {
+  it.skipIf(process.platform === 'win32')('verifies the fallback directory on a successful bind', async () => {
     const { dir, sock } = await fallbackDir();
     const server = net.createServer();
     servers.push(server);
     await listenPrivateUnixSocket(server, sock);
     expect((await fs.stat(dir)).mode & 0o777).toBe(0o700);
-    expect((await fs.stat(sock)).mode & 0o777).toBe(0o600);
+    expect((await fs.stat(dir)).uid).toBe(process.getuid?.());
     const contender = net.createServer();
     await expect(listenPrivateUnixSocket(contender, sock)).rejects.toBeInstanceOf(PrivateSocketInUseError);
   });
