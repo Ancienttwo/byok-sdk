@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
 import { agyUpdaterManifest, AGY_QUALIFIED, contractEnv, hermesBuildCommit, install, isExactVersion, qualifiedVersions, RUNTIMES, vendoredHermesInstaller } from './runtime-contract-install.mjs';
 
@@ -36,6 +36,7 @@ test('vendored Hermes installers match the qualified commit and checksums', asyn
     mkdirSync(join(work, manifest.commit));
     for (const file of ['install.sh', 'install.ps1']) {
       const actualPath = vendoredHermesInstaller(version, file);
+      assert.equal(basename(dirname(actualPath)), manifest.commit);
       assert.match(execFileSync('git', ['check-attr', 'text', '--', actualPath], { encoding: 'utf8' }), /text: unset/);
       const bytes = readFileSync(actualPath);
       writeFileSync(join(work, manifest.commit, file), bytes);

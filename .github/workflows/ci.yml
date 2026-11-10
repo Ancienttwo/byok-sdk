@@ -2111,19 +2111,17 @@ jobs:
           HERMES_RUNTIME_DIR: ${{ runner.temp }}/hermes-tools
         run: |
           $verified = node --input-type=module -e '
-            import { qualifiedVersions, vendoredHermesInstaller,
-              hermesBuildCommit }
+            import { qualifiedVersions, vendoredHermesInstaller }
               from "./scripts/ci/runtime-contract-install.mjs";
             const v = (await qualifiedVersions()).hermes;
             console.log(JSON.stringify({
-              installer: vendoredHermesInstaller(v, "install.ps1"),
-              commit: hermesBuildCommit(v)
+              installer: vendoredHermesInstaller(v, "install.ps1")
             }));' | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or -not $verified) {
             throw 'Hermes installer verification failed'
           }
           $installer = $verified.installer
-          $commit = $verified.commit
+          $commit = Split-Path (Split-Path $installer -Parent) -Leaf
           Write-Host "Using vendored Hermes installer: $installer"
           # The install's own home, apart from the SDK root the test creates.
           $hermesHome = Join-Path $env:RUNNER_TEMP "hermes-install-home"

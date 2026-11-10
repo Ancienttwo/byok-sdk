@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 // #1103: install one runtime CLI for the runtime contract suite and hand its
@@ -124,7 +124,7 @@ function installHermes(mode, version, dir) {
     installer = vendoredHermesInstaller(version, 'install.sh');
     console.log(`Using vendored Hermes installer: ${installer}`);
   }
-  const commit = mode === 'latest' ? run('git', ['ls-remote', HERMES_INSTALLER.repository, 'HEAD']).split(/\s/)[0] : hermesBuildCommit(version);
+  const commit = mode === 'latest' ? run('git', ['ls-remote', HERMES_INSTALLER.repository, 'HEAD']).split(/\s/)[0] : basename(dirname(installer));
   execFileSync('bash', [installer, '--commit', commit, '--non-interactive', '--skip-browser', '--skip-computer-use', '--hermes-home', home, '--dir', agent],
     { stdio: 'inherit', env: { ...process.env, HOME: fakeHome } });
   const bin = [join(agent, '.hermes', 'bin', 'hermes'), join(home, 'bin', 'hermes'), join(fakeHome, '.local', 'bin', 'hermes')].find(existsSync);
