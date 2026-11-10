@@ -25,7 +25,7 @@ import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
 import { AGENT_MEMORY_RECOVERY, agentMemoryCommitFailureRetryable } from '../agent-memory-commit';
 import { settleAgentMemoryCommitCopy } from './agent-memory';
 import type { PreparedExecutionObservation, ActiveTask, OfferPhaseContext } from './support';
-import { isKnownRuntimeId, offeredInstruction, errorMessage, outboundErrorMessage } from './support';
+import { isKnownRuntimeId, offeredInstruction, errorMessage, outboundErrorMessage, pendingCancelBeforeActive } from './support';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
@@ -624,7 +624,7 @@ async function startAndActivateRuntime(
     ...(input.sessionLease === undefined ? {} : { sessionLease: input.sessionLease }),
     ...(pick.descriptor.capabilities.durableLane !== true ? {} : { durableContext: {
       tenantId: this['deps'].tenantId!, replicaRoot: path.join(this['deps'].storeDir, DURABLE_REPLICA_DIRNAME), lifecycle: {
-        ownsLease: () => !blobAbort.signal.aborted && !this['pendingCancelled'].has(taskId),
+        ownsLease: () => !blobAbort.signal.aborted && pendingCancelBeforeActive.call(this, taskId) === undefined,
         record: async (kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number) => {
           if (!this['deps'].recordDurableTransition || !this['deps'].tenantId) throw new Error('durable parent authority unavailable');
           await this['deps'].agentHome!.executionLeaseManager.mutate(agentBinding, () => {
@@ -682,7 +682,7 @@ async function startAndActivateRuntime(
     const host = hostFor(this);
     // Either the reducer already reduced the in-flight cancel (X3b) or the
     // offer-window marker still carries it.
-    const cancelled = this['pendingCancelled'].has(taskId)
+    const cancelled = pendingCancelBeforeActive.call(this, taskId) !== undefined
       || host.current(taskId)?.cancel.requested === true;
     if (disposalFailure || cancelled) {
       if (cancelled) {
@@ -690,7 +690,7 @@ async function startAndActivateRuntime(
         this['revokeAgentResultContext'](taskId);
       }
       const cancellation = createEnvelope('task.cancelled', {
-        reason: this['pendingCancelled'].get(taskId),
+        reason: pendingCancelBeforeActive.call(this, taskId)?.reason,
         ...terminalIdentity(this['claimedHarnesses'].get(taskId)),
         agentRef: agentBinding.resolution.agentRef,
       }, { taskId });
@@ -727,7 +727,7 @@ async function startAndActivateRuntime(
       // outcome. A cancel that raced the start (the legacy checkpoint marker)
       // is reduced as X3 first, so C7 selects cancelled and never failed.
       host.dispatchSync({ type: 'startup.registered', taskId, atMs: Date.now() });
-      const cancelReason = this['pendingCancelled'].get(taskId);
+      const cancelReason = pendingCancelBeforeActive.call(this, taskId)?.reason;
       if (cancelled) {
         host.dispatchSync({
           type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire',

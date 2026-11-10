@@ -9,6 +9,12 @@ import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferAdmissionTiming } from './offer-admission-timing';
 
+export function offerAlreadyHandled(this: TaskRunner, taskId: string): boolean {
+  return this['tasks'].has(taskId) || this['startupOwnership'].has(taskId)
+    || this['inFlightOffers'].has(taskId) || this['finishedTaskIds'].has(taskId)
+    || this['strictDeclinedTaskIds'].has(taskId);
+}
+
 export function admitOffer(this: TaskRunner, phase: OfferPhaseContext): true | undefined {
   const { taskId, decline } = phase;
   // Finding F4, checkpoint 1 ("before claim where possible -> decline
@@ -197,7 +203,7 @@ export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extr
   const advertised = this['deps'].advertisedCapabilities();
   const missing = requiredReceiverCapabilities('task.offer', envelope.payload).filter((flag) => !advertised.includes(flag));
   if (missing.length === 0) return false;
-  if (this['tasks'].has(taskId) || this['startupOwnership'].has(taskId) || this['inFlightOffers'].has(taskId) || this['finishedTaskIds'].has(taskId) || this['strictDeclinedTaskIds'].has(taskId) || this['sealedOpening'].has(taskId)) return true;
+  if (offerAlreadyHandled.call(this, taskId) || this['sealedOpening'].has(taskId)) return true;
   const { agentRef, sealing } = envelope.payload;
   console.error(`[byok/client] task.offer for task ${taskId} declined: this daemon does not advertise ${missing.join(', ')}`);
   if (sealing?.categories.includes('task-output') === true) {
@@ -213,7 +219,7 @@ export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extr
 
 export async function handleSealedOffer(this: TaskRunner, envelope: Envelope, admission: OfferAdmissionTiming): Promise<void> {
   const taskId = envelope.task_id!;
-  if (this['tasks'].has(taskId) || this['startupOwnership'].has(taskId) || this['inFlightOffers'].has(taskId) || this['finishedTaskIds'].has(taskId) || this['strictDeclinedTaskIds'].has(taskId) || this['sealedOpening'].has(taskId)) return;
+  if (offerAlreadyHandled.call(this, taskId) || this['sealedOpening'].has(taskId)) return;
   const agentRef = (envelope.payload as { agentRef?: AgentRef }).agentRef;
   const sealedTasks = this['deps'].sealedTasks;
   if (sealedTasks === undefined) {
