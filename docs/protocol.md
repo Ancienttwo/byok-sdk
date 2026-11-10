@@ -2446,7 +2446,9 @@ with `code` equal to the rule: `agent_memory_selection_invalid`,
 `<rule>: <message>`. A Host can check before it enqueues:
 `HostOfferPlainPayloadSchema.safeParse(payload)` gives the same answer as the
 kernel, and its issue's `params.rule` equals the decline code the device would
-send. Other declines omit `code`, apart from the sealed decline codes. Hosts
+send; a sealed task's decline carries the same code. The sealed decline
+codes and the open token `runtime_unavailable` (sent with
+`runtimeUnavailable`) also set `code`; other declines omit it. Hosts
 classify busy by `code`; `reason` is display text only. Cloud `readTaskResult` reads the code
 (`readDeclineCode`), and `readDeviceTerminal` / embedded `tasks.deviceTerminal`
 preserve it verbatim in the canonical envelope.

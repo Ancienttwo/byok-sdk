@@ -1694,7 +1694,7 @@ export type TaskFailSealedPayload = z.infer<typeof TaskFailSealedPayloadSchema>;
  */
 export const TaskDeclineSealedPayloadSchema = DeclineFields.omit({ reason: true })
   .extend({
-    code: z.union([z.enum(HOME_DECLINE_CODES), unrecognizedToken(DECLINE_CODES)]).optional(),
+    code: z.union([z.enum([...HOME_DECLINE_CODES, ...OFFER_SELECTION_RULES]), unrecognizedToken(DECLINE_CODES)]).optional(),
     sealed: SealedTaskOutputSchema,
   })
   .strict();

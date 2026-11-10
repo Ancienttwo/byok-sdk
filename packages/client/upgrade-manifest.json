@@ -142,14 +142,15 @@
     {
       "id": "offer-selection-rules",
       "impact": "additive",
-      "summary": "@byok-sdk/protocol exports offerSelectionViolation, OfferSelectionRule and OfferSelectionViolation. TaskDeclineCode and the task.decline code enum gain agent_memory_selection_invalid, runtime_selection_mismatch and harness_selection_conflict, which the daemon now sends on its offer selection declines; an older Host reads them as unknown with reportedCode. A Host offer schema issue carries params.rule, and a payload that breaks several rules reports only the first.",
+      "summary": "@byok-sdk/protocol exports offerSelectionViolation, OfferSelectionRule and OfferSelectionViolation. TaskDeclineCode and the plaintext and sealed task.decline code enums gain agent_memory_selection_invalid, runtime_selection_mismatch and harness_selection_conflict, which the daemon now sends on its offer selection declines; an older Host reads them as unknown with reportedCode. A Host offer schema issue carries params.rule, and a payload that breaks several rules reports only the first.",
       "migration": "docs/releases/host-upgrade-next-minor.md#offer-selection-rules",
       "items": [
         "export:@byok-sdk/protocol#OfferSelectionRule",
         "export:@byok-sdk/protocol#OfferSelectionViolation",
+        "export:@byok-sdk/protocol#offerSelectionViolation",
         "export:@byok-sdk/protocol#TaskDeclineCode",
         "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
-        "export:@byok-sdk/protocol#offerSelectionViolation"
+        "export:@byok-sdk/protocol#TaskDeclineSealedPayload"
       ]
     }
   ],

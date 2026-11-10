@@ -6975,6 +6975,9 @@ export declare const TaskDeclineSealedPayloadSchema: z.ZodObject<{
     code: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
         agent_home_reader_busy: "agent_home_reader_busy";
         agent_home_writer_busy: "agent_home_writer_busy";
+        agent_memory_selection_invalid: "agent_memory_selection_invalid";
+        harness_selection_conflict: "harness_selection_conflict";
+        runtime_selection_mismatch: "runtime_selection_mismatch";
     }>, z.ZodString]>>;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
@@ -7289,6 +7292,9 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
     code: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
         agent_home_reader_busy: "agent_home_reader_busy";
         agent_home_writer_busy: "agent_home_writer_busy";
+        agent_memory_selection_invalid: "agent_memory_selection_invalid";
+        harness_selection_conflict: "harness_selection_conflict";
+        runtime_selection_mismatch: "runtime_selection_mismatch";
     }>, z.ZodString]>>;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
