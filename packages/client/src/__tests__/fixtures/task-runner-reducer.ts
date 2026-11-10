@@ -129,11 +129,7 @@ const pending = {
 const queued = { requestId: 'r1', kind: 'task-terminal' as const };
 
 export const ROW_FIXTURES: ReadonlyMap<string, RowFixture> = new Map<string, RowFixture>([
-  ['O0', fixture(makeEvent('offer.sealed_opening'), {})],
   ['O1', fixture(makeEvent('offer.received', { offer: createOfferFacts() }), {})],
-  ['O2', fixture(makeEvent('offer.sealed_declined', { code: 'sealed_unsupported' }), {
-    runner: { sealedOpening: ['t1'] },
-  })],
   ['O3', fixture(makeEvent('admission.begin'), {
     task: { phase: 'received' },
     runner: { pendingCancelled: [{ taskId: 't1', reason: 'stop', atMs: 1 }] },

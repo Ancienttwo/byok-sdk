@@ -6,7 +6,7 @@ import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home'
 import type { OfferPhaseContext } from './support';
 import { settleAgentMemoryCommitCopy } from './agent-memory';
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable';
-import { offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage, pendingCancelBeforeActive } from './support';
+import { hostDeclineSender, offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage, pendingCancelBeforeActive } from './support';
 import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import { offerAlreadyHandled } from './offer-admission';
@@ -98,18 +98,7 @@ export async function handleOffer(
   const host = hostFor(this);
   const offerContext: HostOfferContext = host.beginOffer(taskId, {
     stage: 'receive',
-    sendDecline: (effect, context) => {
-      const code = effect.effect.detail?.code;
-      this['decline'](
-        taskId,
-        admission,
-        effect.effect.reason ?? 'declined',
-        effect.effect.retryable ?? false,
-        context.agentRef as AgentRef | undefined,
-        code === undefined ? undefined : code as TaskDeclinePayload['code'],
-        context.runtimeUnavailable as RuntimeUnavailableAdmission | undefined,
-      );
-    },
+    sendDecline: hostDeclineSender.call(this, taskId, admission),
   });
   const decline = (
     reason: string,

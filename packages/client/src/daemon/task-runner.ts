@@ -624,12 +624,6 @@ export class TaskRunner {
   /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
   private readonly inFlightBlobAborts = new Map<string, AbortController>();
   /**
-   * Bounded local receive dedup for strict legacy declines. A decline is not a
-   * task terminal receipt, so it must never enter the reducer's `finished` list; retaining
-   * it separately keeps replay idempotent without claiming or finishing work.
-   */
-  private readonly strictDeclinedTaskIds = new Set<string>();
-  /**
    * M4 Phase 2 (daemon control socket `shutdown` RPC): set once by
    * {@link stopAcceptingOffers}, checked at the very top of `handleOffer` —
    * see that method's own doc comment for why offers must stop being
@@ -1658,14 +1652,6 @@ export class TaskRunner {
    */
   private releasePreparationPin(taskId: string): Promise<void> {
     return releasePreparationPin.call(this, taskId);
-  }
-
-  private addStrictDeclinedTaskId(taskId: string): void {
-    this.strictDeclinedTaskIds.add(taskId);
-    if (this.strictDeclinedTaskIds.size > MAX_TRACKED_TASK_IDS) {
-      const oldest = this.strictDeclinedTaskIds.values().next().value;
-      if (oldest !== undefined) this.strictDeclinedTaskIds.delete(oldest);
-    }
   }
 
   /**
