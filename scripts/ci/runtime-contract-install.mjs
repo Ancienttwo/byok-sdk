@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url';
 const root = resolve(import.meta.dirname, '../..');
 const adapters = join(root, 'packages/client/src/adapters');
 
-export const RUNTIMES = Object.freeze(['pi', 'claude', 'codex', 'grok', 'hermes', 'dsh', 'agy']);
+export const RUNTIMES = Object.freeze(['pi', 'claude', 'codex', 'grok', 'hermes', 'dsh', 'agy', 'opencode1', 'opencode2']);
 
 /** npm packages of the CLIs the SDK does not bundle. */
 export const NPM_PACKAGES = Object.freeze({
@@ -19,6 +19,8 @@ export const NPM_PACKAGES = Object.freeze({
   codex: { name: '@openai/codex', bin: 'codex' },
   grok: { name: '@xai-official/grok', bin: 'grok' },
   dsh: { name: '@deepseek-ai/dsh', bin: 'dsh' },
+  opencode1: { name: 'opencode-ai', bin: 'opencode' },
+  opencode2: { name: '@opencode/cli', bin: 'opencode' },
 });
 
 export const HERMES_INSTALLER = Object.freeze({
@@ -59,6 +61,8 @@ export async function qualifiedVersions() {
     hermes: await load('hermes/hermes-version.ts', 'QUALIFIED_HERMES_VERSION'),
     dsh: await load('dsh/dsh-version.ts', 'QUALIFIED_DSH_VERSION'),
     agy: await load('antigravity/agy-version.ts', 'QUALIFIED_AGY_VERSION'),
+    opencode1: await load('opencode/opencode-version.ts', 'CONTRACT_OPENCODE_V1_VERSION'),
+    opencode2: await load('opencode/opencode-version.ts', 'QUALIFIED_OPENCODE_VERSION'),
   };
 }
 

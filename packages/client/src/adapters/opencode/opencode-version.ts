@@ -13,6 +13,9 @@ export function opencodeVersionToken(output: string): string | undefined {
 /** The OpenCode release the native canary qualified (#1593). */
 export const QUALIFIED_OPENCODE_VERSION = '2.2.6';
 
+/** The v1 release the runtime contract installs; the default policy qualifies only the v2 line above (#1593). */
+export const CONTRACT_OPENCODE_V1_VERSION = '1.19.5';
+
 /** The adapter's default policy: an unqualified version is an advisory. A block is Host-only, so none is declared here. */
 export const OPENCODE_VERSION_POLICY: RuntimeVersionPolicy = Object.freeze({
   qualifiedVersion: QUALIFIED_OPENCODE_VERSION,
