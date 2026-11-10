@@ -1,8 +1,8 @@
 // Open checks with the real helper and junction fixtures, under both Node and
 // Bun. The runtime supplies the root identity, as the TS caller does. A
 // junction home is refused, and a junction inside the home refuses the write.
-// The TS gate admits Windows x64 without B. These checks prove neither model S
-// recovery nor successful flush operations.
+// The TS gate admits Windows x64 without B. These checks exercise the required
+// helper flushes but do not prove model S recovery.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -12,7 +12,7 @@ import path from 'node:path';
 
 assert.equal(process.platform, 'win32', 'this matrix requires real Windows');
 const helperBin = process.argv[2];
-const PROTOCOL = 3;
+const PROTOCOL = 4;
 assert.ok(helperBin && path.isAbsolute(helperBin), 'use an explicit helper path');
 const version = spawnSync(helperBin, ['--version'], { env: {}, encoding: 'utf8', timeout: 10_000, windowsHide: true });
 assert.ifError(version.error);
@@ -58,7 +58,7 @@ try {
     if (junction) await symlink(target, junction, 'junction');
     try {
       const requests = [
-        { id: 'open', protocol: PROTOCOL, op: 'open', root, expectedIdentity: { kind: 'windows', volumeSerial: identity.dev.toString(10), fileIndex: identity.ino.toString(10) } },
+        { id: 'open', protocol: PROTOCOL, op: 'open', root, ancestorRoot: parent, expectedIdentity: { kind: 'windows', volumeSerial: identity.dev.toString(10), fileIndex: identity.ino.toString(10) } },
         { id: 'write', protocol: PROTOCOL, op: 'replace', path: write.path, expectedRevision: write.expectedRevision, contentBase64: 'eA', maxBytes: 1024 },
         { id: 'close', protocol: PROTOCOL, op: 'close' },
       ];
