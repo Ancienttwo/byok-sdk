@@ -36,6 +36,7 @@ import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { codexFailure } from '../../runtime/oar-failure-runtime';
 import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
+import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, RetryableOnce } from '../session-kit';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
@@ -298,7 +299,7 @@ export class CodexAdapter implements RuntimeAdapter {
             () => session.exited(),
             (error) => session.fail(error),
           );
-          return session.gate(child);
+          return haltGate(child, () => session.halted !== undefined);
         },
         { kind: 'available', via: 'executable', command: invocation.command },
         {
@@ -394,10 +395,10 @@ class CodexSession implements Session {
   private readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
   private failure?: RuntimeExecutionFailure;
   private active = false;
-  private readonly interruptWaiters = new Set<() => void>();
+  private readonly turnWaiters = new SettleWaiters();
   private stopping = false;
-  private closeAttempt?: Promise<void>;
-  private retainedBytes = 0;
+  private readonly closeOnce = new RetryableOnce();
+  private readonly recordBudget: RetainedRecordBudget;
   /** Set when the record consumer failed: no later line reaches the client, so the kernel retains no more of them. */
   halted?: RuntimeExecutionFailure;
   private readonly native?: CodexNativeInteractions;
@@ -408,11 +409,12 @@ class CodexSession implements Session {
     private readonly model: string | undefined,
     private readonly interruptMs: number,
     private readonly operationMs: number,
-    private readonly maxRetainedBytes: number,
+    maxRetainedBytes: number,
     private readonly fresh: boolean,
     interactions?: NativeInteractionHostOptions,
     private readonly expectedSessionRef?: string,
   ) {
+    this.recordBudget = new RetainedRecordBudget(maxRetainedBytes, 'codex');
     if (interactions) {
       this.native = new CodexNativeInteractions(() => this.sessionRef, interactions, () => this.fail(infrastructure('codex native interaction transport failed')));
       this.interactions = this.native.channel;
@@ -427,15 +429,6 @@ class CodexSession implements Session {
   }
   get exitedOnItsOwn(): boolean {
     return this.exit?.exitedOnItsOwn === true;
-  }
-  /** The app-server's lines stop at the transport once the record stream halted. */
-  gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
-    return {
-      ...child,
-      onLine: (handler: (line: string) => void) => child.onLine((line) => {
-        if (this.halted === undefined) handler(line);
-      }),
-    };
   }
   /** Fails the session and kills the app-server when `work` outlives the operation deadline. */
   async within<T>(
@@ -471,9 +464,7 @@ class CodexSession implements Session {
     if (this.halted !== undefined) return;
     try {
       // The observer receives the redacted, retained record: measure what the kernel keeps.
-      this.retainedBytes += Buffer.byteLength(JSON.stringify(record), 'utf8');
-      if (this.retainedBytes > this.maxRetainedBytes)
-        throw infrastructure('codex retained record byte budget exceeded');
+      this.recordBudget.add(record);
       const nativeFrame = record.body as { origin?: string; type?: string; native?: Record<string, unknown> };
       if (record.kind === 'frame' && nativeFrame.origin === 'byok-native' && nativeFrame.type && nativeFrame.native) this.native?.notification(nativeFrame.type, nativeFrame.native);
       this.projection?.consume(this.stream, record, (event) =>
@@ -495,7 +486,7 @@ class CodexSession implements Session {
           body.native.threadId === this.sessionRef)
       ) {
         this.active = false;
-        for (const resolve of this.interruptWaiters) resolve();
+        this.turnWaiters.settleAll();
         if (body.native?.turn?.status === 'failed') {
           const reason = body.native.turn.error?.message ?? 'codex turn failed';
           // The native frame precedes the fold, which classifies the same `turn.error`.
@@ -584,62 +575,42 @@ class CodexSession implements Session {
   async interrupt(): Promise<void> {
     this.native?.interrupt();
     if (!this.raw || !this.active) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let resolveTurn!: () => void;
-    const turnSettled = new Promise<void>(resolve => { resolveTurn = resolve; });
-    this.interruptWaiters.add(resolveTurn);
+    const waiter = this.turnWaiters.wait();
     try {
-      await Promise.race([
-        this.raw.abort().then(async result => {
-          // turn/interrupt ACK accepts the command; turn/completed carries
-          // final usage/outcome. Closing at ACK discards those native frames.
-          if (result.response.body.kind === 'accepted') await turnSettled;
-        }),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(infrastructure('codex late interrupt timed out')),
-            this.interruptMs,
-          );
-        }),
-      ]);
+      await raceDeadline(this.raw.abort().then(async result => {
+        // The final turn frame carries usage after the interrupt acknowledgement.
+        if (result.response.body.kind === 'accepted') await waiter.settled;
+      }), this.interruptMs, () => infrastructure('codex late interrupt timed out'));
     } catch (error) {
       this.fail(error);
       throw error;
     } finally {
-      clearTimeout(timer);
-      this.interruptWaiters.delete(resolveTurn);
+      waiter.release();
     }
   }
   async close(): Promise<void> {
     this.native?.close();
     this.stopping = true;
-    if (!this.closeAttempt) {
-      const promise = Promise.resolve().then(async () => {
+    await this.closeOnce.run(async () => {
+      try {
         try {
-          try {
-            await this.raw?.dispose();
-          } catch (error) {
-            if (!this.failure) throw error;
-          } finally {
-            await this.child?.dispose();
-            await this.scratch.release();
-          }
+          await this.raw?.dispose();
+        } catch (error) {
+          if (!this.failure) throw error;
         } finally {
-          // Stdout may contain final native frames after the interrupt ACK.
-          // End the consumer only after disposal has drained that transport.
-          this.flushPendingUsage();
-          this.queue.end();
+          await this.child?.dispose();
+          await this.scratch.release();
         }
-        this.raw = undefined;
-        this.projection = undefined;
-        this.child = undefined;
-      });
-      this.closeAttempt = promise.catch((error) => {
-        this.closeAttempt = undefined;
-        throw error;
-      });
-    }
-    await this.closeAttempt;
+      } finally {
+        // Stdout may contain final native frames after the interrupt ACK.
+        // End the consumer only after disposal has drained that transport.
+        this.flushPendingUsage();
+        this.queue.end();
+      }
+      this.raw = undefined;
+      this.projection = undefined;
+      this.child = undefined;
+    });
   }
   private flushPendingUsage(): void {
     const usage = this.projection?.takePendingUsage(this.stream);

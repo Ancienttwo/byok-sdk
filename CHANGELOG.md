@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changed (client; #1680)** — Grok, agy, Codex and Hermes share internal session lifecycle helpers for cancellation deadlines and retryable cleanup.
+
 - **Fixed (client; #1679)** — The six adapters now validate `interruptTimeoutMs` consistently; agy, dsh and Hermes also accept fractional milliseconds.
 
 - **Fixed (client; #1695)** — Redelivered offers for tasks that failed after claim but before becoming active no longer claim the task again after startup cleanup. Runtime start and activation failures now retain the task in the bounded finished collection.
