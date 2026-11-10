@@ -3,6 +3,9 @@ import { hash, type Json } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { addTurn, stateOf, type CollaborationState, type Delegation, type Turn, type Verdict } from './model';
 import { applyDelegate, claimUnit, endChain, releaseUnit, REPLY_UNCERTAIN_AFTER_MS, reserveUnits, resolveDelegation, retryReply, ROOT_BOT_BUDGET } from './delegation';
+import type { AutonomyGate } from './rules/autonomy';
+/** These cases apply every autonomous action, as a Bot in `auto` does. */
+const auto: AutonomyGate = { autonomy: 'auto', record: () => { throw new Error('auto records nothing'); } };
 
 function setup(spent = 0) {
   const state = stateOf({});
@@ -12,7 +15,7 @@ function setup(spent = 0) {
   state.budgets.root!.delegation = spent;
   const emit = (_id: string, _value: Json) => {};
   const apply = (turn: Turn, task: string, to: string[]) => applyDelegate(state, turn, task,
-    { delegate: to.map(target => ({ to: target, request: `Ask ${target}` })) }, false, 0, emit, (_kind, work) => work());
+    { delegate: to.map(target => ({ to: target, request: `Ask ${target}` })) }, false, 0, emit, (_kind, work) => work(), auto);
   return { state, root, emit, apply };
 }
 /** B ran (its unit is spent), reply_pending without a Host record, then no verdict for uncertainAfterMs (§3.3, §8.3). */

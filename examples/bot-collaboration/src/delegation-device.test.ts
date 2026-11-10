@@ -3,6 +3,9 @@ import { enqueue, hash, type LedgerState } from '@byok-sdk/server/execution-core
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { addTurn, stateOf } from './model';
 import { applyDelegate, observeDevices, settleDelegations } from './delegation';
+import type { AutonomyGate } from './rules/autonomy';
+/** These cases apply every autonomous action, as a Bot in `auto` does. */
+const auto: AutonomyGate = { autonomy: 'auto', record: () => { throw new Error('auto records nothing'); } };
 
 function setup() {
   const s: LedgerState = { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {}, outbox: {},
@@ -12,7 +15,7 @@ function setup() {
     archived: false, revision: '1', readyRevision: '1', execution: template(id === 'a' ? 'local' : 'remote', id) };
   const turn = addTurn(state, { id: 'root', root: 'root', source: 'user', request: 'Ask b', botId: 'a', hop: 0, authority: 'owner' });
   const events: string[] = [], emit = (id: string) => { events.push(id); };
-  applyDelegate(state, turn, 'task', { delegate: [{ to: 'b', request: 'Check' }] }, false, 0, emit, (_kind, work) => work());
+  applyDelegate(state, turn, 'task', { delegate: [{ to: 'b', request: 'Check' }] }, false, 0, emit, (_kind, work) => work(), auto);
   const d = state.delegations[hash(['task', 'delegate', 0])]!;
   const input = { key: d.id, source: 'bot' as const, execution: template('remote', 'b'), waitUntil: 300_000 };
   return { s, state, d, input, events, emit };
