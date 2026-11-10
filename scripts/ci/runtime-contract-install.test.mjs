@@ -3,9 +3,9 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
-import { agyUpdaterManifest, AGY_QUALIFIED, contractEnv, hermesBuildCommit, install, isExactVersion, qualifiedVersions, RUNTIMES } from './runtime-contract-install.mjs';
+import { agyUpdaterManifest, AGY_QUALIFIED, contractEnv, hermesBuildCommit, install, isExactVersion, qualifiedVersions, RUNTIMES, vendoredHermesInstaller } from './runtime-contract-install.mjs';
 
 const root = new URL('../../', import.meta.url);
 
@@ -25,6 +25,33 @@ test('qualified versions come from each adapter authority and the client Pi pin'
 test('the Hermes build names the commit the installer checks out', () => {
   assert.equal(hermesBuildCommit('0.22.2+2364.g0b10b9f'), '0b10b9f');
   assert.throws(() => hermesBuildCommit('0.22.2'), /names no commit/);
+});
+
+test('vendored Hermes installers match the qualified commit and checksums', async () => {
+  const version = (await qualifiedVersions()).hermes;
+  const vendor = new URL('scripts/ci/vendor/hermes/', root);
+  const manifest = JSON.parse(readFileSync(new URL('manifest.json', vendor), 'utf8'));
+  const work = mkdtempSync(join(tmpdir(), 'hermes-vendor-'));
+  try {
+    mkdirSync(join(work, manifest.commit));
+    for (const file of ['install.sh', 'install.ps1']) {
+      const actualPath = vendoredHermesInstaller(version, file);
+      assert.equal(basename(dirname(actualPath)), manifest.commit);
+      assert.match(execFileSync('git', ['check-attr', 'text', '--', actualPath], { encoding: 'utf8' }), /text: unset/);
+      const bytes = readFileSync(actualPath);
+      writeFileSync(join(work, manifest.commit, file), bytes);
+    }
+    writeFileSync(join(work, 'manifest.json'), JSON.stringify(manifest));
+    assert.throws(() => vendoredHermesInstaller('1.0.0+1.gabcdef0', 'install.sh', work), /does not match/);
+    for (const file of ['install.sh', 'install.ps1']) {
+      writeFileSync(join(work, manifest.commit, file), 'tampered');
+      assert.throws(() => vendoredHermesInstaller(version, file, work), /checksum mismatch/);
+    }
+    rmSync(join(work, manifest.commit), { recursive: true });
+    assert.throws(() => vendoredHermesInstaller(version, 'install.sh', work), /ENOENT/);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 });
 
 test('an npm install takes one exact version, prereleases included', () => {

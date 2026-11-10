@@ -2066,9 +2066,8 @@ jobs:
 
   # #608: the Hermes adapter against a real Hermes on Windows. The qualified
   # build (`QUALIFIED_HERMES_VERSION` in
-  # packages/client/src/adapters/hermes/hermes-version.ts) is installed with
-  # Hermes's own installer, fetched at that commit and checksum-verified, so an
-  # upstream change cannot alter what CI installs. The model is a local fake
+  # packages/client/src/adapters/hermes/hermes-version.ts) uses a vendored,
+  # checksum-verified installer. The model is a local fake
   # OpenAI-compatible endpoint inside the test: no paid call, no provider key.
   # Its own job, because the install takes minutes and only Hermes paths select it.
   hermes-real-windows:
@@ -2100,17 +2099,30 @@ jobs:
       - name: Build client dependencies
         run: bun run build
 
-      - name: Install the qualified Hermes (pinned commit, checksum-verified installer)
+      - name: Cache qualified Hermes tools
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/hermes-tools
+          key: hermes-tools-${{ runner.os }}-${{ runner.arch }}-${{
+            hashFiles('scripts/ci/vendor/hermes/manifest.json') }}
+
+      - name: Install the qualified Hermes from the verified vendor copy
         env:
-          GH_TOKEN: ${{ github.token }}
+          HERMES_RUNTIME_DIR: ${{ runner.temp }}/hermes-tools
         run: |
-          $commit = "0b10b9f8155a7ecadd8c540b87712c791b5c8ac9"
-          $sha = "3d428ce54dea5fe26f8f52e40b2a49876d3cb95c49760e8350d6458046519479"
-          $installer = Join-Path $env:RUNNER_TEMP "hermes-install.ps1"
-          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github.raw" }
-          Invoke-WebRequest -Uri "https://api.github.com/repos/NousResearch/hermes-agent/contents/scripts/install.ps1?ref=$commit" -Headers $headers -OutFile $installer
-          $actual = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLower()
-          if ($actual -ne $sha) { Write-Error "Hermes installer checksum mismatch: expected $sha, got $actual"; exit 1 }
+          $verified = node --input-type=module -e '
+            import { qualifiedVersions, vendoredHermesInstaller }
+              from "./scripts/ci/runtime-contract-install.mjs";
+            const v = (await qualifiedVersions()).hermes;
+            console.log(JSON.stringify({
+              installer: vendoredHermesInstaller(v, "install.ps1")
+            }));' | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $verified) {
+            throw 'Hermes installer verification failed'
+          }
+          $installer = $verified.installer
+          $commit = Split-Path (Split-Path $installer -Parent) -Leaf
+          Write-Host "Using vendored Hermes installer: $installer"
           # The install's own home, apart from the SDK root the test creates.
           $hermesHome = Join-Path $env:RUNNER_TEMP "hermes-install-home"
           $started = Get-Date
@@ -2200,9 +2212,16 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun ci
       - run: bun run build
+      - name: Cache qualified Hermes tools
+        if: matrix.runtime == 'hermes'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/hermes-tools
+          key: hermes-tools-${{ runner.os }}-${{ runner.arch }}-${{
+            hashFiles('scripts/ci/vendor/hermes/manifest.json') }}
       - name: Install the qualified runtime CLI
         env:
-          GH_TOKEN: ${{ github.token }}
+          HERMES_RUNTIME_DIR: ${{ runner.temp }}/hermes-tools
         run: node scripts/ci/runtime-contract-install.mjs ${{ matrix.runtime }} qualified
       - name: Run the runtime contract suite
         run: bun run --filter @byok-sdk/client test:runtime-contract -- src/__tests__/runtime-contract/${{ matrix.runtime }}.contract.ts

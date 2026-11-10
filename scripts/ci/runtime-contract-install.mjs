@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 // #1103: install one runtime CLI for the runtime contract suite and hand its
@@ -21,13 +21,8 @@ export const NPM_PACKAGES = Object.freeze({
   dsh: { name: '@deepseek-ai/dsh', bin: 'dsh' },
 });
 
-/**
- * The Hermes installer at the qualified commit, checksum-pinned like the
- * Windows job's install.ps1. A qualification bump changes both.
- */
 export const HERMES_INSTALLER = Object.freeze({
   repository: 'https://github.com/NousResearch/hermes-agent',
-  sha256: '20f44240ebada354a468104a6a6724d037afcb8883d4d09ddeb4815622c52d8b',
 });
 
 /**
@@ -74,6 +69,24 @@ export function hermesBuildCommit(version) {
   return commit;
 }
 
+/** Verify the vendored installer and its relationship to the adapter's qualified build. */
+export function vendoredHermesInstaller(version, file, vendor = join(root, 'scripts/ci/vendor/hermes')) {
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(join(vendor, 'manifest.json'), 'utf8'));
+  } catch (error) {
+    throw new Error(`Hermes installer manifest is unreadable: ${error.message}`);
+  }
+  if (!/^[0-9a-f]{40}$/.test(manifest.commit) || !manifest.commit.startsWith(hermesBuildCommit(version)))
+    throw new Error('Hermes installer manifest commit does not match the qualified build');
+  if (!['install.sh', 'install.ps1'].includes(file) || !/^[0-9a-f]{64}$/.test(manifest.sha256?.[file] ?? ''))
+    throw new Error(`Hermes installer manifest has no checksum for ${file}`);
+  const installer = join(vendor, manifest.commit, file);
+  const actual = createHash('sha256').update(readFileSync(installer)).digest('hex');
+  if (actual !== manifest.sha256[file]) throw new Error(`Hermes installer checksum mismatch: expected ${manifest.sha256[file]}, got ${actual}`);
+  return installer;
+}
+
 /** The GITHUB_ENV lines the suite reads. A qualified run needs no version: the suite reads the same authority. */
 export function contractEnv(runtime, bin, latestVersion) {
   const key = runtime.toUpperCase();
@@ -101,17 +114,17 @@ function installHermes(mode, version, dir) {
   // The installer edits shell profiles and ~/.local/bin; give it a throwaway HOME.
   const fakeHome = join(dir, 'installer-home');
   mkdirSync(fakeHome, { recursive: true });
-  const ref = mode === 'latest' ? 'main' : hermesBuildCommit(version);
-  const installer = join(dir, 'install.sh');
-  // raw.githubusercontent.com rate-limits unauthenticated requests per shared runner IP; gh counts against the caller's token.
-  const endpoint = `repos/NousResearch/hermes-agent/contents/scripts/install.sh?ref=${ref}`;
-  console.log(`Downloading the Hermes installer: https://api.github.com/${endpoint}`);
-  writeFileSync(installer, execFileSync('gh', ['api', '-H', 'Accept: application/vnd.github.raw', endpoint], { stdio: ['ignore', 'pipe', 'inherit'] }));
-  if (mode === 'qualified') {
-    const actual = createHash('sha256').update(readFileSync(installer)).digest('hex');
-    if (actual !== HERMES_INSTALLER.sha256) throw new Error(`Hermes installer checksum mismatch: expected ${HERMES_INSTALLER.sha256}, got ${actual}`);
+  let installer;
+  if (mode === 'latest') {
+    installer = join(dir, 'install.sh');
+    const endpoint = 'repos/NousResearch/hermes-agent/contents/scripts/install.sh?ref=main';
+    console.log(`Downloading the latest Hermes installer: https://api.github.com/${endpoint}`);
+    writeFileSync(installer, execFileSync('gh', ['api', '-H', 'Accept: application/vnd.github.raw', endpoint], { stdio: ['ignore', 'pipe', 'inherit'] }));
+  } else {
+    installer = vendoredHermesInstaller(version, 'install.sh');
+    console.log(`Using vendored Hermes installer: ${installer}`);
   }
-  const commit = mode === 'latest' ? run('git', ['ls-remote', HERMES_INSTALLER.repository, 'HEAD']).split(/\s/)[0] : ref;
+  const commit = mode === 'latest' ? run('git', ['ls-remote', HERMES_INSTALLER.repository, 'HEAD']).split(/\s/)[0] : basename(dirname(installer));
   execFileSync('bash', [installer, '--commit', commit, '--non-interactive', '--skip-browser', '--skip-computer-use', '--hermes-home', home, '--dir', agent],
     { stdio: 'inherit', env: { ...process.env, HOME: fakeHome } });
   const bin = [join(agent, '.hermes', 'bin', 'hermes'), join(home, 'bin', 'hermes'), join(fakeHome, '.local', 'bin', 'hermes')].find(existsSync);
