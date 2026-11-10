@@ -5,6 +5,7 @@ import { resolveSystemTool } from '@byok-sdk/core/system-tool';
 import { walkTaskkillPidSet } from './taskkill-pid-set';
 // OAR 0.37.0 `shared/executable/process-tree.ts`, vendored with upstream bytes.
 import { descendantsOf, killEntries, readProcessTable, type ProcessEntry, type ProcessTable } from '../runtime/oar-process-tree.js';
+import { processSignalState } from '../util/process-signal-state';
 
 const DEFAULT_TERM_GRACE_MS = 750;
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -613,9 +614,9 @@ function groupExists(pid: number, label: string, kill: KillFn): boolean {
     kill(-pid, 0);
     return true;
   } catch (cause) {
-    const code = (cause as NodeJS.ErrnoException).code;
-    if (code === 'ESRCH') return false;
-    if (code === 'EPERM') return true;
+    const state = processSignalState(cause, pid);
+    if (state === 'gone') return false;
+    if (state === 'live') return true;
     throw new RuntimeDisposalFailure({
       stage: 'quiescence',
       reason: `${label} runtime process-group state could not be verified`,
@@ -629,9 +630,9 @@ function processExists(pid: number, label: string, kill: KillFn): boolean {
     kill(pid, 0);
     return true;
   } catch (cause) {
-    const code = (cause as NodeJS.ErrnoException).code;
-    if (code === 'ESRCH') return false;
-    if (code === 'EPERM') return true;
+    const state = processSignalState(cause);
+    if (state === 'gone') return false;
+    if (state === 'live') return true;
     throw new RuntimeDisposalFailure({
       stage: 'quiescence',
       reason: `${label} runtime process ${pid} state could not be verified`,
@@ -639,15 +640,14 @@ function processExists(pid: number, label: string, kill: KillFn): boolean {
   }
 }
 
-function signalGroup(pid: number, signal: NodeJS.Signals, label: string, kill: KillFn): void {
+async function signalGroup(pid: number, signal: NodeJS.Signals, label: string, kill: KillFn): Promise<void> {
   try {
     kill(-pid, signal);
   } catch (cause) {
+    const state = processSignalState(cause);
+    if (state === 'gone') return;
+    if (state === 'live' && await waitUntil(() => processSignalState(cause, pid) !== 'gone', DEFAULT_KILL_GRACE_MS)) return;
     const code = (cause as NodeJS.ErrnoException).code;
-    // macOS can transiently report EPERM for an orphaned group containing
-    // only processes already exiting. It is not success: the quiescence
-    // poll below must still prove the group disappears before close settles.
-    if (code === 'ESRCH' || code === 'EPERM') return;
     throw new RuntimeDisposalFailure({
       stage: 'signal',
       reason: `${label} runtime process group ${pid} could not receive ${signal} (${code ?? 'unknown'})`,
@@ -774,7 +774,7 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
     return;
   }
   rememberDescendants(options.child, pid, () => readDisposalTable(options));
-  signalGroup(pid, 'SIGTERM', options.label, options.killFn ?? defaultKill);
+  await signalGroup(pid, 'SIGTERM', options.label, options.killFn ?? defaultKill);
   stateFor(options.child).requested = true;
 }
 
@@ -896,7 +896,7 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
   const readTable = (): ProcessTable => readDisposalTable(options);
   if (groupExists(pid, options.label, kill) && !terminationState.get(options.child)?.requested) {
     rememberDescendants(options.child, pid, readTable);
-    signalGroup(pid, 'SIGTERM', options.label, kill);
+    await signalGroup(pid, 'SIGTERM', options.label, kill);
     stateFor(options.child).requested = true;
   }
   const killed: number[] = [];
@@ -904,7 +904,7 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
     // Read again first: the root may have started more since the SIGTERM.
     const table = readTable();
     const more = isRunning(options.child) ? descendantsOf(table, pid) : [];
-    signalGroup(pid, 'SIGKILL', options.label, kill);
+    await signalGroup(pid, 'SIGKILL', options.label, kill);
     killed.push(...killDescendants(options.child, () => table, more));
     if (!(await waitUntil(() => groupExists(pid, options.label, kill), killGraceMs))) {
       throw new RuntimeDisposalFailure({

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1699)** — Runtime cleanup on macOS accepts an owned process group's EPERM only after the process-table poll confirms that no live members remain, avoiding durable Pi interrupt failures while zombies await reaping.
+
 - **Fixed (client; #1676)** — Offers requiring resume, dispatch selection, prepared input or MCP toolsets are declined before claim when the selected runtime does not declare the required capabilities.
 
 - **Changed (client; #1685)** — `RuntimeEnvironmentUnavailableError` now suggests setting `runtimeEnvironment.base` to `allowlist` when the login-shell snapshot or Windows logon registry capture fails.

@@ -14,6 +14,8 @@ import {
   withOwnedProcessTree,
   type OwnedProcessGroupRecord,
 } from '../adapters/process-tree';
+import { disposeDurableShellGroups } from '../adapters/pi-durable/process-groups';
+import { processSignalState } from '../util/process-signal-state';
 import { OWNED_PROCESSES_DIRECTORY, OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { readProcessTable } from '../runtime/oar-process-tree.js';
 import { execFileSync } from 'node:child_process';
@@ -35,12 +37,10 @@ beforeEach(async () => {
 
 afterEach(async () => {
   for (const detach of detachers.splice(0)) detach();
-  for (const child of spawned.splice(0)) {
-    if (child.pid !== undefined && groupAlive(child.pid)) process.kill(-child.pid, 'SIGKILL');
-  }
-  for (const pgid of orphanGroups.splice(0)) {
-    if (groupAlive(pgid)) process.kill(-pgid, 'SIGKILL');
-  }
+  await disposeDurableShellGroups(new Set([
+    ...spawned.splice(0).flatMap(child => child.pid === undefined ? [] : [child.pid]),
+    ...orphanGroups.splice(0),
+  ]));
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -49,7 +49,7 @@ function groupAlive(pgid: number): boolean {
     process.kill(-pgid, 0);
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    if (processSignalState(error, pgid) === 'gone') return false;
     throw error;
   }
 }
