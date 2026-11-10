@@ -102,13 +102,18 @@ export const isExactVersion = (version) => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[
 
 const run = (command, args, options = {}) => execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], ...options }).trim();
 
+/** npm is `npm.cmd` on Windows, which Node runs only through a shell; every argument here is a fixed, validated token. */
+function npm(args, options = {}) {
+  return execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, { encoding: 'utf8', ...(process.platform === 'win32' ? { shell: true } : {}), ...options });
+}
+
 function installNpm(runtime, mode, version, dir) {
   const { name, bin, winBin } = NPM_PACKAGES[runtime];
-  const exact = mode === 'latest' ? run('npm', ['view', name, 'version']) : version;
+  const exact = mode === 'latest' ? npm(['view', name, 'version'], { stdio: ['ignore', 'pipe', 'inherit'] }).trim() : version;
   if (!isExactVersion(exact)) throw new Error(`${name}: not an exact version: ${JSON.stringify(exact)}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'package.json'), '{"private":true}\n');
-  execFileSync('npm', ['install', '--no-audit', '--no-fund', '--save-exact', `${name}@${exact}`], { cwd: dir, stdio: 'inherit' });
+  npm(['install', '--no-audit', '--no-fund', '--save-exact', `${name}@${exact}`], { cwd: dir, stdio: 'inherit' });
   // On Windows the `.bin` entry is a `.cmd` shim, which the adapter cannot execute; use the package's own executable.
   const installed = process.platform === 'win32' && winBin !== undefined ? join(dir, 'node_modules', ...winBin.split('/')) : join(dir, 'node_modules', '.bin', bin);
   return { bin: installed, version: exact };
