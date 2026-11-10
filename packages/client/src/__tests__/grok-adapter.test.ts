@@ -124,11 +124,6 @@ describe('GrokAdapter sessions', () => {
         isolation: { userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: false, sessionPersistence: false },
       },
     });
-    const prepared = await a.prepare({
-      offer: { instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'm' } },
-      descriptor: a.descriptor, requiredToolsetIds: [],
-    });
-    expect(prepared).toEqual({ kind: 'reject', reason: 'grok cannot execute a dispatch selection', retryable: false });
   });
 
   it('runs one owned ACP agent with the exact env and closes the reply with the turn', async () => {

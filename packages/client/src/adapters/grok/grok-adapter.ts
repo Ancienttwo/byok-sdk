@@ -177,8 +177,6 @@ export class GrokAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    if (input.offer.dispatchSelection !== undefined)
-      return { kind: 'reject', reason: 'grok cannot execute a dispatch selection', retryable: false };
     const detected = await this.detect();
     if (detected.kind !== 'available')
       return {
@@ -193,8 +191,6 @@ export class GrokAdapter implements RuntimeAdapter {
   private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('grok requires a resolved instruction');
-    if (input.manifest.dispatchSelection !== undefined)
-      throw authority('prepared grok operation received a manifest with a dispatch selection');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('grok manifest has no sealed cwd');
     const persona = await agentPersona('grok', input.manifest);

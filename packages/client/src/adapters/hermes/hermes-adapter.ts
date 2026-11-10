@@ -300,8 +300,6 @@ export class HermesAdapter implements RuntimeAdapter {
 
   /** Cheap admission, as Codex: the version probe only. The ACP probe and root build belong to `detect()`. */
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    if (input.offer.dispatchSelection !== undefined) return { kind: 'reject', reason: 'hermes does not accept a dispatch selection; the Host configures its model', retryable: false };
-    if (input.offer.sessionRef !== undefined) return { kind: 'reject', reason: 'hermes does not resume native sessions', retryable: false };
     const command = this.command();
     await ensureHermesRoot(this.root);
     const version = await probeHermesVersion(command, await this.rootEnvironment());
@@ -319,7 +317,6 @@ export class HermesAdapter implements RuntimeAdapter {
 
   private async start(input: RuntimeOperationStartInput, command: string, custody?: PreparedHermesCustody): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('hermes requires a resolved instruction');
-    if (input.manifest.sessionRef !== undefined) throw authority('hermes does not resume native sessions');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('hermes manifest has no sealed cwd');
     const workspace = await fs.realpath(cwd);

@@ -83,7 +83,7 @@ import {
 } from './agent-memory';
 import type { AgentMemoryCommitStore } from './agent-memory-commit';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
-import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry } from './task-runner/support';
+import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry, RuntimeRequirements } from './task-runner/support';
 import { offerSettlements, trackOffer, taskTearingDown } from './task-runner/support';
 import { MAX_TRACKED_TASK_IDS } from './task-runner/state';
 import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message';
@@ -1729,8 +1729,9 @@ export class TaskRunner {
   }
 
   /**
-   * Selects which adapter runs this offer, gated on CAPABILITY (MCP toolset
-   * projection, when required) and PRESENCE (`adapter.detect()`) — pre-claim,
+   * Selects which adapter runs this offer, gated on required capabilities
+   * (MCP toolsets, resume, dispatch selection and prepared input) and
+   * presence (`adapter.detect()`) — pre-claim,
    * in both the explicit-runtime and auto-select branches.
    *
    * Explicit-runtime branch (`requestedRuntime` set): allowlist and
@@ -1750,9 +1751,9 @@ export class TaskRunner {
    */
   private pickAdapter(
     requestedRuntime: string | undefined,
-    requiresMcpToolsets: boolean,
+    requirements: RuntimeRequirements,
     signal: AbortSignal,
   ): Promise<PickResult> {
-    return pickAdapter.call(this, requestedRuntime, requiresMcpToolsets, signal);
+    return pickAdapter.call(this, requestedRuntime, requirements, signal);
   }
 }

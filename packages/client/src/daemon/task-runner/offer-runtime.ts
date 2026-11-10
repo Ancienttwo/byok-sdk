@@ -10,8 +10,8 @@ import type { ExecutionScratch } from '../retention/scratch';
 import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
 import { McpAuthorityError, MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from '../mcp-tools-probe';
 import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } from '../../mcp/observation';
-import type { PickResult, OfferPhaseContext, OfferRuntimeInput } from './support';
-import { DEFAULT_RUNTIME_PREFERENCE, orderByPreference, adapterSupportsMcpToolsets, runtimeTaskInput, errorMessage, outboundErrorMessage } from './support';
+import type { PickResult, OfferPhaseContext, OfferRuntimeInput, RuntimeRequirements } from './support';
+import { DEFAULT_RUNTIME_PREFERENCE, orderByPreference, unmetRequirements, requirementPhrases, runtimeTaskInput, errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 
 export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseContext, input: OfferRuntimeInput) {
@@ -28,9 +28,14 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   try {
     pick = await this['pickAdapter'](
       requestedRuntime,
-      requiredToolsets !== undefined
-        || (preparation === undefined && (messageRequirement !== undefined || terminalProjection?.mode === 'result-document'))
-        || requiresAgentMemoryMcp || preparedMemorySelected,
+      {
+        mcpToolsets: requiredToolsets !== undefined
+          || (preparation === undefined && (messageRequirement !== undefined || terminalProjection?.mode === 'result-document'))
+          || requiresAgentMemoryMcp || preparedMemorySelected,
+        resume: offered.sessionRef !== undefined,
+        dispatchSelection: payload.dispatchSelection !== undefined,
+        preparedInput: preparation !== undefined,
+      },
       blobAbort.signal,
     );
   } catch (error) {
@@ -239,7 +244,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
 export async function pickAdapter(
   this: TaskRunner,
   requestedRuntime: string | undefined,
-  requiresMcpToolsets: boolean,
+  requirements: RuntimeRequirements,
   signal: AbortSignal,
 ): Promise<PickResult> {
   const allowlist = this['deps'].runtimeAllowlist;
@@ -263,10 +268,11 @@ export async function pickAdapter(
       };
     }
     const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
-    if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) {
+    const unmet = unmetRequirements(descriptor, requirements);
+    if (unmet.length > 0) {
       return {
         ok: false,
-        reason: `runtime "${requestedRuntime}" cannot project required MCP toolsets`,
+        reason: `runtime "${requestedRuntime}" cannot ${requirementPhrases[unmet[0]!]}`,
         retryable: false,
       };
     }
@@ -311,17 +317,18 @@ export async function pickAdapter(
   let capabilityEligible = 0;
   for (const adapter of candidates) {
     const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
-    if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
+    if (unmetRequirements(descriptor, requirements).length > 0) continue;
     capabilityEligible += 1;
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
     // Auto selection skips a blocked candidate and keeps the candidate order.
     if (detected.kind === 'available' && detected.versionVerdict?.state !== 'block') return { ok: true, adapter, descriptor };
   }
-  const capabilityMismatch = requiresMcpToolsets && eligible.length > 0 && capabilityEligible === 0;
+  const phrases = (Object.keys(requirementPhrases) as (keyof RuntimeRequirements)[]).filter((key) => requirements[key]).map((key) => requirementPhrases[key]);
+  const capabilityMismatch = phrases.length > 0 && eligible.length > 0 && capabilityEligible === 0;
   return {
     ok: false,
-    reason: requiresMcpToolsets
-      ? 'no available runtime on this device can project required MCP toolsets'
+    reason: phrases.length > 0
+      ? `no available runtime on this device can ${phrases.join(' and ')}`
       : 'no available runtime on this device',
     retryable: runtimeUnavailableRetryable('none_available'),
     ...(capabilityMismatch ? {} : { runtimeUnavailable: { cause: 'none_available' as const } }),
