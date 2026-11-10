@@ -556,7 +556,7 @@ describe('diagnostics collector', () => {
 
 describe('doctor explicit fix', () => {
   it('requires --yes and refuses to mutate while a daemon is reachable', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     await fs.writeFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), '{bad');
     await expect(runDoctorCommand(config(dir), { fix: true, adapters: [], connectControl: unreachable })).rejects.toBeInstanceOf(
       DoctorConfirmationRequiredError,
@@ -568,7 +568,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('moves confirmed corrupt bytes to quarantine and writes a matching digest manifest', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
     const bytes = Buffer.from('{not-json-secret-evidence');
     await fs.writeFile(sourcePath, bytes, { mode: 0o600 });
@@ -594,7 +594,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('anchors a relative storeDir before pinning quarantine as the process cwd', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     const relativeStoreDir = path.relative(process.cwd(), dir);
     const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
     await fs.writeFile(sourcePath, '{relative-store-corrupt');
@@ -611,7 +611,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('rejects a raced replacement before any unconfirmed inode enters quarantine', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
     await fs.writeFile(sourcePath, '{original-corrupt');
     const quarantineDir = path.join(dir, 'quarantine');
@@ -634,7 +634,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('rejects same-inode mutation after inspection instead of publishing a stale digest manifest', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
     const quarantineDir = path.join(dir, 'quarantine');
     await fs.writeFile(sourcePath, '{original-corrupt');
@@ -656,7 +656,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('refuses a symlinked quarantine directory without touching its target', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     const outside = await tempDir();
     await fs.writeFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), '{bad');
     await fs.symlink(outside, path.join(dir, 'quarantine'));
@@ -666,7 +666,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('accepts a quarantine directory that a concurrent attempt created first', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     await fs.writeFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), '{bad');
     const realMkdir = fs.mkdir.bind(fs);
     const mkdir = vi.spyOn(fs, 'mkdir').mockImplementation(async (target, options) => {
@@ -681,7 +681,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('pins the checked quarantine directory inode and refuses a raced symlink before writing evidence', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     const outside = await tempDir();
     const quarantineDir = path.join(dir, 'quarantine');
     const movedQuarantine = path.join(dir, 'quarantine-original');
@@ -706,7 +706,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('doctor --fix --yes reports the move and recollects missing health without rebuilding it', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     await fs.writeFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), '{bad');
     const lines: string[] = [];
     await runDoctorCommand(config(dir), {
@@ -721,7 +721,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('refuses symlink evidence without moving it or chmodding its external target', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     const outside = path.join(await tempDir(), 'outside-health');
     await fs.writeFile(outside, '{external-corrupt}', { mode: 0o644 });
     await fs.chmod(outside, 0o644);
@@ -735,7 +735,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('refuses fix while the daemon ownership lease is held', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
     await fs.writeFile(sourcePath, '{bad');
     const lease = await acquireDaemonOwner(dir, 'daemon');
@@ -748,7 +748,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('recovers an owner record whose live PID has a different process-start identity', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     await fs.writeFile(
       path.join(dir, DAEMON_OWNER_FILENAME),
       `${JSON.stringify({
@@ -766,7 +766,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('does not accept an owner record without process-start identity as a compatibility authority', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     await fs.writeFile(
       path.join(dir, DAEMON_OWNER_FILENAME),
       `${JSON.stringify({
@@ -783,7 +783,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('reclaims an owner record after its PID was reused by an unrelated live process', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
     if (child.pid === undefined) throw new Error('test child did not start');
     try {
@@ -810,7 +810,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('recovers a stale malformed reclaim marker after its bounded grace period', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     const reclaimPath = path.join(dir, `${DAEMON_OWNER_FILENAME}.reclaim`);
     await fs.writeFile(reclaimPath, '');
     const stale = new Date(Date.now() - 60_000);
@@ -821,7 +821,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('admits only one concurrent stale-owner reclaimer', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     await fs.writeFile(
       path.join(dir, DAEMON_OWNER_FILENAME),
       `${JSON.stringify({
@@ -862,7 +862,7 @@ describe('doctor explicit fix', () => {
   });
 
   it('does not treat a stale bare-PID reclaim marker as an alternate live-owner authority', async () => {
-    const dir = await tempDir();
+    const dir = await fs.realpath(await tempDir());
     const reclaimPath = path.join(dir, `${DAEMON_OWNER_FILENAME}.reclaim`);
     await fs.writeFile(reclaimPath, `${process.pid}\n`);
     const stale = new Date(Date.now() - 60_000);

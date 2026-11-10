@@ -10,6 +10,7 @@ import {
   AgentHomeBusyError,
   AgentHomeLeaseCorruptError,
   AgentHomeLayout,
+  AgentHomeResolutionError,
   AgentHomeLeaseManager,
   AgentHomeManager,
   createAgentHomeProjection,
@@ -93,6 +94,17 @@ describe('SDK-owned Agent home contract', () => {
     await fs.symlink(one.canonicalHome, path.join(root, 'agents', 'two'), 'dir');
     const restartedLayout = new AgentHomeLayout(root);
     await expect(restartedLayout.resolve(ref('two'))).rejects.toThrow(/real directory|symlink/);
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a hostStorageRoot link in a directory writable by others before creating homes', async () => {
+    const root = await makeRoot();
+    const outside = await makeRoot();
+    const link = path.join(root, 'host');
+    await fs.symlink(outside, link, 'dir');
+    await fs.chmod(root, 0o777);
+    expect(() => new AgentHomeLayout(link)).toThrow(AgentHomeResolutionError);
+    expect(() => new AgentHomeLayout(link)).toThrow(/agentHome.hostStorageRoot: .*directory_writable/);
+    expect(await fs.readdir(outside)).toEqual([]);
   });
 
   it('keeps one Agent home across profile revisions and different Agents isolated', async () => {

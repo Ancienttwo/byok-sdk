@@ -8770,6 +8770,9 @@ export declare class DeviceStore {
      * letter case) are folded into the on-disk spelling here, so the daemon and
      * every CLI derive the same control endpoint, Agent-home owner and retention
      * roots from one spelling.
+     * On POSIX a symbolic link in an existing ancestor is followed only when it
+     * and the directory holding it are trusted; an untrusted link throws
+     * `configured_path_untrusted_link`.
      */
     static resolveDir(productId: string, configured?: string): string;
     load(): Promise<DeviceMetadata | undefined>;

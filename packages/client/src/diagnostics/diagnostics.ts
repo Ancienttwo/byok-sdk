@@ -1,6 +1,7 @@
 import { inspectServiceLogs } from '../lifecycle/service-log';
 import { serviceLogDir } from '../daemon/host-layout';
 import { createDaemonScratch } from '../daemon/retention/scratch';
+import { AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../agent-home';
 import type { DiagnosticCheck, DiagnosticsSnapshot } from './types';
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeDetectResult } from '../types';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1053,7 +1054,8 @@ function publishQuarantineEvidencePinned(
 /**
  * The only S7-b repair: preserve a confirmed-corrupt health file in the
  * never-auto-delete quarantine. Callers must separately enforce the CLI's
- * `--fix --yes` and offline-daemon preconditions.
+ * `--fix --yes` and offline-daemon preconditions. storeDir must come from
+ * DeviceStore.resolveDir.
  */
 export async function quarantineCorruptOperationalHealth(
   storeDir: string,
@@ -1083,22 +1085,12 @@ export async function quarantineCorruptOperationalHealth(
 
       const quarantineDir = path.join(resolvedStoreDir, JOURNAL_QUARANTINE_DIRNAME);
       try {
-        const existing = await fs.lstat(quarantineDir);
-        if (!existing.isDirectory() || existing.isSymbolicLink()) {
+        await ensureDirectoryNoSymlink(resolvedStoreDir, quarantineDir);
+      } catch (error) {
+        if (error instanceof AgentHomeResolutionError) {
           throw new Error('quarantine path is not a real directory; refusing quarantine');
         }
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-        try {
-          await fs.mkdir(quarantineDir, { mode: 0o700 });
-        } catch (mkdirErr) {
-          if ((mkdirErr as NodeJS.ErrnoException).code !== 'EEXIST') throw mkdirErr;
-          // A concurrent attempt created it first: accept only a real directory.
-          const raced = await fs.lstat(quarantineDir);
-          if (!raced.isDirectory() || raced.isSymbolicLink()) {
-            throw new Error('quarantine path is not a real directory; refusing quarantine');
-          }
-        }
+        throw error;
       }
       await ensureSecureDir(quarantineDir);
       const securedQuarantine = await fs.lstat(quarantineDir, { bigint: true });

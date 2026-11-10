@@ -18,11 +18,11 @@ import { connectControlClient, isControlDaemonGone } from '../daemon/control-cli
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { resolveStorageConfig } from '../daemon/retention/config';
-import { foldNameAliases } from '../util/fold-name-aliases';
+import { ConfiguredPathLinkError, foldNameAliases } from '../util/fold-name-aliases';
 import { resolveDaemonConfig } from '../daemon/create-daemon/config';
 import { DeviceStore } from '../daemon/store';
 import { stableAgentHomeOwnerId } from '../agent-home';
-import { defaultScratchRoot } from '../daemon/retention/scratch';
+import { defaultScratchRoot, privateDirectory } from '../daemon/retention/scratch';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { TestServer } from './fixtures/test-server';
 
@@ -496,18 +496,64 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     expect(piByokLauncher?.sessionDir).toBe(path.join(store, 'sessions'));
   });
 
-  it.skipIf(process.platform === 'win32')('never folds a store path through a symbolic link and keeps a missing tail', async () => {
-    const store = realpathSync.native(await tmpDir('byok-link-target-'));
-    const link = `${store}-link`;
+  it.skipIf(process.platform === 'win32')('follows a trusted store link and preserves its missing tail', async () => {
+    const root = realpathSync.native(await tmpDir('byok-link-'));
+    scratchRoots.push(root);
+    await fs.chmod(root, 0o700);
+    const store = path.join(root, 'store');
+    const link = path.join(root, 'link');
+    await fs.mkdir(store);
     await fs.symlink(store, link);
+    expect(foldNameAliases(link)).toBe(store);
+    expect(foldNameAliases(path.join(link, 'missing', 'tail'))).toBe(path.join(store, 'missing', 'tail'));
+    expect(resolveStorageConfig(link).skillPackDataDirs).toEqual([store]);
+    expect(DeviceStore.resolveDir('acme-link', link)).toBe(store);
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses directory_writable links but follows links in sticky directories', async () => {
+    const root = realpathSync.native(await tmpDir('byok-link-'));
+    scratchRoots.push(root);
+    const store = path.join(root, 'store');
+    const link = path.join(root, 'link');
+    await fs.mkdir(store);
+    await fs.symlink(store, link);
+    await fs.chmod(root, 0o777);
+    const configured = path.join(link, 'missing', 'tail');
+    expect(() => foldNameAliases(configured)).toThrow(ConfiguredPathLinkError);
+    expect(() => foldNameAliases(configured)).toThrow(expect.objectContaining({
+      code: 'configured_path_untrusted_link', configuredPath: configured, link, reason: 'directory_writable',
+    }));
+    expect(() => DeviceStore.resolveDir('acme-link', configured)).toThrow(/directory_writable, mode 0o777/);
+    await expect(fs.lstat(path.join(store, 'missing'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await fs.chmod(root, 0o1777);
+    expect(foldNameAliases(configured)).toBe(path.join(store, 'missing', 'tail'));
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('refuses link_owner when the link belongs to another uid', async () => {
+    const root = realpathSync.native(await tmpDir('byok-link-'));
+    scratchRoots.push(root);
+    await fs.chmod(root, 0o700);
+    const link = path.join(root, 'link');
+    await fs.symlink(root, link);
+    const getuid = vi.spyOn(process, 'getuid').mockReturnValue(process.getuid!() + 1);
     try {
-      expect(foldNameAliases(link)).toBe(link);
-      expect(foldNameAliases(path.join(link, 'later'))).toBe(path.join(link, 'later'));
-      expect(resolveStorageConfig(link).skillPackDataDirs).toEqual([link]);
-      expect(foldNameAliases(path.join(store, 'missing', 'tail'))).toBe(path.join(store, 'missing', 'tail'));
+      expect(() => foldNameAliases(path.join(link, 'missing'))).toThrow(expect.objectContaining({
+        code: 'configured_path_untrusted_link', link, reason: 'link_owner',
+      }));
+      await expect(fs.lstat(path.join(root, 'missing'))).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
-      await fs.rm(link, { force: true });
+      getuid.mockRestore();
     }
+  });
+
+  it.skipIf(process.platform !== 'darwin')('folds /tmp store roots before validating the default scratch root', async () => {
+    const store = await fs.mkdtemp('/tmp/s-');
+    const physical = `/private${store}`;
+    scratchRoots.push(physical);
+    expect(DeviceStore.resolveDir('acme-tmp', store)).toBe(physical);
+    const { scratchRoot } = resolveStorageConfig(DeviceStore.resolveDir('acme-tmp', store));
+    await privateDirectory(scratchRoot);
+    expect(await fs.realpath(scratchRoot)).toBe(scratchRoot);
   });
 
   it.skipIf(process.platform !== 'win32')('folds the 8.3 short-name form of a store path', async (ctx) => {

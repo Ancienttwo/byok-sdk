@@ -11,6 +11,7 @@ import {
   type TerminalAgentHomeProjection,
 } from '@byok-sdk/protocol';
 import { atomicWriteFile } from './util/atomic-write';
+import { ConfiguredPathLinkError, foldNameAliases } from './util/fold-name-aliases';
 import {
   AGENT_HOME_READER_RUN_MAX_RETAINED,
   AGENT_HOME_READER_RUNS_DIRECTORY,
@@ -456,7 +457,14 @@ export class AgentHomeLayout {
 
   constructor(hostStorageRoot: string) {
     assertAbsolutePath(hostStorageRoot, 'agentHome.hostStorageRoot');
-    this.hostStorageRootInput = path.resolve(hostStorageRoot);
+    try {
+      this.hostStorageRootInput = process.platform === 'win32' ? path.resolve(hostStorageRoot) : foldNameAliases(hostStorageRoot);
+    } catch (error) {
+      if (error instanceof ConfiguredPathLinkError) {
+        throw new AgentHomeResolutionError(`agentHome.hostStorageRoot: ${error.message}`);
+      }
+      throw error;
+    }
   }
 
   /** Configured root, for read-only maintenance discovery; does not materialize a home. */
