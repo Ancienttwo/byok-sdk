@@ -24,7 +24,7 @@ import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout
 import { hostProjectionDdl, hostScopeDdl } from './host-scopes';
 import { provisionScope } from './operator-provision';
 import type { ChildMessage, ParentMessage } from './device.child';
-import type { PassReport } from './worker';
+import type { PassReport } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 import { openWorkerEndpoint, verifyWorkerIdentity, type WorkerEndpoint } from './worker.test-endpoint';
 import { proxyDiagnostics } from './worker.test-diagnostics';
 

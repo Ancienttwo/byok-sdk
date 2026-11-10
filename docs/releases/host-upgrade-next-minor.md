@@ -175,6 +175,21 @@ K8 rules now build the Bot autonomy gate themselves (#1665). A Host adapter that
 
 The eight built-in adapter option types (`AgyAdapterOptions`, `ClaudeAdapterOptions`, `CodexAdapterOptions`, `DshAdapterOptions`, `GrokAdapterOptions`, `HermesAdapterOptions`, `OpenCodeAdapterOptions`, `PiAdapterOptions`) no longer accept the internal `versionPolicySource` option (#1682). A Host that constructs an adapter directly deletes `versionPolicySource` from the options object. `versionPolicy` itself, `DaemonConfig.runtimes.<id>.versionPolicy` and the version verdicts they produce are unchanged: a Host policy still replaces the descriptor default wholesale.
 
+## Hosted passes
+
+The hosted Bot collaboration index no longer exports `HostedSubmitter`, `HostedReconciler`, `HostedDueScheduler`, `HostedReplyChecker`, `HostedDeviceObserver`, `HostedRoutineScheduler` or `HostedOutboxSender` (#1668). A Host that built its own passes constructs one `HostedPasses(pool, store, ports)` and calls `run()` every `ports.intervalMs`; it runs the passes in the order the Worker used, and a missing required port is a type error. `HostedPasses`, `HostedPassPorts`, `HostedPassTimings`, `PassReport`, `PassFailure` and `PassSynced` replace the pass assembly and the Worker's `PassReport`.
+
+| Before | Now |
+| --- | --- |
+| submitter and reconciler `port` | `ports.task` |
+| reply checker `port`, device observer `port` | `ports.replies`, `ports.devices` |
+| sender `projections`, `homes`, `channel`, `connector` | `ports.projections`, `ports.homes`, `ports.channel`, `ports.connector` |
+| scheduler `intervalMs` | `ports.intervalMs` |
+| the composed sync function | `ports.sync` (the options) and `passes.syncScope` |
+| `changed` callbacks, and the other pass options | wired by `HostedPasses`; the rest go in `ports.timings` |
+
+Pass the command entry `sync: passes.syncScope` and `failStuckIntent: (scope, key) => passes.failStuckIntent(scope, key)`; the latter syncs the touched scope after the call.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
