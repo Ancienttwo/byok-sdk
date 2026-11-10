@@ -974,21 +974,6 @@ function taskIdOf(event: ReducerEvent): string {
 /** Offer / admission / claim / startup / runtime rows (§7.2–7.3). */
 const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
   {
-    id: 'O0',
-    events: ['offer.sealed_opening'],
-    phase: 'none',
-    when: (snapshot, event) =>
-      event.taskId !== undefined && !snapshot.runner.sealedOpening.includes(event.taskId),
-    apply: (snapshot, event) => ({
-      runner: runnerWith(snapshot.runner, {
-        sealedOpening: addUniqueBounded(snapshot.runner.sealedOpening, taskIdOf(event)),
-      }),
-      effects: [barrier('open.sealed', { taskId: taskIdOf(event) })],
-    }),
-    rejection:
-      'Already opening → drop. Success continues as O1, failure as O2; both clear sealedOpening.',
-  },
-  {
     id: 'O1',
     events: ['offer.received'],
     phase: 'none',
@@ -997,7 +982,6 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
       if (taskId === undefined) return false;
       if (snapshot.runner.finished.includes(taskId)) return false;
       if (snapshot.runner.strictDeclined.includes(taskId)) return false;
-      if (snapshot.runner.sealedOpening.includes(taskId)) return false;
       return event.offer !== undefined && event.offer.digest.length > 0;
     },
     apply: (snapshot, event) => {
@@ -1012,12 +996,9 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
         admission: { ...created.admission, stage: 'dedup' },
       };
       return {
-        runner: runnerWith(snapshot.runner, {
-          sealedOpening: removeValue(snapshot.runner.sealedOpening, value => value === taskId),
-        }),
+        runner: snapshot.runner,
         task,
         effects: [
-          atom('clear.sealedOpening'),
           atom('track.inflight'),
           ...(task.offer.preparation === undefined
             ? []
@@ -1026,30 +1007,7 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
       };
     },
     rejection:
-      'Duplicate / finished / strict-declined / still-sealing → drop with no effects. An ordinary decline is not a dedup entry, so a redelivery is processed again (current behavior).',
-  },
-  {
-    id: 'O2',
-    events: ['offer.sealed_declined'],
-    phase: 'none',
-    when: (_snapshot, event) => event.taskId !== undefined,
-    apply: (snapshot, event) => {
-      const taskId = taskIdOf(event);
-      return {
-        runner: runnerWith(snapshot.runner, {
-          sealedOpening: removeValue(snapshot.runner.sealedOpening, value => value === taskId),
-        }),
-        effects: [
-          atom('clear.sealedOpening'),
-          atom('send.decline', {
-            taskId,
-            ...(event.reason === undefined ? {} : { reason: event.reason }),
-            ...(event.code === undefined ? {} : { detail: { code: event.code } }),
-          }),
-        ],
-      };
-    },
-    rejection: 'Unseal failure declines with the closed code and never creates a task entry.',
+      'Duplicate / finished / strict-declined → drop with no effects. An ordinary decline is not a dedup entry, so a redelivery is processed again (current behavior).',
   },
   {
     id: 'O3',

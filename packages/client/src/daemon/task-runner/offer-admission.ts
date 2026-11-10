@@ -1,14 +1,15 @@
 // `TaskRunner` members for offer admission before any runtime work, and for
 // sealed offers (see ./support.ts for how a member module runs).
-import { requiredReceiverCapabilities, type Envelope, type SealedDeclineCode } from '@byok-sdk/protocol';
+import { requiredReceiverCapabilities, type Envelope, type SealedDeclineCode, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import { AgentHomeBusyError, AgentHomeResolutionError, type AgentRef } from '../../agent-home';
 import { isReaderRunName, type AgentHomeAccessMode } from '../../agent-home-readers';
 import type { OfferPhaseContext } from './support';
-import { settledOrWithdrawn, outboundErrorMessage } from './support';
+import { hostDeclineSender, settledOrWithdrawn, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferAdmissionTiming } from './offer-admission-timing';
 import { hostFor } from './host';
+import { createOfferFacts } from './state';
 
 /**
  * Suppress redelivered offers for owned tasks and recently finished tasks.
@@ -22,7 +23,7 @@ import { hostFor } from './host';
 export function offerAlreadyHandled(this: TaskRunner, taskId: string): boolean {
   return this['tasks'].has(taskId) || this['startupOwnership'].has(taskId)
     || this['inFlightOffers'].has(taskId) || hostFor(this).runnerSnapshot().finished.includes(taskId)
-    || this['strictDeclinedTaskIds'].has(taskId);
+    || hostFor(this).runnerSnapshot().strictDeclined.includes(taskId);
 }
 
 export function admitOffer(this: TaskRunner, phase: OfferPhaseContext): true | undefined {
@@ -220,10 +221,9 @@ export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extr
     this['declineSealedOffer'](taskId, admission, agentRef, missing.includes('native-sessions') ? 'native_sessions_unsupported' : 'sealed_key_unavailable');
     return true;
   }
-  this['addStrictDeclinedTaskId'](taskId);
-  this['decline'](taskId, admission, missing.includes('native-sessions') ? 'native_sessions_unsupported'
-    : `offer_capability_missing: this daemon does not advertise ${missing.join(', ')}`, false, agentRef,
-    missing.includes('native-sessions') ? 'native_sessions_unsupported' : undefined);
+  declineStrict.call(this, taskId, admission, agentRef, missing.includes('native-sessions') ? 'native_sessions_unsupported'
+    : `offer_capability_missing: this daemon does not advertise ${missing.join(', ')}`,
+    missing.includes('native-sessions') ? 'native_sessions_unsupported' : undefined, false);
   return true;
 }
 
@@ -249,8 +249,18 @@ export async function handleSealedOffer(this: TaskRunner, envelope: Envelope, ad
   }
 }
 
+function declineStrict(this: TaskRunner, taskId: string, admission: OfferAdmissionTiming, agentRef: AgentRef | undefined, reason: string, code: TaskDeclinePayload['code'] | undefined, sealed: boolean): void {
+  const host = hostFor(this);
+  host.beginOffer(taskId, { stage: 'receive', sendDecline: hostDeclineSender.call(this, taskId, admission) });
+  host.setAgentRef(taskId, agentRef);
+  try {
+    host.dispatchSync({ type: 'offer.received', taskId, atMs: Date.now(), offer: createOfferFacts({ digest: taskId, strict: true, sealed }) });
+    host.dispatchSync({ type: 'admission.declined', taskId, atMs: Date.now(), stage: 'receive', reason, retryable: false, strict: true, ...(code === undefined ? {} : { code }) });
+  } finally {
+    host.endOffer(taskId);
+  }
+}
+
 export function declineSealedOffer(this: TaskRunner, taskId: string, admission: OfferAdmissionTiming, agentRef: AgentRef | undefined, code: SealedDeclineCode): void {
-  if (this['strictDeclinedTaskIds'].has(taskId)) return;
-  this['addStrictDeclinedTaskId'](taskId);
-  this['decline'](taskId, admission, code, false, agentRef, code);
+  declineStrict.call(this, taskId, admission, agentRef, code, code, true);
 }

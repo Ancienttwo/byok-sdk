@@ -572,7 +572,6 @@ export class TaskRunnerHost {
     this.runnerState = result.runner;
     const taskId = event.taskId;
     if (result.task !== undefined) this.tasks.set(result.task.taskId, result.task);
-    else if (taskId !== undefined && event.type === 'offer.sealed_declined') this.tasks.delete(taskId);
     if (taskId !== undefined) this.settleTerminalFromEvent(taskId, event, result);
     const pending = this.executeEffects(
       result.effects,

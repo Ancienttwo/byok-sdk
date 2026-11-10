@@ -30,7 +30,7 @@ import { AgentMessageOutbox, type AgentMessageDraftSealer } from '../agent-messa
 import { AgentResultStore } from '../agent-result-store';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state';
-import { hostFor } from './host';
+import { hostFor, type HostOfferContext } from './host';
 import type { OfferAdmissionTiming } from './offer-admission-timing';
 
 /**
@@ -44,6 +44,18 @@ export const AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS = 20;
 
 /** Inline artifact payloads must stay under this many UTF-8 bytes — mirrors the frozen `TaskArtifactPayloadSchema.inline` limit in `packages/protocol` (see docs/protocol.md §7). Anything bigger goes through the blob client. */
 export const MAX_INLINE_ARTIFACT_BYTES = 64 * 1024;
+
+export function hostDeclineSender(this: TaskRunner, taskId: string, admission: OfferAdmissionTiming): NonNullable<HostOfferContext['sendDecline']> {
+  return (effect, context) => {
+    const code = effect.effect.detail?.code;
+    this['decline'](
+      taskId, admission, effect.effect.reason ?? 'declined', effect.effect.retryable ?? false,
+      context.agentRef as AgentRef | undefined,
+      code === undefined ? undefined : code as TaskDeclinePayload['code'],
+      context.runtimeUnavailable as RuntimeUnavailableAdmission | undefined,
+    );
+  };
+}
 
 export function pendingCancelBeforeActive(this: TaskRunner, taskId: string): { readonly reason: string | undefined } | undefined {
   return this['pendingCancelled'].has(taskId)
