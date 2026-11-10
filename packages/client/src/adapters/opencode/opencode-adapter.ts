@@ -1,3 +1,4 @@
+// ci-bisect control (not for merge)
 import type { spawn as nodeSpawn } from 'node:child_process';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { AsyncQueue } from '../../util/async-queue';
