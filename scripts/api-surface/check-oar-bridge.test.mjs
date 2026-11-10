@@ -24,7 +24,7 @@ const require = createRequire(import.meta.url);
 test('OAR JS bridge re-exports the checked vendored codexSession and SessionNotFoundError', () => {
   const source = readFileSync(path.join(repoRoot, 'packages/client/src/runtime/codex-session-runtime.js'), 'utf8');
   const { body } = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
-  assert.equal(body.length, 2, 'OAR JS bridge must have exactly two checked re-exports');
+  assert.equal(body.length, 5, 'OAR JS bridge must have exactly five checked re-exports');
   const reexports = body.map((statement) => {
     assert.equal(statement.type, 'ExportNamedDeclaration');
     return [
@@ -35,6 +35,9 @@ test('OAR JS bridge re-exports the checked vendored codexSession and SessionNotF
   assert.deepEqual(reexports, [
     ['../../vendor/oar/45488e7/runtimes/codex/session.js', [['codexSession', 'codexSession']]],
     ['../../vendor/oar/45488e7/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
+    ['../../vendor/oar/45488e7/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
+    ['../../vendor/oar/45488e7/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
+    ['../../vendor/oar/45488e7/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
   ]);
 });
 
@@ -69,6 +72,7 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
     ['../../vendor/oar/45488e7/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
     ['../../vendor/oar/45488e7/runtimes/antigravity/session.js', [['antigravitySession', 'antigravitySession']]],
     ['../../vendor/oar/45488e7/runtimes/opencode/session.js', [['opencodeSession', 'opencodeSession']]],
+    ['../../vendor/oar/45488e7/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
   ]);
 });
 
@@ -88,6 +92,7 @@ test('OAR dsh JS bridge re-exports the checked vendored values', () => {
     ['../../vendor/oar/45488e7/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
     ['../../vendor/oar/45488e7/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
     ['../../vendor/oar/45488e7/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
+    ['../../vendor/oar/45488e7/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
   ]);
 });
 

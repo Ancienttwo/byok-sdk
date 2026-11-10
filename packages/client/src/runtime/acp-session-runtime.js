@@ -6,3 +6,4 @@ export { UnsupportedOptionError } from '../../vendor/oar/45488e7/contracts/error
 export { grokSession } from '../../vendor/oar/45488e7/runtimes/grok/session.js';
 export { antigravitySession } from '../../vendor/oar/45488e7/runtimes/antigravity/session.js';
 export { opencodeSession } from '../../vendor/oar/45488e7/runtimes/opencode/session.js';
+export { SessionUnavailableError } from '../../vendor/oar/45488e7/contracts/session-unavailable-error.js';

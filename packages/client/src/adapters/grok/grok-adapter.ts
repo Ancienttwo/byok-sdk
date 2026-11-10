@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { oarStartFailure } from '../oar-start-failure';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import {
@@ -19,7 +20,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
@@ -252,21 +253,7 @@ export class GrokAdapter implements RuntimeAdapter {
       } catch (disposal) {
         throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
       }
-      // A failed record stream is the cause; the open or prompt error is its consequence.
-      const error = session.halted ?? thrown;
-      // A missing session, a refused login or a refused model cannot succeed on retry: fail closed.
-      if (error instanceof acp.SessionNotFoundError)
-        throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: error.message });
-      if (error instanceof acp.RuntimeFailureError)
-        throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: error.message,
-          failure: { class: runtimeFailureClassOf(error.failure) } });
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: isRuntimeExecutionFailure(error) ? error.category : 'infrastructure',
-        retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
-        reason: error instanceof Error ? error.message : 'grok open failed',
-        failure: isRuntimeExecutionFailure(error) ? error.failure : { class: session.exitedOnItsOwn ? 'runtime_exited' : 'unknown' },
-      });
+      throw oarStartFailure(session.halted ?? thrown, { classes: acp, exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'grok' });
     }
   }
 }

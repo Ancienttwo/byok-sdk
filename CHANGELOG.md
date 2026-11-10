@@ -4,6 +4,10 @@
 
 - **Added (keys, client; #1586)** — `pi_model.providerId: 'opencode-go'` explicitly selects Pi's OpenCode Go reasoning replay and session headers for RPC and durable profiles, including local gateways. It requires an explicit `api: 'openai-completions'`; models not served by OpenCode Go must omit it. Profiles without it retain their namespaced Pi id. The prepared lane refuses the field. Every keys-profile RPC launch now refuses a model-runtime configuration/composition error before model resolution or session creation instead of accepting a built-in fallback. Durable workers take the provider id from the launcher's private IPC binding to the sealed profile ref.
 
+- **Fixed (client; #1687)** — On macOS, `storeDir` and `scratchRoot` under `/tmp` or `/var` now allow daemon startup. POSIX configured roots follow symbolic links only when the link and its containing directory belong to root or the daemon user, and the directory is not writable by group or others unless sticky; untrusted links fail with `configured_path_untrusted_link`. Agent-home and local-state relocation roots use the same rule. For stores configured through trusted links, the physical spelling changes the long-store control socket fallback path and Agent-home owner id. Restart the daemon after upgrading so the CLI can reach it; manually remove any stale Agent-home owner lease marker left by a crash as directed by its error message. Store file formats and filenames are unchanged; existing identities are not migrated.
+
+- **Fixed (client; #1678)** — Codex resume of an archived thread is non-retryable; a thread in use remains retryable.
+
 - **Fixed (client; #1677)** — Claude with session persistence disabled declines resume offers before claim; dsh declines unsupported MCP servers before claim; agy observes Host toolsets so MCP tool events and authorization rules identify their server and tool.
 
 - **Fixed (client; #1699)** — Runtime cleanup on macOS accepts an owned process group's EPERM only after the process-table poll confirms that no live members remain, avoiding durable Pi interrupt failures while zombies await reaping.
@@ -35,6 +39,8 @@
 - **Fixed (client; #1563)** — An OpenCode prompt failure that names its cause in the ACP error's `data.errorName` now reports the structured class on `task.fail`: `provider.free-limit`, `go-limit`, `budget-limit`, `model-budget-limit` and `quota` are `quota`, and `provider.rate-limit` is `rate_limited`, where both were `unknown`. A failure classified only from its message stays `unknown` and no longer switches to the next model candidate. The reader is carried in the vendored OAR from botiverse/oar#710 until upstream merges it; only `provider.free-limit` has been observed live.
 
 - **Added (client; #1593)** — The OpenCode descriptor also declares `platforms: ['win32']`. The OpenCode runtime contract gains lifecycle cases (same-session resume with a different workspace refused, a refused permission request, cancellation of a running shell tool, no surviving OpenCode process after close) and runs on Windows in CI. Both release lines passed them on macOS arm64 and Windows x64. See the [qualification evidence](docs/researches/2026-11-09-opencode-platform-qualification.md).
+
+- **Added (client; #1593)** — A runtime contract (`opencode1` and `opencode2` legs) runs OpenCode 1.19.5 and 2.2.6 against a loopback provider in CI. It passed on macOS arm64 and Windows x64; the descriptor's `platforms` is unchanged (`['darwin']`). See the [qualification evidence](docs/researches/2026-11-09-opencode-platform-qualification.md).
 
 The next MINOR changes Codex Agent session retention and adds background Pi subagents and workflows for Bun-compiled products with shipped assets. See the draft [Host upgrade checklist](docs/releases/host-upgrade-next-minor.md); further train changes are pending.
 
