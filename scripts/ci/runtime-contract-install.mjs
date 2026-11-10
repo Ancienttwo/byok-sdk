@@ -107,13 +107,20 @@ function npm(args, options = {}) {
   return execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, { encoding: 'utf8', ...(process.platform === 'win32' ? { shell: true } : {}), ...options });
 }
 
-function installNpm(runtime, mode, version, dir) {
+export function installNpm(runtime, mode, version, dir, npmCommand = npm) {
   const { name, bin, winBin } = NPM_PACKAGES[runtime];
-  const exact = mode === 'latest' ? npm(['view', name, 'version'], { stdio: ['ignore', 'pipe', 'inherit'] }).trim() : version;
+  const exact = mode === 'latest' ? npmCommand(['view', name, 'version'], { stdio: ['ignore', 'pipe', 'inherit'] }).trim() : version;
   if (!isExactVersion(exact)) throw new Error(`${name}: not an exact version: ${JSON.stringify(exact)}`);
+  let before;
+  if (mode === 'qualified') {
+    const times = JSON.parse(npmCommand(['view', name, 'time', '--json'], { stdio: ['ignore', 'pipe', 'inherit'] }));
+    before = times?.[exact];
+    if (typeof before !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(before) || !Number.isFinite(Date.parse(before)))
+      throw new Error(`${name}@${exact}: missing or invalid publish time`);
+  }
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'package.json'), '{"private":true}\n');
-  npm(['install', '--no-audit', '--no-fund', '--save-exact', `${name}@${exact}`], { cwd: dir, stdio: 'inherit' });
+  npmCommand(['install', '--no-audit', '--no-fund', '--save-exact', ...(before === undefined ? [] : [`--before=${before}`]), `${name}@${exact}`], { cwd: dir, stdio: 'inherit' });
   // On Windows the `.bin` entry is a `.cmd` shim, which the adapter cannot execute; use the package's own executable.
   const installed = process.platform === 'win32' && winBin !== undefined ? join(dir, 'node_modules', ...winBin.split('/')) : join(dir, 'node_modules', '.bin', bin);
   return { bin: installed, version: exact };

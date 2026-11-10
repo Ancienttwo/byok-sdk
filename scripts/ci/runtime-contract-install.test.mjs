@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
-import { agyUpdaterManifest, AGY_QUALIFIED, contractEnv, hermesBuildCommit, install, isExactVersion, qualifiedVersions, RUNTIMES, vendoredHermesInstaller } from './runtime-contract-install.mjs';
+import { agyUpdaterManifest, AGY_QUALIFIED, contractEnv, hermesBuildCommit, install, installNpm, isExactVersion, qualifiedVersions, RUNTIMES, vendoredHermesInstaller } from './runtime-contract-install.mjs';
 
 const root = new URL('../../', import.meta.url);
 
@@ -57,6 +57,34 @@ test('vendored Hermes installers match the qualified commit and checksums', asyn
 test('an npm install takes one exact version, prereleases included', () => {
   for (const version of ['1.0.70', '0.160.0', '0.2.1-rc.5', '0.2.2-alpha.2']) assert.ok(isExactVersion(version), version);
   for (const version of ['latest', '^1.0.0', '1.0', '0.2.1-rc.5\n', '0.2.1-', '0.2.1-rc..5', '0.2.1+build']) assert.ok(!isExactVersion(version), JSON.stringify(version));
+});
+
+test('qualified npm installs use the exact release publish time and fail closed when absent', () => {
+  const work = mkdtempSync(join(tmpdir(), 'rc-npm-'));
+  const calls = [];
+  const fakeNpm = (args) => {
+    calls.push(args);
+    return args[0] === 'view' ? JSON.stringify({ '0.2.2-rc.1': '2026-01-02T03:04:05.000Z' }) : '';
+  };
+  try {
+    installNpm('dsh', 'qualified', '0.2.2-rc.1', join(work, 'qualified'), fakeNpm);
+    assert.deepEqual(calls, [
+      ['view', '@deepseek-ai/dsh', 'time', '--json'],
+      ['install', '--no-audit', '--no-fund', '--save-exact', '--before=2026-01-02T03:04:05.000Z', '@deepseek-ai/dsh@0.2.2-rc.1'],
+    ]);
+    calls.length = 0;
+    assert.throws(() => installNpm('dsh', 'qualified', '0.2.2-rc.2', join(work, 'missing'), fakeNpm), /@deepseek-ai\/dsh@0\.2\.2-rc\.2: missing or invalid publish time/);
+    assert.equal(calls.length, 1);
+    calls.length = 0;
+    installNpm('dsh', 'latest', 'ignored', join(work, 'latest'), (args) => {
+      calls.push(args);
+      return args[0] === 'view' ? '0.2.2-rc.1' : '';
+    });
+    assert.deepEqual(calls[0], ['view', '@deepseek-ai/dsh', 'version']);
+    assert.ok(!calls[1].some(arg => arg.startsWith('--before=')));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 });
 
 test('a qualified run hands the suite the binary only; a latest run also its version', () => {
