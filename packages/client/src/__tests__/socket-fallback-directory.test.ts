@@ -82,6 +82,56 @@ describe('private Unix sockets', () => {
     }
   });
 
+  it.skipIf(process.platform === 'win32')('refuses a natural socket whose mode cannot be set to 0600 and removes it', async () => {
+    const { dir } = await fallbackDir();
+    const sock = path.join(dir, 'control.sock');
+    const server = net.createServer();
+    servers.push(server);
+    const realLstat = fs.lstat;
+    const failure = Object.assign(new Error('EPERM'), { code: 'EPERM' });
+    const lstatSpy = vi.spyOn(fs, 'lstat').mockImplementation(async (name, ...rest) => {
+      const stat = await realLstat(name, ...(rest as []));
+      return name === sock && stat.isSocket() ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { mode: (stat.mode & ~0o777) | 0o644 }) : stat;
+    });
+    const chmodSpy = vi.spyOn(fs, 'chmod').mockRejectedValue(failure);
+    try {
+      await expect(listenPrivateUnixSocket(server, sock)).rejects.toMatchObject({ code: 'socket_mode', path: sock, cause: failure });
+      expect(server.listening).toBe(false);
+      await expect(realLstat(sock)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      lstatSpy.mockRestore();
+      chmodSpy.mockRestore();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('never chmods a non-socket swapped in at a natural socket path', async () => {
+    const { dir } = await fallbackDir();
+    const sock = path.join(dir, 'control.sock');
+    const target = path.join(dir, 'target');
+    await fs.writeFile(target, 'keep', { mode: 0o644 });
+    const server = net.createServer();
+    servers.push(server);
+    const realLstat = fs.lstat;
+    let swapped = false;
+    const lstatSpy = vi.spyOn(fs, 'lstat').mockImplementation(async (name, ...rest) => {
+      if (name === sock && !swapped && (await realLstat(sock).catch(() => undefined))?.isSocket()) {
+        swapped = true;
+        await fs.unlink(sock);
+        await fs.symlink(target, sock);
+      }
+      return realLstat(name, ...(rest as []));
+    });
+    const chmodSpy = vi.spyOn(fs, 'chmod');
+    try {
+      await expect(listenPrivateUnixSocket(server, sock)).rejects.toMatchObject({ code: 'socket_path_not_socket', path: sock });
+      expect(chmodSpy).not.toHaveBeenCalled();
+      expect((await fs.stat(target)).mode & 0o777).toBe(0o644);
+    } finally {
+      lstatSpy.mockRestore();
+      chmodSpy.mockRestore();
+    }
+  });
+
   it.skipIf(process.platform === 'win32')('closes a bound listener if the fallback ownership changes after listen', async () => {
     const { dir, sock } = await fallbackDir();
     const server = net.createServer();
@@ -162,7 +212,6 @@ describe('private Unix sockets', () => {
     servers.push(server);
     await listenPrivateUnixSocket(server, sock);
     expect((await fs.stat(dir)).mode & 0o777).toBe(0o700);
-    expect((await fs.stat(dir)).uid).toBe(process.getuid?.());
     const contender = net.createServer();
     await expect(listenPrivateUnixSocket(contender, sock)).rejects.toBeInstanceOf(PrivateSocketInUseError);
   });

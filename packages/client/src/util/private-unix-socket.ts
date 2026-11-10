@@ -42,6 +42,14 @@ export class PrivateSocketInUseError extends Error {
   }
 }
 
+export class PrivateSocketModeError extends Error {
+  readonly code = 'socket_mode';
+  constructor(public readonly path: string, cause?: unknown) {
+    super(`refusing socket "${path}": mode could not be set to 0600; the filesystem or a security policy denied chmod`, cause === undefined ? undefined : { cause });
+    this.name = 'PrivateSocketModeError';
+  }
+}
+
 export function privateSocketEndpoint(
   kind: keyof typeof PRIVATE_SOCKET_FALLBACK_PREFIXES,
   natural: string,
@@ -138,7 +146,28 @@ export async function listenPrivateUnixSocket(server: net.Server, endpoint: stri
       await new Promise<void>((resolve) => server.close(() => resolve()));
       throw error;
     }
+  } else {
+    // A fallback socket sits in a verified 0700 directory; a natural one sits in the store directory, so its own mode is set.
+    try {
+      await ensureSocketMode(endpoint);
+    } catch (error) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      throw error;
+    }
   }
+}
+
+async function ensureSocketMode(endpoint: string): Promise<void> {
+  if (process.getuid === undefined) return;
+  const stat = await fs.lstat(endpoint);
+  // chmod follows symlinks, so it must never run on anything but the socket itself.
+  if (!stat.isSocket()) throw new PrivateSocketPathError(endpoint);
+  if ((stat.mode & 0o777) === 0o600) return;
+  await fs.chmod(endpoint, 0o600).catch((error: unknown) => {
+    throw new PrivateSocketModeError(endpoint, error);
+  });
+  const after = await fs.lstat(endpoint);
+  if (!after.isSocket() || (after.mode & 0o777) !== 0o600) throw new PrivateSocketModeError(endpoint);
 }
 
 /** Non-recursive: leave directories containing a successor's socket or any other file alone. */
