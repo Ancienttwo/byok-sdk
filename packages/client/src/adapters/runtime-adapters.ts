@@ -156,11 +156,6 @@ export interface DaemonRuntimeAdaptersConfig extends RuntimeAdaptersConfig {
  */
 export const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 
-/**
- * Every runtime the SDK can build, in construction order. `grok`, `dsh` and
- * `agy` are custom harnesses, not wire runtime ids, so each is built only when
- * `runtimeAllowlist` lists it; an unset allowlist keeps `ALL_RUNTIME_IDS`.
- */
 type SdkBuiltRuntimeId = keyof RuntimeAdaptersRuntimes;
 
 /** The enumerated runtime options and their admitted values. */
@@ -174,6 +169,11 @@ const RUNTIME_OPTION_VALUES: Readonly<Record<keyof RuntimeAdaptersRuntimes, Read
   opencode: {},
 };
 
+/**
+ * Every runtime the SDK can build, in construction order. `grok`, `dsh` and
+ * `agy` are custom harnesses, not wire runtime ids, so each is built only when
+ * `runtimeAllowlist` lists it; an unset allowlist keeps `ALL_RUNTIME_IDS`.
+ */
 const SDK_BUILT_RUNTIME_IDS = Object.keys(RUNTIME_OPTION_VALUES) as SdkBuiltRuntimeId[];
 
 /**
