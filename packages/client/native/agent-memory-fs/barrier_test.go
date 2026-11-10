@@ -166,6 +166,9 @@ func TestUnixOpenRefusesCrossVolumeAncestor(t *testing.T) {
 			if !comparedBoundary || active != nil || failure == nil || failure.code != "ancestor_volume_mismatch" || flushes != 0 {
 				t.Fatalf("boundary checked=%v granted=%v failure=%#v flushes=%d", comparedBoundary, active != nil, failure, flushes)
 			}
+			if failure.message != "Put the agents directory on the same volume as hostStorageRoot." {
+				t.Fatalf("refusal has no actionable placement instruction: %q", failure.message)
+			}
 			// Refusal leaves no session held; the same request can open once the
 			// selected ancestor is again on the home's volume.
 			sameEntryVolume = originalVolume

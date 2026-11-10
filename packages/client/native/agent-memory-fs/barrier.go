@@ -40,7 +40,7 @@ func syncHomeChain(selected []string, expected *os.Root) error {
 		}
 	}
 	if len(chain) < len(selected) {
-		return failure("ancestor_volume_mismatch", "ancestor root crosses the home volume boundary")
+		return failure("ancestor_volume_mismatch", "Put the agents directory on the same volume as hostStorageRoot.")
 	}
 	return syncPinnedHomeChain(chain, expected)
 }

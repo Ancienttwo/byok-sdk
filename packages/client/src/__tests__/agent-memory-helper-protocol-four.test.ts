@@ -3,7 +3,8 @@ import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const wire = vi.hoisted(() => ({ protocol: 4, helperVersion: '4', requests: [] as Record<string, unknown>[] }));
+const wire = vi.hoisted(() => ({ protocol: 4, helperVersion: '4', requests: [] as Record<string, unknown>[],
+  error: undefined as { code: string; message: string } | undefined }));
 vi.mock('../util/agent-memory-helper-release', () => ({ verifyAgentMemoryFilesystemHelper: (bin: string) => bin }));
 vi.mock('node:child_process', () => ({
   spawn: () => {
@@ -15,9 +16,10 @@ vi.mock('node:child_process', () => ({
           const request = JSON.parse(String(chunk)) as Record<string, unknown>;
           wire.requests.push(request);
           queueMicrotask(() => {
-            child.stdout.write(`${JSON.stringify({ id: request.id, protocol: wire.protocol, ok: true,
-              result: request.op === 'open' ? { helperVersion: wire.helperVersion, identity: request.expectedIdentity } : {},
-            })}\n`);
+            const response = wire.error === undefined
+              ? { ok: true, result: request.op === 'open' ? { helperVersion: wire.helperVersion, identity: request.expectedIdentity } : {} }
+              : { ok: false, error: wire.error };
+            child.stdout.write(`${JSON.stringify({ id: request.id, protocol: wire.protocol, ...response })}\n`);
             if (request.op === 'close') { child.exitCode = 0; child.emit('exit', 0, null); }
           });
           done();
@@ -34,6 +36,7 @@ afterEach(() => {
   Object.defineProperty(process, 'platform', platform);
   wire.protocol = 4;
   wire.helperVersion = '4';
+  wire.error = undefined;
   wire.requests.length = 0;
 });
 function input() {
@@ -48,6 +51,13 @@ describe('protocol 4 transport contract (#605)', () => {
     expect(wire.requests[0]).toEqual({ id: 'm1', protocol: 4, op: 'open', root: selected.canonicalHome,
       ancestorRoot: selected.ancestorRoot, expectedIdentity: { kind: 'unix', dev: '1', ino: '2' } });
     await filesystem.close();
+  });
+  it('gives the Host a same-volume remedy when the ancestor chain is refused', async () => {
+    wire.error = { code: 'ancestor_volume_mismatch', message: 'private diagnostic must not be forwarded' };
+    const refused = openAgentMemoryFilesystemHelper(input());
+    await expect(refused).rejects.toThrow('ancestor_volume_mismatch. Put the agents directory on the same volume as hostStorageRoot.');
+    await expect(refused).rejects.not.toThrow(wire.error.message);
+    expect(wire.requests.map(request => request.op)).toEqual(['open', 'close']);
   });
   it.each([3, 5])('rejects response protocol %s without granting filesystem authority', async protocol => {
     wire.protocol = protocol;

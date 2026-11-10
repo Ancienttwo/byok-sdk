@@ -343,7 +343,8 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
       item.reject(new HelperRevisionConflict(response.error.actualRevision));
       return;
     }
-    const rejected = `Agent memory filesystem helper rejected the operation: ${response.error.code}`;
+    const instruction = response.error.code === 'ancestor_volume_mismatch' ? '. Put the agents directory on the same volume as hostStorageRoot.' : '';
+    const rejected = `Agent memory filesystem helper rejected the operation: ${response.error.code}${instruction}`;
     item.reject(HELPER_IO_FAILURE_CODES.has(response.error.code) ? new AgentMemoryIoError(rejected) : new AgentMemoryError(rejected));
   }
 

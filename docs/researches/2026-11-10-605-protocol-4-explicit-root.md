@@ -77,9 +77,13 @@ the terminal object must match the already-pinned home. Flush ancestor to
 home, check relations, then flush home to ancestor. Every flush is mandatory,
 and no directory above the selected ancestor is flushed by this Windows
 barrier. Unix retains its existing same-volume traversal and validates the
-explicit ancestor relation. Contract clarification from acceptance review:
-**Unix refuses a cross-volume selected ancestor** with
-`ancestor_volume_mismatch` before flushing or granting a session. The traversal
+explicit ancestor relation. **The owner approved Unix cross-volume refusal on
+2026-11-10 in the t4 question dialog** (selection: 「跨 volume 就拒絕（推薦）」),
+as verified and relayed by coordinator t3. Unix refuses a cross-volume selected
+ancestor with `ancestor_volume_mismatch` before flushing or granting a session.
+Both native and TS refusals instruct the Host: "Put the agents directory on the
+same volume as hostStorageRoot." The Host must fix this layout before retrying.
+The traversal
 must cover the entire selected chain before it can stop at the home volume
 boundary; it can still flush same-volume parents above the selected ancestor,
 as before.
@@ -145,9 +149,13 @@ canonical `resolution.hostStorageRoot`.
   generated pin. Real-worktree source/pin tests passed 4/4, followed by a normal
   merged-worktree native build/repro/pin verification. The stage was deleted.
 - Native source digest:
-  `5e7aeb6473b08904da97f822aa5d0dc7d6c318ada355e43184f030bb805c80d0`.
-- Final local affected TS run, with regenerated native artifacts: 28 files,
-  354 tests passed, 38 skipped (31.32 s).
+  `3aaf4812361a4d9e6aab69538f8b7b5ca39f80f9c413bd42afcb8b32479fae75`.
+- Owner-message delta: focused Go race tests and the transport remedy test
+  passed; the final affected TS run passed 4 files / 18 tests without skips.
+  Build/typecheck, three-target two-path reproducibility, API/version/upgrade
+  gates and source/pin tests (4/4) passed with regenerated native assets.
+- Before acceptance review, the affected TS run passed 28 files / 354 tests,
+  with 38 skipped (31.32 s).
 - The broader local workspace run passed the full client suite (483 files,
   6,489 tests, 94 skipped), then failed in K8 cross-bot tests under accumulated
   load. That full-client run preceded the final Windows handle fix; subsequent
@@ -155,12 +163,13 @@ canonical `resolution.hostStorageRoot`.
 - Both macOS hosted helper jobs passed on the merged implementation. Hosted
   Windows SDK TS helper/processor checks and Node/Bun runtime smoke passed
   before the stale raw-junction-smoke version assertion described above.
-- Measured closure sizes after the binding-authority review fix: client
-  2,353,844 → 2,353,872 bytes, agent-memory unchanged at 73,835, and
-  byok-agent 2,324,080 → 2,324,108. The coordinator approved exactly +28 on
-  those two caps for task-runner binding-resolution access; total increases
-  over train are +522, +259 and +522. README rows were regenerated from the
-  build; no selector or workflow edits belong to this PR's own diff.
+- The binding-authority review fix added exactly +28 to the client and
+  byok-agent caps, approved by the coordinator. The subsequent owner-directed
+  TS remedy adds exactly +152 to each affected closure: client
+  2,353,872 → 2,354,024 bytes, agent-memory 73,835 → 73,987, and byok-agent
+  2,324,108 → 2,324,260. Only those measured caps changed; total increases over
+  train are +674, +411 and +674. README rows were regenerated from the build;
+  no selector, workflow or CSP-policy edits belong to this PR's own diff.
 
 The coordinator requested an isolated K8 comparison on the same macOS arm64
 machine, Node 24.18.0 and Bun 1.4.3, sequentially with no overlapping heavy task
