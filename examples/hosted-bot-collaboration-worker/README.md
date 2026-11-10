@@ -38,10 +38,15 @@ outlives an invocation, no session map.
 - A notification only schedules one more pass with `ctx.waitUntil`. A notification is an SDK observer call after a device
   commit, or a product command. That pass rereads Postgres. A lost notification delays work to the next pass, and a
   repeated one changes nothing.
+- Each pass also runs `HostedOutboxSender`, after the submitter, and then syncs the scopes that the sender changed. It
+  delivers projection rows to the `host_projection` table (deduplicated by `(scope, id)`) and runs the Agent home
+  operations through the SDK, so a Bot becomes ready and its next Turn can freeze. The Worker wires no channel and no
+  connector: a card row or a delivery row is listed in `send.failed` (`The Host has no connector for a card call`, `The
+  Host has no channel for a delivery`) and retried after the sender's `backoffMs`. A pass sends at most 100 rows.
 - `HostedRoutineScheduler.start()` is K4 `recover`. It reads the routine rows, so it runs on every pass: a Worker has no
   process start. The scheduler gets `H_CLOCK_MS` as its `intervalMs`, so H's own check against the K8 late bound runs.
 
-Node migrates and provisions; the Worker serves. The SDK migrations, the H DDL and the `host_scope` table are created
+Node migrates and provisions; the Worker serves. The SDK migrations, the H DDL, the `host_scope` table and the `host_projection` table (`hostProjectionDdl`) are created
 from Node before `wrangler dev` starts. The Worker never migrates. See [Operator provisioning](#operator-provisioning)
 for the scope and tenant rows used by the deployed Host.
 

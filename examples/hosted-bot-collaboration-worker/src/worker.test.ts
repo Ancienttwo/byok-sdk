@@ -13,6 +13,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDeviceSimulator } from '../../../packages/testkit/src/index';
 import { alarmReports, openHome, RUN, until, type Home } from './worker.test-support';
 import { readHostScope, sha256Hex } from './host-scopes';
+import { vectorClock } from '../../hosted-bot-collaboration/src/memory-subject.test-support';
+import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 
 const tsx = createRequire(import.meta.url).resolve('tsx');
@@ -76,6 +78,42 @@ describe.skipIf(!RUN)('H Host on local workerd (#794 D3)', () => {
     expect(await h.intent(turnId)).toMatchObject({ tries: 1, submission: 'delivered', conclusion: 'succeeded' });
     expect(await h.commands()).toContain(task);
     expect(await h.mailbox(task)).toEqual([{ type: 'task.offer', session: 'fresh', egress: true }]);
+  });
+
+  it('runs the outbox sender in each pass: a projection lands once, a pending home operation readies its Bot, a card row fails loudly', async () => {
+    const { substrate: { store, pool, hSchema, hostSchema }, home } = h;
+    await h.bot();
+    // Bot `main` at revision 2 whose home operation failed (as homes.test.ts), so the owner retries it.
+    await store.seed(home, state => {
+      seedCollaboration(state);
+      const main = state.team.bots.main!, deviceId = h.device!.deviceId;
+      Object.assign(main, { execution: template(deviceId, 'main'), revision: '2', readyRevision: '1' });
+      state.team.homeOperations.push({ sequence: ++state.sequence, botId: 'main', status: 'failed', error: 'conflict', retries: [], request: { deviceId,
+        payload: { requestId: 'r-2', agentRef: { agentId: 'main', profileRevision: '2' }, projectionHash: 'sha256:2',
+          projection: { schemaVersion: 'bot-profile.v1', name: 'Main', role: 'Team owner', persona: '', model: 'default' } } } as never });
+    });
+    await store.bindDevice(home, h.device!.deviceId);
+    await store.commit(home, { scope: home, commandId: randomUUID(), command: { kind: 'retry_persona', botId: 'main' } }, vectorClock);
+    const key = JSON.stringify(home), outbox = `"${hSchema}".outbox`;
+    const next = Number((await pool.query<{ n: string }>(`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM ${outbox} WHERE scope = $1`, [key])).rows[0]!.n);
+    await pool.query(`INSERT INTO ${outbox} (scope, key, ordinal, kind, body) VALUES ($1, $2, $3, 'projection', '{"v":1}')`, [key, JSON.stringify('p1'), next]);
+    await pool.query(`INSERT INTO ${outbox} (scope, key, ordinal, kind) VALUES ($1, $2, $3, 'card')`, [key, JSON.stringify(['card', 'c1']), next + 1]);
+    const first = await h.worker.passes();
+    expect(first.send.steps).toBeGreaterThanOrEqual(1);
+    expect((await pool.query(`SELECT settled_at FROM ${outbox} WHERE scope = $1 AND key = $2`, [key, JSON.stringify('p1')])).rows[0].settled_at).not.toBeNull();
+    const projected = () => pool.query(`SELECT id, body FROM "${hostSchema}".host_projection WHERE scope = $1`, [home]);
+    const landed = (await projected()).rows;
+    expect(landed).toContainEqual({ id: 'p1', body: { v: 1 } });
+    expect(landed.some(row => row.id.startsWith('persona-retry:'))).toBe(true);
+    expect(first.send.failed).toContainEqual({ scope: home, id: JSON.stringify(['card', 'c1']), error: 'The Host has no connector for a card call' });
+    let report = first;
+    await until(async () => {
+      const bot = (await store.read(home)).team.bots.main!;
+      if (bot.readyRevision === bot.revision && report.send.synced.some(item => item.scope === home)) return true;
+      report = await h.worker.passes();
+      return undefined;
+    });
+    expect((await projected()).rows).toHaveLength(landed.length);
   });
 
   it('rejects a request with no valid owner session, and writes nothing', async () => {
