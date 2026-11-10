@@ -1,3 +1,4 @@
+import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits';
 import type { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,8 +43,6 @@ import { resolveAgyBin } from './resolve-bin';
 
 /** Upstream's bound: the CLI can read its update state before it prints the version. */
 const VERSION_TIMEOUT_MS = 30_000;
-const DEFAULT_RETAINED_BYTES = 16 * 1024 * 1024;
-const DEFAULT_INTERRUPT_MS = 1_000;
 
 export interface AgyAdapterOptions {
   /**
@@ -89,6 +88,8 @@ export class AgyAdapter implements RuntimeAdapter {
   private readonly options: AgyAdapterOptions;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
   private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
+  private readonly interruptTimeoutMs: number;
+  private readonly maxRetainedBytes: number;
 
   get descriptor() {
     return freezeRuntimeAdapterDescriptor({
@@ -109,10 +110,8 @@ export class AgyAdapter implements RuntimeAdapter {
     if (candidate === comparablePath(os.homedir()) || candidate === userNative || candidate.startsWith(`${userNative}${path.sep}`))
       throw new TypeError('AgyAdapterOptions.home must not be the user\'s home or ~/.gemini');
     if (options.model !== undefined && options.model.trim() === '') throw new TypeError('AgyAdapterOptions.model must not be blank');
-    const retained = options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES;
-    if (!Number.isSafeInteger(retained) || retained < 1) throw new TypeError('invalid agy retention budget');
-    const interrupt = options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS;
-    if (!Number.isSafeInteger(interrupt) || interrupt <= 0 || interrupt > 2_147_483_647) throw new TypeError('invalid agy interrupt timeout');
+    this.maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'agy');
+    this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'agy');
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'AgyAdapterOptions.runtimeEnvironment');
     this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
       descriptor: AGY_VERSION_POLICY,
@@ -182,8 +181,8 @@ export class AgyAdapter implements RuntimeAdapter {
     const session = new AgySession(
       input.scratch,
       this.options.model,
-      this.options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS,
-      this.options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES,
+      this.interruptTimeoutMs,
+      this.maxRetainedBytes,
       agyMcpEventIdentities(input.mcpToolsetTools),
       resume,
       reader,

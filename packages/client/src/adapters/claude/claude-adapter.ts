@@ -1,3 +1,4 @@
+import { resolveInterruptTimeoutMs } from '../session-limits';
 import type { RuntimeTaskInput } from '../../types';
 import { createClaudeMcpIdentityResolver } from './mcp-identity';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities';
@@ -165,10 +166,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
   private readonly nativeOptions?: NativeInteractionHostOptions;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
   private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
+  private readonly interruptTimeoutMs: number;
 
   constructor(private readonly options: ClaudeAdapterOptions = {}) {
-    const timeout = options.interruptTimeoutMs ?? 1000;
-    if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) throw new TypeError('invalid Claude interrupt timeout');
+    this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'Claude');
     if (options.agentUserContext !== undefined && options.agentUserContext !== 'inherit' && options.agentUserContext !== 'excluded')
       throw new TypeError('ClaudeAdapterOptions.agentUserContext must be inherit or excluded');
     if (options.agentSessionPersistence !== undefined && options.agentSessionPersistence !== 'enabled' && options.agentSessionPersistence !== 'disabled')
@@ -408,7 +409,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       const mcpIdentity = createClaudeMcpIdentityResolver(() => control.mcpStatus(), new Map(Object.entries(taskMcpServers)));
       gate = startInput.toolAuthorization === undefined ? undefined
         : new ClaudeToolAuthorizationBridge(startInput.toolAuthorization, error => client?.abortStartup(error), mcpIdentity.resolve);
-      const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000, gate?.hooks);
+      const control = createClaudeControlChannel(this.interruptTimeoutMs, gate?.hooks);
       const native = this.nativeOptions === undefined ? undefined : new ClaudeNativeInteractionBridge({
         ...this.nativeOptions,
         // The adapter, never the host callback, owns fatal process termination.

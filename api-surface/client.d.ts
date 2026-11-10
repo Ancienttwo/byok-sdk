@@ -41,6 +41,8 @@ export declare class AgyAdapter implements RuntimeAdapter {
     private readonly options;
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
+    private readonly interruptTimeoutMs;
+    private readonly maxRetainedBytes;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     constructor(options: AgyAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
@@ -102,6 +104,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly nativeOptions?;
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
+    private readonly interruptTimeoutMs;
     constructor(options?: ClaudeAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
@@ -515,6 +518,8 @@ export declare class CodexAdapter implements RuntimeAdapter {
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
+    private readonly interruptTimeoutMs;
+    private readonly maxRetainedBytes;
     constructor(options?: CodexAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
@@ -630,6 +635,8 @@ export declare class DshAdapter implements RuntimeAdapter {
     private readonly sandbox;
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
+    private readonly interruptTimeoutMs;
+    private readonly maxRetainedBytes;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     constructor(options: DshAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
@@ -710,6 +717,8 @@ export declare class GrokAdapter implements RuntimeAdapter {
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
+    private readonly interruptTimeoutMs;
+    private readonly maxRetainedBytes;
     constructor(options?: GrokAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
@@ -778,6 +787,7 @@ export declare class HermesAdapter implements RuntimeAdapter {
     private readonly options;
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
+    private readonly interruptTimeoutMs;
     /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
     private readonly liveHomes;
     get descriptor(): import("..").RuntimeAdapterDescriptor;

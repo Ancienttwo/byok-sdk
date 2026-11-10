@@ -1420,7 +1420,9 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
         retryable: event.retryable ?? false,
       });
       return {
-        runner: snapshot.runner,
+        runner: runnerWith(snapshot.runner, {
+          finished: addUniqueBounded(snapshot.runner.finished, task.taskId),
+        }),
         task: taskWith(task, {
           phase: 'terminalizing',
           terminal,
@@ -1457,7 +1459,9 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
         retryable: false,
       });
       return {
-        runner: snapshot.runner,
+        runner: runnerWith(snapshot.runner, {
+          finished: addUniqueBounded(snapshot.runner.finished, task.taskId),
+        }),
         task: taskWith(task, {
           phase: 'terminalizing',
           terminal,

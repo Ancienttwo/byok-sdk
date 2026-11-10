@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "49bc7e1904c447ffee7e34503c293e41947271716b805ca608835c98a36537c2"
+    "snapshotSha256": "40ec94a0e0fd97d6553fb0067e4ab4d65777d6c3d5e198d4c1771427499aab6e"
   },
   "configFields": {
     "status": "tracked",
@@ -54,6 +54,26 @@
       "items": [
         "example:bot-collaboration"
       ]
+    },
+    {
+      "id": "adapter-session-limits",
+      "impact": "additive",
+      "summary": "agy, dsh and Hermes accept fractional interruptTimeoutMs; session limits are defined once across six adapters.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/client#AgyAdapter",
+        "export:@byok-sdk/client#ClaudeAdapter",
+        "export:@byok-sdk/client#CodexAdapter",
+        "export:@byok-sdk/client#DshAdapter",
+        "export:@byok-sdk/client#GrokAdapter",
+        "export:@byok-sdk/client#HermesAdapter",
+        "export:@byok-sdk/client/adapters#AgyAdapter",
+        "export:@byok-sdk/client/adapters#ClaudeAdapter",
+        "export:@byok-sdk/client/adapters#CodexAdapter",
+        "export:@byok-sdk/client/adapters#DshAdapter",
+        "export:@byok-sdk/client/adapters#GrokAdapter",
+        "export:@byok-sdk/client/adapters#HermesAdapter"
+      ]
     }
   ],
   "changes": [
@@ -72,9 +92,39 @@
       "entry": "example-bot-collaboration-autonomy"
     },
     {
+      "item": "export:@byok-sdk/client#AgyAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client#ClaudeAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client#DshAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
+    },
+    {
       "item": "export:@byok-sdk/client#ExpiringClassId",
       "change": "changed",
       "entry": "codex-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/client#GrokAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client#HermesAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
     },
     {
       "item": "export:@byok-sdk/client#ProtectedClassId",
@@ -85,6 +135,36 @@
       "item": "export:@byok-sdk/client#resolveStorageConfig",
       "change": "changed",
       "entry": "codex-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#DshAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#GrokAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#HermesAdapter",
+      "change": "changed",
+      "entry": "adapter-session-limits"
     },
     {
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",
