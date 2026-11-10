@@ -228,13 +228,14 @@ export async function readServiceLifecycleOwner(storeDir: string, fs: ServiceOwn
  * Local-state relocation takes this gate before `store`, so the order is
  * always `service-lifecycle` then `store`. A held gate fails at once with
  * `lifecycle_owner_busy`; the gate frees itself when its holder process exits.
+ * `gateRoot` is the lifecycle option of that name.
  *
  * @internal
  */
-export async function withServiceOwnerGate<T>(operation: () => Promise<T>): Promise<T> {
+export async function withServiceOwnerGate<T>(operation: () => Promise<T>, gateRoot?: string): Promise<T> {
   let gate;
   try {
-    gate = await acquirePathMutationGate({ scope: 'service-lifecycle' }, { waitMs: 0 });
+    gate = await acquirePathMutationGate({ scope: 'service-lifecycle' }, { waitMs: 0, ...(gateRoot === undefined ? {} : { gateRoot }) });
   } catch (error) {
     if (error instanceof PathMutationGateBusyError) throw new ServiceUnitError('lifecycle_owner_busy');
     throw error;

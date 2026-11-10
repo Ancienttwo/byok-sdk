@@ -198,7 +198,7 @@ WantedBy=default.target
  * systemd user session at all will fail every `systemctl --user` call here
  * with a clear error surfaced from `runOrThrow`, not a silent no-op.
  */
-export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps = {}): ManagedServiceLifecycle {
+export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
   const run = deps.run ?? defaultRunner;
   const fs = deps.fs ?? fsp;
   const homedir = deps.homedir ?? (() => os.homedir());
@@ -253,5 +253,5 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
       const determinate = running || !SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
       return { running, determinate, detail };
     },
-  }, fs);
+  }, fs, gateRoot);
 }

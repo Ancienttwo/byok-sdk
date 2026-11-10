@@ -199,7 +199,7 @@ ${argXml}${cwdXml}
  * `status()` queries `sc.exe` (the real Windows SCM query tool, always
  * present) rather than parsing WinSW's own `status` subcommand text.
  */
-export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {}): ManagedServiceLifecycle {
+export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
   const run = deps.run ?? defaultRunner;
   const fs = deps.fs ?? fsp;
 
@@ -315,5 +315,5 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
       const determinate = running || !WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
       return { running, determinate, detail };
     },
-  }, fs);
+  }, fs, gateRoot);
 }

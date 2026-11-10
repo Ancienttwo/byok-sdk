@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "3c1bde7ba3b8a479c634e7dcad15a88ac4aa1afacf5d0009cb498e4058fa9c78"
+    "snapshotSha256": "b22a49b80d70cb9f97bfce13e4c8809e4c101502c1b9477c7db8df74d41e868b"
   },
   "configFields": {
     "status": "tracked",
@@ -129,6 +129,15 @@
         "export:@byok-sdk/client/adapters#OpenCodeAdapterOptions",
         "export:@byok-sdk/client/adapters#PiAdapterOptions"
       ]
+    },
+    {
+      "id": "service-lifecycle-gate-root",
+      "impact": "additive",
+      "summary": "CreateServiceLifecycleOptions gains an optional gateRoot: an isolated macOS root for the service-lifecycle gate, for tests and parallel consumers. Omitted, the gate root stays /tmp/byok-pm-<uid>. No Host change is required.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#isolated-service-lifecycle-gate-root",
+      "items": [
+        "export:@byok-sdk/client#CreateServiceLifecycleOptions"
+      ]
     }
   ],
   "changes": [
@@ -175,6 +184,11 @@
       "item": "export:@byok-sdk/client#CodexAdapterOptions",
       "change": "changed",
       "entry": "version-policy-source"
+    },
+    {
+      "item": "export:@byok-sdk/client#CreateServiceLifecycleOptions",
+      "change": "changed",
+      "entry": "service-lifecycle-gate-root"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",

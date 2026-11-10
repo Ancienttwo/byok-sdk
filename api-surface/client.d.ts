@@ -11425,6 +11425,26 @@ export interface CreateServiceLifecycleOptions {
     platform?: NodeJS.Platform;
     /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/getuid) — only the fields matching the resolved platform are ever read. */
     deps?: LaunchdDeps & SystemdDeps & WinswDeps & WindowsUserDeps;
+    /**
+     * An isolated root for the `service-lifecycle` gate that install, repair,
+     * uninstall and `owned` hold, for tests and parallel consumers. Omitted,
+     * the gate uses `/tmp/byok-pm-<uid>`. Lifecycles exclude each other only
+     * when they use the same root. Only this lifecycle's gate moves:
+     * `claimServiceLifecycleOwner`, `releaseServiceLifecycleOwner` and
+     * `localStateRelocation` still lock the default root, so a lifecycle on a
+     * `gateRoot` no longer excludes them. It must be an absolute path and gets
+     * the default root's check. An absent root is created with mode 0700.
+     * A gateRoot owned by the process user is set to 0700; a symlink,
+     * non-directory or foreign-owned path is refused. The refusal's `code` is
+     * `private_dir_symlink`, `private_dir_not_directory` or
+     * `private_dir_foreign_owner`, and `private_dir_mode` when the root cannot
+     * be set to 0700. The check covers the root itself, not a
+     * swap of its parent, so choose a root whose parent directory other users
+     * cannot write. The option takes effect on macOS only: Linux and Windows
+     * ignore it, a relative path included, because their gates have no
+     * filesystem root.
+     */
+    gateRoot?: string;
 }
 /**
  * Platform-dispatched entry point for M3-4's lifecycle API: manages the
@@ -11572,7 +11592,7 @@ export declare function generateLaunchdPlist(def: {
  * from the still-on-disk plist) — not `kickstart`, which only force-restarts
  * an ALREADY-loaded job.
  */
-export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: LaunchdDeps): ManagedServiceLifecycle;
+export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: LaunchdDeps, gateRoot?: string): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/managed-lifecycle.d.ts ====
 import { promises as fsp } from 'node:fs';
 import { type ServiceUnitFile } from './service-unit';
@@ -11621,7 +11641,7 @@ export interface ManagedServiceLifecycle extends ServiceLifecycle {
  * repair and uninstall run whole inside the store's owner gate, so the owner
  * they checked is still the owner when they write, deactivate or release.
  */
-export declare function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs?: ManagedLifecycleFs): ManagedServiceLifecycle;
+export declare function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs?: ManagedLifecycleFs, gateRoot?: string): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/sdk-reserved-helper-command.d.ts ====
 /**
  * Product entrypoint seam for single-file/SEA hosts. Returns `false` without
@@ -12321,10 +12341,11 @@ export declare function readServiceLifecycleOwner(storeDir: string, fs?: Service
  * Local-state relocation takes this gate before `store`, so the order is
  * always `service-lifecycle` then `store`. A held gate fails at once with
  * `lifecycle_owner_busy`; the gate frees itself when its holder process exits.
+ * `gateRoot` is the lifecycle option of that name.
  *
  * @internal
  */
-export declare function withServiceOwnerGate<T>(operation: () => Promise<T>): Promise<T>;
+export declare function withServiceOwnerGate<T>(operation: () => Promise<T>, gateRoot?: string): Promise<T>;
 /**
  * Records `owner` as the product's lifecycle owner. Idempotent for the same
  * owner; throws `lifecycle_owner_conflict` when another owner holds it and
@@ -12401,7 +12422,7 @@ export declare function generateSystemdUnit(def: {
  * systemd user session at all will fail every `systemctl --user` call here
  * with a clear error surfaced from `runOrThrow`, not a silent no-op.
  */
-export declare function createSystemdLifecycle(def: ServiceDefinition, deps?: SystemdDeps): ManagedServiceLifecycle;
+export declare function createSystemdLifecycle(def: ServiceDefinition, deps?: SystemdDeps, gateRoot?: string): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/upgrade-from.d.ts ====
 export type UpgradeFromRefusalCode = 'upgrade_from_unsupported' | 'upgrade_history_unavailable' | 'upgrade_train_unresolved';
 export interface UpgradeFromBreakingEntry {
@@ -12489,7 +12510,7 @@ export declare function generateWindowsStartupUnit(launcherPath: string): string
  *   waits for the launcher to exit (`service_unload_timeout`).
  * - `status()` reports the launcher process, found by its command line.
  */
-export declare function createWindowsUserLifecycle(def: ServiceDefinition, deps?: WindowsUserDeps): ManagedServiceLifecycle;
+export declare function createWindowsUserLifecycle(def: ServiceDefinition, deps?: WindowsUserDeps, gateRoot?: string): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/winsw.d.ts ====
 import { promises as fsp } from 'node:fs';
 import { type Runner } from '../util/exec-runner';
@@ -12550,7 +12571,7 @@ export declare function generateWinswXml(def: {
  * `status()` queries `sc.exe` (the real Windows SCM query tool, always
  * present) rather than parsing WinSW's own `status` subcommand text.
  */
-export declare function createWinswLifecycle(def: ServiceDefinition, deps?: WinswDeps): ManagedServiceLifecycle;
+export declare function createWinswLifecycle(def: ServiceDefinition, deps?: WinswDeps, gateRoot?: string): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/local-state-relocation.d.ts ====
 export declare class LocalStateRelocationError extends Error {
     constructor(message: string);

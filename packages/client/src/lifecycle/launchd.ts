@@ -140,7 +140,7 @@ export function generateLaunchdPlist(def: { label: string; launcherPath: string;
  * from the still-on-disk plist) — not `kickstart`, which only force-restarts
  * an ALREADY-loaded job.
  */
-export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps = {}): ManagedServiceLifecycle {
+export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
   const run = deps.run ?? defaultRunner;
   const fs = deps.fs ?? fsp;
   const homedir = deps.homedir ?? (() => os.homedir());
@@ -244,5 +244,5 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
       const determinate = running || !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
       return { running, determinate, detail };
     },
-  }, fs);
+  }, fs, gateRoot);
 }
