@@ -96,16 +96,19 @@ export interface SyncOptions<R extends ContextRoutine> {
   limits: InstructionLimits;
   /** History mode: a Bot Turn freezes only with its history from the external authority, read before this transaction. */
   historyMode: boolean;
-  /** The history row of this Turn, in history mode. */
+  /** Capability: the history row of this Turn, in history mode. Absent: skipped, in history mode the Turn does not freeze in this sync. */
   history?: { readonly rows: readonly ContextTurn[]; readonly digest: string };
-  /** Room history mode (#883): a seat Turn freezes only with its room messages from the external authority, read before this transaction. */
+  /**
+   * Mode: room history mode (#883). A seat Turn freezes only with its room messages from the external authority, read
+   * before this transaction. Absent: off.
+   */
   roomHistoryMode?: boolean;
-  /** The room messages of this seat Turn, in room history mode. */
+  /** Capability: the room messages of this seat Turn, in room history mode. Absent: skipped, in room history mode the seat Turn does not freeze in this sync. */
   roomHistory?: { readonly rows: readonly RoomMessage[]; readonly digest: string };
   routines: readonly R[];
-  /** The Host's outcome offer (#881), checked by `outcomeOffer`. Absent: every action, the default time zones and `send_message`. */
+  /** Policy: the Host's outcome offer (#881), checked by `outcomeOffer`. Absent: default, every action, the default time zones and `send_message`. */
   offer?: CheckedOffer;
-  /** The template of a sealed routine version (#953). Absent: the Host keeps no sealed routine, so a sealed Turn fails. */
+  /** Capability: the template of a sealed routine version (#953). Absent: refused, the Host keeps no sealed routine, so a sealed Turn fails. */
   sealedTemplate?(routine: SealedRoutineRef): SealedRoutineTemplate | undefined;
 }
 /**

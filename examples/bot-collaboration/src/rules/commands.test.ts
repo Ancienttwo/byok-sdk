@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { commandBots, type Command, type CommandScopeState } from './commands';
+import { commandBots, decideCommand, MissingPortError, type Command, type CommandScopeState, type CommandState } from './commands';
 
 /** A plain state slice: two Bots, a room with them and a person, a question and a card of Bot `b`. */
 function state(): CommandScopeState {
@@ -47,4 +47,16 @@ it('names no Bot for an unknown or prototype id, nor for a command that creates 
   const slice = state();
   (slice.questions as Record<string, unknown>).q = { id: 'q', turnId: 'orphan' };
   expect(commandBots(slice, { kind: 'answer', questionId: 'q', answer: 'yes' })).toEqual([]);
+});
+
+it('refuses an outcome with a typed missing_port error when the Host passes no outcome port, and changes no state', () => {
+  const slice = state() as unknown as CommandState, before = structuredClone(slice), out: unknown[] = [];
+  const error = (() => {
+    try { decideCommand(slice, { kind: 'outcome', turnId: 't', taskId: 'task', document: {} }, { now: () => 0, publish: () => {} }, row => out.push(row)); }
+    catch (thrown) { return thrown; }
+  })();
+  expect(error).toBeInstanceOf(MissingPortError);
+  expect(error).toMatchObject({ code: 'missing_port', kind: 'outcome', name: 'MissingPortError', message: 'The Host has no port for outcome' });
+  expect(slice).toEqual(before);
+  expect(out).toEqual([]);
 });

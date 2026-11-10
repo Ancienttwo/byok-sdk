@@ -20,6 +20,8 @@
 
 - **Fixed (client; #1695)** — Redelivered offers for tasks that failed after claim but before becoming active no longer claim the task again after startup cleanup. Runtime start and activation failures now retain the task in the bounded finished collection.
 
+- **Breaking (examples; #1665)** — K8 rules build the Bot autonomy gate from the state in `applyTurnOutcome`, so no Host adapter can leave it out: `OutcomePorts.autonomy` is removed, and `applySpeech` and `applyDelegate` take a required `AutonomyGate`. A command that needs a Host port the Host did not pass now throws `MissingPortError` (`code: 'missing_port'`, `kind`) with the same message as before. Each optional K8 port now documents whether it is a capability, a policy or a mode, and what its absence does.
+
 - **Fixed (examples; #1664)** — Hosted Bot collaboration sync now publishes inbound disposition projections for stored human messages, using the same sync head and tail steps as the local Host.
 
 - **Changed (examples; #1664)** — K8 Layer 2 vendoring now includes `src/adapter-steps.ts`, which shares terminal routing, synchronous Host intent handling and Bot outcome port assembly between the local and hosted Hosts. The hosted `IntentOutcomeError` export is now the K8 class.

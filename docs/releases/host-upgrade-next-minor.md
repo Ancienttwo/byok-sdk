@@ -167,6 +167,10 @@ No Host configuration change is required (#1688). When the daemon refuses its co
 
 No Host configuration change is required (#1688). `RuntimeEnvironmentReport` gains an optional `lanes` list of `RuntimeEnvironmentLaneReport`, also carried by the `runtimes.environment` control method and `byok-agent doctor`. The Pi adapter reports a `pi-prepared` lane unless it is a durable adapter, and a `pi-keys-profile` lane when a BYOK launcher is configured; the Hermes adapter reports a `hermes-custody` lane when a BYOK launcher is configured. An `sdk` lane lists the names its launch removes; the `pi-keys-profile` lane says only that the keys launcher passes its fixed names. A Host that sets `runtimeEnvironment.pass` names such as `PI_OFFLINE` can read there which lanes never give them to the runtime. No lane narrows differently than before. A Host that builds a `RuntimeEnvironmentReport` itself may omit `lanes`.
 
+## Bot collaboration autonomy and missing ports
+
+K8 rules now build the Bot autonomy gate themselves (#1665). A Host adapter that builds its own `OutcomePorts` removes the `autonomy` member; a direct caller of `applySpeech` or `applyDelegate` passes an `AutonomyGate`. A refusal for a missing Host port is now `MissingPortError` from `rules/commands.ts`, with `code` `missing_port` and the port `kind`; the message text is unchanged, so match on `code` instead of the message.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.

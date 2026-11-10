@@ -2,6 +2,9 @@ import { expect, it } from 'vitest';
 import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addTurn } from './turn';
 import { applyDelegate, arbitrateCancel, settleDelegations, type DelegationState, type IntentFact, type IntentFacts } from './delegation';
+import type { AutonomyGate } from './autonomy';
+/** These cases apply every autonomous action, as a Bot in `auto` does. */
+const auto: AutonomyGate = { autonomy: 'auto', record: () => { throw new Error('auto records nothing'); } };
 
 /** A plain collaboration slice and K4 facts by Turn id. The rules need no ledger and no Host. */
 function setup() {
@@ -10,7 +13,7 @@ function setup() {
     replies: {}, rejected: [], audit: [] };
   const root = addTurn(state, { id: 'root', root: 'root', source: 'user', request: 'Ask b', botId: 'a', hop: 0, authority: 'owner' });
   const events: string[] = [], emit = (id: string) => { events.push(id); };
-  applyDelegate(state, root, 'task', { delegate: [{ to: 'b', request: 'Check' }] }, false, 0, emit, (_kind, work) => work());
+  applyDelegate(state, root, 'task', { delegate: [{ to: 'b', request: 'Check' }] }, false, 0, emit, (_kind, work) => work(), auto);
   const d = state.delegations[hash(['task', 'delegate', 0])]!;
   const intents: Record<string, IntentFact & { started?: boolean; declineCode?: string }> = {};
   const facts: IntentFacts = {

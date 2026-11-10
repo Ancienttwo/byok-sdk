@@ -51,9 +51,9 @@ export interface AutonomyGate {
   readonly autonomy: Autonomy;
   record(action: WouldDoAction, index: number, detail: Json): void;
 }
-/** Whether the gate observes: the action is recorded, not applied. An absent gate applies, as every gate did before #1229. */
-export function observes(gate: AutonomyGate | undefined): gate is AutonomyGate {
-  return gate?.autonomy === 'observe';
+/** Whether the gate observes: the action is recorded, not applied. */
+export function observes(gate: AutonomyGate): boolean {
+  return gate.autonomy === 'observe';
 }
 /** The autonomy gate of one outcome (#1229): an observing Bot records its autonomous actions instead of applying them. */
 export function autonomyGate(

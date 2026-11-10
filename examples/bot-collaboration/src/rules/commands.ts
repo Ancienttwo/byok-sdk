@@ -9,7 +9,7 @@ import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } fr
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
 import { acceptMessage, type MessageDisposition, type MessageFields } from './message';
 import { expireCard } from './cards';
-import { autonomyGate, type Autonomy } from './autonomy';
+import type { Autonomy } from './autonomy';
 import { commit, revisionOf, type CommandRecord, type CommitRequest, type CommitResult, type CommitState, type Disposition, type OutboxIntent } from './commit';
 
 // The collaboration commands and their decisions as pure rules (#739 D1). `commitCommand` runs one command
@@ -110,35 +110,55 @@ export interface CommandPorts {
   /** The Host clock. A command reads it when it needs a time. */
   now(): number;
   /**
-   * The Host's admission of a new command (#957). It runs after the replay lookup, so an exact replay still returns its
-   * first result. It throws to refuse, and the commit writes nothing. Absent: every command is admitted.
+   * Policy: the Host's admission of a new command (#957). It runs after the replay lookup, so an exact replay still returns
+   * its first result. It throws to refuse, and the commit writes nothing. A Host that implements the owner switch must
+   * pass it. Absent: every command is accepted.
    */
   admit?(command: Command): void;
   publish: Publish;
-  /** Input admission with the Host coalescing policy. Returns the id of the Turn that answers the input. */
+  /**
+   * Capability: input admission with the Host coalescing policy. Returns the id of the Turn that answers the input.
+   * Absent: an owner input is refused with `MissingPortError`.
+   */
   admitInput?(fields: InputFields): string;
-  /** Saves the inbound route of a received message. Absent: the Host has no channel. */
+  /** Capability: saves the inbound route of a received message. Absent: skipped, the Host has no channel. */
   remember?(root: string): void;
-  /** Queues one channel message and returns the delivery id. Absent: the Host has no channel. */
+  /** Capability: queues one channel message and returns the delivery id. Absent: skipped, the Host has no channel. */
   deliver?(turn: Turn, key: string, text: string): string | undefined;
-  /** Decides the Agent message of a Host intent whose handler has a message handler (#1356). Absent: `binding_mismatch`. */
+  /**
+   * Capability: decides the Agent message of a Host intent whose handler has a message handler (#1356).
+   * Absent: the message is refused as `binding_mismatch`.
+   */
   hostMessage?(): MessageDisposition;
+  /** Capability: the Host stores of a Turn outcome. Absent: an outcome is refused with `MissingPortError`. */
   outcome?: Omit<OutcomePorts, 'now' | 'publish' | 'deliver'>;
-  /** Writes the routine Turn of the occurrence. */
+  /** Capability: writes the routine Turn of the occurrence. Absent: an occurrence is refused with `MissingPortError`. */
   occurrence?(): void;
-  /** The K4 intent rows by Turn id, read in the commit transaction. */
+  /** Capability: the K4 intent rows by Turn id, read in the commit transaction. Absent: refused with `MissingPortError`. */
   intents?: Pick<IntentFacts, 'intent'>;
-  /** Advances the desired persona revision of a Bot with the Host models and toolset policy. */
+  /**
+   * Capability: advances the desired persona revision of a Bot with the Host models and toolset policy.
+   * Absent: refused with `MissingPortError`.
+   */
   updatePersona?(botId: string, persona: string): void;
-  /** Writes one snapshot Bot's profile with the Host template, and queues its persona projection when the profile changed. */
+  /**
+   * Capability: writes one snapshot Bot's profile with the Host template, and queues its persona projection when the
+   * profile changed. Absent: a team snapshot is refused with `MissingPortError`.
+   */
   teamBot?(bot: TeamSnapshotBot): void;
-  /** The channel route rows. Each function returns the id of the row that it wrote. */
+  /**
+   * Capability: the channel route rows. Each function returns the id of the row that it wrote.
+   * Absent: a route command is refused with `MissingPortError`.
+   */
   routes?: {
     enable(conversation: Conversation, channel: string, target: string, owner: string): string;
     revoke(routeId: string): void;
     resend(deliveryId: string): string;
   };
-  /** The K4 routine rows. `end` completes one open Bot routine, as K4 `setLifecycle('completed')`. */
+  /**
+   * Capability: the K4 routine rows. `end` completes one open Bot routine, as K4 `setLifecycle('completed')`.
+   * Absent: `end_routine` is refused with `MissingPortError`.
+   */
   routines?: { end(routineId: string): void };
 }
 /**
@@ -176,9 +196,17 @@ export function retiredIdentity(namespace: RetiredNamespace, id: string, isRetir
 }
 export interface CommandStore {
   scope: string; recordCallbacks: boolean;
-  /** A command record that retention moved out of the state (#798). The replay check reads it after the state. */
+  /**
+   * Capability: a command record that retention moved out of the state (#798). The replay check reads it after the state.
+   * A commit that has no command record (a keyless command, or a callback that the caller deduplicates durably) does not
+   * pass it. Absent: skipped, the replay check reads the state only.
+   */
   archived?: (commandId: string) => CommandRecord | undefined;
-  /** Receives the ids that `decide` added. Not called for a replay. The store passes them to `refuseRetired`. */
+  /**
+   * Capability: receives the ids that `decide` added. Not called for a replay. The store passes them to `refuseRetired`.
+   * A commit that has no command record (a keyless command, or a callback that the caller deduplicates durably) does not
+   * pass it. Absent: skipped, no retired identity check.
+   */
   admitted?: (ids: AdmittedIds) => void;
 }
 
@@ -225,8 +253,13 @@ function conflictMessage(state: CommandState, command: KeyedCommand): string {
     case 'create_room': return 'Room identity conflict';
   }
 }
+/** A command needs a capability port that the Host did not pass. The commit writes nothing. */
+export class MissingPortError extends Error {
+  readonly code = 'missing_port' as const;
+  constructor(readonly kind: string) { super(`The Host has no port for ${kind}`); this.name = 'MissingPortError'; }
+}
 function need<T>(port: T | undefined, kind: string): T {
-  if (port === undefined) throw new Error(`The Host has no port for ${kind}`);
+  if (port === undefined) throw new MissingPortError(kind);
   return port;
 }
 const accepted = (value?: Json): Disposition => value === undefined ? { outcome: 'accepted' } : { outcome: 'accepted', value };
@@ -288,7 +321,7 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
     }
     case 'outcome':
       applyTurnOutcome(state, command.turnId, command.taskId, command.document, { ...need(ports.outcome, command.kind),
-        now: ports.now, publish, autonomy: autonomyGate(state, command.turnId, command.taskId, ports.now, publish), ...(deliver ? { deliver } : {}) });
+        now: ports.now, publish, ...(deliver ? { deliver } : {}) });
       return accepted();
     case 'message': return acceptMessage(state, command.turnId, command.message, ports.now, deliver, ports.hostMessage);
     case 'occurrence':
