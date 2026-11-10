@@ -137,6 +137,18 @@ export class SecureDirHardeningError extends Error {
   }
 }
 
+/** An owned directory whose mode is not 0700 and cannot be set to it; `cause` is the chmod error when chmod failed. */
+export class SecureDirModeError extends Error {
+  readonly code = 'secure_dir_mode';
+  constructor(
+    public readonly dir: string,
+    cause?: unknown,
+  ) {
+    super(`refusing directory "${dir}": its mode is not 0700 and could not be set to 0700`, cause === undefined ? undefined : { cause });
+    this.name = 'SecureDirModeError';
+  }
+}
+
 export class SecureFileHardeningError extends Error {
   constructor(
     public readonly filePath: string,
@@ -180,14 +192,24 @@ export class SecureFileHardeningError extends Error {
  *   clear, typed, actionable rejection — pairing simply fails rather than
  *   silently leaving an unprotected device keypair/access token on disk.
  *
- * Non-win32 (darwin/linux) behavior is completely unchanged — the POSIX
- * `mkdir`/`chmod` calls above are the only enforcement there, and never
- * throw on their own best-effort `chmod` failure (that one stays
- * genuinely benign — an `EPERM` against a directory this process doesn't
- * own — see the inline comment on it).
+ * On POSIX the directory is created 0700, and an existing one whose mode is
+ * not 0700 is chmod'ed to it; a failed chmod or a mode that is still wrong
+ * throws {@link SecureDirModeError}. A directory that is already 0700 is not
+ * chmod'ed, so a sandbox that denies chmod does not refuse it. Use
+ * {@link ensureSecureStoreRoot} for the store root, which may be foreign-owned.
  */
 export async function ensureSecureDir(dir: string, opts: EnsureSecureDirOptions = {}): Promise<void> {
-  await secureDir(dir, buildIcaclsArgs, opts);
+  await secureDir(dir, buildIcaclsArgs, opts, 'owned');
+}
+
+/**
+ * {@link ensureSecureDir} for the store root. A root owned by another user
+ * keeps the mode its owner set (no chmod, no refusal); one the process owns
+ * follows the {@link ensureSecureDir} rule. The role is the caller's choice,
+ * never inferred from the path.
+ */
+export async function ensureSecureStoreRoot(dir: string, opts: EnsureSecureDirOptions = {}): Promise<void> {
+  await secureDir(dir, buildIcaclsArgs, opts, 'store-root');
 }
 
 /**
@@ -203,17 +225,19 @@ export function buildProjectionIcaclsArgs(dir: string, username: string): string
 
 /** {@link ensureSecureDir} for the keys Pi projection directory, with {@link buildProjectionIcaclsArgs}. */
 export async function ensurePiProjectionDir(dir: string, opts: EnsureSecureDirOptions = {}): Promise<void> {
-  await secureDir(dir, buildProjectionIcaclsArgs, opts);
+  await secureDir(dir, buildProjectionIcaclsArgs, opts, 'owned');
 }
 
-async function secureDir(dir: string, buildArgs: (dir: string, username: string) => string[], opts: EnsureSecureDirOptions): Promise<void> {
+async function secureDir(dir: string, buildArgs: (dir: string, username: string) => string[], opts: EnsureSecureDirOptions, role: 'owned' | 'store-root'): Promise<void> {
   const platform = opts.platform ?? process.platform;
   const run = opts.run ?? defaultRunner;
 
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  await fs.chmod(dir, 0o700).catch(() => {});
-
-  if (platform !== 'win32') return;
+  // No chmod on win32: the icacls DACL below is the authority there.
+  if (platform !== 'win32') {
+    await requireMode0700(dir, role);
+    return;
+  }
 
   const { username } = os.userInfo();
   let result: Awaited<ReturnType<Runner>>;
@@ -225,6 +249,19 @@ async function secureDir(dir: string, buildArgs: (dir: string, username: string)
   if (result.code !== 0) {
     throw new SecureDirHardeningError(dir, `icacls exited ${result.code}: ${(result.stderr || result.stdout).trim()}`);
   }
+}
+
+// stat, not lstat: a symlinked directory root stays supported, and its target's mode is the one that matters.
+async function requireMode0700(dir: string, role: 'owned' | 'store-root'): Promise<void> {
+  const uid = process.getuid?.();
+  if (uid === undefined) return;
+  const stat = await fs.stat(dir);
+  if (role === 'store-root' && stat.uid !== uid) return;
+  if ((stat.mode & 0o777) === 0o700) return;
+  await fs.chmod(dir, 0o700).catch((error: unknown) => {
+    throw new SecureDirModeError(dir, error);
+  });
+  if (((await fs.stat(dir)).mode & 0o777) !== 0o700) throw new SecureDirModeError(dir);
 }
 
 /** Re-asserts 0600 on POSIX and a non-inherited owner/SYSTEM/Admin DACL on Windows. */

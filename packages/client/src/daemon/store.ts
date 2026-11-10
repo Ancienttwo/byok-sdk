@@ -12,7 +12,7 @@ import { isTenantId } from '@byok-sdk/core';
 import { atomicWriteFile } from '../util/atomic-write';
 import { pickPlainDataProperties } from '../util/plain-data';
 import { sameContent, sameFile } from '../util/file-state';
-import { ensureSecureDir, type EnsureSecureDirOptions } from '../util/secure-dir';
+import { ensureSecureStoreRoot, type EnsureSecureDirOptions } from '../util/secure-dir';
 import {
   type DeviceCredentialBackend,
   type DeviceCredentialConfig,
@@ -292,10 +292,9 @@ export class DeviceStore {
     // `mkdir`'s own `mode` only applies at CREATION time — a pre-existing
     // storeDir (predating this fix, or created by something else with a
     // more permissive mode) keeps whatever it already had until explicitly
-    // chmod'd. Re-asserted on every save, best-effort — mirrors
-    // `daemon/audit-log.ts`'s `appendAuditRecord`, which has the identical gap
-    // (and the identical fix) for the same reason: a failure here (e.g. a
-    // storeDir owned by a different user) must never block the save itself.
+    // chmod'd. Re-asserted on every save for an owned storeDir; a storeDir
+    // owned by a different user keeps its owner's mode and never blocks the
+    // save (`ensureSecureStoreRoot`).
     // Finding F7: on win32, `ensureSecureDir` ALSO applies a restrictive
     // DACL via `icacls` — POSIX modes alone restrict nothing there. See
     // `util/secure-dir.ts`'s own doc comment. Finding R4: this now THROWS
@@ -303,7 +302,7 @@ export class DeviceStore {
     // warning and continuing — propagates straight out of `save()` (and so
     // out of `AuthManager.pair()`, since nothing here catches it), before
     // `device.json` is ever written.
-    await ensureSecureDir(storeDir, this.secureDirOptions);
+    await ensureSecureStoreRoot(storeDir, this.secureDirOptions);
     // Atomic metadata projection write. No secret value is present in this
     // file; the restrictive mode still limits metadata exposure.
     await atomicWriteFile(this.filePath, JSON.stringify(record, null, 2), { mode: 0o600 });

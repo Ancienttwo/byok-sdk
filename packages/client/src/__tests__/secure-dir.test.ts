@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Runner } from '../util/exec-runner';
-import { buildIcaclsArgs, ensurePiProjectionDir, ensureSecureDir, SecureDirHardeningError } from '../util/secure-dir';
+import { buildIcaclsArgs, ensurePiProjectionDir, ensureSecureDir, ensureSecureStoreRoot, SecureDirHardeningError, SecureDirModeError } from '../util/secure-dir';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -181,5 +181,49 @@ describe('util/secure-dir: ensureSecureDir (finding F7/R4)', () => {
     } else {
       expect(run).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('util/secure-dir: POSIX mode contract', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('an owned 0755 directory becomes 0700, for both entry points', async () => {
+    for (const ensure of [ensureSecureDir, ensureSecureStoreRoot]) {
+      const dir = await tmpDir('byok-secure-dir-mode-');
+      await fs.chmod(dir, 0o755);
+      await ensure(dir);
+      expect((await fs.stat(dir)).mode & 0o777).toBe(0o700);
+    }
+  });
+
+  it('refuses an owned directory whose mode cannot be set, with the chmod error as cause', async () => {
+    const dir = await tmpDir('byok-secure-dir-chmod-denied-');
+    await fs.chmod(dir, 0o755);
+    const denied = Object.assign(new Error('EPERM'), { code: 'EPERM' });
+    vi.spyOn(fs, 'chmod').mockRejectedValue(denied);
+    const err = await ensureSecureDir(dir).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SecureDirModeError);
+    expect(err).toMatchObject({ code: 'secure_dir_mode', dir, cause: denied });
+  });
+
+  it('does not chmod an owned directory that is already 0700', async () => {
+    const dir = await tmpDir('byok-secure-dir-already-');
+    const chmod = vi.spyOn(fs, 'chmod').mockRejectedValue(new Error('EPERM'));
+    await expect(ensureSecureDir(dir)).resolves.toBeUndefined();
+    expect(chmod).not.toHaveBeenCalled();
+  });
+
+  it('leaves a foreign-owned store root unchanged: no chmod, no refusal', async () => {
+    const dir = await tmpDir('byok-secure-dir-foreign-');
+    await fs.chmod(dir, 0o755);
+    const real = await fs.stat(dir);
+    vi.spyOn(fs, 'stat').mockResolvedValue(Object.assign(Object.create(Object.getPrototypeOf(real)), real, { uid: real.uid + 1 }));
+    const chmod = vi.spyOn(fs, 'chmod');
+    await expect(ensureSecureStoreRoot(dir)).resolves.toBeUndefined();
+    expect(chmod).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+    expect((await fs.stat(dir)).mode & 0o777).toBe(0o755);
   });
 });
