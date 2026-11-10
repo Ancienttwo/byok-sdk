@@ -68,6 +68,20 @@ describe('private Unix sockets', () => {
     expect((await fs.stat(dir)).mode & 0o777).toBe(0o700);
   });
 
+  it.skipIf(process.platform === 'win32')('refuses a directory whose mode cannot be set to 0700', async () => {
+    const { dir } = await fallbackDir();
+    await fs.chmod(dir, 0o755);
+    const failure = Object.assign(new Error('EPERM'), { code: 'EPERM' });
+    const spy = vi.spyOn(fs, 'chmod').mockRejectedValue(failure);
+    try {
+      const error = await ensureOwnedPrivateDirectory(dir).catch((error) => error);
+      expect(error).toBeInstanceOf(PrivateDirectoryRefusedError);
+      expect(error).toMatchObject({ code: 'private_dir_mode', path: dir, cause: failure });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it.skipIf(process.platform === 'win32')('closes a bound listener if the fallback ownership changes after listen', async () => {
     const { dir, sock } = await fallbackDir();
     const server = net.createServer();

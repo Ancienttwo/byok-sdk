@@ -4,6 +4,8 @@
 
 - **Changed (client; #1693)** — Offer decline is sent only through the task runner reducer; the two legacy decline fallbacks and `TaskRunner.decline` are removed. The `task.decline` payload is unchanged.
 
+- **Fixed (client; #1732)** — A private socket or path-mutation gate directory whose mode cannot be set to 0700 is now refused with `private_dir_mode` instead of being used with its existing mode.
+
 - **Changed (client; #1692)** — Cancellation after a non-active task selects its terminal no longer retains a pending marker. If a claimed task receives multiple cancellation reasons during startup, the first reason is retained.
 
 - **Changed (client; #1691)** — Strict offer declines and their bounded redelivery tracking now use the task runner reducer while preserving decline payloads.
