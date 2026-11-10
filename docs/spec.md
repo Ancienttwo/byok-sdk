@@ -2041,8 +2041,14 @@ dependencies of the official packages, which pin them exactly in 1.5.0.
 The SDK reads their installed version and does not gate it. Fork aliases and dual runtimes are
 retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
 resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
-Only public Pi APIs are used; private imports, patches, copied provider serializers
-or Session core, and global monkey-patches are forbidden.
+Pi integrations use public APIs except the reviewed ordinary-RPC ingress
+parser `AgentSession._throwIfExtensionCommand`
+([#1642 decision](https://github.com/Ancienttwo/byok-sdk/issues/1642#issuecomment-6762108942)).
+That private dependency is runtime-checked and pinned by upgrade tests; the
+host refuses startup if it is unavailable. It is called through a read-only
+registry façade, with no copied parser or session-state mutation. Private
+imports, upstream patches, copied provider serializers or Session core, and
+global monkey-patches remain forbidden.
 
 Upstream RAFT also embeds the Pi SDK and inherits the user's agent directory.
 It does not run the user's installed pi CLI (RAFT mirror commit
@@ -4045,8 +4051,13 @@ commands can start Pi model-probe processes. Enabling watchdog can start a
 workspace language server and a separate model reviewer with its own tool loop,
 which does not pass through the session tool-authorization hooks. The host
 refuses the command with a failed RPC response carrying
-`pi_host_command_denied`, before its handler runs. The check uses the command
-Pi resolves, including disambiguated aliases, and its extension source; another
+`pi_host_command_denied`, before Pi can defer the prompt during `agent_settled`
+or run its command handler. The ingress check uses Pi 1.5.0's private
+`_throwIfExtensionCommand` parser with a read-only registry façade; there is no
+SDK copy of its parser. If that method is missing or not a function, the host
+refuses startup with `pi_host_command_boundary_unavailable`. The dependency
+must be rechecked on each Pi upgrade. The check uses the command Pi resolves,
+including disambiguated aliases, and its extension source; another
 extension's command with the same name keeps its own behavior. Host text is
 never rewritten. Skill commands (`/skill:`), file prompt templates and other
 extension commands keep their existing expansion. Model text and tool-result

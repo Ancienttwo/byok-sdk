@@ -1,3 +1,4 @@
+import { AgentSession, VERSION as PI_VERSION } from '@earendil-works/pi-coding-agent';
 import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -73,6 +74,79 @@ function evaluate(body: string) {
 }
 
 describe('SDK ordinary Pi RPC entry', () => {
+  it('pins the Pi private command parser and preserves literal extension messages (#1642)', async () => {
+    expect(PI_VERSION).toBe('1.5.0');
+    const parser = (AgentSession.prototype as unknown as { _throwIfExtensionCommand: unknown })._throwIfExtensionCommand;
+    expect(typeof parser).toBe('function');
+    const runner = { getCommand: (name: string) => name === 'run' ? { name, invocationName: name, sourceInfo: { path: 'pinned-subagents' } } : undefined };
+    const invoke = async (text: string, _options?: { expandPromptTemplates: boolean }) => text;
+    const session = { extensionRunner: runner, _throwIfExtensionCommand: parser, prompt: invoke, steer: invoke, followUp: invoke };
+    refusePiSubagentHostCommands(session as never, ['pinned-subagents']);
+    await expect(session.prompt('/run proof-child task')).rejects.toThrow('pi_host_command_denied: /run');
+    await expect(session.prompt('/skill:approved')).resolves.toBe('/skill:approved');
+    await expect(session.prompt('/run literal', { expandPromptTemplates: false })).resolves.toBe('/run literal');
+  });
+
+  it.each(['absent', 'nonfunction'])('refuses host startup when the private Pi parser is %s (#1642)', (kind) => {
+    const f = fixture(), agent = f.env.PI_CODING_AGENT_DIR;
+    mkdirSync(agent, { recursive: true });
+    writeFileSync(f.entry, `import {runPiSessionRuntime} from ${JSON.stringify(resolve(import.meta.dirname, '../bin/pi-session-runtime.ts'))};
+      import {refusePiSubagentHostCommands} from ${JSON.stringify(resolve(import.meta.dirname, '../adapters/pi/subagents.ts'))};
+      runPiSessionRuntime({cwd:${JSON.stringify(f.cwd)},provider:'probe',model:'probe',initialModel:'required',label:'parser-drift',
+        resourceLoaderOptions:{noExtensions:true,noSkills:true,noThemes:true,noPromptTemplates:true},
+        configureSession:session=>{${kind === 'absent' ? 'Reflect.deleteProperty(Object.getPrototypeOf(session),"_throwIfExtensionCommand");' : 'Object.defineProperty(session,"_throwIfExtensionCommand",{value:null});'}
+          refusePiSubagentHostCommands(session,[]);},onSessionReady:()=>console.log('byok_host_ready'),
+        reject:message=>{throw new Error(message);}}).catch(error=>{console.error(String(error));process.exit(1);});`);
+    writeFileSync(join(agent, 'models.json'), JSON.stringify({ providers: { probe: { api: 'openai-completions', baseUrl: 'http://127.0.0.1:1/v1',
+      apiKey: 'synthetic', models: [{ id: 'probe', name: 'probe', contextWindow: 8192, maxTokens: 32, input: ['text'], reasoning: false }] } } }));
+    const result = spawnSync(bun, [f.entry], {
+      cwd: f.sealed, env: f.env, encoding: 'utf8', timeout: 15_000, input: JSON.stringify({ id: 'state', type: 'get_state' }) + '\n',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('pi_host_command_boundary_unavailable: pinned Pi parser _throwIfExtensionCommand is unavailable');
+    expect(result.stdout).not.toContain('byok_host_ready');
+    expect(result.stdout).not.toContain('"success":true');
+  }, 20_000);
+
+  it.each([
+    { label: 'prompt', command: { type: 'prompt' } },
+    { label: 'streaming prompt steer', command: { type: 'prompt', streamingBehavior: 'steer' } },
+    { label: 'streaming prompt followUp', command: { type: 'prompt', streamingBehavior: 'followUp' } },
+    { label: 'steer', command: { type: 'steer' } },
+    { label: 'follow_up', command: { type: 'follow_up' } },
+  ])('returns one refusal for $label while an agent_settled handler is held (#1642)', async ({ command }) => {
+    const f = fixture(), agent = f.env.PI_CODING_AGENT_DIR;
+    mkdirSync(agent, { recursive: true });
+    const held = join(f.root, 'settlement-held'), release = join(f.root, 'release-settlement'), extension = join(f.root, 'hold.ts');
+    writeFileSync(extension, `import {existsSync,writeFileSync} from 'node:fs'; export default pi => {
+      let once=false; pi.on('agent_settled',async()=>{if(once)return;once=true;writeFileSync(${JSON.stringify(held)},'held');
+        while(!existsSync(${JSON.stringify(release)}))await new Promise(resolve=>setTimeout(resolve,10));});
+    };`);
+    const serialized = serializePiHostConfig({ ...f.config, agentExtensionPaths: [extension] });
+    writeFileSync(f.configPath, serialized.bytes);
+    const provider = await startLoopbackProvider('openai-chat', () => ({ kind: 'text', chunks: ['done'] }));
+    writeFileSync(join(agent, 'models.json'), JSON.stringify({ providers: { probe: { api: 'openai-completions', baseUrl: provider.baseUrl,
+      apiKey: 'synthetic', models: [{ id: 'contract-model', name: 'probe', contextWindow: 8192, maxTokens: 32, input: ['text'], reasoning: false }] } } }));
+    const frames: { type: string; id?: string }[] = [];
+    const client = new PiRpcClient({ command: bun, cwd: f.sealed, env: f.env, onFrame: frame => frames.push(frame),
+      args: [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'probe', '--model', 'contract-model'] });
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      expect((await client.send({ type: 'prompt', message: 'Reach the settlement barrier.' })).success).toBe(true);
+      await expect.poll(() => existsSync(held), { timeout: 5_000 }).toBe(true);
+      const result = await Promise.race([client.send({ ...command, id: 'refused-during-settlement', message: '/run proof-child HELD_1642' }),
+        new Promise(resolve => { deadline = setTimeout(() => resolve({ type: 'missing-response' }), 1_000); })]);
+      expect(result).toMatchObject({ success: false, error: expect.stringContaining('pi_host_command_denied: /run') });
+      expect(existsSync(release)).toBe(false);
+      expect(provider.requests).toHaveLength(1);
+      writeFileSync(release, 'release');
+      await expect.poll(() => frames.some(frame => frame.type === 'agent_settled'), { timeout: 5_000 }).toBe(true);
+      expect((await client.send({ type: 'get_state' })).data).toMatchObject({ pendingMessageCount: 0 });
+      expect(frames.filter(frame => frame.id === 'refused-during-settlement')).toHaveLength(1);
+      expect(readdirSync(f.root, { recursive: true }).some(file => String(file).endsWith('status.json'))).toBe(false);
+    } finally { clearTimeout(deadline); writeFileSync(release, 'release'); await client.dispose(); await provider.close(); }
+  }, 20_000);
+
   it.each(['prompt', 'steer', 'follow_up'] as const)('refuses child commands at %s while preserving skills, templates and resolved command aliases (#1642)', async (entry) => {
     const f = fixture(), agent = f.env.PI_CODING_AGENT_DIR;
     mkdirSync(join(agent, 'skills/approved'), { recursive: true }); mkdirSync(join(agent, 'prompts'));
@@ -148,7 +222,9 @@ describe('SDK ordinary Pi RPC entry', () => {
     for (const entry of ['prompt', 'steer', 'followUp'] as const) {
       const runner = { getCommand: (name: string) => commands.find(command => command.name === name) };
       const invoke = async (name: string) => runner.getCommand(name)?.name;
-      const session = { extensionRunner: runner, prompt: invoke, steer: invoke, followUp: invoke };
+      const session = { extensionRunner: runner,
+        _throwIfExtensionCommand: (AgentSession.prototype as unknown as { _throwIfExtensionCommand: unknown })._throwIfExtensionCommand,
+        prompt: invoke, steer: invoke, followUp: invoke };
       refusePiSubagentHostCommands(session as never, ['pinned-subagents']);
       const allowed: string[] = [], refused: string[] = [];
       for (const { name } of commands) {

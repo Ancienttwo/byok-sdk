@@ -35,10 +35,18 @@ const CHILD_START_COMMANDS = new Set([
   'subagents-refresh-provider-models', 'subagents-generate-profiles', 'subagents-watchdog',
 ]);
 
+type PiCommandParser = (this: { _extensionRunner: { getCommand(name: string): void } }, text: string) => void;
+
 /** Keep Host commands out of executor paths without a tool_call approval. */
 export function refusePiSubagentHostCommands(session: CreateAgentSessionResult['session'], sources: readonly string[]): void {
+  // SAFETY: Pi 1.5.0's private method owns first-space parsing. Its runtime
+  // type is checked below; pin tests must re-check it on every Pi upgrade.
+  const parse = (session as unknown as { _throwIfExtensionCommand?: PiCommandParser })._throwIfExtensionCommand;
+  if (typeof parse !== 'function') {
+    throw new Error('pi_host_command_boundary_unavailable: pinned Pi parser _throwIfExtensionCommand is unavailable');
+  }
   const guarded = new WeakSet<typeof session.extensionRunner>();
-  const boundary = <Args extends unknown[], Result>(method: (...args: Args) => Result) => (...args: Args): Result => {
+  const boundary = <Args extends [string, ...unknown[]], Result>(method: (...args: Args) => Promise<Result>, expands?: (...args: Args) => boolean) => async (...args: Args): Promise<Result> => {
     // Reload replaces the runner; session replacement installs this boundary
     // through the runtime factory. Pi alone parses text and resolves aliases.
     const runner = session.extensionRunner;
@@ -53,9 +61,15 @@ export function refusePiSubagentHostCommands(session: CreateAgentSessionResult['
       };
       guarded.add(runner);
     }
+    if (args[0].startsWith('/') && expands?.(...args) !== false) {
+      // Resolve before prompt() can defer during agent_settled. Returning no
+      // command after an allowed lookup prevents Pi's generic queue refusal;
+      // the guarded real registry still throws for a denied command.
+      parse.call({ _extensionRunner: { getCommand: name => { runner.getCommand(name); } } }, args[0]);
+    }
     return method(...args);
   };
-  session.prompt = boundary(session.prompt.bind(session));
+  session.prompt = boundary(session.prompt.bind(session), (_text, options) => options?.expandPromptTemplates !== false);
   session.steer = boundary(session.steer.bind(session));
   session.followUp = boundary(session.followUp.bind(session));
 }

@@ -22,9 +22,10 @@ Turning off `expandPromptTemplates` also disables `/skill:` and file prompt
 templates. That would break the existing authorized-skill RPC regression in
 `pi-rpc-host.test.ts`, so that path was rejected. The SDK instead rejects the
 seven commands below using Pi's actual resolved registry entry and source.
-There is no SDK parser or text rewrite. Rejecting the registry lookup before
-Pi's handler error catcher produces a failed RPC response with
-`pi_host_command_denied`, rather than success with an extension notification.
+There is no SDK parser or text rewrite. The ingress preflight uses Pi's own
+private command parser and rejects through the real guarded registry before
+Pi can defer a prompt or invoke a handler. It produces one failed RPC response
+with `pi_host_command_denied`; the registry wrapper also protects later lookup.
 
 The installed extension has a stable inline source name. Bundled hosts use
 the shipped extension path. A different extension's colliding command remains
@@ -32,11 +33,37 @@ usable; the package command's resolved alias is refused. Each ordinary host
 session installs the boundary, including replacement sessions. A prompt,
 steer or follow-up after reload guards the new registry before dispatch.
 
+## Reviewed private Pi dependency
+
+[Approved dependency](https://github.com/Ancienttwo/byok-sdk/issues/1642#issuecomment-6762108942):
+Pi 1.5.0 `AgentSession._throwIfExtensionCommand`, at
+`dist/core/agent-session.js:1841-1847`. Pi does not export an extension-text
+parser, and `ExtensionRunner.getCommand` accepts a parsed name. The host calls
+this private helper with a read-only lookup façade over the real guarded
+registry. The façade returns no command after an allowed lookup, preventing
+the helper's generic queue refusal; no handler or session state is touched.
+The method must be a function at startup, or the host fails with
+`pi_host_command_boundary_unavailable`. Pin tests require Pi 1.5.0, verify
+`/run` refusal and `/skill:` passage, and simulate absent/nonfunction methods
+on the actual session during runtime assembly. Recheck this dependency on
+every Pi upgrade. The exception is also recorded beside the public-API rule
+in the [core Pi runtime contract](../spec.md#core-pi-runtime-contract); no
+separate reviewed-internals catalog was found.
+
+Pi defers `session.prompt()` before command lookup when an `agent_settled`
+extension handler is awaiting. A guard only on `getCommand` prevents the child
+but leaves the original prompt without a response. Preflight now happens
+before that deferral. It returns a rejected Promise through Pi's ordinary RPC
+error path; the guard emits no response of its own, so it cannot double-report.
+A held-handler regression covers `prompt`, both streaming prompt variants,
+`steer` and `follow_up`, requires a refusal before releasing the handler, and
+checks exactly one correlated response after release.
+
 ## RPC ingress inventory
 
 | RPC entry | Pi 1.5.0 path | Boundary and regression |
 | --- | --- | --- |
-| `prompt` | `rpc-mode.js:298` → `session.prompt` → command lookup | Refuse before handler; preserve skills/templates |
+| `prompt` | `rpc-mode.js:298` → `session.prompt` → command lookup | Refuse at ingress before settlement deferral or handler; preserve skills/templates |
 | `prompt` with `streamingBehavior: steer/followUp` | Same prompt method dispatches extension commands before queueing | Same boundary; rejected commands never enter a queue |
 | `steer` | `rpc-mode.js:319` → `session.steer` → `_queueUserInput` | Same registry check; preserve expanded skill/template input when the queue drains |
 | `follow_up` | `rpc-mode.js:323` → `session.followUp` → `_queueUserInput` | Same registry check; preserve expanded skill/template input when the queue drains |
@@ -138,11 +165,11 @@ bun run --cwd packages/client test src/__tests__/pi-rpc-host.test.ts src/__tests
 bun run check:api-surface
 ```
 
-Build, typecheck and API checks passed. The affected suites passed 77 tests;
+Build, typecheck and API checks passed. The affected suites passed 85 tests;
 two existing payload forms were skipped because the local Homebrew Node is
 not relocatable and no official Node SEA binary was configured. The required
 Bun-compiled regression ran. No public declaration changed. The private Pi
-host closure grew by 1,232 bytes, from 555,793 to 557,025; its exact budget and
+host closure grew by 1,634 bytes, from 555,793 to 557,427; its exact budget and
 generated README row were updated.
 
 Red-green proof: temporarily omitting the session boundary caused all three
@@ -152,4 +179,7 @@ the SDK refusal. Restoring the boundary made all three pass. No existing
 assertion was removed or relaxed. The watchdog regression was also run against
 its earlier allowed classification: `prompt` returned success for watchdog,
 while the two queue entries returned Pi's generic queue error, so all three
-specific-refusal assertions failed before the product rebuild.
+specific-refusal assertions failed before the product rebuild. The held-handler
+red run also reproduced the missing-response error for all three prompt
+variants; `steer` and `follow_up` already refused without deferral. All five
+held-handler cases pass with ingress preflight.
