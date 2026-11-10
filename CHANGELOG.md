@@ -14,6 +14,8 @@
 
 - **Fixed (client; #1695)** — Redelivered offers for tasks that failed after claim but before becoming active no longer claim the task again after startup cleanup. Runtime start and activation failures now retain the task in the bounded finished collection.
 
+- **Fixed (examples; #1664)** — Hosted Bot collaboration sync now publishes inbound disposition projections for stored human messages, using the same sync head and tail steps as the local Host.
+
 - **Changed (examples; #1664)** — K8 Layer 2 vendoring now includes `src/adapter-steps.ts`, which shares terminal routing, synchronous Host intent handling and Bot outcome port assembly between the local and hosted Hosts. The hosted `IntentOutcomeError` export is now the K8 class.
 
 - **Breaking (keys; #1547, #1551)** — Adds the explicit `opencode-go` provider kind. Its key checks send a fresh `x-opencode-session` and a truthful versioned User-Agent. The kind widens the SQLite profile store `provider_kind` CHECK set: existing stores report `migration-required` until the Host explicitly calls `migrateProviderProfileStore`, preserving profiles and credential-store key references. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#opencode-go-key-checks-and-profile-stores).

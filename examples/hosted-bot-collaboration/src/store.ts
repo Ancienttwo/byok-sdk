@@ -6,14 +6,14 @@ import { BOT_DREAM, botRoutines, endable, owned, resealDefinition, routineTurn, 
   type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
 import { admitBotToolsets, applyHomeTerminal, applyManagement, applyModels, failHomeFlush, homeEnqueued, homeHead, inactive, planHomeRetry, requireMain, updateBot,
   writeSnapshotBot, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
-import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
+import { admitUserInput, coalescePolicy, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { checkDreamInstruction, dreamPolicy, recordDream, reconcileDreamRoutines, type DreamingOptions, type DreamSync } from '@byok-sdk/example-bot-collaboration/dream';
-import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
+import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, observeDevices, replyCheckDue, reportCardDecisions,
   commandBots, seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { botOutcomePorts, type IntentOutcomeError } from '@byok-sdk/example-bot-collaboration/adapter-steps';
+import { botOutcomePorts, syncHead, syncTail, type IntentOutcomeError } from '@byok-sdk/example-bot-collaboration/adapter-steps';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefusal, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
@@ -551,10 +551,7 @@ export class HostedCollaborationStore {
       const emit: Publish = (id, body) => { publish(id, body); published.add(id); };
       let more = true;
       while (more) {
-        // As L's sync, a batch sealed here gets its Turn's step in this round, before later Turns of its Bot.
-        sealDueBatches(state, this.coalesce, options.now);
-        // As L's sync, card expiry runs before the Turn steps, so a ContextPack frozen in this round shows it.
-        expireCards(state, options.now);
+        syncHead(state, this.coalesce, options.now);
         // As L's sync, the room step runs before the Turn steps, so a seat Turn that it adds freezes in this round. The K4
         // cancel of a seat's admitted work is H's `cancelIntent`, as for a delegation cancel.
         const seats = await seatFacts(client, scope, Object.keys(state.team.seats));
@@ -582,11 +579,7 @@ export class HostedCollaborationStore {
       }
       await writeSlice(client, key, slice);
       await switchDueVersions(client, key, options.now);
-      // As L's sync (K8 host.ts `sync`), H's sync drops expired and unreserved reply tokens. L's call in each flush pass is a
-      // call in each delivery settle here (`finishDelivery`).
-      if (state.channel) cleanReplyTokens(await intentConclusions(client, scope), state, options.now);
-      // Last, as in L's sync: it sees every seal of this sync and of earlier transactions.
-      projectInputBatches(state, emit);
+      syncTail(state, state.channel ? await intentConclusions(client, scope) : undefined, options.now, emit);
       return { value: { dueAt: await this.dueAt(client, key, state) }, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now: options.now };
     });
   }

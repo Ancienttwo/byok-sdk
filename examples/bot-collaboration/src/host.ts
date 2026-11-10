@@ -12,7 +12,7 @@ import { json, stateOf, type CollaborationState, type Turn, type Verdict } from 
 import { contextTurns, DEFAULT_HANDOFF_BUDGETS, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { cancellable, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
-import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, expireCards, replyCheckDue, reportCardDecisions,
+import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, replyCheckDue, reportCardDecisions,
   commandBots, type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
 import { hostMessageDisposition, type MessageDisposition } from './rules/message';
@@ -22,7 +22,7 @@ import { BOT_DREAM, BOT_ROUTINE, botRoutines, endable, owned, routineCalendar, r
   ownerRoutineUpdate, updateDefinition, type BotRoutineInput } from './routines';
 import { checkDreamInstruction, dreamPolicy, dreamReads, reconcileDreamRoutines, recordDream, syncDreams, type DreamPolicy, type DreamingOptions } from './dream';
 import { DEFAULT_AUTONOMY, autonomyOf, wouldDoRows, type Autonomy, type WouldDo } from './rules/autonomy';
-import { botOutcomePorts, IntentOutcomeError, outcomeFailure, routeTerminal, runHostIntentHandler } from './adapter-steps';
+import { botOutcomePorts, IntentOutcomeError, outcomeFailure, routeTerminal, runHostIntentHandler, syncHead, syncTail } from './adapter-steps';
 import { DEVICE_CONCURRENCY, admitDeviceSlot, type DispatchIntent } from './rules/priority';
 
 import { applyManagement, applyModels, updateBot, writeSnapshotBot } from './team';
@@ -38,12 +38,12 @@ import { admitBot, admitDevice, botDeviceRefusal, checkTopology, DeviceModeError
   type SwitchWork } from './topology';
 import { checkSwitchRecords, refuseExported, sealLedger, switchContent, type SwitchHeader } from './switch';
 import { sealSwitchExport, SwitchExportError, type SwitchExport } from './migration';
-import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy } from './coalesce';
+import { admitUserInput, coalescePolicy, type CoalescePolicy } from './coalesce';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery';
 import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, queueDelivery, refuseRoute, rememberFilteredInbound, rememberInbound,
   resendUnknown, revokePush } from './delivery-routing';
-import { inboundDispositionsOf, projectInboundDispositions } from './inbound';
+import { inboundDispositionsOf } from './inbound';
 import type { InboundDisposition } from './rules/inbound';
 export interface BotOptions {
   botId: string; execution: ExecutionTemplate; now?: () => number;
@@ -1112,11 +1112,8 @@ export class BotCollaboration {
       delete state.hostIntents![key];
       for (const [taskId, reply] of Object.entries(state.replies)) if (reply.turnId === key) delete state.replies[taskId];
     }
-    // A batch sealed here is enqueued in this pass, before later Turns of its Bot.
-    sealDueBatches(state, this.coalesce, this.now());
+    syncHead(state, this.coalesce, this.now());
     reconcileDreamRoutines(s, this.dreaming, this.models(), this.now());
-    // Refresh passive state before any new offer freezes its ContextPack.
-    expireCards(state, this.now());
     const routines = botRoutines(Object.values(s.routines));
     const limits = { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes, instructionMaxBytes: this.instructionMaxBytes, handoff: this.handoff };
     const materialized = advanceRoomsAndTurns(s, state, this.now(), turn => syncTurnInLedger(this.ledger, s, rows, turn, { now: this.now(),
@@ -1128,10 +1125,7 @@ export class BotCollaboration {
       now: this.now(), refused: botId => botDeviceRefusal(state, botId) !== undefined, history: injected?.dreams, historyMode: !!this.options.history });
     settleDelegations(s, state, this.now(), (key, value) => project(s, key, value), this.timers);
     reportCardDecisions(state, (key, value) => project(s, key, value));
-    cleanReplyTokens(s, state, this.now());
-    projectInputBatches(state, (key, value) => project(s, key, value));
-    // #1229 item 3: one projection per destination. An unchanged destination is the same projection id and value.
-    projectInboundDispositions(state, (key, value) => project(s, key, value));
+    syncTail(state, s, this.now(), (key, value) => project(s, key, value));
     return materialized || dreamed;
   }
   /** Example reconcile loop (§3.10). K4 arms no scan after a settled intent, so the Host checks replies itself. */
