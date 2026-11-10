@@ -127,20 +127,19 @@ describe('TaskRunnerHost: offer/admission reducer wiring', () => {
     expect(host.runnerSnapshot().pendingCancelled).toEqual([]);
   });
 
-  it('X2 declines during admission and C1 can no longer claim afterwards', () => {
+  it('X2 records admission cancellation until O5 declines', () => {
     const sent: string[] = [];
     const { host } = makeHost();
     begin(host, 't1', { sendDecline: effect => { sent.push(effect.effect.reason ?? ''); } });
     receive(host);
     host.dispatchSync(event('admission.begin'));
     const cancelled = host.dispatchSync(event('cancel.received', { reason: 'wire cancel' }));
-    expect(cancelled.task?.phase).toBe('declined');
-    expect(cancelled.task?.terminal?.reason).toBe('cancelled before claim: wire cancel');
-    expect(sent).toEqual(['cancelled before claim: wire cancel']);
-
-    const claimable = host.dispatchSync(event('admission.claimable'));
-    expect(claimable.disposition).toBe('dropped');
-    expect(claimable.effects.some(effect => effect.effect.kind === 'journal.admission')).toBe(false);
+    expect(cancelled.task?.phase).toBe('admitting');
+    expect(cancelled.task?.cancel).toMatchObject({ requested: true, reason: 'wire cancel' });
+    expect(sent).toEqual([]);
+    host.dispatchSync(event('admission.declined', { reason: 'cancelled before claim', retryable: false }));
+    expect(sent).toEqual(['cancelled before claim']);
+    expect(host.runnerSnapshot().pendingCancelled).toEqual([{ taskId: 't1', atMs: 100, reason: 'wire cancel' }]);
   });
 
   it('X2a declines a cancel that reduced before claim.journaled; the late journal drops', () => {

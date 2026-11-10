@@ -131,8 +131,7 @@ const queued = { requestId: 'r1', kind: 'task-terminal' as const };
 export const ROW_FIXTURES: ReadonlyMap<string, RowFixture> = new Map<string, RowFixture>([
   ['O1', fixture(makeEvent('offer.received', { offer: createOfferFacts() }), {})],
   ['O3', fixture(makeEvent('admission.begin'), {
-    task: { phase: 'received' },
-    runner: { pendingCancelled: [{ taskId: 't1', reason: 'stop', atMs: 1 }] },
+    task: { phase: 'received', cancel: { requested: true, reason: 'stop' } },
   })],
   ['O4', fixture(makeEvent('admission.stage', { stage: 'home' }), {
     task: { phase: 'admitting' },

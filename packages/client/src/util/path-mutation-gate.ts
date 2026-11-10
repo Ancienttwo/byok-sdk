@@ -74,7 +74,16 @@ export class PathMutationGateBusyError extends Error {
 export const PATH_MUTATION_GATE_PROTOCOL = 2;
 
 // Fixed and environment-independent; holds the darwin lock files.
-const POSIX_GATE_ROOT = `/tmp/byok-pm-${process.getuid?.() ?? 'unknown'}`;
+export const POSIX_GATE_ROOT = `/tmp/byok-pm-${process.getuid?.() ?? 'unknown'}`;
+// Read at acquire time. Only the client test setup replaces it, so test runs do
+// not leave one never-unlinked lock per temp path in the real root. Not exported
+// from the package entry.
+let posixGateRoot = POSIX_GATE_ROOT;
+
+/** Internal test seam: `undefined` restores the production root. */
+export function setPosixGateRootForTests(root: string | undefined): void {
+  posixGateRoot = root ?? POSIX_GATE_ROOT;
+}
 // darwin <sys/fcntl.h>; Node and Bun pass open(2) flags through unchanged.
 const DARWIN_O_EXLOCK = 0x20;
 
@@ -107,7 +116,7 @@ function gateIdentity(scope: PathMutationGateScope, canonicalTarget: string): st
 }
 
 async function assertPrivateGateRoot(): Promise<void> {
-  await ensureOwnedPrivateDirectory(POSIX_GATE_ROOT);
+  await ensureOwnedPrivateDirectory(posixGateRoot);
 }
 
 function resolveGateTarget(input: PathMutationGateInput): Promise<string> {
@@ -122,7 +131,7 @@ async function lockIdentity(identity: string): Promise<(() => Promise<void>) | u
     let fd: number;
     try {
       fd = openSync(
-        path.join(POSIX_GATE_ROOT, `${identity}.lock`),
+        path.join(posixGateRoot, `${identity}.lock`),
         constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW | DARWIN_O_EXLOCK | constants.O_NONBLOCK,
         0o600,
       );

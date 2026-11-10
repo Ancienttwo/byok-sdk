@@ -6,7 +6,11 @@
 
 - **Changed (client; #1688)** — When the daemon runs without its control endpoint after a typed refusal (`private_dir_symlink`, `private_dir_not_directory`, `private_dir_foreign_owner`, `socket_path_not_socket`), `byok-agent doctor` reports the code, path and recording time instead of `daemon offline`. The refusal is kept under an optional `controlEndpoint` key in `operational-health.json` until the next successful bind removes it; `OperationalHealthFileInspection` exposes it as `controlEndpointRefusal`. A health file without a refusal is byte-for-byte unchanged.
 
+- **Changed (client; #1692)** — Cancellation after a non-active task selects its terminal no longer retains a pending marker. If a claimed task receives multiple cancellation reasons during startup, the first reason is retained.
+
 - **Changed (client; #1691)** — Strict offer declines and their bounded redelivery tracking now use the task runner reducer while preserving decline payloads.
+
+- **Fixed (client tests; #1732)** — The client test suites keep their darwin path-mutation gate locks in a per-file temporary root, so a run no longer adds a lock file to `/tmp/byok-pm-<uid>` for every temp path. The production root is unchanged.
 
 - **Changed (client; #1680)** — Grok, agy, Codex and Hermes share internal session lifecycle helpers for cancellation deadlines and retryable cleanup.
 

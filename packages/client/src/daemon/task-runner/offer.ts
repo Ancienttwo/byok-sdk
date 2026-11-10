@@ -6,7 +6,7 @@ import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home'
 import type { OfferPhaseContext } from './support';
 import { settleAgentMemoryCommitCopy } from './agent-memory';
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable';
-import { hostDeclineSender, offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage, pendingCancelBeforeActive } from './support';
+import { hostDeclineSender, offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import { offerAlreadyHandled } from './offer-admission';
@@ -224,13 +224,6 @@ export async function handleOffer(
     }
   }
 
-  // Finding #5: mark this taskId as "in-flight" for the entire remainder
-  // of this call — `evictPendingCancelled` must never remove a
-  // `pendingCancelled` entry for a taskId in this set (see its own doc
-  // comment and `inFlightOffers`'s class-level doc comment for the exact
-  // counterexample this closes). The `finally` below clears it on every
-  // exit path (decline, fail, the checkpoint-2 cancel-teardown, or
-  // successful registration) — never leaked past this one call.
   this['inFlightOffers'].add(taskId);
   const blobAbort = new AbortController();
   const startupDeadline = Date.now() + (this['deps'].startupTimeoutMs ?? 30_000);
@@ -239,18 +232,14 @@ export async function handleOffer(
   startupTimer.unref?.();
   const admissionWithdrawn = (): boolean => {
     if (!blobAbort.signal.aborted) return false;
-    // #1099 S4: the reducer owns the cancel transition. A cancel already
-    // declined during the claim journal (X2a) has sent its own task.decline
-    // and selected the terminal; the stage that observes the abort must not
-    // decline it a second time. Admission-stage cancels, shutdown and the
-    // startup deadline all decline through O5 and keep their exact legacy
-    // reasons/retryability.
     const current = host.current(taskId);
-    if (current?.phase === 'declined' || current?.terminal !== undefined || current?.cancel.requested === true) return true;
-    // The bounded marker keeps the pre-claim cancel reason and non-retryable
-    // pair exactly as before; admission-stage cancels decline through O5.
-    const cancelled = pendingCancelBeforeActive.call(this, taskId) !== undefined;
-    decline(cancelled ? 'cancelled before claim' : this['stoppingOffers'] ? 'daemon is shutting down' : 'runtime startup deadline exceeded', !cancelled);
+    if (current?.phase === 'declined' || current?.terminal !== undefined) return true;
+    if (current?.cancel.requested === true) {
+      if (current.phase === 'claimed' || current.claim.journaled || current.claim.sent) return true;
+      decline('cancelled before claim', false);
+      return true;
+    }
+    decline(this['stoppingOffers'] ? 'daemon is shutting down' : 'runtime startup deadline exceeded', true);
     return true;
   };
   this['inFlightBlobAborts'].set(taskId, blobAbort);
@@ -286,7 +275,6 @@ export async function handleOffer(
     });
   };
   try {
-    if (this['admitOffer'](phase) === undefined) return;
     // Checkpoint 1 passed. O3 moves received -> admitting; if the reducer
     // already settled the offer while preparation was opening, O3 drops and
     // no later stage runs for a task it has settled.
