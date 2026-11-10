@@ -11,6 +11,7 @@ import type { ownsHermesGatewayPid } from './gateway-ownership';
 import type { removeHermesProfile } from './hermes-home';
 import { AsyncQueue } from '../../util/async-queue';
 import { HermesProjection } from './projection';
+import { raceDeadline, RetryableOnce } from '../session-kit';
 
 /** Windows-only gateway helpers. They load with this entry, so the root entries do not carry them. */
 export { exchangeHermesPipe, windowsLower } from './gateway-pipe-win32';
@@ -58,7 +59,7 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
     private failure?: RuntimeExecutionFailure;
     private turn?: Promise<void>;
     private stopping = false;
-    private closeAttempt?: Promise<void>;
+    private readonly closeOnce = new RetryableOnce();
 
     constructor(
       private readonly scratch: ExecutionScratch,
@@ -213,7 +214,6 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
     async interrupt(): Promise<void> {
       const turn = this.turn;
       if (!this.connection || !turn) return;
-      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         // Tools run under the gateway, and the cancel can orphan one that left its group (#1297): remember them first.
         try {
@@ -222,17 +222,10 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
           throw infrastructure('run', `hermes interrupt refused: ${error instanceof Error ? error.message : String(error)}`);
         }
         this.connection.notify('session/cancel', { sessionId: this.sessionRef });
-        await Promise.race([
-          turn,
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(infrastructure('run', 'hermes cancel timed out')), this.interruptMs);
-          }),
-        ]);
+        await raceDeadline(turn, this.interruptMs, () => infrastructure('run', 'hermes cancel timed out'));
       } catch (error) {
         this.fail(error);
         throw error;
-      } finally {
-        clearTimeout(timer);
       }
     }
 
@@ -251,39 +244,32 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
 
     async close(): Promise<void> {
       this.stopping = true;
-      if (!this.closeAttempt) {
-        const attempt = (async () => {
+      await this.closeOnce.run(async () => {
+        try {
+          this.connection?.close(this.failure ?? infrastructure('run', 'hermes session closed'));
           try {
-            this.connection?.close(this.failure ?? infrastructure('run', 'hermes session closed'));
             try {
-              try {
-                await this.viewer?.dispose();
-              } finally {
-                await this.gateway?.dispose();
-              }
+              await this.viewer?.dispose();
             } finally {
-              if (this.home !== undefined) {
-                await removeHermesProfile(this.root, this.home).catch((cause: unknown) => {
-                  throw new RuntimeDisposalFailure({ stage: 'cleanup', reason: 'hermes execution profile removal did not complete' }, { cause });
-                });
-                this.liveHomes.delete(this.home);
-              }
-              await this.scratch.release();
+              await this.gateway?.dispose();
             }
           } finally {
-            this.queue.end();
+            if (this.home !== undefined) {
+              await removeHermesProfile(this.root, this.home).catch((cause: unknown) => {
+                throw new RuntimeDisposalFailure({ stage: 'cleanup', reason: 'hermes execution profile removal did not complete' }, { cause });
+              });
+              this.liveHomes.delete(this.home);
+            }
+            await this.scratch.release();
           }
-          this.connection = undefined;
-          this.viewer = undefined;
-          this.gateway = undefined;
-          this.home = undefined;
-        })();
-        this.closeAttempt = attempt.catch((error) => {
-          this.closeAttempt = undefined;
-          throw error;
-        });
-      }
-      await this.closeAttempt;
+        } finally {
+          this.queue.end();
+        }
+        this.connection = undefined;
+        this.viewer = undefined;
+        this.gateway = undefined;
+        this.home = undefined;
+      });
     }
   }
 

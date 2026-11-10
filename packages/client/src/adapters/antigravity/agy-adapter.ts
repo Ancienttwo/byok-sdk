@@ -26,6 +26,7 @@ import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 import { AsyncQueue } from '../../util/async-queue';
+import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce } from '../session-kit';
 import { comparablePath } from '../../util/comparable-path';
 import { agentPersona } from '../agent-persona';
 import { agyEndpointOf } from './agy-endpoint';
@@ -201,7 +202,7 @@ export class AgyAdapter implements RuntimeAdapter {
           const child = spawnAgent(bin, args, options);
           session.own(child);
           void child.exited.then(() => session.exited(), (error) => session.fail(error));
-          return session.gate(child);
+          return haltGate(child, () => session.halted !== undefined);
         },
         // agy runs its own commands and never asks for a client terminal; the stack still requires the seam.
         createOwnedTerminalSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn }),
@@ -258,10 +259,10 @@ class AgySession implements Session {
   private readonly queue = new AsyncQueue<AgentEvent>();
   private failure?: RuntimeExecutionFailure;
   private active = false;
-  private readonly interruptWaiters = new Set<() => void>();
+  private readonly turnWaiters = new SettleWaiters();
   private stopping = false;
-  private closeAttempt?: Promise<void>;
-  private retainedBytes = 0;
+  private readonly closeOnce = new RetryableOnce();
+  private readonly recordBudget: RetainedRecordBudget;
   /** Set when the record consumer failed: no later line reaches the ACP stream, so the kernel retains no more of them. */
   halted?: RuntimeExecutionFailure;
 
@@ -269,11 +270,11 @@ class AgySession implements Session {
     private readonly scratch: ExecutionScratch,
     private readonly model: string | undefined,
     private readonly interruptMs: number,
-    private readonly maxRetainedBytes: number,
+    maxRetainedBytes: number,
     private readonly identities: McpEventIdentities,
     private readonly expectedSessionRef?: string,
     private readonly reader?: AgyReaderScope,
-  ) {}
+  ) { this.recordBudget = new RetainedRecordBudget(maxRetainedBytes, 'agy'); }
 
   useProxy(proxy: AgyGeminiProxy): void {
     this.proxy = proxy;
@@ -284,15 +285,6 @@ class AgySession implements Session {
   }
   get exitedOnItsOwn(): boolean {
     return this.exit?.exitedOnItsOwn === true;
-  }
-  /** The agent's lines stop at the transport once the record stream halted. */
-  gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
-    return {
-      ...child,
-      onLine: (handler: (line: string) => void) => child.onLine((line) => {
-        if (this.halted === undefined) handler(line);
-      }),
-    };
   }
   ready(id: string): void {
     if (this.expectedSessionRef !== undefined && id !== this.expectedSessionRef) throw authority('agy resume returned a different session id');
@@ -306,8 +298,7 @@ class AgySession implements Session {
     if (this.halted !== undefined) return;
     try {
       // The observer receives the redacted, retained record: measure what the kernel keeps.
-      this.retainedBytes += Buffer.byteLength(JSON.stringify(record), 'utf8');
-      if (this.retainedBytes > this.maxRetainedBytes) throw infrastructure('agy retained record byte budget exceeded');
+      this.recordBudget.add(record);
       this.projection?.consume(record, (event) => this.emit(event), (turn) => this.turnEnded(turn));
     } catch (error) {
       this.fail(error);
@@ -356,7 +347,7 @@ class AgySession implements Session {
         this.queue.push({ type: 'turn_end' });
       }
     }, (error: unknown) => this.fail(error)).finally(() => {
-      for (const resolve of this.interruptWaiters) resolve();
+      this.turnWaiters.settleAll();
     });
   }
   /** OAR sends session/close, which agy advertises, before it releases the process. */
@@ -428,53 +419,32 @@ class AgySession implements Session {
   }
   async interrupt(): Promise<void> {
     if (!this.raw || !this.active) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let resolveTurn!: () => void;
-    const turnSettled = new Promise<void>(resolve => { resolveTurn = resolve; });
-    this.interruptWaiters.add(resolveTurn);
+    const waiter = this.turnWaiters.wait();
     try {
-      await Promise.race([
-        // session/cancel is a notification; the cancelled prompt answer carries the outcome.
-        this.raw.abort().then(async ({ response: { body } }) => {
-          if (body.kind === 'accepted') await turnSettled;
-          // A turn that already ended is a normal race. Any other refusal sent no cancel: fail as an unanswered cancel does.
-          else if (body.kind === 'rejected' && body.code !== 'no_active_turn') throw infrastructure(`agy interrupt refused: ${body.reason}`);
-        }),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(infrastructure('agy interrupt timed out')), this.interruptMs);
-        }),
-      ]);
+      await raceDeadline(oarCancelSettled(this.raw.abort(), waiter.settled, 'agy'), this.interruptMs, () => infrastructure('agy interrupt timed out'));
     } catch (error) {
       this.fail(error);
       throw error;
     } finally {
-      clearTimeout(timer);
-      this.interruptWaiters.delete(resolveTurn);
+      waiter.release();
     }
   }
   async close(): Promise<void> {
     this.stopping = true;
-    if (!this.closeAttempt) {
-      const promise = Promise.resolve().then(async () => {
+    await this.closeOnce.run(async () => {
+      try {
         try {
-          try {
-            await this.stopRuntime();
-          } finally {
-            await this.scratch.release();
-          }
+          await this.stopRuntime();
         } finally {
-          // The cancelled prompt answer can follow the cancel; end the consumer only after disposal drained stdout.
-          this.queue.end();
+          await this.scratch.release();
         }
-        this.raw = undefined;
-        this.projection = undefined;
-        this.child = undefined;
-      });
-      this.closeAttempt = promise.catch((error) => {
-        this.closeAttempt = undefined;
-        throw error;
-      });
-    }
-    await this.closeAttempt;
+      } finally {
+        // The cancelled prompt answer can follow the cancel; end the consumer only after disposal drained stdout.
+        this.queue.end();
+      }
+      this.raw = undefined;
+      this.projection = undefined;
+      this.child = undefined;
+    });
   }
 }

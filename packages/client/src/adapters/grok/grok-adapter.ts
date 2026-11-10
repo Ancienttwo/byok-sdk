@@ -28,6 +28,7 @@ import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
 import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime';
 import { AsyncQueue } from '../../util/async-queue';
+import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce } from '../session-kit';
 import type { ResolvedBin } from '../codex/resolve-bin';
 import { agentPersona } from '../agent-persona';
 import { GROK_USER_MCP_SERVERS_OFF, grokUserMcpServersRefusal } from './agent-user-mcp-servers';
@@ -224,7 +225,7 @@ export class GrokAdapter implements RuntimeAdapter {
           const child = spawnAgent(bin, args, { ...options, env: { ...options.env, ...agentEnv } });
           session.own(child);
           void child.exited.then(() => session.exited(), (error) => session.fail(error));
-          return session.gate(child);
+          return haltGate(child, () => session.halted !== undefined);
         },
         spawnTerminal,
         { kind: 'available', via: 'executable', command },
@@ -280,10 +281,10 @@ class GrokSession implements Session {
   private active = false;
   /** The SDK asked for the active turn's cancel. Grok also ends a turn as cancelled on its own, on a permission request answered `cancelled`. */
   private interruptRequested = false;
-  private readonly interruptWaiters = new Set<() => void>();
+  private readonly turnWaiters = new SettleWaiters();
   private stopping = false;
-  private closeAttempt?: Promise<void>;
-  private retainedBytes = 0;
+  private readonly closeOnce = new RetryableOnce();
+  private readonly recordBudget: RetainedRecordBudget;
   /** Set when the record consumer failed: no later line reaches the ACP stream, so the kernel retains no more of them. */
   halted?: RuntimeExecutionFailure;
 
@@ -291,9 +292,9 @@ class GrokSession implements Session {
     private readonly scratch: ExecutionScratch,
     private readonly model: string | undefined,
     private readonly interruptMs: number,
-    private readonly maxRetainedBytes: number,
+    maxRetainedBytes: number,
     private readonly expectedSessionRef?: string,
-  ) {}
+  ) { this.recordBudget = new RetainedRecordBudget(maxRetainedBytes, 'grok'); }
 
   own(child: { dispose(): Promise<void>; kill(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
@@ -301,15 +302,6 @@ class GrokSession implements Session {
   }
   get exitedOnItsOwn(): boolean {
     return this.exit?.exitedOnItsOwn === true;
-  }
-  /** The agent's lines stop at the transport once the record stream halted. */
-  gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
-    return {
-      ...child,
-      onLine: (handler: (line: string) => void) => child.onLine((line) => {
-        if (this.halted === undefined) handler(line);
-      }),
-    };
   }
   ready(id: string): void {
     if (this.expectedSessionRef !== undefined && id !== this.expectedSessionRef) throw authority('grok resume returned a different session id');
@@ -323,9 +315,7 @@ class GrokSession implements Session {
     if (this.halted !== undefined) return;
     try {
       // The observer receives the redacted, retained record: measure what the kernel keeps.
-      this.retainedBytes += Buffer.byteLength(JSON.stringify(record), 'utf8');
-      if (this.retainedBytes > this.maxRetainedBytes)
-        throw infrastructure('grok retained record byte budget exceeded');
+      this.recordBudget.add(record);
       this.projection?.consume(record, (event) => this.queue.push(event), (turn) => this.turnEnded(turn));
     } catch (error) {
       this.fail(error);
@@ -337,7 +327,7 @@ class GrokSession implements Session {
     const cancelledBySdk = this.interruptRequested || this.stopping;
     this.active = false;
     this.interruptRequested = false;
-    for (const resolve of this.interruptWaiters) resolve();
+    this.turnWaiters.settleAll();
     if (turn.kind === 'failed')
       this.fail(new RuntimeExecutionFailure({
         phase: 'run',
@@ -401,59 +391,38 @@ class GrokSession implements Session {
   async interrupt(): Promise<void> {
     if (!this.raw || !this.active) return;
     this.interruptRequested = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let resolveTurn!: () => void;
-    const turnSettled = new Promise<void>(resolve => { resolveTurn = resolve; });
-    this.interruptWaiters.add(resolveTurn);
+    const waiter = this.turnWaiters.wait();
     try {
-      await Promise.race([
-        // session/cancel is a notification; the cancelled prompt answer carries the final usage and outcome.
-        this.raw.abort().then(async ({ response: { body } }) => {
-          if (body.kind === 'accepted') await turnSettled;
-          // A turn that already ended is a normal race. Any other refusal sent no cancel: fail as an unanswered cancel does.
-          else if (body.kind === 'rejected' && body.code !== 'no_active_turn') throw infrastructure(`grok interrupt refused: ${body.reason}`);
-        }),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(infrastructure('grok interrupt timed out')), this.interruptMs);
-        }),
-      ]);
+      await raceDeadline(oarCancelSettled(this.raw.abort(), waiter.settled, 'grok'), this.interruptMs, () => infrastructure('grok interrupt timed out'));
     } catch (error) {
       this.fail(error);
       throw error;
     } finally {
-      clearTimeout(timer);
-      this.interruptWaiters.delete(resolveTurn);
+      waiter.release();
     }
   }
   async close(): Promise<void> {
     this.stopping = true;
-    if (!this.closeAttempt) {
-      const promise = Promise.resolve().then(async () => {
+    await this.closeOnce.run(async () => {
+      try {
         try {
-          try {
-            await this.raw?.dispose();
-          } catch (error) {
-            // A failed reap of Grok's terminal trees is always reported: a later close retries it.
-            if (!this.failure || isRuntimeDisposalFailure(error)) throw error;
-          } finally {
-            await this.child?.dispose();
-            await this.scratch.release();
-          }
+          await this.raw?.dispose();
+        } catch (error) {
+          // A failed reap of Grok's terminal trees is always reported: a later close retries it.
+          if (!this.failure || isRuntimeDisposalFailure(error)) throw error;
         } finally {
-          // The cancelled prompt answer can follow the cancel; end the consumer only after disposal drained stdout.
-          this.flushPendingUsage();
-          this.queue.end();
+          await this.child?.dispose();
+          await this.scratch.release();
         }
-        this.raw = undefined;
-        this.projection = undefined;
-        this.child = undefined;
-      });
-      this.closeAttempt = promise.catch((error) => {
-        this.closeAttempt = undefined;
-        throw error;
-      });
-    }
-    await this.closeAttempt;
+      } finally {
+        // The cancelled prompt answer can follow the cancel; end the consumer only after disposal drained stdout.
+        this.flushPendingUsage();
+        this.queue.end();
+      }
+      this.raw = undefined;
+      this.projection = undefined;
+      this.child = undefined;
+    });
   }
   private flushPendingUsage(): void {
     const usage = this.projection?.takePendingUsage();
