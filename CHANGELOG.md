@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Added (client; #1593)** — The OpenCode descriptor also declares `platforms: ['win32']`. A runtime contract (`opencode1` and `opencode2` legs) now runs OpenCode 1.19.5 and 2.2.6 against a loopback provider in CI, and passed on macOS arm64 and Windows x64. See the [qualification evidence](docs/researches/2026-11-09-opencode-platform-qualification.md).
+
 ## 0.41.0 — 2026-11-09 (published)
 
 0.41.0 is a MINOR release for all nine public packages and the first wire v6 release: a v5 peer cannot read v6, so the server side and the daemons upgrade together. There is no new `deploy/sql` migration and no SQLite schema change; keys adds an explicit one-shot migration that rebuilds a profile store written with an earlier `provider_kind` CHECK set, and store prechecks can report `migration-required`. The released [upgrade manifest](packages/client/upgrade-history/0.40.0-0.41.0.json) has three breaking entries (wire v6 isolation sources, the retired v5 gates, the token lifetime) and four additive entries; the removal of the private sealed Pi host import is a further breaking change outside the manifest. See the [release notes](docs/releases/v0.41.0.md) and [Host upgrade checklist](docs/releases/host-upgrade-0.41.0.md). All nine packages were published on 2026-11-09 with npm `latest` at 0.41.0 and readback passed. The release commit is `2895560b3`; tag `v0.41.0` and the GitHub Release point to it. Publication does not establish platform or production acceptance.

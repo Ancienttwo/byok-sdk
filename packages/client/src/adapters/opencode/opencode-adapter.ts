@@ -60,8 +60,8 @@ export class OpenCodeAdapter implements RuntimeAdapter {
 
   get descriptor() {
     return freezeRuntimeAdapterDescriptor({ id: 'opencode', supportsDispatchSelection: false,
-      // `platforms` is OS-grained, so `darwin` covers x64 (qualified) and arm64 (no task evidence yet; #1593).
-      platforms: ['darwin'], capabilities: OPENCODE_RUNTIME_CAPABILITIES,
+      // `platforms` is OS-grained: `darwin` covers x64 and arm64, `win32` x64; each has runtime contract evidence on both lines (#1593).
+      platforms: ['darwin', 'win32'], capabilities: OPENCODE_RUNTIME_CAPABILITIES,
       ...(this.policy === undefined ? {} : { versionPolicy: this.policy }),
     });
   }
