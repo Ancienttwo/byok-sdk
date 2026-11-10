@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ZodError } from 'zod';
 import { RESULT_SCHEMA_MAX_BYTES, checkResultSchema } from '@byok-sdk/protocol';
 import { AgentExecutionInputSchema } from '../agent-execution';
 import { TENANT_A, createHarness } from './support/harness';
@@ -46,6 +47,10 @@ describe('fresh Agent execution submission', () => {
     if (field === 'context') delete candidate.agentMessageContext;
     else delete candidate.payload.messageEgress;
     await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate)).rejects.toThrow();
+    if (field === 'messageEgress') {
+      await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate))
+        .rejects.toMatchObject({ code: 'coordination_input_invalid', message: 'agentMessageContext requires messageEgress' });
+    }
     expect(record).not.toHaveBeenCalled();
     expect(await harness.cloud.readTaskAttempt(TENANT_A, input.taskId)).toBeUndefined();
     expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId: input.deviceId, afterSeq: 0 })).messages).toEqual([]);
@@ -192,6 +197,42 @@ describe('fresh Agent execution submission', () => {
       expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId, afterSeq: 0 })).messages).toEqual([]);
     }
 
+    it.each([
+      'enqueueAgentOffer', 'enqueuePreparedOffer', 'enqueueAgentEgressOffer', 'enqueueSealedAgentOffer',
+      'enqueueSealedAgentEgressOffer', 'submitAgentExecution', 'submitSealedAgentExecution',
+    ] as const)('refuses every selection violation on %s before reads or writes, including retries', async lane => {
+      const { harness, device, payload } = await setup(BASE_CAPABILITIES);
+      const getDevice = vi.spyOn(harness.stores.devices, 'get');
+      const record = vi.spyOn(harness.stores.receipts, 'record');
+      const submit = lane.startsWith('submit');
+      const prepared = lane === 'enqueuePreparedOffer';
+      const base: Record<string, unknown> = { ...payload,
+        session: submit || prepared ? { mode: 'fresh' } : { mode: 'resume', sessionRef: 'session' } };
+      if (lane === 'enqueueAgentOffer' || lane === 'enqueueSealedAgentOffer') delete base.egressPolicy;
+      if (lane.includes('Sealed')) base.sealing = { scopeId: 'scope', epoch: 1, categories: ['task-output'] };
+      if (prepared) {
+        delete base.instruction;
+        base.preparation = { reference: 'prepared', requestDigest: 'digest' };
+        base.agentMemory = 'none';
+      }
+      for (const [path, patch] of [
+        ['agentMemory', { homeAccess: 'memory-reader', agentMemory: 'read-write' }],
+        ['runtime', { runtime: 'claude', dispatchSelection: SELECTION }],
+        ['harnessId', { harnessId: 'custom' }],
+      ] as const) {
+        const candidate = { taskId: input.taskId, deviceId: device.deviceId, payload: { ...base, ...patch } };
+        for (let retry = 0; retry < 2; retry++) {
+          const call = submit ? harness.cloud[lane as 'submitAgentExecution'](TENANT_A, candidate as never)
+            : harness.cloud[lane as 'enqueueAgentOffer'](TENANT_A, device.deviceId, candidate as never);
+          await expect(call).rejects.toBeInstanceOf(ZodError);
+          await expect(call).rejects.toMatchObject({ issues: [{ code: 'custom', path: submit ? ['payload', path] : [path] }] });
+          expect(getDevice).not.toHaveBeenCalled();
+          expect(record).not.toHaveBeenCalled();
+          await expectNothingWritten(harness, device.deviceId);
+        }
+      }
+    });
+
     it('refuses dispatchSelection without the dispatch-selection capability', async () => {
       const { harness, device, payload } = await setup(BASE_CAPABILITIES);
       const candidate = AgentExecutionInputSchema.parse({ taskId: input.taskId, deviceId: device.deviceId,
@@ -212,10 +253,13 @@ describe('fresh Agent execution submission', () => {
 
     it('refuses a runtime that differs from dispatchSelection.runtimeId', async () => {
       const { harness, device, payload } = await setup([...BASE_CAPABILITIES, 'dispatch-selection', 'toolset-selection']);
-      const candidate = AgentExecutionInputSchema.parse({ taskId: input.taskId, deviceId: device.deviceId,
-        payload: { ...payload, runtime: 'claude', dispatchSelection: SELECTION, terminalProjection: { mode: 'none' } } });
-      await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate))
-        .rejects.toMatchObject({ code: 'coordination_input_invalid', message: expect.stringMatching(/claude.*codex/) });
+      const candidate = { taskId: input.taskId, deviceId: device.deviceId,
+        payload: { ...payload, runtime: 'claude', dispatchSelection: SELECTION, terminalProjection: { mode: 'none' } } };
+      expect(() => AgentExecutionInputSchema.parse(candidate)).toThrow(ZodError);
+      expect(AgentExecutionInputSchema.safeParse(candidate).error?.issues)
+        .toMatchObject([{ code: 'custom', path: ['payload', 'runtime'], message: expect.stringMatching(/claude.*codex/) }]);
+      await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate as never))
+        .rejects.toMatchObject({ issues: [{ path: ['payload', 'runtime'] }] });
       await expectNothingWritten(harness, device.deviceId);
     });
 

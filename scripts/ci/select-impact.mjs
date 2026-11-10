@@ -239,6 +239,8 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|provider-profile-binding|secret-store|secret-value|sqlite-profile-store|command-runner)\.ts)$/,
   ],
   'windows-client': [
+    // Runtime PATH detection is exercised on Windows, including native and batch candidates.
+    /^packages\/client\/src\/(?:adapters\/(?:runtime-invocation\.ts|antigravity\/resolve-bin\.ts|opencode\/resolve-bin\.ts)|__tests__\/runtime-executable-detection\.test\.ts)$/,
     /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-record)\.ts$/,
     /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write|fold-name-aliases|daemon-owner)\.ts|diagnostics\/|bin\/commands\/)/,
     /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity|service-enrollment-handover)[^/]*$/,
@@ -662,6 +664,11 @@ export function selectImpact(paths, context = {}) {
     // pack-and-smoke.mjs runs it against the packed client.
     if (path === 'packages/client/scripts/packed-cli-mcp-smoke.mjs' || path === 'packages/client/scripts/fixtures/packed-cli-mcp-codex.mjs') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
+    }
+    // #605 L2: the standalone verifier builds its pinned fixture itself.
+    // run-targeted executes it with Node in the existing targeted job.
+    if (/^scripts\/agent-memory-a7\/(?:(?:bridge|evidence|run|verify|verifier\.test)\.mjs|result\.schema\.json)$/.test(path)) {
+      scripts = true; continue;
     }
     // #1105: the retention soak is a dev-only artifact producer run by its own
     // workflow, not by a package test suite.

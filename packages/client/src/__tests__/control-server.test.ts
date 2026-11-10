@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectControlClient } from '../daemon/control-client';
+import { PrivateDirectoryRefusedError, PrivateSocketPathError } from '../util/private-unix-socket';
 import {
   AnotherControlServerRunningError,
   startControlServer,
@@ -150,8 +151,8 @@ function frameStream(socket: net.Socket): { next(): Promise<Record<string, unkno
  * way to leave the file behind). A real crash is the only way to produce
  * this, so this spawns a genuine child process that starts listening, then
  * SIGKILLs it — no cleanup code in the child ever gets a chance to run,
- * leaving exactly the stale-file condition `control-server.ts`'s
- * `handleStaleUnixSocket` exists for.
+ * leaving exactly the stale-file condition the shared private Unix socket
+ * listener recovers from.
  */
 async function createStaleSocketFile(socketPath: string): Promise<void> {
   const child = spawn(
@@ -995,6 +996,64 @@ describe('control-server: stale socket cleanup + "another daemon running"', () =
     handle = undefined;
   });
 
+  it.each(['file', 'dangling symlink'] as const)('refuses a %s endpoint without unlinking it or creating its target', async (kind) => {
+    if (process.platform === 'win32') return;
+    const storeDir = await tmpDir('byok-ctl-nonsocket-');
+    const endpoint = controlSocketPath(storeDir);
+    await fs.mkdir(path.dirname(endpoint), { recursive: true, mode: 0o700 });
+    const target = path.join(storeDir, 'missing-target');
+    if (kind === 'file') await fs.writeFile(endpoint, 'keep me');
+    else await fs.symlink(target, endpoint);
+    try {
+      const error = await startControlServer({ storeDir, productId: 'acme', methods: noopMethods() }).catch((error) => error);
+      expect(error).toBeInstanceOf(PrivateSocketPathError);
+      expect(error).toMatchObject({ code: 'socket_path_not_socket', path: endpoint });
+      expect(error.message).toContain('remove ' + endpoint + ' if no byok process uses it');
+      if (kind === 'file') expect(await fs.readFile(endpoint, 'utf8')).toBe('keep me');
+      else expect(await fs.readlink(endpoint)).toBe(target);
+      await expect(fs.lstat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await fs.unlink(endpoint);
+      if (path.dirname(endpoint) !== storeDir) await fs.rmdir(path.dirname(endpoint));
+    }
+  });
+
+  it('binds when the socket disappears between lstat and the connect probe (ENOENT)', async () => {
+    if (process.platform === 'win32') return;
+    const storeDir = await tmpDir('byok-ctl-vanished-');
+    const endpoint = controlSocketPath(storeDir);
+    await fs.mkdir(path.dirname(endpoint), { recursive: true, mode: 0o700 });
+    await createStaleSocketFile(endpoint);
+    const realLstat = fs.lstat;
+    const realStat = fs.stat;
+    let removed = false;
+    const spy = vi.spyOn(fs, 'lstat').mockImplementation(async (target, ...rest) => {
+      const stat = await realLstat(target, ...(rest as []));
+      if (target === endpoint && !removed) {
+        removed = true;
+        await fs.unlink(endpoint);
+      }
+      return stat;
+    });
+    // Exercise the same race against the pre-refactor implementation's stat.
+    const statSpy = vi.spyOn(fs, 'stat').mockImplementation(async (target, ...rest) => {
+      const stat = await realStat(target, ...(rest as []));
+      if (target === endpoint && !removed) {
+        removed = true;
+        await fs.unlink(endpoint);
+      }
+      return stat;
+    });
+    try {
+      handle = await startControlServer({ storeDir, productId: 'acme', methods: noopMethods() });
+      expect(removed).toBe(true);
+      expect(handle.endpoint).toBe(endpoint);
+    } finally {
+      spy.mockRestore();
+      statSpy.mockRestore();
+    }
+  });
+
   it('cleans up a stale (no-listener) Unix socket file left behind by a crashed daemon before binding', async () => {
     if (process.platform === 'win32') return; // stale socket FILES only exist on darwin/linux
     const storeDir = await tmpDir('byok-ctl-stale-');
@@ -1130,15 +1189,18 @@ describe('control-server: defensive hardening (gatekeeper advisories)', () => {
     // fixes an existing symlink's target, so nothing upstream of the new
     // check would have caught this.
     const attackerTarget = await tmpDir('byok-ctl-symlink-target-');
+    await fs.chmod(attackerTarget, 0o755);
     await fs.mkdir(path.dirname(endpointDir), { recursive: true });
     await fs.symlink(attackerTarget, endpointDir);
 
-    await expect(startControlServer({ storeDir: longStoreDir, productId: 'acme', methods: noopMethods() })).rejects.toThrow(
-      /is a symlink/,
-    );
+    const error = await startControlServer({ storeDir: longStoreDir, productId: 'acme', methods: noopMethods() }).catch((error) => error);
+    expect(error).toBeInstanceOf(PrivateDirectoryRefusedError);
+    expect(error).toMatchObject({ code: 'private_dir_symlink', path: endpointDir, processUid: process.getuid?.() });
+    expect(error.message).toMatch(/is a symlink/);
 
     // Confirms this genuinely never bound inside the attacker's directory.
     expect(await fs.readdir(attackerTarget)).toEqual([]);
+    expect((await fs.stat(attackerTarget)).mode & 0o777).toBe(0o755);
   });
 
   it('P2 re-gate hardening: refuses to bind when the tmpdir fallback directory is owned by a DIFFERENT uid (possible attacker-controlled path in a shared temp dir)', async () => {
@@ -1161,11 +1223,34 @@ describe('control-server: defensive hardening (gatekeeper advisories)', () => {
     });
 
     try {
-      await expect(startControlServer({ storeDir: longStoreDir, productId: 'acme', methods: noopMethods() })).rejects.toThrow(
-        /owned by uid/,
-      );
+      const error = await startControlServer({ storeDir: longStoreDir, productId: 'acme', methods: noopMethods() }).catch((error) => error);
+      expect(error).toBeInstanceOf(PrivateDirectoryRefusedError);
+      expect(error).toMatchObject({ code: 'private_dir_foreign_owner', path: endpointDir, processUid: process.getuid?.(), ownerUid: (process.getuid?.() ?? 0) + 1 });
+      expect(error.message).toMatch(/owned by uid/);
     } finally {
       lstatSpy.mockRestore();
+    }
+  });
+
+  it('binds a natural control socket even when storeDir has a foreign owner', async () => {
+    if (process.platform === 'win32') return;
+    const storeDir = await fs.mkdtemp('/tmp/byok-ctl-owner-');
+    expect(controlSocketPath(storeDir)).toBe(path.join(storeDir, 'control.sock'));
+    const realLstat = fs.lstat;
+    const spy = vi.spyOn(fs, 'lstat').mockImplementation(async (target, ...rest) => {
+      const real = await realLstat(target, ...(rest as []));
+      return target === storeDir ? Object.assign(Object.create(Object.getPrototypeOf(real)), real, { uid: real.uid + 1 }) : real;
+    });
+    try {
+      handle = await startControlServer({ storeDir, productId: 'acme', methods: noopMethods() });
+      expect(handle.endpoint).toBe(path.join(storeDir, 'control.sock'));
+      const conn = await connectControlClient({ storeDir, productId: 'acme' });
+      expect(conn.ok).toBe(true);
+      if (conn.ok) conn.client.close();
+    } finally {
+      spy.mockRestore();
+      await handle?.close();
+      await fs.rm(storeDir, { recursive: true, force: true });
     }
   });
 

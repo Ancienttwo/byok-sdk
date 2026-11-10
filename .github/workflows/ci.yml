@@ -998,6 +998,11 @@ jobs:
             src/__tests__/daemon-stop-shutdown-parity.test.ts `
             src/__tests__/service-enrollment-handover.test.ts
 
+      - name: Run runtime executable detection tests on Windows
+        run: |
+          bun run --filter @byok-sdk/client test -- `
+            src/__tests__/runtime-executable-detection.test.ts
+
       # #1317: the runtime environment base on win32, including a real
       # reg export of the logon keys and of a non-ASCII value.
       - name: Run runtime environment tests on Windows

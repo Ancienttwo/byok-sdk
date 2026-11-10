@@ -1069,18 +1069,20 @@ a reader keeps only the line that puts its result in the final reply. `read`
 binds the memory MCP sealed `read`, so the model has only `memory_recall`.
 `read-write` is the writer default. A `memory-reader` offer that selects
 `read-write` gets a non-retryable decline (`agent_memory_selection_invalid`);
-the reference server refuses that dispatch before the task exists. `read` or
-`read-write` on a daemon that does not admit the memory MCP gets a
-non-retryable decline (`agent_memory_unavailable`); the daemon never changes
-the selection to `none`. `read-if-admitted` runs as `read` when the daemon
+every Host offer lane refuses it with a ZodError at path `agentMemory`
+before the task exists. `read` or `read-write` on a daemon that does not admit
+the memory MCP gets a non-retryable decline (`agent_memory_unavailable`);
+the daemon never changes the selection to `none`. `read-if-admitted` runs as
+`read` when the daemon
 admits the memory MCP and as `none` when it does not, for a writer and a
 reader; it never gets `agent_memory_unavailable`. `read-write-if-admitted`
 runs as `read-write` when the daemon admits the memory MCP and as `none` when
 it does not; it never gets `agent_memory_unavailable`. A `memory-reader` offer
 that selects it gets `agent_memory_selection_invalid` whatever the admission,
-and the reference server refuses that dispatch before the task exists. The
-daemon reads its admission once per offer and binds the memory MCP from that
-one answer. The terminal does not report which mode ran. A daemon advertises
+and every Host offer lane refuses it with a ZodError at path `agentMemory`
+before the task exists. The daemon reads its admission once per offer and
+binds the memory MCP from that one answer. The terminal does not report which
+mode ran. A daemon advertises
 `agent-memory-selection`, `agent-memory-read-if-admitted` and
 `agent-memory-read-write-if-admitted` whenever it has an Agent home, whatever
 its memory admission.

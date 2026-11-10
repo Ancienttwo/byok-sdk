@@ -171,7 +171,7 @@ it('resolves a PATH executable, then the installer location, without configurati
 it('uses the exact npm command-shim entry and node through the owned-process invocation contract', () => {
   const shim = 'C:\\npm\\opencode.cmd';
   const node = 'C:\\npm\\node.exe';
-  expect(resolveRuntimeInvocation(shim, { platform: 'win32', env: {}, isFile: file => [shim, node].includes(file), readFile: () => npmNodeShim('node_modules\\@opencode\\cli\\bin\\opencode.js') })).toEqual({
+  expect(resolveRuntimeInvocation(shim, { platform: 'win32', env: {}, isFile: file => [shim, node].includes(file), isExecutable: () => false, readFile: () => npmNodeShim('node_modules\\@opencode\\cli\\bin\\opencode.js') })).toEqual({
     command: node, args: ['C:\\npm\\node_modules\\@opencode\\cli\\bin\\opencode.js'], executable: shim,
   });
 });
@@ -242,12 +242,28 @@ it.each([
   const session = await box.start('opencode-limit');
   const admitted = session.sessionRef;
   await expect((async () => { for await (const event of session.events) events.push(event as AgentEvent); })()).rejects.toMatchObject({
-    message: 'Rate limit exceeded', phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'unknown' },
+    message: 'Rate limit exceeded', phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'rate_limited' },
   });
   expect(events).toEqual([]);
   expect(session.sessionRef).toBe(admitted);
   expect(box.facts().filter(fact => fact.kind === 'native-session').map(fact => fact.sessionId)).toEqual([admitted]);
   expect(box.facts().filter(fact => fact.kind === 'prompt')).toHaveLength(1);
+});
+
+// The class comes from data.errorName; a failure classified from its words is reported unknown and never switches models.
+it.each([
+  ['opencode-limit-text', 'Rate limit exceeded', 'unknown'],
+  ['opencode-error:provider.free-limit|Free usage exceeded', 'Internal error: Free usage exceeded', 'quota'],
+  ['opencode-error:provider.something-new|Rate limit exceeded', 'Internal error: Rate limit exceeded', 'unknown'],
+  ['opencode-error:APIError|invalid x-api-key', 'Internal error: invalid x-api-key', 'unknown'],
+] as const)('opencode %s fails as %s without switching models', async (prompt, message, failureClass) => {
+  const box = setup('1.18.35');
+  const session = await box.start(prompt);
+  await expect((async () => { for await (const _event of session.events); })()).rejects.toMatchObject({
+    message, phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: failureClass },
+  });
+  expect(box.facts().filter(fact => fact.kind === 'prompt')).toHaveLength(1);
+  expect(box.facts().some(fact => fact.kind === 'open' && fact.method === 'session/resume')).toBe(false);
 });
 
 

@@ -452,7 +452,11 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
   };
   const laneLines = corpus.flatMap((line) => (line.type === 'task.offer' && line.payload.sealing !== undefined
     && (variantOf(line.payload) !== 'sealed execution' || line.payload.terminalProjection !== undefined)
-    ? [{ ...line, variant: variantOf(line.payload) }] : []));
+    ? [{ ...line, variant: variantOf(line.payload), payload: { ...line.payload,
+      // Host fixtures keep the corpus sealing bytes, with valid selections (#1671).
+      runtime: (line.payload.dispatchSelection as { runtimeId: string } | undefined)?.runtimeId ?? line.payload.runtime,
+      agentMemory: line.payload.homeAccess === 'memory-reader' && line.payload.agentMemory === 'read-write' ? 'read' : line.payload.agentMemory,
+    } as Json }] : []));
   // A task that seals only its output keeps a plaintext instruction.
   const outputOnly = laneLines.filter((line) => line.payload.sealed === undefined);
 

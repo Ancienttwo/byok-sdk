@@ -434,6 +434,7 @@ describe('no local listener for provisioning', () => {
       'client/src/tool-authorization-ipc.ts',
       'client/src/util/daemon-owner.ts',
       'client/src/util/path-mutation-gate.ts',
+      'client/src/util/private-unix-socket.ts',
     ]);
   });
 

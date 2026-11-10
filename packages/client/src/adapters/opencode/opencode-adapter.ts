@@ -248,7 +248,7 @@ class OpenCodeSession implements Session {
       if (outcome.kind === 'failed') {
         const failure = (cause?: unknown) => new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: outcome.reason ?? 'opencode turn failed',
           failure: { class: outcome.fromText ? 'unknown' : runtimeFailureClassOf(outcome.failure) } }, { cause });
-        if (!this.cancelled && outcome.failure === 'rate_limited' && !this.projection?.output && index === 0 && this.options.models.length > 1) {
+        if (!this.cancelled && !outcome.fromText && outcome.failure === 'rate_limited' && !this.projection?.output && index === 0 && this.options.models.length > 1) {
           // Resume the admitted native identity and apply the next model through ACP; never create a replacement session.
           try { await this.open(1); }
           catch (error) {

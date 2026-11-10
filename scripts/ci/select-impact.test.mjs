@@ -136,6 +136,23 @@ test('the W5 runner probe workflow selects only the CI script checks (#605)', ()
   assert.doesNotMatch(workflow, /actions\/checkout|pull_request|push:/);
 });
 
+test('A7 harness paths run the Node verifier in the existing targeted job (#605)', () => {
+  const paths = ['bridge.mjs', 'evidence.mjs', 'run.mjs', 'verify.mjs', 'verifier.test.mjs', 'result.schema.json']
+    .map(name => `scripts/agent-memory-a7/${name}`);
+  for (const path of paths) {
+    assert.deepEqual(selectImpact([path]), { dirs: [], files: [path], families: [], reason: 'root-ci-scripts' });
+  }
+  assert.throws(() => selectImpact(['scripts/agent-memory-a7/unreviewed.mjs']), /Reviewed CI mapping required/);
+  const runner = readFileSync(new URL('scripts/ci/run-targeted.mjs', root), 'utf8');
+  assert.match(runner, /path\.startsWith\('scripts\/agent-memory-a7\/'\).*extraTests\.push\('scripts\/agent-memory-a7\/verifier\.test\.mjs'\)/);
+  assert.match(runner, /spawnSync\(process\.execPath, \['--test', '--test-concurrency=1',/);
+  const workflow = readFileSync(new URL('.github/workflows/ci.yml', root), 'utf8');
+  const targeted = workflow.slice(workflow.indexOf('\n  targeted:'), workflow.indexOf('\n  build-test:'));
+  assert.match(targeted, /fetch-depth: 0/); // pinned checker commit is available
+  assert.match(targeted, /oven-sh\/setup-bun@/); // the fixture builds its own dependencies
+  assert.match(targeted, /node scripts\/ci\/run-targeted\.mjs/);
+});
+
 test('the retention soak workflow and harness select only reviewed light checks (#1105)', () => {
   assert.deepEqual(selectImpact(['.github/workflows/client-retention-soak.yml']), {
     dirs: [], files: ['.github/workflows/client-retention-soak.yml'], families: [], reason: 'root-ci-scripts',

@@ -14,6 +14,7 @@ import * as v5Release from 'byok-protocol-previous';
 import {
   AgentMemorySelectionSchema,
   HostOfferPlainPayloadSchema,
+  HostOfferSealedPayloadSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
   SEALED_PAYLOAD_CATEGORIES,
   SessionSelectionSchema,
@@ -118,6 +119,34 @@ describe('WIRE_ADDITIONS', () => {
   });
 });
 
+
+describe('Host offer selection admission (#1671)', () => {
+  const plain = { agentRef: { agentId: 'agent', profileRevision: 'revision' }, runtime: 'codex',
+    instruction: 'resume', session: { mode: 'resume', sessionRef: 'session' } };
+  const selection = { lane: 'subscription', runtimeId: 'claude', providerId: null, modelId: 'model' };
+  const rules = [
+    ['agentMemory', { homeAccess: 'memory-reader', agentMemory: 'read-write' }, 'agentMemory read-write requires a writer; a memory-reader Attempt reads memory only'],
+    ['agentMemory', { homeAccess: 'memory-reader', agentMemory: 'read-write-if-admitted' }, 'agentMemory read-write-if-admitted requires a writer; a memory-reader Attempt reads memory only'],
+    ['runtime', { dispatchSelection: selection }, 'runtime codex does not match dispatchSelection.runtimeId claude'],
+    ['harnessId', { harnessId: 'custom' }, 'harnessId conflicts with built-in runtime selection'],
+    ['harnessId', { runtime: undefined, harnessId: 'custom', dispatchSelection: selection }, 'harnessId conflicts with built-in runtime selection'],
+  ] as const;
+  it.each([
+    ...([
+      ['plain', HostOfferPlainPayloadSchema, TaskOfferPlainPayloadSchema, plain],
+      ['sealed', HostOfferSealedPayloadSchema, TaskOfferSealedPayloadSchema, v6Offers.find(p => p.sealing !== undefined)!],
+    ] as const).flatMap(([name, host, wire, base]) => rules.map(([path, patch, message]) =>
+      [name, host, wire, { ...base, runtime: 'codex', ...patch }, path, message] as const)),
+    ['prepared', HostOfferPlainPayloadSchema, TaskOfferPlainPayloadSchema,
+      { ...v6Offers.find(p => p.preparation !== undefined)!, homeAccess: 'memory-reader', agentMemory: 'read-write' },
+      'agentMemory', rules[0][2]],
+  ] as const)('refuses invalid selection on %s without tightening the wire', (_name, host, wire, payload, path, message) => {
+    expect(wire.safeParse(payload).success).toBe(true);
+    const parsed = host.safeParse(payload);
+    expect(parsed.error).toBeInstanceOf(z.ZodError);
+    expect(parsed.error!.issues).toEqual([{ code: 'custom', path: [path], message }]);
+  });
+});
 
 describe('native session offer admission (#1526)', () => {
   const ordinary = v6Offers.find(p => p.agentMemoryCommit !== undefined && p.sealing === undefined)!;

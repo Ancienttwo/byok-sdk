@@ -110,7 +110,10 @@ async function egressTask(
   const device = await harness.pairDevice(TENANT_A);
   taskCount += 1;
   const taskId = `sealed-surface-${taskCount}`;
-  const payload = typeof build === 'function' ? await build(device.deviceId, taskId) : build;
+  const fixture = typeof build === 'function' ? await build(device.deviceId, taskId) : build;
+  const payload: EgressPayload = { ...fixture,
+    runtime: (fixture.dispatchSelection as { runtimeId: string } | undefined)?.runtimeId ?? fixture.runtime,
+  };
   await harness.stores.devices.recordCapabilities(TENANT_A, {
     deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, payload as never),
   });

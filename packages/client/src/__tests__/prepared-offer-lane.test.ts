@@ -432,7 +432,7 @@ function declineReason(sent: readonly Envelope[]): string {
   return declined.payload.reason;
 }
 
-async function memoryOnlyRecord(): Promise<{
+async function memoryOnlyRecord(mode: 'read' | 'read-write' = 'read'): Promise<{
   readonly store: InputPreparationStore;
   readonly recordId: string;
 }> {
@@ -442,16 +442,16 @@ async function memoryOnlyRecord(): Promise<{
     retryHorizonMs: 60 * 60 * 1000,
   });
   await store.open();
-  const memoryProjection = preparedMemoryProjection('read', MEMORY, inputPreparationRuntimeIdentityString(RUNTIME));
+  const memoryProjection = preparedMemoryProjection(mode, MEMORY, inputPreparationRuntimeIdentityString(RUNTIME));
   const fingerprinted = await fingerprintPreparedToolSurface({
-    agentMemory: 'read', memory: MEMORY, observation: {},
+    agentMemory: mode, memory: MEMORY, observation: {},
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
     toolsetDefinitionRevisions: {},
   });
   if (!fingerprinted.ok) throw new Error(fingerprinted.message);
   const reserved = await store.reserve({
     key: { scopeId: SCOPE_ID, agentRef: AGENT_REF.agentId, requestId: 'memory-only-request' },
-    requestDigest: REQUEST_DIGEST, binding: binding({ agentMemory: 'read' }), model: MODEL, maxInFlight: 8,
+    requestDigest: REQUEST_DIGEST, binding: binding({ agentMemory: mode }), model: MODEL, maxInFlight: 8,
   });
   if (reserved.kind !== 'created') throw new Error('memory-only record was not created');
   const summary: InputPreparationArtifactSummaryV1 = {
@@ -459,7 +459,7 @@ async function memoryOnlyRecord(): Promise<{
     requestBytes: 33, projectionBytes: 19, projection: PROJECTION, residual: [...RESIDUAL],
     observationDigest: fingerprinted.fingerprint.observationDigest,
     toolBindingDigest: preparedToolBindingDigest({
-      agentMemory: 'read',
+      agentMemory: mode,
       toolsetDefinitionRevisions: {}, servers: [],
     }),
     toolNames: memoryProjection.tools.map((tool) => tool.name).sort(),
@@ -786,6 +786,34 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       expect(loserAdapter.preparedStartCalls).toHaveLength(0);
       expect((loser as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken.size).toBe(0);
       await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-memory-only-winner', seq: 3 }));
+    } finally {
+      observe.mockRestore();
+    }
+  });
+
+  it('declines a prepared memory-reader selecting read-write even when its record matches', async () => {
+    const record = await memoryOnlyRecord('read-write');
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory').mockResolvedValue(MEMORY);
+    try {
+      const runner = await makeRunner(await lane(), adapter, sent, {
+        ...MEMORY_BINS,
+        inputPreparationLane: {
+          store: record.store, authorizeAgentMemory: async () => {}, open: () => record.store.open(),
+          runtime: RUNTIME, policyRevision: POLICY_REVISION, toolsetDefinitionRevisions: () => new Map(),
+        },
+      });
+      await runner.handleEnvelope(preparedOffer('task-prepared-reader-write', {
+        reference: record.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST,
+      }, 1, { homeAccess: 'memory-reader', agentMemory: 'read-write', requiredToolsets: undefined }));
+      expect(sent.filter((e) => e.type === 'task.decline').map((e) => e.payload)).toEqual([
+        expect.objectContaining({
+          reason: 'agent_memory_selection_invalid: a memory-reader Attempt reads memory only',
+          retryable: false, agentRef: AGENT_REF,
+        }),
+      ]);
+      expect(sent.some((e) => e.type === 'task.claim')).toBe(false);
     } finally {
       observe.mockRestore();
     }

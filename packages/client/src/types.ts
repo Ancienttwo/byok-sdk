@@ -799,13 +799,11 @@ export class PolicyUnsupportedError extends Error {
 }
 
 /**
- * Thrown by {@link Session.steer} on an adapter whose runtime has no
- * mid-turn steering channel at all (`descriptor.capabilities.steer === false`) — a
- * permanent property of the runtime, never a transient failure. Typed
- * rather than a bare `Error` so the daemon can classify an inbound
- * `task.steer` for such a runtime as non-retryable (record + ack, cursor
- * advances) instead of stalling the cursor on it forever, without matching
- * on message strings.
+ * Thrown by {@link Session.steer} when a runtime that declares a steering
+ * channel cannot accept a particular steer. The daemon logs and acknowledges
+ * this error without retry; other session errors retain cursor redelivery.
+ * Runtimes declaring `descriptor.capabilities.steer !== true` are gated by
+ * the daemon before the session is called.
  */
 export class SteerUnsupportedError extends Error {
   /** The `RuntimeAdapter.descriptor.id` that cannot steer (e.g. `claude`, `codex`). */

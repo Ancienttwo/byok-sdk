@@ -10,10 +10,12 @@ import type { AdapterSession as Session } from "../../contracts/session.js";
 import type { StartAcpSession } from "../../shared/acp/session.js";
 import { acpSession, type AcpSessionProfile } from "../../shared/acp/session.js";
 import { checkMcpServerNames } from "../../shared/mcp-servers.js";
+import { opencodeFailureOutcome } from "./failure.js";
 import { prepareOpenCodePrompts, validateOpenCodePrompts, verifyOpenCodeAgent } from "./prompt-config.js";
 
 export const opencodeAcpProfile: AcpSessionProfile = {
   args: ["acp"],
+  failureOutcome: opencodeFailureOutcome,
   validateOptions: (options) => { refuseSessionOptions(opencodeV1RefusedSessionOptions, options); },
   // The ACP layer forwards only its own sessions' parts: a `task` subagent
   // runs in a child session whose frames never reach this transport, so the

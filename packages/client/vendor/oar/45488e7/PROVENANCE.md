@@ -2,7 +2,7 @@
 
 Source: https://github.com/botiverse/oar, version 0.94.0, fixed commit `45488e745abc9e320da9adb2df851b249160c74e`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 121 source files plus LICENSE. 99 source files keep upstream bytes. 22 source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the Codex goal-event projection, and the manual-compaction operation that the Codex session composes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options}.ts`) with their import closure. The OpenCode session and its prompt, attribution, compaction and version helpers are also selected, with shared environment and private-temp helpers. No Cursor, CLI, arena, executable manager or branded resources are included. The Grok and Antigravity install, update, inventory, model-list and account-usage modules are not included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 122 source files plus LICENSE. 100 source files keep upstream bytes (one of them, `runtimes/opencode/failure.ts`, is carried from an open upstream PR; see below). 22 source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the Codex goal-event projection, and the manual-compaction operation that the Codex session composes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options}.ts`) with their import closure. The OpenCode session and its prompt, attribution, compaction and version helpers are also selected, with shared environment and private-temp helpers. No Cursor, CLI, arena, executable manager or branded resources are included. The Grok and Antigravity install, update, inventory, model-list and account-usage modules are not included.
 
 Upstream's native dsh runtime is selected through `runtimes/dsh/`: `bridge.ts`, `jobs.ts`, `mcp.ts`, `options.ts` and `projection.ts` keep upstream bytes, and `launch.ts`, `control.ts` and `session.ts` carry BYOK changes. `version.ts`, `install.ts`, `installation.ts`, `list-models.ts` and `index.ts` are not selected: the SDK adapter owns version reading, installation and model selection.
 
@@ -865,3 +865,16 @@ reviewed CI paths and current documentation all name `45488e7`. Historical
 identities in earlier re-vendor sections and research stay historical. Build
 assets copy the license, manifest and provenance to
 `dist/assets/provenance/oar/45488e7/`.
+
+## Carried upstream change: OAR #710 (OpenCode `failureOutcome`)
+
+Upstream PR: https://github.com/botiverse/oar/pull/710 (open). Carried from its head commit `b986c781c8f022c41db2778689ccd6485538e22c`, which is the tip of the PR branch at the time of writing, after the reviewer's request that an absent or unmapped `data.errorName` fall back to the generic text rules.
+
+Files carried:
+
+- `runtimes/opencode/failure.ts` is new and byte-identical to that commit (SHA256 `f20f44de095eb1ab6354974a13369570ab17347bd99d858fa2f55d2d38e34316`). The manifest lists that hash as both upstream and vendored.
+- `runtimes/opencode/session.ts` takes the two lines the PR adds to `opencodeAcpProfile`: the `opencodeFailureOutcome` import and `failureOutcome: opencodeFailureOutcome`. The file is already a maintained delta; the manifest keeps the base hash as upstream.
+
+The PR's tests and docs (`tests/failure-mapping.test.ts`, `docs/spec/runtime-matrix.md`, `docs/runtimes/opencode.md`) are not vendored. The SDK covers the same cases in `src/__tests__/opencode-adapter.test.ts`.
+
+Next re-vendor: once #710 is in the new base, `runtimes/opencode/failure.ts` and the two `session.ts` lines must show no diff against upstream. If upstream changed them in review, take upstream's bytes and drop this section. Do not keep a local copy that differs.

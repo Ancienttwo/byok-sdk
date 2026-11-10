@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ResolvedBin } from '../codex/resolve-bin';
+import { findRuntimeCommandOnPath, runtimeInvocationHost } from '../runtime-invocation';
 
 function officialLocation(platform: NodeJS.Platform): string {
   if (platform !== 'win32') return path.posix.join(os.homedir(), '.local', 'bin', 'agy');
@@ -17,9 +18,12 @@ function officialLocation(platform: NodeJS.Platform): string {
 export function resolveAgyBin(env: Readonly<Record<string, string | undefined>>, platform: NodeJS.Platform = process.platform): ResolvedBin {
   const override = process.env.BYOK_AGY_BIN;
   if (override) return { command: override, source: 'env' };
-  const separator = platform === 'win32' ? ';' : ':';
-  const name = platform === 'win32' ? 'agy.exe' : 'agy';
-  const onPath = (env.PATH ?? env.Path ?? '').split(separator).some((dir) => dir !== '' && existsSync(path.join(dir, name)));
+  const runtimeHost = runtimeInvocationHost(env);
+  const host = { ...runtimeHost, platform, isFile: (file: string) =>
+    (platform !== 'win32' || ['.com', '.exe'].includes(path.win32.extname(file).toLowerCase())) && runtimeHost.isFile(file) };
+  const command = findRuntimeCommandOnPath('agy', host);
+  if (command !== undefined) return { command, source: 'path' };
   const official = officialLocation(platform);
-  return !onPath && existsSync(official) ? { command: official, source: 'path' } : { command: 'agy', source: 'path' };
+  if (existsSync(official)) return { command: official, source: 'path' };
+  throw Object.assign(new Error('agy runtime command not found'), { code: 'ENOENT' });
 }

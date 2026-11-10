@@ -7,7 +7,6 @@ import {
   type AgentExecutionInput,
   type SealedAgentExecutionInput,
 } from '../agent-execution';
-import { ByokCloudError } from '../errors';
 import { refuseSealedFields, type EnqueuePaths } from './enqueue';
 
 interface Dependencies {
@@ -51,13 +50,6 @@ export function createAgentExecutionsApi({
       throw new Error('Agent execution with messageEgress requires a registered Agent message consumer.');
     }
     const beforeMailbox = agentMessageOfferWriter(deviceId, requested, validated.agentMessageContext);
-    // Refuse a mismatched runtime before any attempt, receipt or mailbox write.
-    if (requested.dispatchSelection !== undefined && requested.runtime !== requested.dispatchSelection.runtimeId) {
-      throw new ByokCloudError(
-        'coordination_input_invalid',
-        `Agent execution runtime ${requested.runtime} does not match dispatchSelection.runtimeId ${requested.dispatchSelection.runtimeId}.`,
-      );
-    }
     const payload = await resolveOfferPayload(tenant, deviceId, requested, validated.taskId);
     const enqueued = await enqueueTaskEnvelope(
       tenant,

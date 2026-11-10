@@ -326,6 +326,12 @@ export function evictPendingCancelled(this: TaskRunner): void {
 export async function handleSteer(this: TaskRunner, taskId: string, text: string): Promise<void> {
   const active = this['tasks'].get(taskId);
   if (!active) return;
+  if (active.adapter.descriptor.capabilities.steer !== true) {
+    console.error(
+      `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${active.adapter.descriptor.id}" declares no steering channel — acked without retry; this envelope should have been gated server-side`,
+    );
+    return;
+  }
   try {
     await active.session.steer(text);
   } catch (err) {

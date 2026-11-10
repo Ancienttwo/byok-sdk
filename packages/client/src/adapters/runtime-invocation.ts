@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { accessSync, constants, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 /** The program an adapter spawns, and the arguments that go before the adapter's own. */
@@ -13,17 +13,32 @@ export interface RuntimeInvocationHost {
   platform: NodeJS.Platform;
   env: Readonly<Record<string, string | undefined>>;
   isFile(file: string): boolean;
+  isExecutable(file: string): boolean;
   readFile(file: string): string;
 }
 
 /** This process's platform and filesystem, searching `env` — the runtime environment the command will run in (#1095). */
-export function runtimeInvocationHost(env: Readonly<Record<string, string>>): RuntimeInvocationHost {
+export function runtimeInvocationHost(env: Readonly<Record<string, string | undefined>>): RuntimeInvocationHost {
   return {
     platform: process.platform,
     env,
     isFile: file => { try { return statSync(file).isFile(); } catch { return false; } },
+    isExecutable: file => { try { if (!statSync(file).isFile()) return false; accessSync(file, constants.X_OK); return true; } catch { return false; } },
     readFile: file => readFileSync(file, 'utf8'),
   };
+}
+
+/** Find a command on the environment the runtime will use. */
+export function findRuntimeCommandOnPath(command: string, host: RuntimeInvocationHost): string | undefined {
+  if (host.platform === 'win32') {
+    return findWindowsCommand(command, { ...host, isFile: file => path.win32.isAbsolute(file) && host.isFile(file) }, runnableExtensions(host.env));
+  }
+  for (const dir of (host.env.PATH ?? '').split(':')) {
+    if (!path.posix.isAbsolute(dir)) continue;
+    const file = path.posix.join(dir, command);
+    if (host.isExecutable(file)) return file;
+  }
+  return undefined;
 }
 
 const NATIVE = new Set(['.com', '.exe']);

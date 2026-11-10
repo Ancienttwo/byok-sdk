@@ -1,7 +1,7 @@
 // `TaskRunner.handleOffer`: one offer from redelivery guard to active task
 // (see ./support.ts for how a member module runs).
 import type { ExecutionScratch } from '../retention/scratch';
-import { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode, type TaskDeclinePayload } from '@byok-sdk/protocol';
+import type { PreparedAgentMemoryMode, TaskDeclinePayload } from '@byok-sdk/protocol';
 import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home';
 import type { OfferPhaseContext } from './support';
 import { settleAgentMemoryCommitCopy } from './agent-memory';
@@ -443,12 +443,31 @@ function readOfferRequest(
   // from here carries it on the wire.
   const agentRef: AgentRef = offeredRef;
   hostFor(this).setAgentRef(taskId, agentRef);
+  const homeAccess = offeredHomeAccess(payload);
+  if (homeAccess === 'memory-reader' && (payload.agentMemory === 'read-write' || payload.agentMemory === 'read-write-if-admitted')) {
+    decline('agent_memory_selection_invalid: a memory-reader Attempt reads memory only', false);
+    return;
+  }
+  if (
+    payload.dispatchSelection !== undefined &&
+    payload.runtime !== undefined &&
+    payload.runtime !== payload.dispatchSelection.runtimeId
+  ) {
+    decline(
+      `offer runtime ${payload.runtime} does not match dispatchSelection.runtimeId ${payload.dispatchSelection.runtimeId}`,
+      false,
+    );
+    return;
+  }
+  if (payload.harnessId !== undefined && (payload.runtime !== undefined || payload.dispatchSelection !== undefined)) {
+    decline('harnessId cannot be combined with a built-in runtime selection', false);
+    return;
+  }
   if (this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {
     decline('Agent offer requires the SDK-owned agent-home-contract layout and handoff store', false);
     return;
   }
   const sessionRef = offeredSessionRef(payload);
-  const homeAccess = offeredHomeAccess(payload);
   const readerAttempt = homeAccess === 'memory-reader';
   const homeBusyCode = readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy';
   // The prepared lane is selected by the presence of this value and nothing
@@ -460,11 +479,7 @@ function readOfferRequest(
     return;
   }
   const offeredMemory = payload.agentMemory;
-  if (preparation !== undefined && !PreparedAgentMemoryModeSchema.safeParse(offeredMemory).success) {
-    decline('agent_memory_selection_invalid: prepared offers require an explicit memory selection', false);
-    return;
-  }
-  // The prepared lane refused both `*-if-admitted` values above, so this view is exact there.
+  // The decoder refuses both `*-if-admitted` values for prepared offers, so this view is exact there.
   const agentMemory = offeredMemory === 'read-if-admitted' || offeredMemory === 'read-write-if-admitted'
     ? undefined
     : offeredMemory;
@@ -476,10 +491,6 @@ function readOfferRequest(
   // `read-write` when admitted and else `none` (#815, #833). Admission is read
   // once here; the runtime binding uses this answer.
   const ordinaryMemory = preparation === undefined ? offeredMemory : undefined;
-  if ((ordinaryMemory === 'read-write' || ordinaryMemory === 'read-write-if-admitted') && readerAttempt) {
-    decline('agent_memory_selection_invalid: a memory-reader Attempt reads memory only', false);
-    return;
-  }
   const memoryAdmitted = this['agentMemoryMcpAdmitted']();
   if ((ordinaryMemory === 'read' || ordinaryMemory === 'read-write') && !memoryAdmitted) {
     decline('agent_memory_unavailable: this daemon does not admit the Agent memory MCP', false);
