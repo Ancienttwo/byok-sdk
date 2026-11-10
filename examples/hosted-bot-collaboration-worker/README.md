@@ -42,7 +42,26 @@ outlives an invocation, no session map.
   process start. The scheduler gets `H_CLOCK_MS` as its `intervalMs`, so H's own check against the K8 late bound runs.
 
 Node migrates and provisions; the Worker serves. The SDK migrations, the H DDL and the `host_scope` table are created
-from Node before `wrangler dev` starts. The Worker never migrates.
+from Node before `wrangler dev` starts. The Worker never migrates. See [Operator provisioning](#operator-provisioning)
+for the scope and tenant rows used by the deployed Host.
+
+## Operator provisioning
+
+Build the workspace and apply the SDK migrations first. Set `DATABASE_URL` to the direct Postgres DSN for the role whose
+`search_path` selects the SDK schema. For a Host scope also set `HOST_SCHEMA` to the Worker's `host_scope` schema;
+create that table with `hostScopeDdl` first. Keep these values in the private operator environment, not command arguments.
+From `examples/hosted-bot-collaboration-worker` run:
+
+```sh
+node --import tsx src/operator-provision-cli.ts scope SCOPE --owner OWNER_ID --config host-config.json
+node --import tsx src/operator-provision-cli.ts entitlement TENANT
+```
+
+The config is a HostConfig JSON object with `models` containing the Bot execution templates; the owner is a human
+principal ID. The scope command also provisions its tenant entitlement and prints the owner session token exactly once
+to stdout. Capture it privately. Running scope again rotates the token and invalidates the prior token. Both commands
+preserve existing entitlements; new tenants get the example limits (1 GB total, 100 MB per object, 1 MB inline,
+100 MB mailbox). Use a fresh tenant for each acceptance run.
 
 ### Routes
 

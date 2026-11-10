@@ -179,7 +179,7 @@ and requests no caching or referrer transmission.
    the same asset binding and local Hyperdrive connection as the deployable entry.
    Open `/member` on that origin. The local fixture `worker.ts` has no member page.
 2. On the operator machine, provision an isolated tenant's quota in the same
-   schema, using `core.quota.writeEntitlement` as the W1 driver does. Enter that
+   schema using the [operator provisioning CLI](../../../README.md#operator-provisioning). Enter that
    tenant and product ID, then create browser keys. Both P-256 private keys are
    WebCrypto non-extractable keys and remain in memory; public bundles alone are
    shown for copying. The library's scope-key byte arrays exist temporarily in

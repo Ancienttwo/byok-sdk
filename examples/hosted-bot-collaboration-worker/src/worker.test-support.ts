@@ -15,14 +15,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { createPostgresCoreStores, createByokPool, migrate, migrationsDir } from '@byok-sdk/cloud-dataplane';
-import { tenantId } from '@byok-sdk/cloud';
 import { HostedCollaborationStore, type HostConfig } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 import type { Principal } from '@byok-sdk/example-bot-collaboration/channel';
 import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
 import { taskId } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
-import { hostScopeDdl, sha256Hex, writeHostScope } from './host-scopes';
+import { hostScopeDdl } from './host-scopes';
+import { provisionScope } from './operator-provision';
 import type { ChildMessage, ParentMessage } from './device.child';
 import type { PassReport } from './worker';
 import { openWorkerEndpoint, verifyWorkerIdentity, type WorkerEndpoint } from './worker.test-endpoint';
@@ -73,7 +73,7 @@ export async function openSubstrate(): Promise<Substrate> {
   const connectionString = url.toString();
   const sdkPool = createByokPool({ connectionString, max: 2 });
   const pool = new pg.Pool({ connectionString, max: 4 });
-  const configs = new Map<string, HostConfig>(), entitled = new Set<string>();
+  const configs = new Map<string, HostConfig>();
   const store = new HostedCollaborationStore(pool, hSchema, { host: async scope => configs.get(scope)! });
   try {
     await migrate(sdkPool, migrationsDir());
@@ -99,19 +99,12 @@ export async function openSubstrate(): Promise<Substrate> {
      * token; the row keeps only its hash, so each call replaces the earlier token.
      */
     async provision(scope, owner, config) {
-      if (!entitled.has(scope)) await entitle(scope);
-      entitled.add(scope);
-      const token = randomBytes(24).toString('hex');
+      const core = createPostgresCoreStores({ pool: sdkPool, clock: { now: () => new Date() }, objectStorage: s3(sdkSchema) });
+      const token = await provisionScope(core, pool, hostSchema, scope, owner, config);
       configs.set(scope, config);
-      await writeHostScope(pool, hostSchema, { scope, ownerTokenSha256: await sha256Hex(token), owner, config });
       return token;
     },
   };
-  async function entitle(scope: string) {
-      const core = createPostgresCoreStores({ pool: sdkPool, clock: { now: () => new Date() }, objectStorage: s3(sdkSchema) });
-      await core.quota.writeEntitlement(tenantId(scope), { version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
-        maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'test' });
-  }
 }
 
 /** The S3 half of the substrate: the compose SeaweedFS, standing in for R2's S3 endpoint (README, R2). */

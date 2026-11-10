@@ -3,14 +3,63 @@
  * pass, and the clock. One substrate, one device process and one scope for the file; each test seeds its own Agent.
  */
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDeviceSimulator } from '../../../packages/testkit/src/index';
 import { alarmReports, openHome, RUN, until, type Home } from './worker.test-support';
+import { readHostScope, sha256Hex } from './host-scopes';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
+
+it('validates operator arguments and environment without exposing their values', () => {
+  const script = fileURLToPath(new URL('./operator-provision-cli.ts', import.meta.url));
+  const env = { ...process.env, DATABASE_URL: '', HOST_SCHEMA: '' };
+  for (const [args, expected] of [[['scope'], 'Invalid arguments'], [['entitlement', 'tenant'], 'DATABASE_URL is required'],
+    [['scope', 'scope', '--owner', 'owner', '--config', 'config.json'], 'HOST_SCHEMA must be a valid schema name']] as const) {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', script, ...args], { encoding: 'utf8',
+      env: expected.startsWith('HOST_SCHEMA') ? { ...env, DATABASE_URL: 'postgres://localhost/db' } : env });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain(expected);
+  }
+});
 
 describe.skipIf(!RUN)('H Host on local workerd (#794 D3)', () => {
   let h: Home;
   beforeAll(async () => { h = await openHome(); });
   afterAll(async () => { await h?.close(); });
+
+  it('provisions and rotates a scope token while preserving its entitlement', async () => {
+    const scope = `provision-${randomUUID()}`, owner = { id: 'owner', kind: 'human' } as const;
+    const config = { models: { default: template('pending', 'main') }, readOnlyToolsets: [] };
+    const first = await h.substrate.provision(scope, owner, config);
+    const dir = mkdtempSync(join(tmpdir(), 'w5-provision-'));
+    try {
+      const configFile = join(dir, 'config.json');
+      writeFileSync(configFile, JSON.stringify(config));
+      const script = fileURLToPath(new URL('./operator-provision-cli.ts', import.meta.url));
+      const env = { ...process.env, DATABASE_URL: h.substrate.connectionString, HOST_SCHEMA: h.substrate.hostSchema };
+      const run = (...args: string[]) => spawnSync(process.execPath, ['--import', 'tsx', script, ...args], { encoding: 'utf8', env });
+      const newTenant = `${scope}-new`;
+      const created = run('entitlement', newTenant);
+      expect([created.status, created.stdout, created.stderr]).toEqual([0, '', '']);
+      const entitlement = run('entitlement', scope);
+      expect([entitlement.status, entitlement.stdout, entitlement.stderr]).toEqual([0, '', '']);
+      const result = run('scope', scope, '--owner', owner.id, '--config', configFile);
+      expect([result.status, result.stderr]).toEqual([0, '']);
+      expect(result.stdout).toMatch(/^[0-9a-f]{48}\n$/);
+      const second = result.stdout.trim();
+      const row = await readHostScope(h.substrate.pool, h.substrate.hostSchema, scope);
+      expect(first).not.toBe(second);
+      expect(row).toEqual({ scope, owner, config, ownerTokenSha256: await sha256Hex(second) });
+      expect(JSON.stringify(row)).not.toContain(second);
+      const stored = await h.substrate.pool.query('SELECT tenant_id, version FROM storage_entitlement WHERE tenant_id = ANY($1) ORDER BY tenant_id', [[scope, newTenant]]);
+      expect(stored.rows).toEqual([{ tenant_id: scope, version: '1' }, { tenant_id: newTenant, version: '1' }]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 
   it('runs one owner Turn: the entry commits, a pass offers it, the device runs it, a pass applies the terminal once', async () => {
     const { token } = await h.bot();
