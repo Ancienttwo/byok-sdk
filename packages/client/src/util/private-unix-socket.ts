@@ -64,6 +64,8 @@ export async function ensureOwnedPrivateDirectory(dir: string): Promise<void> {
   if (uid !== undefined && stat.uid !== uid) throw new PrivateDirectoryRefusedError('private_dir_foreign_owner', dir, uid, stat.uid);
   // Windows has no uid and no POSIX mode bits; the mode contract is POSIX only.
   if (uid === undefined) return;
+  // An already-private directory needs no chmod, so a sandbox that denies chmod does not refuse it.
+  if ((stat.mode & 0o777) === 0o700) return;
   await fs.chmod(dir, 0o700).catch((error: unknown) => {
     throw new PrivateDirectoryRefusedError('private_dir_mode', dir, uid, undefined, error);
   });

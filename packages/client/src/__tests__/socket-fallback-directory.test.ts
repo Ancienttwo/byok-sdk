@@ -70,6 +70,7 @@ describe('private Unix sockets', () => {
 
   it.skipIf(process.platform === 'win32')('refuses a directory whose mode cannot be set to 0700', async () => {
     const { dir } = await fallbackDir();
+    await fs.chmod(dir, 0o755);
     const failure = Object.assign(new Error('EPERM'), { code: 'EPERM' });
     const spy = vi.spyOn(fs, 'chmod').mockRejectedValue(failure);
     try {
@@ -89,7 +90,7 @@ describe('private Unix sockets', () => {
     let checks = 0;
     const spy = vi.spyOn(fs, 'lstat').mockImplementation(async (name, ...rest) => {
       const stat = await realLstat(name, ...(rest as []));
-      if (name === dir && ++checks === 3) return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 });
+      if (name === dir && ++checks === 2) return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 });
       return stat;
     });
     try {
