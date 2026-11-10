@@ -207,9 +207,24 @@ protocol overrides.
 The configuration is validated, persisted and included in the exact profile
 hash. Missing or stale configuration rejects before credential access or Pi
 startup. Direct provider transports do not require Pi configuration. Vendor
-kind, endpoint and model name never infer it; Pi's built-in catalog does not
-override the namespaced local projection. Model limits do not constitute Host
-ContextPack budgets or measured available input tokens.
+kind, endpoint and model name never infer it. By default the Pi provider id
+is `byok-sdk-<profile_ref>`. A profile served by OpenCode Go may explicitly set
+`pi_model.providerId: 'opencode-go'` with `api: 'openai-completions'`; the
+schema refuses other ids and other APIs. Models not served by OpenCode Go
+must not set it. Pi then applies its own OpenCode Go reasoning replay
+(`reasoning` to `reasoning_content`) and session headers, including at a local
+gateway. The SDK never rewrites request or response payloads. The optional
+field is part of the persisted profile hash. The prepared lane refuses it.
+Every keys-profile RPC launch rejects a Pi model-runtime composition error
+before model resolution or session creation, so an invalid projection cannot
+silently fall back to a built-in provider. A launch projects exactly one
+profile and the profile store permits only one enabled profile. The launcher
+isolates user model/auth files with a fresh private Pi directory; durable
+workers receive the provider id bound to the sealed profile ref over private
+launcher IPC and verify their single projection. Ambient provider credentials,
+including `OPENCODE_API_KEY`, are excluded and refused by the child if present.
+Model limits do not constitute Host ContextPack budgets or measured available
+input tokens.
 
 `@byok-sdk/keys` can derive such a configuration from the pi-ai catalog that
 the client pins. The table is a checked-in generated file; a test fails until
@@ -247,7 +262,9 @@ and makes no network request.
   At that URL a representable entry equals the pinned pi-ai built-in model's
   configuration field by field. Run-time branches that pi-ai takes on its own
   provider id are outside that promise, because the projected provider id is
-  `byok-sdk-<profile_ref>`. In pi-ai 1.5.0 these are `cacheControlFormat` for
+  `byok-sdk-<profile_ref>` unless the profile explicitly declares `opencode-go`.
+  The declared identity enables Pi's OpenCode Go reasoning replay and session
+  headers. In pi-ai 1.5.0 the other branches are `cacheControlFormat` for
   openrouter `anthropic/*` models (`api/openai-completions.js:1257`), the
   xai `reasoning.encrypted_content` include, which differs only for grok-4.3
   at `off` (`api/openai-responses.js:302`), cerebras body-less overflow

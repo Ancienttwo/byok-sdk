@@ -1116,7 +1116,7 @@ export declare const PI_ANTHROPIC_PROFILE_COMPAT_KEYS: readonly PiCompatKey[];
  */
 export declare const PI_PREPARED_COMPAT_KEYS: readonly string[];
 /**
- * Local declared Pi configuration, without identity, endpoint, headers or secrets.
+ * Local declared Pi configuration, without endpoint, headers or secrets.
  *
  * `thinkingLevelMap` is absent or complete, as on the prepared model wire.
  * Without a map, Pi applies its own handling of each level. A partial map is
@@ -1128,6 +1128,7 @@ export declare const PiModelConfigSchema: z.ZodObject<{
         "openai-completions": "openai-completions";
         "openai-responses": "openai-responses";
     }>>;
+    providerId: z.ZodOptional<z.ZodLiteral<"opencode-go">>;
     contextWindow: z.ZodNumber;
     maxTokens: z.ZodNumber;
     reasoning: z.ZodBoolean;
@@ -1258,7 +1259,7 @@ export declare function parsePiProviderLauncherOptions(args: string[]): PiProvid
  * projection refuses a keyless profile for this entry too.
  *
  * A declared `pi_model.api: 'openai-responses'` is refused for the same
- * reason. So are `pi_model.inputLimits` and any compat key outside
+ * reason. So are `pi_model.providerId`, `pi_model.inputLimits` and any compat key outside
  * {@link PI_PREPARED_COMPAT_KEYS}: the frozen prepared model wire does not
  * carry them, and the prepared host refuses a projected entry that declares one.
  *
@@ -1419,14 +1420,13 @@ export declare const PI_AUTH_NONE_API_KEY = "byok-sdk-auth-none";
  */
 export declare const PI_LAUNCHER_RUNTIME_ENTRIES: readonly ['pi-rpc', 'pi-prepared', 'pi-durable'];
 export type PiLauncherRuntimeEntry = (typeof PI_LAUNCHER_RUNTIME_ENTRIES)[number];
-/** Keep projected providers disjoint from Pi built-ins so composition can never fall back to one. */
-export declare function piProjectionProviderId(profileRef: string): string;
+/** The declared Pi identity, or a profile namespace disjoint from Pi built-ins. */
+export declare function piProjectionProviderId(profile: ModelProviderProfile): string;
 /**
  * Credential-blind Pi configuration derived from one validated local profile.
  *
- * The projected provider is namespaced by the profile's own ref, not by its
- * provider kind, so two independently configured endpoints of the same kind
- * project to two distinct Pi providers instead of colliding on one. Model
+ * The projected provider uses the profile's own ref unless `pi_model.providerId`
+ * explicitly selects Pi's OpenCode Go behavior. Model
  * `input` modalities are projected from the profile's declared capabilities,
  * and the provider `api` from the adapter and `pi_model.api` — declared local
  * configuration is the only authority; nothing is inferred from the model name
@@ -1448,7 +1448,7 @@ export declare function buildPiProviderProjection(profile: ModelProviderProfile,
 export declare function assertPiLaunchArgs(profile: ModelProviderProfile): void;
 /**
  * Validate the credential-blind RPC argv the client may delegate, then bind
- * the Pi child to the namespaced projection and exact configured model.
+ * the Pi child to the declared projection and exact configured model.
  */
 export declare function buildPiProviderArgs(profile: ModelProviderProfile, delegatedArgs: readonly string[]): string[];
 /**
@@ -1828,6 +1828,7 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
             "openai-completions": "openai-completions";
             "openai-responses": "openai-responses";
         }>>;
+        providerId: z.ZodOptional<z.ZodLiteral<"opencode-go">>;
         contextWindow: z.ZodNumber;
         maxTokens: z.ZodNumber;
         reasoning: z.ZodBoolean;

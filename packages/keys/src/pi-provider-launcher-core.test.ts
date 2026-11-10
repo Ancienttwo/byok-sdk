@@ -374,19 +374,22 @@ describe('committed Pi spawn boundary', () => {
   });
 
   // Production refuses the Windows durable entry before custody; POSIX IPC evidence runs elsewhere.
-  it.skipIf(process.platform === 'win32')('durable uses one private IPC receipt and never constructs a credential-bearing child environment', async () => {
+  it.skipIf(process.platform === 'win32').each([undefined, 'opencode-go'] as const)('durable binds %s with one private IPC receipt and no credential-bearing child environment', async (providerId) => {
     const f = await fixture();
+    const profile = parseModelProviderProfile({ ...f.provider, pi_model: { ...f.provider.pi_model!,
+      ...(providerId === undefined ? {} : { api: 'openai-completions', providerId }) } });
+    await f.profiles.save(profile);
     try {
       const child = new ChildProcess(); const send = vi.fn((_frame: unknown) => true); const kill = vi.spyOn(child,'kill').mockReturnValue(true);
       Object.assign(child, { connected: true, send });
       const spawn = vi.fn((..._args: Parameters<NonNullable<PiProviderLaunchDependencies['spawn']>>) => child);
-      const launched = await startPiProvider(f.provider, { ...f.options, runtimeEntry:'pi-durable', piArgs:['--config',path.join(f.root,'config.json')] },
+      const launched = await startPiProvider(profile, { ...f.options, runtimeEntry:'pi-durable', piArgs:['--config',path.join(f.root,'config.json')] },
         { ambient:{PI_PROVIDER_API_KEY:'ambient-key',OPENAI_API_KEY:'ambient-key'}, createSecretStore:() => f.store, profiles:f.profiles, spawn });
       const options = spawn.mock.calls[0]![2] as {env:Record<string,string>;stdio:unknown};
       expect(options.env.PI_PROVIDER_API_KEY).toBeUndefined(); expect(JSON.stringify(options.env)).not.toContain(CANARY);
       expect(options.stdio).toEqual(['inherit','inherit','inherit','ipc']); expect(send).not.toHaveBeenCalled();
       child.emit('message', { type:'byok.pi.durable.credential-request', configDigest:'a'.repeat(64) });
-      expect(send.mock.calls[0]![0]).toEqual({ type:'byok.pi.durable.credential', configDigest:'a'.repeat(64), secret:CANARY });
+      expect(send.mock.calls[0]![0]).toEqual({ type:'byok.pi.durable.credential', configDigest:'a'.repeat(64), secret:CANARY, profileRef:f.provider.profile_ref, providerId:providerId ?? `byok-sdk-${f.provider.profile_ref}` });
       child.emit('message', { type:'byok.pi.durable.credential-request', configDigest:'a'.repeat(64) }); expect(send).toHaveBeenCalledTimes(1);
       expect(kill).not.toHaveBeenCalled(); await launched.cleanup();
     } finally { await fs.rm(f.root,{recursive:true,force:true}); }

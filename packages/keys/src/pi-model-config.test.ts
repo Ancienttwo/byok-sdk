@@ -43,6 +43,9 @@ describe('explicit Pi model authority', () => {
     { ...PI_MODEL_FIXTURE, contextWindow: 0 },
     { ...PI_MODEL_FIXTURE, maxTokens: 1_000_001 },
     { ...PI_MODEL_FIXTURE, thinkingLevel: 'off' },
+    { ...PI_MODEL_FIXTURE, providerId: 'opencode' },
+    { ...PI_MODEL_FIXTURE, providerId: 'opencode-go' },
+    { ...PI_MODEL_FIXTURE, api: 'openai-responses', providerId: 'opencode-go', compat: {} },
     { ...PI_MODEL_FIXTURE, compat: { ...PI_MODEL_FIXTURE.compat, headers: { Authorization: 'forbidden' } } },
     { ...PI_MODEL_FIXTURE, thinkingLevelMap: { low: 'low' } },
   ])('rejects incomplete or conflicting model settings', (pi_model) => {
@@ -65,8 +68,21 @@ describe('explicit Pi model authority', () => {
     expect(provider.models).toEqual([{ id: profile.model, name: profile.display_name, input: ['text'], ...settings }]);
   });
 
-  it('keeps openai-completions when no api is declared', () => {
-    const provider = (buildPiProviderProjection(parseModelProviderProfile(profileInput), 'pi-rpc') as any).providers['byok-sdk-test-zai'];
+  it('projects a declared OpenCode Go identity and binds argv without emitting providerId as a model setting', () => {
+    const profile = parseModelProviderProfile({ ...profileInput,
+      pi_model: { ...PI_MODEL_FIXTURE, api: 'openai-completions', providerId: 'opencode-go' } });
+    const projection = buildPiProviderProjection(profile, 'pi-rpc') as any;
+    expect(Object.keys(projection.providers)).toEqual(['opencode-go']);
+    expect(projection.providers['opencode-go'].models[0]).not.toHaveProperty('providerId');
+    expect(buildPiProviderArgs(profile, ['--mode', 'rpc']).slice(2, 4)).toEqual(['--provider', 'opencode-go']);
+    expect(() => assertPiLaunchArgs(profile)).not.toThrow();
+    expect(() => assertPiPreparedProviderProfile({ ...profile, auth_mode: 'bearer' }))
+      .toThrow(/declares Pi providerId; the prepared model wire does not carry these fields/);
+    expect(exactProviderProfileBinding(profile).profileHash).not.toBe(exactProviderProfileBinding(parseModelProviderProfile(profileInput)).profileHash);
+  });
+
+  it.each(['http://127.0.0.1:9191/v1', 'https://opencode.ai/inference/go'])('keeps the profile namespace without a declared id at %s', (base_url) => {
+    const provider = (buildPiProviderProjection(parseModelProviderProfile({ ...profileInput, base_url, model: 'opencode-go/deepseek-v4.1-flash' }), 'pi-rpc') as any).providers['byok-sdk-test-zai'];
     expect(provider.api).toBe('openai-completions');
     expect(provider.models[0]).not.toHaveProperty('api');
   });

@@ -54,9 +54,9 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     if (gate?.fileScope !== undefined && gate.fileScope.home.path !== binding.canonicalHome) {
       throw startFailure('authority', 'durable file scope home does not match the manifest lease');
     }
-    serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 4,
+    serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 5,
       replica: binding, replicaRoot: options.replicaRoot,
-      provider: `byok-sdk-${profileRef}`, model, instruction: input.instruction,
+      profileRef, model, instruction: input.instruction,
       mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {},
         launchCwd: binding.canonicalHome },
       toolAuthorization: gate?.config ?? null,

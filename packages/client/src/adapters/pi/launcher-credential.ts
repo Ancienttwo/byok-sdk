@@ -14,15 +14,17 @@ export const PI_RPC_IPC_KEY_MARKER = 'byok:rpc-ipc';
  * for one entry is never accepted by the other. The keys launcher states the
  * same names (`startPiProvider`); `@byok-sdk/client` has no `keys` dependency.
  */
-export async function receiveLauncherCredential(lane: 'rpc' | 'durable', configDigest: string): Promise<string | undefined> {
+export function receiveLauncherCredential(lane: 'rpc', configDigest: string): Promise<string | undefined>;
+export function receiveLauncherCredential(lane: 'durable', configDigest: string, profileRef: string): Promise<{ secret: string | undefined; providerId: string }>;
+export async function receiveLauncherCredential(lane: 'rpc' | 'durable', configDigest: string, profileRef?: string): Promise<string | undefined | { secret: string | undefined; providerId: string }> {
   if (!process.connected || !process.send) throw new Error(`${lane} custody IPC unavailable`);
   return new Promise((resolve, reject) => {
     let settled = false;
-    const finish = (error?: Error, secret?: string) => {
+    const finish = (error?: Error, credential?: string | { secret: string | undefined; providerId: string }) => {
       if (settled) return; settled = true;
       process.off('message', message); process.off('disconnect', disconnected);
       // Close before constructing tools/MCP or admitting model work.
-      const complete = () => { if (error) reject(error); else resolve(secret); };
+      const complete = () => { if (error) reject(error); else resolve(credential); };
       if (process.connected) { process.once('disconnect', complete); process.disconnect(); }
       else complete();
     };
@@ -30,9 +32,12 @@ export async function receiveLauncherCredential(lane: 'rpc' | 'durable', configD
     const message = (value: unknown) => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) { finish(new Error(`invalid ${lane} custody receipt`)); return; }
       const frame = value as Record<string, unknown>;
-      if (Object.keys(frame).length !== 3 || frame.type !== `byok.pi.${lane}.credential` || frame.configDigest !== configDigest
-        || (frame.secret !== null && (typeof frame.secret !== 'string' || !frame.secret))) { finish(new Error(`invalid ${lane} custody receipt`)); return; }
-      finish(undefined, frame.secret === null ? undefined : frame.secret as string);
+      if (Object.keys(frame).length !== (lane === 'durable' ? 5 : 3) || frame.type !== `byok.pi.${lane}.credential` || frame.configDigest !== configDigest
+        || (frame.secret !== null && (typeof frame.secret !== 'string' || !frame.secret))
+        || (lane === 'durable' && (frame.profileRef !== profileRef || typeof frame.providerId !== 'string'
+          || !frame.providerId || /[\0\r\n]/u.test(frame.providerId)))) { finish(new Error(`invalid ${lane} custody receipt`)); return; }
+      const secret = frame.secret === null ? undefined : frame.secret as string;
+      finish(undefined, lane === 'durable' ? { secret, providerId: frame.providerId as string } : secret);
     };
     process.once('message', message); process.once('disconnect', disconnected);
     process.send!({ type: `byok.pi.${lane}.credential-request`, configDigest }, error => { if (error) finish(new Error(`${lane} custody IPC send failed`)); });

@@ -62,7 +62,7 @@ describe('pi-rpc BYOK key custody (#385)', () => {
   type Respond = (res: ServerResponse, ordinal: number) => void;
 
   /** One BYOK pi-rpc operation through the adapter, the real keys launch sequence and the built host. */
-  async function runLane(instruction: string, respond: Respond, prepareHome?: (home: string) => Promise<void>) {
+  async function runLane(instruction: string, respond: Respond, prepareHome?: (home: string) => Promise<void>, providerId?: 'opencode-go') {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-385-'))); roots.push(root);
     const control = path.join(root, 'control'), home = path.join(root, 'home'); await fs.mkdir(control); await fs.mkdir(home);
     await prepareHome?.(home);
@@ -99,15 +99,22 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     await fs.writeFile(profileDbPath, JSON.stringify({ controlDir: control, secret: CANARY, profile: {
       adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [],
       created_at: '2026-10-13T00:00:00.000Z', updated_at: '2026-10-13T00:00:00.000Z', display_name: 'Probe', enabled: true, kind: 'model',
-      model: 'probe', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, reasoning: false, thinkingLevel: 'off' } } }));
+      model: 'probe', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, reasoning: false, thinkingLevel: 'off',
+        ...(providerId === undefined ? {} : { api: 'openai-completions', providerId }) } } }));
 
     const sessionDir = path.join(root, 'sessions');
     const scratch = await testExecutionScratch();
     const adapter = new PiAdapter({ byokLauncher: { command: process.execPath, args: [launcher], profileDbPath, sessionDir } });
+    const ambientAgent = path.join(root, '.pi', 'agent');
+    await fs.mkdir(ambientAgent, { recursive: true });
+    await fs.writeFile(path.join(ambientAgent, 'models.json'), JSON.stringify({ providers: { 'opencode-go': {
+      baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'AMBIENT_MODEL_KEY', models: [{ id: 'probe' }],
+    } } }));
+    await fs.writeFile(path.join(ambientAgent, 'auth.json'), JSON.stringify({ 'opencode-go': { type: 'api_key', key: 'AMBIENT_AUTH_KEY' } }));
     const session = await startPreparedOperation(adapter, {
       instruction,
       dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'probe', modelId: 'probe' },
-    }, { workspaceDir: home, scratch, env: testRuntimeEnv() });
+    }, { workspaceDir: home, scratch, env: { ...testRuntimeEnv(), HOME: root, PI_CODING_AGENT_DIR: ambientAgent } });
     sessions.push(session);
     const events: Array<AgentEvent | MessageDraftDelta> = [];
     for await (const event of session.events) { events.push(event); if (event.type === 'turn_end' || event.type === 'error') break; }
@@ -115,6 +122,17 @@ describe('pi-rpc BYOK key custody (#385)', () => {
       .map(line => JSON.parse(line) as { args: string[]; env: Record<string, string>; stdio: unknown });
     return { events, received, hostEnvironments, launches, session, sessionDir, home, scratch };
   }
+
+  it.skipIf(BUN_BIN === undefined)('declared OpenCode Go ignores ambient user models.json and auth.json on RPC', async () => {
+    const lane = await runLane('Use only the configured model.', res => stream(res, { role: 'assistant', content: 'done' }, 'stop'), undefined, 'opencode-go');
+    expect(lane.events.filter(event => event.type === 'error')).toEqual([]);
+    expect(lane.received.map(request => request.authorization)).toEqual([`Bearer ${CANARY}`]);
+    expect(lane.launches).toHaveLength(1);
+    const projection = JSON.parse(await fs.readFile(path.join(lane.launches[0]!.env.PI_CODING_AGENT_DIR!, 'models.json'), 'utf8'));
+    expect(Object.keys(projection.providers)).toEqual(['opencode-go']);
+    expect(lane.launches[0]!.args).toContain('opencode-go');
+    expect(JSON.stringify(lane.received)).not.toMatch(/AMBIENT_(MODEL|AUTH)_KEY/);
+  }, 60_000);
 
   const toolCall = (name: string, args: Record<string, unknown>): Respond => (res, ordinal) => {
     if (ordinal === 1) stream(res, { role: 'assistant', tool_calls: [{ index: 0, id: `call-${name}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, 'tool_calls');
