@@ -19,8 +19,8 @@ export const NPM_PACKAGES = Object.freeze({
   codex: { name: '@openai/codex', bin: 'codex' },
   grok: { name: '@xai-official/grok', bin: 'grok' },
   dsh: { name: '@deepseek-ai/dsh', bin: 'dsh' },
-  opencode1: { name: 'opencode-ai', bin: 'opencode' },
-  opencode2: { name: '@opencode/cli', bin: 'opencode' },
+  opencode1: { name: 'opencode-ai', bin: 'opencode', winBin: 'opencode-ai/bin/opencode.exe' },
+  opencode2: { name: '@opencode/cli', bin: 'opencode', winBin: '@opencode/cli/bin/opencode.exe' },
 });
 
 export const HERMES_INSTALLER = Object.freeze({
@@ -103,13 +103,15 @@ export const isExactVersion = (version) => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[
 const run = (command, args, options = {}) => execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], ...options }).trim();
 
 function installNpm(runtime, mode, version, dir) {
-  const { name, bin } = NPM_PACKAGES[runtime];
+  const { name, bin, winBin } = NPM_PACKAGES[runtime];
   const exact = mode === 'latest' ? run('npm', ['view', name, 'version']) : version;
   if (!isExactVersion(exact)) throw new Error(`${name}: not an exact version: ${JSON.stringify(exact)}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'package.json'), '{"private":true}\n');
   execFileSync('npm', ['install', '--no-audit', '--no-fund', '--save-exact', `${name}@${exact}`], { cwd: dir, stdio: 'inherit' });
-  return { bin: join(dir, 'node_modules', '.bin', bin), version: exact };
+  // On Windows the `.bin` entry is a `.cmd` shim, which the adapter cannot execute; use the package's own executable.
+  const installed = process.platform === 'win32' && winBin !== undefined ? join(dir, 'node_modules', ...winBin.split('/')) : join(dir, 'node_modules', '.bin', bin);
+  return { bin: installed, version: exact };
 }
 
 function installHermes(mode, version, dir) {

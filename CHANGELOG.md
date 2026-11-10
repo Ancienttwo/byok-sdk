@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Added (client; #1593)** — The OpenCode descriptor also declares `platforms: ['win32']`. A runtime contract (`opencode1` and `opencode2` legs) now runs OpenCode 1.19.5 and 2.2.6 against a loopback provider in CI, and passed on macOS arm64 and Windows x64. See the [qualification evidence](docs/researches/2026-11-09-opencode-platform-qualification.md).
+- **Added (client; #1593)** — A runtime contract (`opencode1` and `opencode2` legs) runs OpenCode 1.19.5 and 2.2.6 against a loopback provider in CI. It passed on macOS arm64 and Windows x64; the descriptor's `platforms` is unchanged (`['darwin']`). See the [qualification evidence](docs/researches/2026-11-09-opencode-platform-qualification.md).
 
 ## 0.41.0 — 2026-11-09 (published)
 
