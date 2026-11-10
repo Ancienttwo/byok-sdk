@@ -291,6 +291,22 @@ export class HostedCollaborationStore {
         frame.dreams = {};
         await client.query('UPDATE scope SET frame = $2::json WHERE scope = $1', [row.scope, JSON.stringify(frame)]);
       }
+      // An L import on older code kept `wouldDo` in the frame. It is a mapped entity kind now, so a write would empty the
+      // frame map and lose the rows. Move each one into an entity row, once, under the same scope locks.
+      const held = await client.query<{ scope: string; state_version: number; frame: string }>(
+        `SELECT scope, state_version, frame::text FROM scope WHERE frame::jsonb -> 'wouldDo' IS NOT NULL AND frame::jsonb -> 'wouldDo' <> '{}'::jsonb
+         ORDER BY scope FOR UPDATE`);
+      for (const row of held.rows) {
+        if (!SUPPORTED_STORE_VERSIONS.has(row.state_version)) throw new HostedStoreVersionError(row.state_version);
+        const frame = JSON.parse(row.frame) as Record<string, unknown>, wouldDo = frame.wouldDo;
+        if (!object(wouldDo)) throw new Error(`Cannot migrate would-do rows for ${row.scope}: invalid frame`);
+        let ordinal = 0;
+        for (const [id, body] of Object.entries(wouldDo)) {
+          await client.query('INSERT INTO entity (scope, kind, key, ordinal, body) VALUES ($1, $2, $3, $4, $5::json)', [row.scope, 'would_do', storedKey(id), ordinal++, JSON.stringify(body)]);
+        }
+        frame.wouldDo = {};
+        await client.query('UPDATE scope SET frame = $2::json WHERE scope = $1', [row.scope, JSON.stringify(frame)]);
+      }
     }, false);
   }
 

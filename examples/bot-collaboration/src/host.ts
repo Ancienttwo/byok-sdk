@@ -21,7 +21,7 @@ import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_DREAM, BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
   ownerRoutineUpdate, updateDefinition, type BotRoutineInput } from './routines';
 import { checkDreamInstruction, dreamOf, dreamPolicy, dreamReads, reconcileDreamRoutines, recordDream, syncDreams, type DreamPolicy, type DreamingOptions } from './dream';
-import { DEFAULT_AUTONOMY, autonomyOf, recordWouldDo, wouldDoRows, type Autonomy, type AutonomyGate, type WouldDo } from './rules/autonomy';
+import { DEFAULT_AUTONOMY, autonomyOf, wouldDoRows, type Autonomy, type WouldDo } from './rules/autonomy';
 import { DEVICE_CONCURRENCY, admitDeviceSlot, type DispatchIntent } from './rules/priority';
 
 import { applyManagement, applyModels, updateBot, writeSnapshotBot } from './team';
@@ -609,7 +609,6 @@ export class BotCollaboration {
       outcome: {
         // The terminal transaction has not written yet, so a ledger snapshot is the committed state.
         committed: { intent: key => intentRows(this.ledger.snapshot()).intent(key) },
-        autonomy: this.autonomyGate(state, key, taskId, tx.publish),
         manage: (turn, outcome, managed) => applyManagement(state, turn.botId, taskId, outcome, this.models(), managed, this.options.readOnlyToolsets),
         createRoutine: (turn, action, index) => tx.routines.create(createDefinition(tx.routines.list(), turn.botId, taskId, index, action, turn.authority ?? 'bot')),
         updateRoutine: (turn, action) => tx.routines.update(updateDefinition(tx.routines.list(), turn.botId, action)),
@@ -813,14 +812,6 @@ export class BotCollaboration {
   private admitsDeviceSlot(intent: Intent, state: LedgerState): boolean {
     const rows = Object.values(state.intents).map(row => dispatchRow(state, row));
     return admitDeviceSlot(rows.find(row => row.id === intent.id) ?? dispatchRow(state, intent), rows, this.deviceConcurrency);
-  }
-  /** The autonomy gate of one outcome (#1229): an observing Bot records its autonomous actions instead of applying them. */
-  private autonomyGate(state: CollaborationState, turnId: string, taskId: string, publish: (id: string, value: Json) => void): AutonomyGate {
-    const turn = state.turns[turnId]!;
-    return { autonomy: autonomyOf(state.team.bots[turn.botId]), record: (action, index, detail) => {
-      const row = recordWouldDo(state, { botId: turn.botId, taskId, action, index, at: this.now(), detail });
-      if (row) publish(`would-do:${row.id}`, json(row));
-    } };
   }
   /**
    * Deliver each committed cancel to its frozen target (§8.8). A crash before

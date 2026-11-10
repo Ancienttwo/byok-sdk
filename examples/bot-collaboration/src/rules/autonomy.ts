@@ -1,5 +1,5 @@
 import { hash } from '@byok-sdk/server/execution-core/canonical';
-import type { Json } from './turn';
+import { json, type Json } from './turn';
 
 /**
  * Bot autonomy as pure rules (#1229, owner ruling of 2026-10-31). A Bot starts in `observe`: its autonomous actions
@@ -54,4 +54,15 @@ export interface AutonomyGate {
 /** Whether the gate observes: the action is recorded, not applied. An absent gate applies, as every gate did before #1229. */
 export function observes(gate: AutonomyGate | undefined): gate is AutonomyGate {
   return gate?.autonomy === 'observe';
+}
+/** The autonomy gate of one outcome (#1229): an observing Bot records its autonomous actions instead of applying them. */
+export function autonomyGate(
+  state: AutonomyState & { turns: Record<string, { botId: string }>; team: { bots: Record<string, { autonomy?: Autonomy } | undefined> } },
+  turnId: string, taskId: string, now: () => number, publish: (id: string, value: Json) => void,
+): AutonomyGate {
+  const turn = state.turns[turnId]!;
+  return { autonomy: autonomyOf(state.team.bots[turn.botId]), record: (action, index, detail) => {
+    const row = recordWouldDo(state, { botId: turn.botId, taskId, action, index, at: now(), detail });
+    if (row) publish(`would-do:${row.id}`, json(row));
+  } };
 }

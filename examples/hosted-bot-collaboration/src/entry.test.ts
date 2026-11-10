@@ -78,6 +78,21 @@ describe.skipIf(POSTGRES_URL === undefined)('H authenticated command entry on re
     expect(synced).toEqual([]);
   });
 
+  it('lets the owner switch a Bot to auto with a bot-autonomy projection, and refuses a non-owner with an audit line (#1229)', async () => {
+    const { scope, entry, as } = await scoped();
+    await entry.setBotAutonomy(as(), 'main', 'observe');
+    await entry.setBotAutonomy(as(), 'main', 'auto');
+    expect((await store().read(scope)).team.bots.main!.autonomy).toBe('auto');
+    const keys = (await opened!.pool.query<{ key: string }>(`SELECT key FROM "${store().schema}".outbox WHERE scope = $1`, [storedKey(scope)])).rows.map(r => JSON.parse(r.key) as string);
+    expect(keys.filter(key => key.startsWith('bot-autonomy:main:'))).toHaveLength(2);
+    const before = await store().dump(scope);
+    await expect(entry.setBotAutonomy(as({ id: 'mallory', kind: 'human' }), 'main', 'observe')).rejects.toMatchObject({ code: 'not_owner' });
+    const state = await store().read(scope);
+    expect(state.audit).toEqual(['Action refused not_owner: setBotAutonomy main human:mallory']);
+    expect(state.team.bots.main!.autonomy).toBe('auto');
+    expect(before).not.toBe(await store().dump(scope));
+  });
+
   it('refuses an unverified principal after its audit line', async () => {
     const { scope, entry, as } = await scoped();
     await expect(entry.roomInput(as({ id: '', kind: 'human' }), 'r1', 'k1', 'Hi')).rejects.toMatchObject({ code: 'unverified_sender',

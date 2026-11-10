@@ -11,7 +11,7 @@ export const MAPS = [
   ['reply', ['replies']], ['schema', ['schemas']], ['question', ['questions']], ['card', ['cards']],
   ['input', ['inputs']], ['input_batch', ['inputBatches']],
   ['bot', ['team', 'bots']], ['room', ['team', 'rooms']], ['round', ['team', 'rounds']], ['seat', ['team', 'seats']], ['root', ['team', 'roots']],
-  ['inbound', ['channel', 'inbounds']], ['push_route', ['channel', 'pushRoutes']], ['delivery', ['channel', 'deliveries']],
+  ['would_do', ['wouldDo']], ['inbound', ['channel', 'inbounds']], ['push_route', ['channel', 'pushRoutes']], ['delivery', ['channel', 'deliveries']],
 ] as const satisfies ReadonlyArray<readonly [string, readonly string[]]>;
 /** Each list of the state and its entry kind. Room messages are lists inside the room entities. */
 export const LISTS = [
