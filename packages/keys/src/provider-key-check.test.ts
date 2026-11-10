@@ -3,6 +3,7 @@ import { checkProviderKey } from './provider-key-check';
 import { OpenAiCompatibleChatClient } from './openai-client';
 import type { ProviderFetch } from './http';
 import { parseModelProviderProfile, type ModelProviderProfileInput } from './provider-profile';
+import packageManifest from '../package.json' with { type: 'json' };
 
 const profile = (overrides: Partial<ModelProviderProfileInput> = {}) => parseModelProviderProfile({
   adapter: 'openai_compatible', auth_mode: 'bearer',
@@ -25,19 +26,38 @@ const answer = {
 afterEach(() => vi.useRealTimers());
 
 describe('checkProviderKey reasoning probe', () => {
-  it('retries a reasoning-only length response once and requires a final answer', async () => {
+  it('identifies the keys package version in OpenCode Go checks', async () => {
+    const fetchImpl = vi.fn<ProviderFetch>(async () => response(answer));
+    await checkProviderKey(profile({ provider_kind: 'opencode-go' }), 'inert-fixture', { fetchImpl });
+    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get('user-agent')).toBe(`@byok-sdk/keys/${packageManifest.version}`);
+  });
+  it('sends a fresh OpenCode session header for each explicit opencode-go check', async () => {
+    const openCode = profile({ provider_kind: 'opencode-go' });
+    const fetchImpl = vi.fn<ProviderFetch>(async () => response(answer));
+    await expect(checkProviderKey(openCode, 'inert-fixture', { fetchImpl })).resolves.toBe('ok');
+    await expect(checkProviderKey(openCode, 'inert-fixture', { fetchImpl })).resolves.toBe('ok');
+    const sessions = fetchImpl.mock.calls.map(call => new Headers(call[1]?.headers).get('x-opencode-session'));
+    expect(sessions[0]).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(sessions[1]).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(sessions[0]).not.toBe(sessions[1]);
+  });
+  it.each(['zai', 'opencode-go'] as const)('keeps one check session across the reasoning-only retry for %s and requires a final answer', async (provider_kind) => {
     const fetchImpl = vi.fn<ProviderFetch>()
       .mockImplementationOnce(async () => response(reasoningOnly))
       .mockImplementationOnce(async () => response(answer));
-    await expect(checkProviderKey(profile(), 'inert-fixture', { fetchImpl })).resolves.toBe('ok');
+    await expect(checkProviderKey(profile({ provider_kind }), 'inert-fixture', { fetchImpl })).resolves.toBe('ok');
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     const [first, second] = fetchImpl.mock.calls.map(call => call[1]);
     expect(JSON.parse(String(first?.body)).max_tokens).toBe(32);
     expect(JSON.parse(String(second?.body))).toEqual({ ...JSON.parse(String(first?.body)), max_tokens: 2048 });
     for (const call of fetchImpl.mock.calls) {
       expect(String(call[0])).toBe('https://api.z.ai/api/coding/paas/v4/chat/completions');
-      expect(call[1]).toMatchObject({ method: 'POST', redirect: 'error', headers: { authorization: 'Bearer inert-fixture' } });
+      expect(call[1]).toMatchObject({ method: 'POST', redirect: 'error' });
+      expect(new Headers(call[1]?.headers).get('authorization')).toBe('Bearer inert-fixture');
     }
+    const sessions = fetchImpl.mock.calls.map(call => new Headers(call[1]?.headers).get('x-opencode-session'));
+    if (provider_kind === 'opencode-go') expect(sessions).toEqual([expect.stringMatching(/^[0-9a-f-]{36}$/u), sessions[0]]);
+    else expect(sessions).toEqual([null, null]);
   });
 
   it.each(['', null, undefined])('uses reasoning-token metadata when content is %s', async content => {
@@ -78,12 +98,12 @@ describe('checkProviderKey reasoning probe', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it.each([false, true])('keeps HTTP failure outcomes (on retry=%s)', async onRetry => {
+  it.each([[false, 'zai'], [true, 'zai'], [false, 'opencode-go'], [true, 'opencode-go']] as const)('keeps HTTP failure outcomes (on retry=%s, kind=%s)', async (onRetry, provider_kind) => {
     for (const [status, expected] of [[401, 'credential_rejected'], [403, 'model_not_permitted'],
       [429, 'rate_limited'], [500, 'provider_error']] as const) {
       const fetchImpl = vi.fn<ProviderFetch>(async () => response({}, status));
       if (onRetry) fetchImpl.mockImplementationOnce(async () => response(reasoningOnly));
-      await expect(checkProviderKey(profile(), 'inert-fixture', { fetchImpl })).resolves.toBe(expected);
+      await expect(checkProviderKey(profile({ provider_kind }), 'inert-fixture', { fetchImpl })).resolves.toBe(expected);
       expect(fetchImpl).toHaveBeenCalledTimes(onRetry ? 2 : 1);
     }
   });
@@ -91,11 +111,13 @@ describe('checkProviderKey reasoning probe', () => {
   it.each([
     { provider_kind: 'openai', model: 'gpt-4o-mini' },
     { provider_kind: 'custom', model: 'glm-5.3-flash' },
+    { provider_kind: 'custom', model: 'deepseek-v4.1-flash', base_url: 'https://opencode.ai/inference/go/openai/v1' },
     { provider_kind: 'zai', model: 'glm-4' },
   ] as const)('keeps the first probe unchanged for %s', async overrides => {
     const fetchImpl = vi.fn<ProviderFetch>(async () => response(answer));
     await expect(checkProviderKey(profile(overrides), 'inert-fixture', { fetchImpl })).resolves.toBe('ok');
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get('x-opencode-session')).toBeNull();
     expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
       max_tokens: 32, model: overrides.model,
       messages: [{ content: 'Return one JSON object with exactly this shape: {"ok":true}.', role: 'user' }],

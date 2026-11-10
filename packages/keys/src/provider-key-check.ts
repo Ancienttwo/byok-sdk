@@ -1,3 +1,4 @@
+import packageManifest from '../package.json' with { type: 'json' };
 import { AnthropicMessagesClient } from './anthropic-client';
 import type { ProviderKeyCheckOutcome } from './custody';
 import { ByokKeysError } from './errors';
@@ -35,9 +36,17 @@ export async function checkProviderKey(
   secret: string,
   options: ProviderKeyCheckOptions = {},
 ): Promise<Exclude<ProviderKeyCheckOutcome, 'not_run'>> {
+  const sessionId = profile.provider_kind === 'opencode-go' ? crypto.randomUUID() : undefined;
+  const fetchImpl: ProviderFetch | undefined = sessionId === undefined ? options.fetchImpl : (input, init) => {
+    const headers = new Headers(init?.headers);
+    // Pi's withOpenCodeSessionHeader sends the session id for OpenCode Go routing.
+    headers.set('x-opencode-session', sessionId);
+    headers.set('user-agent', `@byok-sdk/keys/${packageManifest.version}`);
+    return (options.fetchImpl ?? fetch)(input, { ...init, headers });
+  };
   const client = profile.adapter === 'anthropic'
-    ? new AnthropicMessagesClient({ fetchImpl: options.fetchImpl, profile, secret })
-    : new OpenAiCompatibleChatClient({ fetchImpl: options.fetchImpl, profile, secret });
+    ? new AnthropicMessagesClient({ fetchImpl, profile, secret })
+    : new OpenAiCompatibleChatClient({ fetchImpl, profile, secret });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort('provider_key_check_timeout'), options.timeoutMs ?? PROVIDER_KEY_CHECK_TIMEOUT_MS);
   try {

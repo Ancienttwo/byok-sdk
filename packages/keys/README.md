@@ -200,6 +200,17 @@ difference is an earlier `provider_kind` CHECK set; see the
 Key-based BYOK: a validated provider profile, credential-backed auth headers, and
 direct transports to OpenAI-compatible and Anthropic providers.
 
+Choose `provider_kind: 'opencode-go'` explicitly for OpenCode Go. Key checks
+send a fresh `x-opencode-session` per check; the endpoint URL does not select
+this behavior. The added kind widens the SQLite `provider_kind` CHECK set.
+An older store reports `migration-required`: stop store users, take a backup,
+and call `migrateProviderProfileStore(path)` before opening it. The migration
+keeps profiles and their credential-store key references; keys need no re-entry.
+For Pi execution also declare `pi_model.api: 'openai-completions'` and
+`pi_model.providerId: 'opencode-go'` explicitly; the provider kind does not infer
+Pi's identity. See the [next-MINOR Host upgrade checklist](../../docs/releases/host-upgrade-next-minor.md#opencode-go-key-checks-and-profile-stores)
+and [offline preparation evidence](../../docs/researches/2026-11-10-opencode-go-key-check-preparation.md).
+
 Status: **P5 + Pi provider launcher done** — the pure-function layer (K0), the `SecretStore` layer
 backed by the macOS Keychain and the Windows Credential Manager (K1), and the
 configure/resolve registry with pluggable profile persistence (K2) have all

@@ -191,6 +191,12 @@ export function providerProfileRouteIssues(
         : 'OpenAI-compatible providers support bearer or no authentication',
     });
   }
+  if (route.provider_kind === 'opencode-go' && route.auth_mode !== 'bearer') {
+    issues.push({
+      path: ['auth_mode'],
+      message: 'OpenCode Go requires bearer authentication',
+    });
+  }
   if (route.adapter === 'anthropic' && route.pi_model?.api !== undefined) {
     issues.push({
       path: ['pi_model', 'api'],

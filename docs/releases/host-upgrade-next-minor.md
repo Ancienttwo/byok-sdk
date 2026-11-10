@@ -50,6 +50,24 @@ now refuse model-runtime configuration/composition errors before selecting a
 model or creating a session; repair the declared settings if admission fails
 with `keys_profile_model_composition_failed`.
 
+## OpenCode Go key checks and profile stores
+
+Choose `provider_kind: 'opencode-go'` explicitly for direct OpenCode Go
+profiles. `checkProviderKey` then sends a fresh `x-opencode-session` per check
+and identifies the keys package/version in its User-Agent. Pi conversations
+also need the explicit Pi declaration described above; provider kind never
+selects Pi's provider id (#1547, #1551).
+
+The new kind widens the SQLite `provider_kind` CHECK set. A store from 0.41.0
+or earlier reports `migration-required` in the precheck. Stop all store users,
+take a backup, and call the candidate's `migrateProviderProfileStore(path)`
+before opening it. A Host using `createServiceInstallation` supplies that
+call in its `migrate` program; without one, upgrade stops with
+`store_migration_required`. Profiles and their credential-store key references
+are preserved; users do not re-enter keys. Opening never migrates a store.
+Rollback restores the pre-migration store snapshot before running the older
+SDK. See the [store migration sequence](host-upgrade-0.41.0.md#stores).
+
 ## Embedded server offer admission
 
 **Breaking (server; #1672).** Embedded `dispatch` and `executions.submit` now use the same offer admission as the direct cloud kernel lanes. Hosts that catch input errors must use the kernel's error class and code or schema path:
