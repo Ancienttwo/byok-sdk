@@ -1,10 +1,6 @@
 import { runtimeVersionPolicyIssues } from './runtime-version-policy';
-import { DAEMON_CONFIG_SCHEMA } from './daemon/config-schema/schema.generated';
+import { DAEMON_CONFIG_RUNTIME_IDS } from './daemon-config-runtime-ids.generated';
 import type { DaemonConfigIssue } from './daemon/config-schema/validate';
-
-const runtimeProperties = DAEMON_CONFIG_SCHEMA.properties?.runtimes?.properties;
-if (!runtimeProperties) throw new Error('DAEMON_CONFIG_SCHEMA has no runtimes.properties; regenerate it with generate-schema.mjs');
-const runtimeIds = Object.keys(runtimeProperties);
 
 /**
  * Semantic checks the generated JSON schema cannot express (#1103): a
@@ -17,7 +13,7 @@ export function versionPolicyConfigIssues(config: unknown): DaemonConfigIssue[] 
   const runtimes = (config as Record<string, unknown>).runtimes;
   if (runtimes === null || typeof runtimes !== 'object' || Array.isArray(runtimes)) return [];
   const issues: DaemonConfigIssue[] = [];
-  for (const id of runtimeIds) {
+  for (const id of DAEMON_CONFIG_RUNTIME_IDS) {
     const runtime = (runtimes as Record<string, unknown>)[id];
     if (runtime === null || typeof runtime !== 'object' || Array.isArray(runtime)) continue;
     const policy = (runtime as Record<string, unknown>).versionPolicy;
