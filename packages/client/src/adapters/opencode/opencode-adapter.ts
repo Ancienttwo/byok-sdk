@@ -86,7 +86,13 @@ export class OpenCodeAdapter implements RuntimeAdapter {
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     if (input.offer.dispatchSelection !== undefined) return { kind: 'reject', reason: 'opencode models belong to the Host candidate list', retryable: false };
-    if (Object.keys(input.mcpServers ?? {}).length > 0) return { kind: 'reject', reason: 'opencode Host MCP toolsets are not qualified on both release lines', retryable: false };
+    const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({
+      name, command: server.command, ...(server.args === undefined ? {} : { args: [...server.args] }),
+      ...(server.env === undefined ? {} : { env: { ...server.env } }),
+    }));
+    if (mcpServers.some(server => !server.name || typeof server.command !== 'string' || !server.command.trim() ||
+      server.args?.some(arg => typeof arg !== 'string') || Object.values(server.env ?? {}).some(value => typeof value !== 'string')))
+      return { kind: 'reject', reason: 'invalid opencode Host MCP server', retryable: false };
     const probe = await this.probe();
     if (probe.detected.kind !== 'available' || probe.command === undefined || probe.version === undefined)
       return { kind: 'reject', reason: `opencode installation refused: ${probe.detected.kind}`, retryable: false };
@@ -98,12 +104,12 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('opencode requires a resolved instruction');
     if (input.manifest.dispatchSelection !== undefined) throw authority('opencode cannot receive a dispatch selection');
     if (!input.manifest.cwd) throw authority('opencode requires a sealed cwd');
-    if (Object.keys(input.mcpServers ?? {}).length > 0) throw authority('opencode Host MCP toolsets are not qualified');
     if (version.startsWith('2.') && input.manifest.homeAccess === 'memory-reader')
       throw authority('opencode v2 does not load the instructions configuration used for session-local appended prompts; ACP exposes no equivalent transient instruction channel');
     const persona = input.manifest.homeAccess === 'memory-reader'
       ? await agentPersona('opencode', input.manifest, { reappliesOnResume: true }) : undefined;
-    const session = new OpenCodeSession(input, this.options, command, version, persona);
+    const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
+    const session = new OpenCodeSession(input, this.options, command, version, mcpServers, persona);
     try {
       await session.start();
       return session;
@@ -147,7 +153,8 @@ class OpenCodeSession implements Session {
   private opening?: Promise<void>;
 
   constructor(private readonly input: RuntimeOperationStartInput & { kind: 'instruction' }, private readonly options: OpenCodeAdapterOptions,
-    private readonly command: string, private readonly version: string, private readonly persona?: string) {}
+    private readonly command: string, private readonly version: string,
+    private readonly mcpServers: readonly { name: string; command: string; args?: readonly string[]; env?: Readonly<Record<string, string>> }[], private readonly persona?: string) {}
 
   async start(): Promise<void> {
     await this.open(0);
@@ -195,6 +202,7 @@ class OpenCodeSession implements Session {
     },
     { kind: 'available', via: 'executable', command: this.command, version: this.version }, {
       cwd: this.input.manifest.cwd!, env: { ...this.input.env, ...this.input.scratch.env }, model: this.options.models[index]!,
+      ...(this.mcpServers.length === 0 ? {} : { mcpServers: this.mcpServers }),
       ...(expected === undefined ? {} : { resume: expected }),
       ...(this.persona === undefined ? {} : { appendSystemPrompt: this.persona }),
     }, {
