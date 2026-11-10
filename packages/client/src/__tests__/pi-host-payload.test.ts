@@ -100,7 +100,24 @@ describe('copyPiRuntimeAssets', () => {
  */
 const HOST_ENTRY_SOURCE = `
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import nodePath from 'node:path';
+import util from 'node:util';
 import * as sdk from ${JSON.stringify(CLIENT_DIST)};
+// #1710 diagnosis: where the host child looks for koffi, and what loading it throws.
+async function koffiDiagnosis(input) {
+  const probe = async load => { try { return { ok: await load() }; } catch (error) { return { error: util.inspect(error, { depth: 8 }) }; } };
+  const bases = { cwd: nodePath.join(process.cwd(), 'probe.cjs'), entry: nodePath.resolve(process.argv[1] ?? process.execPath), execPath: process.execPath };
+  const resolution = {};
+  for (const [name, base] of Object.entries(bases)) {
+    const req = createRequire(base);
+    resolution[name] = { base, paths: req.resolve.paths('koffi'), koffi: await probe(() => req.resolve('koffi')),
+      koffiWin32: await probe(() => req.resolve('@koromix/koffi-win32-x64/package.json')) };
+  }
+  return { cwd: process.cwd(), execPath: process.execPath, argv1: process.argv[1], importMetaUrl: import.meta.url,
+    nativeAssetRootPassed: input.nativeAssetRoot ?? null, resolution,
+    dynamicImportKoffi: await probe(async () => { const koffi = await import('koffi'); (koffi.default ?? koffi).load('kernel32.dll'); return 'kernel32 loaded'; }) };
+}
 async function main() {
 if (process.env.PAYLOAD_TEST_CHILD_START && process.argv[2] === '--no-extensions') await fs.appendFile(process.env.PAYLOAD_TEST_CHILD_START, 'runner started\\n');
 if (process.argv[2] !== 'task') {
@@ -111,6 +128,7 @@ if (process.argv[2] !== 'task') {
 } else {
   const input = JSON.parse(await fs.readFile(process.argv[3], 'utf8'));
   const report = { stage: 'lookup' };
+  if (process.platform === 'win32') report.koffiDiagnosis = await koffiDiagnosis(input);
   try {
     try { report.lookup = (await import(input.piSpecifier)).FOREIGN === true ? 'foreign' : 'resolved'; } catch (error) { report.lookup = String(error); }
     report.defaultDetect = await new sdk.PiAdapter().detect();
@@ -156,7 +174,7 @@ if (process.argv[2] !== 'task') {
       .map(file => fs.readFile(scratch.runtimeDir + '/' + file, 'utf8')));
     report.stage = 'close'; await session.close();
     report.stage = 'done';
-  } catch (error) { report.error = String(error); }
+  } catch (error) { report.error = String(error); report.errorDetail = util.inspect(error, { depth: 8 }); }
   await fs.writeFile(input.report, JSON.stringify(report));
 }
 }
@@ -179,7 +197,7 @@ export default function userExtension(pi: ExtensionAPI): void {
 }
 
 interface HostReport {
-  stage: string; error?: string; lookup?: string;
+  stage: string; error?: string; errorDetail?: string; koffiDiagnosis?: unknown; lookup?: string;
   defaultDetect?: { kind: string }; detect?: unknown;
   launch?: { command: string; entry?: string; fixedArgs: string[] };
   pathPreserved?: boolean; sameExecutable?: boolean; privateSubagentRuntime?: boolean;
@@ -457,6 +475,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         throw new Error(`host task failed: ${String(error)}\nreport: ${await fs.readFile(reportPath, 'utf8').catch(() => 'none')}`);
       });
       const report = JSON.parse(await fs.readFile(reportPath, 'utf8')) as HostReport;
+      if (process.platform === 'win32') console.log(`[#1710 ${form}] errorDetail:\n${report.errorDetail ?? 'none'}\nkoffiDiagnosis:\n${JSON.stringify(report.koffiDiagnosis, null, 2)}`);
       expect(report.error, `failed at ${report.stage}`).toBeUndefined();
       expect(report.stage).toBe('done');
       // Package lookup is denied, and the default adapter reproduces the reported probe failure.

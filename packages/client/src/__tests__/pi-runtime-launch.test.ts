@@ -78,6 +78,10 @@ describe('client runtime launch resources', () => {
         // #1373: the keys launcher requires OWNER RIGHTS READ_CONTROL on the projection.
         const save = path.join(f.root, 'projection.acl');
         await promisify(execFile)('icacls', [projection, '/save', save], { windowsHide: true });
+        // #1710 diagnosis: the full DACL the product wrote and the account that ran it.
+        const listing = (await promisify(execFile)('icacls', [projection], { windowsHide: true })).stdout;
+        const user = (await promisify(execFile)('whoami', ['/user', '/fo', 'csv', '/nh'], { windowsHide: true })).stdout;
+        console.log(`[#1710 ACL] icacls /save:\n${(await fs.readFile(save)).toString('utf16le')}\nicacls:\n${listing}\nwhoami /user: ${user}`);
         expect((await fs.readFile(save)).toString('utf16le')).toMatch(/^[^\r\n]+\r\nD:P[A-Z]*\(.*\(A;;RC;;;OW\)/u);
       }
       expect(await fs.readdir(projection)).toEqual([]);
