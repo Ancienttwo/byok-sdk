@@ -190,6 +190,10 @@ The hosted Bot collaboration index no longer exports `HostedSubmitter`, `HostedR
 
 Pass the command entry `sync: passes.syncScope` and `failStuckIntent: (scope, key) => passes.failStuckIntent(scope, key)`; the latter syncs the touched scope after the call.
 
+## Isolated service lifecycle gate root
+
+No Host change is required (#1732). `CreateServiceLifecycleOptions` gains an optional `gateRoot`. On macOS, install, repair and uninstall then hold the `service-lifecycle` gate in that directory instead of `/tmp/byok-pm-<uid>`, so tests or parallel consumers can drive separate lifecycles without refusing each other with `lifecycle_owner_busy`. Lifecycles exclude each other only when they use the same root, so production code should omit it. The root must be an absolute path to a directory the user owns that is not a symlink, the same check the default root gets: a missing directory is created with mode 0700, an existing one is set to 0700, and a symlink, non-directory or foreign-owned root is refused with `private_dir_symlink`, `private_dir_not_directory` or `private_dir_foreign_owner`. Linux and Windows ignore the option: their gate is an abstract socket or a named pipe with no filesystem root.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.

@@ -22,6 +22,18 @@ export interface CreateServiceLifecycleOptions {
   platform?: NodeJS.Platform;
   /** Platform-specific DI seams (mocked exec, mocked fs, mocked homedir/getuid) — only the fields matching the resolved platform are ever read. */
   deps?: LaunchdDeps & SystemdDeps & WinswDeps & WindowsUserDeps;
+  /**
+   * An isolated root for the `service-lifecycle` gate that install, repair,
+   * uninstall and `owned` hold, for tests and parallel consumers. Omitted,
+   * the gate uses `/tmp/byok-pm-<uid>`. Lifecycles exclude each other only
+   * when they use the same root. It must be an absolute path to a directory
+   * this user owns that is not a symlink: a missing directory is created with
+   * mode 0700, an existing one is set to 0700, and anything else is refused
+   * with an error whose `code` is `private_dir_symlink`,
+   * `private_dir_not_directory` or `private_dir_foreign_owner`. Only macOS
+   * reads it: the Linux and Windows gates have no filesystem root.
+   */
+  gateRoot?: string;
 }
 
 /**
@@ -75,11 +87,11 @@ export function createManagedServiceLifecycle(def: ServiceDefinition, opts: Crea
   const platform = opts.platform ?? process.platform;
   switch (platform) {
     case 'darwin':
-      return createLaunchdLifecycle(def, opts.deps);
+      return createLaunchdLifecycle(def, opts.deps, opts.gateRoot);
     case 'linux':
-      return createSystemdLifecycle(def, opts.deps);
+      return createSystemdLifecycle(def, opts.deps, opts.gateRoot);
     case 'win32':
-      return def.windows?.scope === 'user' ? createWindowsUserLifecycle(def, opts.deps) : createWinswLifecycle(def, opts.deps);
+      return def.windows?.scope === 'user' ? createWindowsUserLifecycle(def, opts.deps, opts.gateRoot) : createWinswLifecycle(def, opts.deps, opts.gateRoot);
     default:
       throw new UnsupportedServicePlatformError(platform);
   }

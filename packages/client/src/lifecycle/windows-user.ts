@@ -92,7 +92,7 @@ function launcherQuery(launcherPath: string): string {
  *   waits for the launcher to exit (`service_unload_timeout`).
  * - `status()` reports the launcher process, found by its command line.
  */
-export function createWindowsUserLifecycle(def: ServiceDefinition, deps: WindowsUserDeps = {}): ManagedServiceLifecycle {
+export function createWindowsUserLifecycle(def: ServiceDefinition, deps: WindowsUserDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
   const windows = def.windows;
   if (windows?.scope !== 'user') throw new Error("Windows user-scope lifecycle requires `ServiceDefinition.windows.scope: 'user'`");
   const hostStop = windows.stop;
@@ -172,5 +172,5 @@ export function createWindowsUserLifecycle(def: ServiceDefinition, deps: Windows
       const running = result.pids.length > 0;
       return { running, determinate: true, detail: running ? `launcher running (pid ${result.pids.join(', ')})` : 'launcher not running' };
     },
-  }, fs);
+  }, fs, gateRoot);
 }
