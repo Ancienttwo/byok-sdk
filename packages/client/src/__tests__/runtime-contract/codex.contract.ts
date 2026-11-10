@@ -120,7 +120,7 @@ const resumeTurns = once(async () => {
 
 const excluded = once(() => turn('excluded'));
 const inherited = once(() => turn('inherit'));
-const descriptor = adapter().descriptor;
+const descriptor = adapter({ agentUserContext: 'excluded', agentUserMcpServers: 'excluded' }).descriptor;
 
 defineRuntimeContract(`codex runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, {
   'detect.version': check(async () => {

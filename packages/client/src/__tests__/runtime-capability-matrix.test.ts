@@ -38,6 +38,18 @@ const adapters = (): ReadonlyArray<readonly [string, RuntimeAdapter]> => [
 ];
 
 describe('runtime capability matrix projection to conn.hello / presence', () => {
+  it.each([
+    ['claude', (mode: 'inherit' | 'excluded') => new ClaudeAdapter({ agentUserContext: mode }), [true, true, true, false, false]],
+    ['codex', (mode: 'inherit' | 'excluded') => new CodexAdapter({ agentUserContext: mode }), [true, false, true, false, false]],
+    ['pi', (mode: 'inherit' | 'excluded') => new PiAdapter({ agentUserContext: mode }), [true, true, true, true, true]],
+  ] as const)('%s reports user context according to its options', (_name, make, excluded) => {
+    const fields = ['userInstructions', 'userOutputStyle', 'userMemory', 'userSkills', 'userHookContext'] as const;
+    for (const mode of ['inherit', 'excluded'] as const) {
+      const caps = make(mode).descriptor.capabilities;
+      expect(fields.map(field => caps.isolation?.[field])).toEqual(mode === 'excluded' ? excluded : fields.map(() => false));
+      expect(toRuntimeInfoCapabilities(caps).isolation).toEqual(caps.isolation);
+    }
+  });
   it.each(adapters())('%s carries every declared field with its descriptor value', (_name, adapter) => {
     const capabilities = adapter.descriptor.capabilities;
     const wire = toRuntimeInfoCapabilities(capabilities);

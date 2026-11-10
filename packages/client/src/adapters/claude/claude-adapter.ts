@@ -192,6 +192,12 @@ export class ClaudeAdapter implements RuntimeAdapter {
       platforms: ['darwin', 'linux', 'win32'],
       capabilities: {
         ...CLAUDE_RUNTIME_CAPABILITIES,
+        isolation: {
+          ...CLAUDE_RUNTIME_CAPABILITIES.isolation!,
+          ...(options.agentUserContext === 'excluded' ? {} : {
+            userInstructions: false, userOutputStyle: false, userMemory: false,
+          }),
+        },
         ...(this.nativeOptions === undefined ? {} : { nativeInteractions: CLAUDE_NATIVE_INTERACTION_CAPABILITIES }),
       },
       ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),

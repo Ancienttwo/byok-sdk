@@ -130,7 +130,7 @@ async function gateTurn() {
   }
 }
 
-const descriptor = new PiAdapter().descriptor;
+const descriptor = turnAdapter({ agentUserContext: 'excluded' }).descriptor;
 
 if (mode === 'latest') {
   skipRuntimeContract(`pi runtime contract (latest)`, 'Pi is bundled at byok.piRuntimePin and the SDK runs only that release; a newer Pi is qualified by a pin bump PR, which runs this suite in qualified mode');

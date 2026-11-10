@@ -143,6 +143,12 @@ export class CodexAdapter implements RuntimeAdapter {
     mcpToolApprovals: true,
     capabilities: {
       ...CODEX_RUNTIME_CAPABILITIES,
+      isolation: {
+        ...CODEX_RUNTIME_CAPABILITIES.isolation!,
+        ...(this.options.agentUserContext === 'excluded' ? {} : {
+          userInstructions: false, userMemory: false,
+        }),
+      },
       // Questions only: tool permission is the SDK `auto | all` decision.
       ...(this.options.nativeInteractions === undefined ? {} : { nativeInteractions: { approvalDecisions: [], structuredQuestions: true } }),
     },

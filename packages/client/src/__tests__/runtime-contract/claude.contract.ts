@@ -131,7 +131,7 @@ const inherited = once(() => turn('inherit'));
 const agentStyled = once(() => turn('excluded', true));
 const agentStyledInherited = once(() => turn('inherit', true));
 const gated = once(gateTurn);
-const descriptor = adapter().descriptor;
+const descriptor = adapter({ agentUserContext: 'excluded', agentSessionPersistence: 'disabled' }).descriptor;
 
 defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, {
   'detect.version': check(async () => {

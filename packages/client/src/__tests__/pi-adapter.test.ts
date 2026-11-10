@@ -972,7 +972,7 @@ const __executionScratch = await testExecutionScratch();
       approvalInteractive: false,
       toolAuthorizationAuto: true,
       preparedLane: true,
-      isolation: { userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: true, userHookContext: true, userMcpServers: false, sessionPersistence: false },
+      isolation: { userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: false, sessionPersistence: false },
     });
   });
 });
