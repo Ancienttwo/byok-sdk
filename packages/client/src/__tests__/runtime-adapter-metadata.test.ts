@@ -59,7 +59,9 @@ async function onPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>): 
 
 describe('selection target', () => {
   it('declares agy steering', async () => {
-    expect(builtIns(await tempDir()).agy.descriptor.capabilities.steer).toBe(true);
+    const descriptor = builtIns(await tempDir()).agy.descriptor;
+    expect(descriptor.capabilities.steer).toBe(true);
+    expect(descriptor.requiresMcpToolsetToolObservation).toBe(true);
   });
 
   it('derives the wire runtime ids and the harness exclusion from one list', () => {

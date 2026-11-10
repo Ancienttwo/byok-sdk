@@ -93,6 +93,7 @@ export class AgyAdapter implements RuntimeAdapter {
     return freezeRuntimeAdapterDescriptor({
       id: 'agy',
       supportsDispatchSelection: false,
+      requiresMcpToolsetToolObservation: true,
       platforms: ['darwin', 'linux', 'win32'],
       capabilities: AGY_RUNTIME_CAPABILITIES,
       ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),

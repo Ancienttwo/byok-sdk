@@ -17,7 +17,7 @@ import {
 } from '../../types';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { dshSession, RuntimeFailureError, SessionNotFoundError, UnsupportedOptionError, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime';
+import { dshMcpRows, dshSession, RuntimeFailureError, SessionNotFoundError, UnsupportedOptionError, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 import { AsyncQueue } from '../../util/async-queue';
@@ -216,6 +216,11 @@ export class DshAdapter implements RuntimeAdapter {
 
   /** Cheap admission, as Hermes: the version probe only. The acp profile probe belongs to `detect()`. */
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    try {
+      dshMcpRows(Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server })), '.');
+    } catch (error) {
+      return { kind: 'reject', reason: `dsh cannot attach the task MCP servers: ${(error as Error).message}`, retryable: false };
+    }
     const command = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin).bin.command;
     const { env: base } = await this.runtimeEnvironment();
     const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, dshEnvironment(base, this.root, this.sandbox));
