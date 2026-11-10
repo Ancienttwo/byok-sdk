@@ -50,7 +50,7 @@ describe('private Unix sockets', () => {
     const id = '0123456789abcdef';
     for (const [kind, prefix] of [['control', 'byok'], ['storeMutex', 'byok-store-mutex']] as const) {
       expect(privateSocketEndpoint(kind, 'a'.repeat(100), id)).toBe('a'.repeat(100));
-      expect(privateSocketEndpoint(kind, 'é'.repeat(51), id)).toBe('/tmp/' + prefix + '-' + id + '/sock');
+      expect(privateSocketEndpoint(kind, 'é'.repeat(51), id)).toBe(path.join('/tmp', `${prefix}-${id}`, 'sock'));
       for (const invalid of ['', 'ABCDEF0123456789', id + '0', 'z'.repeat(16)]) {
         expect(() => privateSocketEndpoint(kind, '/short', invalid)).toThrow(TypeError);
       }
