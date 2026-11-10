@@ -172,7 +172,6 @@ export type ApprovalOrigin =
 
 /** Every effect the host executor knows, in one vocabulary (§6.2). */
 export type EffectKind =
-  | 'open.sealed'
   | 'journal.admission'
   | 'open.preparation'
   | 'reserve.home'
@@ -181,7 +180,6 @@ export type EffectKind =
   | 'bind.workspace'
   | 'seal.manifest'
   | 'pin.preparation'
-  | 'clear.sealedOpening'
   | 'track.inflight'
   | 'consume.pendingCancelled'
   | 'send.decline'
@@ -195,7 +193,6 @@ export type EffectKind =
   | 'flush.batcher'
   | 'stop.batcher'
   | 'stop.draft'
-  | 'mark.finished'
   | 'abort.blob'
   | 'abort.inflightBlob'
   | 'abort.inflightBlobs'
@@ -346,7 +343,6 @@ export interface AdmissionStateV1 {
   readonly deviceSlot: boolean;
   readonly scratch: boolean;
   readonly lease: boolean;
-  readonly homeReservation?: string;
   readonly pin?: string;
   readonly decline?: AdmissionDeclineV1;
 }
@@ -471,8 +467,6 @@ export interface RunnerStateV1 {
   readonly pendingCancelled: readonly PendingCancelV1[];
   readonly finished: readonly string[];
   readonly strictDeclined: readonly string[];
-  readonly sealedOpening: readonly string[];
-  readonly homeReservations: Readonly<Record<string, number>>;
 }
 
 export interface ReducerSnapshot {
@@ -483,10 +477,7 @@ export interface ReducerSnapshot {
 /* -------------------------------- Events ------------------------------- */
 
 export type ReducerEventType =
-  | 'offer.sealed_opening'
   | 'offer.received'
-  | 'offer.sealed_opened'
-  | 'offer.sealed_declined'
   | 'admission.begin'
   | 'admission.stage'
   | 'admission.declined'
@@ -606,8 +597,6 @@ export function createRunnerState(): RunnerStateV1 {
     pendingCancelled: [] as readonly PendingCancelV1[],
     finished: [] as readonly string[],
     strictDeclined: [] as readonly string[],
-    sealedOpening: [] as readonly string[],
-    homeReservations: {} as Readonly<Record<string, number>>,
   });
 }
 
@@ -2850,7 +2839,7 @@ function fallbackRow(id: string, events: readonly ReducerEventType[]): Transitio
 }
 
 const FALLBACK_ROWS: readonly TransitionRow[] = [
-  /* @__PURE__ */ fallbackRow('F-OFFER', ['offer.sealed_opening', 'offer.received', 'offer.sealed_opened', 'offer.sealed_declined']),
+  /* @__PURE__ */ fallbackRow('F-OFFER', ['offer.received']),
   /* @__PURE__ */ fallbackRow('F-ADMISSION', ['admission.begin', 'admission.stage', 'admission.declined', 'admission.claimable']),
   /* @__PURE__ */ fallbackRow('F-CLAIM', ['claim.journaled', 'claim.journal_failed', 'claim.sent']),
   /* @__PURE__ */ fallbackRow('F-STARTUP', ['startup.registered', 'startup.transferred', 'startup.disposed']),

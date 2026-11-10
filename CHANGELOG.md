@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Breaking (client; #1694)** — The exported task runner reducer types drop members that nothing writes or emits: `EffectKind` loses `'open.sealed'`, `'clear.sealedOpening'` and `'mark.finished'`; `ReducerEventType` loses `'offer.sealed_opening'`, `'offer.sealed_opened'` and `'offer.sealed_declined'`; `AdmissionStateV1.homeReservation` and `RunnerStateV1.sealedOpening` and `homeReservations` are removed. Runtime behavior and the wire are unchanged.
+
 - **Changed (client; #1681)** — OpenCode unclassified start failures are retryable, and unexpected process exits report `runtime_exited`. Archived resume targets are non-retryable; targets in use are retryable. Fractional interrupt timeouts are accepted; invalid limit messages now name the retention budget or interrupt timeout. Hosts already read `retryable`; confirm that OpenCode start failures are not cached as permanent.
 
 - **Changed (client; #1688)** — `RuntimeEnvironmentReport` gains optional `lanes` (`RuntimeEnvironmentLaneReport`): the Pi prepared lane, a Hermes custody launch and a Pi launch with a pinned BYOK profile, with the names an SDK lane removes. `byok-agent doctor` prints one line per lane, so `runtimeEnvironment.pass` names that never reach the runtime in a lane are visible. Reports carry names only; no lane's allow list changes.

@@ -8970,7 +8970,7 @@ export type ApprovalKind = 'tool-authorization' | 'task-terminal';
 export type ApprovalDecision = 'approve' | 'reject';
 export type ApprovalOrigin = 'wire' | 'in-process' | 'control-socket' | 'timeout' | 'withdraw' | 'eviction' | 'fail-closed';
 /** Every effect the host executor knows, in one vocabulary (§6.2). */
-export type EffectKind = 'open.sealed' | 'journal.admission' | 'open.preparation' | 'reserve.home' | 'admission.limits' | 'prepare.runtime' | 'bind.workspace' | 'seal.manifest' | 'pin.preparation' | 'clear.sealedOpening' | 'track.inflight' | 'consume.pendingCancelled' | 'send.decline' | 'send.claim' | 'send.terminal' | 'send.started' | 'send.cancelled' | 'send.fail' | 'send.approval_request' | 'send.approval_resolved' | 'flush.batcher' | 'stop.batcher' | 'stop.draft' | 'mark.finished' | 'abort.blob' | 'abort.inflightBlob' | 'abort.inflightBlobs' | 'revoke.contexts' | 'revoke.host_contexts' | 'revoke.allHostContexts' | 'revoke.message_context' | 'delete.contexts' | 'delete.host_contexts' | 'register.startup_owner' | 'dispose.startup' | 'dispose.startup_all' | 'transfer.startup' | 'startup.stopRetry' | 'start.runtime' | 'bind.session' | 'persist.handoff' | 'activate.message' | 'register.active' | 'arm.max_duration' | 'start.pump' | 'register.approval' | 'arm.approval_timeout' | 'clear.timeout' | 'resolve.approval' | 'resolve.approval_promise' | 'dispatch.next_approval' | 'drain.approval_queue' | 'persist.evidence' | 'prepare.envelope' | 'interrupt.session' | 'await.close' | 'await.terminal_commit' | 'retry.close' | 'retry.commit' | 'publish.record' | 'snapshot.memory' | 'release.lease' | 'release.pin' | 'release.scratch' | 'release.home_reservation' | 'release.deviceSlot' | 'finish' | 'finish.declined' | 'failClaimedAgent' | 'steer.session' | 'await.offerSettlements' | 'shutdown.fail_active_tasks' | 'report.disposalFailure' | 'log' | 'audit';
+export type EffectKind = 'journal.admission' | 'open.preparation' | 'reserve.home' | 'admission.limits' | 'prepare.runtime' | 'bind.workspace' | 'seal.manifest' | 'pin.preparation' | 'track.inflight' | 'consume.pendingCancelled' | 'send.decline' | 'send.claim' | 'send.terminal' | 'send.started' | 'send.cancelled' | 'send.fail' | 'send.approval_request' | 'send.approval_resolved' | 'flush.batcher' | 'stop.batcher' | 'stop.draft' | 'abort.blob' | 'abort.inflightBlob' | 'abort.inflightBlobs' | 'revoke.contexts' | 'revoke.host_contexts' | 'revoke.allHostContexts' | 'revoke.message_context' | 'delete.contexts' | 'delete.host_contexts' | 'register.startup_owner' | 'dispose.startup' | 'dispose.startup_all' | 'transfer.startup' | 'startup.stopRetry' | 'start.runtime' | 'bind.session' | 'persist.handoff' | 'activate.message' | 'register.active' | 'arm.max_duration' | 'start.pump' | 'register.approval' | 'arm.approval_timeout' | 'clear.timeout' | 'resolve.approval' | 'resolve.approval_promise' | 'dispatch.next_approval' | 'drain.approval_queue' | 'persist.evidence' | 'prepare.envelope' | 'interrupt.session' | 'await.close' | 'await.terminal_commit' | 'retry.close' | 'retry.commit' | 'publish.record' | 'snapshot.memory' | 'release.lease' | 'release.pin' | 'release.scratch' | 'release.home_reservation' | 'release.deviceSlot' | 'finish' | 'finish.declined' | 'failClaimedAgent' | 'steer.session' | 'await.offerSettlements' | 'shutdown.fail_active_tasks' | 'report.disposalFailure' | 'log' | 'audit';
 /** Pure effect description; never a handle or a closure. */
 export interface Effect {
     readonly kind: EffectKind;
@@ -9057,7 +9057,6 @@ export interface AdmissionStateV1 {
     readonly deviceSlot: boolean;
     readonly scratch: boolean;
     readonly lease: boolean;
-    readonly homeReservation?: string;
     readonly pin?: string;
     readonly decline?: AdmissionDeclineV1;
 }
@@ -9167,14 +9166,12 @@ export interface RunnerStateV1 {
     readonly pendingCancelled: readonly PendingCancelV1[];
     readonly finished: readonly string[];
     readonly strictDeclined: readonly string[];
-    readonly sealedOpening: readonly string[];
-    readonly homeReservations: Readonly<Record<string, number>>;
 }
 export interface ReducerSnapshot {
     readonly runner: RunnerStateV1;
     readonly task?: TaskStateV1;
 }
-export type ReducerEventType = 'offer.sealed_opening' | 'offer.received' | 'offer.sealed_opened' | 'offer.sealed_declined' | 'admission.begin' | 'admission.stage' | 'admission.declined' | 'admission.claimable' | 'claim.journaled' | 'claim.journal_failed' | 'claim.sent' | 'startup.registered' | 'startup.transferred' | 'startup.disposed' | 'runtime.session_bound' | 'runtime.started' | 'runtime.activation_failed' | 'runtime.start_failed' | 'runtime.run_failed' | 'turn.ended' | 'stream.ended' | 'resource.exceeded' | 'approval.requested' | 'approval.dispatch_next' | 'approval.decided' | 'approval.withdrawn' | 'approval.stale' | 'terminal.requested' | 'terminal.evidence' | 'terminal.envelope_ready' | 'terminal.envelope_failed' | 'terminal.sent' | 'terminal.close' | 'terminal.commit' | 'finish.completed' | 'retry.finalization' | 'cancel.received' | 'steer.received' | 'steer.failed' | 'message.accepted' | 'message.refused' | 'message.send_attempted' | 'shutdown.stop_accepting' | 'shutdown.drain' | 'shutdown.completed';
+export type ReducerEventType = 'offer.received' | 'admission.begin' | 'admission.stage' | 'admission.declined' | 'admission.claimable' | 'claim.journaled' | 'claim.journal_failed' | 'claim.sent' | 'startup.registered' | 'startup.transferred' | 'startup.disposed' | 'runtime.session_bound' | 'runtime.started' | 'runtime.activation_failed' | 'runtime.start_failed' | 'runtime.run_failed' | 'turn.ended' | 'stream.ended' | 'resource.exceeded' | 'approval.requested' | 'approval.dispatch_next' | 'approval.decided' | 'approval.withdrawn' | 'approval.stale' | 'terminal.requested' | 'terminal.evidence' | 'terminal.envelope_ready' | 'terminal.envelope_failed' | 'terminal.sent' | 'terminal.close' | 'terminal.commit' | 'finish.completed' | 'retry.finalization' | 'cancel.received' | 'steer.received' | 'steer.failed' | 'message.accepted' | 'message.refused' | 'message.send_attempted' | 'shutdown.stop_accepting' | 'shutdown.drain' | 'shutdown.completed';
 /**
  * One internal event. Payloads are deliberately flat: a transition row names
  * exactly the fields it reads, and every field stays JSON-serializable. Ids and
