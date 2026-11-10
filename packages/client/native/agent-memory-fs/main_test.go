@@ -85,10 +85,13 @@ func TestRootBarrierFlushesNestedAncestorsToVolumeBoundary(t *testing.T) {
 		}
 		return
 	}
-	if err != nil || !boundaryReached || len(flushed) != 4 || output.Len() != 0 {
+	if err != nil || !boundaryReached || len(flushed) != 8 || output.Len() != 0 {
 		t.Fatalf("err=%v boundary=%v calls=%d output=%q", err, boundaryReached, len(flushed), output.String())
 	}
-	for index, path := range []string{root, filepath.Dir(root), filepath.Dir(filepath.Dir(root)), boundary} {
+	// The shared pinned-chain barrier first pins downward, then re-flushes
+	// retained directories upward after its final relationship checks.
+	for index, path := range []string{boundary, filepath.Dir(filepath.Dir(root)), filepath.Dir(root), root,
+		root, filepath.Dir(root), filepath.Dir(filepath.Dir(root)), boundary} {
 		want, _ := os.Stat(path)
 		if !os.SameFile(flushed[index], want) {
 			t.Fatalf("flush %d skipped or reordered an ancestor", index)

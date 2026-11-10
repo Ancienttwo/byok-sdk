@@ -271,73 +271,20 @@ func runRootBarrier(input io.Reader) (err error) {
 		cause = "root_barrier_unsupported"
 		return errors.New("Windows has no strict root barrier contract")
 	}
-	var roots []*os.Root
-	var paths []string
-	var infos []os.FileInfo
+	cause = "root_barrier_open_failed"
+	root, err := os.OpenRoot(req.Root)
+	if err != nil {
+		return err
+	}
 	defer func() {
-		for _, root := range roots {
-			if closeErr := root.Close(); closeErr != nil && err == nil {
-				cause, err = "root_barrier_close_failed", closeErr
-			}
+		if closeErr := root.Close(); closeErr != nil && err == nil {
+			cause, err = "root_barrier_close_failed", closeErr
 		}
 	}()
-	for cursor := req.Root; ; cursor = filepath.Dir(cursor) {
-		cause = "root_barrier_open_failed"
-		root, err := os.OpenRoot(cursor)
-		if err != nil {
-			return err
-		}
-		roots = append(roots, root)
-		cause = "root_barrier_metadata_failed"
-		info, err := root.Stat(".")
-		if err != nil {
-			return err
-		}
-		if len(infos) > 0 {
-			cause = "root_barrier_volume_failed"
-			same, err := sameEntryVolume(infos[0], info)
-			if err != nil {
-				return err
-			}
-			// The mounted volume is the durable boundary. Do not flush its
-			// parent on a different device, or any directory above that parent.
-			if !same {
-				break
-			}
-			cause = "root_barrier_changed"
-			child, err := root.Lstat(filepath.Base(paths[len(paths)-1]))
-			if err != nil || !os.SameFile(child, infos[len(infos)-1]) {
-				return errors.New("root ancestry changed")
-			}
-		}
-		paths, infos = append(paths, cursor), append(infos, info)
-		cause = "root_barrier_open_failed"
-		file, err := root.Open(".")
-		if err != nil {
-			return err
-		}
-		syncErr := strictSync(file)
-		closeErr := file.Close()
-		if syncErr != nil {
-			cause = "root_barrier_sync_failed"
-			return syncErr
-		}
-		if closeErr != nil {
-			cause = "root_barrier_close_failed"
-			return closeErr
-		}
-		if filepath.Dir(cursor) == cursor {
-			break
-		}
-	}
-	cause = "root_barrier_changed"
-	for index, path := range paths {
-		entry, err := os.Lstat(path)
-		if err != nil || !os.SameFile(infos[index], entry) {
-			return errors.New("root ancestry changed during barrier")
-		}
-	}
-	return nil
+	// Reuse protocol 4's pinned chain and its child-before-parent re-flush
+	// after the final relationship checks. Keep one chain-barrier semantics.
+	cause = "root_barrier_sync_failed"
+	return syncHomeChain([]string{req.Root}, root)
 }
 
 func serve(input io.Reader, output io.Writer) error {
