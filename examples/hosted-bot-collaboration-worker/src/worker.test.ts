@@ -4,6 +4,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,12 +15,16 @@ import { alarmReports, openHome, RUN, until, type Home } from './worker.test-sup
 import { readHostScope, sha256Hex } from './host-scopes';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 
+const tsx = createRequire(import.meta.url).resolve('tsx');
+
 it('validates operator arguments and environment without exposing their values', () => {
   const script = fileURLToPath(new URL('./operator-provision-cli.ts', import.meta.url));
   const env = { ...process.env, DATABASE_URL: '', HOST_SCHEMA: '' };
   for (const [args, expected] of [[['scope'], 'Invalid arguments'], [['entitlement', 'tenant'], 'DATABASE_URL is required'],
+    [['entitlement', ' invalid'], 'Invalid scope or tenant identifier'],
+    [['scope', 'x'.repeat(201), '--owner', 'owner', '--config', 'config.json'], 'Invalid scope or tenant identifier'],
     [['scope', 'scope', '--owner', 'owner', '--config', 'config.json'], 'HOST_SCHEMA must be a valid schema name']] as const) {
-    const result = spawnSync(process.execPath, ['--import', 'tsx', script, ...args], { encoding: 'utf8',
+    const result = spawnSync(process.execPath, ['--import', tsx, script, ...args], { encoding: 'utf8',
       env: expected.startsWith('HOST_SCHEMA') ? { ...env, DATABASE_URL: 'postgres://localhost/db' } : env });
     expect(result.status).toBe(1);
     expect(result.stdout).toBe('');
@@ -42,7 +47,7 @@ describe.skipIf(!RUN)('H Host on local workerd (#794 D3)', () => {
       writeFileSync(configFile, JSON.stringify(config));
       const script = fileURLToPath(new URL('./operator-provision-cli.ts', import.meta.url));
       const env = { ...process.env, DATABASE_URL: h.substrate.connectionString, HOST_SCHEMA: h.substrate.hostSchema };
-      const run = (...args: string[]) => spawnSync(process.execPath, ['--import', 'tsx', script, ...args], { encoding: 'utf8', env });
+      const run = (...args: string[]) => spawnSync(process.execPath, ['--import', tsx, script, ...args], { encoding: 'utf8', env });
       const newTenant = `${scope}-new`;
       const created = run('entitlement', newTenant);
       expect([created.status, created.stdout, created.stderr]).toEqual([0, '', '']);

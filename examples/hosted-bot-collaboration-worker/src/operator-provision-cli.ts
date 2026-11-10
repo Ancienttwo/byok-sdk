@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 import { createByokPool, PostgresQuotaStore } from '@byok-sdk/cloud-dataplane';
+import { isTenantId } from '@byok-sdk/cloud';
 import type { HostConfig } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 import { provisionEntitlement, provisionScope } from './operator-provision';
 
@@ -21,6 +22,7 @@ async function main(): Promise<void> {
     || (scopeCommand && (!args[3] || args[3].startsWith('-') || !args[5] || args[5].startsWith('-')))) {
     throw new ValidationError('Invalid arguments. Use --help for usage.');
   }
+  if (!isTenantId(args[1])) throw new ValidationError('Invalid scope or tenant identifier.');
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new ValidationError('DATABASE_URL is required.');
   try {
