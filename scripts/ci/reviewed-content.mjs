@@ -342,6 +342,10 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     if (before.exports?.['./adapter-steps'] === undefined && after.exports?.['./adapter-steps'] === './src/adapter-steps.ts') {
       delete after.exports['./adapter-steps'];
     }
+    // #1666: H cancel results import the shared delegation rules entry.
+    if (before.exports?.['./rules/delegation'] === undefined && after.exports?.['./rules/delegation'] === './src/rules/delegation.ts') {
+      delete after.exports['./rules/delegation'];
+    }
   } else if (path === 'examples/byok-mcp-server/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The MCP server example must stay private');
     // #1375: the routine calendar moved to protocol, so the core edge goes.

@@ -723,6 +723,19 @@ test('#1664: K8 adds only the shared adapter-steps export', t => {
   assert.throws(() => selectImpact([path], f), /more than/, 'an extra export');
 });
 
+test('#1666: K8 adds only the shared delegation rules export', t => {
+  const f = fixture(t), path = 'examples/bot-collaboration/package.json';
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1',
+    exports: { './model': './src/model.ts' } };
+  f.write(path, manifest);
+  rebase(f, 'K8 before delegation rules export');
+  const exports = { ...manifest.exports, './rules/delegation': './src/rules/delegation.ts' };
+  f.write(path, { ...manifest, exports });
+  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
+  f.write(path, { ...manifest, exports: { ...exports, './other': './src/other.ts' } });
+  assert.throws(() => selectImpact([path], f), /more than/, 'an extra export');
+});
+
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
   const f = fixture(t);
   const path = 'examples/bot-collaboration/package.json';

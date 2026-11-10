@@ -3,6 +3,7 @@ import { hash, type Routine } from '@byok-sdk/server/execution-core';
 import { isOwner, verified, type Principal } from '@byok-sdk/example-bot-collaboration/channel';
 import type { Command, KeylessCommand } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { CommitConflict, type CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
+import type { DelegationCancelResult, TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
 import type { HostedCollaborationStore } from './store';
 
 type RoomInputCommand = Extract<Command, { kind: 'room_input' }>;
@@ -90,13 +91,19 @@ export class HostedCommandEntry<C> {
     await this.options.sync(scope, this.now());
     if (error) throw new Error(error);
   }
-  async cancelTurn(credential: C, turnId: string): Promise<void> {
+  /** As L `cancelTurn` (#1405): only a `cancelled` result committed, so only it syncs. */
+  async cancelTurn(credential: C, turnId: string): Promise<TurnCancelResult> {
     const { scope } = await this.owned(credential, 'cancelTurn', turnId);
-    await this.keyless(scope, { kind: 'cancel_turn', turnId });
+    const result = await this.store.cancelTurn(scope, turnId, this.now);
+    if (result.result === 'cancelled') await this.options.sync(scope, this.now());
+    return result;
   }
-  async cancelDelegation(credential: C, delegationId: string): Promise<void> {
+  /** As L `cancelDelegation` (#1405). Refuses with `DelegationError`. */
+  async cancelDelegation(credential: C, delegationId: string): Promise<DelegationCancelResult> {
     const { scope } = await this.owned(credential, 'cancelDelegation', delegationId);
-    await this.keyless(scope, { kind: 'cancel_delegation', delegationId });
+    const result = await this.store.cancelDelegation(scope, delegationId, this.now);
+    if (result.result === 'cancelled') await this.options.sync(scope, this.now());
+    return result;
   }
   async abandonDelegation(credential: C, delegationId: string): Promise<void> {
     const { scope } = await this.owned(credential, 'abandonDelegation', delegationId);

@@ -18,7 +18,8 @@ import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } 
 import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefusal, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { cancelIntent, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
+import { delegationCancelAnswer, turnCancelAnswer, type DelegationCancelResult, type TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
+import { cancelIntent, commandIntentFacts, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { syncDreamSlice } from './dreams';
 import { HostedStoreVersionError, inSchema, lockScope, SCHEMA } from './transaction';
 import { decideMessage, messageCommandId, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDecision } from './messages';
@@ -40,6 +41,7 @@ import { exportMarkOf, hostedSwitchContent, importMarkOf, SwitchExportedError, S
 export type Publish = (id: string, value: Json) => void;
 /** `now` is the clock of the writer. A transaction that settles a delivery must give it, for the outbox index. */
 export type Decision<T> = { value: T; outbox: OutboxIntent[]; now?: number };
+type CommitExtra = (state: CollaborationState, ports: StorePorts) => { remember?: CommandPorts['remember']; outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> };
 type Decide<T> = (state: CollaborationState, publish: Publish, client: PoolClient) => Decision<T> | Promise<Decision<T>>;
 type TurnHistory = NonNullable<SyncOptions<never>['history']>;
 /**
@@ -340,6 +342,27 @@ export class HostedCollaborationStore {
   }
 
   /**
+   * The owner cancel of a Turn, as L `cancelTurn` (K8 host.ts): the answer of K8 `turnCancelAnswer` and the keyless commit
+   * run in one transaction under the scope lock. An answer other than `cancelled` writes nothing and cancels no intent.
+   */
+  async cancelTurn(scope: string, turnId: string, clock: () => number): Promise<TurnCancelResult> {
+    let answer: Omit<TurnCancelResult, 'turnId'> | undefined;
+    const committed = await this.commitWith(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId } }, clock, undefined, 'binding', undefined,
+      async (state, client) => {
+        answer = turnCancelAnswer(state, await commandIntentFacts(client, scope, Object.keys(state.turns)), turnId);
+        return answer !== undefined;
+      });
+    return { turnId, ...(committed ? { result: 'cancelled' } : answer!) };
+  }
+  /** The owner cancel of a delegation, as L `cancelDelegation`: see `cancelTurn`. */
+  async cancelDelegation(scope: string, delegationId: string, clock: () => number): Promise<DelegationCancelResult> {
+    let answer: Omit<DelegationCancelResult, 'delegationId'> | undefined;
+    const committed = await this.commitWith(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_delegation', delegationId } }, clock, undefined, 'binding', undefined,
+      async state => (answer = delegationCancelAnswer(state, delegationId)) !== undefined);
+    return { delegationId, ...(committed ? { result: 'cancelled' } : answer!) };
+  }
+
+  /**
    * The inbound channel entry (#793 D2b-out-3), as L `receive()` (K8 host.ts). K8 `classifyInbound` sorts the message:
    * - `echo`: in one transaction under the scope lock, K8 `echoCandidates` and `acceptDeliveryEcho` settle the one delivery
    *   that the echo names, or an `unmatched_echo` audit line is written; then the reply tokens are cleaned. The delivery index
@@ -408,12 +431,19 @@ export class HostedCollaborationStore {
    * command, admitted as L admits it (see `commit`). `binding`: an owner command of the command entry, which also needs an
    * active H binding for the work it added. Neither: a callback, which L commits with no admission either.
    */
-  private async commitWith(scope: string, request: CommitRequest<Command>, clock: () => number,
-    extra?: (state: CollaborationState, ports: StorePorts) => { remember?: CommandPorts['remember']; outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
-    entry?: 'owner' | 'binding', guard?: (client: PoolClient) => Promise<void>): Promise<CommitResult> {
+  private commitWith(scope: string, request: CommitRequest<Command>, clock: () => number, extra?: CommitExtra,
+    entry?: 'owner' | 'binding', guard?: (client: PoolClient) => Promise<void>): Promise<CommitResult>;
+  /** With `settled`, the commit is skipped and `undefined` returned when the step answers, after the guard and under the scope lock. */
+  private commitWith(scope: string, request: CommitRequest<Command>, clock: () => number, extra: CommitExtra | undefined,
+    entry: 'owner' | 'binding' | undefined, guard: ((client: PoolClient) => Promise<void>) | undefined,
+    settled: (state: CollaborationState, client: PoolClient) => Promise<boolean>): Promise<CommitResult | undefined>;
+  private async commitWith(scope: string, request: CommitRequest<Command>, clock: () => number, extra?: CommitExtra,
+    entry?: 'owner' | 'binding', guard?: (client: PoolClient) => Promise<void>,
+    settled?: (state: CollaborationState, client: PoolClient) => Promise<boolean>): Promise<CommitResult | undefined> {
     const key = storedKey(scope), config = await this.host(scope);
-    return this.change(scope, request.commandId, async (state, publish, client) => {
+    return this.change<CommitResult | undefined>(scope, request.commandId, async (state, publish, client) => {
       await guard?.(client);
+      if (await settled?.(state, client)) return { value: undefined, outbox: [] };
       // The store admits each input with its own policy, as L does (K8 host.ts `commitOwner`), so the admission and the sync's
       // seal use one policy.
       const { manage, ...own } = this.ports(config, state, publish, clock), head = revisionOf(state);

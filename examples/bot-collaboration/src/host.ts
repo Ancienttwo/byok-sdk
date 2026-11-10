@@ -10,8 +10,9 @@ import { HostLedger, type Conclusion } from '@byok-sdk/server/execution-core';
 import { canonical, hash, isOccurrenceIntentKey, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
 import { json, stateOf, type CollaborationState, type Turn, type Verdict } from './model';
 import { contextTurns, DEFAULT_HANDOFF_BUDGETS, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
-import { cancellable, DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
+import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
+import { delegationCancelAnswer, turnCancelAnswer, type CancelOutcome, type DelegationCancelResult, type TurnCancelResult } from './rules/delegation';
 import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, replyCheckDue, reportCardDecisions,
   commandBots, type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
@@ -179,25 +180,7 @@ export class HostIntentError extends Error {
  * `cancelled`: the intent was not submitted and settled as `cancelled`. `cancel_pending`: the SDK cancel went out, and K4
  * settles the intent at its terminal. `already_settled`: no cancel was sent; `conclusion` is the earlier one.
  */
-export interface HostIntentCancelResult { key: string; result: 'cancelled' | 'cancel_pending' | 'already_settled'; conclusion?: Conclusion }
-/**
- * `cancelTurn` refuses with `cancelDelegation`'s codes on a chain Turn, and `cancelDelegation` with `unknown_delegation` or with
- * `not_cancellable` for a delegation whose state a cancel cannot act on: end a `reply_held` or `uncertain` one with
- * `abandonDelegation` (#1405). `key` is the delegation id. A delegation is no intent key, so this is not a `HostIntentError`.
- */
-export class DelegationError extends Error {
-  constructor(readonly key: string, readonly code: 'unknown_delegation' | 'not_cancellable', message: string) {
-    super(message); this.name = 'DelegationError';
-  }
-}
-/**
- * `cancelTurn` and `cancelDelegation` (#1405), read from the ledger, so a replay or a restart gives the same answer.
- * `cancelled`: this call committed the cancel. `cancel_pending`: an earlier cancel has no terminal yet, so this call writes
- * nothing and sends no cancel. `already_settled`: the target had ended, and this call writes nothing; `conclusion` is the
- * Turn's earlier one (the K4 intent's when the Turn has one) and `verdict` the delegation's.
- */
-export interface TurnCancelResult { turnId: string; result: HostIntentCancelResult['result']; conclusion?: string }
-export interface DelegationCancelResult { delegationId: string; result: HostIntentCancelResult['result']; verdict?: Verdict }
+export interface HostIntentCancelResult { key: string; result: CancelOutcome; conclusion?: Conclusion }
 function hostIntent(state: CollaborationState, key: string): { handler: string } | undefined {
   return state.hostIntents && Object.hasOwn(state.hostIntents, key) ? state.hostIntents[key] : undefined;
 }
@@ -207,33 +190,6 @@ function openIntent(intents: LedgerState['intents'], key: string): Intent {
   if (!intent) throw new HostIntentError(key, 'unknown_intent', `Unknown intent: ${key}`);
   if (intent.conclusion) throw new HostIntentError(key, 'already_settled', `Intent already settled: ${key}`);
   return intent;
-}
-/**
- * The answer of a delegation cancel that writes nothing, or `undefined` when the cancel commits. Refuses before any write what
- * `arbitrateCancel` would refuse, with a code.
- */
-function settledDelegationCancel(state: CollaborationState, id: string): Omit<DelegationCancelResult, 'delegationId'> | undefined {
-  const d = Object.hasOwn(state.delegations, id) ? state.delegations[id]! : undefined;
-  if (!d) throw new DelegationError(id, 'unknown_delegation', 'Delegation not found');
-  if (d.verdict) return { result: 'already_settled', verdict: d.verdict };
-  if (d.cancel) return { result: 'cancel_pending' };
-  if (!cancellable(d.status)) throw new DelegationError(id, 'not_cancellable', 'Delegation cannot be cancelled in this state; use abandonDelegation');
-  return undefined;
-}
-/**
- * The answer of a Turn cancel that writes nothing, or `undefined` when the cancel commits. It follows the `cancel_turn` rule:
- * a chain Turn with no verdict is its delegation's cancel, an input names its batch, and an open batch commits its seal.
- * A missing Turn commits, so the rule refuses it.
- */
-function settledTurnCancel(s: LedgerState, id: string): Omit<TurnCancelResult, 'turnId'> | undefined {
-  const state = stateOf(s.application), chain = state.turns[id]?.delegationId;
-  if (chain && !state.delegations[chain]!.verdict) return settledDelegationCancel(state, chain);
-  const input = state.inputs?.[id], batch = input && state.inputBatches![input.batchId]!;
-  if (batch?.state === 'open') return undefined;
-  const target = batch ? batch.id : id, turn = state.turns[target], intent = s.intents[hash(target)];
-  if (!turn) return undefined;
-  if (intent) return intent.conclusion ? { result: 'already_settled', conclusion: intent.conclusion } : intent.cancelReason ? { result: 'cancel_pending' } : undefined;
-  return turn.conclusion ? { result: 'already_settled', conclusion: turn.conclusion } : undefined;
 }
 /** Phase 1 of a history-mode sync: the injected rows of each Turn that can freeze its offer next, by Turn id. */
 interface InjectedHistory {
@@ -763,7 +719,7 @@ export class BotCollaboration {
   cancelDelegation(id: string, ...by: PrincipalArg): Promise<DelegationCancelResult> {
     return this.exclusive(async () => {
       this.ownerOnly(by, 'cancelDelegation', id);
-      const settled = settledDelegationCancel(this.snapshot(), id);
+      const settled = delegationCancelAnswer(this.snapshot(), id);
       if (settled) return { delegationId: id, ...settled };
       await this.settleChain(this.commitKeyless({ kind: 'cancel_delegation', delegationId: id }));
       return { delegationId: id, result: 'cancelled' };
@@ -971,7 +927,7 @@ export class BotCollaboration {
   }
   private async cancelOneTurn(id: string): Promise<TurnCancelResult> {
     // The read and the commit run in one synchronous step, so no K4 transaction lands between them.
-    const settled = settledTurnCancel(this.ledger.snapshot(), id);
+    const snapshot = this.ledger.snapshot(), settled = turnCancelAnswer(stateOf(snapshot.application), intentRows(snapshot), id);
     if (settled) return { turnId: id, ...settled };
     const result = this.commitKeyless({ kind: 'cancel_turn', turnId: id });
     const value = valueOf<{ deliver: boolean } | { target: string; admitted: boolean }>(result);
