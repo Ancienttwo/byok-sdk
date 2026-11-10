@@ -126,10 +126,19 @@ const gatedLines = readFileSync(corpusPath, 'utf8')
   })
   .filter((entry) => isServerToDaemonType(entry.type) && entry.flags.length > 0 && !CLOUD_EMITTED.includes(entry.type));
 
-/** Whether the line's surface has a hosted entry that accepts its payload. */
+/** Keep every corpus row's gates exercised with valid Host selections (#1671). */
+function hostCopy(entry: (typeof gatedLines)[number]) {
+  if (entry.type !== 'task.offer') return entry;
+  const payload = { ...entry.payload };
+  const selection = payload.dispatchSelection as { runtimeId: string } | undefined;
+  if (selection !== undefined && payload.runtime !== undefined) payload.runtime = selection.runtimeId;
+  if (payload.homeAccess === 'memory-reader' && payload.agentMemory === 'read-write') payload.agentMemory = 'read';
+  return { ...entry, payload };
+}
+
+/** Only fresh execution's terminalProjection requirement excludes corpus rows from gate checks. */
 const submitExpressible = (entry: (typeof gatedLines)[number]): boolean => {
   if (entry.variant === 'fresh execution') return AgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
-  // #654: the sealed fresh lane has the same rules in its own hosted entry.
   if (entry.variant === 'sealed execution') return SealedAgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
   return true;
 };
@@ -150,12 +159,12 @@ async function errorCode(run: Promise<unknown>): Promise<string | undefined> {
   }
 }
 
-/** The fresh payload schema's one refusal for a corpus line without `terminalProjection`. */
+/** The fresh payload schema's pinned refusal for a corpus line without terminalProjection. */
 async function expectTerminalProjectionRequired(run: Promise<unknown>): Promise<void> {
   const error = await run.then(() => undefined, (caught: unknown) => caught);
   expect(error).toBeInstanceOf(ZodError);
-  expect((error as ZodError).issues).toEqual([
-    expect.objectContaining({ code: 'invalid_type', path: ['payload', 'terminalProjection'] }),
+  expect((error as ZodError).issues.map(({ code, path }) => ({ code, path }))).toEqual([
+    { code: 'invalid_type', path: ['payload', 'terminalProjection'] },
   ]);
 }
 
@@ -189,6 +198,32 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     expect(harnessOnly.filter(submitExpressible)).toEqual(harnessOnly);
   });
 
+  it.each([53, 54, 55, 58, 59, 60, 68, 69, 70, 164, 165, 166, 173, 179, 180, 181, 188, 337])(
+    'raw corpus offer %i has pinned selection refusals before device reads', async line => {
+      const entry = gatedLines.find(candidate => candidate.line === line)!;
+      const { harness, deviceId } = await deviceWith(entry.flags);
+      const reads = vi.spyOn(harness.stores.devices, 'get');
+      const error = await ENQUEUE[entry.type]!(harness, deviceId, entry.payload as never)
+        .then(() => undefined, (caught: unknown) => caught);
+      expect(error).toBeInstanceOf(ZodError);
+      expect((error as ZodError).issues.map(({ code, path }) => ({ code, path }))).toEqual([
+        ...(line === 69 ? [{ code: 'custom', path: ['agentMemory'] }] : []),
+        { code: 'custom', path: ['runtime'] },
+      ]);
+      expect(reads).not.toHaveBeenCalled();
+      expect(await harness.cloud.readTaskAttempt(TENANT_A, 'gated')).toBeUndefined();
+      expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId, afterSeq: 0 })).messages).toEqual([]);
+    },
+  );
+
+  it.each(Object.keys(OFFER_ENQUEUE) as OfferVariant[])('preserves every corpus capability gate on the %s lane', variant => {
+    const entries = gatedLines.filter(entry => entry.variant === variant);
+    const host = entries.map(hostCopy).filter(submitExpressible);
+    expect(new Set(host.flatMap(entry => entry.flags))).toEqual(new Set(entries.flatMap(entry => entry.flags)));
+    for (const entry of host) expect(requiredReceiverCapabilities(entry.type, entry.payload)).toEqual(entry.flags);
+    if (variant === 'sealed egress') expect(host.flatMap(entry => entry.flags)).toContain('sealed-payload-v2');
+  });
+
   it.each(gatedLines.flatMap((entry) => entry.flags.map((flag) => [entry.line, entry.variant ?? entry.type, flag, entry] as const)))(
     'corpus line %i (%s) is refused without %s, before task or mailbox state',
     async (_line, _label, flag, entry) => {
@@ -196,8 +231,9 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
       const { harness, deviceId } = await deviceWith(entry.flags.filter((candidate) => candidate !== flag));
       const capabilityReads = vi.spyOn(harness.stores.devices, 'get');
 
-      const run = ENQUEUE[type]!(harness, deviceId, entry.payload as never);
-      if (submitExpressible(entry)) {
+      const host = hostCopy(entry);
+      const run = ENQUEUE[type]!(harness, deviceId, host.payload as never);
+      if (submitExpressible(host)) {
         await expect(run).rejects.toMatchObject({
           code: 'agent_capability_missing',
           message: expect.stringContaining(flag),
@@ -217,8 +253,9 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     async (_line, _label, entry) => {
       const { type } = entry;
       const { harness, deviceId } = await deviceWith(entry.flags);
-      const run = ENQUEUE[type]!(harness, deviceId, entry.payload as never);
-      if (submitExpressible(entry)) expect(await errorCode(run)).not.toBe('agent_capability_missing');
+      const host = hostCopy(entry);
+      const run = ENQUEUE[type]!(harness, deviceId, host.payload as never);
+      if (submitExpressible(host)) expect(await errorCode(run)).not.toBe('agent_capability_missing');
       else await expectTerminalProjectionRequired(run);
     },
   );

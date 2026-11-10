@@ -110,7 +110,6 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
     if (recorded === undefined) {
       await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', resolved));
       if (resolved.harnessId !== undefined) {
-        if (resolved.runtime !== undefined || resolved.dispatchSelection !== undefined) throw new ByokCloudError('coordination_input_invalid', 'harnessId conflicts with built-in runtime selection');
         const target = await options.cloud.devices.get(tenant, deviceId);
         if (!target?.harnesses?.some(harness => harness.id === resolved.harnessId)) throw new ByokCloudError('coordination_input_invalid', 'requested custom harness is not advertised by this device');
       }
@@ -447,7 +446,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
     context: AgentMessageServerContext | undefined,
   ): ((stores: TenantStores, taskId: string) => Promise<void>) | undefined {
     if (payload.messageEgress === undefined) {
-      if (context !== undefined) throw new Error('agentMessageContext requires messageEgress');
+      if (context !== undefined) throw new ByokCloudError('coordination_input_invalid', 'agentMessageContext requires messageEgress');
       return undefined;
     }
     if (payload.sealing?.categories.includes('agent-message') === true && typeof options.agentMessage?.consumeSealed !== 'function') {

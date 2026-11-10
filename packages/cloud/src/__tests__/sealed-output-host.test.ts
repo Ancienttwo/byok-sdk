@@ -659,8 +659,8 @@ describe('the sealed Agent message of a task that seals it (#1045 S3)', () => {
   const messageOffer = (maxBytes: number) => {
     const line = corpus.find((entry) => entry.type === 'task.offer'
       && (entry.payload.sealing as { categories?: string[] } | undefined)?.categories?.includes('agent-message'))!;
-    const payload = line.payload as { messageEgress: object; agentRef: object; runtime: string };
-    return { ...payload, messageEgress: { ...payload.messageEgress, maxBytes } };
+    const payload = line.payload as { messageEgress: object; agentRef: object; runtime: string; dispatchSelection: { runtimeId: string } };
+    return { ...payload, runtime: payload.dispatchSelection.runtimeId, messageEgress: { ...payload.messageEgress, maxBytes } };
   };
   const SEALED_MESSAGE = corpus.find((line) => line.type === 'agent.message.publish' && line.payload.sealed !== undefined)!
     .payload as { agentRef: object; sealed: { contentMac: string } } & Record<string, unknown>;
