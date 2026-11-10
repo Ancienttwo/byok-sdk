@@ -75,6 +75,7 @@ export interface PiToolLoadoutSession {
 /** One native session/services assembly for strict daemon RPC and operator CLI. */
 export async function runPiSessionRuntime(options: {
   cwd: string; session?: string; sessionDir?: string;
+  credentialSource: 'keys-profile' | 'pi-auth-store';
   provider?: string; model?: string;
   thinking?: CreateAgentSessionOptions['thinkingLevel'];
   tools?: string[]; excludeTools?: string[]; noTools?: 'all' | 'builtin';
@@ -199,6 +200,9 @@ export async function runPiSessionRuntime(options: {
         : SettingsManager.create(options.cwd, agentDir, { projectTrusted: true }),
       resourceLoaderOptions: options.resourceLoaderOptions,
     });
+    if (options.credentialSource === 'keys-profile' && services.modelRuntime.getError() !== undefined) {
+      options.reject('keys_profile_model_composition_failed: launcher provider projection could not be composed');
+    }
     const extensions = services.resourceLoader.getExtensions();
     const errors = [
       ...services.diagnostics.filter(diagnostic => diagnostic.type === 'error').map(diagnostic => diagnostic.message),

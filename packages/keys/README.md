@@ -114,7 +114,7 @@ you save it: it throws when the Pi rpc host would refuse the `--provider`,
 the same check before admission and before spawn.
 
 The prepared runtime entry compiles `'openai-completions'` only. It refuses a
-profile that declares `'openai-responses'` or `inputLimits`. It also refuses
+profile that declares `'openai-responses'`, `providerId` or `inputLimits`. It also refuses
 `compat.supportsLongCacheRetention`, `compat.supportsStrictMode`,
 `compat.requiresReasoningContentOnAssistantMessages` and
 `compat.sendSessionAffinityHeaders`, because the frozen prepared wire does not
@@ -141,6 +141,8 @@ await registry.configure({
   display_name: 'OpenCode Go via local gateway',
   capabilities: [],
   pi_model: {
+    api: 'openai-completions',
+    providerId: 'opencode-go',
     contextWindow: 1_000_000,
     maxTokens: 384_000,
     reasoning: true,
@@ -154,6 +156,11 @@ await registry.configure({
 }, gatewayKey);
 ```
 
+- `pi_model.providerId: 'opencode-go'` explicitly selects Pi's OpenCode Go
+  reasoning replay and session-header behavior. It requires
+  `api: 'openai-completions'`. Models not served by OpenCode Go must not set
+  it, including other models on the same gateway. Without it the Pi provider
+  id remains `byok-sdk-<profile_ref>`; no name, URL or provider kind infers it.
 - `model` is the gateway's model id.
 - Take `contextWindow`, `maxTokens`, `reasoning` and `thinkingLevelMap` from
   the gateway's own model list for that id.
@@ -166,17 +173,17 @@ await registry.configure({
 
 `compat.sendSessionAffinityHeaders` makes Pi send its session id in the
 `session_id`, `x-client-request-id` and `x-session-affinity` headers. The
-gateway turns that session id into the `x-opencode-session` header that
-OpenCode Go requires, so every request of one Pi session carries the same
-OpenCode session. The prepared runtime entry refuses this compat key, so this
-profile does not run on `pi-prepared`. The recorded run used `pi-rpc`.
+declared OpenCode Go identity also sends `x-opencode-session`; the gateway
+must preserve a stable OpenCode session for requests from one Pi session.
+The prepared runtime entry refuses both the provider id and this compat key,
+so this profile does not run on `pi-prepared`. The recorded run used `pi-rpc`.
 
-The direct `opencode-go` vendor profile currently has a reasoning replay
-defect, see [#1586](https://github.com/Ancienttwo/byok-sdk/issues/1586).
-Pi 1.5.0 replays thinking in the field the gateway used. A gateway that
-returns thinking as `reasoning_content`, as magpie does, gets that field back
-in the replayed assistant message, including the message that carries a tool
-call. At `thinkingLevel: 'high'` the model may answer a simple turn without
+Pi 1.5.0 uses the declared `opencode-go` identity to replay a streamed
+`reasoning` value as `reasoning_content`, including on an assistant message
+that carries a tool call. A gateway that already returns `reasoning_content`
+keeps that field. The declared identity also makes Pi send
+`x-opencode-session` directly to the gateway. The SDK does not translate either
+payload. At `thinkingLevel: 'high'` the model may answer a simple turn without
 thinking. The recorded replay run used `'max'`.
 
 One run through magpie is recorded in
@@ -364,8 +371,10 @@ if (submission.ok) {
   pinned Pi fills undeclared `compat` keys from the endpoint URL. There, a
   representable entry equals the pinned pi-ai built-in model's configuration
   field by field. Pi's run-time branches on its own provider id are not part
-  of that promise, because the projected provider is `byok-sdk-<profile_ref>`.
-  In pi-ai 1.5.0 they are:
+  of that promise, because catalog-derived providers use `byok-sdk-<profile_ref>`.
+  A manually declared `pi_model.providerId: 'opencode-go'` selects Pi's own
+  OpenCode Go replay and session-header branches. In pi-ai 1.5.0 the other
+  branches are:
   - openrouter `anthropic/*` `cacheControlFormat`. No representable entry is
     affected.
   - the xai `reasoning.encrypted_content` include. Only grok-4.3 at `off`

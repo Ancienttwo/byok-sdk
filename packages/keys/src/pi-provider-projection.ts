@@ -40,25 +40,24 @@ const PI_ANTHROPIC_MESSAGES_PATH = '/v1/messages';
 export const PI_LAUNCHER_RUNTIME_ENTRIES = ['pi-rpc', 'pi-prepared', 'pi-durable'] as const;
 export type PiLauncherRuntimeEntry = (typeof PI_LAUNCHER_RUNTIME_ENTRIES)[number];
 
-/** Keep projected providers disjoint from Pi built-ins so composition can never fall back to one. */
-export function piProjectionProviderId(profileRef: string): string {
-  return `byok-sdk-${profileRef}`;
+/** The declared Pi identity, or a profile namespace disjoint from Pi built-ins. */
+export function piProjectionProviderId(profile: ModelProviderProfile): string {
+  return profile.pi_model?.providerId ?? `byok-sdk-${profile.profile_ref}`;
 }
 
 /**
  * Credential-blind Pi configuration derived from one validated local profile.
  *
- * The projected provider is namespaced by the profile's own ref, not by its
- * provider kind, so two independently configured endpoints of the same kind
- * project to two distinct Pi providers instead of colliding on one. Model
+ * The projected provider uses the profile's own ref unless `pi_model.providerId`
+ * explicitly selects Pi's OpenCode Go behavior. Model
  * `input` modalities are projected from the profile's declared capabilities,
  * and the provider `api` from the adapter and `pi_model.api` — declared local
  * configuration is the only authority; nothing is inferred from the model name
  * or base URL.
  */
 export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): object {
-  const { thinkingLevel: _, api, ...modelSettings } = requirePiModelConfig(profile);
-  const projectedProviderId = piProjectionProviderId(profile.profile_ref);
+  const { thinkingLevel: _, api, providerId: _providerId, ...modelSettings } = requirePiModelConfig(profile);
+  const projectedProviderId = piProjectionProviderId(profile);
   return {
     providers: {
       [projectedProviderId]: {
@@ -149,7 +148,7 @@ function piApiKey(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntime
 export function assertPiLaunchArgs(profile: ModelProviderProfile): void {
   const config = requirePiModelConfig(profile);
   const values: readonly (readonly [string, string])[] = [
-    ['--provider', piProjectionProviderId(profile.profile_ref)],
+    ['--provider', piProjectionProviderId(profile)],
     ['--model', profile.model],
     ['--thinking', config.thinkingLevel],
   ];
@@ -165,7 +164,7 @@ export function assertPiLaunchArgs(profile: ModelProviderProfile): void {
 
 /**
  * Validate the credential-blind RPC argv the client may delegate, then bind
- * the Pi child to the namespaced projection and exact configured model.
+ * the Pi child to the declared projection and exact configured model.
  */
 export function buildPiProviderArgs(
   profile: ModelProviderProfile,
@@ -225,7 +224,7 @@ export function buildPiProviderArgs(
   return [
     ...delegatedArgs,
     '--provider',
-    piProjectionProviderId(profile.profile_ref),
+    piProjectionProviderId(profile),
     '--model',
     profile.model,
     '--thinking',

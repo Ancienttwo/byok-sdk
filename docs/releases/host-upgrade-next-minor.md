@@ -26,6 +26,22 @@ Request the child or review through the model's `subagent` tool instead. Under `
 
 No Host action is required if task instructions do not invoke those leading commands. `/skill:` commands, file prompt templates and other extension commands keep their behavior. A slash command appearing mid-text, in model output or in a tool result stays content. Verify a supported `subagent` tool request and a refused leading `/run` request in each Host product before rollout. See the [Pi subagents specification](../spec.md#pi-subagents) and [runtime evidence](../researches/2026-11-10-pi-host-command-gate.md).
 
+## Pi OpenCode Go profiles
+
+Hosts that do not use OpenCode Go need no configuration change. For a model
+served by OpenCode Go, including through a local gateway, set the new optional
+`pi_model.providerId: 'opencode-go'` and explicitly set
+`pi_model.api: 'openai-completions'`. This lets Pi replay prior thinking as
+`reasoning_content` and send OpenCode session headers. Models not served by
+OpenCode Go must not set the field. Profiles that omit it retain
+`byok-sdk-<profile_ref>`. The prepared lane refuses it (#1586).
+
+Saving the optional field changes the exact profile hash, so refresh any
+pinned binding after saving it. RPC launches
+now refuse model-runtime configuration/composition errors before selecting a
+model or creating a session; repair the declared settings if admission fails
+with `keys_profile_model_composition_failed`.
+
 ## Pending train changes
 
 - TODO (#1641): Document OpenCode MCP toolsets and any Host upgrade steps after the change lands.

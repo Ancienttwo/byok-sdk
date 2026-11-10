@@ -245,7 +245,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     const resourceAgentDir = join(dirname(args.configPath), 'pi-agent-resources');
     mkdirSync(resourceAgentDir, { mode: 0o700 });
     await runPiSessionRuntime({
-      cwd: config.cwd, provider: args.provider, model: args.model, thinking: args.thinking,
+      cwd: config.cwd, credentialSource: config.credentialSource, provider: args.provider, model: args.model, thinking: args.thinking,
       resourceAgentDir, memoryLane, ...memoryLane.toolOptions,
       resourceLoaderOptions: memoryLane.resourceLoaderOptions,
       ...(providerApiKey === undefined ? {} : { providerApiKey }),
@@ -323,7 +323,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     mkdirSync(resourceAgentDir, { mode: 0o700 });
   }
   await runPiSessionRuntime({
-    cwd: config.cwd, session: args.session, sessionDir,
+    cwd: config.cwd, credentialSource: config.credentialSource, session: args.session, sessionDir,
     onSessionReady: ready,
     configureSession: session => refusePiSubagentHostCommands(session, [`<inline:${PI_SUBAGENT_HOST_EXTENSION}>`, ...subagentExtensionPaths]),
     provider: args.provider, model: args.model, thinking: args.thinking,

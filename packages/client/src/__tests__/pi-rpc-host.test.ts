@@ -562,7 +562,7 @@ describe('SDK ordinary Pi RPC entry', () => {
     expect(existsSync(join(f.root, 'agent', 'sessions'))).toBe(false);
   });
 
-  it.each(['PI_PROVIDER_API_KEY', 'OPENAI_API_KEY'])('refuses a keys-profile launch environment that carries %s', (name) => {
+  it.each(['PI_PROVIDER_API_KEY', 'OPENAI_API_KEY', 'OPENCODE_API_KEY'])('refuses a keys-profile launch environment that carries %s', (name) => {
     const f = custodyFixture('keys-profile');
     const result = spawnSync(bun, f.argv, { cwd: f.sealed, env: { ...f.env, [name]: 'sk-env-canary' }, encoding: 'utf8', timeout: 15_000 });
     expect(result.status).toBe(1);
@@ -570,6 +570,35 @@ describe('SDK ordinary Pi RPC entry', () => {
     expect(result.stderr).not.toContain('sk-env-canary');
     expect(result.stdout).toBe('');
   });
+
+  it.each(['opencode-go', 'byok-sdk-probe'])('refuses a composition error for %s before a model request', async (provider) => {
+    const f = custodyFixture('keys-profile');
+    let requests = 0;
+    const server = createServer((_req, res) => { requests++; res.end(); });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('no provider port');
+      // Schema-valid to Pi, but composition fails: radius OAuth requires a provider baseUrl.
+      writeFileSync(join(f.root, 'agent', 'models.json'), JSON.stringify({ providers: { [provider]: {
+        apiKey: 'byok:rpc-ipc', oauth: 'radius', models: [{ id: 'minimax-m3', api: 'openai-completions',
+          baseUrl: `http://127.0.0.1:${address.port}/v1` }],
+      } } }));
+      const argv = [...f.argv]; argv[argv.indexOf('--provider') + 1] = provider; argv[argv.indexOf('--model') + 1] = 'minimax-m3';
+      const child = spawn(bun, argv, { cwd: f.sealed, env: { ...f.env, PI_CODING_AGENT_SESSION_DIR: join(f.root, 'sessions') },
+        stdio: ['pipe', 'pipe', 'pipe', 'ipc'], timeout: 15_000 });
+      let stderr = '', stdout = '';
+      child.stderr!.on('data', data => { stderr += data; }); child.stdout!.on('data', data => { stdout += data; });
+      child.once('message', (request: { configDigest: string }) => child.send({
+        type: 'byok.pi.rpc.credential', configDigest: request.configDigest, secret: 'sk-composition-test',
+      }));
+      const code = await new Promise<number | null>(done => child.once('close', done));
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain('keys_profile_model_composition_failed');
+      expect(stderr).not.toContain('sk-composition-test');
+      expect(stdout).toBe(''); expect(requests).toBe(0);
+    } finally { server.closeAllConnections(); await new Promise<void>(done => server.close(() => done())); }
+  }, 20_000);
 
   it('refuses a device-auth launch that was given an undeclared custody channel', async () => {
     const f = custodyFixture('pi-auth-store');

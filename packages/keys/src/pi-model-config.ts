@@ -93,7 +93,7 @@ const inputLimits = z.object({
 }).strict();
 
 /**
- * Local declared Pi configuration, without identity, endpoint, headers or secrets.
+ * Local declared Pi configuration, without endpoint, headers or secrets.
  *
  * `thinkingLevelMap` is absent or complete, as on the prepared model wire.
  * Without a map, Pi applies its own handling of each level. A partial map is
@@ -102,6 +102,8 @@ const inputLimits = z.object({
  */
 export const PiModelConfigSchema = z.object({
   api: z.enum(PI_OPENAI_COMPATIBLE_APIS).optional(),
+  /** Opt in to Pi's OpenCode Go behavior; requires an explicit completions API. */
+  providerId: z.literal('opencode-go').optional(),
   contextWindow: limit,
   maxTokens: limit,
   reasoning: z.boolean(),
@@ -113,6 +115,9 @@ export const PiModelConfigSchema = z.object({
   compat,
   inputLimits: inputLimits.optional(),
 }).strict().superRefine((config, ctx) => {
+  if (config.providerId !== undefined && config.api !== 'openai-completions') {
+    ctx.addIssue({ code: 'custom', path: ['providerId'], message: 'Pi providerId requires api openai-completions' });
+  }
   if (config.maxTokens > config.contextWindow) {
     ctx.addIssue({ code: 'custom', path: ['maxTokens'], message: 'Pi maximum output cannot exceed its context window' });
   }

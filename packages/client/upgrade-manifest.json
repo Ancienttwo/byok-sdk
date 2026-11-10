@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "edd52a67fa80834eca34617842c2e7b5e03de6e539e483f6822d2ee89c9f8a15"
+    "snapshotSha256": "2388d6d5719918ca4810d8fcad9dd884cc0393c1943f5998a4cf7b9780494a75"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,16 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "pi-opencode-go-provider-id",
+      "impact": "additive",
+      "summary": "OpenCode Go profiles may set pi_model.providerId to opencode-go with an explicit openai-completions API to enable Pi reasoning_content replay and session headers on RPC and durable lanes. Other models must omit it; existing profiles need no change. Saving it changes the exact profile hash. The prepared lane refuses it, and keys-profile RPC launches refuse model-runtime composition errors instead of using a built-in fallback.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-opencode-go-profiles",
+      "items": [
+        "export:@byok-sdk/keys#ModelProviderProfileSchema",
+        "export:@byok-sdk/keys#PiModelConfigSchema"
+      ]
+    },
     {
       "id": "codex-session-store",
       "impact": "breaking",
@@ -50,6 +60,16 @@
       "item": "export:@byok-sdk/client#resolveStorageConfig",
       "change": "changed",
       "entry": "codex-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ModelProviderProfileSchema",
+      "change": "changed",
+      "entry": "pi-opencode-go-provider-id"
+    },
+    {
+      "item": "export:@byok-sdk/keys#PiModelConfigSchema",
+      "change": "changed",
+      "entry": "pi-opencode-go-provider-id"
     }
   ]
 }

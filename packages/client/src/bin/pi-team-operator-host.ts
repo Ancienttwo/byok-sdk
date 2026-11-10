@@ -31,7 +31,7 @@ export async function runPiTeamOperatorHost(argv: readonly string[]): Promise<vo
   if (Object.keys(mcp.observation).length !== 0) fail('operator MCP requires an empty host observation');
   if (VERSION !== resolvePiRuntimeIdentity().version) fail('native version differs from the static SDK pin');
   await runPiSessionRuntime({
-    cwd: raw.cwd as string, sessionDir: raw.sessionDir as string,
+    cwd: raw.cwd as string, credentialSource: 'pi-auth-store', sessionDir: raw.sessionDir as string,
     provider: raw.provider as string, model: raw.model as string, noTools: 'builtin',
     resourceLoaderOptions: {
       noExtensions: true, noSkills: true, noContextFiles: true, noPromptTemplates: true, noThemes: true,
