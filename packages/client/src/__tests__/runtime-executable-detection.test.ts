@@ -93,11 +93,24 @@ describe.skipIf(windows)('runtime detection reports the executable it ran', () =
     const home = await tempDir('bh-');
     const official = path.join(home, '.local', 'bin', 'agy');
     await fs.mkdir(path.dirname(official), { recursive: true });
-    await fs.writeFile(official, '');
+    await fs.writeFile(official, '', { mode: 0o755 });
     vi.stubEnv('HOME', home);
     vi.stubEnv('BYOK_AGY_BIN', '');
     expect(resolveAgyBin({ PATH: await tempDir('bp-') })).toEqual({ command: official, source: 'path' });
     expect(resolveAgyBin({ PATH: path.dirname(official) })).toEqual({ command: 'agy', source: 'path' });
+  });
+
+  it('agy: an inexecutable PATH entry falls back to the official install', async () => {
+    const home = await tempDir('bh-');
+    const official = path.join(home, '.local', 'bin', 'agy');
+    const bin = await tempDir('bp-');
+    await fs.mkdir(path.dirname(official), { recursive: true });
+    await fs.writeFile(official, '', { mode: 0o755 });
+    await fs.writeFile(path.join(bin, 'agy'), '', { mode: 0o644 });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('BYOK_AGY_BIN', '');
+    vi.stubEnv('PATH', path.dirname(official));
+    expect(resolveAgyBin({ PATH: bin })).toEqual({ command: official, source: 'path' });
   });
 
   it('pi: a Host resolveBin reports source config, because the pi-rpc lane launches that file', async () => {

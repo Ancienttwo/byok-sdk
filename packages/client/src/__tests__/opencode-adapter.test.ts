@@ -171,7 +171,7 @@ it('resolves a PATH executable, then the installer location, without configurati
 it('uses the exact npm command-shim entry and node through the owned-process invocation contract', () => {
   const shim = 'C:\\npm\\opencode.cmd';
   const node = 'C:\\npm\\node.exe';
-  expect(resolveRuntimeInvocation(shim, { platform: 'win32', env: {}, isFile: file => [shim, node].includes(file), readFile: () => npmNodeShim('node_modules\\@opencode\\cli\\bin\\opencode.js') })).toEqual({
+  expect(resolveRuntimeInvocation(shim, { platform: 'win32', env: {}, isFile: file => [shim, node].includes(file), isExecutable: () => false, readFile: () => npmNodeShim('node_modules\\@opencode\\cli\\bin\\opencode.js') })).toEqual({
     command: node, args: ['C:\\npm\\node_modules\\@opencode\\cli\\bin\\opencode.js'], executable: shim,
   });
 });
