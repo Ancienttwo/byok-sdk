@@ -63,3 +63,11 @@ export declare function dshSession(
     onRecord?: (record: DshRecord) => void;
   },
 ): Promise<RawDshSession>;
+
+export declare class SessionUnavailableError extends Error {
+  readonly name: 'SessionUnavailableError';
+  readonly sessionId: string;
+  readonly reason: 'archived' | 'in_use';
+  readonly cause: { readonly method: string; readonly native: Readonly<Record<string, unknown>> };
+  constructor(sessionId: string, message: string, details: { readonly reason: 'archived' | 'in_use'; readonly method: string; readonly native: Readonly<Record<string, unknown>> });
+}

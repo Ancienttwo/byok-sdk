@@ -2,6 +2,8 @@ import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import * as dshRuntime from '../../runtime/dsh-session-runtime';
+import { oarStartFailure } from '../oar-start-failure';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import {
@@ -15,9 +17,9 @@ import {
   type RuntimeVersionPolicy,
   type Session,
 } from '../../types';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { dshMcpRows, dshSession, RuntimeFailureError, SessionNotFoundError, UnsupportedOptionError, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime';
+import { dshMcpRows, dshSession, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 import { AsyncQueue } from '../../util/async-queue';
@@ -283,20 +285,7 @@ export class DshAdapter implements RuntimeAdapter {
       } catch (disposal) {
         throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
       }
-      // A failed record stream is the cause; the open or prompt error is its consequence.
-      const error = session.halted ?? thrown;
-      // A refused option (an MCP entry with env or headers, another workspace on resume) or a missing session cannot succeed on retry.
-      if (error instanceof SessionNotFoundError || error instanceof UnsupportedOptionError) throw authority(error.message);
-      if (error instanceof RuntimeFailureError)
-        throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: error.message,
-          failure: { class: runtimeFailureClassOf(error.failure) } });
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: isRuntimeExecutionFailure(error) ? error.category : 'infrastructure',
-        retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
-        reason: error instanceof Error ? error.message : 'dsh open failed',
-        failure: isRuntimeExecutionFailure(error) ? error.failure : { class: session.exitedOnItsOwn ? 'runtime_exited' : 'unknown' },
-      });
+      throw oarStartFailure(session.halted ?? thrown, { classes: dshRuntime, exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'dsh' });
     }
   }
 }

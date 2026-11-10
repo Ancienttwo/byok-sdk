@@ -6,6 +6,8 @@ import { CodexNativeInteractions } from './native-interactions';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
+import * as codexRuntime from '../../runtime/codex-session-runtime';
+import { oarStartFailure } from '../oar-start-failure';
 import type {
   AgentEvent,
   TaskFailure,
@@ -30,11 +32,6 @@ import {
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
-import {
-  codexSession,
-  SessionNotFoundError,
-  type RawCodexSession,
-} from '../../runtime/codex-session-runtime';
 import { codexFailure } from '../../runtime/oar-failure-runtime';
 import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
@@ -300,7 +297,7 @@ export class CodexAdapter implements RuntimeAdapter {
     try {
       const codexHome = excludeUserContext ? { CODEX_HOME: await createCodexAgentHome(input.env, input.scratch.sdkDir, input.manifest.lease?.canonicalHome) } : {};
       // The open deadline covers spawn, initialize, the thread open and its read-back.
-      const raw = await session.within('open', retryable, codexSession(
+      const raw = await session.within('open', retryable, codexRuntime.codexSession(
         (bin, args, options) => {
           const child = spawned(bin, [...invocation.args, ...args], options);
           session.own(child);
@@ -367,27 +364,7 @@ export class CodexAdapter implements RuntimeAdapter {
           cause: disposal,
         });
       }
-      // A failed record stream is the cause; the open or prompt error is its consequence.
-      const error = session.halted ?? thrown;
-      // A resume of a missing thread cannot succeed on retry: fail closed.
-      if (error instanceof SessionNotFoundError)
-        throw new RuntimeExecutionFailure({
-          phase: 'start',
-          category: 'authority',
-          retry: 'non-retryable',
-          reason: error.message,
-        });
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: isRuntimeExecutionFailure(error)
-          ? error.category
-          : 'infrastructure',
-        retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
-        reason: error instanceof Error ? error.message : 'codex open failed',
-        failure: isRuntimeExecutionFailure(error)
-          ? error.failure
-          : { class: session.exitedOnItsOwn ? 'runtime_exited' : 'unknown' },
-      });
+      throw oarStartFailure(session.halted ?? thrown, { classes: codexRuntime, exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'codex' });
     }
   }
 }
@@ -416,7 +393,7 @@ const retryable = (reason: string) =>
   });
 class CodexSession implements Session {
   sessionRef = '';
-  private raw?: RawCodexSession;
+  private raw?: codexRuntime.RawCodexSession;
   private child?: { dispose(): Promise<void>; kill(): void };
   private exit?: { readonly exitedOnItsOwn: boolean };
   private projection?: CodexProjection;
@@ -494,7 +471,7 @@ class CodexSession implements Session {
     this.sessionRef = id;
     this.projection = new CodexProjection(this.workspace, id, this.fresh);
   }
-  bind(raw: RawCodexSession): void {
+  bind(raw: codexRuntime.RawCodexSession): void {
     this.raw = raw;
   }
   record(record: CodexRecord): void {

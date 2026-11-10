@@ -9,6 +9,11 @@ import {
 import type { RuntimeFailurePhase } from '../runtime-failure';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { oarStartFailure } from '../adapters/oar-start-failure';
+import { SessionNotFoundError } from '../../vendor/oar/45488e7/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/45488e7/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/45488e7/contracts/errors';
+import { RuntimeFailureError } from '../../vendor/oar/45488e7/contracts/runtime-failure-error';
 
 const teardownIsNotExecutionPhase = (): RuntimeFailurePhase => {
   // @ts-expect-error teardown evidence belongs to Sprint Row 3, not the execution failure union.
@@ -111,5 +116,27 @@ describe('RuntimeExecutionFailure', () => {
     expect(source).not.toMatch(/catch\s*\([^)]*\)\s*\{[^}]*runtime[^}]*retryable\s*:\s*true/s);
     expect(source).toContain("projectRuntimeBoundaryFailure(err, 'start')");
     expect(source).toContain("projectRuntimeBoundaryFailure(err, 'run')");
+  });
+});
+
+describe('OAR start failures', () => {
+  const classes = { SessionNotFoundError, SessionUnavailableError, UnsupportedOptionError, RuntimeFailureError };
+  const details = { method: 'resume', native: {} };
+  const typed = new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'retryable', reason: 'typed', failure: { class: 'quota' } });
+  it.each([
+    [typed, 'semantic', 'retryable', 'quota', 'typed'],
+    [new SessionNotFoundError('id', 'missing', details), 'authority', 'non-retryable', 'unknown', 'missing'],
+    [new SessionUnavailableError('id', 'archived', { ...details, reason: 'archived' }), 'authority', 'non-retryable', 'unknown', 'archived'],
+    [new SessionUnavailableError('id', 'in use', { ...details, reason: 'in_use' }), 'infrastructure', 'retryable', 'unknown', 'in use'],
+    [new UnsupportedOptionError('model', 'unsupported'), 'authority', 'non-retryable', 'unknown', 'unsupported'],
+    [new RuntimeFailureError('auth', 'login'), 'authority', 'non-retryable', 'auth', 'login'],
+    [new Error('exit'), 'infrastructure', 'retryable', 'runtime_exited', 'exit'],
+  ])('classifies %s', (error, category, retry, failureClass, message) => {
+    const result = oarStartFailure(error, { classes, exitedOnItsOwn: true, runtime: 'codex' });
+    expect(result).toMatchObject({ phase: 'start', category, retry, failure: { class: failureClass }, message, cause: error });
+    expect(projectRuntimeBoundaryFailure(result, 'start').retryable).toBe(retry === 'retryable');
+  });
+  it('uses the runtime name for non-error throws and unknown for a live process', () => {
+    expect(oarStartFailure(null, { classes, exitedOnItsOwn: false, runtime: 'grok' })).toMatchObject({ message: 'grok open failed', failure: { class: 'unknown' }, cause: null });
   });
 });
