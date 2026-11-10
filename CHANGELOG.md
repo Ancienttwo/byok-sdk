@@ -4,6 +4,8 @@
 
 - **Changed (client; #1691)** — Strict offer declines and their bounded redelivery tracking now use the task runner reducer while preserving decline payloads.
 
+- **Fixed (client tests; #1732)** — The client test suites keep their darwin path-mutation gate locks in a per-file temporary root, so a run no longer adds a lock file to `/tmp/byok-pm-<uid>` for every temp path. The production root is unchanged.
+
 - **Changed (client; #1680)** — Grok, agy, Codex and Hermes share internal session lifecycle helpers for cancellation deadlines and retryable cleanup.
 
 - **Fixed (client; #1679)** — The six adapters now validate `interruptTimeoutMs` consistently; agy, dsh and Hermes also accept fractional milliseconds.
