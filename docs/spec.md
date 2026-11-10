@@ -4109,14 +4109,21 @@ The bundled host sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to a
 launch-private package that carries Pi's name, version and `piConfig` and
 re-exports the product's own Pi. A foreign Pi installed above the product is
 never selected. Compiled products also capture Pi's embedded peer namespaces
-through Pi's extension loader and expose them to the detached runner. They
-copy pi-subagents and the SDK child extensions into that private tree, outside
-the release Pi manifest's ancestry, so upstream cannot mistake the release
-asset manifest for an installed Pi SDK.
+through Pi's extension loader and expose them to the detached runner. SEA
+preparation copies pi-subagents and the SDK child extensions into that private
+tree, outside the release Pi manifest's ancestry, so upstream cannot mistake
+the release asset manifest for an installed Pi SDK. Bun instead executes the
+unchanged installed code from the product-derived root described below.
 
 Bun-compiled products set `PI_SUBAGENT_PI_BINARY` to the product and recognize
-only upstream's fixed Pi CLI arguments, the exact canonical path of their
-private `binary-bootstrap.js`, and an absolute `PI_SUBAGENT_RUNNER_CONFIG`.
+only upstream's fixed Pi CLI arguments, the exact canonical installed
+`binary-bootstrap.js`, and an absolute `PI_SUBAGENT_RUNNER_CONFIG`. The code
+authority is `dirname(realpath(process.execPath))/pi-subagents`, with the SDK
+child extensions beside it. An environment-selected root or writable runtime
+manifest cannot choose code to load. The installed package and extensions
+reject symlinks; device/inode identities are captured from that trusted source
+and rechecked before loading. Launch data and generated peer bridges stay
+private. Other configured Pi data roots do not change this code authority.
 Pi's loader runs the unchanged upstream binary bootstrap, which owns runner
 startup, execution and disposal.
 
@@ -4131,7 +4138,10 @@ script/config argv, and runs them with embedded Node. The workflow supervisor
 is recognized by exact canonical equality with the private
 `workflow-script-process.cjs`, worker and Acorn files; its root is recovered
 from the private executable path even though upstream clears the fork's
-environment. Other argv continues through ordinary product dispatch.
+environment. A helper outside the launch-config-derived private directory is
+refused before asset preparation. Malformed or foreign compiled runner-shaped
+argv is rejected before the product CLI; ordinary product commands retain
+their existing dispatch.
 
 **Residual risk, owner-selected route C (#1589):** SEA workflow execution
 does not enable Node's `--permission` sandbox. SEA receives those flags as

@@ -8,6 +8,11 @@ retains interpreter-plus-bundle refusal, and explicitly accepts the missing
 Node permission layer for SEA workflows. This supersedes the earlier
 upstream-seam refusal recorded in #1622.
 
+The original implementation/evidence below describes reviewed head
+`80ebbd561`; independent review requested changes. The round 1 repair and
+its updated validation are recorded at the end. SEA executable scope remains pending an owner
+decision, and the Windows repair rerun is pending owner-reopened access.
+
 ## Implementation and boundary
 
 The SDK loads the unchanged upstream package from a launch-private copy of
@@ -121,3 +126,34 @@ Added product lines: **195**. Added test lines: **173** across existing test
 files only. No full repository test run was used. Host-provided Node and
 background execution for interpreter-plus-bundle products remain outside this
 owner-selected route; #1589 remains open.
+
+## Round 1 repair
+
+Bun code loading is now anchored to the product's real executable install
+location, not an environment-selected private tree. Upstream package and SDK
+extension files reject symlinks; trusted-source device/inode identities are
+captured and checked again before loading. Atomic same-content replacement
+also fails the identity check. Launch data and generated peer bridges stay
+private. SEA validates its config-derived private directory before preparing
+assets. Malformed compiled runner shapes are rejected before ordinary product
+dispatch, and only Bun sets the Pi binary override.
+
+The repair passes build/typecheck, 69 launch/helper/G1/dist-boundary cases
+and all 8 payload cases. macOS and a Linux arm64 production bundle both complete the
+Bun foreground/background/workflow sequence with six child requests, G1 and
+three child read approvals. Hostile environment roots and symlinked bootstrap
+and extension files are rejected without executing the foreign marker.
+API/version/upgrade gates pass with unchanged public declarations.
+
+The unchanged dist-boundary test reproduced a CI failure before the repair.
+The quoted TypeBox compiler specifier came from the original `80ebbd561`
+peer catalogue, not Part A; TypeBox was already external. The catalogue is
+now loaded lazily from the installed upstream runner's `HOST_PEER_ALIASES`
+export, and all TypeBox subpaths are explicitly external. The same test then
+passes without an assertion change. No duplicate peer catalogue remains in
+client source; the sibling sweep found no other matching source sites.
+
+Windows repair validation is pending: the owner has suspended win-ci access,
+and no connection was made. The old Windows rows above are historical only.
+Part B's whole-host alias scope and foreground availability remain unresolved
+pending the owner's decision. This repair leaves Part B unchanged.

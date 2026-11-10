@@ -66,6 +66,19 @@ describe('client runtime launch resources', () => {
     }
   });
 
+  it('refuses a SEA install directory before preparing private subagent assets', async () => {
+    const f = await fixture();
+    const product = path.join(f.root, 'product');
+    await fs.writeFile(product, 'unused executable');
+    const original = process.execPath;
+    try {
+      process.execPath = product;
+      expect(() => bundledSubagents.assertSeaSubagentRoot(f.root, path.join(f.options.scratch.sdkDir, 'rpc-launch.json')))
+        .toThrow('SDK launch-private directory');
+      expect((await fs.readdir(f.root)).sort()).toEqual(['product', 'session with spaces']);
+    } finally { process.execPath = original; await f.options.scratch.release(); }
+  });
+
   it('launches in the session cwd with a private client-owned projection', async () => {
     const f = await fixture();
     const resources = await resolvePiRuntimeLaunch(f.options);

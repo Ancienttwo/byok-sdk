@@ -12,7 +12,7 @@ export { openPiRpcSession } from './pi-session-runtime';
 import { webExtension } from './pi-extension-factories.js';
 import { loadPiSubagentsAsset, loadPiSubagentsExtensions, writePiSubagentsHostSdk } from '../adapters/pi/subagents';
 import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
-import { BUNDLED_SUBAGENT_DIR, isNodeSea, prepareBundledSubagents, refuseInterpreterBackground } from '../adapters/pi/bundled-subagent-runtime';
+import { assertSeaSubagentRoot, BUNDLED_SUBAGENT_DIR, isNodeSea, pinBunSubagentAssets, prepareBundledSubagents, refuseInterpreterBackground } from '../adapters/pi/bundled-subagent-runtime';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import { parseToolAuthorizationIpcConfig, setToolAuthorizationGateEnv, type ToolAuthorizationIpcConfig } from '../tool-authorization-ipc';
@@ -290,7 +290,9 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
       let subagentAssets = assetRoot;
       if (compiled) {
         const root = sea ? dirname(process.execPath) : join(resolve(dirname(args.configPath)), BUNDLED_SUBAGENT_DIR);
-        subagentAssets = await prepareBundledSubagents(root, assetRoot);
+        if (sea) assertSeaSubagentRoot(root, args.configPath);
+        const trustedBun = sea ? undefined : pinBunSubagentAssets();
+        subagentAssets = await prepareBundledSubagents(root, assetRoot, trustedBun);
       } else {
         process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = await writePiSubagentsHostSdk(join(resolve(dirname(args.configPath)), 'pi-subagents-host-sdk'), assetRoot);
         extensionFactories.push(refuseInterpreterBackground);

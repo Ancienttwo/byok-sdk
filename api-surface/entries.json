@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2353162,
+      "budgetBytes": 2354745,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -653,7 +653,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 554155,
+      "budgetBytes": 556519,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -882,6 +882,11 @@
           "file": "openai/lib/EventStream.mjs",
           "line": 123,
           "rule": "Function reference"
+        },
+        {
+          "file": "packages/client/dist/bin/pi-runtime-host.js",
+          "line": 35,
+          "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",

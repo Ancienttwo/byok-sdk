@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -6,15 +6,40 @@ import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import { PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENT_EXTENSIONS_ASSET_DIR, writePiSubagentsHostSdk } from './subagents';
 
 export const BUNDLED_SUBAGENT_DIR = 'pi-subagent-runtime';
-const RUNTIME_ENV = 'BYOK_PI_SUBAGENT_RUNTIME_DIR';
+export interface TrustedBunSubagentAssets {
+  readonly root: string;
+  verify(): void;
+}
+
+/** The executable's install location is the authority; writable runtime metadata is not. */
+export function pinBunSubagentAssets(): TrustedBunSubagentAssets {
+  const root = path.dirname(realpathSync(process.execPath));
+  const identities = new Map<string, { dev: bigint; ino: bigint; directory: boolean; size: bigint; mtimeNs: bigint }>();
+  const fail = (file: string): never => { throw new Error('pi_subagents_host_sdk_unavailable: untrusted bundled subagent asset ' + file); };
+  const capture = (file: string): void => {
+    const stat = lstatSync(file, { bigint: true });
+    if (stat.isSymbolicLink() || realpathSync(file) !== path.resolve(file) || (!stat.isDirectory() && !stat.isFile())) fail(file);
+    identities.set(file, { dev: stat.dev, ino: stat.ino, directory: stat.isDirectory(), size: stat.size, mtimeNs: stat.mtimeNs });
+    if (stat.isDirectory()) for (const entry of readdirSync(file)) capture(path.join(file, entry));
+  };
+  capture(path.join(root, PI_SUBAGENTS_ASSET_DIR));
+  capture(path.join(root, PI_SUBAGENT_EXTENSIONS_ASSET_DIR));
+  return { root, verify: () => {
+    for (const [file, expected] of identities) {
+      const actual = lstatSync(file, { bigint: true });
+      if (actual.isSymbolicLink() || realpathSync(file) !== file || actual.dev !== expected.dev || actual.ino !== expected.ino
+        || actual.isDirectory() !== expected.directory || (!expected.directory && (!actual.isFile()
+          || actual.size !== expected.size || actual.mtimeNs !== expected.mtimeNs))) fail(file);
+    }
+  } };
+}
+
 const PEERS_KEY = 'byok-sdk.pi-subagents.peers';
 const HOST_KEY = 'byok-sdk.pi-subagents.host-sdk';
 const BOOTSTRAP = 'src/runs/background/subagent-runner-bootstrap.js';
 const BINARY_BOOTSTRAP = 'src/runs/background/binary-bootstrap.js';
 const BINARY_ARGS = ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-session', '--mode', 'rpc', '--extension'];
-const PEERS = ['@earendil-works/pi-coding-agent', '@earendil-works/pi-agent-core', '@earendil-works/pi-tui',
-  '@earendil-works/pi-ai', '@earendil-works/pi-ai/compat', '@earendil-works/pi-ai/models', '@earendil-works/pi-ai/oauth',
-  '@earendil-works/pi-ai/providers/all', 'typebox', 'typebox/compile', 'typebox/value'] as const;
+const HOST_PEER = '@earendil-works/pi-coding-agent';
 const EXPORT_NAME = /^[A-Za-z_$][\w$]*$/u;
 
 export function isNodeSea(): boolean {
@@ -42,26 +67,35 @@ async function loadPeers(root: string): Promise<Record<string, Record<string, un
   return peers;
 }
 
-/** A private copy outside the release's Pi-manifest ancestry; children retain the product's Pi. */
-export async function prepareBundledSubagents(root: string, assetRoot: string): Promise<string> {
+/** Private launch data; Bun executes code from independently pinned install assets. */
+export async function prepareBundledSubagents(root: string, assetRoot: string, trustedBun?: TrustedBunSubagentAssets): Promise<string> {
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const assets = path.join(root, 'assets');
-  mkdirSync(assets, { mode: 0o700 });
-  for (const dir of [PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENT_EXTENSIONS_ASSET_DIR]) {
-    cpSync(path.join(assetRoot, dir), path.join(assets, dir), { recursive: true, errorOnExist: true, force: false });
+  if (trustedBun === undefined) {
+    mkdirSync(assets, { mode: 0o700 });
+    for (const dir of [PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENT_EXTENSIONS_ASSET_DIR]) {
+      cpSync(path.join(assetRoot, dir), path.join(assets, dir), { recursive: true, errorOnExist: true, force: false });
+    }
   }
+  // The installed runner owns its peer catalogue; keep it and TypeBox outside client dist.
+  trustedBun?.verify();
+  const { HOST_PEER_ALIASES: aliases } = await import(pathToFileURL(path.join(trustedBun?.root ?? assets,
+    PI_SUBAGENTS_ASSET_DIR, 'src/runs/background/runner-aliases.js')).href) as {
+    HOST_PEER_ALIASES: ReadonlyArray<{ specifier: string; optional?: boolean }>;
+  };
+  const specifiers = aliases.filter(alias => !alias.optional).map(alias => alias.specifier);
   writeFileSync(path.join(root, 'host-peers.ts'), [
-    ...PEERS.map((specifier, index) => `import * as peer${index} from ${JSON.stringify(specifier)};`),
-    `const peers = { ${PEERS.map((specifier, index) => `${JSON.stringify(specifier)}: peer${index}`).join(', ')} };`,
+    ...specifiers.map((specifier, index) => `import * as peer${index} from ${JSON.stringify(specifier)};`),
+    `const peers = { ${specifiers.map((specifier, index) => `${JSON.stringify(specifier)}: peer${index}`).join(', ')} };`,
     `globalThis[Symbol.for(${JSON.stringify(PEERS_KEY)})] = peers;`,
-    `globalThis[Symbol.for(${JSON.stringify(HOST_KEY)})] = peers[${JSON.stringify(PEERS[0])}];`,
+    `globalThis[Symbol.for(${JSON.stringify(HOST_KEY)})] = peers[${JSON.stringify(HOST_PEER)}];`,
     'export default function captureHostPeers() {}',
   ].join('\n'), { flag: 'wx' });
   const peers = await loadPeers(root);
   await writePiSubagentsHostSdk(root, assetRoot);
   const manifests = new Map<string, { dir: string; exports: Record<string, string> }>();
-  for (const [index, specifier] of PEERS.entries()) {
-    if (specifier === PEERS[0]) continue;
+  for (const [index, specifier] of specifiers.entries()) {
+    if (specifier === HOST_PEER) continue;
     const parts = specifier.split('/');
     const count = specifier.startsWith('@') ? 2 : 1;
     const name = parts.slice(0, count).join('/');
@@ -84,10 +118,10 @@ export async function prepareBundledSubagents(root: string, assetRoot: string): 
   for (const [name, manifest] of manifests) {
     writeFileSync(path.join(manifest.dir, 'package.json'), JSON.stringify({ name, type: 'module', exports: manifest.exports }), { flag: 'wx' });
   }
-  process.env[RUNTIME_ENV] = root;
   process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = root;
-  process.env.PI_SUBAGENT_PI_BINARY = process.execPath;
-  return assets;
+  if (isBunExecutable()) process.env.PI_SUBAGENT_PI_BINARY = process.execPath;
+  trustedBun?.verify();
+  return trustedBun?.root ?? assets;
 }
 
 /** Interpreter bundles keep the upstream missing-peer refusal, with an actionable explanation. */
@@ -101,24 +135,40 @@ export const refuseInterpreterBackground: ExtensionFactory = pi => {
 
 function sameFile(candidate: string | undefined, expected: string): boolean {
   if (candidate === undefined || !path.isAbsolute(candidate) || !existsSync(candidate) || !existsSync(expected)) return false;
-  return realpathSync(candidate) === realpathSync(expected);
+  const written = lstatSync(expected, { bigint: true }), actual = lstatSync(candidate, { bigint: true });
+  if (!written.isFile() || !actual.isFile() || written.isSymbolicLink() || actual.isSymbolicLink()) return false;
+  return realpathSync(expected) === path.resolve(expected) && realpathSync(candidate) === path.resolve(expected)
+    && actual.dev === written.dev && actual.ino === written.ino;
 }
 
-/** Only executables recognize the pinned upstream runner shapes; ordinary product argv stays untouched. */
+/** Validate the launch-config-derived location before any SEA helper writes assets. */
+export function assertSeaSubagentRoot(root: string, configPath: string): void {
+  const expected = path.join(realpathSync(path.dirname(configPath)), BUNDLED_SUBAGENT_DIR);
+  const executable = path.join(expected, process.platform === 'win32' ? 'node.exe' : 'node');
+  const stat = existsSync(root) ? lstatSync(root) : undefined;
+  if (stat === undefined || !stat.isDirectory() || stat.isSymbolicLink()
+    || (process.platform !== 'win32' && (stat.mode & 0o777) !== 0o700)
+    || (process.getuid !== undefined && stat.uid !== process.getuid())
+    || realpathSync(root) !== expected || !sameFile(process.execPath, executable)) {
+    throw new Error('pi_background_unavailable: the SEA helper is not running from its SDK launch-private directory');
+  }
+}
+
+/** Compiled runner prefixes are reserved: malformed or foreign re-entry fails before product dispatch. */
 export async function runBundledSubagentCommand(argv: readonly string[]): Promise<boolean> {
   const sea = isNodeSea();
   const bun = isBunExecutable();
   if (!sea && !bun) return false;
-  const root = sea ? path.dirname(process.execPath) : process.env[RUNTIME_ENV];
-  if (root === undefined || !path.isAbsolute(root)) return false;
-  const pkg = path.join(root, 'assets', PI_SUBAGENTS_ASSET_DIR);
+  const root = path.dirname(realpathSync(process.execPath));
+  const invalid = (): never => { throw new Error('pi_background_unavailable: invalid SDK Pi runner re-entry'); };
+  const pkg = bun ? path.join(root, PI_SUBAGENTS_ASSET_DIR) : path.join(root, 'assets', PI_SUBAGENTS_ASSET_DIR);
   if (sea && argv.length === 7 && argv[0] === '--permission' && argv[1] === '--allow-worker') {
     const supervisor = path.join(pkg, 'workflow-script-process.cjs');
     const worker = path.join(pkg, 'workflow-script-worker.cjs');
     const acorn = path.join(pkg, 'node_modules/acorn/dist/acorn.js');
     if (!sameFile(argv[5], supervisor) || !sameFile(argv[6], acorn)
       || ![supervisor, worker, acorn].every((file, index) => sameFile(argv[index + 2]?.replace(/^--allow-fs-read=/u, ''), file)
-        && argv[index + 2]?.startsWith('--allow-fs-read='))) return false;
+        && argv[index + 2]?.startsWith('--allow-fs-read='))) return invalid();
     // SEA does not apply Node flags in argv. Route C intentionally runs the
     // upstream VM realm without Node's permission layer, as upstream Bun does.
     // Do not propagate apparent permission flags to the worker or claim them.
@@ -131,8 +181,8 @@ export async function runBundledSubagentCommand(argv: readonly string[]): Promis
     const bootstrap = path.join(pkg, BOOTSTRAP);
     const preload = path.join(pkg, 'runner-peer-preload.mjs');
     let preloadPath: string;
-    try { preloadPath = fileURLToPath(argv[1]!); } catch { return false; }
-    if (!sameFile(argv[2], bootstrap) || !sameFile(preloadPath, preload) || !path.isAbsolute(argv[3]!)) return false;
+    try { preloadPath = fileURLToPath(argv[1]!); } catch { return invalid(); }
+    if (!sameFile(argv[2], bootstrap) || !sameFile(preloadPath, preload) || !path.isAbsolute(argv[3]!)) return invalid();
     await loadPeers(root);
     process.argv = [process.execPath, realpathSync(bootstrap), argv[3]!];
     await import(pathToFileURL(realpathSync(preload)).href);
@@ -142,14 +192,16 @@ export async function runBundledSubagentCommand(argv: readonly string[]): Promis
   if (bun && argv.length === 8 && BINARY_ARGS.every((arg, index) => argv[index] === arg)
     && sameFile(argv[7], path.join(pkg, BINARY_BOOTSTRAP))) {
     const config = process.env.PI_SUBAGENT_RUNNER_CONFIG;
-    if (config === undefined || !path.isAbsolute(config)) return false;
+    if (config === undefined || !path.isAbsolute(config)) return invalid();
+    const trusted = pinBunSubagentAssets();
     (globalThis as { PI_BUNDLED_NODE?: boolean }).PI_BUNDLED_NODE = true;
     Reflect.get(globalThis, 'Headers');
     const { DefaultResourceLoader, getAgentDir } = await import('@earendil-works/pi-coding-agent');
     const loader = new DefaultResourceLoader({ cwd: process.cwd(), agentDir: getAgentDir(), noExtensions: true,
       noSkills: true, noPromptTemplates: true, additionalExtensionPaths: [path.join(pkg, BINARY_BOOTSTRAP)] });
+    trusted.verify();
     await loader.reload();
     throw new Error('pi_subagents_host_sdk_unavailable: binary bootstrap returned without running the child');
   }
-  return false;
+  return invalid();
 }

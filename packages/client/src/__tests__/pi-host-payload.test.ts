@@ -407,6 +407,25 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         expect(results[1]).toContain('Bun-compiled executable or Node SEA');
       }
       expect(existsSync(reexecMarker)).toBe(false);
+      if (form === 'compiled-executable') {
+        const foreignRoot = await tempRoot('byok-hostile-bun-root-');
+        const foreignBootstrap = path.join(foreignRoot, 'assets/pi-subagents/src/runs/background/binary-bootstrap.js');
+        const marker = path.join(foreignRoot, 'executed');
+        await fs.mkdir(path.dirname(foreignBootstrap), { recursive: true });
+        await fs.writeFile(foreignBootstrap, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'foreign'); export default function foreign() {}`);
+        const fixed = ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-session', '--mode', 'rpc', '--extension'];
+        const runnerEnv = { ...env, BYOK_PI_SUBAGENT_RUNTIME_DIR: foreignRoot, PI_SUBAGENT_RUNNER_CONFIG: path.join(runDir, 'foreign-config.json') };
+        await expect(execFileAsync(host.command, [...fixed, foreignBootstrap], { env: runnerEnv, timeout: 10_000 }))
+          .rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('invalid SDK Pi runner re-entry') });
+        const installed = path.join(release, 'pi-subagents/src/runs/background/binary-bootstrap.js');
+        await fs.rename(installed, installed + '.saved');
+        try {
+          await fs.symlink(foreignBootstrap, installed, 'file');
+          await expect(execFileAsync(host.command, [...fixed, installed], { env: runnerEnv, timeout: 10_000 }))
+            .rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('invalid SDK Pi runner re-entry') });
+        } finally { await fs.rm(installed, { force: true }); await fs.rename(installed + '.saved', installed); }
+        expect(existsSync(marker)).toBe(false);
+      }
       // The user's extension loaded against the Pi runtime in the bundle.
       expect(JSON.parse(await fs.readFile(extensionMarker, 'utf8'))).toEqual({ version: '1.5.0', schema: 'object', api: 'function' });
     } finally {
