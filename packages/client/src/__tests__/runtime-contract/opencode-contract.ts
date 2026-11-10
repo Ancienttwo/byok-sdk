@@ -96,6 +96,33 @@ async function waitFor<T>(read: () => Promise<T | undefined>, ms: number, what: 
   }
 }
 
+/** Files under `root` (relative, with sizes), at most `limit`; a missing root is empty. */
+async function listFiles(root: string, limit = 60): Promise<string[]> {
+  const out: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      if (out.length >= limit) return;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else out.push(`${path.relative(root, full).replace(/\\/g, '/')} (${(await fs.stat(full).catch(() => ({ size: -1 }))).size}B)`);
+    }
+  };
+  await walk(root);
+  return out;
+}
+
+/** What a timed-out cancel case leaves to read (#1696): the holder script and pid, every event with its time, and OpenCode's own logs. */
+async function cancelDiagnostics(workspace: string, home: string, log: readonly string[]): Promise<string> {
+  const exists = (file: string) => fs.stat(path.join(workspace, file)).then(stat => `${file}=${stat.size}B`, () => `${file}=missing`);
+  const logs = (await listFiles(home)).filter(row => /\.log\b/.test(row)).slice(-4);
+  const tails: string[] = [];
+  for (const row of logs) {
+    const name = row.replace(/ \(\d+B\)$/, '');
+    tails.push(`--- ${name}\n${(await fs.readFile(path.join(home, name), 'utf8').catch(() => '')).split(/\r?\n/).slice(-40).join('\n')}`);
+  }
+  return `\nworkspace: ${[await exists('hold.mjs'), await exists('hold.pid')].join(' ')}; node=${process.execPath}\nevents:\n${log.join('\n')}\nhome files: ${(await listFiles(home)).join(', ')}\n${tails.join('\n')}`;
+}
+
 /** The pid of a `pid command` row; `ps` right-aligns its pid column, so leading spaces are not a field. */
 const pidOf = (row: string): string => row.trim().split(/\s+/)[0] ?? '';
 
@@ -229,9 +256,10 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
       const session = await startPreparedOperation(adapter(), { instruction: 'Run the shell command.' }, { workspaceDir: box.workspace, agentHome: box.workspace, env: { ...env, ...recorder.env } });
       const events: string[] = [];
       const log: string[] = [];
-      const drained = (async () => { for await (const event of session.events) { events.push(event.type); log.push(JSON.stringify(event).slice(0, 300)); if (event.type === 'turn_end') break; } })();
+      const started = Date.now();
+      const drained = (async () => { for await (const event of session.events) { events.push(event.type); log.push(`+${Date.now() - started}ms ${JSON.stringify(event).slice(0, 600)}`); if (event.type === 'turn_end') break; } })();
       const tool = Number(await waitFor(async () => (await fs.readFile(pidFile, 'utf8').catch(() => '')).trim() || undefined, 60_000, 'the shell tool pid')
-        .catch((error: Error) => { throw new Error(`${error.message}; events: ${log.slice(-8).join(' | ')}`); }));
+        .catch(async (error: Error) => { throw new Error(`${error.message}; ${await cancelDiagnostics(box.workspace, env.HOME!, log)}`); }));
       await session.interrupt();
       await drained;
       // Before close(): a close would reap the process and hide a cancel that left it running.
