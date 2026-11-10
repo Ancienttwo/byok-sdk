@@ -1,7 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 
-import type { AgentHomeLease } from '../agent-home';
+import { ensureCreatedAgentHomeRootDurable, type AgentHomeLease } from '../agent-home';
 import { verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
 import { AgentMemoryIoError, AgentMemoryRevisionConflictError } from './agent-memory';
 import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry } from './agent-memory-filesystem';
@@ -141,6 +141,23 @@ function encodeReplaceContent(content: string, maxBytes: number): string {
   return bytes.toString('base64').replace(/=+$/u, '');
 }
 
+async function initializeCreatedHostStorageRoot(helperBin: string, root: string): Promise<void> {
+  await ensureCreatedAgentHomeRootDurable(root, async () => {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = execFile(helperBin, ['root-barrier'], {
+          shell: false, windowsHide: true, env: Object.freeze({}),
+          timeout: HELPER_REQUEST_TIMEOUT_MS, maxBuffer: HELPER_MAX_STDERR_BYTES,
+        }, error => { if (error) reject(error); else resolve(); });
+        child.stdin!.on('error', reject);
+        child.stdin!.end(JSON.stringify({ root }));
+      });
+    } catch {
+      throw new AgentMemoryIoError('Agent memory hostStorageRoot durability barrier failed; helper open refused');
+    }
+  });
+}
+
 class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
   private readonly pending = new Map<string, Pending>();
   private stdoutBuffer = Buffer.alloc(0);
@@ -172,6 +189,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     }
     const helperBin = verifyAgentMemoryFilesystemHelper(safeHelperPath(input.helperBin), input.assetRoot);
     const expected = agentMemoryHelperIdentity(input.homeIdentity, process.platform);
+    await initializeCreatedHostStorageRoot(helperBin, input.ancestorRoot);
     const child = spawn(helperBin, ['serve'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,

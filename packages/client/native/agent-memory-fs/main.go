@@ -222,10 +222,78 @@ func runCLI(args []string, input io.Reader, output io.Writer) error {
 		_, err := fmt.Fprintln(output, helperVersion)
 		return err
 	}
+	if len(args) == 1 && args[0] == "root-barrier" {
+		return runRootBarrier(input)
+	}
 	if len(args) != 1 || args[0] != "serve" {
 		return errors.New("invalid command")
 	}
 	return serve(input, output)
+}
+
+// This initialization command is separate from the signed protocol-4 session.
+// It accepts only a bounded canonical root on stdin and grants no file authority.
+func runRootBarrier(input io.Reader) error {
+	const maxInputBytes = 32 * 1024
+	data, err := io.ReadAll(io.LimitReader(input, maxInputBytes+1))
+	if err != nil || len(data) > maxInputBytes {
+		return errors.New("invalid root barrier input")
+	}
+	var req struct {
+		Root string `json:"root"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		return errors.New("invalid root barrier input")
+	}
+	if decoder.Decode(new(any)) != io.EOF || len(req.Root) == 0 || len(req.Root) > 4096 ||
+		!filepath.IsAbs(req.Root) || filepath.Clean(req.Root) != req.Root || strings.ContainsAny(req.Root, "\x00\r\n") {
+		return errors.New("invalid root barrier root")
+	}
+	parent, err := os.OpenRoot(filepath.Dir(req.Root))
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	parentInfo, err := parent.Stat(".")
+	if err != nil {
+		return err
+	}
+	name := filepath.Base(req.Root)
+	if filepath.Dir(req.Root) == req.Root {
+		name = "."
+	}
+	root, openErr := openVerifiedChild(parent, name)
+	if openErr != nil {
+		return openErr
+	}
+	defer root.Close()
+	rootInfo, err := root.Stat(".")
+	if err != nil {
+		return err
+	}
+	// Flush the child object before the parent entry that makes it reachable.
+	for _, directory := range []*os.Root{root, parent} {
+		file, err := directory.Open(".")
+		if err != nil {
+			return err
+		}
+		syncErr := strictSync(file)
+		closeErr := file.Close()
+		if syncErr != nil {
+			return syncErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	entry, err := os.Lstat(req.Root)
+	parentEntry, parentErr := os.Stat(filepath.Dir(req.Root))
+	if err != nil || parentErr != nil || !os.SameFile(rootInfo, entry) || !os.SameFile(parentInfo, parentEntry) {
+		return errors.New("root or parent changed during barrier")
+	}
+	return nil
 }
 
 func serve(input io.Reader, output io.Writer) error {

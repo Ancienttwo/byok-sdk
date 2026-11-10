@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -42,6 +43,82 @@ type helperProcess struct {
 	output *bufio.Reader
 	nextID int
 	closed bool
+}
+
+func TestRootBarrierFlushesRootAndParent(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootInfo, _ := os.Stat(root)
+	parentInfo, _ := os.Stat(filepath.Dir(root))
+	original := strictSync
+	t.Cleanup(func() { strictSync = original })
+	var flushed []os.FileInfo
+	strictSync = func(file *os.File) error {
+		info, err := file.Stat()
+		if err != nil {
+			return err
+		}
+		flushed = append(flushed, info)
+		return original(file)
+	}
+	input, _ := json.Marshal(map[string]string{"root": root})
+	var output bytes.Buffer
+	if err := runCLI([]string{"root-barrier"}, bytes.NewReader(input), &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(flushed) != 2 || !os.SameFile(flushed[0], rootInfo) || !os.SameFile(flushed[1], parentInfo) || output.Len() != 0 {
+		t.Fatalf("root and parent not flushed in order, calls=%d output=%q", len(flushed), output.String())
+	}
+}
+
+func TestRootBarrierFailuresRemainRetryable(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, _ := json.Marshal(map[string]string{"root": root})
+	original := strictSync
+	t.Cleanup(func() { strictSync = original })
+	injected := errors.New("injected strict barrier failure")
+	for _, failAt := range []int{1, 2} {
+		calls := 0
+		strictSync = func(file *os.File) error {
+			calls++
+			if calls == failAt {
+				return injected
+			}
+			return original(file)
+		}
+		if err := runCLI([]string{"root-barrier"}, bytes.NewReader(input), io.Discard); !errors.Is(err, injected) || calls != failAt {
+			t.Fatalf("failAt=%d err=%v calls=%d", failAt, err, calls)
+		}
+		strictSync = original
+		if err := runCLI([]string{"root-barrier"}, bytes.NewReader(input), io.Discard); err != nil {
+			t.Fatalf("retry after flush %d: %v", failAt, err)
+		}
+	}
+}
+
+func TestRootBarrierRefusesInvalidInputBeforeFlushing(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "file")
+	if err := os.WriteFile(file, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	missing, _ := json.Marshal(map[string]string{"root": filepath.Join(root, "missing")})
+	notDirectory, _ := json.Marshal(map[string]string{"root": file})
+	original := strictSync
+	t.Cleanup(func() { strictSync = original })
+	strictSync = func(*os.File) error { t.Fatal("invalid input reached flush"); return nil }
+	for _, input := range []string{"", `{}`, `{"root":null}`, `{"root":"relative"}`, `{"root":"/bad\u0000root"}`,
+		`{"root":"/bad\nroot"}`, `{"root":"/a/../b"}`, `{"root":"/root","extra":true}`, `{"root":"/root"} {}`,
+		strings.Repeat(" ", 32*1024+1), string(missing), string(notDirectory)} {
+		if err := runCLI([]string{"root-barrier"}, strings.NewReader(input), io.Discard); err == nil {
+			t.Fatalf("accepted invalid input (%d bytes)", len(input))
+		}
+	}
 }
 
 func TestVersionAndOpenProtocol(t *testing.T) {

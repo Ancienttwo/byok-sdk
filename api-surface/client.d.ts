@@ -1716,6 +1716,8 @@ export interface AgentHomeExecutionBinding {
     readonly lease: AgentHomeExecutionLease;
 }
 export declare function validateAgentRef(value: unknown): AgentRef;
+/** Internal handoff from layout initialization to the verified native helper. */
+export declare function ensureCreatedAgentHomeRootDurable(root: string, barrier: () => Promise<void>): Promise<void>;
 export declare function ensureDirectoryNoSymlink(root: string, target: string): Promise<string>;
 /**
  * SDK-owned deterministic Agent-home layout. The downstream supplies exactly
@@ -2772,7 +2774,7 @@ export interface AgentMemoryRestoreCleanup {
     readonly deleted: number;
 }
 // ==== @byok-sdk/client dist/daemon/agent-memory-fs-helper.d.ts ====
-import type { AgentHomeLease } from '../agent-home';
+import { type AgentHomeLease } from '../agent-home';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
 export declare const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 4;
 export declare const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = "4";
