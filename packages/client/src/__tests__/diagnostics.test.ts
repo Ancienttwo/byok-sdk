@@ -332,6 +332,13 @@ describe('diagnostics collector', () => {
       summary: 'control endpoint refused: private_dir_symlink /tmp/byok-0123456789abcdef (recorded 2026-08-09T00:00:00.000Z); '
         + 'remove /tmp/byok-0123456789abcdef if no byok process uses it, or shorten storeDir',
     });
+
+    await tracker.noteControlEndpoint({ code: 'socket_path_not_socket', path: '/tmp/byok-0123456789abcdef/control.sock' });
+    const socket = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(socket.checks.find((check) => check.id === 'control')?.summary).toBe(
+      'control endpoint refused: socket_path_not_socket /tmp/byok-0123456789abcdef/control.sock (recorded 2026-08-09T00:00:00.000Z); '
+        + 'remove /tmp/byok-0123456789abcdef/control.sock if no byok process uses it',
+    );
   });
 
   it('reports valid health and bounds quarantine inventory', async () => {

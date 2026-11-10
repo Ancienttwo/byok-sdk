@@ -25,9 +25,12 @@ interface RunMarker {
 }
 
 type ControlEndpointRefusal = NonNullable<Extract<OperationalHealthFileInspection, { status: 'valid' }>['controlEndpointRefusal']>;
-const CONTROL_ENDPOINT_REFUSAL_CODES: readonly ControlEndpointRefusal['code'][] = [
+const CONTROL_ENDPOINT_REFUSAL_CODES = [
   'private_dir_symlink', 'private_dir_not_directory', 'private_dir_foreign_owner', 'socket_path_not_socket',
-];
+] as const satisfies readonly ControlEndpointRefusal['code'][];
+// Compile-time exhaustiveness: a code of the union missing from the list fails here.
+type NoMissingCode<Missing extends never> = Missing;
+type _AllRefusalCodesListed = NoMissingCode<Exclude<ControlEndpointRefusal['code'], (typeof CONTROL_ENDPOINT_REFUSAL_CODES)[number]>>;
 
 interface ControlEndpointRecord extends ControlEndpointRefusal {
   status: 'refused';
@@ -462,7 +465,7 @@ function isControlEndpointRecord(value: unknown): value is ControlEndpointRecord
   return (
     Object.keys(record).every((key) => ['status', 'code', 'path', 'at'].includes(key)) &&
     record.status === 'refused' &&
-    CONTROL_ENDPOINT_REFUSAL_CODES.includes(record.code as ControlEndpointRefusal['code']) &&
+    (CONTROL_ENDPOINT_REFUSAL_CODES as readonly unknown[]).includes(record.code) &&
     typeof record.path === 'string' &&
     typeof record.at === 'string' &&
     Number.isFinite(Date.parse(record.at))
