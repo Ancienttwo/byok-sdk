@@ -4,6 +4,7 @@ import { testScratchOwner } from "./fixtures/execution-scratch";
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
+import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { createOfferFacts, MAX_TRACKED_TASK_IDS } from '../daemon/task-runner/state';
@@ -155,6 +156,37 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     expect(sent.filter((e) => e.type === 'task.claim' && e.task_id === taskId)).toHaveLength(1);
     expect(sent.filter((e) => e.type === 'task.complete' && e.task_id === taskId)).toHaveLength(1);
   });
+
+  it.each(['C7 start failure', 'C8 handoff write failure'])(
+    '%s keeps redelivery idempotent after startup ownership is released',
+    async (failure) => {
+      const adapter = new StubRuntimeAdapter();
+      const sent: Envelope[] = [];
+      const runner = await makeRunner(adapter, sent);
+      if (failure === 'C7 start failure') {
+        adapter.startError = new Error('spawn failed');
+      } else {
+        vi.spyOn(AgentSessionHandoffStore.prototype, 'record')
+          .mockRejectedValueOnce(new Error('handoff write failed'));
+      }
+      try {
+        const taskId = 'task-pre-active-failure';
+        const payload = { agentRef: freshTestAgentRef(), instruction: 'fail before active', ...FRESH_OFFER };
+        await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId, seq: 1 }));
+        expect(sent.filter((e) => e.type === 'task.fail' && e.task_id === taskId)).toHaveLength(1);
+        expect(sent.filter((e) => e.task_id === taskId).map((e) => e.type))
+          .toEqual(['task.claim', 'task.fail']);
+        await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+
+        const sentBeforeRedelivery = sent.length;
+        await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId, seq: 2 }));
+        expect(sent.filter((e) => e.type === 'task.claim' && e.task_id === taskId)).toHaveLength(1);
+        expect(sent).toHaveLength(sentBeforeRedelivery);
+      } finally {
+        vi.restoreAllMocks();
+      }
+    },
+  );
 
   it('a cancel arriving during the in-flight offer-processing window still tears the session down even after pendingCancelled is already full of older entries (finding F4 under M3-B cap pressure)', async () => {
     const adapter = new StubRuntimeAdapter();

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1695)** — Redelivered offers for tasks that failed after claim but before becoming active no longer claim the task again after startup cleanup. Runtime start and activation failures now retain the task in the bounded finished collection.
+
 - **Fixed (client; #1687)** — On macOS, `storeDir` and `scratchRoot` under `/tmp` or `/var` now allow daemon startup. POSIX configured roots follow symbolic links only when the link and its containing directory belong to root or the daemon user, and the directory is not writable by group or others unless sticky; untrusted links fail with `configured_path_untrusted_link`. Agent-home and local-state relocation roots use the same rule. For stores configured through trusted links, the physical spelling changes the long-store control socket fallback path and Agent-home owner id. Restart the daemon after upgrading so the CLI can reach it; manually remove any stale Agent-home owner lease marker left by a crash as directed by its error message. Store file formats and filenames are unchanged; existing identities are not migrated.
 
 - **Fixed (client; #1678)** — Codex resume of an archived thread is non-retryable; a thread in use remains retryable.
