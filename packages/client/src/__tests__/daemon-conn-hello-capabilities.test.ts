@@ -134,7 +134,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       // The capability matrix (#1103) rides on the same object.
       toolAuthorizationAuto: true,
       preparedLane: true,
-      isolation: { userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: true, userHookContext: true, userMcpServers: false, sessionPersistence: false },
+      isolation: { userInstructions: false, userOutputStyle: true, userMemory: true, userSkills: false, userHookContext: false, userMcpServers: false, sessionPersistence: false },
     });
 
     // Claude still supports plan; its private confirm/approval MCP path has been removed.
@@ -146,7 +146,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       messageDraft: true,
       toolAuthorizationAuto: true,
       preparedLane: false,
-      isolation: { userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: true },
+      isolation: { userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: false, sessionPersistence: false },
     });
 
     // codex: persistent app-server steering with YOLO-only auto permission mode.
@@ -157,7 +157,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       mcpToolsets: true,
       messageDraft: true,
       preparedLane: false,
-      isolation: { userInstructions: true, userOutputStyle: false, userMemory: true, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: false },
+      isolation: { userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: false, sessionPersistence: false },
     });
 
     // The wire value remains adapter-generated. The shipped adapters all

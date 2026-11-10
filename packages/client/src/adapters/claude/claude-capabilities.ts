@@ -1,10 +1,9 @@
 import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types';
 
 /**
- * What the Claude adapter can do: the one authority for its descriptor, the
- * wire capability matrix and the generated docs/adapter-capabilities.md table
- * (#1103). The runtime contract suite refuses to skip a case for a capability
- * declared here.
+ * Best-case Claude capabilities under its adapter options. The descriptor
+ * projects these for the constructed options; the generated capability table
+ * and runtime contract suite cover this best case (#1103).
  */
 export const CLAUDE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   steer: false,

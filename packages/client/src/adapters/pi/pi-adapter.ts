@@ -298,6 +298,15 @@ export class PiAdapter implements RuntimeAdapter {
     if (options.durableLane !== undefined && typeof options.durableLane !== 'boolean') throw new Error('PiAdapterOptions.durableLane must be boolean; pass replicaRoot through durableContext');
     this.descriptor = freezeRuntimeAdapterDescriptor({
       ...this.descriptor,
+      capabilities: {
+        ...PI_RUNTIME_CAPABILITIES,
+        isolation: {
+          ...PI_RUNTIME_CAPABILITIES.isolation!,
+          ...(this.agentResources.agentUserContext === 'excluded' ? {} : {
+            userInstructions: false, userSkills: false, userHookContext: false,
+          }),
+        },
+      },
       ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
     });
     // T0 verified the RPC lanes only. The durable worker's own frames and

@@ -38,6 +38,30 @@ const adapters = (): ReadonlyArray<readonly [string, RuntimeAdapter]> => [
 ];
 
 describe('runtime capability matrix projection to conn.hello / presence', () => {
+  it.each([
+    ['claude', (mode: 'inherit' | 'excluded') => new ClaudeAdapter({ agentUserContext: mode }), [true, true, true, false, false]],
+    ['codex', (mode: 'inherit' | 'excluded') => new CodexAdapter({ agentUserContext: mode }), [true, false, true, false, false]],
+    ['pi', (mode: 'inherit' | 'excluded') => new PiAdapter({ agentUserContext: mode }), [true, true, true, true, true]],
+  ] as const)('%s reports user context according to its options', (name, make, excluded) => {
+    const fields = ['userInstructions', 'userOutputStyle', 'userMemory', 'userSkills', 'userHookContext'] as const;
+    for (const mode of ['inherit', 'excluded'] as const) {
+      const caps = make(mode).descriptor.capabilities;
+      expect(fields.map(field => caps.isolation?.[field])).toEqual(mode === 'excluded' ? excluded : name === 'pi' ? [false, true, true, false, false] : fields.map(() => false));
+      expect(toRuntimeInfoCapabilities(caps).isolation).toEqual(caps.isolation);
+    }
+  });
+  it.each([undefined, 'inherit', 'excluded'] as const)('projects Claude context %s and independent session policy', context => {
+    for (const persistence of [undefined, 'enabled', 'disabled'] as const) {
+      const isolation = new ClaudeAdapter({ agentUserContext: context, agentSessionPersistence: persistence }).descriptor.capabilities.isolation;
+      expect([isolation?.userMcpServers, isolation?.sessionPersistence]).toEqual([context === 'excluded', persistence === 'disabled']);
+    }
+  });
+  it.each([undefined, 'inherit', 'excluded'] as const)('projects Codex MCP %s independently of context', mcp => {
+    for (const context of [undefined, 'inherit', 'excluded'] as const) {
+      const isolation = new CodexAdapter({ agentUserContext: context, agentUserMcpServers: mcp }).descriptor.capabilities.isolation;
+      expect([isolation?.userInstructions, isolation?.userMcpServers]).toEqual([context === 'excluded', mcp === 'excluded']);
+    }
+  });
   it.each(adapters())('%s carries every declared field with its descriptor value', (_name, adapter) => {
     const capabilities = adapter.descriptor.capabilities;
     const wire = toRuntimeInfoCapabilities(capabilities);

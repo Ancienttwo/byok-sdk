@@ -1,10 +1,9 @@
 import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types';
 
 /**
- * What the Pi adapter can do on its ordinary RPC lane: the one authority for
- * its descriptor, the wire capability matrix and the generated
- * docs/adapter-capabilities.md table (#1103). The runtime contract suite
- * refuses to skip a case for a capability declared here.
+ * Best-case Pi capabilities on its ordinary RPC lane under its adapter options.
+ * The descriptor projects these for the constructed options; the generated
+ * capability table and runtime contract suite cover this best case (#1103).
  */
 export const PI_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   steer: true,
