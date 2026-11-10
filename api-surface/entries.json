@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2354745,
+      "budgetBytes": 2351829,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -100,16 +100,6 @@
           "rule": "Function constructor"
         },
         {
-          "file": "packages/client/dist/index.js",
-          "line": 35,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "packages/client/dist/index.js",
-          "line": 35,
-          "rule": "opaque import()"
-        },
-        {
           "file": "zod/v4/core/compile.js",
           "line": 180,
           "rule": "Function reference"
@@ -131,7 +121,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 529993,
+      "budgetBytes": 529190,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -463,7 +453,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 492164,
+      "budgetBytes": 491360,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -653,7 +643,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 556519,
+      "budgetBytes": 554553,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -692,7 +682,6 @@
         "node:events",
         "node:fs",
         "node:fs/promises",
-        "node:module",
         "node:net",
         "node:os",
         "node:path",
@@ -779,7 +768,6 @@
           "node:events",
           "node:fs",
           "node:fs/promises",
-          "node:module",
           "node:net",
           "node:os",
           "node:path",
@@ -885,32 +873,22 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 35,
+          "line": 34,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 35,
+          "line": 34,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 35,
+          "line": 34,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 35,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 35,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 35,
+          "line": 34,
           "rule": "opaque import()"
         },
         {
@@ -2201,7 +2179,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2323520,
+      "budgetBytes": 2322689,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

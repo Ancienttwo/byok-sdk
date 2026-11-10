@@ -77,6 +77,9 @@ describe('SDK-reserved helper host composition', () => {
       process.execPath = path.join(root, 'node');
       const uri = (file: string) => pathToFileURL(file).href;
       for (const input of [
+        ['--import', uri(preload), bootstrap, '/config.json'],
+        ['--permission', '--allow-worker', `--allow-fs-read=${supervisor}`, `--allow-fs-read=${worker}`,
+          `--allow-fs-read=${acorn}`, supervisor, acorn],
         ['--import', uri(preload), foreign, '/config.json'],
         ['--import', uri(foreign), bootstrap, '/config.json'],
         ['--import', uri(preload), bootstrap, 'relative.json'],

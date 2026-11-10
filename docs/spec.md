@@ -4038,7 +4038,7 @@ Pi's own extension loader, which supplies the Pi modules of the product bundle.
 
 Foreground children are in-process Pi sessions inside the parent host. In the
 installed host, background runs use pi-subagents' detached Node runner from the
-installed package. Compiled products re-enter their executable as described
+installed package. Bun-compiled products re-enter their executable as described
 below; no `pi-subagent-print` or `pi-subagent-runner` helper kind is added. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
 fan-out limits. The SDK adds no second limit and no money or token spend cap.
 
@@ -4092,9 +4092,9 @@ from a `subagent` call. It skips the call for schedule ticks, auto-resume,
 extension, so each of their tool calls is gated, but no launch check of their
 `cwd`, gate commands or output runs. This is the same as 0.83.1.
 
-Bun-compiled executables and Node SEA products offer foreground and background
-subagents, including workflows. Interpreter + bundle products offer foreground
-subagents only. `copyPiRuntimeAssets`
+Bun-compiled executables offer foreground and background subagents, including
+workflows. Node SEA and interpreter + bundle products offer foreground
+subagents and refuse background launches. `copyPiRuntimeAssets`
 writes `pi-subagents/` into the Pi asset root: the client's exact pi-subagents
 package with the closure of its runtime dependencies in its own `node_modules`,
 about 22 MB. Beside it, `pi-subagent-extensions/` holds the SDK gate and
@@ -4108,11 +4108,10 @@ is its name and version, not a content digest.
 The bundled host sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to a
 launch-private package that carries Pi's name, version and `piConfig` and
 re-exports the product's own Pi. A foreign Pi installed above the product is
-never selected. Compiled products also capture Pi's embedded peer namespaces
-through Pi's extension loader and expose them to the detached runner. SEA
-preparation copies pi-subagents and the SDK child extensions into that private
-tree, outside the release Pi manifest's ancestry, so upstream cannot mistake
-the release asset manifest for an installed Pi SDK. Bun instead executes the
+never selected. Bun-compiled products also capture Pi's embedded peer namespaces
+through Pi's extension loader and expose them to the detached runner. The peer
+catalogue is loaded lazily from the installed upstream runner's
+`HOST_PEER_ALIASES`, so TypeBox remains outside the client dist. Bun executes
 unchanged installed code from the product-derived root described below.
 
 Bun-compiled products set `PI_SUBAGENT_PI_BINARY` to the product and recognize
@@ -4127,40 +4126,37 @@ private. Other configured Pi data roots do not change this code authority.
 Pi's loader runs the unchanged upstream binary bootstrap, which owns runner
 startup, execution and disposal.
 
-A Node SEA Pi host starts through a launch-private hardlink named `node`
-(`node.exe` on Windows). Upstream then uses `process.execPath` directly. PATH
-is unchanged, including in ordinary tools and nested child environments. The
-executable and SDK scratch directory must share a volume; otherwise launch
-fails with `pi_background_unavailable` and an explicit same-volume error.
-The product recognizes the exact canonical paths of its private
-`runner-peer-preload.mjs` and `subagent-runner-bootstrap.js`, restores upstream's
-script/config argv, and runs them with embedded Node. The workflow supervisor
-is recognized by exact canonical equality with the private
-`workflow-script-process.cjs`, worker and Acorn files; its root is recovered
-from the private executable path even though upstream clears the fork's
-environment. A helper outside the launch-config-derived private directory is
-refused before asset preparation. Malformed or foreign compiled runner-shaped
-argv is rejected before the product CLI; ordinary product commands retain
-their existing dispatch.
+Node SEA starts its foreground host with the original executable and creates
+no `node` hardlink or executable alias, at startup or on demand. Link permissions
+and volume boundaries cannot prevent a foreground task from starting. SEA
+background requests return `pi_background_unavailable`: pi-subagents 0.87.0
+uses `resolveNodeExecutable` for its background runner and `fork` on
+`process.execPath` for its workflow supervisor, and a SEA binary cannot stand
+in for Node. The message names foreground subagents and a Bun-compiled product
+as working alternatives. Explicit background requests and default-background
+workflow requests are blocked at `tool_call`, before execution. When an ordinary
+child's `async` is omitted, upstream resolves its configured mode; its missing-peer
+preflight refuses a background launch before spawning, and the SDK gives the
+same explanation. Foreground children keep their existing mode resolution.
 
-**Residual risk, owner-selected route C (#1589):** SEA workflow execution
-does not enable Node's `--permission` sandbox. SEA receives those flags as
-application arguments, and the SDK deliberately does not treat them as active
-or propagate them as worker permissions. This matches upstream's Bun worker
-path, which also has no Node permission layer. If workflow code escapes its
-VM realm, Node no longer denies file reads outside the worker/Acorn grants,
-file writes, subprocess creation or extra workers. The VM realm restrictions,
-G1 `subagent_launch` admission, each native child's per-tool approval, and the
-required gate/file-scope child extensions still apply. Those approval hooks
-mediate Pi tool events; they do not police arbitrary JavaScript APIs after a
-VM escape. Installed-package Node workflows retain upstream's permission
-model.
+SEA has no background asset preparation, private executable-root guard, runner
+preload/bootstrap dispatcher or workflow-supervisor dispatcher. Compiled
+runner-shaped argv that cannot match the supported Bun bootstrap is rejected
+before the product CLI. Ordinary product commands retain their dispatch, and
+PATH and general Node executable selection are unchanged.
+
+Bun workflows retain upstream's VM restrictions without Node's permission
+layer. G1 `subagent_launch` admission, native-child per-tool approval and required
+gate/file-scope child extensions still apply. Those hooks mediate Pi tool events;
+they do not police arbitrary JavaScript APIs after a VM escape. Installed-package
+Node workflows retain upstream's permission model. SEA background workflows
+are refused rather than run with a different permission boundary.
 
 Interpreter + bundle products retain a foreground-only private Pi bridge
 without detached peers. A background request is refused with
 `pi_background_unavailable`: the runner cannot re-enter a bundle run by an
-interpreter; the supported background forms are a Bun-compiled executable and
-Node SEA. No new public export, option or config key is required.
+interpreter. The message names foreground subagents and a Bun-compiled product.
+No new public export, option or config key is required.
 
 The product dispatcher accepts only these pinned runner shapes. Other Pi CLI
 operations, including Herdr project panes, Rex local placement and profile

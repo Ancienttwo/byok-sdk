@@ -44,39 +44,20 @@ describe('client runtime launch resources', () => {
     } finally { await resources.release(); }
   });
 
-  it.each([false, true])('SEA host hardlink keeps PATH intact and fails closed on cross-volume=%s', async (crossVolume) => {
+  it.each(['EXDEV', 'EPERM'])('starts a SEA foreground host without linking even when link would fail with %s', async code => {
     const f = await fixture();
     const { keysSessionDir: _unused, ...options } = f.options;
     vi.spyOn(bundledSubagents, 'isNodeSea').mockReturnValue(true);
-    const release = vi.fn(() => options.scratch.release());
-    const input = { ...options, scratch: { ...options.scratch, release },
-      resolveInvocation: () => ({ command: process.execPath, fixedArgs: ['__byok_sdk_helper', 'pi-rpc'] }) };
-    if (crossVolume) {
-      vi.spyOn(fs, 'link').mockRejectedValue(Object.assign(new Error('cross-volume'), { code: 'EXDEV' }));
-      await expect(resolvePiRuntimeLaunch(input)).rejects.toThrow('same volume');
-      expect(release).toHaveBeenCalledOnce();
-    } else {
-      const launch = await resolvePiRuntimeLaunch(input);
-      try {
-        expect(path.basename(launch.command)).toBe(process.platform === 'win32' ? 'node.exe' : 'node');
-        const actual = await fs.stat(launch.command), expected = await fs.stat(process.execPath);
-        expect([actual.dev, actual.ino]).toEqual([expected.dev, expected.ino]);
-        expect(launch.env.PATH).toBe(options.env.PATH);
-      } finally { await launch.release(); }
-    }
-  });
-
-  it('refuses a SEA install directory before preparing private subagent assets', async () => {
-    const f = await fixture();
-    const product = path.join(f.root, 'product');
-    await fs.writeFile(product, 'unused executable');
-    const original = process.execPath;
+    const link = vi.spyOn(fs, 'link').mockRejectedValue(Object.assign(new Error('link unavailable'), { code }));
+    const before = await fs.readdir(options.scratch.sdkDir);
+    const launch = await resolvePiRuntimeLaunch({ ...options,
+      resolveInvocation: () => ({ command: process.execPath, fixedArgs: ['__byok_sdk_helper', 'pi-rpc'] }) });
     try {
-      process.execPath = product;
-      expect(() => bundledSubagents.assertSeaSubagentRoot(f.root, path.join(f.options.scratch.sdkDir, 'rpc-launch.json')))
-        .toThrow('SDK launch-private directory');
-      expect((await fs.readdir(f.root)).sort()).toEqual(['product', 'session with spaces']);
-    } finally { process.execPath = original; await f.options.scratch.release(); }
+      expect(launch.command).toBe(process.execPath);
+      expect(launch.env.PATH).toBe(options.env.PATH);
+      expect(link).not.toHaveBeenCalled();
+      expect(await fs.readdir(options.scratch.sdkDir)).toEqual(before);
+    } finally { await launch.release(); }
   });
 
   it('launches in the session cwd with a private client-owned projection', async () => {

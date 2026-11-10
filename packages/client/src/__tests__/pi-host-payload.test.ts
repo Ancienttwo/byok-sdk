@@ -140,6 +140,7 @@ if (process.argv[2] !== 'task') {
       report.events.push(event); await fs.writeFile(input.report, JSON.stringify(report));
       if (event.type === 'turn_end') break;
     }
+    report.privateSubagentRuntime = (await fs.readdir(scratch.sdkDir)).includes('pi-subagent-runtime');
     report.runnerErrors = await Promise.all((await fs.readdir(scratch.runtimeDir, { recursive: true })).filter(file => file.endsWith('runner.stderr.log'))
       .map(file => fs.readFile(scratch.runtimeDir + '/' + file, 'utf8')));
     report.stage = 'close'; await session.close();
@@ -170,7 +171,7 @@ interface HostReport {
   stage: string; error?: string; lookup?: string;
   defaultDetect?: { kind: string }; detect?: unknown;
   launch?: { command: string; entry?: string; fixedArgs: string[] };
-  pathPreserved?: boolean; sameExecutable?: boolean;
+  pathPreserved?: boolean; sameExecutable?: boolean; privateSubagentRuntime?: boolean;
   events?: AgentEvent[]; runnerErrors?: string[];
   gateCalls?: { toolName: string; nativeAgentId?: string }[];
 }
@@ -299,7 +300,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
     const runDir = await tempRoot('byok-host-payload-run-');
     const bodies: string[] = [];
     const childBodies: string[] = [];
-    const executable = form === 'compiled-executable' || form === 'node-sea';
+    const background = form === 'compiled-executable';
     const provider = createServer((request, response) => {
       let body = '';
       request.on('data', chunk => { body += String(chunk); });
@@ -315,9 +316,14 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         }
         bodies.push(body);
         if (bodies.length < 3) completion(response, String(bodies.length), subagentCall(bodies.length === 2));
-        else if (executable && [3, 5, 6].includes(bodies.length)) completion(response, `wait-${bodies.length}`, { name: 'bg_wait', arguments: JSON.stringify({ timeoutMs: 30_000 }) });
-        else if (executable && bodies.length === 4) completion(response, 'workflow', { name: 'subagent', arguments: JSON.stringify({ workflow: true, async: true }) },
+        else if (background && [3, 5, 6].includes(bodies.length)) completion(response, `wait-${bodies.length}`, { name: 'bg_wait', arguments: JSON.stringify({ timeoutMs: 30_000 }) });
+        else if ((background && bodies.length === 4) || (form === 'node-sea' && bodies.length === 3)) completion(response, 'workflow',
+          { name: 'subagent', arguments: JSON.stringify({ workflow: true, ...(background ? { async: true } : {}) }) },
           '```js workflow\nreturn runs.run("main", { agent: "payload-child", task: "Read child-input.txt and reply.", model: "host-stub/host-payload-model" });\n```');
+        else if (form === 'node-sea' && bodies.length === 4) {
+          const call = subagentCall(true), args = JSON.parse(call.arguments); delete args.async;
+          completion(response, 'default-background', { ...call, arguments: JSON.stringify(args) });
+        }
         else completion(response, 'HOST_PAYLOAD_OK');
       });
     });
@@ -377,34 +383,42 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       });
       expect(report.pathPreserved).toBe(true);
       if (form === 'node-sea') {
-        expect(path.basename(report.launch!.command)).toBe(process.platform === 'win32' ? 'node.exe' : 'node');
+        expect(report.privateSubagentRuntime).toBe(false);
         expect(report.sameExecutable).toBe(true);
+        expect((await fs.readdir(release)).sort()).toEqual(host.files);
       }
-      expect(report.launch).toEqual({ command: form === 'node-sea' ? report.launch!.command : host.command, ...(host.entry === undefined ? {} : { entry: host.entry }),
+      expect(report.launch).toEqual({ command: host.command, ...(host.entry === undefined ? {} : { entry: host.entry }),
         fixedArgs: ['__byok_sdk_helper', 'pi-rpc'] });
       const events = report.events!;
       expect(events.filter(event => event.type === 'error')).toEqual([]);
-      expect(events.filter(event => event.type === 'progress').map(event => event.text).join('')).toBe(executable
+      expect(events.filter(event => event.type === 'progress').map(event => event.text).join('')).toBe(background || form === 'node-sea'
         ? '```js workflow\nreturn runs.run("main", { agent: "payload-child", task: "Read child-input.txt and reply.", model: "host-stub/host-payload-model" });\n```HOST_PAYLOAD_OK'
         : 'HOST_PAYLOAD_OK');
       expect(events.at(-1)).toEqual({ type: 'turn_end' });
-      expect(bodies.length).toBeGreaterThanOrEqual(executable ? 7 : 3);
+      expect(bodies.length).toBeGreaterThanOrEqual(background ? 7 : 3);
       expect(bodies[0]).toContain('Reply with the host payload marker.');
-      expect(childBodies, JSON.stringify(report.runnerErrors)).toHaveLength(executable ? 6 : 2);
+      expect(childBodies, JSON.stringify(report.runnerErrors)).toHaveLength(background ? 6 : 2);
       const childIds = new Set(report.gateCalls!.filter(call => call.toolName === 'read').map(call => call.nativeAgentId));
-      expect(childIds.size).toBe(executable ? 3 : 1);
+      expect(childIds.size).toBe(background ? 3 : 1);
       for (const id of childIds) expect(id).toMatch(/^pi-subagent:/u);
       const results = (JSON.parse(bodies.at(-1)!) as { messages: { role: string; content: unknown }[] }).messages
         .filter(message => message.role === 'tool').map(message => JSON.stringify(message.content));
       expect(results[0]).toContain('CHILD_OK');
-      if (executable) {
+      if (background) {
         expect(report.gateCalls).toContainEqual({ toolName: 'subagent_launch' });
         expect(results.join('\n')).not.toContain('pi_background_unavailable');
         expect(results.join('\n')).toContain('No active async runs');
+      } else if (form === 'node-sea') {
+        expect(results).toHaveLength(4);
+        for (const result of results.slice(1)) {
+          for (const text of ['pi_background_unavailable', 'Node SEA', '0.87.0', 'resolveNodeExecutable',
+            'fork on process.execPath', 'cannot stand in for Node', 'Foreground subagents work', 'Bun-compiled product']) expect(result).toContain(text);
+        }
+        expect(report.gateCalls!.some(call => call.toolName === 'subagent_launch')).toBe(false);
       } else {
         expect(results).toHaveLength(2);
         expect(results[1]).toContain('the background runner cannot re-enter a bundle run by an interpreter');
-        expect(results[1]).toContain('Bun-compiled executable or Node SEA');
+        expect(results[1]).toContain('Bun-compiled product');
       }
       expect(existsSync(reexecMarker)).toBe(false);
       if (form === 'compiled-executable') {

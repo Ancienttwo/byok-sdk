@@ -52,19 +52,24 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 
 ## Pi background subagents in packaged products (#1589)
 
-Bun-compiled executables and Node SEA support native background subagents and
-workflows through the product's embedded Pi and the exact pi-subagents 0.87.0
-assets. G1 workflow-child admission and per-tool child authorization retain
-the ordinary `auto` contract. Node SEA uses a private executable hardlink named
-`node`; the executable and SDK scratch must share a volume. PATH is unchanged.
-Node/Bun interpreter + bundle products offer foreground children and explicitly
-refuse background runs because the runner cannot re-enter their bundle entry.
+Bun-compiled executables support native background subagents and workflows
+through the product's embedded Pi and the exact pi-subagents 0.87.0 assets.
+The installed code is anchored to the product's real executable directory;
+symlinks and changed asset identities are rejected. G1 workflow-child admission
+and per-tool child authorization retain the ordinary `auto` contract.
 
-SEA workflows deliberately run without Node's permission sandbox, matching
-upstream's Bun worker path. VM restrictions, G1 and required child extensions
-remain; after a VM escape, Node's denial of ungranted reads, writes, subprocesses
-and extra workers is absent. This is a residual risk, not a sandbox capability.
-See [Pi subagents](spec.md#pi-subagents) for the exact dispatch and risk contract.
+Node SEA retains foreground subagents and explicitly refuses background
+subagents and workflows: pi-subagents 0.87.0 resolves its runner through Node
+and forks its supervisor on `process.execPath`; a SEA product cannot stand in
+for Node. No executable alias or hardlink is created, so EXDEV/EPERM cannot
+affect foreground startup. Node/Bun interpreter + bundle products also retain
+foreground children and refuse background runs. The refusal names the working
+foreground mode and Bun-compiled background product. PATH is unchanged.
+
+Bun workflows keep upstream's VM restrictions without Node's permission layer.
+G1 and required child extensions remain; those tool-event checks do not police
+arbitrary JavaScript APIs after a VM escape. Installed-package Node workflows
+retain upstream's permission model. See [Pi subagents](spec.md#pi-subagents).
 
 ## OpenCode implementation and qualification (#1538)
 
