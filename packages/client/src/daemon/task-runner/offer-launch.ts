@@ -298,12 +298,10 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
     if (!admissionWithdrawn()) {
       const reason = `claim journal unavailable: ${outboundErrorMessage(error)}`;
       // C9 (#1217/#1221): the journal failure is a retryable decline and the
-      // claim never sends. The reducer owns the terminal/reason; a stale row
-      // (cancel already declined) keeps the legacy send as the fallback.
-      const failed = host.dispatchSync({
+      // claim never sends. The reducer owns the terminal and reason.
+      host.dispatchSync({
         type: 'claim.journal_failed', taskId, atMs: Date.now(), reason, retryable: true,
       });
-      if (failed.disposition !== 'applied') decline(reason, true);
     }
     return;
   }

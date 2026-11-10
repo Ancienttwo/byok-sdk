@@ -7,7 +7,7 @@ export const UNIX_SOCKET_PATH_SOFT_LIMIT = 100;
 export const PRIVATE_SOCKET_FALLBACK_PREFIXES = { control: 'byok', storeMutex: 'byok-store-mutex' } as const;
 const FALLBACK_LEAF = new RegExp(`^(${Object.values(PRIVATE_SOCKET_FALLBACK_PREFIXES).join('|')})-[0-9a-f]{16}$`);
 
-type PrivateDirectoryRefusalCode = 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner';
+type PrivateDirectoryRefusalCode = 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner' | 'private_dir_mode';
 
 export class PrivateDirectoryRefusedError extends Error {
   constructor(
@@ -15,11 +15,13 @@ export class PrivateDirectoryRefusedError extends Error {
     public readonly path: string,
     public readonly processUid: number | undefined,
     public readonly ownerUid?: number,
+    cause?: unknown,
   ) {
     const reason = code === 'private_dir_symlink' ? 'path is a symlink'
       : code === 'private_dir_not_directory' ? 'path is not a directory'
+      : code === 'private_dir_mode' ? 'mode could not be set to 0700'
       : `directory is owned by uid ${ownerUid}, not process uid ${processUid}`;
-    super(`refusing private directory "${path}": ${reason}; remove ${path} if no byok process uses it, or shorten storeDir`);
+    super(`refusing private directory "${path}": ${reason}; remove ${path} if no byok process uses it, or shorten storeDir`, cause === undefined ? undefined : { cause });
     this.name = 'PrivateDirectoryRefusedError';
   }
 }
@@ -37,6 +39,14 @@ export class PrivateSocketInUseError extends Error {
   constructor(public readonly path: string) {
     super(`socket is in use at "${path}"`);
     this.name = 'PrivateSocketInUseError';
+  }
+}
+
+export class PrivateSocketModeError extends Error {
+  readonly code = 'socket_mode';
+  constructor(public readonly path: string, cause?: unknown) {
+    super(`refusing socket "${path}": mode could not be set to 0600; the filesystem or a security policy denied chmod`, cause === undefined ? undefined : { cause });
+    this.name = 'PrivateSocketModeError';
   }
 }
 
@@ -60,7 +70,16 @@ export async function ensureOwnedPrivateDirectory(dir: string): Promise<void> {
   if (stat.isSymbolicLink()) throw new PrivateDirectoryRefusedError('private_dir_symlink', dir, uid);
   if (!stat.isDirectory()) throw new PrivateDirectoryRefusedError('private_dir_not_directory', dir, uid);
   if (uid !== undefined && stat.uid !== uid) throw new PrivateDirectoryRefusedError('private_dir_foreign_owner', dir, uid, stat.uid);
-  await fs.chmod(dir, 0o700).catch(() => undefined);
+  // Windows has no uid and no POSIX mode bits; the mode contract is POSIX only.
+  if (uid === undefined) return;
+  // An already-private directory needs no chmod, so a sandbox that denies chmod does not refuse it.
+  if ((stat.mode & 0o777) === 0o700) return;
+  await fs.chmod(dir, 0o700).catch((error: unknown) => {
+    throw new PrivateDirectoryRefusedError('private_dir_mode', dir, uid, undefined, error);
+  });
+  const after = await fs.lstat(dir);
+  if (after.isSymbolicLink()) throw new PrivateDirectoryRefusedError('private_dir_symlink', dir, uid);
+  if ((after.mode & 0o777) !== 0o700) throw new PrivateDirectoryRefusedError('private_dir_mode', dir, uid);
 }
 
 function isFallbackDirectory(dir: string): boolean {
@@ -127,8 +146,28 @@ export async function listenPrivateUnixSocket(server: net.Server, endpoint: stri
       await new Promise<void>((resolve) => server.close(() => resolve()));
       throw error;
     }
+  } else {
+    // A fallback socket sits in a verified 0700 directory; a natural one sits in the store directory, so its own mode is set.
+    try {
+      await ensureSocketMode(endpoint);
+    } catch (error) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      throw error;
+    }
   }
-  await fs.chmod(endpoint, 0o600).catch(() => undefined);
+}
+
+async function ensureSocketMode(endpoint: string): Promise<void> {
+  if (process.getuid === undefined) return;
+  const stat = await fs.lstat(endpoint);
+  // chmod follows symlinks, so it must never run on anything but the socket itself.
+  if (!stat.isSocket()) throw new PrivateSocketPathError(endpoint);
+  if ((stat.mode & 0o777) === 0o600) return;
+  await fs.chmod(endpoint, 0o600).catch((error: unknown) => {
+    throw new PrivateSocketModeError(endpoint, error);
+  });
+  const after = await fs.lstat(endpoint);
+  if (!after.isSocket() || (after.mode & 0o777) !== 0o600) throw new PrivateSocketModeError(endpoint);
 }
 
 /** Non-recursive: leave directories containing a successor's socket or any other file alone. */

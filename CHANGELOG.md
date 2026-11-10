@@ -12,6 +12,12 @@
 
 - **Changed (client; #1688)** — When the daemon runs without its control endpoint after a typed refusal (`private_dir_symlink`, `private_dir_not_directory`, `private_dir_foreign_owner`, `socket_path_not_socket`), `byok-agent doctor` reports the code, path and recording time instead of `daemon offline`. The refusal is kept under an optional `controlEndpoint` key in `operational-health.json` until the next successful bind removes it; `OperationalHealthFileInspection` exposes it as `controlEndpointRefusal`. A health file without a refusal is byte-for-byte unchanged.
 
+- **Fixed (client; #1732)** — A natural Unix socket (in the store directory) is now verified to be a socket and set to 0600, failing the listen with `socket_mode` instead of swallowing a chmod error. New refusal: listen fails where a sandbox or MAC policy denies chmod. Fallback sockets no longer have their file chmod'ed; their verified 0700 parent directory is the guard. Residual risk: between the `lstat` and the chmod, another user with write access to the store directory can at most get the process to chmod a file it owns to 0600.
+
+- **Changed (client; #1693)** — Offer decline is sent only through the task runner reducer; the two legacy decline fallbacks and `TaskRunner.decline` are removed. The `task.decline` payload is unchanged.
+
+- **Fixed (client; #1732)** — A private socket or path-mutation gate directory whose mode cannot be set to 0700 is now refused with `private_dir_mode` instead of being used with its existing mode.
+
 - **Changed (client; #1692)** — Cancellation after a non-active task selects its terminal no longer retains a pending marker. If a claimed task receives multiple cancellation reasons during startup, the first reason is retained.
 
 - **Changed (client; #1691)** — Strict offer declines and their bounded redelivery tracking now use the task runner reducer while preserving decline payloads.

@@ -8005,7 +8005,7 @@ export type OperationalHealthFileInspection = {
     lastCrashAt?: string;
     /** The typed codes of `PrivateDirectoryRefusedError` and `PrivateSocketPathError`; lifecycle passes `err.code`, so the compiler holds them in step. */
     controlEndpointRefusal?: {
-        code: 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner' | 'socket_path_not_socket';
+        code: 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner' | 'private_dir_mode' | 'socket_path_not_socket';
         path: string;
         at: string;
     };

@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import { RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TerminalProjectionSelection, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
+import { createEnvelope, RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TerminalProjectionSelection, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../types';
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable';
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home';
@@ -48,12 +48,21 @@ export const MAX_INLINE_ARTIFACT_BYTES = 64 * 1024;
 export function hostDeclineSender(this: TaskRunner, taskId: string, admission: OfferAdmissionTiming): NonNullable<HostOfferContext['sendDecline']> {
   return (effect, context) => {
     const code = effect.effect.detail?.code;
-    this['decline'](
-      taskId, admission, effect.effect.reason ?? 'declined', effect.effect.retryable ?? false,
-      context.agentRef as AgentRef | undefined,
-      code === undefined ? undefined : code as TaskDeclinePayload['code'],
-      context.runtimeUnavailable as RuntimeUnavailableAdmission | undefined,
-    );
+    const timings = admission.snapshot();
+    const agentRef = context.agentRef as AgentRef | undefined;
+    const runtimeUnavailable = context.runtimeUnavailable as RuntimeUnavailableAdmission | undefined;
+    this['deps'].send(createEnvelope(
+      'task.decline',
+      {
+        reason: effect.effect.reason ?? 'declined',
+        retryable: effect.effect.retryable ?? false,
+        ...(agentRef === undefined ? {} : { agentRef }),
+        ...(code === undefined ? {} : { code: code as TaskDeclinePayload['code'] }),
+        ...(runtimeUnavailable === undefined ? {} : { runtimeUnavailable }),
+        ...(timings === undefined ? {} : { admission: timings }),
+      },
+      { taskId },
+    ));
   };
 }
 
