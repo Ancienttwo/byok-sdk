@@ -76,9 +76,16 @@ describe('client runtime launch resources', () => {
         expect(stat.uid).toBe(process.getuid!());
       } else {
         // #1373: the keys launcher requires OWNER RIGHTS READ_CONTROL on the projection.
+        // A protected DACL with exactly these ACEs, in any order: none inherited, no other principal (#1710).
         const save = path.join(f.root, 'projection.acl');
         await promisify(execFile)('icacls', [projection, '/save', save], { windowsHide: true });
-        expect((await fs.readFile(save)).toString('utf16le')).toMatch(/^[^\r\n]+\r\nD:P[A-Z]*\(.*\(A;;RC;;;OW\)/u);
+        const sddl = (await fs.readFile(save)).toString('utf16le').split('\r\n')[1]!;
+        const dacl = /^D:P[A-Z]*((?:\([^()]*\))+)$/u.exec(sddl);
+        expect(dacl, sddl).not.toBeNull();
+        // icacls renders the built-in Administrator (RID 500) as LA, and any other account as its SID.
+        const sid = /"(S-1-[0-9-]+)"/u.exec((await promisify(execFile)('whoami', ['/user', '/fo', 'csv', '/nh'], { windowsHide: true })).stdout)![1]!;
+        const user = sid.endsWith('-500') ? 'LA' : sid;
+        expect(dacl![1]!.slice(1, -1).split(')(').sort()).toEqual(['A;;RC;;;OW', 'A;OICI;FA;;;BA', 'A;OICI;FA;;;SY', `A;OICI;FA;;;${user}`].sort());
       }
       expect(await fs.readdir(projection)).toEqual([]);
       expect(path.dirname(projection)).toBe(f.options.scratch.sdkDir);

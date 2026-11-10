@@ -121,7 +121,8 @@ test('shared device credential fixtures select client consumers and native smoke
   }
   assert.deepEqual(impact.families, ['adapter-lifecycle-smoke', 'dataplane', 'packageability-smoke']);
   for (const path of ['scripts/testing/sdk-koffi-asset-root.mjs', 'scripts/testing/sdk-koffi-asset-root.d.mts']) {
-    assert.deepEqual(['execution-recovery-native', 'service-upgrade-smoke'].filter(id => selectImpact([path]).families.includes(id)), ['execution-recovery-native', 'service-upgrade-smoke']);
+    const families = ['execution-recovery-native', 'service-upgrade-smoke', 'windows-client'];
+    assert.deepEqual(families.filter(id => selectImpact([path]).families.includes(id)), families);
   }
   assert.throws(() => selectImpact(['scripts/testing/unreviewed-backend.mjs']), /Reviewed CI mapping required/);
 });

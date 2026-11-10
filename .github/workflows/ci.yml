@@ -1033,6 +1033,19 @@ jobs:
             src/__tests__/file-scope-tool-approval.test.ts `
             src/__tests__/file-scope-discovery-tools.test.ts
 
+      # #1710: the Pi host payload forms (Bun-background run, SEA refusal) and the
+      # projection ACL on Windows, in gate mode: every host form runs, none skips.
+      - name: Run Pi host payload and runtime launch tests on Windows
+        run: |
+          $env:BYOK_REQUIRE_BUN = '1'
+          $env:BYOK_TEST_BUN_BIN = (Get-Command bun -CommandType Application | Select-Object -First 1).Source
+          $env:SEA_NODE = (Get-Command node -CommandType Application | Select-Object -First 1).Source
+          "bun: $env:BYOK_TEST_BUN_BIN"; & $env:BYOK_TEST_BUN_BIN --version
+          "node: $env:SEA_NODE"; & $env:SEA_NODE --version
+          bun run --filter @byok-sdk/client test -- `
+            src/__tests__/pi-host-payload.test.ts `
+            src/__tests__/pi-runtime-launch.test.ts
+
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) while
   # runtime CLIs remain external subprocesses. A single-file bundle without

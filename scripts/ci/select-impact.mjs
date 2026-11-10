@@ -257,6 +257,9 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/(?:runtime\/environment\.ts|__tests__\/environment\.test\.ts)$/,
     // The reserved MCP context file on win32: the writer, the scratch ACL it relies on and the suite.
     /^packages\/client\/src\/(?:daemon\/task-runner\/mcp-contexts\.ts|daemon\/retention\/scratch\.ts|__tests__\/task-assertion-broker\.test\.ts)$/,
+    // #1710: the Pi host payload forms and the projection ACL on win32, with the code they qualify.
+    /^packages\/client\/src\/__tests__\/(?:pi-host-payload|pi-runtime-launch)\.test\.ts$/,
+    /^packages\/client\/src\/(?:adapters\/pi\/runtime-launch|adapters\/win32-job-object|sdk-native-assets-runtime)\.ts$/,
   ],
   // #608: the real Hermes run on Windows, its fake model endpoint and the code it qualifies.
   'hermes-real-windows': [
@@ -623,10 +626,10 @@ export function selectImpact(paths, context = {}) {
       families.add('adapter-lifecycle-smoke'); families.add('packageability-smoke');
       continue;
     }
-    // #1445: the asset root of the two test Hosts that bundle the SDK on Windows.
+    // #1445, #1710: the asset root of the test Hosts that bundle the SDK on Windows.
     if (path === 'scripts/testing/sdk-koffi-asset-root.mjs' || path === 'scripts/testing/sdk-koffi-asset-root.d.mts') {
       dirs.add('packages/client');
-      families.add('execution-recovery-native'); families.add('service-upgrade-smoke');
+      families.add('execution-recovery-native'); families.add('service-upgrade-smoke'); families.add('windows-client');
       continue;
     }
     if (path === 'api-surface/entries.json') {
