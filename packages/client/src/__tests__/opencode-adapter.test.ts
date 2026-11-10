@@ -175,6 +175,26 @@ it.each(['1.19.5', 'opencode v2.2.6'])('passes admitted MCP servers on new and r
   for (const open of opens) expect(open.params.mcpServers).toEqual([{ name: 'host', command: server.command, args: server.args, env: [{ name: 'TASK_SECRET', value: 'fixture-secret' }] }]);
 });
 
+it.each(['1.19.5', 'opencode v2.2.6'])('uses MCP servers supplied at start on %s', async version => {
+  const box = setup(version);
+  const prepare = box.adapter.prepare.bind(box.adapter);
+  vi.spyOn(box.adapter, 'prepare').mockImplementation(async input => {
+    const prepared = await prepare(input);
+    if (prepared.kind === 'reject') return prepared;
+    const start = prepared.operation.start;
+    return { ...prepared, operation: { ...prepared.operation, start: input => start({ ...input,
+      mcpServers: { late: { command: 'late-mcp', env: { TOKEN: 'late-secret' } } },
+    }) } };
+  });
+  const session = await startPreparedOperation(box.adapter, { instruction: 'hello' }, {
+    workspaceDir: box.cwd, env: box.env, mcpServers: { admitted: { command: 'admitted-mcp' } },
+  });
+  sessions.push(session); await collect(session);
+  expect(box.facts().find(fact => fact.kind === 'open')?.params.mcpServers).toEqual([
+    { name: 'late', command: 'late-mcp', args: [], env: [{ name: 'TOKEN', value: 'late-secret' }] },
+  ]);
+});
+
 it.each([{ '': { command: 'server' } }, { host: { command: '' } }, { host: { command: 'server', env: { KEY: null } } }])('rejects malformed MCP authority during preparation', async mcpServers => {
   const box = setup(); const result = await box.adapter.prepare({ offer: { instruction: 'hello' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [], mcpServers: mcpServers as any });
   expect(result).toMatchObject({ kind: 'reject', retryable: false }); expect(existsSync(box.log)).toBe(false);

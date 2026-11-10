@@ -97,10 +97,10 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     if (probe.detected.kind !== 'available' || probe.command === undefined || probe.version === undefined)
       return { kind: 'reject', reason: `opencode installation refused: ${probe.detected.kind}`, retryable: false };
     const { command, version } = probe;
-    return { kind: 'prepared', operation: { start: input => this.start(input, command, version, mcpServers) } };
+    return { kind: 'prepared', operation: { start: input => this.start(input, command, version) } };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string, version: string, mcpServers: readonly { name: string; command: string; args?: readonly string[]; env?: Readonly<Record<string, string>> }[]): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, command: string, version: string): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('opencode requires a resolved instruction');
     if (input.manifest.dispatchSelection !== undefined) throw authority('opencode cannot receive a dispatch selection');
     if (!input.manifest.cwd) throw authority('opencode requires a sealed cwd');
@@ -108,6 +108,7 @@ export class OpenCodeAdapter implements RuntimeAdapter {
       throw authority('opencode v2 does not load the instructions configuration used for session-local appended prompts; ACP exposes no equivalent transient instruction channel');
     const persona = input.manifest.homeAccess === 'memory-reader'
       ? await agentPersona('opencode', input.manifest, { reappliesOnResume: true }) : undefined;
+    const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const session = new OpenCodeSession(input, this.options, command, version, mcpServers, persona);
     try {
       await session.start();
