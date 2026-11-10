@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changed (client; #1681)** — OpenCode unclassified start failures are retryable, and unexpected process exits report `runtime_exited`. Archived resume targets are non-retryable; targets in use are retryable. Fractional interrupt timeouts are accepted; invalid limit messages now name the retention budget or interrupt timeout. Hosts already read `retryable`; confirm that OpenCode start failures are not cached as permanent.
+
 - **Changed (client; #1688)** — `RuntimeEnvironmentReport` gains optional `lanes` (`RuntimeEnvironmentLaneReport`): the Pi prepared lane, a Hermes custody launch and a Pi launch with a pinned BYOK profile, with the names an SDK lane removes. `byok-agent doctor` prints one line per lane, so `runtimeEnvironment.pass` names that never reach the runtime in a lane are visible. Reports carry names only; no lane's allow list changes.
 
 - **Changed (client; #1688)** — When the daemon runs without its control endpoint after a typed refusal (`private_dir_symlink`, `private_dir_not_directory`, `private_dir_foreign_owner`, `socket_path_not_socket`), `byok-agent doctor` reports the code, path and recording time instead of `daemon offline`. The refusal is kept under an optional `controlEndpoint` key in `operational-health.json` until the next successful bind removes it; `OperationalHealthFileInspection` exposes it as `controlEndpointRefusal`. A health file without a refusal is byte-for-byte unchanged.
