@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyDetectError } from '../adapters/detect-outcome';
-import { resolveRuntimeInvocation, type RuntimeInvocationHost } from '../adapters/runtime-invocation';
+import { findRuntimeCommandOnPath, resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocationHost } from '../adapters/runtime-invocation';
 import { npmNodeShim } from './fixtures/npm-node-shim';
 
 // cmd-shim 9.0.2 (npm 12) moves the PATHEXT change to the last line.
@@ -20,6 +20,7 @@ function windows(files: Record<string, string | Error>, env: Record<string, stri
     platform: 'win32',
     env,
     isFile: file => { looked.push(file); return file in files; },
+    isExecutable: file => { looked.push(file); return file in files; },
     readFile: file => {
       const body = files[file];
       if (body instanceof Error) throw body;
@@ -38,6 +39,34 @@ function thrownCode(run: () => unknown): unknown {
   }
   return 'no error';
 }
+
+describe('findRuntimeCommandOnPath', () => {
+  it('uses PATH order and PATHEXT on Windows, ignoring extensionless commands', () => {
+    const { host } = windows({ 'C:\\npm\\agy.cmd': '', 'C:\\npm\\agy.exe': '', 'C:\\npm\\opencode': '' }, { PATH: 'C:\\npm', PATHEXT: '.CMD;.EXE' });
+    expect(findRuntimeCommandOnPath('agy', host)).toBe('C:\\npm\\agy.cmd');
+    expect(findRuntimeCommandOnPath('opencode', host)).toBeUndefined();
+  });
+
+  it('searches only the supplied POSIX PATH, skipping empty and inexecutable entries', () => {
+    const { host, looked } = windows({ '/second/agy': '' }, { PATH: ':/first::/second:' });
+    expect(findRuntimeCommandOnPath('agy', { ...host, platform: 'darwin' })).toBe('/second/agy');
+    expect(looked).toEqual(['/first/agy', '/second/agy']);
+    expect(findRuntimeCommandOnPath('agy', { ...host, platform: 'linux', env: {} })).toBeUndefined();
+  });
+
+  it('skips relative PATH entries on POSIX and Windows', () => {
+    const posix = windows({ 'bin/opencode': '', '/safe/opencode': '' }, { PATH: 'bin:/safe' });
+    expect(findRuntimeCommandOnPath('opencode', { ...posix.host, platform: 'linux' })).toBe('/safe/opencode');
+    const win = windows({ 'bin\\opencode.exe': '', 'C:\\safe\\opencode.exe': '' }, { PATH: 'bin;C:\\safe' });
+    expect(findRuntimeCommandOnPath('opencode', win.host)).toBe('C:\\safe\\opencode.exe');
+  });
+
+  it('rejects directories and missing files as executables', () => {
+    const host = runtimeInvocationHost({});
+    expect(host.isExecutable(process.cwd())).toBe(false);
+    expect(host.isExecutable('/nonexistent/byok-executable')).toBe(false);
+  });
+});
 
 describe('resolveRuntimeInvocation', () => {
   it('keeps the command unchanged off Windows and reads no file', () => {
