@@ -6,8 +6,19 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"syscall"
 )
+
+// Unix retains its existing pathname canonicalization and volume barrier.
+func platformHomeChainPaths(home, ancestor string, _ *os.Root) (string, string, error) {
+	canonicalHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		return "", "", err
+	}
+	canonicalAncestor, err := filepath.EvalSymlinks(ancestor)
+	return canonicalHome, canonicalAncestor, err
+}
 
 // identityForRoot uses the decimal dev/ino representation produced by Node's
 // fs.Stat bigint fields on Unix. libuv widens both fields into uint64_t before

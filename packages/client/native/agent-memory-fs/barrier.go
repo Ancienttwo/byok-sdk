@@ -50,22 +50,18 @@ func syncHomeChain(home string, expected *os.Root) error {
 
 // The caller names the pre-existing durable boundary; never discover or default it.
 func syncHomeChainFrom(home, ancestor string, expected *os.Root) error {
-	chain, err := selectedHomeChain(home, ancestor)
+	chain, err := selectedHomeChain(home, ancestor, expected)
 	if err != nil {
 		return err
 	}
 	return syncPinnedHomeChain(chain, expected)
 }
 
-func selectedHomeChain(home, ancestor string) ([]string, error) {
+func selectedHomeChain(home, ancestor string, expected *os.Root) ([]string, error) {
 	if !filepath.IsAbs(home) || !filepath.IsAbs(ancestor) {
 		return nil, errors.New("home chain requires absolute paths")
 	}
-	canonicalHome, err := filepath.EvalSymlinks(home)
-	if err != nil {
-		return nil, err
-	}
-	canonicalAncestor, err := filepath.EvalSymlinks(ancestor)
+	canonicalHome, canonicalAncestor, err := platformHomeChainPaths(home, ancestor, expected)
 	if err != nil {
 		return nil, err
 	}

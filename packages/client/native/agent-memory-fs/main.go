@@ -379,8 +379,12 @@ func openSession(req openRequest) (*session, *protocolError) {
 	if actual != req.ExpectedIdentity {
 		return nil, failure("root_identity_mismatch", "root identity does not match")
 	}
-	chain, err := selectedHomeChain(req.Root, req.AncestorRoot)
+	chain, err := selectedHomeChain(req.Root, req.AncestorRoot, root)
 	if err != nil {
+		var resolutionFailure *protocolError
+		if errors.As(err, &resolutionFailure) {
+			return nil, resolutionFailure
+		}
 		return nil, failure("invalid_root", "ancestor root is invalid")
 	}
 	if runtime.GOOS == "windows" {

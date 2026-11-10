@@ -98,10 +98,11 @@ Local macOS arm64:
 
 - `bun run build`, `bun run typecheck`, Go `go test ./...`, and Windows amd64
   test-binary cross-compilation passed.
-- The memory/helper TS files passed in the initial broad run. Its unrelated
-  runtime-discovery case returned zero runtimes; the untouched train baseline
-  passed that case, so no baseline-failure claim is made. The separately scoped
-  connection capability cases passed (19 passed, 5 skipped).
+- After the rebase, all 28 affected TS files passed: 354 tests passed and 38
+  skipped, including runtime discovery. The full client suite then passed
+  483 files / 6,489 tests (94 tests skipped); other workspace suites are still
+  running. This full-client run used the pre-handle-fix native artifact;
+  affected helper tests must also run with the regenerated artifact.
 - The native release was built at two independent source paths for all three
   targets; bytes and generated pin matched. Source-digest release tests passed.
 - `check:api-surface` and `check:version-authority` passed after the deliberate
@@ -113,15 +114,39 @@ Local macOS arm64:
 
 The first actual win-ci Go run (Go 1.26.5, Windows amd64, normal user) passed
 all new protocol, explicit-chain and initialization tests, including every
-injected flush. One existing ancestor-junction fixture failed after its new
-ancestor field was mechanically derived from the requested alias. The fixture
-now supplies its original canonical parent authority while preserving its
-aliased home and all containment assertions; that update awaits Windows rerun.
+injected flush. Its ancestor-junction fixture failed. Using the original
+canonical ancestor authority did not fix it: [hosted Windows job
+129706074753](https://github.com/Ancienttwo/byok-sdk/actions/runs/42779537199/job/129706074753)
+reproduced the failure at `TestWindowsOpenWithJunctionFixtures/ancestor-junction`.
+The existing W2 diagnostic in that job independently showed
+`filepath.EvalSymlinks` failing on a junction-ancestor home while every native
+handle open and flush succeeded.
+
+The fix resolves both Windows chain names with `GetFinalPathNameByHandleW`
+using `FILE_NAME_NORMALIZED | VOLUME_NAME_DOS` (flags zero): home comes from the
+already-pinned handle, ancestor from an explicitly opened `ancestorRoot`.
+One normalizer removes the extended drive prefix or converts the extended UNC
+prefix for both names; it preserves component case. The requested home must
+still identify the pinned object, and the retained-chain relation, volume and
+final-home checks remain mandatory. Query/normalization failure returns the
+specific bounded `root_resolution_failed` error with no pathname fallback.
+Unix retains `EvalSymlinks`; the other production use in `syncHomeChain` is
+only called on Unix. Diagnostic-only uses are not admission paths.
+
+A new Windows regression covers junction-ancestor resolution from the pinned
+home, shared DOS/UNC normalization, and closed name-handle failure. The original
+junction assertions remain. Local Go race and Windows amd64 cross-compilation
+passed after the fix. All three native targets were rebuilt with the normal
+repository scripts in an isolated stage, including two-path reproducibility;
+the stage source digest was checked against the real native tree before
+copying the generated pin. The worktree source/pin tests passed (4/4).
+Regenerated source digest:
+`412481b72e8872d75cf6954c83073b38b87dab6a7410c41cedc9940aed5aff20`.
+Hosted Windows green and actual win-ci processor verification remain pending.
 
 The coordinator paused all win-ci activity after its connection hung during
-large stdin transfers. No further remote probes, transfers or cleanup are
-allowed until the coordinator restores it. The remote scratch to remove then
-is `C:\Users\win\byok-tmp\l1-605-t26m`. Future file transfers must use `hc file`.
+large stdin transfers, then restored serialized access. This seat still waits
+for its explicit turn. The remote scratch to remove then is `C:\Users\win\byok-tmp\l1-605-t26m`. Future file transfers must use `hc file`.
 Actual Windows TS processor verification, final Go rerun, release-pack and
 full-suite results will be appended before final handoff. CI on the Draft head
 is the acceptance authority; local and process-kill checks cannot close A7.
