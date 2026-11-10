@@ -1,4 +1,5 @@
-export { BotCollaboration, DelegationError, HostIntentError, IntentOutcomeError } from './host';
+export { BotCollaboration, DelegationError, HostIntentError } from './host';
+export { IntentOutcomeError } from './adapter-steps';
 export { botCompactVeto } from './compaction';
 export { RetentionRefused, retainRoots } from './retention';
 export type { RetentionFacts, RetentionInput, RetentionRefusedCode, RetentionLimits, RetentionResult, RetentionStore } from './retention';

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changed (examples; #1664)** — K8 Layer 2 vendoring now includes `src/adapter-steps.ts`, which shares terminal routing, synchronous Host intent handling and Bot outcome port assembly between the local and hosted Hosts. The hosted `IntentOutcomeError` export is now the K8 class.
+
 - **Added (keys, client; #1586)** — `pi_model.providerId: 'opencode-go'` explicitly selects Pi's OpenCode Go reasoning replay and session headers for RPC and durable profiles, including local gateways. It requires an explicit `api: 'openai-completions'`; models not served by OpenCode Go must omit it. Profiles without it retain their namespaced Pi id. The prepared lane refuses the field. Every keys-profile RPC launch now refuses a model-runtime configuration/composition error before model resolution or session creation instead of accepting a built-in fallback. Durable workers take the provider id from the launcher's private IPC binding to the sealed profile ref.
 
 - **Fixed (client; #1677)** — Claude with session persistence disabled declines resume offers before claim; dsh declines unsupported MCP servers before claim; agy observes Host toolsets so MCP tool events and authorization rules identify their server and tool.

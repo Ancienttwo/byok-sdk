@@ -9,8 +9,9 @@ import { freezeIntent, HostedSubmitter } from './intents';
 import { storedKey } from './layout';
 import { TEST_HOST } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { HostedReconciler, IntentOutcomeError, type HostedIntentHandler, type HostedTaskPort } from './reconcile';
-import type { AgentMessageInput, HostedIntentMessageHandler, MessageDisposition } from './index';
+import { IntentOutcomeError as K8IntentOutcomeError } from '@byok-sdk/example-bot-collaboration/adapter-steps';
+import { HostedReconciler, type HostedIntentHandler, type HostedTaskPort } from './reconcile';
+import { IntentOutcomeError, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDisposition } from './index';
 import { HostedCollaborationStore, inSchema, lockScope } from './store';
 
 /**
@@ -146,6 +147,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
       const result = await reconciler(store).run();
       expect(result).toMatchObject({ concluded: 0, failed: [{ scope, turnId: KEY, error: refused }] });
       expect(result.failed[0]!.error).toBeInstanceOf(IntentOutcomeError);
+      expect(result.failed[0]!.error).toBeInstanceOf(K8IntentOutcomeError);
     }
     expect(await row(scope)).toMatchObject({ conclusion: null, terminal: null, last_error: 'unknown_intent: No Bot Turn or Host intent has this key' });
     expect(await refusals(store, scope)).toEqual([`Intent outcome refused unknown_intent: ${KEY} No Bot Turn or Host intent has this key`]);

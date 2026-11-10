@@ -18,10 +18,11 @@ import type { CommandRecord } from './rules/commit';
 import { hostMessageDisposition, type MessageDisposition } from './rules/message';
 import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, writeLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
-import { BOT_DREAM, BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
+import { BOT_DREAM, BOT_ROUTINE, botRoutines, endable, owned, routineCalendar, routineTurn,
   ownerRoutineUpdate, updateDefinition, type BotRoutineInput } from './routines';
-import { checkDreamInstruction, dreamOf, dreamPolicy, dreamReads, reconcileDreamRoutines, recordDream, syncDreams, type DreamPolicy, type DreamingOptions } from './dream';
+import { checkDreamInstruction, dreamPolicy, dreamReads, reconcileDreamRoutines, recordDream, syncDreams, type DreamPolicy, type DreamingOptions } from './dream';
 import { DEFAULT_AUTONOMY, autonomyOf, wouldDoRows, type Autonomy, type WouldDo } from './rules/autonomy';
+import { botOutcomePorts, IntentOutcomeError, outcomeFailure, routeTerminal, runHostIntentHandler } from './adapter-steps';
 import { DEVICE_CONCURRENCY, admitDeviceSlot, type DispatchIntent } from './rules/priority';
 
 import { applyManagement, applyModels, updateBot, writeSnapshotBot } from './team';
@@ -164,16 +165,6 @@ export interface BotOptions {
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
 /** Synchronous. A throw rolls the message transaction back, and a thenable or another result throws. */
 export type HostIntentMessageHandler = (input: AgentMessageInput, transaction: MessageTransaction) => MessageDisposition;
-/**
- * A K4 terminal that K8 cannot apply (#882 Q6f): its key is neither a Bot Turn nor a Host intent, its Host handler
- * failed, or the outcome commit of its Bot Turn threw. The intent stays open at the head of its FIFO, and each pass rejects
- * with this error, until the outcome applies or the owner calls `failStuckIntent`.
- */
-export class IntentOutcomeError extends Error {
-  constructor(readonly key: string, readonly code: 'unknown_intent' | 'handler_failed' | 'outcome_failed', message: string) {
-    super(message); this.name = 'IntentOutcomeError';
-  }
-}
 /**
  * A refused intent key. `cancelHostIntent` (#1320): `unknown_intent` as in `IntentOutcomeError`, or `not_host_intent` for a Bot
  * Turn. `failStuckIntent` (#1405): `unknown_intent` for a key with no K4 intent, `already_settled`, or `not_stuck` for an intent
@@ -592,14 +583,15 @@ export class BotCollaboration {
   private applyOutcome(document: unknown, tx: OutcomeTransaction): void {
     const state = stateOf(tx.application), taskId = tx.intent.taskId, key = tx.intent.key;
     refuseExported(state);
-    const owner = hostIntent(state, key);
-    if (owner) return this.applyHostOutcome(key, owner.handler, document, tx);
-    // A dream's result is its memory on the device. The sync closes it from the K4 conclusion.
-    if (dreamOf(state, key)) return;
-    // Not a key that K8 wrote. It must never settle as a success.
-    if (!Object.hasOwn(state.turns, key)) throw this.intentFailure(key, 'unknown_intent', 'No Bot Turn or Host intent has this key');
-    try { this.commitBotOutcome(state, key, taskId, document, tx); } catch (cause) {
-      throw this.intentFailure(key, 'outcome_failed', cause instanceof Error ? cause.message : String(cause));
+    try {
+      const route = routeTerminal(state, key, hostIntent(state, key)?.handler);
+      if (route.kind === 'host_intent') runHostIntentHandler(key, route.handler, this.hostIntentHandlers.get(route.handler)?.bind(null, document, tx));
+      else if (route.kind === 'bot_turn') {
+        try { this.commitBotOutcome(state, key, taskId, document, tx); } catch (cause) { throw outcomeFailure(key, cause); }
+      }
+    } catch (error) {
+      if (error instanceof IntentOutcomeError) this.intentFailures.set(key, error);
+      throw error;
     }
   }
   private commitBotOutcome(state: CollaborationState, key: string, taskId: string, document: unknown, tx: OutcomeTransaction): void {
@@ -609,29 +601,10 @@ export class BotCollaboration {
       outcome: {
         // The terminal transaction has not written yet, so a ledger snapshot is the committed state.
         committed: { intent: key => intentRows(this.ledger.snapshot()).intent(key) },
-        manage: (turn, outcome, managed) => applyManagement(state, turn.botId, taskId, outcome, this.models(), managed, this.options.readOnlyToolsets),
-        createRoutine: (turn, action, index) => tx.routines.create(createDefinition(tx.routines.list(), turn.botId, taskId, index, action, turn.authority ?? 'bot')),
-        updateRoutine: (turn, action) => tx.routines.update(updateDefinition(tx.routines.list(), turn.botId, action)),
-        cancelRoutine: (turn, action) => tx.routines.lifecycle(owned(tx.routines.list(), turn.botId, action.routineId).definition.id, 'completed'),
-        roomPosts: !!this.options.roomHistory,
+        ...botOutcomePorts({ taskId, routines: tx.routines, roomPosts: !!this.options.roomHistory,
+          manage: (turn, outcome, managed) => applyManagement(state, turn.botId, taskId, outcome, this.models(), managed, this.options.readOnlyToolsets) }),
       },
     });
-  }
-  private applyHostOutcome(key: string, handler: string, document: unknown, tx: OutcomeTransaction): void {
-    let result: unknown;
-    try { result = this.hostIntentHandlers.get(handler)!(document, tx); } catch (cause) {
-      throw this.intentFailure(key, 'handler_failed', cause instanceof Error ? cause.message : String(cause));
-    }
-    // K4 checks only what K8 returns, so K8 checks the handler. Its promise must not reject unhandled.
-    if (result && typeof (result as { then?: unknown }).then === 'function') {
-      void Promise.resolve(result).catch(() => {});
-      throw this.intentFailure(key, 'handler_failed', 'Host intent handler must be synchronous');
-    }
-  }
-  private intentFailure(key: string, code: IntentOutcomeError['code'], message: string): IntentOutcomeError {
-    const error = new IntentOutcomeError(key, code, message);
-    this.intentFailures.set(key, error);
-    return error;
   }
   /** The refused terminals of the last K4 drain: one audit row for each new key and reason, and the error of the pass. */
   private reportIntentFailures(): IntentOutcomeError | undefined {

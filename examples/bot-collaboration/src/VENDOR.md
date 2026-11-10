@@ -89,6 +89,7 @@ types from the K4 root entry, and `hash` and `canonical` from the canonical entr
 that format and writes the format into an L tenant.
 
 ```vendor host
+src/adapter-steps.ts
 src/channel.ts
 src/coalesce.ts
 src/commit.ts
