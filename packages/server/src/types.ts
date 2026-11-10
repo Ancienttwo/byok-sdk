@@ -138,8 +138,8 @@ interface DispatchInputBase {
   taskId?: string;
   instruction: string;
   /**
-   * Authoritative web-selected target. When present, `runtime` is derived
-   * from `runtimeId`; supplying a different `runtime` is rejected.
+   * Authoritative web-selected target. The device selects the adapter from
+   * `runtimeId`; a `runtime` that differs is refused.
    */
   dispatchSelection?: DispatchSelection;
   runtime?: RuntimeId;

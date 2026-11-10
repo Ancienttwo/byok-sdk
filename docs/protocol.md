@@ -909,8 +909,8 @@ present.** It is a strict discriminated union:
   requiredCapabilities}}`.
 
 Every id is non-empty, bounded to 160 characters, and rejects NUL/CR/LF. The
-server derives the task's requested runtime from `runtimeId`; if the legacy
-optional `runtime` field is also present, disagreement is rejected before task
+daemon selects the adapter from `runtimeId`; a `runtime` that is also present
+must equal it, and every Host offer lane rejects disagreement before task
 creation. The Agent offers are strict, so a daemon that does not know the
 field refuses the offer; the server first requires the target device to
 advertise the `dispatch-selection` capability (`WIRE_ADDITIONS`), and absence

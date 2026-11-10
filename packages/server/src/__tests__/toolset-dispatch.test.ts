@@ -93,7 +93,7 @@ describe('logical MCP toolset dispatch', () => {
         instruction: 'must use Salesko',
         requiredToolsets: ['salesko'],
       }),
-    ).rejects.toThrow(/did not advertise toolset-selection/);
+    ).rejects.toMatchObject({ name: 'ByokCloudError', code: 'agent_capability_missing' });
     expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
   });
 
