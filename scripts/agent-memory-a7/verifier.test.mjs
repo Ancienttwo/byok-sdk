@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,15 +11,18 @@ import { bridge, compare, verify } from './verify.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const scratch = mkdtempSync(path.join(os.tmpdir(), 'byok-a7-verifier-'));
 let repo = root;
-if (execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() !== BEFORE) {
-  repo = path.join(scratch, 'before');
-  execFileSync('git', ['-C', root, 'worktree', 'add', '--detach', repo, BEFORE], { stdio: 'pipe' });
-  symlinkSync(path.join(root, 'node_modules'), path.join(repo, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
-}
 after(() => {
   if (repo !== root) execFileSync('git', ['-C', root, 'worktree', 'remove', '--force', repo]);
   rmSync(scratch, { recursive: true, force: true });
 });
+if (execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() !== BEFORE) {
+  repo = path.join(scratch, 'before');
+  execFileSync('git', ['-C', root, 'worktree', 'add', '--detach', repo, BEFORE], { stdio: 'pipe' });
+  // Bun's isolated workspace links live in each package, so a root
+  // node_modules link alone cannot load the pinned parser's dependencies.
+  execFileSync('bun', ['ci'], { cwd: repo, stdio: 'pipe' });
+  execFileSync('bun', ['run', '--filter', '@byok-sdk/keys', '--filter', '@byok-sdk/protocol', '--filter', '@byok-sdk/core', 'build'], { cwd: repo, stdio: 'pipe' });
+}
 const EMPTY = 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 const BASE = `sha256:${'b'.repeat(64)}`;
 const STAMP = '2026-11-10T00:00:00.000Z';
