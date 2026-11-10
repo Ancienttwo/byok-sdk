@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, writeFileS
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
-import { PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENT_EXTENSIONS_ASSET_DIR, writePiSubagentsHostSdk } from './subagents';
+import { PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENT_EXTENSIONS_ASSET_DIR, isNodeSea, writePiSubagentsHostSdk } from './subagents';
 
 export const BUNDLED_SUBAGENT_DIR = 'pi-subagent-runtime';
 export interface TrustedBunSubagentAssets {
@@ -46,10 +46,6 @@ const BINARY_ARGS = ['--no-extensions', '--no-skills', '--no-prompt-templates', 
 const HOST_PEER = '@earendil-works/pi-coding-agent';
 const EXPORT_NAME = /^[A-Za-z_$][\w$]*$/u;
 const MISSING_BUN_ASSETS = 'pi_background_unavailable: background Pi subagents and workflows require the shipped pi-subagents and pi-subagent-extensions assets beside the real executable. Foreground non-workflow subagents work from the configured Pi assets; ship those asset directories beside the executable to enable background execution.';
-
-export function isNodeSea(): boolean {
-  return process.versions.bun === undefined && process.getBuiltinModule('node:sea').isSea();
-}
 
 function isBunExecutable(): boolean {
   return process.versions.bun !== undefined && /^(?:\/\$bunfs\/|B:[\\/]~BUN[\\/])/u.test(process.argv[1] ?? '');

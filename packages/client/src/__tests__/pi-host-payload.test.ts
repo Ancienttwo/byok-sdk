@@ -152,7 +152,8 @@ if (process.argv[2] !== 'task') {
         if (event.type === 'turn_end') break;
       }
     }
-    report.privateSubagentRuntime = (await fs.readdir(scratch.sdkDir)).includes('pi-subagent-runtime');
+    report.sdkDir = (await fs.readdir(scratch.sdkDir)).sort();
+    report.privateSubagentRuntime = report.sdkDir.includes('pi-subagent-runtime');
     report.runnerStatuses = await Promise.all((await fs.readdir(scratch.runtimeDir, { recursive: true })).filter(file => file.endsWith('/status.json') || file.endsWith('\\status.json'))
       .map(async file => JSON.parse(await fs.readFile(scratch.runtimeDir + '/' + file, 'utf8'))));
     report.runnerErrors = await Promise.all((await fs.readdir(scratch.runtimeDir, { recursive: true })).filter(file => file.endsWith('runner.stderr.log'))
@@ -185,7 +186,7 @@ interface HostReport {
   stage: string; error?: string; errorDetail?: string; lookup?: string;
   defaultDetect?: { kind: string }; detect?: unknown;
   launch?: { command: string; entry?: string; fixedArgs: string[] };
-  pathPreserved?: boolean; sameExecutable?: boolean; privateSubagentRuntime?: boolean;
+  pathPreserved?: boolean; sameExecutable?: boolean; privateSubagentRuntime?: boolean; sdkDir?: string[];
   events?: AgentEvent[]; runnerErrors?: string[]; runnerStatuses?: { state?: string; steps?: { error?: string }[] }[];
   gateCalls?: { toolName: string; nativeAgentId?: string }[];
 }
@@ -473,7 +474,8 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       expect(report.stage).toBe('done');
       // Package lookup is denied, and the default adapter reproduces the reported probe failure.
       // The only Pi package a lookup can find is the foreign one above the release.
-      expect(report.lookup).toMatch(/^foreign$|Cannot find (package|module)/u);
+      // A Node 25.7+ SEA main script's import() loads built-in modules only (#1741).
+      expect(report.lookup).toMatch(/^foreign$|Cannot find (package|module)|No such built-in module/u);
       expect(report.defaultDetect).toEqual({ kind: 'probe-failed' });
       // The default provider's models.json apiKey is pi's login (#345).
       expect(report.detect).toEqual({
@@ -483,6 +485,8 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       expect(report.pathPreserved).toBe(true);
       if (!background) {
         expect(report.privateSubagentRuntime).toBe(false);
+        // #1741: a SEA takes the interpreter branch, never the Bun-only prepareBundledSubagents import().
+        if (form === 'node-sea') expect(report.sdkDir).toContain('pi-subagents-host-sdk');
         expect(report.sameExecutable).toBe(true);
         expect((await fs.readdir(release)).sort()).toEqual(host.files);
       }
