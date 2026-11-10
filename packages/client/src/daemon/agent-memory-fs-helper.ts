@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 
 import type { AgentHomeLease } from '../agent-home';
@@ -141,6 +141,45 @@ function encodeReplaceContent(content: string, maxBytes: number): string {
   return bytes.toString('base64').replace(/=+$/u, '');
 }
 
+const rootBarriers = new Map<string, Promise<void>>();
+const ROOT_BARRIER_CAUSES: ReadonlySet<string> = new Set([
+  'root_barrier_invalid_input', 'root_barrier_noncanonical', 'root_barrier_unsupported',
+  'root_barrier_open_failed', 'root_barrier_metadata_failed', 'root_barrier_volume_failed',
+  'root_barrier_sync_failed', 'root_barrier_close_failed', 'root_barrier_changed',
+  'root_barrier_process_failed',
+]);
+
+async function initializeHostStorageRoot(helperBin: string, root: string): Promise<void> {
+  // Windows promises no strict ledger durability and must not require access
+  // to the root's parent (for example the drive root of C:\\ByokHost).
+  if (process.platform === 'win32') return;
+  let pending = rootBarriers.get(root);
+  if (pending === undefined) {
+    pending = (async () => {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const child = execFile(helperBin, ['root-barrier'], {
+            shell: false, windowsHide: true, env: Object.freeze({}),
+            timeout: HELPER_REQUEST_TIMEOUT_MS, maxBuffer: HELPER_MAX_STDERR_BYTES,
+          }, (error, _stdout, stderr) => {
+            if (error) reject(stderr.trim()); else resolve();
+          });
+          child.stdin!.on('error', () => reject('root_barrier_process_failed'));
+          child.stdin!.end(JSON.stringify({ root }));
+        });
+      } catch (cause) {
+        const code = typeof cause === 'string' && ROOT_BARRIER_CAUSES.has(cause) ? cause : 'root_barrier_process_failed';
+        throw Object.assign(new AgentMemoryIoError(`Agent memory hostStorageRoot durability barrier failed (${code}); helper open refused`), { cause: code });
+      }
+    })().catch(error => {
+      rootBarriers.delete(root);
+      throw error;
+    });
+    rootBarriers.set(root, pending);
+  }
+  await pending;
+}
+
 class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
   private readonly pending = new Map<string, Pending>();
   private stdoutBuffer = Buffer.alloc(0);
@@ -172,6 +211,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
     }
     const helperBin = verifyAgentMemoryFilesystemHelper(safeHelperPath(input.helperBin), input.assetRoot);
     const expected = agentMemoryHelperIdentity(input.homeIdentity, process.platform);
+    await initializeHostStorageRoot(helperBin, input.ancestorRoot);
     const child = spawn(helperBin, ['serve'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,

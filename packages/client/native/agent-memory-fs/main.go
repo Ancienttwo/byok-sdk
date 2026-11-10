@@ -212,7 +212,12 @@ func main() {
 	if err := runCLI(os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		// Do not print Go/OS error strings: they can contain the absolute root or
 		// a requested pathname. Protocol callers receive a bounded typed failure.
-		fmt.Fprintln(os.Stderr, "agent-memory-fs failed")
+		code := "agent-memory-fs failed"
+		var barrierFailure *protocolError
+		if len(os.Args) == 2 && os.Args[1] == "root-barrier" && errors.As(err, &barrierFailure) {
+			code = barrierFailure.code
+		}
+		fmt.Fprintln(os.Stderr, code)
 		os.Exit(1)
 	}
 }
@@ -222,10 +227,64 @@ func runCLI(args []string, input io.Reader, output io.Writer) error {
 		_, err := fmt.Fprintln(output, helperVersion)
 		return err
 	}
+	if len(args) == 1 && args[0] == "root-barrier" {
+		return runRootBarrier(input)
+	}
 	if len(args) != 1 || args[0] != "serve" {
 		return errors.New("invalid command")
 	}
 	return serve(input, output)
+}
+
+// This initialization command is separate from the signed protocol-4 session.
+// It accepts only a bounded canonical root on stdin and grants no file authority.
+func runRootBarrier(input io.Reader) (err error) {
+	cause := "root_barrier_invalid_input"
+	defer func() {
+		if err != nil {
+			err = failure(cause, "root barrier failed")
+		}
+	}()
+	const maxInputBytes = 32 * 1024
+	data, err := io.ReadAll(io.LimitReader(input, maxInputBytes+1))
+	if err != nil || len(data) > maxInputBytes {
+		return errors.New("invalid root barrier input")
+	}
+	var req struct {
+		Root string `json:"root"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		return err
+	}
+	if decoder.Decode(new(any)) != io.EOF || len(req.Root) == 0 || len(req.Root) > 4096 ||
+		!filepath.IsAbs(req.Root) || filepath.Clean(req.Root) != req.Root || strings.ContainsAny(req.Root, "\x00\r\n") {
+		return errors.New("invalid root barrier root")
+	}
+	cause = "root_barrier_noncanonical"
+	canonical, err := filepath.EvalSymlinks(req.Root)
+	if err != nil || canonical != req.Root {
+		return errors.New("root is not canonical")
+	}
+	if runtime.GOOS == "windows" {
+		cause = "root_barrier_unsupported"
+		return errors.New("Windows has no strict root barrier contract")
+	}
+	cause = "root_barrier_open_failed"
+	root, err := os.OpenRoot(req.Root)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil && err == nil {
+			cause, err = "root_barrier_close_failed", closeErr
+		}
+	}()
+	// Reuse protocol 4's pinned chain and its child-before-parent re-flush
+	// after the final relationship checks. Keep one chain-barrier semantics.
+	cause = "root_barrier_sync_failed"
+	return syncHomeChain([]string{req.Root}, root)
 }
 
 func serve(input io.Reader, output io.Writer) error {

@@ -8,23 +8,23 @@ export const AGENT_MEMORY_HELPER_RELEASE = {
     "-buildvcs=false",
     "-trimpath"
   ],
-  "sourceDigest": "3aaf4812361a4d9e6aab69538f8b7b5ca39f80f9c413bd42afcb8b32479fae75",
+  "sourceDigest": "671e46ad2239ae935afc8e7fcea359c9c2492342e66a35b9fbc6634b54d91326",
   "signingPolicy": "product-resigning-allowed",
   "entries": {
     "darwin-arm64": {
       "file": "darwin-arm64",
       "digestAlgorithm": "mach-o-content-v1",
-      "digest": "096d7013827a5d555119821c5a5472ba29fb0b95224db3c77576aa814739d7eb"
+      "digest": "214e7e04a77762f04863f5f3b341df910e3d3a2b06181e099da2738a35cd3cb7"
     },
     "darwin-x64": {
       "file": "darwin-x64",
       "digestAlgorithm": "mach-o-content-v1",
-      "digest": "7ac1f89268bd41f037464bb7dbdb1a08a12c24f48f967406d10d5cbb05dab0bb"
+      "digest": "746f43259a123a984f6cd12d4e34790cc79e3eaec9a7de524044d4ef2624efe4"
     },
     "win32-x64": {
       "file": "win32-x64.exe",
       "digestAlgorithm": "pe-content-v1",
-      "digest": "904a72c5b71b1b259b7441fc59a029f17d8f86a8ab90a4ab537bf3cd2ea69353"
+      "digest": "bd035c41805fa6a1598ddcfb47b315d80ea289224d394dd411ceb0a3dbb90473"
     }
   }
 } as const;
