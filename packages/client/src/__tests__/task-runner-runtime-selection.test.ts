@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, HostOfferPlainPayloadSchema } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter, RuntimeOperationStartInput } from '../types';
@@ -413,27 +413,16 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       }, { taskId: 'task-selection-holder', seq: server.nextSeq() }));
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-selection-holder');
 
-      server.send(
-        createEnvelope(
-          'task.offer',
-          { agentRef, ...FRESH_OFFER, homeAccess,
-            instruction: 'x',
-            runtime: 'claude',
-            dispatchSelection: {
-              lane: 'byok',
-              runtimeId: 'pi',
-              providerId: 'openai',
-              modelId: 'gpt-5.2',
-            },
-          },
-          { taskId: 'task-selection-2', seq: server.nextSeq() },
-        ),
-      );
+      // The runtime mismatch and the harness conflict both fail; the first rule wins on Host and device alike.
+      const contradictory = { agentRef, ...FRESH_OFFER, homeAccess, instruction: 'x', runtime: 'claude', harnessId: 'acme-harness',
+        dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } } as const;
+      server.send(createEnvelope('task.offer', contradictory, { taskId: 'task-selection-2', seq: server.nextSeq() }));
 
       const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'task-selection-2');
-      expect(decline.payload).toMatchObject({ retryable: false, agentRef });
-      expect((decline.payload as { reason: string }).reason).toBe('offer runtime claude does not match dispatchSelection.runtimeId pi');
-      expect(decline.payload).not.toHaveProperty('code');
+      expect(decline.payload).toMatchObject({ retryable: false, agentRef, code: 'runtime_selection_mismatch',
+        reason: 'runtime_selection_mismatch: runtime claude does not match dispatchSelection.runtimeId pi' });
+      expect(HostOfferPlainPayloadSchema.safeParse(contradictory).error?.issues.map((issue) => (issue as { params?: unknown }).params))
+        .toEqual([{ rule: 'runtime_selection_mismatch' }]);
       expect(server.received.filter((e) => e.type === 'task.decline' && e.task_id === 'task-selection-2')).toHaveLength(1);
       expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === 'task-selection-2')).toBe(false);
       expect(pi.startCalls).toHaveLength(0);

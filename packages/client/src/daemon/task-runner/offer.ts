@@ -1,7 +1,7 @@
 // `TaskRunner.handleOffer`: one offer from redelivery guard to active task
 // (see ./support.ts for how a member module runs).
 import type { ExecutionScratch } from '../retention/scratch';
-import type { PreparedAgentMemoryMode, TaskDeclinePayload } from '@byok-sdk/protocol';
+import { offerSelectionViolation, type PreparedAgentMemoryMode, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home';
 import type { OfferPhaseContext } from './support';
 import { settleAgentMemoryCommitCopy } from './agent-memory';
@@ -400,23 +400,9 @@ function readOfferRequest(
   const agentRef: AgentRef = offeredRef;
   hostFor(this).setAgentRef(taskId, agentRef);
   const homeAccess = offeredHomeAccess(payload);
-  if (homeAccess === 'memory-reader' && (payload.agentMemory === 'read-write' || payload.agentMemory === 'read-write-if-admitted')) {
-    decline('agent_memory_selection_invalid: a memory-reader Attempt reads memory only', false);
-    return;
-  }
-  if (
-    payload.dispatchSelection !== undefined &&
-    payload.runtime !== undefined &&
-    payload.runtime !== payload.dispatchSelection.runtimeId
-  ) {
-    decline(
-      `offer runtime ${payload.runtime} does not match dispatchSelection.runtimeId ${payload.dispatchSelection.runtimeId}`,
-      false,
-    );
-    return;
-  }
-  if (payload.harnessId !== undefined && (payload.runtime !== undefined || payload.dispatchSelection !== undefined)) {
-    decline('harnessId cannot be combined with a built-in runtime selection', false);
+  const violation = offerSelectionViolation(payload);
+  if (violation !== undefined) {
+    decline(`${violation.rule}: ${violation.message}`, false, violation.rule);
     return;
   }
   if (this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {

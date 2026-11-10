@@ -497,6 +497,8 @@ type OfferRuleInput = {
  * - A `routineRef` names an execution, so it needs a fresh session.
  * - `agentMemoryCommit` needs a writer.
  * - `nativeSessions` runs only a fresh memory-only task, without other tool or output lanes.
+ *
+ * Structural rules live here; a violation stops the receiving cursor. Semantic cross-field rules live only in `offerSelectionViolation`, which the Host offer schemas and the daemon both run.
  */
 function offerRule(payload: OfferRuleInput, ctx: z.RefinementCtx, plaintext: boolean): void {
   const { instruction, session, preparation, agentMemory, agentMemoryCommit, homeAccess, egressPolicy, messageEgress, routineRef } = payload;
@@ -531,6 +533,37 @@ function offerRule(payload: OfferRuleInput, ctx: z.RefinementCtx, plaintext: boo
   if (agentMemoryCommit !== undefined && homeAccess === 'memory-reader') {
     ctx.addIssue({ code: 'custom', path: ['agentMemoryCommit'], message: 'agentMemoryCommit needs a writer; a memory-reader Attempt reads the live files' });
   }
+}
+
+const OFFER_SELECTION_RULES = ['agent_memory_selection_invalid', 'runtime_selection_mismatch', 'harness_selection_conflict'] as const;
+/** A semantic offer selection rule; also the `task.decline` code a device sends when the rule fails. */
+export type OfferSelectionRule = (typeof OFFER_SELECTION_RULES)[number];
+export type OfferSelectionViolation = { readonly rule: OfferSelectionRule; readonly path: readonly string[]; readonly message: string };
+
+/**
+ * The single definition of the offer selection rules. The Host offer schemas
+ * report a violation as an issue whose `params.rule` is the rule; the daemon
+ * declines with `code` equal to the rule. Rules are checked reader, runtime,
+ * harness, and only the first violation is returned.
+ */
+export function offerSelectionViolation(payload: {
+  readonly homeAccess?: AgentHomeAccess;
+  readonly agentMemory?: AgentMemorySelection;
+  readonly runtime?: string;
+  readonly harnessId?: string;
+  readonly dispatchSelection?: { readonly runtimeId: string };
+}): OfferSelectionViolation | undefined {
+  const { homeAccess, agentMemory, runtime, harnessId, dispatchSelection } = payload;
+  if (homeAccess === 'memory-reader' && (agentMemory === 'read-write' || agentMemory === 'read-write-if-admitted')) {
+    return { rule: 'agent_memory_selection_invalid', path: ['agentMemory'], message: `agentMemory ${agentMemory} requires a writer; a memory-reader Attempt reads memory only` };
+  }
+  if (runtime !== undefined && dispatchSelection !== undefined && runtime !== dispatchSelection.runtimeId) {
+    return { rule: 'runtime_selection_mismatch', path: ['runtime'], message: `runtime ${runtime} does not match dispatchSelection.runtimeId ${dispatchSelection.runtimeId}` };
+  }
+  if (harnessId !== undefined && (runtime !== undefined || dispatchSelection !== undefined)) {
+    return { rule: 'harness_selection_conflict', path: ['harnessId'], message: 'harnessId conflicts with built-in runtime selection' };
+  }
+  return undefined;
 }
 
 /** The plaintext branch of `task.offer`, before its cross-field rules. */
@@ -1098,7 +1131,7 @@ export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
  * terminal-state consumer into "Failed or Declined, handle both".
  */
 const HOME_DECLINE_CODES = ['agent_home_writer_busy', 'agent_home_reader_busy'] as const;
-const DECLINE_CODES = [...HOME_DECLINE_CODES, ...SEALED_DECLINE_CODES] as const;
+const DECLINE_CODES = [...HOME_DECLINE_CODES, ...SEALED_DECLINE_CODES, ...OFFER_SELECTION_RULES] as const;
 export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
 /**
  * The decline code is open (#1121): a well-formed code this version does not
