@@ -370,14 +370,15 @@ describe('device runner boundaries', () => {
     } finally { compose.mockRestore(); }
   });
 
-  it.each(['match', 'different', 'missing', 'missing-record', 'late-match', 'expired', 'interrupted', 'bound-before-ready'])('binds local approval to the relayed public anchor: %s', async mode => {
+  it.each(['match', 'different', 'missing', 'missing-record', 'late-match', 'expired', 'interrupted', 'bound-before-ready', 'bound-startup-halted'])('binds local approval to the relayed public anchor: %s', async mode => {
     const fakeCloud = { appendMemberChainEntries: vi.fn() } as unknown as CanaryCloud;
     const browser = await HostedMember.create(fakeCloud, 'tenant' as never), other = await HostedMember.create(fakeCloud, 'tenant' as never);
     const state = { tenantId: 'tenant', deviceId: 'physical', member: { ...other.member, deviceId: 'physical' } };
     const read = vi.spyOn(DeviceMemberRecords.prototype, 'readState').mockResolvedValue(state);
     let connectionOpen = mode !== 'bound-before-ready';
     const daemon = { subscribe: () => () => {}, pair: vi.fn(async () => ({ deviceId: 'physical' })), start: vi.fn(), stop: vi.fn(),
-      status: vi.fn(() => ({ lifecycle: { phase: 'running', connection: connectionOpen ? 'open' : 'connecting' } })),
+      status: vi.fn(() => ({ lifecycle: mode === 'bound-startup-halted' ? { phase: 'halted', reason: 'device_revoked' }
+        : { phase: 'running', connection: connectionOpen ? 'open' : 'connecting' } })),
     } as unknown as client.Daemon;
     let wrapped!: client.RuntimeAdapter;
     const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => { wrapped = adapters[0]!; return daemon; }), send = vi.fn();
@@ -388,6 +389,8 @@ describe('device runner boundaries', () => {
       await device.pair('code', browser.verificationSecret);
       expect(daemon.start).not.toHaveBeenCalled();
       await expect(device.start()).rejects.toThrow('comparison is required');
+      expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'member binding failed', retryable: false });
+      await device.pair('code', browser.verificationSecret);
       await device.compareMember(browser.member);
       expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toEqual({ kind: 'reject', reason: 'member binding pending', retryable: false });
       const key = mode === 'different' ? other.member.signingPublicJwk : browser.member.signingPublicJwk;
@@ -399,7 +402,8 @@ describe('device runner boundaries', () => {
       if (mode === 'expired') await vi.advanceTimersByTimeAsync(600_001);
       const started = device.start(controller.signal);
       const matches = mode === 'match' || mode === 'late-match' || mode === 'bound-before-ready';
-      const assertion = matches ? expect(started).resolves.toBeUndefined() : expect(started).rejects.toThrow('did not bind');
+      const assertion = matches ? expect(started).resolves.toBeUndefined()
+        : expect(started).rejects.toThrow(mode === 'bound-startup-halted' ? 'did not become ready' : 'did not bind');
       if (mode === 'bound-before-ready') {
         await vi.advanceTimersByTimeAsync(1);
         expect(daemon.status).toHaveBeenCalled();
@@ -416,7 +420,10 @@ describe('device runner boundaries', () => {
       expect(send.mock.calls.some(([event]) => event.type === 'ready')).toBe(matches);
       expect(await wrapped.prepare({} as client.RuntimeAdapterPrepareInput)).toMatchObject(matches ? { kind: 'prepared' }
         : { kind: 'reject', reason: 'member binding failed', retryable: false });
-      if (!matches) {
+      if (mode === 'bound-startup-halted') {
+        expect(daemon.status).toHaveBeenCalled();
+        expect(daemon.stop).not.toHaveBeenCalled();
+      } else if (!matches) {
         expect(daemon.stop).toHaveBeenCalled();
         expect(send).toHaveBeenCalledWith({ type: 'error', message: 'member relay did not bind the locally approved browser key' });
       }

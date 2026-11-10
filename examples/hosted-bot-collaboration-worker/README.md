@@ -267,8 +267,9 @@ The device can now start and resume member verification. Before emitting `ready`
 `anchor.approverSigningPublicJwk` and compares its canonical `kty/crv/x/y` fields with the approved key; a different or
 missing anchor stops the daemon and emits a fixed error. A successful binding alone does not open admission: the
 single admission gate stays pending until the connection is open and `ready` is emitted, for both member and non-member
-runs. Before that, `prepare()` returns `member binding pending` with `retryable:false`; a binding failure or `stop()`
-closes the gate with `member binding failed` and `retryable:false`.
+runs. Before that, `prepare()` returns `member binding pending` with `retryable:false`; any failed `start()` or `pair()`,
+including a binding failure, abort, SDK rejection or readiness failure, closes the gate with `member binding failed`
+and `retryable:false` before rethrowing. `stop()` also closes it.
 Submit work only after `ready`: tasks offered before it are terminally declined and are not retried.
 A sealed offer may still be opened in process memory before this refusal; nothing leaves the
 process and no runtime starts. On a mismatch send `{"type":"reject"}`; the

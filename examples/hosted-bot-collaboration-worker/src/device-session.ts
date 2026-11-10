@@ -165,47 +165,54 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
       return false;
     }
   }
+  async function closeAdmissionOnFailure<T>(run: () => Promise<T>): Promise<T> {
+    try { return await run(); }
+    catch (error) { gate.resolve(false); throw error; }
+  }
   async function start(signal: AbortSignal = lifetime.signal) {
-    if (!pairedDeviceId) throw new Error('device is not paired');
-    if (memberPairing && !comparedKey) throw new MemberComparisonError('member comparison is required before startup');
-    const startupSignal = AbortSignal.any([signal, lifetime.signal]);
-    startupSignal.throwIfAborted();
-    await daemon.start();
-    if (memberPairing && !(await bindComparedMember(pairedDeviceId, AbortSignal.any([
-      startupSignal, AbortSignal.timeout(Math.max(0, pairingDeadline - Date.now())),
-    ])))) throw new MemberComparisonError('member relay did not bind the locally approved browser key');
-    for (const deadline = Date.now() + 30_000; ;) {
+    return closeAdmissionOnFailure(async () => {
+      if (!pairedDeviceId) throw new Error('device is not paired');
+      if (memberPairing && !comparedKey) throw new MemberComparisonError('member comparison is required before startup');
+      const startupSignal = AbortSignal.any([signal, lifetime.signal]);
       startupSignal.throwIfAborted();
-      const lifecycle = daemon.status().lifecycle;
-      if (lifecycle.phase === 'running' && lifecycle.connection === 'open') break;
-      if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed' || Date.now() > deadline) throw new Error('daemon did not become ready');
-      await delay(25, undefined, { signal: startupSignal });
-    }
-    send({ type: 'ready', deviceId: pairedDeviceId });
-    startupSignal.throwIfAborted();
-    gate.resolve(true);
+      await daemon.start();
+      if (memberPairing && !(await bindComparedMember(pairedDeviceId, AbortSignal.any([
+        startupSignal, AbortSignal.timeout(Math.max(0, pairingDeadline - Date.now())),
+      ])))) throw new MemberComparisonError('member relay did not bind the locally approved browser key');
+      for (const deadline = Date.now() + 30_000; ;) {
+        startupSignal.throwIfAborted();
+        const lifecycle = daemon.status().lifecycle;
+        if (lifecycle.phase === 'running' && lifecycle.connection === 'open') break;
+        if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed' || Date.now() > deadline) throw new Error('daemon did not become ready');
+        await delay(25, undefined, { signal: startupSignal });
+      }
+      send({ type: 'ready', deviceId: pairedDeviceId });
+      startupSignal.throwIfAborted();
+      gate.resolve(true);
+    });
   }
   return {
     daemon, start,
     async pair(code: string, verificationSecret?: string) {
-      memberPairing = verificationSecret !== undefined;
-      gate = admissionGate();
-      if (memberPairing) {
-        const initiated = Date.now();
-        try {
-          const { PAIRING_VERIFICATION_TTL_MS: ttl } = await import('../../../packages/client/src/daemon/device-member.js');
-          if (!Number.isFinite(ttl) || ttl <= 0) throw new Error('invalid pairing TTL');
-          pairingDeadline = initiated + ttl;
-        } catch {
-          gate.resolve(false);
-          throw new MemberComparisonError('member comparison requires the pinned SDK pairing-verification TTL');
+      return closeAdmissionOnFailure(async () => {
+        memberPairing = verificationSecret !== undefined;
+        gate = admissionGate();
+        if (memberPairing) {
+          const initiated = Date.now();
+          try {
+            const { PAIRING_VERIFICATION_TTL_MS: ttl } = await import('../../../packages/client/src/daemon/device-member.js');
+            if (!Number.isFinite(ttl) || ttl <= 0) throw new Error('invalid pairing TTL');
+            pairingDeadline = initiated + ttl;
+          } catch {
+            throw new MemberComparisonError('member comparison requires the pinned SDK pairing-verification TTL');
+          }
         }
-      }
-      const { deviceId } = await daemon.pair(code, verificationSecret === undefined ? undefined : { verificationSecret });
-      pairedDeviceId = deviceId;
-      comparedKey = undefined;
-      if (memberPairing) send({ type: 'paired', deviceId });
-      else await start();
+        const { deviceId } = await daemon.pair(code, verificationSecret === undefined ? undefined : { verificationSecret });
+        pairedDeviceId = deviceId;
+        comparedKey = undefined;
+        if (memberPairing) send({ type: 'paired', deviceId });
+        else await start();
+      });
     },
     async compareMember(bundle: unknown) {
       if (!pairedDeviceId) throw new Error('device is not paired');
