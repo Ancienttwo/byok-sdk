@@ -11,7 +11,7 @@ import {
   type TerminalAgentHomeProjection,
 } from '@byok-sdk/protocol';
 import { atomicWriteFile } from './util/atomic-write';
-import { processSignalState } from './adapters/process-tree';
+import { processSignalState } from './util/process-signal-state';
 import {
   AGENT_HOME_READER_RUN_MAX_RETAINED,
   AGENT_HOME_READER_RUNS_DIRECTORY,

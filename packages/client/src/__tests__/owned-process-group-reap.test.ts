@@ -10,12 +10,12 @@ import {
   readBootId,
   disposeOwnedProcessTree,
   reapOwnedProcessGroups,
-  processSignalState,
   requestOwnedProcessTreeTermination,
   withOwnedProcessTree,
   type OwnedProcessGroupRecord,
 } from '../adapters/process-tree';
 import { disposeDurableShellGroups } from '../adapters/pi-durable/process-groups';
+import { processSignalState } from '../util/process-signal-state';
 import { OWNED_PROCESSES_DIRECTORY, OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { readProcessTable } from '../runtime/oar-process-tree.js';
 import { execFileSync } from 'node:child_process';

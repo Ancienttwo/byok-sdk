@@ -1,4 +1,4 @@
-import { processSignalState, readProcessGroupRows as rows } from '../process-tree';
+import { processSignalState, readProcessGroupRows as rows } from '../../util/process-signal-state';
 import { RuntimeDisposalFailure } from '../../runtime-failure';
 export function assertDurableShellOwner(pid: number, worker: number): void {
   if (!Number.isSafeInteger(pid) || pid <= 1 || pid === process.pid) throw new Error('invalid durable shell pid');
