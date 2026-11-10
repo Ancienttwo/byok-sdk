@@ -30,9 +30,11 @@ export function runtimeInvocationHost(env: Readonly<Record<string, string | unde
 
 /** Find a command on the environment the runtime will use. */
 export function findRuntimeCommandOnPath(command: string, host: RuntimeInvocationHost): string | undefined {
-  if (host.platform === 'win32') return findWindowsCommand(command, host, runnableExtensions(host.env));
+  if (host.platform === 'win32') {
+    return findWindowsCommand(command, { ...host, isFile: file => path.win32.isAbsolute(file) && host.isFile(file) }, runnableExtensions(host.env));
+  }
   for (const dir of (host.env.PATH ?? '').split(':')) {
-    if (!dir) continue;
+    if (!path.posix.isAbsolute(dir)) continue;
     const file = path.posix.join(dir, command);
     if (host.isExecutable(file)) return file;
   }

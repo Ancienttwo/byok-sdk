@@ -18,7 +18,9 @@ function officialLocation(platform: NodeJS.Platform): string {
 export function resolveAgyBin(env: Readonly<Record<string, string | undefined>>, platform: NodeJS.Platform = process.platform): ResolvedBin {
   const override = process.env.BYOK_AGY_BIN;
   if (override) return { command: override, source: 'env' };
-  const host = { ...runtimeInvocationHost(env), platform };
+  const runtimeHost = runtimeInvocationHost(env);
+  const host = { ...runtimeHost, platform, isFile: (file: string) =>
+    (platform !== 'win32' || ['.com', '.exe'].includes(path.win32.extname(file).toLowerCase())) && runtimeHost.isFile(file) };
   const onPath = findRuntimeCommandOnPath('agy', host) !== undefined;
   const official = officialLocation(platform);
   return !onPath && existsSync(official) ? { command: official, source: 'path' } : { command: 'agy', source: 'path' };

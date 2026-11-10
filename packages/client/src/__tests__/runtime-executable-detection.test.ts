@@ -33,6 +33,24 @@ async function tempDir(prefix: string): Promise<string> {
   return fs.realpath(dir);
 }
 
+it.skipIf(!windows)('agy: Windows ignores batch files and finds native PATH entries', async () => {
+  const local = await tempDir('ba-');
+  const bin = await tempDir('bp-');
+  const official = path.join(local, 'agy', 'bin', 'agy.exe');
+  await fs.mkdir(path.dirname(official), { recursive: true });
+  await fs.writeFile(official, '');
+  await fs.writeFile(path.join(bin, 'agy.cmd'), '');
+  await fs.writeFile(path.join(bin, 'agy.bat'), '');
+  vi.stubEnv('LOCALAPPDATA', local);
+  vi.stubEnv('BYOK_AGY_BIN', '');
+  expect(resolveAgyBin({ PATH: bin, PATHEXT: '.CMD;.BAT;.EXE;.COM' })).toEqual({ command: official, source: 'path' });
+  for (const ext of ['exe', 'com']) {
+    await fs.writeFile(path.join(bin, `agy.${ext}`), '');
+    expect(resolveAgyBin({ PATH: bin, PATHEXT: '.CMD;.BAT;.EXE;.COM' })).toEqual({ command: 'agy', source: 'path' });
+    await fs.unlink(path.join(bin, `agy.${ext}`));
+  }
+});
+
 interface Case {
   readonly id: string;
   readonly envName: string;

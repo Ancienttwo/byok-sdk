@@ -54,6 +54,13 @@ describe('findRuntimeCommandOnPath', () => {
     expect(findRuntimeCommandOnPath('agy', { ...host, platform: 'linux', env: {} })).toBeUndefined();
   });
 
+  it('skips relative PATH entries on POSIX and Windows', () => {
+    const posix = windows({ 'bin/opencode': '', '/safe/opencode': '' }, { PATH: 'bin:/safe' });
+    expect(findRuntimeCommandOnPath('opencode', { ...posix.host, platform: 'linux' })).toBe('/safe/opencode');
+    const win = windows({ 'bin\\opencode.exe': '', 'C:\\safe\\opencode.exe': '' }, { PATH: 'bin;C:\\safe' });
+    expect(findRuntimeCommandOnPath('opencode', win.host)).toBe('C:\\safe\\opencode.exe');
+  });
+
   it('rejects directories and missing files as executables', () => {
     const host = runtimeInvocationHost({});
     expect(host.isExecutable(process.cwd())).toBe(false);
