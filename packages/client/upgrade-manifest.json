@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "218dd1b0003d0d43ac695ddaa1d0727fc2cee8fa5ff7ec709022364409eb77bf"
+    "snapshotSha256": "be15c8a2928c91b6bd8558724a8b8fad3bd20a331bfc9dc5f45e7347247b0ca7"
   },
   "configFields": {
     "status": "tracked",
@@ -119,7 +119,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
-      "after": "K8 0.0.1 src-sha256=a905dc6764a4fb5d",
+      "after": "K8 0.0.1 src-sha256=03083c3028653633",
       "entry": "example-bot-collaboration-autonomy"
     },
     {

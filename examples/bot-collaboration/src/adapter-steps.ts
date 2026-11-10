@@ -1,4 +1,9 @@
 import type { RoutineCommands } from '@byok-sdk/server/execution-core';
+import { sealDueBatches, projectInputBatches, type CoalescePolicy } from './coalesce';
+import { cleanReplyTokens, type IntentConclusions } from './delivery-routing';
+import { projectInboundDispositions } from './inbound';
+import type { Publish } from './rules/delegation';
+import { expireCards } from './rules/commands';
 import { dreamOf } from './dream';
 import type { CollaborationState } from './model';
 import type { CommandPorts } from './rules/commands';
@@ -59,4 +64,21 @@ export function botOutcomePorts({ taskId, routines, manage, roomPosts }: {
     cancelRoutine: (turn, action) => routines.lifecycle(owned(routines.list(), turn.botId, action.routineId).definition.id, 'completed'),
     roomPosts,
   };
+}
+
+/** Seals due batches and expires cards before the sync freezes any new ContextPack. */
+export function syncHead(state: CollaborationState, coalesce: CoalescePolicy | undefined, now: number): void {
+  sealDueBatches(state, coalesce, now);
+  expireCards(state, now);
+}
+
+/**
+ * Cleans reply tokens and projects every input batch and inbound destination after the sync's Turn steps.
+ * H's finishDelivery also cleans reply tokens, corresponding to L's cleanup in each flush pass.
+ * #1229 item 3: one projection per destination; an unchanged destination keeps the same projection id and value.
+ */
+export function syncTail(state: CollaborationState, conclusions: IntentConclusions | undefined, now: number, emit: Publish): void {
+  if (conclusions !== undefined) cleanReplyTokens(conclusions, state, now);
+  projectInputBatches(state, emit);
+  projectInboundDispositions(state, emit);
 }

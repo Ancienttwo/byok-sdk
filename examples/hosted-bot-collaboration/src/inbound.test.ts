@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { hash } from '@byok-sdk/server/execution-core';
 import { inboundKey, type Delivery, type InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { seedCollaboration, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
+import { projectInboundDispositions } from '../../bot-collaboration/src/inbound';
+import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
 import { TEST_HOST, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
@@ -47,6 +48,24 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
     const before = await on.dump(scope);
     expect(await on.receive(scope, inbound, IDENTITY, vectorClock)).toEqual(first);
     expect(await on.dump(scope)).toBe(before);
+  });
+
+  it('projects every stored inbound disposition in sync and keeps identical rows on replay (#1664)', async () => {
+    const { on, scope } = await scoped(true);
+    await on.bindDevice(scope, 'device');
+    await on.receive(scope, message({ replyRoute: REPLY }), IDENTITY, vectorClock);
+    await on.sync(scope, { ...SYNC_OPTIONS, history: undefined });
+    const emitted = vi.fn();
+    projectInboundDispositions(await on.read(scope), emitted);
+    expect(emitted.mock.calls.length).toBeGreaterThan(0);
+    const rows = async () => (await opened!.pool.query<{ key: string; body: unknown }>(
+      `SELECT key, body FROM "${store().schema}".outbox WHERE scope = $1 AND kind = 'projection' ORDER BY key`, [storedKey(scope)])).rows;
+    const before = await rows();
+    for (const [id, value] of emitted.mock.calls) {
+      expect(before.filter(row => row.key === storedKey(id))).toEqual([{ key: storedKey(id), body: value }]);
+    }
+    await on.sync(scope, { ...SYNC_OPTIONS, history: undefined });
+    expect(await rows()).toEqual(before);
   });
 
   it('keeps no inbound without a channel, as L passes no remember port then', async () => {

@@ -359,6 +359,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
 
     it('counts no step for a delivery claim that changes nothing, and one for a claim that only moves the entity', async () => {
       const { channelStore, scope, turnId } = await received();
+      // Settle sync's inbound projections before measuring delivery steps.
+      await sender({ projections: receiver().port }).run();
       await claimed(channelStore, scope, turnId);
       await channelStore.seed(scope, state => { Object.assign(state.channel!.deliveries.d1!, { state: 'pending', attempts: 0 }); });
       await query(`UPDATE ${table('outbox')} SET next_at = 0 WHERE scope = $1`, [storedKey(scope)]);
@@ -453,6 +455,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
 
     it('fences a failed readback by its attempt: it leaves the lease of a later attempt alone', async () => {
       const { channelStore, scope, turnId } = await received();
+      // Settle sync's inbound projections before measuring delivery steps.
+      await sender({ projections: receiver().port }).run();
       clock = await unknownAt(channelStore, scope, turnId);
       let begin!: () => void, fail!: () => void;
       const started = new Promise<void>(resolve => { begin = resolve; }), gate = new Promise<void>(resolve => { fail = resolve; });
