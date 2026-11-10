@@ -8,7 +8,7 @@ import { MAX_TIMER_DELAY_MS } from '../../util/timer-delay';
 import type { ActiveTask } from './support';
 import { raceSettleFirst, taskFinalizing } from './support';
 import type { TaskRunner } from '../task-runner';
-import { DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS, MAX_DURATION_EXCEEDED_REASON_PREFIX, MAX_TRACKED_TASK_IDS } from './state';
+import { DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS, MAX_DURATION_EXCEEDED_REASON_PREFIX } from './state';
 import { hostFor } from './host';
 import { beginTerminal, drainApprovals, retryTerminalFinalization, terminalEffectsHost } from './finish';
 
@@ -206,58 +206,34 @@ export async function handleCancel(this: TaskRunner, taskId: string, reason: str
   const active = this['tasks'].get(taskId);
   const host = hostFor(this);
   if (!active) {
-    // #1099 S4: a task already in the reducer, but not registered active, is
-    // in the offer/start window. Where the reducer can decide now, it owns
-    // the transition. The bounded legacy marker remains the offer-window
-    // checkpoint record (unknown/pre-offer and the claimed-to-started
-    // handoff) and is consumed at checkpoint 2; it is not the cx authority.
     const current = host.current(taskId);
-    // A pre-claim task is declined by the stage that observes the aborted
-    // admission signal (design §8.4): the bounded marker below keeps the
-    // exact legacy reason and the admission timing payload that only the
-    // waiting stage can record. O5 owns the decline.
-    if (current !== undefined && current.phase === 'claiming' && !current.claim.journaled && !current.claim.sent) {
-      // X2a (#1218): the journal is in flight, so the claim is not committed.
-      // No admission phase is pending here, so declining now keeps the same
-      // reason/retryable pair the deferred O5 path used.
+    if (current === undefined) {
+      if (this['startupOwnership'].has(taskId) && !this['inFlightOffers'].has(taskId)) {
+        await this['startupOwnership'].dispose(taskId);
+        return;
+      }
+      host.dispatchSync({ type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire', ...(reason === undefined ? {} : { reason }) });
+      host.endTask(taskId);
+      this['inFlightBlobAborts'].get(taskId)?.abort();
+      return;
+    }
+    if (current.phase === 'claiming' && !current.claim.journaled && !current.claim.sent) {
       this['inFlightBlobAborts'].get(taskId)?.abort();
       host.dispatchSync({ type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire' });
       return;
     }
-    if (current !== undefined && current.phase === 'claimed') {
-      // X3 (startup ownership exists) or X3b (start is still in flight):
-      // checkpoint 2 reads cx.requested and makes runtime.started take C6,
-      // never task.started. The bounded marker stays the offer-window
-      // checkpoint record the start path consumes.
+    if (current.phase === 'claimed') {
       this['inFlightBlobAborts'].get(taskId)?.abort();
-      host.dispatchSync({
-        type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire',
-        ...(reason === undefined ? {} : { reason }),
-      });
-      this['setPendingCancelled'](taskId, reason);
+      host.dispatchSync({ type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire', ...(reason === undefined ? {} : { reason }) });
       return;
     }
-    if (current !== undefined && (current.phase === 'terminalizing' || current.phase === 'retiring')) {
-      // X5: share the selected terminal; its IO is S6 scope.
-      host.dispatchSync({
-        type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire',
-        ...(reason === undefined ? {} : { reason }),
-      });
+    if (['received', 'admitting', 'claiming', 'declined', 'terminalizing', 'retiring'].includes(current.phase)) {
+      host.dispatchSync({ type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire', ...(reason === undefined ? {} : { reason }) });
     }
     if (this['startupOwnership'].has(taskId) && !this['inFlightOffers'].has(taskId)) {
       await this['startupOwnership'].dispose(taskId);
       return;
     }
-    // Finding F4: not registered yet — record it in case handleOffer is
-    // still in flight for this exact taskId (claimed but not yet started;
-    // see the class-level doc on `pendingCancelled` and the two
-    // checkpoints in handleOffer). A genuinely stale/unknown/already-
-    // finished taskId just leaves a harmless, never-consulted entry —
-    // identical in effect to the old silent-drop behavior for that case
-    // (M3-B: except now bounded — see `setPendingCancelled`). S4 retains
-    // this store because the bounded-collections oracle pins it; the
-    // reducer marker (X1/X3b) is not co-written here.
-    this['setPendingCancelled'](taskId, reason);
     this['inFlightBlobAborts'].get(taskId)?.abort();
     return;
   }
@@ -309,18 +285,6 @@ export async function handleCancel(this: TaskRunner, taskId: string, reason: str
   }
   void drainApprovals.call(this, taskId);
   await receipt;
-}
-
-export function evictPendingCancelled(this: TaskRunner): void {
-  for (const key of this['pendingCancelled'].keys()) {
-    if (!this['inFlightOffers'].has(key)) {
-      this['pendingCancelled'].delete(key);
-      return;
-    }
-  }
-  console.warn(
-    `[byok/client] pendingCancelled exceeded ${MAX_TRACKED_TASK_IDS} entries with every tracked taskId currently in-flight — leaving it temporarily over cap rather than evict a marker a running handleOffer() still needs`,
-  );
 }
 
 export async function handleSteer(this: TaskRunner, taskId: string, text: string): Promise<void> {

@@ -513,6 +513,10 @@ describe('same-home admission after a published terminal (#476)', () => {
       ]);
       expect(claimed(sent, 'second')).toBe(0);
       expect(adapter.startCalls).toHaveLength(1);
+      await runner.handleEnvelope(agentOffer('second', 4));
+      expect(declines(sent, 'second')).toHaveLength(2);
+      expect(declines(sent, 'second')[1]!.payload).toMatchObject({ reason: 'cancelled before claim: host withdrew', retryable: false });
+      expect(claimed(sent, 'second')).toBe(0);
       releaseClose();
       await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
     });

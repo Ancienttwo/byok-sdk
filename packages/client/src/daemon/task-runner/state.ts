@@ -809,10 +809,6 @@ function selectTerminal(
 function declineFacts(
   snapshot: ReducerSnapshot, event: ReducerEvent, stage: string,
 ): { readonly reason: string; readonly retryable: boolean; readonly code?: string } {
-  const task = taskOf(snapshot);
-  if (task.cancel.requested) {
-    return { reason: terminalReasonForCancel(task.cancel.reason), retryable: false };
-  }
   // Shutdown only owns the limits-stage verdict: an offer already parked on a
   // busy Agent home still reports that concrete, machine-readable cause first.
   if (stage === 'limits'
@@ -991,12 +987,16 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
         generation: event.generation ?? 1,
         offer: event.offer ?? createOfferFacts({ strict: event.strict ?? false, sealed: event.sealed ?? false }),
       });
+      const pending = snapshot.runner.pendingCancelled.find(value => value.taskId === taskId);
       const task: TaskStateV1 = {
         ...created,
         admission: { ...created.admission, stage: 'dedup' },
+        ...(pending === undefined ? {} : { cancel: { requested: true, source: 'wire' as const, atMs: pending.atMs, ...(pending.reason === undefined ? {} : { reason: pending.reason }) } }),
       };
       return {
-        runner: snapshot.runner,
+        runner: pending === undefined ? snapshot.runner : runnerWith(snapshot.runner, {
+          pendingCancelled: removeValue(snapshot.runner.pendingCancelled, value => value.taskId === taskId),
+        }),
         task,
         effects: [
           atom('track.inflight'),
@@ -1015,23 +1015,17 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
     phase: ['received'],
     apply: (snapshot, event) => {
       const task = taskOf(snapshot);
-      const pending = snapshot.runner.pendingCancelled.find(value => value.taskId === task.taskId);
-      if (pending !== undefined) {
+      if (task.cancel.requested) {
         const declined = declinedTask(snapshot, event, 'checkpoint1', {
-          reason: terminalReasonForCancel(pending.reason),
+          reason: terminalReasonForCancel(task.cancel.reason),
           retryable: false,
         });
         return {
-          runner: runnerWith(snapshot.runner, {
-            pendingCancelled: removeValue(
-              snapshot.runner.pendingCancelled,
-              value => value.taskId === task.taskId,
-            ),
-          }),
+          runner: snapshot.runner,
           task: declined.task,
           effects: [
             atom('send.decline', { reason: declined.reason, retryable: false }),
-            atom('consume.pendingCancelled'),
+            ...declineCleanupEffects(),
           ],
           reason: declined.reason,
         };
@@ -1046,7 +1040,7 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
       };
     },
     rejection:
-      'Checkpoint 1 (pre-claim cancel) wins ahead of home/limits and consumes the pendingCancelled marker; otherwise admission proceeds to the home reservation.',
+      'Checkpoint 1 declines a recorded cancel before home/limits; otherwise admission proceeds to the home reservation.',
   },
   {
     id: 'O4',
@@ -1087,11 +1081,13 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
       const declined = declinedTask(snapshot, event, event.stage ?? task.admission.stage);
       const strict = event.strict ?? task.offer.strict;
       return {
-        runner: strict
-          ? runnerWith(snapshot.runner, {
-              strictDeclined: addUniqueBounded(snapshot.runner.strictDeclined, task.taskId),
-            })
-          : snapshot.runner,
+        runner: runnerWith(snapshot.runner, {
+          ...(strict ? { strictDeclined: addUniqueBounded(snapshot.runner.strictDeclined, task.taskId) } : {}),
+          ...(task.cancel.requested ? { pendingCancelled: upsertPendingCancel(snapshot.runner.pendingCancelled, {
+            taskId: task.taskId, atMs: task.cancel.atMs ?? event.atMs,
+            ...(task.cancel.reason === undefined ? {} : { reason: task.cancel.reason }),
+          }) } : {}),
+        }),
         task: declined.task,
         effects: [
           atom('send.decline', {
@@ -1107,14 +1103,14 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
       };
     },
     rejection:
-      'First decline wins; later declines audit only. Cancel rewrites the reason to cancelled before claim (false); shutdown to daemon is shutting down (true).',
+      'First decline wins; later declines audit only. A recorded cancel is retained for redelivery; shutdown can select daemon is shutting down (true).',
   },
   {
     id: 'C1',
     events: ['admission.claimable'],
     phase: ['admitting'],
     when: (snapshot) =>
-      snapshot.task !== undefined && !snapshot.task.cancel.requested && snapshot.task.terminal === undefined
+      snapshot.task !== undefined && snapshot.task.terminal === undefined
       && snapshot.runner.shutdown === undefined,
     apply: (snapshot) => {
       const task = taskOf(snapshot);
@@ -1129,7 +1125,7 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
       };
     },
     rejection:
-      'A cancel/shutdown before the journal is admitted falls to O5 (decline). A journal failure is C9: retryable decline per #1217/#1221.',
+      'Shutdown before the journal is admitted falls to O5 (decline). A journal failure is C9: retryable decline per #1217/#1221.',
   },
   {
     id: 'C2',
@@ -2290,14 +2286,19 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
     id: 'X7',
     events: ['cancel.received'],
     phase: '*',
-    when: (snapshot) => snapshot.task?.cancel.requested === true,
-    apply: (snapshot) => ({
-      runner: snapshot.runner,
-      task: snapshot.task,
-      effects: [],
-      disposition: 'dropped',
-    }),
-    rejection: 'Duplicate cancel is idempotent and keeps the first reason; the attempt is shared.',
+    when: (snapshot) => snapshot.task?.cancel.requested === true && snapshot.task.phase !== 'declined',
+    apply: (snapshot, event) => {
+      const task = taskOf(snapshot);
+      if (task.phase === 'received' || task.phase === 'admitting') {
+        return { runner: snapshot.runner, task: taskWith(task, { cancel: {
+          requested: true, atMs: event.atMs,
+          ...(event.reason === undefined ? {} : { reason: event.reason }),
+          ...(event.source === undefined ? {} : { source: event.source }),
+        } }), effects: [] };
+      }
+      return { runner: snapshot.runner, task, effects: [], disposition: 'dropped' };
+    },
+    rejection: 'Before claim the latest cancel replaces the reason; later duplicates keep the first reason.',
   },
   {
     id: 'X2',
@@ -2307,35 +2308,18 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
       snapshot.task !== undefined && !snapshot.task.claim.sent && !snapshot.task.cancel.requested,
     apply: (snapshot, event) => {
       const task = taskOf(snapshot);
-      const reason = terminalReasonForCancel(event.reason);
-      const declined = declinedTask(snapshot, event, task.admission.stage, { reason, retryable: false });
       return {
-        runner: runnerWith(snapshot.runner, {
-          pendingCancelled: removeValue(
-            snapshot.runner.pendingCancelled,
-            value => value.taskId === task.taskId,
-          ),
-        }),
-        task: {
-          ...declined.task,
-          cancel: {
-            requested: true,
-            reason,
-            ...(event.source === undefined ? {} : { source: event.source }),
-            atMs: event.atMs,
-          },
-        },
-        effects: [
-          atom('revoke.host_contexts', { reason }, { requires: CLEANUP }),
-          atom('send.decline', { reason, retryable: false }),
-          atom('consume.pendingCancelled'),
-          ...declineCleanupEffects(),
-        ],
-        reason,
+        runner: snapshot.runner,
+        task: taskWith(task, { cancel: {
+          requested: true, atMs: event.atMs,
+          ...(event.reason === undefined ? {} : { reason: event.reason }),
+          ...(event.source === undefined ? {} : { source: event.source }),
+        } }),
+        effects: [],
       };
     },
     rejection:
-      'Pre-claim cancel declines (cancelled before claim, false), consumes the pending marker and releases every reservation.',
+      'Pre-claim cancel records the reason; the admission stage decides the decline.',
   },
   {
     id: 'X2a',
@@ -2565,13 +2549,18 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
     id: 'X6',
     events: ['cancel.received'],
     phase: ['finished', 'declined'],
-    apply: (snapshot) => ({
-      runner: snapshot.runner,
+    apply: (snapshot, event) => ({
+      runner: snapshot.task?.phase === 'declined' ? runnerWith(snapshot.runner, {
+        pendingCancelled: upsertPendingCancel(snapshot.runner.pendingCancelled, {
+          taskId: taskIdOf(event), atMs: event.atMs,
+          ...(event.reason === undefined ? {} : { reason: event.reason }),
+        }),
+      }) : snapshot.runner,
       task: snapshot.task,
       effects: [atom('audit', { detail: { terminal: 'settled' } })],
-      disposition: 'dropped',
+      ...(snapshot.task?.phase === 'declined' ? {} : { disposition: 'dropped' as const }),
     }),
-    rejection: 'Idempotent no-op; a finished/declined task is never revived.',
+    rejection: 'A declined task records a pending cancel for redelivery; a finished task stays settled.',
   },
   {
     id: 'ST1',

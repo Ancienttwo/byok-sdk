@@ -85,12 +85,11 @@ import type { AgentMemoryCommitStore } from './agent-memory-commit';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
 import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry, RuntimeRequirements } from './task-runner/support';
 import { offerSettlements, trackOffer, taskTearingDown } from './task-runner/support';
-import { MAX_TRACKED_TASK_IDS } from './task-runner/state';
 import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message';
 import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts';
 import { activeMemoryContext, runMemoryOperation, quiesceAndSnapshotAgentMemory, bindAgentMemoryFilesystem } from './task-runner/agent-memory';
-import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, evictPendingCancelled, handleSteer } from './task-runner/lifecycle';
-import { admitOffer, reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer, declineOfferMissingCapabilities } from './task-runner/offer-admission';
+import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, handleSteer } from './task-runner/lifecycle';
+import { reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer, declineOfferMissingCapabilities } from './task-runner/offer-admission';
 import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime';
 import { requestApproval, handleApprove, handleReject } from './task-runner/approvals';
 import { terminalInferenceUsagePayload, preparedObservationPayload, agentTerminalPayload, resolveStagedResult, persistAgentTerminalEvidence, measureReaderMemoryChange, retryAgentTerminalEvidence, reportAgentTerminalEvidenceFailure } from './task-runner/terminal-evidence';
@@ -554,56 +553,6 @@ export class TaskRunner {
   /** Retries resend one envelope id per record (#693); the cloud replays the disposition per arrival. */
   private readonly agentMessageEnvelopes = new WeakMap<AgentMessageOutboxRecord, Envelope>();
   /**
-   * Finding F4 (cancel lost during the offer-processing window): a
-   * `task.cancel` for a taskId that hasn't finished `handleOffer` yet (still
-   * awaiting adapter detection / instruction resolution / workspace setup /
-   * prepared operation `start()`) has no `this.tasks` entry to land on — it used to be
-   * silently dropped, and the runtime session `handleOffer` was about to
-   * register would then run an unsupervised ("zombie") turn nobody asked
-   * for anymore. Recording the taskId here lets `handleOffer` consult it at
-   * the two points where it can still safely react (see its body): before
-   * claiming at all (decline instead of ever starting a session), and right
-   * after the prepared operation resolves but before this task is registered as
-   * active (tear the just-started session down immediately, before its
-   * event loop ever pumps a single event). Consumed (deleted) at whichever
-   * checkpoint handles it; a cancel for a taskId that's already active,
-   * already finished, or never offered at all leaves a harmless entry that
-   * nothing will ever consult.
-   *
-   * M3-B: that last sentence is exactly the unbounded-growth vector this
-   * needed closed for long-lived operation — a cancel for a taskId nobody
-   * ever claims (unknown, already active, or already finished) leaves a
-   * permanent entry with nothing left to consume it. Bounded to
-   * `MAX_TRACKED_TASK_IDS` via `setPendingCancelled` below, oldest evicted
-   * first: safe because every entry this field's correctness actually
-   * depends on is consumed (deleted) by one of `handleOffer`'s two
-   * checkpoints within that SAME task's own offer-processing window — one
-   * in-flight task's startup latency, nowhere near enough churn for eviction
-   * to remove an entry still inside its consuming window before it's read.
-   */
-  private readonly pendingCancelled = new Map<string, string | undefined>();
-  /**
-   * Finding #5 (Codex counterexample): taskIds currently INSIDE `handleOffer`
-   * — from the moment it decides an offer is worth processing until it
-   * reaches one of its own resolution points (decline, fail, the
-   * checkpoint-2 cancel-teardown, or successful registration into
-   * `this.tasks`). Bounded eviction on `pendingCancelled` (below) must never
-   * remove an entry for a taskId in this set: doing so is exactly the bug —
-   * block task A in prepared-operation `start()`, deliver A's own `task.cancel` (so
-   * `pendingCancelled` gets an entry for A while A is still in-flight),
-   * then deliver `MAX_TRACKED_TASK_IDS` more cancels for unrelated taskIds
-   * nobody ever offered — under naive oldest-wins eviction, A's entry (the
-   * single oldest) gets evicted purely because of unrelated churn, so when
-   * the prepared operation finally resolves, checkpoint 2 finds no cancel marker
-   * and the already-cancelled task starts a real session. See
-   * `evictPendingCancelled` below for the fix, and
-   * `task-runner-bounded-collections.test.ts` for a test mirroring this
-   * exact scenario. Membership here is naturally tiny (bounded by this
-   * device's real concurrent-offer-processing count, nowhere near
-   * `MAX_TRACKED_TASK_IDS`), so scanning past it to find an evictable entry
-   * costs nothing.
-   */
-  /**
    * `taskId` -> the preparation record this Execution pinned.
    *
    * The pin is a durable single-consumer claim on already-counted tokens, so it
@@ -613,6 +562,7 @@ export class TaskRunner {
    * record whose bytes a live process may still be sending.
    */
   private readonly preparationPinsByTask = new Map<string, string>();
+  /** Task IDs inside handleOffer, used to drop a second delivery of the same offer. */
   private readonly inFlightOffers = new Set<string>();
   /** Sealed offers being opened, so a redelivery during the open is not opened twice. */
   private readonly sealedOpening = new Set<string>();
@@ -1035,10 +985,6 @@ export class TaskRunner {
     return outcome;
   }
 
-  private admitOffer(phase: OfferPhaseContext): true | undefined {
-    return admitOffer.call(this, phase);
-  }
-
   private reserveOfferHome(
     phase: OfferPhaseContext,
     agentRef: AgentRef,
@@ -1300,43 +1246,6 @@ export class TaskRunner {
 
   private handleCancel(taskId: string, reason: string | undefined): Promise<void> {
     return handleCancel.call(this, taskId, reason);
-  }
-
-  /** M3-B: bounded insert for `pendingCancelled` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest SAFE-TO-EVICT entry once over cap — see `evictPendingCancelled` (finding #5: not simply "the oldest entry", which could be an in-flight offer's own cancel marker). */
-  private setPendingCancelled(taskId: string, reason: string | undefined): void {
-    this.pendingCancelled.set(taskId, reason);
-    if (this.pendingCancelled.size > MAX_TRACKED_TASK_IDS) {
-      this.evictPendingCancelled();
-    }
-  }
-
-  /**
-   * Finding #5 (Codex counterexample — see `inFlightOffers`'s class-level
-   * doc comment for the exact scenario): evicts the OLDEST entry that is
-   * NOT a taskId currently inside `handleOffer`'s in-flight window, rather
-   * than unconditionally the single oldest entry. `Map` iterates in
-   * insertion order, so this is "oldest entry that's safe to drop," which
-   * only differs from "the oldest entry, period" when that oldest entry
-   * happens to belong to a task still being processed — exactly the case
-   * that must never be evicted, since `handleOffer`'s own checkpoint 2
-   * still needs to observe it.
-   *
-   * `inFlightOffers` is naturally tiny (bounded by this device's real
-   * concurrent-offer-processing count — normally single digits, driven by
-   * how many `task.offer`s are simultaneously mid-prepared-operation start() — nowhere
-   * near `MAX_TRACKED_TASK_IDS`), so this scan is cheap in practice: it
-   * finds a safe entry at or near the front almost always. The only case
-   * where NO entry is safe to evict is every single tracked cancel
-   * belonging to a currently in-flight offer, which would require this
-   * device to have `MAX_TRACKED_TASK_IDS` offers mid-processing
-   * simultaneously — implausible, but handled without corrupting anything:
-   * this insert is simply allowed to leave the map one entry over cap
-   * rather than evict something still needed, and it shrinks back under cap
-   * as those in-flight offers resolve and their entries get CONSUMED
-   * (deleted by `handleOffer` itself) rather than evicted.
-   */
-  private evictPendingCancelled(): void {
-    return evictPendingCancelled.call(this);
   }
 
   /**

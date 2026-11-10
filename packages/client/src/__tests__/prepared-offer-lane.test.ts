@@ -1112,6 +1112,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     { first: 'opens and starts', sent: ['task.claim', 'task.started'], starts: 1 },
     { first: 'fails to open', sent: ['task.decline'], starts: 0 },
     { first: 'is cancelled before claim', sent: ['task.decline'], starts: 0 },
+    { first: 'is cancelled with a reason', sent: ['task.decline'], starts: 0 },
   ] as const)('answers a redelivered offer that arrives during open() with nothing when the first $first', async (testCase) => {
     const built = await lane();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
@@ -1137,8 +1138,8 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     const first = runner.handleEnvelope(preparedOffer(taskId, reference(built), 1));
     await vi.waitFor(() => expect(opens).toHaveLength(1));
     const second = runner.handleEnvelope(preparedOffer(taskId, reference(built), 2));
-    if (testCase.first === 'is cancelled before claim') {
-      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId, seq: 3 }));
+    if (testCase.first === 'is cancelled before claim' || testCase.first === 'is cancelled with a reason') {
+      await runner.handleEnvelope(createEnvelope('task.cancel', testCase.first === 'is cancelled with a reason' ? { reason: 'stop' } : {}, { taskId, seq: 3 }));
     }
     if (testCase.first === 'fails to open') opens[0]!.fail();
     else opens[0]!.release();
@@ -1149,6 +1150,9 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     await second;
 
     expect(sent.map((envelope) => envelope.type)).toEqual(testCase.sent);
+    if (testCase.first === 'is cancelled before claim' || testCase.first === 'is cancelled with a reason') {
+      expect(sent[0]!.payload).toMatchObject({ reason: testCase.first === 'is cancelled with a reason' ? 'cancelled before claim: stop' : 'cancelled before claim', retryable: false });
+    }
     expect(adapter.preparedStartCalls).toHaveLength(testCase.starts);
     expect(opens).toHaveLength(1);
     if (testCase.starts === 1) {

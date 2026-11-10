@@ -58,8 +58,9 @@ export function hostDeclineSender(this: TaskRunner, taskId: string, admission: O
 }
 
 export function pendingCancelBeforeActive(this: TaskRunner, taskId: string): { readonly reason: string | undefined } | undefined {
-  return this['pendingCancelled'].has(taskId)
-    ? { reason: this['pendingCancelled'].get(taskId) }
+  const task = hostFor(this).current(taskId);
+  return task?.cancel.requested === true && ['received', 'admitting', 'claiming', 'claimed'].includes(task.phase)
+    ? { reason: task.cancel.reason }
     : undefined;
 }
 

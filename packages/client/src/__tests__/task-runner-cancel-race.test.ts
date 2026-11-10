@@ -145,6 +145,7 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
     await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'cancel while starting' }, { taskId, seq: 2 }));
     await vi.waitFor(() => expect(sent.some((e) => e.type === 'task.cancelled' && e.task_id === taskId)).toBe(true));
+    expect(sent.find((e) => e.type === 'task.cancelled' && e.task_id === taskId)?.payload).toMatchObject({ reason: 'cancel while starting' });
 
     runner.stopAcceptingOffers();
     let shutdownError: unknown;
@@ -185,7 +186,8 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
       ),
     );
 
-    expect(sent.some((e) => e.type === 'task.decline' && e.task_id === taskId)).toBe(true);
+    expect(sent.filter((e) => e.type === 'task.decline' && e.task_id === taskId)).toHaveLength(1);
+    expect(sent.find((e) => e.type === 'task.decline' && e.task_id === taskId)?.payload).toMatchObject({ reason: 'cancelled before claim: cancelled early', retryable: false });
     expect(sent.some((e) => e.type === 'task.claim' && e.task_id === taskId)).toBe(false);
     expect(adapter.startCalls).toHaveLength(0);
     expect(runner.activeTaskCount).toBe(0);

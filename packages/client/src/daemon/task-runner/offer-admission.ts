@@ -26,23 +26,6 @@ export function offerAlreadyHandled(this: TaskRunner, taskId: string): boolean {
     || hostFor(this).runnerSnapshot().strictDeclined.includes(taskId);
 }
 
-export function admitOffer(this: TaskRunner, phase: OfferPhaseContext): true | undefined {
-  const { taskId, decline } = phase;
-  // Finding F4, checkpoint 1 ("before claim where possible -> decline
-  // path"): a task.cancel already arrived for this exact taskId before
-  // this offer was even looked at. Decline outright — never claim, never
-  // spawn a runtime session for a task that's already dead. Checked first
-  // (ahead of every other pre-claim check below) so a pre-cancelled offer
-  // costs nothing beyond this map lookup.
-  if (this['pendingCancelled'].has(taskId)) {
-    const reason = this['pendingCancelled'].get(taskId);
-    this['pendingCancelled'].delete(taskId);
-    decline(reason ? `cancelled before claim: ${reason}` : 'cancelled before claim', false);
-    return undefined;
-  }
-  return true;
-}
-
 export async function reserveOfferHome(
   this: TaskRunner,
   phase: OfferPhaseContext,
