@@ -347,6 +347,10 @@ describe('diagnostics collector', () => {
       'control endpoint refused: socket_path_not_socket /tmp/byok-0123456789abcdef/control.sock (recorded 2026-08-09T00:00:00.000Z); '
         + 'remove /tmp/byok-0123456789abcdef/control.sock if no byok process uses it',
     );
+
+    await tracker.noteControlEndpoint({ code: 'socket_mode', path: '/tmp/byok-0123456789abcdef/control.sock' });
+    const mode = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(mode.checks.find((check) => check.id === 'control')?.summary).toContain('refused setting the mode to 0600');
   });
 
   it('reports valid health and bounds quarantine inventory', async () => {
