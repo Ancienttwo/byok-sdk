@@ -50,6 +50,79 @@ now refuse model-runtime configuration/composition errors before selecting a
 model or creating a session; repair the declared settings if admission fails
 with `keys_profile_model_composition_failed`.
 
+## Embedded server offer admission
+
+**Breaking (server; #1672).** Embedded `dispatch` and `executions.submit` now use the same offer admission as the direct cloud kernel lanes. Hosts that catch input errors must use the kernel's error class and code or schema path:
+
+| Refusal | Error class | Code or schema path |
+| --- | --- | --- |
+| Device lacks `dispatch-selection` or `toolset-selection` | `ByokCloudError` | `agent_capability_missing` |
+| Resume dispatch has no exact `sessionRef` | `ByokCloudError` | `coordination_input_invalid` |
+| Invalid façade input, including an empty task/device id, an in-flight task id, or message context without message egress | `ByokCloudError` | `coordination_input_invalid` |
+| A memory-reader selects a writing memory mode | `ZodError` | `['agentMemory']` on dispatch; `['payload', 'agentMemory']` on submission |
+| `runtime` differs from `dispatchSelection.runtimeId` | `ZodError` | `['runtime']` on dispatch; `['payload', 'runtime']` on submission |
+
+Submission passes invalid input to the kernel, including null and undefined from JavaScript callers. Sealed fields on plaintext submission remain refused with `ByokCloudError` / `coordination_input_invalid`. Retrying an offer recorded before a mailbox append failure uses the recorded admission without rechecking the device's capabilities.
+
+Dispatch no longer fills in `runtime` from `dispatchSelection.runtimeId`. If the Host omits `runtime`, it stays absent in the recorded offer and mailbox payload; the daemon selects the adapter from `runtimeId`. A Host that also supplies `runtime` must make it equal to that selection. See the [protocol's dispatch selection contract](../protocol.md).
+
+### Operator step for embedded SQLite Hosts
+
+Before upgrading, inspect each embedded Host store using `sqlite3 -readonly <store>` and run Q1 below. An AiphaBee local-agent research Host keeps this store at `<research host root>/server.sqlite`; other embedded Host stores contain both `request_receipt` and `task_attempt` tables. Q1 finds recorded, undelivered resume offers whose bytes contain both `dispatchSelection` and the old derived `runtime`:
+
+```sql
+-- Q1
+WITH o AS (
+  SELECT tenant_id, key, recorded_at,
+         CASE WHEN json_valid(body) THEN body END AS j
+  FROM request_receipt
+  WHERE key LIKE 'task-offer:%'
+)
+SELECT o.tenant_id, o.key AS receipt_key, o.recorded_at,
+       json_extract(j, '$.deviceId') AS device_id,
+       json_extract(j, '$.payload.agentRef.agentId') AS agent_id,
+       json_extract(j, '$.payload.agentRef') AS agent_ref_json
+FROM o
+WHERE json_extract(j, '$.payload.session.mode') = 'resume'
+  AND json_extract(j, '$.payload.dispatchSelection') IS NOT NULL
+  AND json_extract(j, '$.payload.runtime') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM request_receipt d
+    WHERE d.tenant_id = o.tenant_id
+      AND d.key = 'task-offer-delivered:' || substr(o.key, 12)
+  );
+```
+
+If Q1 is empty, no offer cleanup is required. Otherwise run Q2 to find offered attempts with no mailbox row:
+
+```sql
+-- Q2
+SELECT a.tenant_id, a.task_id, a.device_id, a.agent_ref_json, a.offered_at
+FROM task_attempt a
+WHERE a.status = 'offered'
+  AND NOT EXISTS (
+    SELECT 1 FROM mailbox_message m
+    WHERE m.tenant_id = a.tenant_id
+      AND m.device_id = a.device_id
+      AND CASE WHEN json_valid(m.body)
+               THEN json_extract(m.body, '$.task_id') END = a.task_id
+  );
+```
+
+### Prove each receipt-to-task mapping before abandoning
+
+Q2 supplies candidates, not proof of receipt ownership. Keep Q1's `(tenant_id, receipt_key)` and full `agent_ref_json` with the inventory. Do not choose a task merely because it is the only Q2 row for a device and Agent.
+
+The key is `task-offer:<messageId>`; its suffix is a hash-derived UUID, not an encoded task id. The kernel computes `messageId` from the UTF-8 bytes of `JSON.stringify({ domain: 'byok:task-offer', tenant, taskId, deviceId, agentRef })`, in that property order, using the complete attempt `agentRef` (including `profileRevision`). It takes the first 16 bytes of SHA-256, sets the UUID version nibble to `8` and the variant bits to binary `10`, and formats the result as a lowercase UUID. See [offer identity](../../packages/cloud/src/offer-identity.ts). There is no inverse key-to-task decoder: prove the association by recomputing the key for a candidate task.
+
+Use the old Host's existing `await byok.tasks.offer(candidate.task_id)` to perform that derivation. This read-only API loads the durable attempt within the Host's tenant, computes its message id, reads exactly `task-offer:<messageId>` within that same tenant, and validates the stored target and full AgentRef. See [offer readback](../../packages/cloud/src/api/task-reads.ts). No new helper or device dispatch is required.
+
+1. Bind the old embedded Host to the Q1 row's exact `tenant_id`. Its configured `productId` must produce `tenant_id === 'product:' + productId`. Never use a candidate or readback from another tenant.
+2. For each Q1 row, consider Q2 rows only within that tenant, with the same `device_id` and full AgentRef (`agentId` and `profileRevision`). For each candidate, read `offer = await byok.tasks.offer(candidate.task_id)`. A match requires all of: `offer` exists, `offer.taskId === candidate.task_id`, `offer.deviceId === Q1.device_id`, `offer.delivered === false`, its full `offer.payload.agentRef` equals Q1's parsed `agent_ref_json`, and **`'task-offer:' + offer.messageId === Q1.receipt_key`**. The exact key equality, computed from the attempt, proves the task identity.
+3. Build and verify the complete mapping before any mutation. Every Q1 `(tenant_id, receipt_key)` must match exactly one Q2 `(tenant_id, task_id)`, and every mapped `(tenant_id, task_id)` must occur exactly once in that mapping. Retain the receipt key, message id and verified task id together in the inventory. Device/Agent equality alone never satisfies this check.
+4. If a candidate read fails, a Q1 row has no match or multiple matches satisfying every identity check, or two Q1 rows map to the same task, **stop and do not abandon any task**. Resolve the association before upgrading; do not infer it from candidate count or timestamps.
+5. Only after all checks pass, call `byok.tasks.abandon(verifiedTaskId, 'operator')` through that same old Host for each verified task. Then upgrade and dispatch with new task ids. These offers never reached the device; do not use `cancel` for this cleanup. Do not replay the old recorded offer with the newly omitted `runtime` bytes.
+
 ## OpenCode Host MCP toolsets
 
 No Host configuration change is required (#1632). OpenCode now advertises `mcpToolsets: true` and passes an admitted task's Host MCP servers through ACP on session open and resume. A Host may offer configured toolsets to OpenCode using the existing toolset selection. The loopback contract exercised OpenCode 1.19.5 and 2.2.6 on macOS arm64 and Windows x64. OpenCode v2 still refuses Agent `memory-reader` tasks because its session-local appended instruction channel is unqualified.
