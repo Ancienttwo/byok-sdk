@@ -5,7 +5,8 @@ import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/example-bot-collaboration/r
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { SwitchExportedError } from './switch';
 import { checkHomeReadback, homeRequests, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
-import { errorText, HOST_JOB_EXECUTION_UNSUPPORTED, inSchema, lockScope, type DeliveryTimes, type HomeClaim, type HomeStep,
+import { inSchema, lockScope } from './transaction';
+import { errorText, HOST_JOB_EXECUTION_UNSUPPORTED, type DeliveryTimes, type HomeClaim, type HomeStep,
   type HostedCollaborationStore, type HostJobOutcome } from './store';
 
 /**

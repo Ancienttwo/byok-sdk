@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
-import { inSchema, type HostedCollaborationStore, type SyncResult } from './store';
+import { inSchema } from './transaction';
+import type { HostedCollaborationStore, SyncResult } from './store';
 
 export interface DueSchedulerOptions {
   /**

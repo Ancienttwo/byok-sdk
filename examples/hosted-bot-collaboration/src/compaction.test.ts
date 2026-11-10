@@ -8,7 +8,7 @@ import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collabora
 import { freezeIntent } from './intents';
 import { storedKey } from './layout';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { inSchema, lockScope } from './store';
+import { inSchema, lockScope } from './transaction';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;

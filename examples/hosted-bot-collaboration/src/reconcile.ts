@@ -10,7 +10,8 @@ import { deliverCancels } from './intents';
 import { commitStored } from './retention';
 import { storedKey } from './layout';
 import { hostedRoutineCommands, loadSlice, switchDueVersions, writeSlice } from './routines';
-import { inSchema, lockScope, type Decision, type HostedCollaborationStore, type Publish, type StorePorts } from './store';
+import { inSchema, lockScope } from './transaction';
+import type { Decision, HostedCollaborationStore, Publish, StorePorts } from './store';
 
 /** What a Host intent handler gets in the terminal transaction (#955). `publish` writes a projection row in the same commit. */
 export interface HostedIntentTransaction {

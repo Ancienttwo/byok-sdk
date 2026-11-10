@@ -7,7 +7,7 @@ import { openHostedCloud, SKIP_HOSTED_CLOUD, type HostedCloud } from './hosted-c
 import { freezeIntent, HostedSubmitter, type SubmitterOptions } from './intents';
 import { storedKey } from './layout';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { inSchema, lockScope } from './store';
+import { inSchema, lockScope } from './transaction';
 
 // The SDK side is the hosted composition (createByokCloud over createPostgresCloudStores) with a real daemon, paired
 // over loopback HTTP. The H side is its own schema of the same Postgres. D2b ships no product entry: the tests

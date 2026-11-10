@@ -12,7 +12,8 @@ import { TEST_HOST, vectorClock } from './memory-subject.test-support';
 import { hostedMessageConsumer, type AgentMessageInput } from './messages';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedOutboxSender } from './sender';
-import { HostedCollaborationStore, inSchema, lockScope } from './store';
+import { HostedCollaborationStore } from './store';
+import { inSchema, lockScope } from './transaction';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;

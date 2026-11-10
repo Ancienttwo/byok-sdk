@@ -14,7 +14,8 @@ import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedRoutineScheduler } from './scheduler';
 import { HostedOutboxSender } from './sender';
 import { TEST_HOST } from './memory-subject.test-support';
-import { HostedCollaborationStore, homeRowKey, inSchema, lockScope, type InboundIdentity } from './store';
+import { HostedCollaborationStore, homeRowKey, type InboundIdentity } from './store';
+import { inSchema, lockScope } from './transaction';
 import { freezeIntent, HostedSubmitter } from './intents';
 import type { TaskEvidence } from './reconcile';
 

@@ -9,7 +9,7 @@ import { HostedCommandEntry, type EntryCaller } from './entry';
 import { freezeIntent, HostedSubmitter } from './intents';
 import { storedKey } from './layout';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { inSchema, lockScope } from './store';
+import { inSchema, lockScope } from './transaction';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;

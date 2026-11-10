@@ -12,7 +12,8 @@ import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { IntentOutcomeError as K8IntentOutcomeError } from '@byok-sdk/example-bot-collaboration/adapter-steps';
 import { HostedReconciler, type HostedIntentHandler, type HostedTaskPort } from './reconcile';
 import { IntentOutcomeError, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDisposition } from './index';
-import { HostedCollaborationStore, inSchema, lockScope } from './store';
+import { HostedCollaborationStore } from './store';
+import { inSchema, lockScope } from './transaction';
 
 /**
  * #955: the Host's own intents on H, the cases of L's host-intents.test.ts (#882) on Postgres. A fake SDK port: a
