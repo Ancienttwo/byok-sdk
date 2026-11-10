@@ -1389,25 +1389,14 @@ export class TaskRunner {
   }
 
   /**
-   * S0/H-006: an inbound `task.steer` is normally impossible for a runtime
-   * that cannot steer — the hub gates it at claim-time capability
-   * (`steer_unsupported_runtime`) and never sends the envelope. If one
-   * arrives anyway (a forged sender, a pre-gate server, a device whose
-   * adapter set changed), the session throws {@link SteerUnsupportedError},
-   * which is a PERMANENT property of that runtime, not a transient failure.
+   * The server normally gates `task.steer` using the claimed runtime's
+   * capability. If a relay still sends one to a runtime declaring no
+   * steering channel, log and acknowledge it without calling the session.
+   * This keeps the inbound cursor from stalling on a permanent mismatch.
    *
-   * Rethrowing it would hand it to `ConnectionManager.process()`
-   * (`connection-manager.ts` `stalledAtSeq`), which freezes the cursor at
-   * that seq and redelivers the same envelope forever — every retry
-   * guaranteed to fail identically, and every later envelope for every
-   * other task blocked behind it. So this is classified as a
-   * non-retryable protocol/authority error: record it and return normally,
-   * which acks the envelope and lets the cursor advance. Nothing is
-   * swallowed — the steer simply has no reachable success state, and the
-   * honest terminal action is to log it and move on.
-   *
-   * Every OTHER error stays transient and is rethrown untouched, preserving
-   * the existing stall/redelivery semantics exactly.
+   * A steering-capable session can throw {@link SteerUnsupportedError} to
+   * reject a particular steer without retry. Other errors propagate and keep
+   * the existing cursor stall and redelivery behavior.
    */
   private handleSteer(taskId: string, text: string): Promise<void> {
     return handleSteer.call(this, taskId, text);

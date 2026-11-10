@@ -138,6 +138,55 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
     expect(result.state).toBe('Complete');
   }, 15000);
 
+  it('acks a steer delivered by a relay to a runtime declaring no steering channel', async () => {
+    real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
+    const storeDir = await tmpDir('byok-e2e-store-');
+    const adapter = new StubRuntimeAdapter('pi', undefined, {
+      steer: false, resume: true, approvalInteractive: true, mcpToolsets: true,
+    });
+    const unsupported = adapter.descriptor;
+    daemon = createDaemonWithAdapters(
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      [adapter], { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } },
+    );
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const record = await daemon.pair((await real.createPairingCode()).code);
+      await daemon.start();
+      await waitForDaemonOpen(daemon);
+      const cursorStore = new CursorStore(storeDir);
+      let seedCursor = 0;
+      const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, instruction: 'run over long-poll' }, {
+        beforeResume: async () => {
+          await vi.waitFor(async () => expect(await cursorStore.load(real.url, record.deviceId)).toBeGreaterThan(0));
+          seedCursor = (await cursorStore.load(real.url, record.deviceId))!;
+          // Let the real server accept the steer using a stale claim snapshot,
+          // simulating a relay that does not enforce the runtime's capability.
+          Object.defineProperty(adapter, 'descriptor', { value: { ...unsupported, capabilities: { ...unsupported.capabilities, steer: true } }, configurable: true });
+        },
+      });
+      await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
+      Object.defineProperty(adapter, 'descriptor', { value: unsupported, configurable: true });
+      let baseline = 0;
+      await vi.waitFor(async () => {
+        baseline = (await cursorStore.load(real.url, record.deviceId)) ?? 0;
+        expect(baseline).toBeGreaterThan(seedCursor);
+      });
+      session.steerErrorPersistent = new Error('runtime cannot steer');
+      await handle.steer('unsupported steer');
+      const message = `[byok/client] inbound task.steer for task ${handle.taskId} rejected: runtime "pi" declares no steering channel — acked without retry; this envelope should have been gated server-side`;
+      await vi.waitFor(() => expect(errors).toHaveBeenCalledWith(message));
+      await vi.waitFor(async () => expect(await cursorStore.load(real.url, record.deviceId)).toBeGreaterThan(baseline));
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(errors.mock.calls.filter(([value]) => value === message)).toHaveLength(1);
+      expect(session.steerAttempts).toBe(0);
+      session.emit({ type: 'turn_end' });
+      expect((await handle.result()).state).toBe('Complete');
+    } finally {
+      errors.mockRestore();
+    }
+  }, 15000);
+
   /**
    * S0/H-006, the other half of the same classification: a `SteerUnsupportedError`
    * is NOT a transient handler failure — the runtime has no steering channel at
