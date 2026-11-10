@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, openSync, promises as fs } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import path from 'node:path';
-import { ensureSecureDir } from './secure-dir';
+import { ensureOwnedPrivateDirectory } from './private-unix-socket';
 
 export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
 
@@ -107,12 +107,7 @@ function gateIdentity(scope: PathMutationGateScope, canonicalTarget: string): st
 }
 
 async function assertPrivateGateRoot(): Promise<void> {
-  await ensureSecureDir(POSIX_GATE_ROOT);
-  const stat = await fs.lstat(POSIX_GATE_ROOT);
-  const uid = process.getuid?.();
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (uid !== undefined && stat.uid !== uid)) {
-    throw new Error(`path mutation gate root is not a private owned directory: ${POSIX_GATE_ROOT}`);
-  }
+  await ensureOwnedPrivateDirectory(POSIX_GATE_ROOT);
 }
 
 function resolveGateTarget(input: PathMutationGateInput): Promise<string> {

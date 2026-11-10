@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { promises as fs } from 'node:fs';
 import { lstat, mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
 import { createConnection, createServer, Server, type Socket } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../util/daemon-owner';
+import { PrivateDirectoryRefusedError } from '../util/private-unix-socket';
 
 /**
  * The store mutex used to be a listener on a loopback TCP port derived from
@@ -138,6 +140,36 @@ describe('daemon owner store mutex: a store-scoped lock, immune to foreign liste
     } finally {
       spy.mockRestore();
       await held.release();
+    }
+  });
+
+  it.each(['symlink', 'foreign owner'] as const)('refuses a %s fallback directory before publishing a daemon lease', async (kind) => {
+    if (process.platform === 'win32') return;
+    const storeDir = path.join(await tmpDir(), 'x'.repeat(150));
+    await mkdir(storeDir, { recursive: true, mode: 0o700 });
+    const canonical = await realpath(storeDir);
+    const endpoint = storeMutexEndpoint(canonical, createHash('sha256').update(canonical).digest('hex'));
+    const dir = path.dirname(endpoint);
+    fallbackDirectories.push(dir);
+    const target = await tmpDir();
+    if (kind === 'symlink') await fs.symlink(target, dir);
+    else await mkdir(dir, { mode: 0o700 });
+    const realLstat = fs.lstat;
+    const spy = vi.spyOn(fs, 'lstat').mockImplementation(async (name, ...rest) => {
+      const stat = await realLstat(name, ...(rest as []));
+      return name === dir && kind === 'foreign owner'
+        ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
+    });
+    try {
+      const error = await acquireDaemonOwner(storeDir, 'daemon').catch((error) => error);
+      expect(error).toBeInstanceOf(PrivateDirectoryRefusedError);
+      expect(error).toMatchObject({ code: kind === 'symlink' ? 'private_dir_symlink' : 'private_dir_foreign_owner', path: dir, processUid: process.getuid?.() });
+      if (kind === 'foreign owner') expect(error.ownerUid).toBe((process.getuid?.() ?? 0) + 1);
+      await expect(lstat(endpoint)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(lstat(path.join(storeDir, 'daemon-owner.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await fs.readdir(target)).toEqual([]);
+    } finally {
+      spy.mockRestore();
     }
   });
 

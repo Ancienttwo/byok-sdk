@@ -7,6 +7,7 @@ import { build } from 'esbuild';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
 import { resolveBunBin } from './support/test-bun-bin';
+import { PrivateDirectoryRefusedError } from '../util/private-unix-socket';
 
 /**
  * #1149: the gate is an OS lock owned by one open handle, so no process can
@@ -129,6 +130,18 @@ afterAll(async () => {
 });
 
 describe.runIf(supported)('path-mutation gate: one OS lock per handle (#1149)', () => {
+  it.skipIf(process.platform !== 'darwin')('uses the shared typed refusal for a foreign-owned gate root', async () => {
+    const realLstat = nodeFs.lstat;
+    const dir = '/tmp/byok-pm-' + process.getuid?.();
+    vi.spyOn(nodeFs, 'lstat').mockImplementation(async (name, ...rest) => {
+      const stat = await realLstat(name, ...(rest as []));
+      return name === dir ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 }) : stat;
+    });
+    const result = await settle(acquirePathMutationGate({ scope: 'store', targetPath: await target() }));
+    expect(result).toBeInstanceOf(PrivateDirectoryRefusedError);
+    expect(result).toMatchObject({ code: 'private_dir_foreign_owner', path: dir, processUid: process.getuid?.(), ownerUid: (process.getuid?.() ?? 0) + 1 });
+  });
+
   it('a second acquisition in the same process is busy, and the gate is free again after release', async () => {
     const targetPath = await target();
     const first = await settle(acquirePathMutationGate({ scope: 'store', targetPath }));

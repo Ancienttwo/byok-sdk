@@ -576,17 +576,18 @@ the wire (`packages/client/src/daemon/control-protocol.ts`,
 - **Half-open cap**: at most 8 concurrent pre-handshake connections; beyond
   that, a new connection is closed immediately (`control-server.ts`'s
   `MAX_HALF_OPEN_CONNECTIONS`).
-- **Stale-socket handling**: a leftover socket file from a crashed daemon is
-  distinguished from a live listener by actually attempting a connection;
-  an ambiguous result (permission denied, a hung connect) fails closed as
-  "assume live" rather than guessing (`control-server.ts`'s
-  `probeUnixSocketAlive`/`handleStaleUnixSocket`).
-- **Shared-tmpdir ownership check**: the long-storeDir-path fallback socket
-  lives under a per-daemon subdirectory of `os.tmpdir()`; before binding,
-  that subdirectory's `lstat` must show neither a symlink nor a different
-  uid, closing the window where an attacker on the same machine
-  pre-creates the deterministic fallback path (`control-server.ts`'s
-  `assertOwnedPrivateDir`).
+- **Stale-socket handling**: `util/private-unix-socket.ts` uses `lstat` and
+  `isSocket` before probing a leftover socket. Non-sockets, including dangling
+  symlinks, are refused without unlinking. Only `ECONNREFUSED` or `ENOENT`
+  proves absence; a successful connection or an ambiguous result (permission
+  denied, a hung connect) refuses the bind.
+- **Shared-/tmp ownership check**: control and store-mutex long-path fallback
+  sockets live under private directories in the fixed `/tmp` root. Before and
+  after binding, `util/private-unix-socket.ts` requires `lstat` to show a real
+  directory owned by the process uid. Symlinks, non-directories and foreign
+  owners produce `PrivateDirectoryRefusedError`; unexpected endpoint objects
+  produce `PrivateSocketPathError`, and occupied sockets produce
+  `PrivateSocketInUseError`.
 
 | Attacker position | Can | Cannot |
 |---|---|---|
@@ -1182,6 +1183,10 @@ The #654 design gives the digest rules for sealed categories (§9.3).
 | `ciphertextRef.contentHash` of a sealed member and the R2 key of its blob | The ciphertext, not the content | `packages/protocol/src/sealed-payload.ts:174-220` |
 
 ## Residual risks (explicit)
+
+- The daemon trusts the owner of `storeDir`: that principal can replace `control.token` and `device.json` and so impersonate the control endpoint. Keep `storeDir` in a directory only the daemon's user can write.
+- The `/tmp` fallback directory name carries no uid: a same-named directory another user left behind refuses the bind (`private_dir_foreign_owner`). Remove that directory or shorten `storeDir`.
+- An image without `/tmp` cannot bind the fallback socket of a `storeDir` longer than the socket budget; shorten `storeDir`.
 
 - **A same-user process can resolve approvals or read device credentials.**
   Stated above, repeated here because it's the single most powerful local
