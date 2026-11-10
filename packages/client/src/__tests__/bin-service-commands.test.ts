@@ -34,8 +34,15 @@ function baseConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
 }
 
 describe('bin/commands/service: cliServiceDefinition', () => {
-  it('defaults name to productId, agentBin to process.argv[1], nodeBin to process.execPath', () => {
-    const def = cliServiceDefinition(baseConfig(), '/config/acme.json', []);
+  it('defaults name to productId, agentBin to process.argv[1], nodeBin to process.execPath', async () => {
+    // DeviceStore.resolveDir folds a trusted /tmp link to its physical path (#1687), so use the physical store directory.
+    const storeDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-service-definition-store-')));
+    let def: ReturnType<typeof cliServiceDefinition>;
+    try {
+      def = cliServiceDefinition(baseConfig({ storeDir }), '/config/acme.json', []);
+    } finally {
+      await fs.rm(storeDir, { recursive: true, force: true });
+    }
     expect(def.name).toBe('acme-product');
     expect(def.displayName).toBe('Acme');
     expect(def.program.command).toBe(process.execPath);
@@ -47,8 +54,8 @@ describe('bin/commands/service: cliServiceDefinition', () => {
       path.resolve('/config/acme.json'),
       '--service',
     ]);
-    expect(def.logDir).toBe(path.join('/tmp/acme-store', 'service-logs'));
-    expect(def.storeDir).toBe('/tmp/acme-store');
+    expect(def.logDir).toBe(path.join(storeDir, 'service-logs'));
+    expect(def.storeDir).toBe(storeDir);
     expect(def.owner).toBe('cli');
     expect(def.windows).toBeUndefined();
   });
