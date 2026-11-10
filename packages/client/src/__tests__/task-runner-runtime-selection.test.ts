@@ -14,6 +14,7 @@ import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
+import { TaskRunner } from '../daemon/task-runner';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
 
 const PI_FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
@@ -47,6 +48,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await daemon?.stop();
     daemon = undefined;
     await server.close();
@@ -85,11 +87,12 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
   });
 
   it('declines auto selection when no candidate supports resume', async () => {
+    vi.spyOn(TaskRunner.prototype as unknown as { agentMemoryMcpAdmitted: () => boolean }, 'agentMemoryMcpAdmitted').mockReturnValue(true);
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true });
     const prepare = vi.spyOn(adapter, 'prepare');
     await setup([adapter]);
     const taskId = 'auto-unsupported-resume';
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x' }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x', agentMemory: 'none' }, { taskId, seq: server.nextSeq() }));
     const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
     expect(decline.payload).toMatchObject({ reason: 'no available runtime on this device can resume a session', retryable: true });
     expect(decline.payload).not.toHaveProperty('runtimeUnavailable');

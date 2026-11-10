@@ -1584,8 +1584,6 @@ describe('every compared item declines by its own name, with no claim and no pin
 });
 
 describe('prepared Agent memory admission declines with its exact typed reason', () => {
-  /** Every mode the policy cases need, so an earlier capability gate cannot answer for them. */
-  const ALL_MODES: RuntimeCapabilities = { ...MCP_CAPABLE };
   const MEMORY_HELPER = MEMORY_BINS;
 
   function nothingCommitted(sent: readonly Envelope[], adapter: StubRuntimeAdapter, runner: TaskRunner): void {

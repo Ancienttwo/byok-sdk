@@ -112,6 +112,7 @@ const PRODUCT_ID = 'prepared-offer-process-restart';
 const TERMINAL_WAIT_MS = 20_000;
 
 const MCP_CAPABLE: RuntimeCapabilities = {
+  preparedLane: true,
   steer: false,
   resume: true,
   approvalInteractive: true,
