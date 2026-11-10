@@ -369,8 +369,23 @@ export function orderByPreference(candidates: readonly RuntimeAdapter[], prefere
   return [...candidates].sort((a, b) => (rank.get(a.descriptor.id) ?? preference.length) - (rank.get(b.descriptor.id) ?? preference.length));
 }
 
-export function adapterSupportsMcpToolsets(descriptor: RuntimeAdapterDescriptor): boolean {
-  return descriptor.capabilities.mcpToolsets === true;
+export type RuntimeRequirements = { readonly mcpToolsets: boolean; readonly resume: boolean; readonly dispatchSelection: boolean; readonly preparedInput: boolean };
+
+export const requirementPhrases: Record<keyof RuntimeRequirements, string> = {
+  mcpToolsets: 'project required MCP toolsets',
+  resume: 'resume a session',
+  dispatchSelection: 'take a dispatch selection',
+  preparedInput: 'run a prepared input',
+};
+
+export function unmetRequirements(descriptor: RuntimeAdapterDescriptor, requirements: RuntimeRequirements): (keyof RuntimeRequirements)[] {
+  const supported: RuntimeRequirements = {
+    mcpToolsets: descriptor.capabilities.mcpToolsets === true,
+    resume: descriptor.capabilities.resume === true,
+    dispatchSelection: descriptor.supportsDispatchSelection === true,
+    preparedInput: descriptor.capabilities.preparedLane === true,
+  };
+  return (Object.keys(requirementPhrases) as (keyof RuntimeRequirements)[]).filter((key) => requirements[key] && !supported[key]);
 }
 
 /**

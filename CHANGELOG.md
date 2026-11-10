@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1676)** — Offers requiring resume, dispatch selection, prepared input or MCP toolsets are declined before claim when the selected runtime does not declare the required capabilities.
+
 - **Changed (client; #1685)** — `RuntimeEnvironmentUnavailableError` now suggests setting `runtimeEnvironment.base` to `allowlist` when the login-shell snapshot or Windows logon registry capture fails.
 
 - **Fixed (client; #1675)** — If a relay sends a steer to a runtime that declares no steering channel, the daemon logs and acknowledges it instead of retrying indefinitely and blocking later messages.

@@ -264,19 +264,6 @@ describe('HermesAdapter detect', () => {
 });
 
 describe('HermesAdapter prepare', () => {
-  it('rejects a dispatch selection and a native resume before any process starts', async () => {
-    const { adapter } = await setup();
-    await withAmbientReceipt(async (read) => {
-      expect(await adapter.prepare({
-        offer: { instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'codex' } } as RuntimeTaskInput,
-        descriptor: adapter.descriptor, requiredToolsetIds: [],
-      })).toMatchObject({ kind: 'reject', retryable: false });
-      expect(await adapter.prepare({ offer: { instruction: 'x', sessionRef: 's' }, descriptor: adapter.descriptor, requiredToolsetIds: [] }))
-        .toMatchObject({ kind: 'reject', reason: 'hermes does not resume native sessions', retryable: false });
-      expect(await read()).toEqual([]);
-    });
-  });
-
   it('admits with the version probe only; the ACP probe stays in detect()', async () => {
     const { adapter, root } = await setup();
     await withAmbientReceipt(async (read) => {

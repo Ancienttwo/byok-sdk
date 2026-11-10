@@ -83,7 +83,7 @@ import {
 } from './agent-memory';
 import type { AgentMemoryCommitStore } from './agent-memory-commit';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
-import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry } from './task-runner/support';
+import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry, RuntimeRequirements } from './task-runner/support';
 import { offerSettlements, trackOffer, taskTearingDown } from './task-runner/support';
 import { MAX_TRACKED_TASK_IDS } from './task-runner/state';
 import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message';
@@ -1750,9 +1750,9 @@ export class TaskRunner {
    */
   private pickAdapter(
     requestedRuntime: string | undefined,
-    requiresMcpToolsets: boolean,
+    requirements: RuntimeRequirements,
     signal: AbortSignal,
   ): Promise<PickResult> {
-    return pickAdapter.call(this, requestedRuntime, requiresMcpToolsets, signal);
+    return pickAdapter.call(this, requestedRuntime, requirements, signal);
   }
 }

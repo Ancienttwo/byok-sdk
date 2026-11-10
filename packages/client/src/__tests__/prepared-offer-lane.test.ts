@@ -89,6 +89,7 @@ import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scrat
  */
 
 const MCP_CAPABLE: RuntimeCapabilities = {
+  preparedLane: true,
   steer: false,
   resume: true,
   approvalInteractive: true,
@@ -516,6 +517,20 @@ async function toollessRecord(options: {
 }
 
 describe('a prepared offer is admitted only by item-by-item equality with its record', () => {
+  it('declines an unsupported prepared lane before pin, prepare or claim', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, { ...MCP_CAPABLE, preparedLane: false });
+    const prepare = vi.spyOn(adapter, 'prepare');
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent);
+    await runner.handleEnvelope(preparedOffer('unsupported-prepared', reference(built)));
+    expect(declineReason(sent)).toBe('runtime "pi" cannot run a prepared input');
+    expect(sent.find((e) => e.type === 'task.decline')?.payload).toMatchObject({ retryable: false });
+    expect(sent.some((e) => e.type === 'task.claim')).toBe(false);
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(adapter.preparedStartCalls).toHaveLength(0);
+  });
   it('binds only the toolsets the record names, so an unrelated registry toolset does not perturb the digests', async () => {
     const built = await lane();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
