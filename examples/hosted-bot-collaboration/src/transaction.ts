@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
-import { exportMarkOf, importMarkOf, SwitchExportedError, SwitchImportedError } from './switch';
+import { exportMarkOf, SwitchExportedError, SwitchImportedError } from '@byok-sdk/example-bot-collaboration/migration';
+import { importMarkOf } from './switch';
 
 /** A stored scope row of a store version that this code does not support. Nothing was written. */
 export class HostedStoreVersionError extends Error {

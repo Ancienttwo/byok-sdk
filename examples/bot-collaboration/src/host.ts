@@ -37,8 +37,8 @@ import { flushHomes, type HomeServer } from './home-projections';
 import { admitBot, admitDevice, botDeviceRefusal, checkTopology, DeviceModeError, deviceRefusal, deviceTopology, homeSent, switchDrained, switchStep, switchWork,
   type DeviceTopology,
   type SwitchWork } from './topology';
-import { checkSwitchRecords, refuseExported, sealLedger, switchContent, type SwitchHeader } from './switch';
-import { sealSwitchExport, SwitchExportError, type SwitchExport } from './migration';
+import { checkSwitchRecords, refuseExported, sealLedger, switchContent } from './switch';
+import { sealSwitchExport, SwitchExportError, type SwitchExport, type SwitchHeader } from './migration';
 import { admitUserInput, coalescePolicy, type CoalescePolicy } from './coalesce';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery';

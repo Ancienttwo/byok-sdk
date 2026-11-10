@@ -5,11 +5,10 @@ import { openHost, template, type TestHost } from '@byok-sdk/example-host-execut
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
 import { botCompactVeto } from './compaction';
-import { sealSwitchExport, SwitchExportError, verifySwitchExport, type SwitchExport } from './migration';
-import { checkSwitchRecords, commitImport, discardImport, importForSwitch, sealLedger, SwitchExportedError, switchContent, switchDump,
-  type SwitchHeader } from './switch';
+import { DeviceSwitchingError, sealSwitchExport, SwitchExportedError, SwitchExportError, verifySwitchExport, type SwitchExport, type SwitchHeader } from './migration';
+import { checkSwitchRecords, commitImport, discardImport, importForSwitch, sealLedger, switchContent, switchDump } from './switch';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
-import { DeviceModeError, DeviceSwitchingError } from './topology';
+import { DeviceModeError } from './topology';
 
 // #975 slice 3: L as the old owner exports a drained domain and commits away on the new owner's receipt, and L as the new
 // owner imports an H export into an empty tenant, reads it back, and commits toward L or discards it.
@@ -111,7 +110,7 @@ it('exports a drained L domain, imports it as an H export into a new tenant, com
   expect(stateOf(ledger.snapshot().application)).toMatchObject({ topology: { [device()]: { mode: 'H', revision: 1 } },
     switchImport: { digest: document.manifest.digest, devices: [device()] } });
   // No Host runs on an import that is not committed toward L.
-  expect(() => new BotCollaboration(fixture!.server, ledger, options())).toThrow('holds the switch import');
+  expect(() => new BotCollaboration(fixture!.server, ledger, options())).toThrow(expect.objectContaining({ name: 'SwitchImportedError', code: 'switch_imported', digest: document.manifest.digest }));
 
   // Step 5 on the old owner: the receipt of its own export.
   await expect(bot.commitSwitch(device(), 1, document.manifest.digest)).rejects.toThrow("is not this Host's export");

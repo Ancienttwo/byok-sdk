@@ -28,8 +28,9 @@ export { inboundDisposition, inboundDispositions, type InboundDisposition, type 
 export { DEVICE_CONCURRENCY } from './rules/priority';
 export { TEAM_ROOM_LIMIT, TeamModeError, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot, type TeamSnapshotRoom } from './rules/team';
 export { createBotPersonaProjection } from './persona';
-export { DeviceModeError, DeviceSwitchingError, type DeviceTopology, type SwitchWork } from './topology';
+export { DeviceModeError, type DeviceTopology, type SwitchWork } from './topology';
 export { SWITCH_EXPORT_VERSION, SWITCH_SECTIONS, SwitchExportError, sealSwitchExport, switchAttempts, verifySwitchExport, type ArchivedRecord, type ExecutionRecord, type IntentRecord, type MessageReceipt,
   type OccurrenceRecord, type OutboxRecord, type RoutineRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal,
   type SwitchManifest, type SwitchSection, type TombstoneRecord } from './migration';
-export { commitImport, discardImport, importForSwitch, SwitchExportedError, type SwitchReceipt } from './switch';
+export { commitImport, discardImport, importForSwitch } from './switch';
+export { DeviceSwitchingError, SwitchExportedError, SwitchImportedError, type SwitchReceipt } from './migration';

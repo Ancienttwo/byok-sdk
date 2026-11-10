@@ -198,6 +198,10 @@ No Host change is required (#1732). `CreateServiceLifecycleOptions` gains an opt
 
 The hosted `HostedCommandEntry.cancelTurn` and `cancelDelegation` return `TurnCancelResult` and `DelegationCancelResult` instead of `void` (#1666), as the local Host does. A cancel returns `cancelled` when it committed, `cancel_pending` when an earlier cancel has no terminal yet, and `already_settled` when the target had ended; the last two write nothing and send no second K4 cancel. Cancelling an ended delegation no longer throws: it returns `already_settled` with the `verdict`. A refused delegation cancel throws `DelegationError` with `code` `unknown_delegation` or `not_cancellable` (end a `reply_held` or `uncertain` delegation with `abandonDelegation`). `DelegationError` and both result types are exported from `@byok-sdk/example-hosted-bot-collaboration` and from K8 `rules/delegation`.
 
+## Bot collaboration switch contract
+
+The owner switch records and errors are defined once, in `@byok-sdk/example-bot-collaboration/migration` (#1667): `SwitchHeader`, `SwitchReceipt`, `SwitchExportMark`, `exportMarkOf`, `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError`. The roots of both packages still export the classes and `SwitchReceipt` (and the hosted root `SwitchExportMark`), but the local `./switch` and `./topology` modules and the hosted `./switch` and `./binding` modules no longer do; a deep import moves to `./migration`. `DeviceSwitchingError` takes `target: 'L' | 'H'`. The messages of `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError` changed and their `code` values did not, so match on `code`. The local `refuseImported` now throws `SwitchImportedError` (`switch_imported`) instead of a plain `Error`.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.

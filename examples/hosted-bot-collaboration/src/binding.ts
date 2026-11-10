@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
-import { DEVICE_SWITCHING, type SyncRefusal } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import type { SyncRefusal } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { DeviceSwitchingError } from '@byok-sdk/example-bot-collaboration/migration';
 import { storedKey } from './layout';
 
 /**
@@ -14,17 +15,6 @@ export class DeviceBindingError extends Error {
   }
 }
 
-/**
- * A write that can create execution found its device frozen by an open owner switch (§4.1, #957). Nothing was written.
- * It is the typed "switching" refusal: retry after the switch. L throws its own error with the same `code`.
- */
-export class DeviceSwitchingError extends Error {
-  readonly code = DEVICE_SWITCHING;
-  constructor(readonly deviceId: string, readonly target: 'L', readonly revision: number) {
-    super(`Device is switching to ${target}: ${deviceId}`);
-    this.name = 'DeviceSwitchingError';
-  }
-}
 /** A switch step that the device's binding refuses (#957). Nothing was written. */
 export class DeviceSwitchRefusedError extends Error {
   readonly code = 'switch_refused' as const;
