@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "ce2394192863efbd43941d2f7f8b7459f05e8d19b346a02869ffc45215536acb"
+    "snapshotSha256": "218dd1b0003d0d43ac695ddaa1d0727fc2cee8fa5ff7ec709022364409eb77bf"
   },
   "configFields": {
     "status": "tracked",
@@ -16,12 +16,24 @@
   },
   "entries": [
     {
+      "id": "opencode-go-keys-store",
+      "impact": "breaking",
+      "summary": "The explicit opencode-go provider kind adds session routing and a versioned User-Agent to keys checks and widens the SQLite profile store provider_kind CHECK set. Existing stores report migration-required until the Host calls migrateProviderProfileStore before opening; profiles and credential-store key references are preserved. Pi execution separately requires the declared pi_model.providerId and completions API.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#opencode-go-key-checks-and-profile-stores",
+      "acceptance": "migrate",
+      "items": [
+        "export:@byok-sdk/keys#MODEL_PROVIDER_VENDORS",
+        "export:@byok-sdk/keys#ModelProviderProfileSchema",
+        "export:@byok-sdk/keys/model-route#MODEL_PROVIDER_VENDORS",
+        "store:keys-profile-store"
+      ]
+    },
+    {
       "id": "pi-opencode-go-provider-id",
       "impact": "additive",
       "summary": "OpenCode Go profiles may set pi_model.providerId to opencode-go with an explicit openai-completions API to enable Pi reasoning_content replay and session headers on RPC and durable lanes. Other models must omit it; existing profiles need no change. Saving it changes the exact profile hash. The prepared lane refuses it, and keys-profile RPC launches refuse model-runtime composition errors instead of using a built-in fallback.",
       "migration": "docs/releases/host-upgrade-next-minor.md#pi-opencode-go-profiles",
       "items": [
-        "export:@byok-sdk/keys#ModelProviderProfileSchema",
         "export:@byok-sdk/keys#PiModelConfigSchema"
       ]
     },
@@ -206,14 +218,31 @@
       "entry": "agent-memory-helper-protocol-4"
     },
     {
+      "item": "export:@byok-sdk/keys#MODEL_PROVIDER_VENDORS",
+      "change": "changed",
+      "entry": "opencode-go-keys-store"
+    },
+    {
       "item": "export:@byok-sdk/keys#ModelProviderProfileSchema",
       "change": "changed",
-      "entry": "pi-opencode-go-provider-id"
+      "entry": "opencode-go-keys-store"
     },
     {
       "item": "export:@byok-sdk/keys#PiModelConfigSchema",
       "change": "changed",
       "entry": "pi-opencode-go-provider-id"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#MODEL_PROVIDER_VENDORS",
+      "change": "changed",
+      "entry": "opencode-go-keys-store"
+    },
+    {
+      "item": "store:keys-profile-store",
+      "change": "changed",
+      "before": "ddl-sha256=a59cf523fe7a89d1",
+      "after": "ddl-sha256=7c5c4e5f67ea8b36",
+      "entry": "opencode-go-keys-store"
     }
   ]
 }

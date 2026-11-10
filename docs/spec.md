@@ -226,6 +226,18 @@ including `OPENCODE_API_KEY`, are excluded and refused by the child if present.
 Model limits do not constitute Host ContextPack budgets or measured available
 input tokens.
 
+Direct OpenCode Go profiles use the explicit `provider_kind: 'opencode-go'`.
+Each `checkProviderKey` call generates one random `x-opencode-session`, reused
+across its bounded reasoning-only retry, and sends a truthful
+`@byok-sdk/keys/<package version>` User-Agent. An endpoint or model name never
+selects this behavior. Authentication failures keep their closed outcome
+codes; a successful key check remains a UI hint. The added provider kind
+widens the profile store CHECK set: existing stores report
+`migration-required` and keep their data and credential-store key references
+through the Host's explicit `migrateProviderProfileStore` call. Pi execution
+separately requires the declared Pi identity above; provider kind does not
+infer it.
+
 `@byok-sdk/keys` can derive such a configuration from the pi-ai catalog that
 the client pins. The table is a checked-in generated file; a test fails until
 it is regenerated for the pinned pi-ai. Keys does not read pi-ai at run time. A derived configuration
