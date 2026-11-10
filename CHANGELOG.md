@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Added (client; #1732)** — `CreateServiceLifecycleOptions.gateRoot` names an isolated macOS root for the `service-lifecycle` gate, for tests and parallel consumers. It gets the same owned private directory check as the default root, which stays `/tmp/byok-pm-<uid>` when the option is omitted. Linux and Windows ignore it. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#isolated-service-lifecycle-gate-root).
+- **Added (client; #1732)** — `CreateServiceLifecycleOptions.gateRoot` names an isolated macOS root for the `service-lifecycle` gate, for tests and parallel consumers. It gets the same owned private directory check as the default root, which stays `/tmp/byok-pm-<uid>` when the option is omitted; choose a root whose parent directory other users cannot write. Owner claim and release and `localStateRelocation` still lock the default root, so a lifecycle on a `gateRoot` no longer excludes them. The option takes effect on macOS only; Linux and Windows ignore it, a relative path included. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#isolated-service-lifecycle-gate-root).
 
 - **Breaking (client; #1694)** — The exported task runner reducer types drop members that nothing writes or emits: `EffectKind` loses `'open.sealed'`, `'clear.sealedOpening'` and `'mark.finished'`; `ReducerEventType` loses `'offer.sealed_opening'`, `'offer.sealed_opened'` and `'offer.sealed_declined'`; `AdmissionStateV1.homeReservation` and `RunnerStateV1.sealedOpening` and `homeReservations` are removed. Runtime behavior and the wire are unchanged.
 

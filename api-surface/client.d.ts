@@ -11429,13 +11429,19 @@ export interface CreateServiceLifecycleOptions {
      * An isolated root for the `service-lifecycle` gate that install, repair,
      * uninstall and `owned` hold, for tests and parallel consumers. Omitted,
      * the gate uses `/tmp/byok-pm-<uid>`. Lifecycles exclude each other only
-     * when they use the same root. It must be an absolute path and gets the
-     * default root's check. An absent root is created with mode 0700.
+     * when they use the same root. Only this lifecycle's gate moves:
+     * `claimServiceLifecycleOwner`, `releaseServiceLifecycleOwner` and
+     * `localStateRelocation` still lock the default root, so a lifecycle on a
+     * `gateRoot` no longer excludes them. It must be an absolute path and gets
+     * the default root's check. An absent root is created with mode 0700.
      * A gateRoot owned by the process user is set to 0700; a symlink,
      * non-directory or foreign-owned path is refused. The refusal's `code` is
      * `private_dir_symlink`, `private_dir_not_directory` or
-     * `private_dir_foreign_owner`. Only macOS reads it: the Linux and Windows
-     * gates have no filesystem root.
+     * `private_dir_foreign_owner`. The check covers the root itself, not a
+     * swap of its parent, so choose a root whose parent directory other users
+     * cannot write. The option takes effect on macOS only: Linux and Windows
+     * ignore it, a relative path included, because their gates have no
+     * filesystem root.
      */
     gateRoot?: string;
 }
