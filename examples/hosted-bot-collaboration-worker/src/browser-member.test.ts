@@ -10,6 +10,7 @@ import { computeDevicePairingMac, createMemberKeyBundle, parsePairingInput, memb
   verifyClientPairingMac, openScopeKeyPackage, openSealedContent, sealContent } from '@byok-sdk/core/sealed-payload';
 import { template } from '../../host-execution-core/src/test-support';
 import { BrowserMember, base64Url, memberTransport, sha256 } from './browser-member';
+import { provisionEntitlement } from './operator-provision';
 import { memberAsset, readMemberCiphertext } from './member-readback';
 import deployable, { MEMBER_METHODS } from './fixtures/sealed-canary/deployable-worker';
 
@@ -54,8 +55,7 @@ async function fixture() {
     devicePublicKey: 'proof-public-key', proofKeyId: 'identity', proofKeyEpoch: 0 });
   await base.stores.devices.recordCapabilities(tenant, { deviceId, capabilities: ['sealed-payload-v1',
     'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection'] });
-  await base.core.quota.writeEntitlement(tenant, { version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
-    maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'test' });
+  await provisionEntitlement(base.core, tenant);
   async function register(mac: string) {
     await store.registerMember(tenant, { deviceId, memberId: bundle.memberId, bundle: JSON.stringify(bundle), deviceMac: mac,
       macExpiresAt: new Date(Date.now() + 600_000).toISOString(), request: { requestId: crypto.randomUUID(),

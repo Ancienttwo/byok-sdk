@@ -5,6 +5,7 @@ import { createByokPool, createPostgresCoreStores, migrate, migrationsDir } from
 import { createDataplaneScope } from '../../../packages/cloud-dataplane/src/__tests__/support/dataplane';
 import { startWranglerDev } from '../../../packages/cloud-dataplane/src/__tests__/support/wrangler';
 import { CANARY_METHODS, decodeCanaryRpc, encodeCanaryRpc, type CanaryCloud } from '../../hosted-bot-collaboration/src/canary-cloud.test-support';
+import { provisionEntitlement } from './operator-provision';
 import { openHostedDevice } from '../../hosted-bot-collaboration/src/hosted-device.test-support';
 import type { HostedCloudOptions } from '../../hosted-bot-collaboration/src/hosted-cloud.test-support';
 import type { ZeroHitHost } from '../../hosted-bot-collaboration/src/sealed-zero-hit.test-support';
@@ -24,8 +25,7 @@ export async function openWorkerCanary(options: HostedCloudOptions): Promise<Zer
     await migrate(pool, migrationsDir());
     const tenant = tenantId('hosted-collaboration-tenant');
     const core = createPostgresCoreStores({ pool: pool, clock: { now: () => new Date() }, objectStorage: options.objectStorage });
-    await core.quota.writeEntitlement(tenant, { version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
-      maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'test' });
+    await provisionEntitlement(core, tenant);
     const { signingClock: _clock, ...storage } = options.objectStorage;
     const worker = await startWranglerDev(FIXTURE_DIR, [`BYOK_CANARY_STORAGE:${JSON.stringify(storage)}`], {
       CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_BYOK_PG: scope.connectionString,

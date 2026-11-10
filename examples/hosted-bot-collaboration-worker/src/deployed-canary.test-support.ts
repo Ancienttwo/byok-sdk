@@ -14,6 +14,7 @@ import { canaryNeedles, objectLocation, readObjects, record, scanPostgres, type 
 import type { SealedMember } from '../../hosted-bot-collaboration/src/e2ee-member.test-support';
 import { CANARY_METHODS, decodeCanaryRpc, encodeCanaryRpc, type CanaryCloud } from '../../hosted-bot-collaboration/src/canary-cloud.test-support';
 import { openHostedDevice } from '../../hosted-bot-collaboration/src/hosted-device.test-support';
+import { provisionEntitlement } from './operator-provision';
 import { ZeroHitAdapter } from '../../hosted-bot-collaboration/src/zero-hit-runtime.test-support';
 
 export interface CanaryConfig {
@@ -102,8 +103,7 @@ export async function runDeployedCanary(config: CanaryConfig, nodeLogs: () => st
   const sealedText = `byok654sealed${randomUUID().replaceAll('-', '')}`, plainText = `byok654plain${randomUUID().replaceAll('-', '')}`;
   try {
     const core = createPostgresCoreStores({ pool, clock, objectStorage });
-    await core.quota.writeEntitlement(tenant, { version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
-      maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'test' });
+    await provisionEntitlement(core, tenant);
     const adapter = new ZeroHitAdapter();
     device = await openHostedDevice(cloud, tenant, config.base, { adapter, objectStorage,
       e2ee: { scopeId: 'scope-zero-hit', categories: ['task-input', 'task-output'] } });
