@@ -13,5 +13,6 @@ export function resolveOpenCodeBin(env: Readonly<Record<string, string | undefin
   if (command !== undefined) return { command, source: 'path' };
   const home = env.HOME ?? env.USERPROFILE ?? os.homedir();
   const official = paths.join(home, '.opencode', 'bin', platform === 'win32' ? 'opencode.exe' : 'opencode');
-  return { command: host.isExecutable(official) ? official : 'opencode', source: 'path' };
+  if (host.isExecutable(official)) return { command: official, source: 'path' };
+  throw Object.assign(new Error('opencode runtime command not found'), { code: 'ENOENT' });
 }

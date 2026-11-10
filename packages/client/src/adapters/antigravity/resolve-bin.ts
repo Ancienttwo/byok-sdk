@@ -21,7 +21,9 @@ export function resolveAgyBin(env: Readonly<Record<string, string | undefined>>,
   const runtimeHost = runtimeInvocationHost(env);
   const host = { ...runtimeHost, platform, isFile: (file: string) =>
     (platform !== 'win32' || ['.com', '.exe'].includes(path.win32.extname(file).toLowerCase())) && runtimeHost.isFile(file) };
-  const onPath = findRuntimeCommandOnPath('agy', host) !== undefined;
+  const command = findRuntimeCommandOnPath('agy', host);
+  if (command !== undefined) return { command, source: 'path' };
   const official = officialLocation(platform);
-  return !onPath && existsSync(official) ? { command: official, source: 'path' } : { command: 'agy', source: 'path' };
+  if (existsSync(official)) return { command: official, source: 'path' };
+  throw Object.assign(new Error('agy runtime command not found'), { code: 'ENOENT' });
 }
