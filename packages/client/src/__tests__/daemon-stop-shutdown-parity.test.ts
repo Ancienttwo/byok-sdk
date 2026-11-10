@@ -69,10 +69,10 @@ async function waitFor(check: () => unknown | Promise<unknown>, opts: { timeoutM
 }
 
 /**
- * Local stand-in for `daemon-owner.ts`'s own private `probeStoreMutex`, kept
+ * Local stand-in for `private-unix-socket.ts`'s shared socket probe, kept
  * to the one bit this guard needs: is the store-mutation lock's endpoint
- * still BOUND (i.e. `probeStoreMutex` would answer anything other than
- * `unbound`, and `acquireDaemonOwner` would therefore refuse)? Same
+ * still BOUND (i.e. the shared probe returns true and
+ * `acquireDaemonOwner` would therefore refuse)? Same
  * "`ECONNREFUSED`/`ENOENT` is the only positive proof of absence, every other
  * errno is unknown-and-therefore-occupied" convention that module uses.
  * Written here rather than exported from there on purpose: the guard must not

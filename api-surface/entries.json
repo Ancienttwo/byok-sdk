@@ -121,7 +121,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 530646,
+      "budgetBytes": 531865,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -238,7 +238,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 123416,
+      "budgetBytes": 123841,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -453,7 +453,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 492951,
+      "budgetBytes": 494170,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -643,7 +643,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 548164,
+      "budgetBytes": 549745,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2289,7 +2289,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 45690,
+      "budgetBytes": 46121,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2330,7 +2330,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 45694,
+      "budgetBytes": 46125,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2371,7 +2371,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 45690,
+      "budgetBytes": 46121,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2412,7 +2412,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 45660,
+      "budgetBytes": 46091,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
