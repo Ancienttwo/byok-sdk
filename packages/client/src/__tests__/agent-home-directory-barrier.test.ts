@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AgentHomeLayout, AgentHomeManager, AgentHomeResolutionError, ensureCreatedAgentHomeRootDurable, ensureDirectoryNoSymlink } from '../agent-home';
+import { AgentHomeManager, AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../agent-home';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
 
@@ -13,7 +13,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
 
-describe('created host storage root native barrier handoff', () => {
+describe('host storage root native barrier', () => {
   async function hostRoot() {
     const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-created-root-')));
     roots.push(parent);
@@ -35,40 +35,6 @@ describe('created host storage root native barrier handoff', () => {
     } finally {
       await binding.lease.release();
     }
-  });
-
-  it('defers the native barrier until helper use and shares it across layouts and opens', async () => {
-    const host = await hostRoot();
-    await new AgentHomeLayout(host).resolve({ agentId: 'one', profileRevision: 'p1' });
-    await new AgentHomeLayout(host).preflight();
-    let finish!: () => void;
-    const barrier = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
-    const first = ensureCreatedAgentHomeRootDurable(host, barrier);
-    const second = ensureCreatedAgentHomeRootDurable(host, barrier);
-    expect(barrier).toHaveBeenCalledTimes(1);
-    finish();
-    await Promise.all([first, second]);
-    await ensureCreatedAgentHomeRootDurable(host, barrier);
-    expect(barrier).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps a failed barrier pending even when another layout sees the existing root', async () => {
-    const host = await hostRoot();
-    await new AgentHomeLayout(host).preflight();
-    const barrier = vi.fn().mockRejectedValueOnce(new Error('strict root flush failed')).mockResolvedValue(undefined);
-    await expect(ensureCreatedAgentHomeRootDurable(host, barrier)).rejects.toThrow('strict root flush failed');
-    await new AgentHomeLayout(host).preflight();
-    await ensureCreatedAgentHomeRootDurable(host, barrier);
-    expect(barrier).toHaveBeenCalledTimes(2);
-  });
-
-  it('leaves an already provisioned root to its Host durability precondition', async () => {
-    const host = await hostRoot();
-    await fs.mkdir(host);
-    await new AgentHomeLayout(host).preflight();
-    const barrier = vi.fn();
-    await ensureCreatedAgentHomeRootDurable(host, barrier);
-    expect(barrier).not.toHaveBeenCalled();
   });
 });
 

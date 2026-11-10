@@ -378,29 +378,8 @@ async function mkdirOrAcceptRacedDirectory(directory: string): Promise<void> {
   }
 }
 
-// Only roots materialized by this process need the helper's initialization
-// barrier. Keep failures pending and share a first barrier across concurrent opens.
-const createdRootBarriers = new Map<string, Promise<void> | undefined>();
-
-/** Internal handoff from layout initialization to the verified native helper. */
-export async function ensureCreatedAgentHomeRootDurable(root: string, barrier: () => Promise<void>): Promise<void> {
-  if (!createdRootBarriers.has(root)) return;
-  let pending = createdRootBarriers.get(root);
-  if (pending === undefined) {
-    pending = barrier().then(() => {
-      createdRootBarriers.delete(root);
-    }, error => {
-      createdRootBarriers.set(root, undefined);
-      throw error;
-    });
-    createdRootBarriers.set(root, pending);
-  }
-  await pending;
-}
-
 async function materializeDirectory(inputPath: string): Promise<string> {
   const { canonical, tail } = await resolveExistingAncestor(inputPath);
-  if (tail.length > 0) createdRootBarriers.set(path.resolve(canonical, ...tail), undefined);
   await syncExistingDirectoryChain(canonical);
   let cursor = canonical;
   for (const component of tail) {

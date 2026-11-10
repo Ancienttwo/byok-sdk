@@ -7,17 +7,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const wire = vi.hoisted(() => ({ protocol: 4, helperVersion: '4', requests: [] as Record<string, unknown>[],
   barriers: [] as Record<string, unknown>[], commands: [] as string[], deferBarrier: false,
-  finishBarrier: undefined as (() => void) | undefined, barrierError: null as Error | null,
+  finishBarrier: undefined as (() => void) | undefined, barrierError: null as Error | null, barrierStderr: '',
   error: undefined as { code: string; message: string } | undefined }));
 vi.mock('../util/agent-memory-helper-release', () => ({ verifyAgentMemoryFilesystemHelper: (bin: string) => bin }));
 vi.mock('node:child_process', () => ({
-  execFile: (_bin: string, args: string[], options: Record<string, unknown>, callback: (error: Error | null) => void) => {
+  execFile: (_bin: string, args: string[], options: Record<string, unknown>, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
     wire.commands.push(args[0]!);
     expect(options).toMatchObject({ shell: false, windowsHide: true, env: {}, timeout: 10_000, maxBuffer: 4096 });
     return { stdin: new Writable({
       write(chunk, _encoding, done) { wire.barriers.push(JSON.parse(String(chunk))); done(); },
       final(done) {
-        wire.finishBarrier = () => callback(wire.barrierError);
+        wire.finishBarrier = () => callback(wire.barrierError, '', wire.barrierStderr);
         if (!wire.deferBarrier) queueMicrotask(wire.finishBarrier);
         done();
       },
@@ -61,6 +61,7 @@ afterEach(async () => {
   wire.deferBarrier = false;
   wire.finishBarrier = undefined;
   wire.barrierError = null;
+  wire.barrierStderr = '';
   wire.protocol = 4;
   wire.helperVersion = '4';
   wire.error = undefined;
@@ -72,18 +73,18 @@ function input() {
 }
 
 describe('protocol 4 transport contract (#605)', () => {
-  async function createdRootInput() {
+  async function existingRootInput() {
     const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-helper-root-')));
     roots.push(parent);
     const ancestorRoot = path.join(parent, 'host');
+    // Simulate a root left by a prior process before its first helper open.
+    await fs.mkdir(ancestorRoot);
     const home = await new AgentHomeLayout(ancestorRoot).resolve({ agentId: 'one', profileRevision: 'p1' });
     return { ...input(), ancestorRoot, canonicalHome: home.canonicalHome };
   }
 
-  it.each(['darwin', 'win32'])('runs the native root barrier once before concurrent opens on %s', async target => {
-    const selected = await createdRootInput();
-    Object.defineProperty(process, 'platform', { ...platform, value: target });
-    Object.defineProperty(process, 'arch', { ...arch, value: 'x64' });
+  it('runs the barrier for an existing root and shares it before concurrent first opens', async () => {
+    const selected = await existingRootInput();
     wire.deferBarrier = true;
     const first = openAgentMemoryFilesystemHelper(selected);
     const second = openAgentMemoryFilesystemHelper(selected);
@@ -97,17 +98,28 @@ describe('protocol 4 transport contract (#605)', () => {
     await Promise.all(filesystems.map(filesystem => filesystem.close()));
   });
 
-  it('refuses helper open on a failed barrier and retries before granting authority', async () => {
-    const selected = await createdRootInput();
+  it('skips the root barrier on win32 without requiring access to the drive root', async () => {
+    const selected = input();
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    Object.defineProperty(process, 'arch', { ...arch, value: 'x64' });
+    wire.barrierError = new Error('root parent access denied');
+    const ancestorRoot = path.join(path.parse(selected.ancestorRoot).root, 'ByokHost');
+    const filesystem = await openAgentMemoryFilesystemHelper({ ...selected, ancestorRoot });
+    expect(wire.commands).toEqual(['serve']);
+    expect(wire.barriers).toEqual([]);
+    expect(wire.requests[0]?.ancestorRoot).toBe(ancestorRoot);
+    await filesystem.close();
+  });
+
+  it.each(['root_barrier_sync_failed', 'private native failure at /private/host'])('refuses open with a bounded cause for %s', async stderr => {
+    const selected = await existingRootInput();
     wire.barrierError = new Error(`private native failure at ${selected.ancestorRoot}`);
-    await expect(openAgentMemoryFilesystemHelper(selected)).rejects.toMatchObject({ name: 'AgentMemoryIoError',
-      message: 'Agent memory hostStorageRoot durability barrier failed; helper open refused' });
+    wire.barrierStderr = `${stderr}\n`;
+    const code = stderr === 'root_barrier_sync_failed' ? stderr : 'root_barrier_process_failed';
+    await expect(openAgentMemoryFilesystemHelper(selected)).rejects.toMatchObject({ name: 'AgentMemoryIoError', cause: code,
+      message: `Agent memory hostStorageRoot durability barrier failed (${code}); helper open refused` });
     expect(wire.commands).toEqual(['root-barrier']);
     expect(wire.requests).toEqual([]);
-    wire.barrierError = null;
-    const filesystem = await openAgentMemoryFilesystemHelper(selected);
-    expect(wire.commands).toEqual(['root-barrier', 'root-barrier', 'serve']);
-    await filesystem.close();
   });
 
   it('sends the separately selected ancestor root in the first request', async () => {

@@ -212,7 +212,12 @@ func main() {
 	if err := runCLI(os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		// Do not print Go/OS error strings: they can contain the absolute root or
 		// a requested pathname. Protocol callers receive a bounded typed failure.
-		fmt.Fprintln(os.Stderr, "agent-memory-fs failed")
+		code := "agent-memory-fs failed"
+		var barrierFailure *protocolError
+		if len(os.Args) == 2 && os.Args[1] == "root-barrier" && errors.As(err, &barrierFailure) {
+			code = barrierFailure.code
+		}
+		fmt.Fprintln(os.Stderr, code)
 		os.Exit(1)
 	}
 }
@@ -233,7 +238,13 @@ func runCLI(args []string, input io.Reader, output io.Writer) error {
 
 // This initialization command is separate from the signed protocol-4 session.
 // It accepts only a bounded canonical root on stdin and grants no file authority.
-func runRootBarrier(input io.Reader) error {
+func runRootBarrier(input io.Reader) (err error) {
+	cause := "root_barrier_invalid_input"
+	defer func() {
+		if err != nil {
+			err = failure(cause, "root barrier failed")
+		}
+	}()
 	const maxInputBytes = 32 * 1024
 	data, err := io.ReadAll(io.LimitReader(input, maxInputBytes+1))
 	if err != nil || len(data) > maxInputBytes {
@@ -245,53 +256,86 @@ func runRootBarrier(input io.Reader) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
-		return errors.New("invalid root barrier input")
+		return err
 	}
 	if decoder.Decode(new(any)) != io.EOF || len(req.Root) == 0 || len(req.Root) > 4096 ||
 		!filepath.IsAbs(req.Root) || filepath.Clean(req.Root) != req.Root || strings.ContainsAny(req.Root, "\x00\r\n") {
 		return errors.New("invalid root barrier root")
 	}
-	parent, err := os.OpenRoot(filepath.Dir(req.Root))
-	if err != nil {
-		return err
+	cause = "root_barrier_noncanonical"
+	canonical, err := filepath.EvalSymlinks(req.Root)
+	if err != nil || canonical != req.Root {
+		return errors.New("root is not canonical")
 	}
-	defer parent.Close()
-	parentInfo, err := parent.Stat(".")
-	if err != nil {
-		return err
+	if runtime.GOOS == "windows" {
+		cause = "root_barrier_unsupported"
+		return errors.New("Windows has no strict root barrier contract")
 	}
-	name := filepath.Base(req.Root)
-	if filepath.Dir(req.Root) == req.Root {
-		name = "."
-	}
-	root, openErr := openVerifiedChild(parent, name)
-	if openErr != nil {
-		return openErr
-	}
-	defer root.Close()
-	rootInfo, err := root.Stat(".")
-	if err != nil {
-		return err
-	}
-	// Flush the child object before the parent entry that makes it reachable.
-	for _, directory := range []*os.Root{root, parent} {
-		file, err := directory.Open(".")
+	var roots []*os.Root
+	var paths []string
+	var infos []os.FileInfo
+	defer func() {
+		for _, root := range roots {
+			if closeErr := root.Close(); closeErr != nil && err == nil {
+				cause, err = "root_barrier_close_failed", closeErr
+			}
+		}
+	}()
+	for cursor := req.Root; ; cursor = filepath.Dir(cursor) {
+		cause = "root_barrier_open_failed"
+		root, err := os.OpenRoot(cursor)
+		if err != nil {
+			return err
+		}
+		roots = append(roots, root)
+		cause = "root_barrier_metadata_failed"
+		info, err := root.Stat(".")
+		if err != nil {
+			return err
+		}
+		if len(infos) > 0 {
+			cause = "root_barrier_volume_failed"
+			same, err := sameEntryVolume(infos[0], info)
+			if err != nil {
+				return err
+			}
+			// The mounted volume is the durable boundary. Do not flush its
+			// parent on a different device, or any directory above that parent.
+			if !same {
+				break
+			}
+			cause = "root_barrier_changed"
+			child, err := root.Lstat(filepath.Base(paths[len(paths)-1]))
+			if err != nil || !os.SameFile(child, infos[len(infos)-1]) {
+				return errors.New("root ancestry changed")
+			}
+		}
+		paths, infos = append(paths, cursor), append(infos, info)
+		cause = "root_barrier_open_failed"
+		file, err := root.Open(".")
 		if err != nil {
 			return err
 		}
 		syncErr := strictSync(file)
 		closeErr := file.Close()
 		if syncErr != nil {
+			cause = "root_barrier_sync_failed"
 			return syncErr
 		}
 		if closeErr != nil {
+			cause = "root_barrier_close_failed"
 			return closeErr
 		}
+		if filepath.Dir(cursor) == cursor {
+			break
+		}
 	}
-	entry, err := os.Lstat(req.Root)
-	parentEntry, parentErr := os.Stat(filepath.Dir(req.Root))
-	if err != nil || parentErr != nil || !os.SameFile(rootInfo, entry) || !os.SameFile(parentInfo, parentEntry) {
-		return errors.New("root or parent changed during barrier")
+	cause = "root_barrier_changed"
+	for index, path := range paths {
+		entry, err := os.Lstat(path)
+		if err != nil || !os.SameFile(infos[index], entry) {
+			return errors.New("root ancestry changed during barrier")
+		}
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -45,15 +46,26 @@ type helperProcess struct {
 	closed bool
 }
 
-func TestRootBarrierFlushesRootAndParent(t *testing.T) {
-	root, err := filepath.EvalSymlinks(t.TempDir())
+func TestRootBarrierFlushesNestedAncestorsToVolumeBoundary(t *testing.T) {
+	boundary, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootInfo, _ := os.Stat(root)
-	parentInfo, _ := os.Stat(filepath.Dir(root))
-	original := strictSync
-	t.Cleanup(func() { strictSync = original })
+	root := filepath.Join(boundary, "new", "deeper", "host")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	outside, _ := os.Stat(filepath.Dir(boundary))
+	originalSync, originalVolume := strictSync, sameEntryVolume
+	t.Cleanup(func() { strictSync, sameEntryVolume = originalSync, originalVolume })
+	boundaryReached := false
+	sameEntryVolume = func(left, right os.FileInfo) (bool, error) {
+		if os.SameFile(right, outside) {
+			boundaryReached = true
+			return false, nil
+		}
+		return originalVolume(left, right)
+	}
 	var flushed []os.FileInfo
 	strictSync = func(file *os.File) error {
 		info, err := file.Stat()
@@ -61,19 +73,33 @@ func TestRootBarrierFlushesRootAndParent(t *testing.T) {
 			return err
 		}
 		flushed = append(flushed, info)
-		return original(file)
+		return originalSync(file)
 	}
 	input, _ := json.Marshal(map[string]string{"root": root})
 	var output bytes.Buffer
-	if err := runCLI([]string{"root-barrier"}, bytes.NewReader(input), &output); err != nil {
-		t.Fatal(err)
+	err = runCLI([]string{"root-barrier"}, bytes.NewReader(input), &output)
+	if runtime.GOOS == "windows" {
+		var failure *protocolError
+		if !errors.As(err, &failure) || failure.code != "root_barrier_unsupported" || len(flushed) != 0 {
+			t.Fatalf("Windows ran a strict barrier: err=%v calls=%d", err, len(flushed))
+		}
+		return
 	}
-	if len(flushed) != 2 || !os.SameFile(flushed[0], rootInfo) || !os.SameFile(flushed[1], parentInfo) || output.Len() != 0 {
-		t.Fatalf("root and parent not flushed in order, calls=%d output=%q", len(flushed), output.String())
+	if err != nil || !boundaryReached || len(flushed) != 4 || output.Len() != 0 {
+		t.Fatalf("err=%v boundary=%v calls=%d output=%q", err, boundaryReached, len(flushed), output.String())
+	}
+	for index, path := range []string{root, filepath.Dir(root), filepath.Dir(filepath.Dir(root)), boundary} {
+		want, _ := os.Stat(path)
+		if !os.SameFile(flushed[index], want) {
+			t.Fatalf("flush %d skipped or reordered an ancestor", index)
+		}
 	}
 }
 
-func TestRootBarrierFailuresRemainRetryable(t *testing.T) {
+func TestRootBarrierReportsFlushFailures(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		return // The no-barrier contract is asserted above.
+	}
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -81,24 +107,48 @@ func TestRootBarrierFailuresRemainRetryable(t *testing.T) {
 	input, _ := json.Marshal(map[string]string{"root": root})
 	original := strictSync
 	t.Cleanup(func() { strictSync = original })
-	injected := errors.New("injected strict barrier failure")
-	for _, failAt := range []int{1, 2} {
+	for _, failAt := range []int{1, 2, 3} {
 		calls := 0
 		strictSync = func(file *os.File) error {
 			calls++
 			if calls == failAt {
-				return injected
+				return errors.New("private OS failure at " + root)
 			}
 			return original(file)
 		}
-		if err := runCLI([]string{"root-barrier"}, bytes.NewReader(input), io.Discard); !errors.Is(err, injected) || calls != failAt {
+		err := runCLI([]string{"root-barrier"}, bytes.NewReader(input), io.Discard)
+		var failure *protocolError
+		if !errors.As(err, &failure) || failure.code != "root_barrier_sync_failed" || calls != failAt || strings.Contains(err.Error(), root) {
 			t.Fatalf("failAt=%d err=%v calls=%d", failAt, err, calls)
 		}
-		strictSync = original
-		if err := runCLI([]string{"root-barrier"}, bytes.NewReader(input), io.Discard); err != nil {
-			t.Fatalf("retry after flush %d: %v", failAt, err)
-		}
 	}
+}
+
+func TestRootBarrierRefusesNoncanonicalRoot(t *testing.T) {
+	t.Run("ancestor-symlink", func(t *testing.T) {
+		base, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		real, link := filepath.Join(base, "real"), filepath.Join(base, "link")
+		if err := os.MkdirAll(filepath.Join(real, "host"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(real, link); err != nil {
+			t.Fatalf("symlink setup failed: %v", err)
+		}
+		original := strictSync
+		t.Cleanup(func() { strictSync = original })
+		strictSync = func(*os.File) error { t.Fatal("noncanonical root reached flush"); return nil }
+		for _, root := range []string{link, filepath.Join(link, "host")} {
+			input, _ := json.Marshal(map[string]string{"root": root})
+			err := runCLI([]string{"root-barrier"}, bytes.NewReader(input), io.Discard)
+			var failure *protocolError
+			if !errors.As(err, &failure) || failure.code != "root_barrier_noncanonical" {
+				t.Fatalf("noncanonical root admitted: %v", err)
+			}
+		}
+	})
 }
 
 func TestRootBarrierRefusesInvalidInputBeforeFlushing(t *testing.T) {
