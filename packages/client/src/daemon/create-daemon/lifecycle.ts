@@ -5,6 +5,7 @@ import { DeviceRecordRePairRequiredError } from '../store';
 import { DeviceStoreBindingMismatchError } from '../daemon-errors';
 import { CursorUnreadableError } from '../cursor-store';
 import { AuthRequestAbortedError, DeviceRevokedError } from '../auth-manager';
+import { PrivateDirectoryRefusedError, PrivateSocketPathError } from '../../util/private-unix-socket';
 import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS } from './support';
 import type { DaemonScope } from './scope';
 
@@ -33,7 +34,7 @@ export async function runLifecycleMutation<T>(daemonScope: DaemonScope, operatio
  * without an endpoint binds one.
  */
 export async function replaceControlServer(daemonScope: DaemonScope, required: boolean, enrollmentOnly = false): Promise<void> {
-  const { daemonState, controlMethods, storeDir, config } = daemonScope;
+  const { daemonState, controlMethods, storeDir, config, operationalHealth } = daemonScope;
   const methods = enrollmentOnly
     ? {
         unary: {
@@ -48,6 +49,7 @@ export async function replaceControlServer(daemonScope: DaemonScope, required: b
     daemonState.controlServerHandle.setMethods(methods);
     return;
   }
+  let refusal: PrivateDirectoryRefusedError | PrivateSocketPathError | undefined;
   try {
     daemonState.controlServerHandle = await startControlServer({ storeDir, productId: config.productId, methods });
   } catch (err) {
@@ -56,7 +58,15 @@ export async function replaceControlServer(daemonScope: DaemonScope, required: b
       `[byok/client] control socket failed to start (continuing without it): ${err instanceof Error ? err.message : String(err)}`,
     );
     daemonState.controlServerHandle = undefined;
+    // doctor cannot ask a daemon without an endpoint, so a typed refusal is recorded in the health file.
+    if (!(err instanceof PrivateDirectoryRefusedError || err instanceof PrivateSocketPathError)) return;
+    refusal = err;
   }
+  await operationalHealth.noteControlEndpoint(refusal && { code: refusal.code, path: refusal.path }).catch(warnHealthPersistFailure);
+}
+
+function warnHealthPersistFailure(err: unknown): void {
+  console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
 }
 
 /** One report path per lifecycle fact: `status().lifecycle` and the `lifecycle` event change together. */
@@ -82,9 +92,7 @@ export function crashed(daemonScope: DaemonScope): void {
   const { setLifecycle, operationalHealth } = daemonScope;
   setLifecycle({ phase: 'crashed', at: new Date().toISOString() });
   endActiveTasks(daemonScope, 'crashed');
-  void operationalHealth.recordFailure('lifecycle').catch((err: unknown) => {
-    console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
-  });
+  void operationalHealth.recordFailure('lifecycle').catch(warnHealthPersistFailure);
 }
 
 /**

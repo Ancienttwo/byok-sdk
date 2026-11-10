@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "40ec94a0e0fd97d6553fb0067e4ab4d65777d6c3d5e198d4c1771427499aab6e"
+    "snapshotSha256": "9e3e235d11dba199381277cd9e07973a91378ddb9616b5995d32cf0fbc921216"
   },
   "configFields": {
     "status": "tracked",
@@ -74,6 +74,15 @@
         "export:@byok-sdk/client/adapters#GrokAdapter",
         "export:@byok-sdk/client/adapters#HermesAdapter"
       ]
+    },
+    {
+      "id": "doctor-control-endpoint-refusal",
+      "impact": "additive",
+      "summary": "DiagnosticsSnapshot.health gains an optional controlEndpointRefusal (code, path, recording time) on its valid branch. byok-agent doctor reports a typed control endpoint refusal instead of daemon offline. No Host change is required.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#doctor-names-a-refused-control-endpoint",
+      "items": [
+        "export:@byok-sdk/client#DiagnosticsSnapshot"
+      ]
     }
   ],
   "changes": [
@@ -105,6 +114,11 @@
       "item": "export:@byok-sdk/client#CodexAdapter",
       "change": "changed",
       "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
+      "change": "changed",
+      "entry": "doctor-control-endpoint-refusal"
     },
     {
       "item": "export:@byok-sdk/client#DshAdapter",

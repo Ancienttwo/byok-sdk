@@ -68,6 +68,27 @@ describe('operational health', () => {
     expect(afterRollback.snapshot()).toMatchObject({ availability: 'available', state: 'healthy', failureCount: 0 });
   });
 
+  it('writes a control endpoint refusal noted before startRun, and without one the file bytes are unchanged', async () => {
+    const dir = await tempDir();
+    const now = new Date('2026-08-09T00:00:00.000Z');
+    const tracker = new OperationalHealthTracker(dir, { clock: () => now, runId: () => 'run-1', pid: 123 });
+    await tracker.noteControlEndpoint({ code: 'private_dir_symlink', path: '/tmp/byok-0123456789abcdef' });
+    await tracker.startRun();
+    const filePath = path.join(dir, 'operational-health.json');
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8')).controlEndpoint).toEqual({
+      status: 'refused', code: 'private_dir_symlink', path: '/tmp/byok-0123456789abcdef', at: now.toISOString(),
+    });
+
+    await tracker.noteControlEndpoint(undefined);
+    expect(await fs.readFile(filePath, 'utf8')).toBe(JSON.stringify({
+      version: 1,
+      state: 'healthy',
+      failures: [],
+      crashes: [],
+      currentRun: { id: 'run-1', startedAt: now.toISOString(), pid: 123 },
+    }, null, 2));
+  });
+
   it('records an unclean previous run, but never classifies a clean stop as a crash', async () => {
     const dir = await tempDir();
     let now = new Date('2026-08-09T00:00:00.000Z');

@@ -614,7 +614,7 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>, deviceReason: 
     {
       id: 'control',
       status: snapshot.control.status === 'online' ? 'pass' : 'warn',
-      summary: snapshot.control.status === 'online' ? 'online' : 'daemon offline',
+      summary: snapshot.control.status === 'online' ? 'online' : controlOfflineSummary(snapshot.health),
     },
     lifecycleCheck(snapshot.lifecycle),
     clockSkewCheck(snapshot.clockSkew),
@@ -1121,3 +1121,10 @@ export async function quarantineCorruptOperationalHealth(
 }
 
 export { OPERATIONAL_HEALTH_FILENAME };
+
+function controlOfflineSummary(health: OperationalHealthFileInspection): string {
+  const refusal = health.status === 'valid' ? health.controlEndpointRefusal : undefined;
+  if (!refusal) return 'daemon offline';
+  return `control endpoint refused: ${refusal.code} ${refusal.path} (recorded ${refusal.at}); remove ${refusal.path} if no byok process uses it`
+    + (refusal.code === 'socket_path_not_socket' ? '' : ', or shorten storeDir');
+}
