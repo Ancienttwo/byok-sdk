@@ -5,6 +5,7 @@ import {
   formatApprovalsListLines,
   formatDaemonEventLine,
   formatLiveStatusLines,
+  formatRuntimeEnvironmentLines,
   formatRuntimeLines,
   formatStatusLines,
   formatTaskLine,
@@ -592,5 +593,17 @@ describe('diagnostics/format: live view and environment', () => {
       `environment: unavailable code=timeout at=${at}`,
     );
     expect(formatStatusLines({ ...view, environment: { ts: at, status: { source: 'inherited' } } })).toContain(`environment: inherited at=${at}`);
+  });
+
+  it('prints one line per runtime environment lane after the removed names', () => {
+    expect(formatRuntimeEnvironmentLines({ status: 'known', runtimes: [{
+      runtimeId: 'pi', status: 'built', names: [{ name: 'PI_OFFLINE', source: 'pass' }], removed: [],
+      lanes: [{ lane: 'pi-prepared', narrowedBy: 'sdk', removed: ['PI_OFFLINE', 'TERM'] }, { lane: 'pi-keys-profile', narrowedBy: 'keys-launcher' }],
+    }] })).toEqual([
+      'runtime-environment pi: 1 names, 0 removed',
+      '  PI_OFFLINE (pass)',
+      '  lane pi-prepared removes PI_OFFLINE, TERM',
+      '  lane pi-keys-profile: the keys launcher passes only its fixed names; runtimeEnvironment.pass names do not reach Pi',
+    ]);
   });
 });

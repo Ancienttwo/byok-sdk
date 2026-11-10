@@ -103,7 +103,11 @@ it('sends only name and source, name and rule, whatever else a custom adapter pu
   // Structural typing lets a custom adapter return report entries with more fields than the type names.
   const names = [{ name: 'ACME_API_KEY', source: 'pass' as const, value: 'NAME_VALUE_SENTINEL' }];
   const removed = [{ name: 'BYOK_SECRET', rule: 'deny' as const, value: 'REMOVED_VALUE_SENTINEL' }];
-  const rich: RuntimeEnvironment = { env: { ACME_API_KEY: 'NAME_VALUE_SENTINEL' }, report: { names, removed } };
+  const lanes = [
+    { lane: 'pi-prepared' as const, narrowedBy: 'sdk' as const, removed: ['ACME_API_KEY'], value: 'LANE_VALUE_SENTINEL' },
+    { lane: 'pi-keys-profile' as const, narrowedBy: 'keys-launcher' as const, removed: ['LANE_NAME_SENTINEL'] },
+  ];
+  const rich: RuntimeEnvironment = { env: { ACME_API_KEY: 'NAME_VALUE_SENTINEL' }, report: { names, removed, lanes } };
   const adapter = new StubRuntimeAdapter('claude');
   adapter.runtimeEnvironment = async () => rich;
   daemon = createDaemonWithAdapters({
@@ -118,11 +122,13 @@ it('sends only name and source, name and rule, whatever else a custom adapter pu
   try {
     const result = await connection.client.request<unknown>(RUNTIMES_ENVIRONMENT_METHOD);
     expect(result).toEqual({
-      runtimes: [{ runtimeId: 'claude', status: 'built', names: [{ name: 'ACME_API_KEY', source: 'pass' }], removed: [{ name: 'BYOK_SECRET', rule: 'deny' }] }],
+      runtimes: [{
+        runtimeId: 'claude', status: 'built', names: [{ name: 'ACME_API_KEY', source: 'pass' }], removed: [{ name: 'BYOK_SECRET', rule: 'deny' }],
+        lanes: [{ lane: 'pi-prepared', narrowedBy: 'sdk', removed: ['ACME_API_KEY'] }, { lane: 'pi-keys-profile', narrowedBy: 'keys-launcher' }],
+      }],
     });
     const serialized = JSON.stringify(result);
-    expect(serialized).not.toContain('NAME_VALUE_SENTINEL');
-    expect(serialized).not.toContain('REMOVED_VALUE_SENTINEL');
+    for (const value of ['NAME_VALUE_SENTINEL', 'REMOVED_VALUE_SENTINEL', 'LANE_VALUE_SENTINEL', 'LANE_NAME_SENTINEL']) expect(serialized).not.toContain(value);
   } finally {
     connection.client.close();
   }

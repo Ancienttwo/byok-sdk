@@ -22,7 +22,7 @@ import {
 } from '../../types';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, buildRuntimeEnvironment, sdkLaneReport, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { classifyDetectError } from '../detect-outcome';
 import type { ResolvedBin } from '../codex/resolve-bin';
@@ -225,8 +225,10 @@ export class HermesAdapter implements RuntimeAdapter {
     return resolveRuntimeCommand(this.options.resolveBin, resolveHermesBin).bin.command;
   }
 
-  runtimeEnvironment(): Promise<RuntimeEnvironment> {
-    return buildRuntimeEnvironment(this.environmentPolicy);
+  async runtimeEnvironment(): Promise<RuntimeEnvironment> {
+    const { env, report } = await buildRuntimeEnvironment(this.environmentPolicy);
+    // The custody lane launches with the platform baseline only (launchEnvironment and the task launch).
+    return this.options.byokLauncher ? { env, report: { ...report, lanes: [sdkLaneReport('hermes-custody', env, [])] } } : { env, report };
   }
 
   /** The custody launcher's lane is the platform baseline of the runtime environment. */

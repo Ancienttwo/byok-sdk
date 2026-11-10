@@ -75,6 +75,9 @@ async function createProjectionDir(projectionRoot: string, sessionCwd: string): 
   return projectionDir;
 }
 
+/** Beyond the platform baseline, the only names the prepared lane passes; its runtime environment report uses the same list. */
+export const PI_PREPARED_ENV_ALLOW: readonly string[] = Object.freeze([...CONTROLLED_PI_DIRECTORY_ENV_NAMES, ...PI_PROVIDER_ENV_KEY_NAMES]);
+
 export async function resolvePiRuntimeLaunch(options: {
   kind: PiRuntimeLaunchKind;
   sessionCwd: string;
@@ -90,7 +93,7 @@ export async function resolvePiRuntimeLaunch(options: {
   // the platform baseline, the Pi directories and the provider names. In the
   // keys lane the launcher also narrows the environment of its own Pi child.
   const env = options.kind === 'pi-prepared'
-    ? buildAllowlistedEnv({ ambient: original, allow: [...CONTROLLED_PI_DIRECTORY_ENV_NAMES, ...PI_PROVIDER_ENV_KEY_NAMES] })
+    ? buildAllowlistedEnv({ ambient: original, allow: PI_PREPARED_ENV_ALLOW })
     : original;
   let projectionDir: string | undefined;
   let released = false;

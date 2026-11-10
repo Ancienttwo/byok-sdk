@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "9e3e235d11dba199381277cd9e07973a91378ddb9616b5995d32cf0fbc921216"
+    "snapshotSha256": "ce2394192863efbd43941d2f7f8b7459f05e8d19b346a02869ffc45215536acb"
   },
   "configFields": {
     "status": "tracked",
@@ -83,6 +83,16 @@
       "items": [
         "export:@byok-sdk/client#DiagnosticsSnapshot"
       ]
+    },
+    {
+      "id": "runtime-environment-lanes",
+      "impact": "additive",
+      "summary": "RuntimeEnvironmentReport gains an optional lanes list (RuntimeEnvironmentLaneReport) naming the launch lanes that narrow the runtime environment and the names an SDK lane removes. No Host change is required; a Host that builds a report itself may omit lanes.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#runtime-environment-lanes-in-doctor",
+      "items": [
+        "export:@byok-sdk/client#RuntimeEnvironmentReport",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironmentReport"
+      ]
     }
   ],
   "changes": [
@@ -146,6 +156,11 @@
       "entry": "codex-session-store"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentReport",
+      "change": "changed",
+      "entry": "runtime-environment-lanes"
+    },
+    {
       "item": "export:@byok-sdk/client#resolveStorageConfig",
       "change": "changed",
       "entry": "codex-session-store"
@@ -179,6 +194,11 @@
       "item": "export:@byok-sdk/client/adapters#HermesAdapter",
       "change": "changed",
       "entry": "adapter-session-limits"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentReport",
+      "change": "changed",
+      "entry": "runtime-environment-lanes"
     },
     {
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",

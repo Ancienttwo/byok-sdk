@@ -1,6 +1,6 @@
 import { PI_MEMORY_LANE } from './memory-lane-contract';
 import { parsePiHostReadyEvent } from './host-ready';
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, sdkLaneReport, type RuntimeEnvironment, type RuntimeEnvironmentLaneReport, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from './pi-capabilities';
 import { parsePiAgentResources, INHERITED_PI_AGENT_RESOURCES, type PiAgentResources } from './agent-resources';
 import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity';
@@ -9,7 +9,7 @@ import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { startDurablePi } from '../pi-durable/session';
 import { serializePiHostConfig } from './runtime-host-binding';
 import { parsePiMcpEnvironment, projectPiMcpEnvironment } from './mcp-environment';
-import { piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from './runtime-launch';
+import { PI_PREPARED_ENV_ALLOW, piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from './runtime-launch';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -320,7 +320,11 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   async runtimeEnvironment(): Promise<RuntimeEnvironment> {
-    return withPiPackageDir(await buildRuntimeEnvironment(this.environmentPolicy), this.options.packageDir);
+    const { env, report } = withPiPackageDir(await buildRuntimeEnvironment(this.environmentPolicy), this.options.packageDir);
+    const lanes: RuntimeEnvironmentLaneReport[] = [];
+    if (this.options.durableLane !== true) lanes.push(sdkLaneReport('pi-prepared', env, PI_PREPARED_ENV_ALLOW));
+    if (this.options.byokLauncher !== undefined) lanes.push({ lane: 'pi-keys-profile', narrowedBy: 'keys-launcher' });
+    return { env, report: lanes.length === 0 ? report : { ...report, lanes } };
   }
 
   /** Pi's directory selectors and provider credentials stay with Pi; its MCP servers never inherit them. */

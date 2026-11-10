@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SqliteProviderProfileStore, parseModelProviderProfile, exactProviderProfileBinding } from '../../../keys/src/index';
 import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
@@ -59,6 +59,21 @@ it('rejects malformed launcher arguments and conflicting static model selection'
   const launcher = { command: '/usr/bin/node', profileDbPath: '/tmp/profiles.sqlite', selectProfile: () => { throw Error('not called'); } };
   expect(() => new HermesAdapter({ home: '/tmp/hermes-custody-constructor', byokLauncher: { ...launcher, args: 'ab' as unknown as string[] } })).toThrow(/launcher/);
   expect(() => new HermesAdapter({ home: '/tmp/hermes-custody-constructor', model: { provider: 'custom', model: 'm' }, byokLauncher: launcher })).toThrow(/mutually exclusive/);
+});
+
+it('reports the custody lane as every name beyond the platform baseline, and no lane without custody (#1688)', async () => {
+  vi.stubEnv('HERMES_PASS_SENTINEL', 'pass-value-sentinel');
+  try {
+    const runtimeEnvironment = { base: 'allowlist' as const, pass: ['HERMES_PASS_SENTINEL'] };
+    const launcher = { command: '/usr/bin/node', profileDbPath: '/tmp/profiles.sqlite', selectProfile: () => { throw Error('not called'); } };
+    const { env, report } = await new HermesAdapter({ home: '/tmp/hermes-custody-lane', runtimeEnvironment, byokLauncher: launcher }).runtimeEnvironment();
+    expect(report.lanes).toEqual([{ lane: 'hermes-custody', narrowedBy: 'sdk', removed: expect.arrayContaining(['HERMES_PASS_SENTINEL']) }]);
+    expect(env.PATH).toBeDefined();
+    expect(report.lanes![0]).not.toMatchObject({ removed: expect.arrayContaining(['PATH']) });
+    expect(JSON.stringify(report)).not.toContain('pass-value-sentinel');
+    const plain = await new HermesAdapter({ home: '/tmp/hermes-custody-lane', runtimeEnvironment }).runtimeEnvironment();
+    expect(plain.report).not.toHaveProperty('lanes');
+  } finally { vi.unstubAllEnvs(); }
 });
 
 describe('Hermes separate credential custody', () => {

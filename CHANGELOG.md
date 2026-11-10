@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changed (client; #1688)** — `RuntimeEnvironmentReport` gains optional `lanes` (`RuntimeEnvironmentLaneReport`): the Pi prepared lane, a Hermes custody launch and a Pi launch with a pinned BYOK profile, with the names an SDK lane removes. `byok-agent doctor` prints one line per lane, so `runtimeEnvironment.pass` names that never reach the runtime in a lane are visible. Reports carry names only; no lane's allow list changes.
+
 - **Changed (client; #1688)** — When the daemon runs without its control endpoint after a typed refusal (`private_dir_symlink`, `private_dir_not_directory`, `private_dir_foreign_owner`, `socket_path_not_socket`), `byok-agent doctor` reports the code, path and recording time instead of `daemon offline`. The refusal is kept under an optional `controlEndpoint` key in `operational-health.json` until the next successful bind removes it; `OperationalHealthFileInspection` exposes it as `controlEndpointRefusal`. A health file without a refusal is byte-for-byte unchanged.
 
 - **Fixed (client; #1679)** — The six adapters now validate `interruptTimeoutMs` consistently; agy, dsh and Hermes also accept fractional milliseconds.

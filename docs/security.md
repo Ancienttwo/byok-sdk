@@ -1190,6 +1190,7 @@ The #654 design gives the digest rules for sealed categories (§9.3).
 - The `/tmp` fallback directory name carries no uid: a same-named directory another user left behind refuses the bind (`private_dir_foreign_owner`). Remove that directory or shorten `storeDir`.
 - An image without `/tmp` cannot bind the fallback socket of a `storeDir` longer than the socket budget; shorten `storeDir`.
 - **Private socket paths retain two local directory-write race windows.** A foreign-owned socket in a store directory another uid can write can be probed and unlinked, and replacing a fallback directory between `lstat` and `chmod` can redirect the `chmod`. Each window requires a local actor who can write that directory and existed before this change. Keep `storeDir` in a directory only the daemon's user can write.
+- The Pi prepared lane, a Hermes custody launch and a Pi launch with a pinned BYOK profile give the runtime only the platform baseline and the lane's fixed names, so `runtimeEnvironment.pass` names do not reach the runtime there; `byok-agent doctor` lists them per lane. The keys launcher's list is reported by name only, not expanded.
 
 - **A same-user process can resolve approvals or read device credentials.**
   Stated above, repeated here because it's the single most powerful local

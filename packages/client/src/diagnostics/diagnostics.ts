@@ -32,7 +32,7 @@ import { probeRuntimes } from './runtime-probe';
 import { buildRuntimeAdapters, resolvePiByokLauncher } from '../adapters/runtime-adapters';
 import { isRecord, RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, type ControlRuntimesEnvironmentResult, type ControlStatusResult } from '../daemon/control-protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
-import type { RuntimeEnvironmentRemovalRule, RuntimeEnvironmentSource } from '../runtime/environment';
+import type { RuntimeEnvironmentLaneReport, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentSource } from '../runtime/environment';
 import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal';
 import { isSqliteAvailable, loadSqliteModule } from '../util/sqlite-support';
 import {
@@ -712,7 +712,7 @@ function parseRuntimesEnvironmentResult(value: unknown): ControlRuntimesEnvironm
       runtimes.push({ runtimeId, status: 'failed' });
     } else if (entry.status === 'unavailable' && hasOnlyKeys(entry, ['runtimeId', 'status', 'code']) && typeof entry.code === 'string' && UNAVAILABLE_ENVIRONMENT_CODES.has(entry.code)) {
       runtimes.push({ runtimeId, status: 'unavailable', code: entry.code as ServiceEnvironmentUnavailableCode });
-    } else if (entry.status === 'built' && hasOnlyKeys(entry, ['runtimeId', 'status', 'names', 'removed']) && Array.isArray(entry.names) && Array.isArray(entry.removed)) {
+    } else if (entry.status === 'built' && hasOnlyKeys(entry, ['runtimeId', 'status', 'names', 'removed', 'lanes']) && Array.isArray(entry.names) && Array.isArray(entry.removed)) {
       const names: { name: string; source: RuntimeEnvironmentSource }[] = [];
       for (const item of entry.names) {
         if (!isRecord(item) || !hasOnlyKeys(item, ['name', 'source']) || !isEnvironmentName(item.name) || typeof item.source !== 'string' || !RUNTIME_ENVIRONMENT_SOURCES.has(item.source)) return undefined;
@@ -723,12 +723,33 @@ function parseRuntimesEnvironmentResult(value: unknown): ControlRuntimesEnvironm
         if (!isRecord(item) || !hasOnlyKeys(item, ['name', 'rule']) || !isEnvironmentName(item.name) || typeof item.rule !== 'string' || !RUNTIME_ENVIRONMENT_REMOVAL_RULES.has(item.rule)) return undefined;
         removed.push({ name: item.name, rule: item.rule as RuntimeEnvironmentRemovalRule });
       }
-      runtimes.push({ runtimeId, status: 'built', names, removed });
+      const lanes = entry.lanes === undefined ? undefined : parseRuntimeEnvironmentLanes(entry.lanes);
+      if (lanes === null) return undefined;
+      runtimes.push({ runtimeId, status: 'built', names, removed, ...(lanes === undefined ? {} : { lanes }) });
     } else {
       return undefined;
     }
   }
   return { runtimes };
+}
+
+function parseRuntimeEnvironmentLanes(value: unknown): RuntimeEnvironmentLaneReport[] | null {
+  if (!Array.isArray(value)) return null;
+  const lanes: RuntimeEnvironmentLaneReport[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    if (item.lane === 'pi-keys-profile' && item.narrowedBy === 'keys-launcher' && hasOnlyKeys(item, ['lane', 'narrowedBy'])) {
+      lanes.push({ lane: 'pi-keys-profile', narrowedBy: 'keys-launcher' });
+    } else if (
+      (item.lane === 'pi-prepared' || item.lane === 'hermes-custody') && item.narrowedBy === 'sdk' && hasOnlyKeys(item, ['lane', 'narrowedBy', 'removed'])
+      && Array.isArray(item.removed) && item.removed.every(isEnvironmentName)
+    ) {
+      lanes.push({ lane: item.lane, narrowedBy: 'sdk', removed: [...item.removed] });
+    } else {
+      return null;
+    }
+  }
+  return lanes;
 }
 
 export async function collectDiagnostics(
