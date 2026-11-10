@@ -30,6 +30,7 @@ test('tracked scripts detect the CLI entry with import.meta.main, not a hand-wri
   const violations = [];
   for (const file of files) {
     const lines = readFileSync(join(repo, file), 'utf8').split('\n');
+    if (/^packages\/[^/]+\/src\//.test(file) && !/(?:\/bin\/|\/__tests__\/|\.(?:test|spec)\.)/.test(file)) assert.doesNotMatch(lines.join('\n'), /\bconsole\s*\.\s*(?:log|info)\s*\(/, `${file}: package source must not write to stdout`);
     // A guard may wrap onto the next line.
     for (const [index, line] of lines.entries()) {
       if (!argvEntry.test(line) || violations.at(-1) === `${file}:${index}`) continue;

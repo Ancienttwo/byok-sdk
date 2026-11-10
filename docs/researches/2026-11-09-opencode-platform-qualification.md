@@ -114,3 +114,18 @@ Result: one passed, 63 skipped. This proves the tested SDK retention path under 
 ## Declaration decision (#1593, owner 2026-11-09)
 
 The owner decided to declare macOS now. `RuntimeAdapterDescriptor.platforms` is OS-grained, so the descriptor declares `darwin` and covers both arches. macOS x64 passed first task, same-session resume, cleanup and the canary on `opencode v2.2.6`. macOS arm64 on `2.2.6` passed detection and the free-model readback, but its first task hit the free-usage limit (a quota refusal, not a program failure), so arm64 has no measured task evidence yet. Windows x64 stays undeclared until a retry after the quota resets. The default version policy qualifies `2.2.6` with `unqualified: 'warn'`. Cleanup scope is SDK-owned processes and scratch; native session files are outside it, and the remote 24-hour sweep was not observed.
+
+## Runtime contract evidence (#1593, 2026-11-10)
+
+The free-usage limit still blocked the native canary, so arm64 and Windows were run through the runtime contract (`opencode1.contract.ts`, `opencode2.contract.ts`) against the loopback OpenAI-compatible fixture, configured as a custom provider in `$XDG_CONFIG_HOME/opencode/opencode.json`. No quota, credential or paid model is involved. The three non-skipped cases are `detect.version`, `instructions.project` (a turn that reaches the model) and `egress.declaredHostsOnly`; the remaining cases are skipped because the descriptor advertises no `mcpToolsets`, `messageDraft`, auto gate or isolation guarantee and the adapter reports no `authPresent`.
+
+| Platform | OpenCode | Result |
+| --- | --- | --- |
+| macOS 26.5 arm64 | 1.19.5 (`opencode-darwin-arm64@1.19.5`) | 3 passed, 13 skipped |
+| macOS 26.5 arm64 | v2.2.6 (`@opencode/cli-darwin-arm64@2.2.6`) | 3 passed, 13 skipped |
+| Windows 11 10.0.26100 x64 | 1.19.5 (`opencode-ai@1.19.5`, `opencode.exe`) | 3 passed, 13 skipped |
+| Windows 11 10.0.26100 x64 | v2.2.6 (`@opencode/cli@2.2.6`, `opencode.exe`) | 3 passed, 13 skipped |
+
+Command (macOS): `BYOK_RUNTIME_CONTRACT=qualified BYOK_CONTRACT_OPENCODE<1|2>_BIN=<opencode> bunx vitest run --config src/__tests__/runtime-contract/vitest.config.ts src/__tests__/runtime-contract/opencode<1|2>.contract.ts`, with the binary unpacked from the registry tarball (its sha512 for 2.2.6 matches the record above). Windows ran the same command from `C:\Users\win\byok-tools\wc1593` at the branch head, with both lines installed by `npm install --save-exact`. On Windows `BYOK_CONTRACT_OPENCODE<n>_BIN` must name the package's `opencode.exe`: the npm `.bin\opencode.cmd` shim made detect return `not-executable` in the first run.
+
+Findings: the adapter's spawn environment keeps the `HOME` and `XDG_*` overrides, so the provider table reaches OpenCode. OpenCode 1.x installs the configured provider package from `registry.npmjs.org` on first use (declared as an egress host of its leg); 2.x bundles it. The descriptor stays `['darwin']`: the contract does not cover the lifecycle cases the qualification rule requires on Windows, so `win32` is not declared. The contract does not exercise resume, cancellation, permission refusal or disposal. The earlier native run on macOS x64 (2.2.6) covered the first task, same-session resume (different-cwd resume refused) and process and scratch cleanup after close; it observed no permission request and its later cancellation checks were stopped. Cancellation, permission refusal and disposal are not yet evidenced on any line.

@@ -4181,6 +4181,9 @@ operations, including Herdr project panes, Rex local placement and profile
 model probes, do not gain a general Pi CLI re-entry. A separately invoked
 ambient Pi cannot use the product's process-local peer bridge or select a
 foreign SDK through it.
+The upstream host runner command seam proposed in nicobailon/pi-subagents#3105
+was closed as not planned, and pinned 0.87.0 still has no such seam. See the
+[upstream decision and package-source evidence](researches/2026-11-09-pi-background-runner-seam.md).
 
 ## Local native interaction contract
 

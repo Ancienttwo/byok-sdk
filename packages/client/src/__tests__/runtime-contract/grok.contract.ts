@@ -72,7 +72,7 @@ async function turn(mode: 'inherit' | 'excluded') {
 
 const excluded = once(() => turn('excluded'));
 const inherited = once(() => turn('inherit'));
-const descriptor = adapter().descriptor;
+const descriptor = adapter({ agentUserMcpServers: 'excluded' }).descriptor;
 
 defineRuntimeContract(`grok runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, {
   'detect.version': check(async () => {

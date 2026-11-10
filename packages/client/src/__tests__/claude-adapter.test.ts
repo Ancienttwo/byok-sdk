@@ -18,7 +18,7 @@ import { testExecutionScratch } from './fixtures/execution-scratch';
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
 function fakeClaudeAdapter(): ClaudeAdapter {
-  return new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }) });
+  return new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), runtimeEnvironment: { base: 'allowlist', allow: ['FAKE_CLAUDE_*'] } });
 }
 
 async function takeEvents(session: Session, count: number): Promise<Array<AgentEvent | MessageDraftDelta>> {
@@ -68,7 +68,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
   it('detect() reports authPresent:false when the fake `auth status --json` fails, without affecting present', async () => {
     const adapter = new ClaudeAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), runtimeEnvironment: { base: 'allowlist', allow: ['FAKE_CLAUDE_*'] },
     });
     const original = process.env.FAKE_CLAUDE_AUTH_STATUS_FAIL;
     process.env.FAKE_CLAUDE_AUTH_STATUS_FAIL = '1';
@@ -121,7 +121,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       messageDraft: true,
       toolAuthorizationAuto: true,
       preparedLane: false,
-      isolation: { userInstructions: true, userOutputStyle: true, userMemory: true, userSkills: false, userHookContext: false, userMcpServers: true, sessionPersistence: true },
+      isolation: { userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: false, sessionPersistence: false },
     });
     // Claude reads MCP tools itself; the daemon takes no tools/list observation for it.
     expect(adapter.descriptor.requiresMcpToolsetToolObservation).not.toBe(true);

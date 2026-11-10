@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { expect, it } from 'vitest';
 import { releaseAfterBody } from './body-lifetime';
 
@@ -7,6 +8,13 @@ function streamed() {
   const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
   return { response: new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } }), controller };
 }
+
+it('shares Vitest with cross-workspace test helpers resolved from the root', () => {
+  const localVitest = createRequire(import.meta.url).resolve('vitest');
+  for (const manifest of ['../../../package.json', '../../basic/package.json', '../../hosted-bot-collaboration/package.json', '../../host-execution-core/package.json']) {
+    expect(localVitest).toBe(createRequire(new URL(manifest, import.meta.url)).resolve('vitest'));
+  }
+});
 
 it('keeps the pools until a streamed body ends, then releases once', async () => {
   const { response, controller } = streamed();
