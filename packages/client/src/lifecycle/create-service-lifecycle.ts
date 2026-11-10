@@ -34,7 +34,8 @@ export interface CreateServiceLifecycleOptions {
    * A gateRoot owned by the process user is set to 0700; a symlink,
    * non-directory or foreign-owned path is refused. The refusal's `code` is
    * `private_dir_symlink`, `private_dir_not_directory` or
-   * `private_dir_foreign_owner`. The check covers the root itself, not a
+   * `private_dir_foreign_owner`, and `private_dir_mode` when the root cannot
+   * be set to 0700. The check covers the root itself, not a
    * swap of its parent, so choose a root whose parent directory other users
    * cannot write. The option takes effect on macOS only: Linux and Windows
    * ignore it, a relative path included, because their gates have no
