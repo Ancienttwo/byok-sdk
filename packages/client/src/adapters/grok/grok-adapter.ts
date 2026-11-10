@@ -1,3 +1,4 @@
+import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits';
 import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
 import type { RuntimeTaskInput } from '../../types';
 import { existsSync } from 'node:fs';
@@ -39,8 +40,6 @@ import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../.
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
-const DEFAULT_RETAINED_BYTES = 16 * 1024 * 1024;
-const DEFAULT_INTERRUPT_MS = 1000;
 const PERMISSION_STOP_REASON = 'grok ended the turn as cancelled without an SDK cancel (a permission request answered cancelled)';
 /** Grok's per-process switches for the Claude and Cursor `agents` and `rules` compatibility cells. */
 const COMPAT_INSTRUCTIONS_OFF = Object.freeze({
@@ -122,13 +121,13 @@ export class GrokAdapter implements RuntimeAdapter {
 
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
   private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
+  private readonly interruptTimeoutMs: number;
+  private readonly maxRetainedBytes: number;
 
   constructor(private readonly options: GrokAdapterOptions = {}) {
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'GrokAdapterOptions.runtimeEnvironment');
-    const retained = options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES;
-    if (!Number.isSafeInteger(retained) || retained < 1) throw new TypeError('invalid Grok retention budget');
-    const interrupt = options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS;
-    if (!Number.isFinite(interrupt) || interrupt <= 0 || interrupt > 2_147_483_647) throw new TypeError('invalid Grok interrupt timeout');
+    this.maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'Grok');
+    this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'Grok');
     if (options.model !== undefined && options.model.trim() === '') throw new TypeError('GrokAdapterOptions.model must not be blank');
     if (options.compatInstructions !== undefined && options.compatInstructions !== 'inherit' && options.compatInstructions !== 'disabled')
       throw new TypeError('GrokAdapterOptions.compatInstructions must be inherit or disabled');
@@ -215,8 +214,8 @@ export class GrokAdapter implements RuntimeAdapter {
     const session = new GrokSession(
       input.scratch,
       this.options.model,
-      this.options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS,
-      this.options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES,
+      this.interruptTimeoutMs,
+      this.maxRetainedBytes,
       input.manifest.sessionRef,
     );
     try {

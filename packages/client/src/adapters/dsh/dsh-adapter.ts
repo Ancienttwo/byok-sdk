@@ -1,3 +1,4 @@
+import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -66,8 +67,6 @@ export type DshSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-on
 const VERSION_TIMEOUT_MS = 5_000;
 /** `dsh --profile acp --help` boots the launcher and, on a new root, writes the acp profile: about 1.7 s measured. */
 const PROFILE_PROBE_TIMEOUT_MS = 30_000;
-const DEFAULT_RETAINED_BYTES = 16 * 1024 * 1024;
-const DEFAULT_INTERRUPT_MS = 1_000;
 const PATCH_FILE = 'dsh.patch.yml';
 
 export interface DshAdapterOptions {
@@ -139,6 +138,8 @@ export class DshAdapter implements RuntimeAdapter {
   private readonly sandbox: DshSandboxMode;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
   private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
+  private readonly interruptTimeoutMs: number;
+  private readonly maxRetainedBytes: number;
 
   get descriptor() {
     return freezeRuntimeAdapterDescriptor({
@@ -162,10 +163,8 @@ export class DshAdapter implements RuntimeAdapter {
     assertDshModelSelection(options.model, 'DshAdapterOptions.model');
     const sandbox = options.sandbox ?? 'danger-full-access';
     assertDshSandboxMode(sandbox, 'DshAdapterOptions.sandbox');
-    const retained = options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES;
-    if (!Number.isSafeInteger(retained) || retained < 1) throw new TypeError('invalid dsh retention budget');
-    const interrupt = options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS;
-    if (!Number.isSafeInteger(interrupt) || interrupt <= 0 || interrupt > 2_147_483_647) throw new TypeError('invalid dsh interrupt timeout');
+    this.maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'dsh');
+    this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'dsh');
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'DshAdapterOptions.runtimeEnvironment');
     this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
       descriptor: DSH_VERSION_POLICY,
@@ -240,8 +239,8 @@ export class DshAdapter implements RuntimeAdapter {
     const model = `${dshRoute(this.options.model)}/${this.options.model.model}`;
     const session = new DshSession(
       input.scratch,
-      this.options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS,
-      this.options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES,
+      this.interruptTimeoutMs,
+      this.maxRetainedBytes,
       model,
     );
     try {
