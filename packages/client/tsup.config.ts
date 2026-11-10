@@ -69,7 +69,7 @@ export default defineConfig({
   // and so the win32 branch loads the host's own prebuilt addon.
   external: [
     'koffi', '#byok-hermes-session', '#byok-acp-runtime', '#byok-pi-runtime-host', '#byok-pi-todo-runtime',
-    'typebox', 'typebox/compile',
+    /^typebox(?:\/|$)/,
     'undici',
   ],
   define: { __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version) },

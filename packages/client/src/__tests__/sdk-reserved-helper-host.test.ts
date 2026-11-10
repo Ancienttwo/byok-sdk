@@ -7,10 +7,12 @@ import { sdkDistributionManifest } from '../sdk-native-assets';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin } from '../sdk-reserved-helper-host';
 import { sdkReservedHelperArgumentCount } from '../sdk-reserved-helper-context';
 import { runSdkReservedHelperCommand } from '../lifecycle/sdk-reserved-helper-command';
+import { pinBunSubagentAssets } from '../adapters/pi/bundled-subagent-runtime';
 import { preflightAgentMessageMcp } from '../daemon/agent-message-mcp-preflight';
 
 const roots: string[] = [];
@@ -48,6 +50,108 @@ describe('SDK-reserved helper host composition', () => {
     expect(() => resolveSdkReservedHelperBin('agent-message-mcp', {
       mode: 'self-executable', executable: 'relative-product',
     })).toThrow(/absolute executable path/);
+  });
+
+  it('does not execute foreign runner paths, preloads, or malformed executable argv', async () => {
+    const root = path.dirname(await fixture('node', 'unused executable'));
+    const pkg = path.join(root, 'assets', 'pi-subagents');
+    const bootstrap = path.join(pkg, 'src/runs/background/subagent-runner-bootstrap.js');
+    const binary = path.join(pkg, 'src/runs/background/binary-bootstrap.js');
+    const preload = path.join(pkg, 'runner-peer-preload.mjs');
+    const supervisor = path.join(pkg, 'workflow-script-process.cjs');
+    const worker = path.join(pkg, 'workflow-script-worker.cjs');
+    const acorn = path.join(pkg, 'node_modules/acorn/dist/acorn.js');
+    for (const file of [bootstrap, binary, preload, supervisor, worker, acorn]) {
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, 'throw new Error("foreign code executed");');
+    }
+    const foreign = await fixture('subagent-runner-bootstrap.js', 'throw new Error("foreign code executed");');
+    const originalBuiltin = process.getBuiltinModule;
+    vi.spyOn(process, 'getBuiltinModule').mockImplementation(((name: string) => name === 'node:sea'
+      ? { isSea: () => true } : originalBuiltin(name)) as typeof originalBuiltin);
+    const executable = process.execPath, argv = [...process.argv];
+    const bun = Object.getOwnPropertyDescriptor(process.versions, 'bun');
+    const scope = globalThis as { PI_BUNDLED_NODE?: boolean };
+    const bundled = scope.PI_BUNDLED_NODE;
+    try {
+      process.execPath = path.join(root, 'node');
+      const uri = (file: string) => pathToFileURL(file).href;
+      for (const input of [
+        ['--import', uri(preload), bootstrap, '/config.json'],
+        ['--permission', '--allow-worker', `--allow-fs-read=${supervisor}`, `--allow-fs-read=${worker}`,
+          `--allow-fs-read=${acorn}`, supervisor, acorn],
+        ['--import', uri(preload), foreign, '/config.json'],
+        ['--import', uri(foreign), bootstrap, '/config.json'],
+        ['--import', uri(preload), bootstrap, 'relative.json'],
+        ['--import', uri(preload), bootstrap, '/config.json', 'extra'],
+        ['--permission', '--allow-worker', `--allow-fs-read=${supervisor}`, `--allow-fs-read=${foreign}`,
+          `--allow-fs-read=${acorn}`, supervisor, acorn],
+        ['--permission', '--allow-worker', `--allow-fs-read=${supervisor}`, `--allow-fs-read=${worker}`,
+          `--allow-fs-read=${acorn}`, foreign, acorn],
+      ]) await expect(runSdkReservedHelperCommand(input)).rejects.toThrow('invalid SDK Pi runner re-entry');
+      Object.defineProperty(process.versions, 'bun', { value: '1.4.3', configurable: true });
+      process.argv[1] = '/$bunfs/root/product';
+      await fs.cp(pkg, path.join(root, 'pi-subagents'), { recursive: true });
+      await fs.mkdir(path.join(root, 'pi-subagent-extensions'));
+      const hostileRoot = path.dirname(foreign);
+      const hostileBinary = path.join(hostileRoot, 'assets/pi-subagents/src/runs/background/binary-bootstrap.js');
+      await fs.mkdir(path.dirname(hostileBinary), { recursive: true });
+      await fs.writeFile(hostileBinary, 'throw new Error("foreign code executed");');
+      vi.stubEnv('BYOK_PI_SUBAGENT_RUNTIME_DIR', hostileRoot);
+      vi.stubEnv('PI_SUBAGENT_RUNNER_CONFIG', '/config.json');
+      await expect(runSdkReservedHelperCommand(['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-session', '--mode', 'rpc', '--extension', hostileBinary])).rejects.toThrow('invalid SDK Pi runner re-entry');
+      vi.stubEnv('PI_SUBAGENT_RUNNER_CONFIG', 'relative.json');
+      const fixed = ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-session', '--mode', 'rpc', '--extension'];
+      await expect(runSdkReservedHelperCommand([...fixed, binary])).rejects.toThrow('invalid SDK Pi runner re-entry');
+      await expect(runSdkReservedHelperCommand([...fixed, foreign])).rejects.toThrow('invalid SDK Pi runner re-entry');
+      expect(scope.PI_BUNDLED_NODE).toBe(bundled);
+    } finally {
+      process.execPath = executable; process.argv = argv;
+      if (bun === undefined) delete (process.versions as { bun?: string }).bun;
+      else Object.defineProperty(process.versions, 'bun', bun);
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each(['bootstrap', 'extension', 'directory', 'replacement', 'missing-package', 'missing-extensions', 'missing-both', 'missing-with-symlink'] as const)('checks install-root Bun assets for %s', async kind => {
+    const executable = await fixture('product', 'unused executable');
+    const root = path.dirname(executable);
+    const pkg = path.join(root, 'pi-subagents');
+    const bootstrap = path.join(pkg, 'src/runs/background/binary-bootstrap.js');
+    const extension = path.join(pkg, 'bundle/index.js');
+    const gates = path.join(root, 'pi-subagent-extensions');
+    await fs.mkdir(path.dirname(bootstrap), { recursive: true });
+    await fs.mkdir(path.dirname(extension), { recursive: true });
+    await fs.mkdir(gates);
+    await fs.writeFile(bootstrap, 'export default function bootstrap() {}');
+    await fs.writeFile(extension, 'export default function extension() {}');
+    const foreign = await fixture('foreign.js', 'throw new Error("foreign code executed");');
+    const original = process.execPath;
+    try {
+      process.execPath = executable;
+      if (kind.startsWith('missing-')) {
+        await fs.rm(kind === 'missing-extensions' ? gates : pkg, { recursive: true });
+        if (kind === 'missing-both') await fs.rm(gates, { recursive: true });
+        if (kind === 'missing-with-symlink') {
+          await fs.rm(gates, { recursive: true }); await fs.symlink(path.dirname(foreign), gates, 'dir');
+          expect(() => pinBunSubagentAssets()).toThrow('untrusted bundled subagent asset');
+        } else expect(pinBunSubagentAssets()).toBeUndefined();
+        return;
+      }
+      const trusted = pinBunSubagentAssets()!;
+      expect(trusted.root).toBe(await fs.realpath(root));
+      trusted.verify();
+      if (kind === 'replacement') {
+        await fs.writeFile(bootstrap + '.new', await fs.readFile(bootstrap));
+        await fs.rename(bootstrap + '.new', bootstrap);
+        expect(() => trusted.verify()).toThrow('untrusted bundled subagent asset');
+      } else {
+        const target = kind === 'bootstrap' ? bootstrap : kind === 'extension' ? extension : pkg;
+        await fs.rm(target, { recursive: true });
+        await fs.symlink(kind === 'directory' ? path.dirname(foreign) : foreign, target, kind === 'directory' ? 'dir' : 'file');
+        expect(() => pinBunSubagentAssets()).toThrow('untrusted bundled subagent asset');
+      }
+    } finally { process.execPath = original; }
   });
 
   it('inserts an explicit interpreter entry before the same fixed helper prefix', () => {

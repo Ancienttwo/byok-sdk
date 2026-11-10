@@ -43,6 +43,19 @@ describe('client runtime launch resources', () => {
     } finally { await resources.release(); }
   });
 
+  it('starts the foreground host with the original executable and an unchanged sdkDir', async () => {
+    const f = await fixture();
+    const { keysSessionDir: _unused, ...options } = f.options;
+    const before = await fs.readdir(options.scratch.sdkDir);
+    const launch = await resolvePiRuntimeLaunch({ ...options,
+      resolveInvocation: () => ({ command: process.execPath, fixedArgs: ['__byok_sdk_helper', 'pi-rpc'] }) });
+    try {
+      expect(launch.command).toBe(process.execPath);
+      expect(launch.env.PATH).toBe(options.env.PATH);
+      expect(await fs.readdir(options.scratch.sdkDir)).toEqual(before);
+    } finally { await launch.release(); }
+  });
+
   it('launches in the session cwd with a private client-owned projection', async () => {
     const f = await fixture();
     const resources = await resolvePiRuntimeLaunch(f.options);

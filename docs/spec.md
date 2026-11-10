@@ -4030,8 +4030,7 @@ poll the cloud read API. With no draft producer, only a terminal marker appears.
 
 Pi subagents are the upstream `pi-subagents` package (exact client dependency,
 0.87.0), loaded by the ordinary RPC host when the credential source is
-`pi-auth-store` (see the `keys-profile` lane above), and never by the sealed
-host. The SDK vendors and patches none of it. pi-subagents reads its own
+`pi-auth-store` (see the `keys-profile` lane above). The SDK vendors and patches none of it. pi-subagents reads its own
 package files at run time, so a product bundler never inlines it. The installed
 host imports the installed package through opaque specifiers. A single-file
 product's bundled re-entry loads the copy in its Pi asset root (below) through
@@ -4039,8 +4038,8 @@ Pi's own extension loader, which supplies the Pi modules of the product bundle.
 
 Foreground children are in-process Pi sessions inside the parent host. In the
 installed host, background runs use pi-subagents' detached Node runner from the
-installed package. Neither re-enters the SDK: there is no `pi-subagent-print` or
-`pi-subagent-runner` helper kind. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
+installed package. Bun-compiled products re-enter their executable as described
+below; no `pi-subagent-print` or `pi-subagent-runner` helper kind is added. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
 fan-out limits. The SDK adds no second limit and no money or token spend cap.
 
 Under the `auto` tool authorization gate, the parent session registers
@@ -4093,7 +4092,10 @@ from a `subagent` call. It skips the call for schedule ticks, auto-resume,
 extension, so each of their tool calls is gated, but no launch check of their
 `cwd`, gate commands or output runs. This is the same as 0.83.1.
 
-A single-file product offers foreground subagents only. `copyPiRuntimeAssets`
+Bun-compiled executables with install-root assets offer foreground and
+background subagents, including workflows. Node SEA and interpreter + bundle
+products offer foreground non-workflow subagents; they refuse background
+launches and every workflow, including `async:false`. `copyPiRuntimeAssets`
 writes `pi-subagents/` into the Pi asset root: the client's exact pi-subagents
 package with the closure of its runtime dependencies in its own `node_modules`,
 about 22 MB. Beside it, `pi-subagent-extensions/` holds the SDK gate and
@@ -4104,37 +4106,81 @@ An asset root without the copy, or with another version, fails the launch with
 `pi_bundled_assets_unavailable`. The copy is SDK build output, so the check
 is its name and version, not a content digest.
 
-pi-subagents loads the Pi SDK of its foreground children, and decides whether
-a background run can start, from the Pi package root it finds. It reads
-`PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` before it searches the ancestors of
-the entry point and its own resolution, which could otherwise find a foreign
-Pi installed above the product. The bundled host sets that variable to a
-package it writes into its launch-private directory. The package carries Pi's
-name, version and `piConfig` and re-exports the product's own in-process Pi
-module, but holds none of Pi's peers. Foreground children therefore always run
-on the product's Pi, and pi-subagents refuses every background run in the
-interpreter + bundle form ("Background children require the host npm package
-… with its dependencies"). The Bun-compiled form re-executes `process.execPath`
-for a background run, which would start the product itself with Pi CLI
-arguments. So the bundled host also sets pi-subagents' Pi executable override,
-`PI_SUBAGENT_PI_BINARY`, to the same launch-private directory, which always
-exists and cannot be spawned. Only spawn paths read that override, never
-foreground children. A background launch then fails before any runner starts
-("async runner did not produce a pid"), and the tool call returns the error.
-The other users of the override fail the same way and never re-execute the
-product: Herdr project panes, Rex local placement and the live model probe of
-the profile check. Pi's bash tool passes the host environment to the commands
-it runs, and pi-subagents children build their own bash tools, so the SDK
-cannot strip both variables from them. A `pi` that a user starts inside the
-agent's bash therefore fails to load pi-subagents (the generated package loads
-only inside its host) and cannot spawn a background runner; it never loads a
-foreign Pi.
+The bundled host sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to a
+launch-private package that carries Pi's name, version and `piConfig` and
+re-exports the product's own Pi. A foreign Pi installed above the product is
+never selected. Bun-compiled products also capture Pi's embedded peer namespaces
+through Pi's extension loader and expose them to the detached runner. The peer
+catalogue is loaded lazily from the installed upstream runner's
+`HOST_PEER_ALIASES`, so TypeBox remains outside the client dist. Bun executes
+unchanged installed code from the product-derived root described below.
 
-Background subagents in a single-file product need an upstream seam (#1589,
-item 2): a host runner command for background runs
-(nicobailon/pi-subagents#3105), and a way for the host to state that its Pi is
-the embedded one and that it hosts no background runs, instead of the package
-root setting above. Both are deferred.
+Bun-compiled products set `PI_SUBAGENT_PI_BINARY` to the product and recognize
+only upstream's fixed Pi CLI arguments, the exact canonical installed
+`binary-bootstrap.js`, and an absolute `PI_SUBAGENT_RUNNER_CONFIG`. The code
+authority is `dirname(realpath(process.execPath))/pi-subagents`, with the SDK
+child extensions beside it. An environment-selected root or writable runtime
+manifest cannot choose code to load. The installed package and extensions
+reject symlinks. The install root has the same filesystem trust as the binary.
+Each process captures and rechecks its own device/inode, size and mtime pins
+to detect swaps within that process before loading. The runner does not
+authenticate against the host's earlier pins; no cross-process identity is
+passed, and replacing install files before a process starts is outside these
+swap checks. Launch data and generated peer bridges stay private. Other
+configured Pi data roots do not change this code authority. Pi's loader runs
+the unchanged upstream binary bootstrap, which owns startup and disposal.
+
+If either install-root asset directory is absent, the Bun host instead keeps
+foreground non-workflow subagents working from `bundledAssetRoot()` (including
+`runtimes.pi.packageDir`). This is a foreground-only branch, never another
+background code root. Explicit async calls and every workflow, including
+`async:false`, are refused at `tool_call`, explaining that background
+subagents and workflows need the shipped `pi-subagents` and
+`pi-subagent-extensions` assets beside the real executable. For an ordinary
+call left to async-by-default, upstream may return an async receipt. Its
+reserved runner then exits with the same missing-assets reason before loading
+any configured-root code. Upstream records the job as failed with that reason
+in the step error; `bg_wait` finishes rather than hanging. The receipt is not
+rewritten into an error. Present but symlinked, noncanonical or changed assets
+continue to fail closed, even when the other directory is absent.
+
+Node SEA starts its foreground host with the original executable and creates
+no `node` hardlink or executable alias, at startup or on demand. Link permissions
+and volume boundaries cannot prevent a foreground task from starting. SEA
+background requests return `pi_background_unavailable`: pi-subagents 0.87.0
+uses `resolveNodeExecutable` for its background runner and `fork` on
+`process.execPath` for its workflow supervisor, and a SEA binary cannot stand
+in for Node. The message names foreground subagents and a Bun-compiled product
+as working alternatives. Explicit background requests and every workflow,
+including `async:false`, are blocked at `tool_call`, before execution. When an ordinary
+child's `async` is omitted, upstream resolves its configured mode; its missing-peer
+preflight refuses a background launch before spawning, and the SDK gives the
+same explanation. Foreground children keep their existing mode resolution.
+
+SEA has no background asset preparation, private executable-root guard, runner
+preload/bootstrap dispatcher or workflow-supervisor dispatcher. Compiled
+runner-shaped argv that cannot match the supported Bun bootstrap is rejected
+before the product CLI. Ordinary product commands retain their dispatch, and
+PATH and general Node executable selection are unchanged.
+
+Bun workflows retain upstream's VM restrictions without Node's permission
+layer. G1 `subagent_launch` admission, native-child per-tool approval and required
+gate/file-scope child extensions still apply. Those hooks mediate Pi tool events;
+they do not police arbitrary JavaScript APIs after a VM escape. Installed-package
+Node workflows retain upstream's permission model. SEA background workflows
+are refused rather than run with a different permission boundary.
+
+Interpreter + bundle products retain a foreground-only private Pi bridge
+without detached peers. A background request is refused with
+`pi_background_unavailable`: the runner cannot re-enter a bundle run by an
+interpreter. The message names foreground subagents and a Bun-compiled product.
+No new public export, option or config key is required.
+
+The product dispatcher accepts only these pinned runner shapes. Other Pi CLI
+operations, including Herdr project panes, Rex local placement and profile
+model probes, do not gain a general Pi CLI re-entry. A separately invoked
+ambient Pi cannot use the product's process-local peer bridge or select a
+foreign SDK through it.
 
 ## Local native interaction contract
 
