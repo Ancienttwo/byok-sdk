@@ -173,22 +173,6 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
     return undefined;
   }
 
-  if (
-    payload.dispatchSelection !== undefined &&
-    payload.runtime !== undefined &&
-    payload.runtime !== payload.dispatchSelection.runtimeId
-  ) {
-    decline(
-      `offer runtime ${payload.runtime} does not match dispatchSelection.runtimeId ${payload.dispatchSelection.runtimeId}`,
-      false,
-    );
-    return undefined;
-  }
-
-  if (payload.harnessId !== undefined && (payload.runtime !== undefined || payload.dispatchSelection !== undefined)) {
-    decline('harnessId cannot be combined with a built-in runtime selection', false);
-    return undefined;
-  }
   const requiredToolsets = payload.requiredToolsets;
   const resolvedMcp = requiredToolsets ? this['resolveMcpServers'](requiredToolsets) : undefined;
   if (resolvedMcp && !resolvedMcp.ok) {
