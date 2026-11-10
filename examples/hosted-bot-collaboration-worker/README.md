@@ -15,11 +15,11 @@ invocation is done:
   Worker invocation may hold open at once;
 - `createPostgresCoreStores` and `createPostgresCloudStores` from `@byok-sdk/cloud-dataplane/runtime`, and
   `createByokCloud` with H's message consumer and a new in-process mailbox wake with a 1 s fallback;
-- `HostedCollaborationStore` and its passes: the routine scheduler (`start()` and `run()`), the reconciler, the composed
-  sync of each changed scope (reply checker, device observer, `store.sync`), the due scheduler and the submitter, then
-  the composed sync of each scope where the submitter concluded an intent with no SDK call (its `changed` option: the
-  queued expiry, or a sealed row with no sealed lane), so that Turn settles in the same pass. The task port has both
-  lanes: `submit` is `submitAgentExecution`, and `submitSealed` is `submitSealedAgentExecution`.
+- `HostedCollaborationStore` and one `HostedPasses`, which runs the routine scheduler (`start()` and `run()`), the reconciler,
+  the composed sync of each changed scope (reply checker, device observer, `store.sync`), the due scheduler and the
+  submitter, then the composed sync of each scope where the submitter concluded an intent with no SDK call (the queued
+  expiry, or a sealed row with no sealed lane), so that Turn settles in the same pass. The task port has both lanes:
+  `submit` is `submitAgentExecution`, and `submitSealed` is `submitSealedAgentExecution`.
 
 A device response keeps its invocation's pools open until its body ends or is cancelled (`src/body-lifetime.ts`): the
 board SSE stream keeps querying after `cloud.fetch` returns its headers.
@@ -38,7 +38,7 @@ outlives an invocation, no session map.
 - A notification only schedules one more pass with `ctx.waitUntil`. A notification is an SDK observer call after a device
   commit, or a product command. That pass rereads Postgres. A lost notification delays work to the next pass, and a
   repeated one changes nothing.
-- Each pass also runs `HostedOutboxSender`, after the submitter, and then syncs the scopes that the sender changed. It
+- Each `HostedPasses` pass also runs the outbox sender, after the submitter, and then syncs the scopes that the sender changed. It
   delivers projection rows to the `host_projection` table (deduplicated by `(scope, id)`) and runs the Agent home
   operations through the SDK, so a Bot becomes ready and its next Turn can freeze. The Worker wires no channel and no
   connector: a card row or a delivery row is listed in `send.failed` (`The Host has no connector for a card call`, `The
