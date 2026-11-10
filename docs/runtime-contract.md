@@ -67,6 +67,19 @@ dsh adds three cases of its own in `dsh.contract.ts`:
   the tool's processes, which run in a process group of their own
   ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
 
+OpenCode runs as two legs, `opencode1` (`opencode-ai` at `CONTRACT_OPENCODE_V1_VERSION`)
+and `opencode2` (`@opencode/cli` at `QUALIFIED_OPENCODE_VERSION`), through the
+shared plan in `opencode-contract.ts`. OpenCode reads its provider table from
+`$XDG_CONFIG_HOME/opencode/opencode.json`, so each turn writes a custom
+OpenAI-compatible provider that points at the loopback model. The adapter
+declares no `mcpToolsets`, `messageDraft`, auto gate or isolation guarantee,
+and reports no `authPresent`, so those cases are skipped with that reason; the
+checks are `detect.version`, `instructions.project` and egress. The 1.x line
+installs the configured provider package from `registry.npmjs.org` on first
+use, which its leg declares as an egress host. The v1 version is not the
+adapter's qualified version, so its leg expects the unqualified-version
+advisory.
+
 dsh publishes only prereleases, so the installer accepts an exact semver
 prerelease (`0.2.1-rc.5`) as an exact version.
 

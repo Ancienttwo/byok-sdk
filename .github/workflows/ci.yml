@@ -2198,7 +2198,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: [pi, claude, codex, grok, hermes, dsh, agy]
+        runtime: [pi, claude, codex, grok, hermes, dsh, agy, opencode1, opencode2]
     env:
       BYOK_RUNTIME_CONTRACT: qualified
     steps:

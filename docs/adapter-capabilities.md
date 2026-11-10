@@ -54,13 +54,16 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 
 `OpenCodeAdapter` is an opt-in custom harness (`harnessId: 'opencode'`). Its
 descriptor declares `platforms: ['darwin']` (#1593); Windows and Linux stay
-undeclared. `platforms` is OS-grained, so `darwin` covers both arches, but the
-evidence differs: macOS x64 passed first task, same-session resume, cleanup and
-the free-model canary on 2.2.6. macOS arm64 on 2.2.6 passed detection and the
-free-model readback, but its first task hit the free-usage limit (a quota
-refusal, not a program failure), so arm64 has no measured task evidence yet.
-Windows x64 is blocked by the same limit and is declared after a retry once
-the quota resets. The compatibility floors are v1 1.18.35 and v2 2.0.26. The
+undeclared. `platforms` is OS-grained, so `darwin` covers both arches. The
+evidence differs by platform: the native 2.2.6 canary passed first task,
+same-session resume, cleanup and the free-model canary on macOS x64 only. The
+runtime contract (`opencode1` and `opencode2` legs, see
+[Runtime contract suite](runtime-contract.md)) passed on macOS arm64 and
+Windows x64, on OpenCode 1.19.5 and 2.2.6, against a loopback OpenAI-compatible
+provider. It checks detection, the project instruction file and egress, so it
+is not completion, resume, cwd refusal, permission refusal, cancellation and
+disposal evidence; Windows is declared only after those cases pass in CI there
+([research note](researches/2026-11-09-opencode-platform-qualification.md)). The compatibility floors are v1 1.18.35 and v2 2.0.26. The
 default version policy qualifies `2.2.6` and warns on any other accepted
 version (`OPENCODE_VERSION_POLICY`, `unqualified: 'warn'`); only a Host may
 declare `block`. Unrecognized, below-floor and prerelease tokens still fail the

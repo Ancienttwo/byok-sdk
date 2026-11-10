@@ -56,7 +56,7 @@ export const ISOLATION_SOURCE_CASES: Readonly<Record<RuntimeIsolationSource, Con
   userHookContext: 'isolation.userHookContext',
 });
 
-export type ContractRuntime = 'pi' | 'claude' | 'codex' | 'grok' | 'hermes' | 'dsh' | 'agy';
+export type ContractRuntime = 'pi' | 'claude' | 'codex' | 'grok' | 'hermes' | 'dsh' | 'agy' | 'opencode1' | 'opencode2';
 export type ContractMode = 'qualified' | 'latest';
 
 /** The run mode. The suite's own vitest config refuses to start without it, so this never defaults. */
