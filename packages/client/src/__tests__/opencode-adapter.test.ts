@@ -306,6 +306,24 @@ it.each([
 });
 
 
+it('classifies OpenCode process exits during start and a turn', async () => {
+  const opening = setup('1.18.35', { FAKE_ACP_INITIALIZE: 'exit' });
+  await expect(opening.start('hello')).rejects.toMatchObject({
+    phase: 'start', category: 'infrastructure', retry: 'retryable', failure: { class: 'runtime_exited' },
+  });
+  vi.unstubAllEnvs();
+  const running = setup();
+  const session = await running.start('exit');
+  await expect(collect(session)).rejects.toMatchObject({
+    phase: 'run', category: 'infrastructure', retry: 'non-retryable', failure: { class: 'runtime_exited' },
+  });
+});
+
+it('validates the shared session limits', () => {
+  expect(() => new OpenCodeAdapter({ models, interruptTimeoutMs: 0.5 })).not.toThrow();
+  expect(() => new OpenCodeAdapter({ models, maxRetainedBytes: 0 })).toThrow('invalid opencode retention budget');
+});
+
 it('normalizes startup failures to start while retaining native classification', async () => {
   for (const { env, category, failure } of [
     { env: { FAKE_ACP_INITIALIZE: 'error' }, category: 'infrastructure', failure: 'unknown' },

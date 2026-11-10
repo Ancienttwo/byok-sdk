@@ -1831,7 +1831,7 @@ independent closed axes: `category` is `semantic`, `infrastructure`, or
 `authority`; `retry` is explicitly `retryable` or `non-retryable` and is never
 derived from category or reason text.
 
-OAR start error classification is owned by `packages/client/src/adapters/oar-start-failure.ts`. An archived resume target is an authority failure and non-retryable; a target in use is an infrastructure failure and retryable.
+OAR start error classification for Grok, agy, Codex and OpenCode is owned by `packages/client/src/adapters/oar-start-failure.ts`. An archived resume target is an authority failure and non-retryable; a target in use is an infrastructure failure and retryable.
 
 - Vendor-native terminal task failure is semantic and non-retryable unless the
   provider supplies structured retry authority.
@@ -1869,7 +1869,7 @@ makes itself `unknown`. It keeps `scope` only when the server also advertises
 | dsh | the native `LlmFailure` code, then its HTTP status, through the vendored OAR dsh table; no class comes from error text |
 | Pi, Hermes | no structured field: `unknown` |
 
-Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes), Hermes, dsh and agy report a
+Claude, Codex, Grok, OpenCode, Pi (the rpc, prepared and durable lanes), Hermes, dsh and agy report a
 runtime process that ends on its own before its terminal, during start or a turn,
 as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
 Pi's durable lane recovers a worker that ends on its own during a run (within its

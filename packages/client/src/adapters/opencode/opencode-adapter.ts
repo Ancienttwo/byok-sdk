@@ -12,6 +12,9 @@ import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../.
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
 import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invocation';
+import { oarStartFailure } from '../oar-start-failure';
+import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits';
+import { haltGate, raceDeadline, RetainedRecordBudget, RetryableOnce } from '../session-kit';
 import type { ResolvedBin } from '../codex/resolve-bin';
 import { agentPersona } from '../agent-persona';
 import { OPENCODE_RUNTIME_CAPABILITIES } from './opencode-capabilities';
@@ -39,23 +42,22 @@ const infrastructure = (reason: string, phase: RuntimeFailurePhase = 'run') => n
 
 /** Native OpenCode ACP, addressed through harnessId `opencode`; never touches user configuration or login storage. */
 export class OpenCodeAdapter implements RuntimeAdapter {
-  private readonly options: OpenCodeAdapterOptions;
+  private readonly options: OpenCodeAdapterOptions & { maxRetainedBytes: number; interruptTimeoutMs: number };
   private readonly environment: RuntimeEnvironmentPolicy;
   private readonly policy?: RuntimeVersionPolicy;
 
   constructor(options: OpenCodeAdapterOptions) {
     if (!Array.isArray(options?.models) || options.models.length === 0 || options.models.some(id => typeof id !== 'string' || !id.trim()))
       throw new TypeError('OpenCodeAdapterOptions.models must be a nonempty list of nonblank Host model ids');
-    for (const [name, value] of [['maxRetainedBytes', options.maxRetainedBytes ?? 16 * 1024 * 1024], ['interruptTimeoutMs', options.interruptTimeoutMs ?? 1000]] as const) {
-      if (!Number.isSafeInteger(value) || value <= 0 || (name === 'interruptTimeoutMs' && value > 2_147_483_647)) throw new TypeError(`invalid opencode ${name}`);
-    }
+    const maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'opencode');
+    const interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'opencode');
     this.environment = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'OpenCodeAdapterOptions.runtimeEnvironment');
     this.policy = resolveRuntimeVersionPolicy({
       descriptor: OPENCODE_VERSION_POLICY,
       ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
         ? { daemonConfig: options.versionPolicy } : { adapterOption: options.versionPolicy }),
     }).policy;
-    this.options = { ...options, models: Object.freeze([...options.models]) };
+    this.options = { ...options, models: Object.freeze([...options.models]), maxRetainedBytes, interruptTimeoutMs };
   }
 
   get descriptor() {
@@ -85,7 +87,6 @@ export class OpenCodeAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> { return (await this.probe()).detected; }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    if (input.offer.dispatchSelection !== undefined) return { kind: 'reject', reason: 'opencode models belong to the Host candidate list', retryable: false };
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({
       name, command: server.command, ...(server.args === undefined ? {} : { args: [...server.args] }),
       ...(server.env === undefined ? {} : { env: { ...server.env } }),
@@ -102,29 +103,20 @@ export class OpenCodeAdapter implements RuntimeAdapter {
 
   private async start(input: RuntimeOperationStartInput, command: string, version: string): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('opencode requires a resolved instruction');
-    if (input.manifest.dispatchSelection !== undefined) throw authority('opencode cannot receive a dispatch selection');
     if (!input.manifest.cwd) throw authority('opencode requires a sealed cwd');
     if (version.startsWith('2.') && input.manifest.homeAccess === 'memory-reader')
       throw authority('opencode v2 does not load the instructions configuration used for session-local appended prompts; ACP exposes no equivalent transient instruction channel');
     const persona = input.manifest.homeAccess === 'memory-reader'
       ? await agentPersona('opencode', input.manifest, { reappliesOnResume: true }) : undefined;
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
-    const session = new OpenCodeSession(input, this.options, command, version, mcpServers, persona);
+    const session = new OpenCodeSession(input, this.options, command, version, mcpServers, this.options.maxRetainedBytes, this.options.interruptTimeoutMs, persona);
     try {
       await session.start();
       return session;
     } catch (error) {
       try { await session.close(); }
       catch (disposal) { throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal }); }
-      if (isRuntimeExecutionFailure(error)) {
-        if (error.phase === 'start') throw error;
-        throw new RuntimeExecutionFailure({ phase: 'start', category: error.category, retry: error.retry, reason: error.message, failure: error.failure }, { cause: error });
-      }
-      const acp = await import('#byok-acp-runtime');
-      if (error instanceof acp.UnsupportedOptionError || error instanceof acp.SessionNotFoundError) throw authority(error.message);
-      if (error instanceof acp.RuntimeFailureError) throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable',
-        reason: error.message, failure: { class: runtimeFailureClassOf(error.failure) } }, { cause: error });
-      throw infrastructure(error instanceof Error ? error.message : 'opencode start failed', 'start');
+      throw oarStartFailure(error, { classes: await import('#byok-acp-runtime'), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'opencode' });
     }
   }
 }
@@ -139,14 +131,14 @@ class OpenCodeSession implements Session {
   private projection?: OpenCodeProjection;
   private model?: string;
   private prompting = false;
-  private retained = 0;
+  private readonly recordBudget: RetainedRecordBudget;
   private failure?: RuntimeExecutionFailure;
   private haltExit?: Promise<number | null>;
   private ending = false;
   private cancelled = false;
   private closing = false;
   private stopAttempt?: Promise<void>;
-  private closeAttempt?: Promise<void>;
+  private readonly closeOnce = new RetryableOnce();
   private runner?: Promise<void>;
   private settle?: (outcome: OpenCodeTurnOutcome) => void;
   private outcome?: Promise<OpenCodeTurnOutcome>;
@@ -154,7 +146,12 @@ class OpenCodeSession implements Session {
 
   constructor(private readonly input: RuntimeOperationStartInput & { kind: 'instruction' }, private readonly options: OpenCodeAdapterOptions,
     private readonly command: string, private readonly version: string,
-    private readonly mcpServers: readonly { name: string; command: string; args?: readonly string[]; env?: Readonly<Record<string, string>> }[], private readonly persona?: string) {}
+    private readonly mcpServers: readonly { name: string; command: string; args?: readonly string[]; env?: Readonly<Record<string, string>> }[],
+    maxRetainedBytes: number, private readonly interruptTimeoutMs: number, private readonly persona?: string) {
+    this.recordBudget = new RetainedRecordBudget(maxRetainedBytes, 'opencode');
+  }
+
+  get exitedOnItsOwn(): boolean { return this.child?.exitedOnItsOwn === true; }
 
   async start(): Promise<void> {
     await this.open(0);
@@ -188,12 +185,14 @@ class OpenCodeSession implements Session {
       this.child = child;
       void child.exited.then(() => {
         // OAR reaps a refused opening before rejecting it; that requested cleanup is not an execution exit.
-        if (this.child === child && !this.ending && child.exitedOnItsOwn) this.halt(infrastructure('opencode acp exited'));
+        if (this.child === child && !this.ending && child.exitedOnItsOwn) this.halt(new RuntimeExecutionFailure({
+          phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason: 'opencode acp exited', failure: { class: 'runtime_exited' },
+        }));
       }, error => { if (this.child === child) this.halt(error); });
       // ACP consumes exit notifications; owned disposal separately owns retryable
       // quiescence failures, which must not permanently reject ACP's exit state.
       const exited = new Promise<number | null>(resolve => child.onExit(resolve));
-      return { ...child, exited, onLine: handler => child.onLine(line => { if (!this.failure) handler(line); }) };
+      return { ...haltGate(child, () => this.failure !== undefined), exited };
     }, (bin, args, opts) => {
       const spawnTerminal = createOwnedTerminalSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn });
       if (opts.shell) return spawnTerminal(bin, args, opts);
@@ -221,8 +220,7 @@ class OpenCodeSession implements Session {
   private record(record: AcpRecord, index: number): void {
     if (this.failure) return;
     try {
-      this.retained += Buffer.byteLength(JSON.stringify(record));
-      if (this.retained > (this.options.maxRetainedBytes ?? 16 * 1024 * 1024)) throw infrastructure('opencode retained record byte budget exceeded');
+      this.recordBudget.add(record);
       const body = object(record.body);
       if (record.kind === 'frame' && record.sessionId === this.sessionRef && Array.isArray(body?.events)) {
         for (const value of body.events) {
@@ -308,19 +306,15 @@ class OpenCodeSession implements Session {
   async interrupt(): Promise<void> {
     this.cancelled = true;
     this.child?.observeDescendants();
-    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([
-        (async () => { await this.raw?.abort(); await this.runner; })(),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(infrastructure('opencode interrupt timed out')), this.options.interruptTimeoutMs ?? 1000); }),
-      ]);
+      await raceDeadline((async () => { await this.raw?.abort(); await this.runner; })(), this.interruptTimeoutMs,
+        () => infrastructure('opencode interrupt timed out'));
     } catch (error) { this.halt(error); await this.close(); throw error; }
-    finally { clearTimeout(timer); }
   }
   async close(): Promise<void> {
     this.closing = true;
     this.cancelled = true;
-    this.closeAttempt ??= (async () => {
+    return this.closeOnce.run(async () => {
       try {
         await this.opening?.catch(() => {});
         await this.stop();
@@ -328,7 +322,6 @@ class OpenCodeSession implements Session {
         await this.runner;
         await this.input.scratch.release();
       } finally { this.queue.end(); }
-    })().catch(error => { this.closeAttempt = undefined; throw error; });
-    return this.closeAttempt;
+    });
   }
 }
