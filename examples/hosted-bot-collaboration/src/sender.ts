@@ -3,7 +3,7 @@ import { validateJson, type Json } from '@byok-sdk/server/execution-core';
 import type { ChannelPort } from '@byok-sdk/example-bot-collaboration/channel';
 import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
-import { SwitchExportedError } from './switch';
+import { SwitchExportedError } from '@byok-sdk/example-bot-collaboration/migration';
 import { checkHomeReadback, homeRequests, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { inSchema, lockScope } from './transaction';
 import { errorText, HOST_JOB_EXECUTION_UNSUPPORTED, type DeliveryTimes, type HomeClaim, type HomeStep,

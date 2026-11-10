@@ -7,7 +7,8 @@ import { CommitConflict } from './commit';
 import { roomFields, updateBot } from './team';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
 import { botCompactVeto } from './compaction';
-import { DeviceModeError, DeviceSwitchingError } from './topology';
+import { DeviceSwitchingError } from './migration';
+import { DeviceModeError } from './topology';
 
 // #957 (§4.1): L as the old owner of a device switch. The freeze, the refusals, the hold, the drain, commit and abort.
 let fixture: TestHost | undefined;

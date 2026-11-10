@@ -2,7 +2,8 @@ import { hash, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf, type CollaborationState } from './model';
 import type { HomeOperation } from './team-model';
 import { CommitConflict } from './rules/commit';
-import { DEVICE_NOT_BOUND, DEVICE_SWITCHING, type SyncRefusal } from './rules/commands';
+import { DEVICE_NOT_BOUND, type SyncRefusal } from './rules/commands';
+import { DeviceSwitchingError } from './migration';
 
 // The L side of the §4.1 owner switch (#957). L is the old owner: it freezes one device, drains it, and then either hands it
 // to H or resumes it. The record is per device, as §4.1 records the mode, and one L Host can own Bots on two devices.
@@ -21,14 +22,6 @@ export interface SwitchWork {
   homeOperations: number[];
 }
 
-/** The device is frozen for an owner switch. A retry after the switch may succeed. */
-export class DeviceSwitchingError extends Error {
-  readonly code = DEVICE_SWITCHING;
-  constructor(readonly deviceId: string, readonly target: 'H', readonly revision: number) {
-    super(`Device ${deviceId} is switching to ${target}`);
-    this.name = 'DeviceSwitchingError';
-  }
-}
 /** The device's owner is now H. L never creates work on it again. Same code and reason as H's `DeviceBindingError`. */
 export class DeviceModeError extends Error {
   readonly code = DEVICE_NOT_BOUND;

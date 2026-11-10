@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Breaking (examples; #1667)** — The owner switch contract is defined once, in `@byok-sdk/example-bot-collaboration/migration`: `SwitchHeader`, `SwitchReceipt`, `SwitchExportMark`, `exportMarkOf`, `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError(deviceId, target: 'L' | 'H', revision)`. The local and hosted packages re-export the classes and types from there, so both Hosts throw the same class with the same `code` for the same refusal. The local `refuseImported` now throws `SwitchImportedError` (`switch_imported`) instead of a plain `Error`. The three error messages changed, and no `code` did.
+
 - **Fixed (client; #1741)** — A Node SEA product built on Node 25.7 or later can launch Pi with native subagents again. Inside a SEA, the Pi host now loads the bundled pi-subagents child-extension registration through `module.createRequire()` instead of `import()`, which a SEA main script can use only for built-in modules on those Node versions. Bun-compiled and interpreter products are unchanged.
 
 - **Added (client; #1732)** — `CreateServiceLifecycleOptions.gateRoot` names an isolated macOS root for the `service-lifecycle` gate, for tests and parallel consumers. It gets the same owned private directory check as the default root, which stays `/tmp/byok-pm-<uid>` when the option is omitted; choose a root whose parent directory other users cannot write. Owner claim and release and `localStateRelocation` still lock the default root, so a lifecycle on a `gateRoot` no longer excludes them. The option takes effect on macOS only; Linux and Windows ignore it, a relative path included. See the [next-MINOR Host upgrade checklist](docs/releases/host-upgrade-next-minor.md#isolated-service-lifecycle-gate-root).

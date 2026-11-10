@@ -9,8 +9,9 @@ export type { MessageDisposition } from '@byok-sdk/example-bot-collaboration/rul
 export { freezeIntent, type IntentFreeze, type SubmitFailure, type SubmitPass, type SubmitterOptions } from './intents';
 export { IntentOutcomeError } from '@byok-sdk/example-bot-collaboration/adapter-steps';
 export { type HostedIntentHandler, type HostedIntentTransaction, type HostedTaskPort, type ReconcileFailure, type ReconcilePass, type ReconcilerOptions, type TaskEvidence } from './reconcile';
-export { DeviceBindingError, DeviceSwitchingError, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
-export { SwitchExportedError, SwitchImportedError, type SwitchExportMark, type SwitchImportMark, type SwitchReceipt } from './switch';
+export { DeviceBindingError, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
+export { type SwitchImportMark } from './switch';
+export { DeviceSwitchingError, SwitchExportedError, SwitchImportedError, type SwitchExportMark, type SwitchReceipt } from '@byok-sdk/example-bot-collaboration/migration';
 export { connectedDevices, type DeviceObserverOptions, type HostedDevicePort } from './devices';
 export { type DueFailure, type DuePass, type DueSchedulerOptions } from './due';
 export { type HostedReplyPort, type ReplyCheckerOptions } from './replies';

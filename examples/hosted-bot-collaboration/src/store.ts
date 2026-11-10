@@ -35,8 +35,8 @@ import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, refuseRout
   revokePush } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { assemble, entryGroup, idOf, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
 import { sealSwitchExport, SwitchExportError, verifySwitchExport, type SwitchExport } from '@byok-sdk/example-bot-collaboration/migration';
-import { exportMarkOf, hostedSwitchContent, importMarkOf, SwitchExportedError, SwitchImportedError, writeSwitchRows, type SwitchExportMark,
-  type SwitchImportMark, type SwitchReceipt } from './switch';
+import { exportMarkOf, SwitchExportedError, SwitchImportedError, type SwitchExportMark, type SwitchReceipt } from '@byok-sdk/example-bot-collaboration/migration';
+import { hostedSwitchContent, importMarkOf, writeSwitchRows, type SwitchImportMark } from './switch';
 
 export type Publish = (id: string, value: Json) => void;
 /** `now` is the clock of the writer. A transaction that settles a delivery must give it, for the outbox index. */
