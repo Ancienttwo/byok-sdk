@@ -12,5 +12,6 @@ export { SwitchExportedError, SwitchImportedError, type SwitchExportMark, type S
 export { connectedDevices, HostedDeviceObserver, type DeviceObserverOptions, type HostedDevicePort } from './devices';
 export { HostedDueScheduler, type DueFailure, type DuePass, type DueSchedulerOptions } from './due';
 export { HostedReplyChecker, type HostedReplyPort, type ReplyCheckerOptions } from './replies';
+export { HostedOutboxSender, type HostedHomePort, type ProjectionPort, type SendFailure, type SendPass, type SenderOptions } from './sender';
 export { HostedRoutineScheduler, type RoutineFailure, type SchedulerOptions, type SchedulerPass } from './scheduler';
 export { EntryRefusedError, HostedCommandEntry, UnauthenticatedError, type CommandEntryOptions, type EntryCaller } from './entry';

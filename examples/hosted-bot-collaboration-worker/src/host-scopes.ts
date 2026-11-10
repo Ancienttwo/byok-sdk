@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
+import type { Json } from '@byok-sdk/server/execution-core';
 import type { Principal } from '@byok-sdk/example-bot-collaboration/channel';
-import type { HostConfig } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
+import type { HostConfig, ProjectionPort } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 
 /**
  * The product rows that the Worker Host reads for each scope: the owner session (the hash of its token), the owner principal,
@@ -10,13 +11,24 @@ import type { HostConfig } from '@byok-sdk/example-hosted-bot-collaboration/src/
 export interface HostScope { scope: string; ownerTokenSha256: string; owner: Principal; config: HostConfig }
 
 const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
-function table(schema: string): string {
+function table(schema: string, name = 'host_scope'): string {
   if (!SCHEMA.test(schema)) throw new Error('Invalid host scope schema name');
-  return `"${schema}".host_scope`;
+  return `"${schema}".${name}`;
 }
 
 export const hostScopeDdl = (schema: string): string => `CREATE TABLE IF NOT EXISTS ${table(schema)} (
   scope text PRIMARY KEY, owner_token_sha256 text NOT NULL UNIQUE, owner jsonb NOT NULL, config jsonb NOT NULL)`;
+
+/** The projections that H's outbox sender delivers, one row per `(scope, id)`: the receiver deduplicates, as the sender requires. */
+export const hostProjectionDdl = (schema: string): string => `CREATE TABLE IF NOT EXISTS ${table(schema, 'host_projection')} (
+  scope text NOT NULL, id text NOT NULL, body jsonb NOT NULL, PRIMARY KEY (scope, id))`;
+
+export function hostProjections(pool: Pool, schema: string): ProjectionPort {
+  const target = table(schema, 'host_projection');
+  return { deliver: async (scope, id, value: Json) => {
+    await pool.query(`INSERT INTO ${target} (scope, id, body) VALUES ($1, $2, $3) ON CONFLICT (scope, id) DO NOTHING`, [scope, id, JSON.stringify(value)]);
+  } };
+}
 
 type HostScopeRow = { scope: string; owner_token_sha256: string; owner: Principal; config: HostConfig };
 const hostScope = (row: HostScopeRow | undefined): HostScope | undefined =>

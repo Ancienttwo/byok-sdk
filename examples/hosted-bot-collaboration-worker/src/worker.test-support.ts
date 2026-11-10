@@ -21,7 +21,7 @@ import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-supp
 import { taskId } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
-import { hostScopeDdl } from './host-scopes';
+import { hostProjectionDdl, hostScopeDdl } from './host-scopes';
 import { provisionScope } from './operator-provision';
 import type { ChildMessage, ParentMessage } from './device.child';
 import type { PassReport } from './worker';
@@ -79,6 +79,7 @@ export async function openSubstrate(): Promise<Substrate> {
     await migrate(sdkPool, migrationsDir());
     await store.migrate();
     await pool.query(hostScopeDdl(hostSchema));
+    await pool.query(hostProjectionDdl(hostSchema));
   } catch (error) {
     await dispose();
     throw error;
