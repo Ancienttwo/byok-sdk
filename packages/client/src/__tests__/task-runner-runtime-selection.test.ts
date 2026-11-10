@@ -339,15 +339,21 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       expect(claude.startCalls).toHaveLength(0);
     });
 
-    it('declines a contradictory legacy runtime before claim or adapter start', async () => {
+    it.each(['writer', 'memory-reader'] as const)('declines a contradictory legacy runtime before %s home-busy admission', async (access) => {
+      const homeAccess = access === 'writer' ? undefined : access;
       const pi = new StubRuntimeAdapter('pi');
       const claude = new StubRuntimeAdapter('claude');
-      await setup([claude, pi]);
+      await setup([claude, pi], { maxConcurrentReaderAttemptsPerAgentHome: 1 });
+      const agentRef = freshTestAgentRef();
+      server.send(createEnvelope('task.offer', {
+        agentRef, ...FRESH_OFFER, instruction: 'hold home', homeAccess,
+      }, { taskId: 'task-selection-holder', seq: server.nextSeq() }));
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-selection-holder');
 
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
+          { agentRef, ...FRESH_OFFER, homeAccess,
             instruction: 'x',
             runtime: 'claude',
             dispatchSelection: {
@@ -361,12 +367,14 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
         ),
       );
 
-      const decline = await server.waitFor((e) => e.type === 'task.decline');
-      expect(decline.payload).toMatchObject({ retryable: false });
-      expect((decline.payload as { reason: string }).reason).toMatch(/does not match dispatchSelection/);
+      const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'task-selection-2');
+      expect(decline.payload).toMatchObject({ retryable: false, agentRef });
+      expect((decline.payload as { reason: string }).reason).toBe('offer runtime claude does not match dispatchSelection.runtimeId pi');
+      expect(decline.payload).not.toHaveProperty('code');
+      expect(server.received.filter((e) => e.type === 'task.decline' && e.task_id === 'task-selection-2')).toHaveLength(1);
       expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === 'task-selection-2')).toBe(false);
       expect(pi.startCalls).toHaveLength(0);
-      expect(claude.startCalls).toHaveLength(0);
+      expect(claude.startCalls).toHaveLength(1);
     });
   });
 });
