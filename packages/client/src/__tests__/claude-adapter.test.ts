@@ -861,7 +861,8 @@ describe('ClaudeAdapter agentSessionPersistence', () => {
   it('declares resume unavailable when Agent session persistence is disabled', () => {
     expect(new ClaudeAdapter({ agentSessionPersistence: 'disabled' }).descriptor.capabilities.resume).toBe(false);
     expect(new ClaudeAdapter().descriptor.capabilities.resume).toBe(true);
-  });});
+  });
+});
 
 describe('ClaudeAdapter against the real installed claude binary (no network/task dispatch required)', () => {
   it('detect() returns a well-formed result whether or not claude is actually installed on PATH here', async () => {

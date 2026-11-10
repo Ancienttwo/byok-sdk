@@ -85,9 +85,10 @@ export interface ClaudeAdapterOptions {
      * For an Agent task (`task.offer`), `disabled` starts Claude with
      * `--no-session-persistence`, so Claude does not save the session
      * transcript under `<config dir>/projects/`. Such a session cannot be
-     * resumed: an Agent task that carries a `sessionRef` fails before Claude
-     * starts. Follow-ups in the same task still work. Other tasks are
-     * unchanged. Default `enabled`.
+     * resumed: the descriptor declares `resume: false`, so the daemon declines
+     * an offer carrying a `sessionRef` before claim with the non-retryable
+     * reason `runtime "claude" cannot resume a session`. Follow-ups in the same
+     * task still work. Other tasks are unchanged. Default `enabled`.
      */
     agentSessionPersistence?: 'enabled' | 'disabled';
     /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */

@@ -1241,8 +1241,9 @@ optional `model` and `versionPolicy`). The other options stay on the
   reads the macOS keychain was not checked, and the SDK does not isolate it.
 - Host toolsets: agy requires MCP tool observation during admission, so tool
   events and authorization rules can identify the server and tool. Observation
-  failures decline the offer before claim. agy rejects Host toolset entries carrying `env` or `headers`;
-  a Host that configures env for its own server cannot run it under agy. agy
+  failures decline the offer before claim. agy rejects Host toolset entries
+  carrying `env` or `headers`; a Host that configures env for its own server
+  cannot run it under agy. agy
   persists session MCP entries in its conversation database; upstream found env
   and header values there in plain text after close (botiverse/oar#392). Treat
   `args` the same way: do not put tokens in `args`.
