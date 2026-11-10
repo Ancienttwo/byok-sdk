@@ -28,8 +28,8 @@ import (
 )
 
 const (
-	protocolVersion = 3
-	helperVersion   = "3"
+	protocolVersion = 4
+	helperVersion   = "4"
 
 	maxFileBytes      = 256 * 1024
 	maxLocalLogBytes  = 1 * 1024 * 1024
@@ -62,6 +62,7 @@ type openRequest struct {
 	Protocol         int          `json:"protocol"`
 	Op               string       `json:"op"`
 	Root             string       `json:"root"`
+	AncestorRoot     string       `json:"ancestorRoot"`
 	ExpectedIdentity rootIdentity `json:"expectedIdentity"`
 }
 
@@ -341,6 +342,9 @@ func openSession(req openRequest) (*session, *protocolError) {
 	if len(req.Root) == 0 || len(req.Root) > 4096 || strings.IndexByte(req.Root, 0) >= 0 || !filepath.IsAbs(req.Root) {
 		return nil, failure("invalid_root", "root is invalid")
 	}
+	if len(req.AncestorRoot) == 0 || len(req.AncestorRoot) > 4096 || strings.IndexByte(req.AncestorRoot, 0) >= 0 || !filepath.IsAbs(req.AncestorRoot) {
+		return nil, failure("invalid_root", "ancestor root is invalid")
+	}
 
 	before, err := os.Lstat(req.Root)
 	if err != nil || !before.IsDir() || before.Mode()&os.ModeSymlink != 0 {
@@ -375,15 +379,20 @@ func openSession(req openRequest) (*session, *protocolError) {
 	if actual != req.ExpectedIdentity {
 		return nil, failure("root_identity_mismatch", "root identity does not match")
 	}
-	// Windows has no home-chain barrier while its intent backend keeps B false.
-	// It promises single-file atomicity under a process crash and the strict
-	// flushes of each write, not durability after an OS crash or power loss.
-	// The Windows chain rule waits for the B decision (W2 in
-	// docs/plans/2026-10-22-605-windows-memory.md).
-	if runtime.GOOS != "windows" {
-		if err := syncHomeChain(req.Root, root); err != nil {
-			return nil, failure("io_failure", "home directory barrier failed")
-		}
+	chain, err := selectedHomeChain(req.Root, req.AncestorRoot)
+	if err != nil {
+		return nil, failure("invalid_root", "ancestor root is invalid")
+	}
+	if runtime.GOOS == "windows" {
+		err = syncPinnedHomeChain(chain, root)
+	} else {
+		err = syncHomeChain(req.Root, root)
+	}
+	if err != nil {
+		return nil, failure("io_failure", "home directory barrier failed")
+	}
+	if err := syncInitializedDirectories(root); err != nil {
+		return nil, err
 	}
 	// Recheck the name after the chain barrier and before publishing authority.
 	post, err = os.Lstat(req.Root)
@@ -1095,7 +1104,7 @@ func decodeRequest(line []byte) (request, *protocolError) {
 	switch base.Op {
 	case "open":
 		var typed openRequest
-		if err := strictJSON(line, &typed); err != nil || !hasRequiredJSONFields(line, "id", "protocol", "op", "root", "expectedIdentity") {
+		if err := strictJSON(line, &typed); err != nil || !hasRequiredJSONFields(line, "id", "protocol", "op", "root", "ancestorRoot", "expectedIdentity") {
 			return requestValue, failure("malformed_request", "request is malformed")
 		}
 		requestValue.open = &typed

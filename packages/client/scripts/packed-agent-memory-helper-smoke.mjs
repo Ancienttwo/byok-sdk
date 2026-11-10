@@ -67,7 +67,7 @@ if (process.platform === 'darwin') {
   const originalManifest = readFileSync(manifestFile);
   const scratch = mkdtempSync(path.join(tmpdir(), 'byok-packed-helper-'));
   const binding = await new sdk.AgentHomeManager({ hostStorageRoot: scratch }).prepare({ agentId: 'packed-helper', profileRevision: 'p1' });
-  const open = () => memory.openAgentMemoryFilesystemHelper({ helperBin: bin, canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity });
+  const open = () => memory.openAgentMemoryFilesystemHelper({ helperBin: bin, canonicalHome: binding.lease.canonicalHome, ancestorRoot: binding.resolution.hostStorageRoot, homeIdentity: binding.lease.homeIdentity });
   try {
     let filesystem = await open();
     await filesystem.close();

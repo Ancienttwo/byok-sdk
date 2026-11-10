@@ -112,7 +112,7 @@ describe.skipIf(process.platform !== 'darwin' || !hasAgentMemoryHelperBuild())('
       operationDigest: await agentMemoryIntentOperationDigest(identity), ...(operation === 'replace' ? { content: 'new' } : {}),
     };
     const completions: AgentMemoryIntentCompletion[] = [];
-    const backend = helperAgentMemoryIntentBackend(resolveAgentMemoryFilesystemHelper());
+    const backend = helperAgentMemoryIntentBackend(resolveAgentMemoryFilesystemHelper(), binding.resolution.hostStorageRoot);
     const transport = {
       fetch: async (request: { reservation: string }) => ({ disposition: request.reservation === 'none' ? 'deferred' : 'release', intent }),
       complete: async (completion: AgentMemoryIntentCompletion) => {
@@ -216,7 +216,7 @@ describe.skipIf(process.platform !== 'darwin' || !hasAgentMemoryHelperBuild())('
   it('holds the writer lease through timeout until the real stopped helper exits', async () => {
     const w = await world();
     const binding = await w.homes.acquire(w.agentRef);
-    const filesystem = await openAgentMemoryFilesystemHelper({ helperBin: resolveAgentMemoryFilesystemHelper(), canonicalHome: binding.lease.canonicalHome, homeIdentity: binding.lease.homeIdentity });
+    const filesystem = await openAgentMemoryFilesystemHelper({ helperBin: resolveAgentMemoryFilesystemHelper(), canonicalHome: binding.lease.canonicalHome, ancestorRoot: binding.resolution.hostStorageRoot, homeIdentity: binding.lease.homeIdentity });
     const child = control.last!;
     let exited = false;
     child.once('exit', () => { exited = true; });

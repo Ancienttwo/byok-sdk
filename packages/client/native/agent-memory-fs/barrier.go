@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 )
 
 // These test seams delegate to real operations in the release binary.
@@ -42,6 +44,131 @@ func syncHomeChain(home string, expected *os.Root) error {
 	}
 	if len(chain) == 0 {
 		return errors.New("home volume changed")
+	}
+	return syncPinnedHomeChain(chain, expected)
+}
+
+// The caller names the pre-existing durable boundary; never discover or default it.
+func syncHomeChainFrom(home, ancestor string, expected *os.Root) error {
+	chain, err := selectedHomeChain(home, ancestor)
+	if err != nil {
+		return err
+	}
+	return syncPinnedHomeChain(chain, expected)
+}
+
+func selectedHomeChain(home, ancestor string) ([]string, error) {
+	if !filepath.IsAbs(home) || !filepath.IsAbs(ancestor) {
+		return nil, errors.New("home chain requires absolute paths")
+	}
+	canonicalHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		return nil, err
+	}
+	canonicalAncestor, err := filepath.EvalSymlinks(ancestor)
+	if err != nil {
+		return nil, err
+	}
+	relative, err := filepath.Rel(canonicalAncestor, canonicalHome)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return nil, errors.New("chain root is not an ancestor of home")
+	}
+	chain := []string{canonicalAncestor}
+	if relative != "." {
+		for _, part := range strings.Split(relative, string(filepath.Separator)) {
+			chain = append(chain, filepath.Join(chain[len(chain)-1], part))
+		}
+	}
+	slices.Reverse(chain)
+	return chain, nil
+}
+
+// Agent-home initialization runs before open in the daemon. Flush the actual
+// child objects and their names even on a repeated open: a prior failed open
+// may have left an existing but unflushed directory. Missing children grant no
+// authority and are not created here.
+func syncInitializedDirectories(home *os.Root) *protocolError {
+	for _, name := range []string{".byok", "notes"} {
+		entry, err := home.Lstat(name)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return failureForInitialization()
+		}
+		// Repair operations can remove a malformed notes entry. It owns no
+		// directory authority to initialize; operations still refuse to follow it.
+		if !entry.IsDir() || entry.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		child, failure := openVerifiedChild(home, name)
+		if failure != nil {
+			if failure.code == "not_found" {
+				continue
+			}
+			return failure
+		}
+		file, err := child.Open(".")
+		if err != nil {
+			_ = child.Close()
+			return failureForInitialization()
+		}
+		syncErr := strictSync(file)
+		closeErr := file.Close()
+		childInfo, statErr := child.Stat(".")
+		entry, entryErr := home.Lstat(name)
+		rootCloseErr := child.Close()
+		if syncErr != nil || closeErr != nil || statErr != nil || entryErr != nil || rootCloseErr != nil || !os.SameFile(childInfo, entry) {
+			return failureForInitialization()
+		}
+		parent, err := home.Open(".")
+		if err != nil {
+			return failureForInitialization()
+		}
+		syncErr = strictSync(parent)
+		closeErr = parent.Close()
+		post, postErr := home.Lstat(name)
+		if syncErr != nil || closeErr != nil || postErr != nil || !os.SameFile(childInfo, post) {
+			return failureForInitialization()
+		}
+	}
+	return nil
+}
+
+func failureForInitialization() *protocolError {
+	return failure("io_failure", "initial directory barrier failed")
+}
+
+func samePinnedHomeVolume(left, right *os.Root) (bool, error) {
+	leftInfo, err := left.Stat(".")
+	if err != nil {
+		return false, err
+	}
+	rightInfo, err := right.Stat(".")
+	if err != nil {
+		return false, err
+	}
+	leftID, err := identityForRoot(left, leftInfo)
+	if err != nil {
+		return false, err
+	}
+	rightID, err := identityForRoot(right, rightInfo)
+	if err != nil {
+		return false, err
+	}
+	if leftID.Kind != rightID.Kind {
+		return false, errors.New("home volume identity changed")
+	}
+	if leftID.Kind == "windows" {
+		return leftID.VolumeSerial == rightID.VolumeSerial, nil
+	}
+	return leftID.Dev == rightID.Dev, nil
+}
+
+func syncPinnedHomeChain(chain []string, expected *os.Root) error {
+	expectedInfo, err := expected.Stat(".")
+	if err != nil {
+		return err
 	}
 	anchor := chain[len(chain)-1]
 	before, err := os.Lstat(anchor)
@@ -82,6 +209,9 @@ func syncHomeChain(home string, expected *os.Root) error {
 			}
 		}
 		current := roots[len(roots)-1]
+		if same, err := samePinnedHomeVolume(expected, current); err != nil || !same {
+			return errors.New("home chain crossed a volume")
+		}
 		file, err := current.Open(".")
 		if err != nil {
 			return err

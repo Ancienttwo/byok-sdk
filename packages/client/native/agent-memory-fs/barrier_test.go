@@ -27,7 +27,7 @@ func openedSession(t *testing.T, home string) *session {
 	if err != nil {
 		t.Fatal(err)
 	}
-	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identity})
+	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identity})
 	if failure != nil {
 		t.Fatalf("open: %#v", failure)
 	}
@@ -158,7 +158,7 @@ func TestHomeChainBarrierIsStrictBeforeOpen(t *testing.T) {
 		t.Fatalf("err=%v calls=%d", err, calls)
 	}
 	calls = 0
-	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identity})
+	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identity})
 	if active != nil || failure == nil || failure.code != "io_failure" || calls != 1 || casCalls != 0 {
 		t.Fatalf("session=%v failure=%#v calls=%d CAS=%d", active, failure, calls, casCalls)
 	}
@@ -253,7 +253,7 @@ func TestHomeChainRejectsSwapAndRestore(t *testing.T) {
 		}
 		return nil
 	}
-	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identity})
+	active, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identity})
 	if active != nil {
 		_ = active.root.Close()
 	}

@@ -58,6 +58,7 @@ func TestWindowsJunctionRootIsRefusedAndPreservesOutsideSentinel(t *testing.T) {
 		Protocol:         protocolVersion,
 		Op:               "open",
 		Root:             junction,
+		AncestorRoot:     filepath.Dir(junction),
 		ExpectedIdentity: identityForTest(t, outside),
 	})
 	if opened != nil || protocolErr == nil || protocolErr.code != "unsafe_root" {
@@ -81,7 +82,7 @@ func TestWindowsOpenAdmitsOnlyNTFS(t *testing.T) {
 			original := rootFileSystem
 			t.Cleanup(func() { rootFileSystem = original })
 			rootFileSystem = func(*os.Root) (string, error) { return volume.name, volume.err }
-			opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identityForTest(t, home)})
+			opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identityForTest(t, home)})
 			if opened != nil || failure == nil || failure.code != "unsafe_root" {
 				t.Fatalf("file system %q (error %v) admitted: session=%v error=%v", volume.name, volume.err, opened, failure)
 			}
@@ -104,7 +105,7 @@ func TestWindowsOpenRefusesRemoteVolume(t *testing.T) {
 			original := rootRemote
 			t.Cleanup(func() { rootRemote = original })
 			rootRemote = func(*os.Root) (bool, error) { return volume.remote, volume.err }
-			opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, ExpectedIdentity: identityForTest(t, home)})
+			opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: home, AncestorRoot: filepath.Dir(home), ExpectedIdentity: identityForTest(t, home)})
 			if opened != nil || failure == nil || failure.code != "unsafe_root" {
 				t.Fatalf("volume %q (error %v) admitted: session=%v error=%v", volume.name, volume.err, opened, failure)
 			}
@@ -143,7 +144,7 @@ func TestWindowsRemoteVolumeQueryOnSMBLoopback(t *testing.T) {
 	}
 	name, err := volumeFileSystemName(shared)
 	t.Logf("SMB loopback share %s reports file system %q (error %v)", share, name, err)
-	opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: share, ExpectedIdentity: identityForTest(t, home)})
+	opened, failure := openSession(openRequest{ID: "open", Protocol: protocolVersion, Op: "open", Root: share, AncestorRoot: filepath.Dir(share), ExpectedIdentity: identityForTest(t, home)})
 	if opened != nil || failure == nil || failure.code != "unsafe_root" {
 		t.Fatalf("SMB loopback home admitted: session=%v error=%v", opened, failure)
 	}

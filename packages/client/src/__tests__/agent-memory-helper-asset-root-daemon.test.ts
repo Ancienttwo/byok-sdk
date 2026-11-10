@@ -96,7 +96,8 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
     expect(save.isError).not.toBe(true);
     expect(JSON.stringify(await client.callTool({ name: 'memory_recall', arguments: { path: 'MEMORY.md' } }))).toContain('saved through MCP');
     expect(open.mock.calls.length).toBeGreaterThanOrEqual(intents ? 3 : 1);
-    for (const [input] of open.mock.calls) expect(input).toMatchObject({ assetRoot, helperBin });
+    const ancestorRoot = await fs.realpath(path.join(root, 'homes'));
+    for (const [input] of open.mock.calls) expect(input).toMatchObject({ assetRoot, helperBin, ancestorRoot });
   } finally {
     await client.close();
     await daemon?.stop();

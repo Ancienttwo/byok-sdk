@@ -161,12 +161,13 @@ export const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend = Obje
  * macOS helper has the strict barrier proof. Windows has no OS-crash or
  * power-loss proof, so it never advertises intents.
  */
-export function helperAgentMemoryIntentBackend(helperBin: string, assetRoot?: string): AgentMemoryIntentBackend {
+export function helperAgentMemoryIntentBackend(helperBin: string, ancestorRoot: string, assetRoot?: string): AgentMemoryIntentBackend {
   const verifiedBin = verifyAgentMemoryFilesystemHelper(helperBin, assetRoot);
   return Object.freeze<AgentMemoryIntentBackend>({
     openFilesystem: (lease) => openAgentMemoryFilesystemHelper({
       helperBin: verifiedBin,
       assetRoot,
+      ancestorRoot,
       canonicalHome: lease.canonicalHome,
       homeIdentity: lease.homeIdentity,
     }),
