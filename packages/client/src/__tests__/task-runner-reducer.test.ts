@@ -310,7 +310,8 @@ describe('task-runner reducer core (#1099 S1)', () => {
     const sent = apply(snapshot, makeEvent('terminal.sent', { token }));
     expect(sent.rowId).toBe('T9');
     expect(sent.task?.phase).toBe('retiring');
-    expect(kinds(sent.effects)).toEqual(['mark.finished', 'await.close']);
+    expect(kinds(sent.effects)).toEqual(['await.close']);
+    expect(sent.runner.finished).toContain(sent.task?.taskId);
     snapshot = snapshotOf(sent);
 
     const closed = apply(snapshot, makeEvent('terminal.close', { token, ok: true }));

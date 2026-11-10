@@ -1392,7 +1392,9 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
           retryable: false,
         });
         return {
-          runner: snapshot.runner,
+          runner: runnerWith(snapshot.runner, {
+            finished: addUniqueBounded(snapshot.runner.finished, task.taskId),
+          }),
           task: taskWith(task, {
             phase: 'terminalizing',
             terminal,
@@ -2055,20 +2057,21 @@ const TERMINAL_ROWS: readonly TransitionRow[] = [
       const terminal = task.terminal;
       if (terminal === undefined) throw new Error('terminal missing');
       return {
-        runner: snapshot.runner,
+        runner: runnerWith(snapshot.runner, {
+          finished: addUniqueBounded(snapshot.runner.finished, task.taskId),
+        }),
         task: taskWith(task, {
           phase: 'retiring',
           terminal: { ...terminal, stage: 'sent' },
           teardown: { ...task.teardown, close: 'pending' },
         }),
         effects: [
-          atom('mark.finished', { token: terminal.token }),
           barrier('await.close', { token: terminal.token, stage: 'close' }),
         ],
       };
     },
     rejection:
-      'Terminal is sent before close; a duplicate terminal.sent drops. mark.finished mirrors finishOnce top.',
+      'Terminal is sent before close; a duplicate terminal.sent drops.',
   },
   {
     id: 'T10',

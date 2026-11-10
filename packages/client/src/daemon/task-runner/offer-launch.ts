@@ -709,7 +709,7 @@ async function startAndActivateRuntime(
           this['deps'].send(cancellation);
           cancellationSettled = true;
           this['pendingCancelled'].delete(taskId);
-          this['addFinishedTaskId'](taskId);
+          host.endTask(taskId);
         } } : nativeSessions ? { settle: async () => {
           if (disposalFailure) await err.retryDisposal();
           await this['failClaimedAgent'](taskId,

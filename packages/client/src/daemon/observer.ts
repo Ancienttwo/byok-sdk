@@ -365,7 +365,7 @@ export class DaemonObserver {
     const taskId = offer.task_id;
 
     // Redelivery guard (protocol §9, at-least-once delivery): this observer
-    // has no visibility into TaskRunner's own private `finishedTaskIds`/
+    // has no visibility into the reducer's `finished` list or TaskRunner's
     // `this.tasks` redelivery dedup, so it mirrors the same idempotency
     // independently using its OWN record instead — any taskId this observer
     // already has an entry for was necessarily already offered once before
@@ -373,8 +373,8 @@ export class DaemonObserver {
     // both of which only ever fire for a taskId TaskRunner itself has already
     // seen), so a second offer for it is never "the first time" here
     // either. Without this, a stalled-cursor re-poll redelivering an
-    // already-succeeded offer (`task-runner.ts`'s own doc comment on
-    // `finishedTaskIds` describes exactly this scenario) would locally
+    // already-succeeded offer (`offerAlreadyHandled` documents the reducer's
+    // bounded `finished` list for this scenario) would locally
     // regress a finished task back to `Offered`.
     if (this.taskInfo.has(taskId)) return;
 
