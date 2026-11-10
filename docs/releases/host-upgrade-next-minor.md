@@ -50,9 +50,9 @@ now refuse model-runtime configuration/composition errors before selecting a
 model or creating a session; repair the declared settings if admission fails
 with `keys_profile_model_composition_failed`.
 
-## Pending train changes
+## OpenCode Host MCP toolsets
 
-- TODO (#1641): Document OpenCode MCP toolsets and any Host upgrade steps after the change lands.
+No Host action is required for this change (#1632). The OpenCode adapter passes an admitted task's MCP servers to ACP on session open and resume, but its `mcpToolsets` capability remains `false` until both supported release lines pass tool-call and isolation qualification. Hosts should continue to treat task-scoped Host MCP toolsets as unavailable for OpenCode. OpenCode v2 still refuses Agent `memory-reader` tasks because its session-local appended instruction channel is unqualified.
 
 ## Release and verification checklist
 
