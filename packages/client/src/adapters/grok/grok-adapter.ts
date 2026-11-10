@@ -109,7 +109,13 @@ export class GrokAdapter implements RuntimeAdapter {
     supportsDispatchSelection: false,
     // Windows has no Grok evidence (`docs/adapter-capabilities.md`).
     platforms: ['darwin', 'linux'],
-    capabilities: GROK_RUNTIME_CAPABILITIES,
+    capabilities: {
+      ...GROK_RUNTIME_CAPABILITIES,
+      isolation: {
+        ...GROK_RUNTIME_CAPABILITIES.isolation!,
+        ...(this.options.agentUserMcpServers === 'excluded' ? {} : { userMcpServers: false }),
+      },
+    },
     ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
   }); }
 

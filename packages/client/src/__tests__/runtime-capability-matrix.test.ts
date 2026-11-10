@@ -62,6 +62,11 @@ describe('runtime capability matrix projection to conn.hello / presence', () => 
       expect([isolation?.userInstructions, isolation?.userMcpServers]).toEqual([context === 'excluded', mcp === 'excluded']);
     }
   });
+  it.each([undefined, 'inherit', 'excluded'] as const)('projects Grok MCP %s', mcp => {
+    const caps = new GrokAdapter({ agentUserMcpServers: mcp }).descriptor.capabilities;
+    expect(caps.isolation?.userMcpServers).toBe(mcp === 'excluded');
+    expect(toRuntimeInfoCapabilities(caps).isolation).toEqual(caps.isolation);
+  });
   it.each(adapters())('%s carries every declared field with its descriptor value', (_name, adapter) => {
     const capabilities = adapter.descriptor.capabilities;
     const wire = toRuntimeInfoCapabilities(capabilities);
