@@ -1189,6 +1189,7 @@ describe('control-server: defensive hardening (gatekeeper advisories)', () => {
     // fixes an existing symlink's target, so nothing upstream of the new
     // check would have caught this.
     const attackerTarget = await tmpDir('byok-ctl-symlink-target-');
+    await fs.chmod(attackerTarget, 0o755);
     await fs.mkdir(path.dirname(endpointDir), { recursive: true });
     await fs.symlink(attackerTarget, endpointDir);
 
@@ -1199,6 +1200,7 @@ describe('control-server: defensive hardening (gatekeeper advisories)', () => {
 
     // Confirms this genuinely never bound inside the attacker's directory.
     expect(await fs.readdir(attackerTarget)).toEqual([]);
+    expect((await fs.stat(attackerTarget)).mode & 0o777).toBe(0o755);
   });
 
   it('P2 re-gate hardening: refuses to bind when the tmpdir fallback directory is owned by a DIFFERENT uid (possible attacker-controlled path in a shared temp dir)', async () => {

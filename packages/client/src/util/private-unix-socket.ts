@@ -55,12 +55,12 @@ export async function ensureOwnedPrivateDirectory(dir: string): Promise<void> {
     // Inspect existing non-directories below so they receive a typed refusal.
     if (error.code !== 'EEXIST' && error.code !== 'ENOTDIR') throw error;
   });
-  await fs.chmod(dir, 0o700).catch(() => undefined);
   const stat = await fs.lstat(dir);
   const uid = process.getuid?.();
   if (stat.isSymbolicLink()) throw new PrivateDirectoryRefusedError('private_dir_symlink', dir, uid);
   if (!stat.isDirectory()) throw new PrivateDirectoryRefusedError('private_dir_not_directory', dir, uid);
   if (uid !== undefined && stat.uid !== uid) throw new PrivateDirectoryRefusedError('private_dir_foreign_owner', dir, uid, stat.uid);
+  await fs.chmod(dir, 0o700).catch(() => undefined);
 }
 
 function isFallbackDirectory(dir: string): boolean {
