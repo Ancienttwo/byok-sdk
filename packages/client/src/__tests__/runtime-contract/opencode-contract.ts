@@ -113,37 +113,38 @@ async function listFiles(root: string, limit = 60): Promise<string[]> {
 
 /**
  * Replays the shell tool's launch as OpenCode 2.x builds it on Windows (`<shell> -NoLogo -NoProfile -NonInteractive -Command <command>`, stdin ignored)
- * and reports, per shell, how many launches ran the command: a launch that exits 0 without running it is the cancel case's failure (#1696).
+ * under several environments and reports how many launches ran the command (#1696).
  */
 async function probeShellLaunches(workspace: string, env: NodeJS.ProcessEnv, count: number): Promise<string> {
   if (process.platform !== 'win32') return 'probe: not windows';
-  const probe = path.join(workspace, 'probe.mjs');
-  await fs.writeFile(probe, "import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2], String(process.pid));\n");
-  const lines: string[] = [];
-  const where = (name: string) => { try { return execFileSync('where.exe', [name], { env, encoding: 'utf8' }).trim().split(/\r?\n/); } catch { return []; } };
-  const pwshPaths = where('pwsh');
-  lines.push(`PATH where pwsh: ${pwshPaths.join(' ; ') || 'none'}; powershell: ${where('powershell').join(' ; ') || 'none'}; PATH=${env.PATH ?? env.Path}`);
-  const shells: Array<[string, string]> = [['pwsh', 'pwsh'], ['powershell', 'powershell.exe'], ...(pwshPaths[0] ? [['pwsh-abs', pwshPaths[0]] as [string, string]] : [])];
-  for (const [label, shell] of shells) {
-    const rows: string[] = [];
-    let ran = 0;
-    for (let index = 0; index < count; index++) {
-      const marker = path.join(workspace, `probe-${label}-${index}.pid`).replace(/\\/g, '/');
-      const command = `${process.execPath.replace(/\\/g, '/')} probe.mjs ${marker}`;
-      const started = Date.now();
-      const result = await new Promise<string>(resolve => {
-        const child = spawn(shell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], { cwd: workspace, env, stdio: ['ignore', 'pipe', 'pipe'] });
-        let out = '';
-        child.stdout?.on('data', chunk => { out += String(chunk); });
-        child.stderr?.on('data', chunk => { out += String(chunk); });
-        child.on('error', error => resolve(`spawn error ${error.message}`));
-        child.on('close', (code, signal) => resolve(`exit=${code ?? signal} out=${JSON.stringify(out.slice(0, 200))}`));
-      });
-      const did = await fs.access(marker).then(() => true, () => false);
-      if (did) ran++;
-      if (!did && rows.length < 3) rows.push(`#${index} ${Date.now() - started}ms ${result}`);
+  await fs.writeFile(path.join(workspace, 'probe.mjs'), "import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2], String(process.pid));\n");
+  const node = process.execPath.replace(/\\/g, '/');
+  const extra = (names: string[]) => Object.fromEntries(names.flatMap(name => process.env[name] === undefined ? [] : [[name, process.env[name]]]));
+  const variants: Array<[string, NodeJS.ProcessEnv]> = [
+    ['stripped', env], ['full process.env', { ...process.env, ...env }],
+    ['stripped+PATHEXT', { ...env, ...extra(['PATHEXT']) }],
+    ...['APPDATA', 'LOCALAPPDATA', 'ProgramData', 'ProgramFiles', 'COMSPEC', 'windir', 'PSModulePath', 'ALLUSERSPROFILE'].map((name): [string, NodeJS.ProcessEnv] => [`stripped+${name}`, { ...env, ...extra([name]) }]),
+  ];
+  const lines: string[] = [`stripped env keys: ${Object.keys(env).join(',')}`];
+  for (const [label, shellEnv] of variants) {
+    for (const shell of ['pwsh', 'powershell.exe']) {
+      let ran = 0;
+      const misses: string[] = [];
+      for (let index = 0; index < count; index++) {
+        const marker = path.join(workspace, `probe-${label.replace(/\W/g, '_')}-${shell}-${index}.pid`).replace(/\\/g, '/');
+        const result = await new Promise<string>(resolve => {
+          const child = spawn(shell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `${node} probe.mjs ${marker}`], { cwd: workspace, env: shellEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+          let out = '';
+          child.stdout?.on('data', chunk => { out += String(chunk); });
+          child.stderr?.on('data', chunk => { out += String(chunk); });
+          child.on('error', error => resolve(`spawn error ${error.message}`));
+          child.on('close', (code, signal) => resolve(`exit=${code ?? signal} out=${JSON.stringify(out.slice(0, 160))}`));
+        });
+        if (await fs.access(marker).then(() => true, () => false)) ran++;
+        else if (misses.length < 1) misses.push(result);
+      }
+      lines.push(`${label} / ${shell}: ${ran}/${count}${misses.length ? ` ${misses[0]}` : ''}`);
     }
-    lines.push(`${label}: ${ran}/${count} ran the command${rows.length ? `; first misses: ${rows.join(' | ')}` : ''}`);
   }
   return `shell launch probe:\n${lines.join('\n')}`;
 }
@@ -163,7 +164,7 @@ async function cancelDiagnostics(workspace: string, home: string, log: readonly 
     const text = (await fs.readFile(path.join(home, '.local', 'share', 'opencode', file)).catch(() => Buffer.alloc(0))).toString('latin1');
     for (const match of text.matchAll(/[\x20-\x7e]{0,400}hold\.mjs[\x20-\x7e]{0,900}/g)) if (stored.length < 4) stored.push(`${file}: ${match[0]}`);
   }
-  return `\nworkspace: ${[await exists('hold.mjs'), await exists('hold.pid')].join(' ')}; node=${process.execPath}\nevents:\n${log.join('\n')}\nhome files: ${(await listFiles(home)).join(', ')}\n${tails.join('\n')}\nstored shell records:\n${stored.join('\n')}\n${await probeShellLaunches(workspace, env, 10)}`;
+  return `\nworkspace: ${[await exists('hold.mjs'), await exists('hold.pid')].join(' ')}; node=${process.execPath}\nevents:\n${log.join('\n')}\nhome files: ${(await listFiles(home)).join(', ')}\n${tails.join('\n')}\nstored shell records:\n${stored.join('\n')}\n${await probeShellLaunches(workspace, env, 2)}`;
 }
 
 /** The pid of a `pid command` row; `ps` right-aligns its pid column, so leading spaces are not a field. */
@@ -284,7 +285,7 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
     const pidFile = path.join(box.workspace, 'hold.pid').replace(/\\/g, '/');
     if (/\s/.test(process.execPath)) throw new Error(`the Node path must not contain whitespace: ${process.execPath}`);
     // #1696 diagnostics: the launch probe also runs up front so a passing job can be compared with a failing one.
-    console.log(`[1696 ${runtime}] ${await probeShellLaunches(box.workspace, baseEnv(box.home), 10)}`);
+    console.log(`[1696 ${runtime}] ${await probeShellLaunches(box.workspace, baseEnv(box.home), 2)}`);
     const holder = path.join(box.workspace, 'hold.mjs');
     await fs.writeFile(holder, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);\n`);
     const script: ProviderScript = request => {
