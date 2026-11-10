@@ -116,7 +116,7 @@ async function koffiDiagnosis(input) {
   }
   return { cwd: process.cwd(), execPath: process.execPath, argv1: process.argv[1], importMetaUrl: import.meta.url,
     nativeAssetRootPassed: input.nativeAssetRoot ?? null, resolution,
-    dynamicImportKoffi: await probe(async () => { const koffi = await import('koffi'); (koffi.default ?? koffi).load('kernel32.dll'); return 'kernel32 loaded'; }) };
+    dynamicImportKoffi: await probe(async () => { const koffi = await import(input.koffiSpecifier); (koffi.default ?? koffi).load('kernel32.dll'); return 'kernel32 loaded'; }) };
 }
 async function main() {
 if (process.env.PAYLOAD_TEST_CHILD_START && process.argv[2] === '--no-extensions') await fs.appendFile(process.env.PAYLOAD_TEST_CHILD_START, 'runner started\\n');
@@ -468,7 +468,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       const env = { PATH: process.env.PATH ?? '', HOME: home, USER: os.userInfo().username, TMPDIR: runDir, PI_CODING_AGENT_DIR: agentDir,
         npm_config_registry: deadRegistry, BUN_CONFIG_DEFAULT_REGISTRY: deadRegistry, PAYLOAD_TEST_PRODUCT_REEXEC: reexecMarker };
       const reportPath = path.join(runDir, 'report.json'); const inputPath = path.join(runDir, 'input.json');
-      await fs.writeFile(inputPath, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: 'Reply with the host payload marker.',
+      await fs.writeFile(inputPath, JSON.stringify({ piSpecifier: PI_SPECIFIER, koffiSpecifier: 'koffi', instruction: 'Reply with the host payload marker.',
         bundleEntry: host.entry !== undefined, piPackageDir: host.piPackageDir, cwd, env, scratchRoot: testScratchRoot(), report: reportPath }));
 
       await execFileAsync(host.command, [...host.prefix, 'task', inputPath], { cwd: runDir, env, timeout: 60_000 }).catch(async (error: unknown) => {
