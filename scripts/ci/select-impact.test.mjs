@@ -350,6 +350,14 @@ test('Hermes adapter, real run and custody launcher paths select the real Hermes
   }
 });
 
+test('vendored Hermes paths select both real installer jobs', () => {
+  for (const path of ['manifest.json', `${'a'.repeat(40)}/install.sh`, `${'a'.repeat(40)}/install.ps1`]) {
+    const impact = selectImpact([`scripts/ci/vendor/hermes/${path}`]);
+    assert.deepEqual(impact.files, [`scripts/ci/vendor/hermes/${path}`]);
+    for (const family of ['hermes-real-windows', 'runtime-contract']) assert.ok(impact.families.includes(family), path);
+  }
+});
+
 test('owned helper build scripts keep release packaging qualification', () => {
   for (const path of ['packages/client/scripts/build-agent-memory-helper.mjs', 'packages/client/scripts/check-agent-memory-helper-build.mjs', 'packages/client/scripts/agent-memory-helper-source.mjs']) {
     const families = selectImpact([path]).families;
@@ -369,7 +377,7 @@ const registeredJobInputs = {
     'packages/client/dist/native/agent-memory-fs/darwin-': 'build output that the macOS step compares with its own helper build',
     'packages/client/dist/native/agent-memory-fs/win32-x64.exe': 'build output that the Windows junction smoke runs',
   },
-  'hermes-real-windows': { $installer: 'the pinned upstream Hermes installer, downloaded at run time' },
+  'hermes-real-windows': { $installer: 'the verified vendored Hermes installer' },
   'packageability-smoke': {
     'packages/client/scripts/build-agent-memory-helper.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
     'packages/client/scripts/check-agent-memory-helper-build.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
