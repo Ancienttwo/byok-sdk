@@ -186,9 +186,11 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
     try {
       const { env } = await openCodeEnv(`${runtime}-cancel-env`, provider.baseUrl);
       const session = await startPreparedOperation(adapter(), { instruction: 'Run the shell command.' }, { workspaceDir: box.workspace, agentHome: box.workspace, env: { ...env, ...recorder.env } });
-      const tool = Number(await waitFor(async () => (await fs.readFile(pidFile, 'utf8').catch(() => '')).trim() || undefined, 120_000, 'the shell tool pid'));
       const events: string[] = [];
-      const drained = (async () => { for await (const event of session.events) { events.push(event.type); if (event.type === 'turn_end') break; } })();
+      const log: string[] = [];
+      const drained = (async () => { for await (const event of session.events) { events.push(event.type); log.push(JSON.stringify(event).slice(0, 300)); if (event.type === 'turn_end') break; } })();
+      const tool = Number(await waitFor(async () => (await fs.readFile(pidFile, 'utf8').catch(() => '')).trim() || undefined, 60_000, 'the shell tool pid')
+        .catch((error: Error) => { throw new Error(`${error.message}; events: ${log.slice(-8).join(' | ')}`); }));
       await session.interrupt();
       await drained;
       await session.close();
