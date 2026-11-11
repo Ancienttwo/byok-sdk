@@ -6,7 +6,7 @@ import { retainRoots, RetentionRefused, type RetentionInput, type RetentionLimit
 import { commitCommand, refuseRetired, retiredIdentity, type AdmittedIds, type Command, type CommandPorts,
   type RetiredNamespace } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { CommandRecord, CommitRequest, CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { queueDelivery } from '@byok-sdk/example-bot-collaboration/delivery-routing';
+import { promoteStaged, queueDelivery } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { commandIntentFacts, intentConclusions } from './intents';
 import { storedKey } from './layout';
 import { loadSlice } from './routines';
@@ -85,7 +85,7 @@ export async function retiredTurns(client: PoolClient, scopeKey: string, turnIds
  * retention moved still answers a replay, and an id that retention retired is refused at admission. A throw rolls back.
  */
 export async function commitStored(client: PoolClient, scope: string, state: CollaborationState, request: CommitRequest<Command>,
-  ports: Omit<CommandPorts, 'intents' | 'deliver' | 'outcome'> & { outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
+  ports: Omit<CommandPorts, 'intents' | 'deliver' | 'promote' | 'outcome'> & { outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
   channel: boolean): Promise<CommitResult> {
   const scopeKey = storedKey(scope), command = request.command, { outcome, ...rest } = ports;
   // The channel outbox port of a K4 callback (K8 host.ts `deliverPort`). The delivery rules read the intent
@@ -93,7 +93,8 @@ export async function commitStored(client: PoolClient, scope: string, state: Col
   const taskId = command.kind === 'message' ? command.message.taskId : command.kind === 'outcome' ? command.taskId : undefined;
   const conclusions = channel && taskId !== undefined ? await intentConclusions(client, scope) : undefined;
   const deliver = conclusions && taskId !== undefined
-    ? { deliver: (turn: Turn, key: string, text: string) => queueDelivery(conclusions, state, turn, taskId, key, text, ports.now())?.id } : {};
+    ? { deliver: (turn: Turn, key: string, text: string, staged: boolean) => queueDelivery(conclusions, state, turn, taskId, key, text, ports.now(), staged)?.id,
+      promote: (id: string) => promoteStaged(state, id) } : {};
   // The intent facts come from the intent rows in this transaction, never from the caller (#793 D2f-4). So do the committed
   // intents of an outcome, which a Main Bot cancel reads.
   const intents = await commandIntentFacts(client, scope, Object.keys(state.turns));

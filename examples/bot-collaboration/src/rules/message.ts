@@ -8,7 +8,7 @@ import { BOT_REPLY_MAX_BYTES, type DelegationState } from './delegation';
 export interface MessageFields { taskId: string; payload: { body: string; messageId: string; contentHash: string; contentType: string } }
 export type MessageDisposition = { outcome: 'accepted' } | { outcome: 'refused'; reasonCode: string };
 /**
- * `deliver` queues the body for the Host channel. Absent: the Host has no channel. `hostMessage` (#1356) decides the message of
+ * `deliver` stages the body for the Host channel; the Turn's outcome makes it visible (#1762). Absent: the Host has no channel. `hostMessage` (#1356) decides the message of
  * a Host intent whose handler has a message handler. An accepted one is recorded without its body and is not delivered.
  */
 export function acceptMessage(state: DelegationState, turnId: string, input: MessageFields, now: () => number,

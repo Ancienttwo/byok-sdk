@@ -261,6 +261,14 @@ The examples no longer read three old stored shapes (#1669). Before the upgrade,
 
 - Vendored Hosts: `src/history.ts` is removed from the `vendor host` layer. A Host that copied it imports `HISTORY_MAX_BYTES` and `HISTORY_MAX_ITEMS` from `rules/history` instead.
 
+## Bot replies wait for the Turn outcome (#1762)
+
+A Bot reply is now visible only when its Turn's outcome committed: iff the Turn's intent concluded `succeeded` with that reply's task id. Before, an accepted reply was queued for the channel at once, so a daemon stop between the reply and the outcome posted the reply and dropped every action of the outcome.
+
+- The channel delivery of an accepted reply starts in the new `DeliveryState` `staged`. The outcome transaction that concludes the intent `succeeded` promotes it to `pending`, so a channel reply now arrives after the Turn's outcome, not mid-Turn. A staged delivery whose intent concludes otherwise is `rejected` with the new code `outcome_not_applied`, and its Turn stays `failed`. A Host that reads deliveries handles both values. A pending or unknown reply delivery now keeps its reply route token until it settles or the route expires.
+- Persisted format: no migration and no schema change. L stores the new state in its ledger JSON. H stores it in the `delivery` entity JSON, which has no CHECK on `state`; H inserts a delivery's `outbox` row only when the delivery is promoted, so a staged or withheld delivery has none. `STORE_VERSION` is unchanged. A reply delivery that is already `pending` before the upgrade is still sent once; every reply accepted after it is staged.
+- Operator step for vendoring Hosts: a Host that shows or uploads replies from `replies` must skip a reply unless `core.intent(turnId)` has `conclusion === 'succeeded'` and `taskId` equal to the reply's task id. For example, AiphaBee adds this check to its `k8RootUploads`. Until a Host adds it, its own upload still shows a reply before the outcome commits; K8's channel no longer does. See [Reply visibility](../../examples/bot-collaboration/src/VENDOR.md#reply-visibility).
+
 ## Offer selection rules
 
 `@byok-sdk/protocol` exports `offerSelectionViolation(payload)` and the types `OfferSelectionRule` and `OfferSelectionViolation` (#1674). The three offer selection rules have one definition, which the Host offer schemas and the daemon both run. A `HostOfferPlainPayloadSchema` or `HostOfferSealedPayloadSchema` issue carries `params.rule`, and the daemon declines the same offer with `task.decline.code` equal to that rule:

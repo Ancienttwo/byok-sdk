@@ -123,8 +123,13 @@ export interface CommandPorts {
   admitInput?(fields: InputFields): string;
   /** Capability: saves the inbound route of a received message. Absent: skipped, the Host has no channel. */
   remember?(root: string): void;
-  /** Capability: queues one channel message and returns the delivery id. Absent: skipped, the Host has no channel. */
-  deliver?(turn: Turn, key: string, text: string): string | undefined;
+  /**
+   * Capability: queues one channel message and returns the delivery id. A `staged` one waits for `promote` (#1762).
+   * Absent: skipped, the Host has no channel.
+   */
+  deliver?(turn: Turn, key: string, text: string, staged: boolean): string | undefined;
+  /** Capability: promotes the staged deliveries of a task and returns their ids. Absent: skipped, the Host has no channel. */
+  promote?(taskId: string): readonly string[];
   /**
    * Capability: decides the Agent message of a Host intent whose handler has a message handler (#1356).
    * Absent: the message is refused as `binding_mismatch`.
@@ -267,9 +272,11 @@ const accepted = (value?: Json): Disposition => value === undefined ? { outcome:
 export function decideCommand(state: CommandState, command: Command, ports: CommandPorts, out: (intent: OutboxIntent) => void): Disposition {
   const publish: Publish = (id, value) => { ports.publish(id, value); out({ kind: 'projection', id }); };
   const deliver = ports.deliver && ((turn: Turn, key: string, text: string) => {
-    const id = ports.deliver!(turn, key, text);
+    const id = ports.deliver!(turn, key, text, false);
     if (id !== undefined) out({ kind: 'delivery', id });
   });
+  // An accepted reply is visible only once its Turn outcome commits (#1762): the outcome below promotes it.
+  const stage = ports.deliver && ((turn: Turn, key: string, text: string) => { ports.deliver!(turn, key, text, true); });
   switch (command.kind) {
     case 'input': {
       activeBot(state.team, command.botId);
@@ -322,8 +329,9 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
     case 'outcome':
       applyTurnOutcome(state, command.turnId, command.taskId, command.document, { ...need(ports.outcome, command.kind),
         now: ports.now, publish, ...(deliver ? { deliver } : {}) });
+      for (const id of ports.promote?.(command.taskId) ?? []) out({ kind: 'delivery', id });
       return accepted();
-    case 'message': return acceptMessage(state, command.turnId, command.message, ports.now, deliver, ports.hostMessage);
+    case 'message': return acceptMessage(state, command.turnId, command.message, ports.now, stage, ports.hostMessage);
     case 'occurrence':
       need(ports.occurrence, command.kind)();
       return accepted();

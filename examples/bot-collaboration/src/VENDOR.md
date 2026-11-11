@@ -174,6 +174,29 @@ node:readline
 vitest
 ```
 
+## Reply visibility
+
+A Bot reply is visible iff its Turn's intent concluded `succeeded` with that
+reply's task id (#1762). The SDK accepts the reply while the Turn still runs, so
+an accepted reply is not yet a Turn that happened: the Turn can still fail, for
+example when the daemon stops before its outcome commits.
+
+- K8's channel outbox follows this itself. An accepted reply's delivery is
+  `staged`, and no sender takes it. The outcome transaction that concludes the
+  intent `succeeded` promotes it to `pending`. A staged delivery whose intent
+  concludes otherwise becomes `rejected` with code `outcome_not_applied` at the
+  next sync, and its reply stays only as an audit fact.
+- `replies` records every accepted reply, including withheld ones. A Host that
+  shows or uploads replies from `replies` checks the conclusion first: skip a
+  reply unless `core.intent(turnId)` has `conclusion === 'succeeded'` and
+  `taskId` equal to the reply's task id. For example, AiphaBee adds this check
+  to its `k8RootUploads` before it returns a body. A failed Turn then shows its
+  failure, never its reply.
+- A send is at-least-once from the durable outbox. The receiver deduplicates by
+  the delivery id, which stays the same across resends of one row; a Host
+  upload deduplicates by task id, and only the task that concluded the intent
+  can pass the check above.
+
 ## K4
 
 K8 imports K4 from the published `@byok-sdk/server` package (#1106): the root

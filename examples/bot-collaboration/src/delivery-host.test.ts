@@ -100,9 +100,7 @@ async function openDeliveryHost(port: ChannelPort, rest: Partial<BotOptions> = {
   return { fixture, received, options, get bot() { return bot; }, ledger, rows, running, finish, message,
     async publish() {
       const root = (await bot.receive(inbound('contract', now + 600_000))).id!;
-      await running(root);
-      expect(await bot.consumeMessage(message(root))).toEqual({ outcome: 'accepted' });
-      await bot.drain();
+      await finish(root);
     },
     async advance(ms: number) { now += ms; await bot.drain(); },
     async drain() { await bot.drain(); },
@@ -124,7 +122,7 @@ channelContract('Host delivery outbox with an external fake ChannelPort', openDe
 let h: Harness | undefined;
 afterEach(async () => { await h?.close(); h = undefined; });
 
-it('atomically accepts one payload and one delivery, and refuses a conflicting payload', async () => {
+it('atomically accepts one payload and one staged delivery, and withholds it when the daemon stops before the outcome (#1762)', async () => {
   const send = vi.fn<ChannelPort['send']>(async () => ({ result: 'accepted', platformMessageId: 'platform-1' }));
   h = await openDeliveryHost({ send });
   const root = (await h.bot.receive(inbound())).id!;
@@ -133,14 +131,45 @@ it('atomically accepts one payload and one delivery, and refuses a conflicting p
   expect(await h.bot.consumeMessage(input)).toEqual({ outcome: 'accepted' });
   // Both records exist immediately after acceptance, before a caller has to drain.
   expect(h.bot.snapshot().replies[input.taskId]).toMatchObject({ messageId: input.payload.messageId, contentHash: input.payload.contentHash });
-  expect(h.rows()).toEqual([expect.objectContaining({ taskId: input.taskId, messageId: input.payload.messageId, body: input.payload.body })]);
+  expect(h.rows()).toEqual([expect.objectContaining({ taskId: input.taskId, messageId: input.payload.messageId, body: input.payload.body, state: 'staged' })]);
   expect(await h.bot.consumeMessage(input)).toEqual({ outcome: 'accepted' });
   expect(await h.bot.consumeMessage({ ...input, payload: { ...input.payload, messageId: randomUUID() } }))
     .toEqual({ outcome: 'refused', reasonCode: 'message_conflict' });
   await Promise.all([h.bot.drain(), h.bot.drain()]);
+  expect(send).not.toHaveBeenCalled();
+  // The daemon stops between the accepted reply and the outcome: the task fails and K4 applies no outcome.
+  await h.fixture.offline(); await h.fixture.online();
+  await vi.waitFor(async () => { await h!.bot.drain(); expect(h!.bot.core.intent(root)!.conclusion).toBe('failed'); }, { timeout: 10_000 });
+  await h.bot.drain();
+  expect(send).not.toHaveBeenCalled();
+  expect(h.bot.snapshot().turns[root]!.status).toBe('failed');
+  expect(h.rows()).toEqual([expect.objectContaining({ id: h.rows()[0]!.id, state: 'rejected', code: 'outcome_not_applied', attempts: 0 })]);
+  expect(h.bot.snapshot().audit).toContainEqual(`Delivery outcome_not_applied: ${input.taskId} ${input.payload.messageId}`);
+});
+
+it('promotes the reply once in the outcome transaction and sends it once after a Host reopen (#1762)', async () => {
+  const send = vi.fn<ChannelPort['send']>(async () => ({ result: 'accepted', platformMessageId: 'platform-1' }));
+  h = await openDeliveryHost({ send });
+  const root = (await h.bot.receive(inbound())).id!;
+  const session = await h.running(root), taskId = h.bot.core.intent(root)!.taskId;
+  const events = h.fixture.server.events.subscribe()[Symbol.asyncIterator]();
+  try {
+    void session.finish({});
+    for (let next = await events.next(); !next.done; next = await events.next()) {
+      if (next.value.kind === 'task.state' && next.value.taskId === taskId && next.value.state === 'Complete') break;
+    }
+  } finally { await events.return?.(); }
+  // K4 alone commits the outcome; no Host pass sends between it and the reopen.
+  await h.bot.core.drain();
+  const [row] = h.rows();
+  expect(h.received).toHaveLength(1);
+  expect(row).toMatchObject({ taskId, messageId: h.received[0]!.payload.messageId, state: 'pending', attempts: 0 });
+  expect(send).not.toHaveBeenCalled();
+  await h.reopen();
+  await Promise.all([h.bot.drain(), h.bot.drain()]);
   expect(send).toHaveBeenCalledTimes(1);
-  expect(send.mock.calls[0]![0]).toMatchObject({ deliveryId: h.rows()[0]!.id, body: 'Final answer', route: { kind: 'reply', inboundId: 'in1', token: 'secret-in1' } });
-  expect(h.rows()).toHaveLength(1);
+  expect(send.mock.calls[0]![0]).toMatchObject({ deliveryId: row!.id, body: h.received[0]!.payload.body, route: { kind: 'reply', inboundId: 'in1', token: 'secret-in1' } });
+  expect(h.rows()).toEqual([expect.objectContaining({ id: row!.id, state: 'accepted', attempts: 1 })]);
   expect(JSON.stringify(h.ledger().snapshot().outbox)).not.toContain('secret-in1');
 });
 
@@ -182,8 +211,7 @@ it('requires owner opt-in, revokes push and gives a manual resend a new identity
   await expect(h.bot.enablePushRoute(conversation, 'fake', 'target', outsider)).rejects.toThrow('not_owner');
   const route = await h.bot.enablePushRoute(conversation, 'fake', 'target');
   const root = await h.bot.input('push', 'Send a reply');
-  await h.running(root);
-  await h.bot.consumeMessage(h.message(root)); await h.bot.drain();
+  await h.finish(root);
   const old = h.rows()[0]!;
   expect(old).toMatchObject({ state: 'unknown', route: { kind: 'push', pushRouteId: route } });
   await expect(h.bot.resendDelivery(old.id, outsider)).rejects.toThrow('not_owner');
@@ -272,15 +300,14 @@ it('reloads a persisted sending claim as unknown without blindly sending after r
   });
   h = await openDeliveryHost({ send });
   const root = (await h.bot.receive(inbound())).id!;
-  await h.running(root);
-  await h.bot.consumeMessage(h.message(root));
+  const finishing = h.finish(root);
   await started;
   const disk = new HostLedger(checkpoint, h.ledger().tenant);
   const claim = Object.values(stateOf(disk.snapshot().application).channel!.deliveries)[0]!;
   expect(claim).toMatchObject({ state: 'sending', attempts: 1 });
   disk.close();
   release({ result: 'accepted', platformMessageId: 'late' });
-  await h.bot.drain();
+  await finishing;
   // The replacement Host opens the exact crash-boundary SQLite snapshot.
   await h.reopen(checkpoint);
   expect(h.rows()).toEqual([expect.objectContaining({ id: claim.id, state: 'unknown', attempts: 1, code: 'interrupted' })]);
@@ -297,8 +324,7 @@ it('selects the latest authenticated inbound route for a coalesced reply', async
   const second = await h.bot.receive(inbound('batch-2', h.options.now!() + 600_000));
   expect(second.id).toBe(first.id);
   await h.finish(busy);
-  await h.running(first.id!);
-  await h.bot.consumeMessage(h.message(first.id!)); await h.bot.drain();
+  await h.finish(first.id!);
   expect(send).toHaveBeenCalledTimes(1);
   expect(send.mock.calls[0]![0]).toMatchObject({ route: { kind: 'reply', inboundId: 'batch-2', token: 'secret-batch-2' } });
   expect(h.rows()[0]!.route).toEqual({ kind: 'reply', inboundId: inboundKey(inbound('batch-2')) });

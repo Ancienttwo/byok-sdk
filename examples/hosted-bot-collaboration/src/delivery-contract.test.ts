@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { taskId, type Json } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
@@ -13,6 +14,7 @@ import { hostedMessageConsumer, type AgentMessageInput } from './messages';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedOutboxSender } from './sender';
 import { HostedCollaborationStore, type InboundIdentity } from './store';
+import type { TaskEvidence } from './reconcile';
 import { inSchema } from './transaction';
 
 // #793 D2b-out-2: the K8 delivery vectors on H, with the outbox sender on real Postgres.
@@ -32,15 +34,19 @@ async function indexDrift(db: Awaited<ReturnType<typeof openStore>>, scope: stri
   const drift: string[] = [];
   for (const row of deliveries) {
     const index = rows.get(row.id);
-    if (!index) { drift.push(`${row.id}: no outbox row`); continue; }
+    // A staged row, or one withheld before its promotion, has no outbox row (#1762).
+    if (!index) { if (row.state !== 'staged' && row.code !== 'outcome_not_applied') drift.push(`${row.id}: no outbox row`); continue; }
     if ((index.settled_at !== null) !== (row.state === 'accepted' || row.state === 'rejected')) drift.push(`${row.id}: settled_at for ${row.state}`);
     if (row.state === 'pending' && Number(index.next_at) !== (row.nextAttemptAt ?? 0)) drift.push(`${row.id}: next_at for pending`);
   }
-  if (rows.size !== deliveries.length) drift.push('an outbox delivery row with no entity');
+  if ([...rows.keys()].some(key => !deliveries.some(row => row.id === key))) drift.push('an outbox delivery row with no entity');
   return drift;
 }
 
-async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
+const terminal = (turnId: string, type: string): TaskEvidence => ({ attempt: { taskId: taskId(turnId, 0) } as unknown as TaskAttempt,
+  terminal: { envelope: { task_id: taskId(turnId, 0), type, payload: type === 'task.complete' ? { document: {} } : {} } } as unknown as DeviceTerminal });
+
+async function hostedSubject(port: ChannelPort) {
   const db = await openStore();
   opened.push(db);
   const store = new HostedCollaborationStore(db.pool, db.store.schema, { host: TEST_HOST, channel: true });
@@ -64,7 +70,6 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
     await hold.gate;
     return result;
   };
-  const roots = new Map<string, string>();
   const execution = { ...template('device', 'main'), agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'delivery' } };
   await store.seed(scope, state => { seedCollaboration(state); state.team.bots.main!.execution = execution; });
   await store.bindDevice(scope, 'device');
@@ -124,33 +129,34 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
   };
   const consume = hostedMessageConsumer(store, { scopeOf: tenant => tenant, now: clock });
 
-  return {
+  /** Owner message `key` reaches Bot `main`, and its Turn's final Agent message is accepted. Returns the Turn id. */
+  const accept = async (key: string, replyMs: number | null = 600_000) => {
+    const message: InboundMessage = { channel: 'fake', platformMessageId: key, conversation: DIRECT, sender: { id: 'owner', kind: 'human' },
+      text: 'Answer me', mentions: [], ...(replyMs === null ? {} : { replyRoute: { kind: 'reply', channel: 'fake', inboundId: key, token: replyToken(key), expiresAt: now + replyMs } }) };
+    const received = await store.receive(scope, message, IDENTITY, clock);
+    expect(received).toMatchObject({ kind: 'owner_input' });
+    const turnId = received.id!;
+    await store.sync(scope, { ...SYNC_OPTIONS, now, history: undefined });
+    const frozen = await inSchema(db.pool, store.schema, client => frozenIntent(client, scope, taskId(turnId, 0)), true);
+    if (!frozen) throw new Error('The Turn did not freeze');
+    const input = { tenant: scope, taskId: frozen.input.taskId, deviceId: frozen.input.deviceId, context: frozen.input.agentMessageContext,
+      payload: { agentRef: frozen.input.payload.agentRef, sessionRef: randomUUID(), contract: 'conversation-turn/v1', messageId: randomUUID(), cursor: 1,
+        contentType: 'text/markdown', body: FINAL_BODY, contentHash: `sha256:${createHash('sha256').update(FINAL_BODY).digest('hex')}`,
+        byteCount: Buffer.byteLength(FINAL_BODY) } } as unknown as AgentMessageInput;
+    expect(await consume.consume(input)).toEqual({ outcome: 'accepted' });
+    return turnId;
+  };
+  /** The Turn's terminal concludes its intent; the reply becomes sendable only in a succeeded outcome transaction (#1762). */
+  const conclude = async (turnId: string, type: 'task.complete' | 'task.fail') => {
+    expect(await store.finish(scope, turnId, terminal(turnId, type), clock)).toBe(type === 'task.complete' ? 'succeeded' : 'failed');
+    await run();
+  };
+
+  const subject: DeliverySubject = {
     now: () => now,
     drain: run,
     advance: async ms => { now += ms; await run(); },
-    publish: async (key, { replyMs = 600_000 } = {}) => {
-      const message: InboundMessage = { channel: 'fake', platformMessageId: key, conversation: DIRECT, sender: { id: 'owner', kind: 'human' },
-        text: 'Answer me', mentions: [], ...(replyMs === null ? {} : { replyRoute: { kind: 'reply', channel: 'fake', inboundId: key, token: replyToken(key), expiresAt: now + replyMs } }) };
-      const received = await store.receive(scope, message, IDENTITY, clock);
-      expect(received).toMatchObject({ kind: 'owner_input' });
-      const turnId = received.id!;
-      roots.set(key, turnId);
-      await store.sync(scope, { ...SYNC_OPTIONS, now, history: undefined });
-      const frozen = await inSchema(db.pool, store.schema, client => frozenIntent(client, scope, taskId(turnId, 0)), true);
-      if (!frozen) throw new Error('The Turn did not freeze');
-      const input = { tenant: scope, taskId: frozen.input.taskId, deviceId: frozen.input.deviceId, context: frozen.input.agentMessageContext,
-        payload: { agentRef: frozen.input.payload.agentRef, sessionRef: randomUUID(), contract: 'conversation-turn/v1', messageId: randomUUID(), cursor: 1,
-          contentType: 'text/markdown', body: FINAL_BODY, contentHash: `sha256:${createHash('sha256').update(FINAL_BODY).digest('hex')}`,
-          byteCount: Buffer.byteLength(FINAL_BODY) } } as unknown as AgentMessageInput;
-      expect(await consume.consume(input)).toEqual({ outcome: 'accepted' });
-      await run();
-    },
-    end: async key => {
-      const root = roots.get(key)!;
-      await keyless({ kind: 'cancel_turn', turnId: root });
-      await run();
-      expect((await store.read(scope)).turns[root]).toMatchObject({ conclusion: 'cancelled' });
-    },
+    publish: async (key, { replyMs = 600_000 } = {}) => { await conclude(await accept(key, replyMs), 'task.complete'); },
     holdNextSend: () => holdNext('send'),
     holdNextReadback: () => holdNext('readback'),
     enablePush: async target => {
@@ -173,10 +179,36 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
     state: () => store.read(scope),
     stored: () => store.dump(scope),
   };
+  /** The delivery keys of the scope's outbox rows. */
+  const outbox = async () => (await db.pool.query<{ key: string }>(`SELECT key FROM "${store.schema}".outbox WHERE scope = $1 AND kind = 'delivery'`,
+    [storedKey(scope)])).rows.map(row => JSON.parse(row.key) as string);
+  return { ...subject, accept, conclude, outbox };
 }
 
 describe.skipIf(POSTGRES_URL === undefined)('H delivery sender (#793 D2b-out-2)', () => {
   deliveryVectors('H HostedCollaborationStore and outbox sender on Postgres', hostedSubject);
+
+  it.each(['task.complete', 'task.fail'] as const)('gives a staged reply an outbox row only when a succeeded outcome promotes it: %s (#1762)', async type => {
+    const sent: string[] = [];
+    const subject = await hostedSubject({ send: async input => { sent.push(input.deliveryId); return { result: 'accepted', platformMessageId: 'p1' }; } });
+    const turnId = await subject.accept('in1');
+    await subject.drain();
+    expect(await subject.deliveries()).toMatchObject([{ state: 'staged', body: FINAL_BODY, attempts: 0 }]);
+    expect(await subject.outbox()).toEqual([]);
+    await subject.conclude(turnId, type);
+    await subject.drain();
+    const [row] = await subject.deliveries();
+    if (type === 'task.complete') {
+      expect(row).toMatchObject({ state: 'accepted', attempts: 1, platformMessageId: 'p1' });
+      expect(await subject.outbox()).toEqual([row!.id]);
+      expect(sent).toEqual([row!.id]);
+    } else {
+      expect(row).toMatchObject({ state: 'rejected', code: 'outcome_not_applied', attempts: 0 });
+      expect((await subject.state()).audit).toContain(`Delivery outcome_not_applied: ${row!.taskId} ${row!.messageId}`);
+      expect(await subject.outbox()).toEqual([]);
+      expect(sent).toEqual([]);
+    }
+  }, 60_000);
 
   it('keeps a send claim whose settle never ran until its lease has passed, because another sender may still be sending', async () => {
     const send: ChannelPort['send'] = async () => ({ result: 'accepted', platformMessageId: 'late' });
