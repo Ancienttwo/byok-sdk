@@ -1,7 +1,7 @@
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs, readFileSync } from 'node:fs';
 import { spawn as realSpawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -31,6 +31,7 @@ import { AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS } from '../daemon/task-runner/stat
 import { sealRuntimeOperationManifest } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+import { npmNodeShim } from './fixtures/npm-node-shim';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -45,6 +46,21 @@ const RUNTIME_FIXTURES = {
 } as const;
 
 const roots: string[] = [];
+
+/**
+ * Windows cannot spawn a `.mjs` file. Claude and Codex fixtures are reached
+ * through an npm-style `.cmd` node shim, as an installed runtime is; Pi runs
+ * its fixture as a `package` entry under node.
+ */
+async function runtimeCommand(runtime: 'claude' | 'codex'): Promise<string> {
+  if (process.platform !== 'win32') return RUNTIME_FIXTURES[runtime];
+  const bin = await makeRoot();
+  const entry = `${runtime}-entry.mjs`;
+  await fs.writeFile(path.join(bin, entry), `await import(${JSON.stringify(pathToFileURL(RUNTIME_FIXTURES[runtime]).href)});\n`);
+  const shim = path.join(bin, `${runtime}.cmd`);
+  await fs.writeFile(shim, npmNodeShim(entry));
+  return shim;
+}
 
 async function makeRoot(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-agent-home-'));
@@ -997,14 +1013,15 @@ describe('SDK-owned Agent home contract', () => {
         }
         return realSpawn(command, args, options);
       }) as never;
+      const command = runtime === 'pi' ? RUNTIME_FIXTURES.pi : await runtimeCommand(runtime);
       const adapter = runtime === 'pi'
         ? new PiAdapter({
-            resolveBin: () => ({ command: RUNTIME_FIXTURES.pi, source: 'env' }),
+            resolveBin: () => ({ command, source: process.platform === 'win32' ? 'package' : 'env' }),
             spawnFn,
           })
         : runtime === 'claude'
-          ? new ClaudeAdapter({ resolveBin: () => ({ command: RUNTIME_FIXTURES.claude, source: 'path' }), spawnFn })
-          : new CodexAdapter({ resolveBin: () => ({ command: RUNTIME_FIXTURES.codex, source: 'path' }), spawnFn });
+          ? new ClaudeAdapter({ resolveBin: () => ({ command, source: 'path' }), spawnFn })
+          : new CodexAdapter({ resolveBin: () => ({ command, source: 'path' }), spawnFn });
       const session = await startPreparedOperation(
         adapter,
         { instruction: 'verify cwd' },
