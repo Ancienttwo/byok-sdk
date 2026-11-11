@@ -101,6 +101,8 @@ export interface ModelRouteHostEntry {
   /** `pi_model` without `thinkingLevel`. */
   readonly config: unknown;
   readonly input: readonly PiCatalogModelInput[];
+  /** The thinking level a draft takes when this entry is selected. One of the levels its `config` supports. */
+  readonly default_thinking_level?: PiThinkingLevel;
 }
 
 /** Product choices a Host passes in, instead of forking SDK data. */
@@ -133,8 +135,9 @@ export interface ModelRouteContext {
 
 /**
  * A context over the pinned Pi catalog. A policy that lists one vendor, api
- * and model in two Host entries, or a Host entry whose model id a profile
- * cannot hold, is a Host programming error and throws.
+ * and model in two Host entries, a Host entry whose model id a profile cannot
+ * hold, or one whose `default_thinking_level` its config does not support, is
+ * a Host programming error and throws.
  */
 export function modelRouteContext(input: {
   readonly stored?: ModelRouteStoredProfile | null;
@@ -464,9 +467,12 @@ function withModel(draft: ModelRouteDraft, model: string, api: PiModelApi | unde
   const matches = modelChoices(draft, context).filter((entry) => entry.value === model && (api === undefined || entry.api === api));
   const choice = matches.length === 1 ? matches[0]! : undefined;
   if (choice?.status === 'representable') {
+    const declared = choice.source === 'host'
+      ? context.policy.overrides?.find((entry) => entry.provider_kind === draft.provider_kind && entry.api === choice.api && entry.model === model)?.default_thinking_level
+      : undefined;
     return withDefaultThinking({
       ...draft, model, model_api: choice.api, model_source: choice.source, pi_model: null, capabilities: [],
-    }, choice.thinking_levels, false);
+    }, choice.thinking_levels, false, declared);
   }
   if (choice === undefined && matches.length > 1) return { ...draft, ...NO_MODEL, model };
   return { ...draft, ...MANUAL_MODEL, model };
@@ -481,10 +487,14 @@ function modelAllowed(draft: ModelRouteDraft, model: string, policy: ModelRouteP
 /**
  * `off` when it is the model's only level, as the schema then requires; Pi's
  * own default level when the model supports it; otherwise no level, so the
- * user chooses one. `keep` retains a current level the model supports.
+ * user chooses one. `keep` retains a current level the model supports; a Host
+ * entry's `declared` level comes next, before those rules.
  */
-function withDefaultThinking(draft: ModelRouteDraft, levels: readonly PiThinkingLevel[], keep: boolean): ModelRouteDraft {
+function withDefaultThinking(
+  draft: ModelRouteDraft, levels: readonly PiThinkingLevel[], keep: boolean, declared?: PiThinkingLevel,
+): ModelRouteDraft {
   if (keep && draft.thinking_level !== null && levels.includes(draft.thinking_level)) return draft;
+  if (declared !== undefined) return { ...draft, thinking_level: declared };
   if (levels.length === 1 && levels[0] === 'off') return { ...draft, thinking_level: 'off' };
   return { ...draft, thinking_level: levels.includes(PI_DEFAULT_THINKING_LEVEL) ? PI_DEFAULT_THINKING_LEVEL : null };
 }
@@ -589,6 +599,9 @@ function assertHostEntries(policy: ModelRoutePolicy): void {
       throw new Error(`model-route policy lists the Host entry ${entry.provider_kind} ${entry.api} ${entry.model} twice`);
     }
     seen.add(key);
+    if (entry.default_thinking_level !== undefined && !manualThinkingLevels(entry.config).includes(entry.default_thinking_level)) {
+      throw new Error(`model-route policy declares the unsupported default thinking level ${JSON.stringify(entry.default_thinking_level)} on the Host entry ${entry.provider_kind} ${entry.api} ${entry.model}`);
+    }
   }
 }
 

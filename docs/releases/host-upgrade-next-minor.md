@@ -448,3 +448,7 @@ On Windows, the SDK now refuses a configured root that passes through a symbolic
 Before, a `hostStorageRoot` behind a link was followed silently, and relocation already refused the same root. A `storeDir` behind a link failed later in the scratch, retention or relocation checks. Subst drives, mapped network drives and mount points to a volume with a drive letter still resolve to their final path. A mount point to a volume with no drive letter is expected to fail construction. A subst or mapped drive whose backing path contains a link is still followed, because only the configured spelling is checked. POSIX keeps its trusted-link rule.
 
 Before upgrading a Windows Host, check every configured root for a link in its existing ancestors, for example with `dir /AL` on each parent or `(Get-Item <path>).LinkType` in PowerShell. Point a linked setting at the physical directory, the link's target. Roots without a link keep their identities. Changing `storeDir` to its physical spelling changes its control pipe name and Agent-home owner id, so stop the daemon before changing it.
+
+## Host model-route entries can declare a default thinking level
+
+`ModelRouteHostEntry` accepts an optional `default_thinking_level` (#1856), additive. A Host that keeps its own default-level rule for a Host entry can move it onto the entry; the level must be one its `config` supports, or `modelRouteContext` throws. Entries without the field behave as before.
