@@ -1,22 +1,29 @@
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
-import { BRIDGE_VERSION, BridgeError, decodeMessage, encodeMessage, type BridgeMethods, type BridgeResponse } from './protocol.ts';
+import type { MethodHandlers, MethodTable } from './domain.ts';
+import { BRIDGE_VERSION, BridgeError, decodeMessage, encodeMessage, type BridgeResponse, type HostMethods } from './protocol.ts';
 
-/** What a Host implements behind the bridge. Params are validated here, at the Host boundary. */
-export interface BridgeHandlers {
+/** What a Host implements behind the bridge. Params are validated by each method handler, at the Host boundary. */
+export interface BridgeHandlers<M extends MethodTable<M> = HostMethods> {
   /** Called once, after main's hello passed; the Host starts its work only then. */
   greeted(): void;
-  status(): BridgeMethods['status']['result'] | Promise<BridgeMethods['status']['result']>;
+  /** Every method besides `hello` and `shutdown`. A method not listed here is refused as `unknown_method`. */
+  methods: MethodHandlers<M>;
   /** Stops the Host; the bridge replies, then stops reading. */
   shutdown(): Promise<void>;
 }
+
+/** A handler failure answers its call only; the bridge keeps serving. */
+const callFailure = (error: unknown): BridgeError => error instanceof BridgeError && error.code === 'invalid_params'
+  ? error
+  : new BridgeError('method_failed', error instanceof Error ? error.message : String(error));
 
 /**
  * The Host's end of the bridge. Resolves after `shutdown` or when main closes
  * the pipe; rejects after replying to a hello from another bridge version, or on
  * a malformed line, so the Host exits non-zero.
  */
-export function serveBridge(handlers: BridgeHandlers, io: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
+export function serveBridge<M extends MethodTable<M> = HostMethods>(handlers: BridgeHandlers<M>, io: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
   const lines = createInterface({ input: io.input });
   const reply = (response: BridgeResponse) => io.output.write(encodeMessage(response));
   let greeted = false;
@@ -45,14 +52,28 @@ export function serveBridge(handlers: BridgeHandlers, io: { input: Readable; out
           return;
         }
         if (!greeted) throw new BridgeError('hello_required', 'The first bridge call must be hello');
-        if (message.method === 'status') { reply({ id, result: await handlers.status() }); return; }
         if (message.method === 'shutdown') {
           await handlers.shutdown();
           reply({ id, result: null });
           stop();
           return;
         }
-        reply({ id, error: { code: 'unknown_method', message: `Unknown bridge method ${String(message.method)}` } });
+        const method = typeof message.method === 'string' && Object.hasOwn(handlers.methods, message.method)
+          ? (handlers.methods as Record<string, (params: unknown) => unknown>)[message.method]
+          : undefined;
+        if (!method) {
+          reply({ id, error: { code: 'unknown_method', message: `Unknown bridge method ${String(message.method)}` } });
+          return;
+        }
+        let result: unknown;
+        try {
+          result = await method(message.params);
+        } catch (error) {
+          const failure = callFailure(error);
+          reply({ id, error: { code: failure.code, message: failure.message } });
+          return;
+        }
+        reply({ id, result });
       } catch (error) {
         const failure = error instanceof BridgeError ? error : new BridgeError('invalid_message', String(error));
         reply({ id, error: { code: failure.code, message: failure.message } });

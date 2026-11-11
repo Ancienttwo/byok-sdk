@@ -1,11 +1,12 @@
 import { mkdir, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  createDaemonWithAdapters, DaemonHaltError, type Daemon, type DeviceCredentialBackend,
+  createDaemonWithAdapters, DaemonHaltError, type Daemon, type DaemonConfig, type DeviceCredentialBackend,
   type RuntimeEnvironmentPolicy, type SdkHelperHostConfig,
 } from '@byok-sdk/client';
 import { createRuntimeAdapters } from '@byok-sdk/client/adapters';
 import { createByokServer, listenLoopback, type LoopbackPortStore } from '@byok-sdk/server';
+import { composeDomains, type ComposedDomains } from './domains.ts';
 import { precheckHostStores } from './precheck.ts';
 
 export interface HostCompositionOptions {
@@ -22,10 +23,11 @@ export interface HostCompositionOptions {
   readonly deviceCredentials?: DeviceCredentialBackend;
 }
 
-/** The running server and daemon of one Host process. */
+/** The running server, daemon and bridge domains of one Host process. */
 export interface ComposedHost {
   readonly daemon: Daemon;
-  /** Stops the daemon, then the loopback listener, then the server. */
+  readonly domains: ComposedDomains;
+  /** Closes the domains, then stops the daemon, the loopback listener and the server. */
   close(): Promise<void>;
 }
 
@@ -113,7 +115,15 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
     throw error;
   });
   let daemon: Daemon | undefined;
+  let domains: ComposedDomains | undefined;
   const close = async () => {
+    try {
+      await domains?.close();
+    } finally {
+      await stopDaemon();
+    }
+  };
+  const stopDaemon = async () => {
     try {
       await daemon?.stop();
     } finally {
@@ -126,7 +136,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
       ...(options.sdkHelperHost ? { sdkHelperHost: options.sdkHelperHost } : {}),
       runtimes: { pi: { runtimeEnvironment: LOGIN_SHELL }, claude: { runtimeEnvironment: LOGIN_SHELL }, codex: { runtimeEnvironment: LOGIN_SHELL } },
     });
-    daemon = createDaemonWithAdapters({
+    const daemonConfig: DaemonConfig = {
       productId: options.productId,
       productName: options.productName,
       serverUrl: listener.serverUrl,
@@ -135,13 +145,17 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
       agentEgress: {},
       localAgentRelease: { version: options.releaseVersion },
       ...(options.sdkHelperHost ? { sdkHelperHost: options.sdkHelperHost } : {}),
-    }, adapters, options.deviceCredentials ? { deviceCredentials: options.deviceCredentials } : {});
+    };
+    daemon = createDaemonWithAdapters(daemonConfig, adapters, options.deviceCredentials ? { deviceCredentials: options.deviceCredentials } : {});
     const started = daemon;
     await startPaired(started, async () => {
       const { code } = await server.pairing.createPairingCode({ productId: options.productId });
       await started.pair(code);
     });
-    return { daemon: started, close };
+    domains = await composeDomains({
+      daemon: started, daemonConfig, server, storeDir: options.storeDir, hostStorageRoot: options.hostStorageRoot,
+    });
+    return { daemon: started, domains, close };
   } catch (error) {
     await close();
     if (error instanceof DaemonHaltError) throw new HostStoppedError(`Daemon halted at start: ${error.reason}`, { cause: error });

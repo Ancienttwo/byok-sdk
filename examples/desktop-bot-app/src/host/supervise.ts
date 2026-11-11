@@ -7,8 +7,9 @@ import type { Readable, Writable } from 'node:stream';
 import { bundledSdkHelperHost, resolveHostLayout, runSdkReservedHelperCommand } from '@byok-sdk/client';
 import brand from '../../brand.config.ts';
 import manifest from '../../package.json' with { type: 'json' };
+import { joinHandlers } from '../bridge/domain.ts';
 import { encodeMessage, type HostState } from '../bridge/protocol.ts';
-import { serveBridge } from '../bridge/server.ts';
+import { serveBridge, type BridgeHandlers } from '../bridge/server.ts';
 import { composeHost, HostStoppedError, type ComposedHost, type HostCompositionOptions } from './compose.ts';
 import { HostStoreRefusedError } from './precheck.ts';
 
@@ -29,6 +30,18 @@ export async function superviseHost(
     io.output.write(encodeMessage({ event: 'state', state }));
   };
   let composing: Promise<ComposedHost | undefined> = Promise.resolve(undefined);
+  const status = () => state;
+  /** The bridge methods: `status`, and the domain methods while the Host runs (cleared when closing starts). */
+  let methods: Record<string, (params: unknown) => unknown> = { status };
+  /** Domain calls in flight; closing waits for them before the domains close. */
+  const inflight = new Set<Promise<unknown>>();
+  const track = (handler: (params: unknown) => unknown) => (params: unknown) => {
+    const call = Promise.resolve().then(() => handler(params));
+    inflight.add(call);
+    // The caller gets the outcome through the bridge reply; this only forgets the settled call.
+    call.then(() => inflight.delete(call), () => inflight.delete(call));
+    return call;
+  };
   let crash: (error: unknown) => void = () => {};
   const crashed = new Promise<never>((_resolve, reject) => { crash = reject; });
 
@@ -48,13 +61,28 @@ export async function superviseHost(
         : { state: 'running', pid: process.pid, activeWork: status.activeTaskCount };
       if (JSON.stringify(next) !== JSON.stringify(state)) push(next);
     };
+    let served: typeof methods;
+    try {
+      served = joinHandlers({ status }, Object.fromEntries(Object.entries(host.domains.handlers).map(([name, handler]) => [name, track(handler as (params: unknown) => unknown)])));
+    } catch (error) {
+      await host.close();
+      throw error;
+    }
     host.daemon.subscribe(observe);
     observe();
+    if (!closing) methods = served;
     return host;
   };
 
   let closing: Promise<void> | undefined;
-  const close = () => closing ??= composing.then(host => host?.close());
+  const close = () => {
+    methods = { status };
+    return closing ??= (async () => {
+      const host = await composing;
+      await Promise.allSettled(inflight);
+      await host?.close();
+    })();
+  };
 
   await Promise.race([crashed, serveBridge({
     greeted: () => {
@@ -62,7 +90,8 @@ export async function superviseHost(
       composing = compose();
       composing.catch(crash);
     },
-    status: () => state,
+    // Read on every call: the domain methods exist only while the Host runs, and are `unknown_method` before and after.
+    get methods() { return methods as BridgeHandlers['methods']; },
     shutdown: close,
   }, io)]);
   await close();

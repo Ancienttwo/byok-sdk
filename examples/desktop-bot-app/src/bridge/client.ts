@@ -1,7 +1,8 @@
 import type { ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 import { createInterface } from 'node:readline';
-import { BRIDGE_VERSION, BridgeError, decodeHostMessage, encodeMessage, type BridgeMethod, type BridgeMethods, type HostState } from './protocol.ts';
+import type { MethodTable } from './domain.ts';
+import { BRIDGE_VERSION, BridgeError, decodeHostMessage, encodeMessage, type BridgeMethods, type CoreMethods, type HostState } from './protocol.ts';
 
 /** A Host child spawned with piped stdin and stdout; stderr is the Host's diagnostics. */
 export type HostChild = ChildProcessByStdio<Writable, Readable, null>;
@@ -9,7 +10,7 @@ export type HostChild = ChildProcessByStdio<Writable, Readable, null>;
 interface Pending { resolve(value: unknown): void; reject(error: Error): void }
 
 /** Main's end of the bridge to one Host child. */
-export class BridgeClient {
+export class BridgeClient<M extends MethodTable<M> & CoreMethods = BridgeMethods> {
   readonly #child: HostChild;
   readonly #pending = new Map<number, Pending>();
   readonly exited: Promise<number | null>;
@@ -47,8 +48,8 @@ export class BridgeClient {
    * Says hello before any other call. A Host on another bridge version is
    * killed and the connect rejects. `onState` receives every Host state push.
    */
-  static async connect(child: HostChild, onState: (state: HostState) => void = () => {}): Promise<BridgeClient> {
-    const client = new BridgeClient(child, onState);
+  static async connect<M extends MethodTable<M> & CoreMethods = BridgeMethods>(child: HostChild, onState: (state: HostState) => void = () => {}): Promise<BridgeClient<M>> {
+    const client = new BridgeClient<M>(child, onState);
     try {
       const { bridgeVersion } = await client.call('hello', { bridgeVersion: BRIDGE_VERSION });
       if (bridgeVersion !== BRIDGE_VERSION) {
@@ -61,7 +62,7 @@ export class BridgeClient {
     return client;
   }
 
-  call<M extends BridgeMethod>(method: M, params: BridgeMethods[M]['params']): Promise<BridgeMethods[M]['result']> {
+  call<K extends keyof M & string>(method: K, params: M[K]['params']): Promise<M[K]['result']> {
     if (this.#closed) return Promise.reject(this.#closed);
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
