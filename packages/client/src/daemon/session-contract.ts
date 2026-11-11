@@ -31,7 +31,6 @@ export function bindDeclaredSessionMembers(descriptor: RuntimeAdapterDescriptor,
     if (typeof session.progressStartsMessage !== 'function') {
       throw new RuntimeExecutionFailure({
         phase: 'start',
-        category: 'authority',
         retry: 'non-retryable',
         reason: `runtime_session_incomplete: runtime "${descriptor.id}" declares progressMessageBoundary "session" but its Session has no progressStartsMessage()`,
       });

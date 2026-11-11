@@ -28,17 +28,17 @@ export interface DurableStart {
  * carry runtime output. A worker that ended on its own before its start
  * receipt is `runtime_exited` (#869); any other start failure is `unknown`.
  */
-const startFailure = (category: 'authority' | 'infrastructure', reason = 'durable runtime start failed', exited = false, cause?: unknown) =>
-  new RuntimeExecutionFailure({ phase: 'start', category, retry: 'non-retryable', reason,
+const startFailure = (reason = 'durable runtime start failed', exited = false, cause?: unknown) =>
+  new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason,
     failure: { class: exited ? 'runtime_exited' : 'unknown' } }, { cause });
 export async function startDurablePi(options: DurableStart): Promise<Session> {
   const { input, runtimeLaunch, launcher } = options;
   const context = input.durableContext;
   const manifest = input.manifest;
   if (!context || !manifest.agentRef || !manifest.lease || runtimeLaunch.credentialSource !== 'keys-profile' || runtimeLaunch.kind !== 'pi-durable'
-    || manifest.cwd !== manifest.lease.canonicalHome || input.signal?.aborted) throw startFailure('authority', 'durable requires current Agent lease and credential custody');
+    || manifest.cwd !== manifest.lease.canonicalHome || input.signal?.aborted) throw startFailure('durable requires current Agent lease and credential custody');
   const selection = manifest.dispatchSelection;
-  if (!selection || (selection.lane !== 'byok' && selection.lane !== 'byok-profile')) throw startFailure('authority', 'durable requires BYOK selection');
+  if (!selection || (selection.lane !== 'byok' && selection.lane !== 'byok-profile')) throw startFailure('durable requires BYOK selection');
   const binding = { agentRef: { ...manifest.agentRef, tenantId: context.tenantId }, taskId: manifest.taskId, leaseId: manifest.lease.leaseId, canonicalHome: manifest.lease.canonicalHome };
   const configDir = input.scratch.sdkDir;
   const configPath = path.join(configDir, 'config.json');
@@ -52,7 +52,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   try {
     gate = input.toolAuthorization === undefined ? undefined : await startToolAuthorizationIpc(input.toolAuthorization);
     if (gate?.fileScope !== undefined && gate.fileScope.home.path !== binding.canonicalHome) {
-      throw startFailure('authority', 'durable file scope home does not match the manifest lease');
+      throw startFailure('durable file scope home does not match the manifest lease');
     }
     serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 5,
       replica: binding, replicaRoot: options.replicaRoot,
@@ -66,7 +66,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   } catch (error) {
     await gate?.close();
     if (error instanceof RuntimeExecutionFailure) throw error;
-    throw startFailure('infrastructure', undefined, false, error);
+    throw startFailure(undefined, false, error);
   }
   const shellGroups = new Set<number>();
   let workerPid: number | undefined;
@@ -179,7 +179,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
       } catch (error) {
         if (!closing) {
           recovery.stop();
-          failure = new RuntimeExecutionFailure({ phase: 'run', category: 'authority', retry: 'non-retryable',
+          failure = new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable',
             reason: interrupted ? 'durable runtime was interrupted during a model request' : 'durable runtime failed or recovery was refused',
             failure: { class: interrupted || crashed || exitedBeforeReceipt ? 'runtime_exited' : 'unknown' } }, { cause: error });
           queue.push({ type: 'error', message: failure.message }); queue.end();
@@ -189,7 +189,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   } catch (error) {
     const exited = exitedBeforeReceipt;
     await close();
-    throw startFailure('infrastructure', undefined, exited, error);
+    throw startFailure(undefined, exited, error);
   }
   return { sessionRef: manifest.taskId, events: (async function*(){for await(const event of queue)yield event;if(failure)throw failure;})(),
     steer: async () => { throw new Error('durable steering is outside slice 1'); },

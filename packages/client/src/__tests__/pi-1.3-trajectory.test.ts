@@ -192,7 +192,7 @@ describe('Octop T0: synthetic RPC records through the real SDK parser and mapper
     expect(mapped.filter(event => event.type === 'turn_end')).toHaveLength(scenario === 'normal' || scenario === 'tool-error' ? 1 : 0);
     if (scenario === 'interrupted') {
       expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-      expect(failure).toMatchObject({ category: 'semantic', retry: 'non-retryable' });
+      expect(failure).toMatchObject({ retry: 'non-retryable' });
     } else expect(failure).toBeUndefined();
     expect(raw.filter(frame => frame.type === 'agent_settled')).toHaveLength(scenario === 'killed' ? 0 : 1);
   });

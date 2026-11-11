@@ -2,7 +2,7 @@ import { RuntimeExecutionFailure } from '../runtime-failure';
 import type { RawAcpSession } from '../runtime/acp-session-runtime';
 
 function failure(reason: string): RuntimeExecutionFailure {
-  return new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason });
+  return new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason });
 }
 
 export class RetainedRecordBudget {

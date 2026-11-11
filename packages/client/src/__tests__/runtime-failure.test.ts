@@ -23,10 +23,9 @@ const teardownIsNotExecutionPhase = (): RuntimeFailurePhase => {
 void teardownIsNotExecutionPhase;
 
 describe('RuntimeExecutionFailure', () => {
-  it('projects the explicit retry disposition without inferring from category or reason text', () => {
+  it('projects the explicit retry disposition without inferring from reason text', () => {
     const failure = new RuntimeExecutionFailure({
       phase: 'run',
-      category: 'semantic',
       retry: 'non-retryable',
       reason: 'temporary network words are diagnostic text only',
     });
@@ -52,7 +51,6 @@ describe('RuntimeExecutionFailure', () => {
   it('fails closed when a typed failure crosses the wrong lifecycle phase', () => {
     const failure = new RuntimeExecutionFailure({
       phase: 'start',
-      category: 'infrastructure',
       retry: 'retryable',
       reason: 'start transport unavailable',
     });
@@ -67,14 +65,12 @@ describe('RuntimeExecutionFailure', () => {
   it('rejects invalid JavaScript construction and freezes valid failure authority', () => {
     expect(() => new RuntimeExecutionFailure({
       phase: 'run',
-      category: 'infrastructure',
       retry: 'sometimes' as never,
       reason: 'invalid retry disposition',
     })).toThrow(/invalid RuntimeExecutionFailure input/);
 
     const failure = new RuntimeExecutionFailure({
       phase: 'start',
-      category: 'authority',
       retry: 'non-retryable',
       reason: 'manifest mismatch',
     });
@@ -82,7 +78,7 @@ describe('RuntimeExecutionFailure', () => {
   });
 
   it('carries a runtime failure class verbatim and rejects one the wire would refuse (#869)', () => {
-    const base = { phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'quota' } as const;
+    const base = { phase: 'run', retry: 'non-retryable', reason: 'quota' } as const;
     const quota = new RuntimeExecutionFailure({ ...base, failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' } });
     expect(projectRuntimeExecutionFailure(quota).failure).toEqual({ class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' });
     expect(Object.isFrozen(quota.failure)).toBe(true);
@@ -123,18 +119,18 @@ describe('RuntimeExecutionFailure', () => {
 describe('runtime start failures', () => {
   const classify = oarStartClassifier({ SessionNotFoundError, SessionUnavailableError, UnsupportedOptionError, RuntimeFailureError });
   const details = { method: 'resume', native: {} };
-  const typed = new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'retryable', reason: 'typed', failure: { class: 'quota' } });
+  const typed = new RuntimeExecutionFailure({ phase: 'run', retry: 'retryable', reason: 'typed', failure: { class: 'quota' } });
   it.each([
-    [typed, 'semantic', 'retryable', 'quota', 'typed'],
-    [new SessionNotFoundError('id', 'missing', details), 'authority', 'non-retryable', 'unknown', 'missing'],
-    [new SessionUnavailableError('id', 'archived', { ...details, reason: 'archived' }), 'authority', 'non-retryable', 'unknown', 'archived'],
-    [new SessionUnavailableError('id', 'in use', { ...details, reason: 'in_use' }), 'infrastructure', 'retryable', 'unknown', 'in use'],
-    [new UnsupportedOptionError('model', 'unsupported'), 'authority', 'non-retryable', 'unknown', 'unsupported'],
-    [new RuntimeFailureError('auth', 'login'), 'authority', 'non-retryable', 'auth', 'login'],
-    [new Error('exit'), 'infrastructure', 'retryable', 'runtime_exited', 'exit'],
-  ])('classifies %s', (error, category, retry, failureClass, message) => {
+    [typed, 'retryable', 'quota', 'typed'],
+    [new SessionNotFoundError('id', 'missing', details), 'non-retryable', 'unknown', 'missing'],
+    [new SessionUnavailableError('id', 'archived', { ...details, reason: 'archived' }), 'non-retryable', 'unknown', 'archived'],
+    [new SessionUnavailableError('id', 'in use', { ...details, reason: 'in_use' }), 'retryable', 'unknown', 'in use'],
+    [new UnsupportedOptionError('model', 'unsupported'), 'non-retryable', 'unknown', 'unsupported'],
+    [new RuntimeFailureError('auth', 'login'), 'non-retryable', 'auth', 'login'],
+    [new Error('exit'), 'retryable', 'runtime_exited', 'exit'],
+  ])('classifies %s', (error, retry, failureClass, message) => {
     const result = runtimeStartFailure(error, { classify, exitedOnItsOwn: true, runtime: 'codex' });
-    expect(result).toMatchObject({ phase: 'start', category, retry, failure: { class: failureClass }, message, cause: error });
+    expect(result).toMatchObject({ phase: 'start', retry, failure: { class: failureClass }, message, cause: error });
     expect(projectRuntimeBoundaryFailure(result, 'start').retryable).toBe(retry === 'retryable');
   });
   it('uses the runtime name for non-error throws and unknown for a live process', () => {
@@ -142,7 +138,7 @@ describe('runtime start failures', () => {
   });
   it('classifies a Hermes ACP error as non-retryable and an untyped Hermes error by its exit', () => {
     const rpc = new AcpRpcError('session/new', -32603, 'Internal error');
-    expect(runtimeStartFailure(rpc, { classify: hermesStartClass, exitedOnItsOwn: true, runtime: 'hermes' })).toMatchObject({ phase: 'start', category: 'infrastructure', retry: 'non-retryable', failure: { class: 'unknown' }, cause: rpc });
+    expect(runtimeStartFailure(rpc, { classify: hermesStartClass, exitedOnItsOwn: true, runtime: 'hermes' })).toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'unknown' }, cause: rpc });
     expect(runtimeStartFailure(new Error('not writable'), { classify: hermesStartClass, exitedOnItsOwn: true, runtime: 'hermes' })).toMatchObject({ retry: 'retryable', failure: { class: 'runtime_exited' } });
   });
 });

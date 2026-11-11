@@ -177,8 +177,10 @@ reconciler `changed` callbacks to the deployment's scope sync, as for Bot Turns.
 and a terminal committed through the store also project an immediately due scope.
 
 User Turns use the shared K8 `userFirst` rule and autonomous set: they overtake unsubmitted routine,
-bot_request and dream intents in their Agent FIFO. Submitted work keeps its order. H does not
-yet apply L's `admitDeviceSlot` reservation. Dream records live in one `dream_state` row per scope,
+bot_request and dream intents in their Agent FIFO. Submitted work keeps its order. The submitter applies the shared K8
+`admitDeviceSlot` rule as L does: with `deviceConcurrency` (default 8, in the submitter options) slots per device and
+scope, a row that is not user-source leaves one slot free, and a row with no slot waits as a FIFO head with no backoff. A
+row holds a slot once it is tried and has delivery or attempt evidence. Dream records live in one `dream_state` row per scope,
 read and written in the same transaction as its intents. `store.migrate()` creates the table; it no longer
 moves frame dreams into it, so a store with frame dreams runs v0.41.0 `migrate()` first (#1669).
 Dream state does not count toward the 4096-byte frame limit. Discarding an uncommitted import
@@ -416,6 +418,12 @@ L lets the Host run its own work on the K4 core (`enqueueHostIntent`, #882). H d
   unknown key, a settled row (also one that this reconciliation concluded), and a row with no refused terminal; another
   error of the reconciliation is thrown as it is. The entry's `failStuckIntent` checks the owner, calls it, then syncs,
   so a Bot Turn ends `failed`.
+- `HostedCollaborationStore.cancelHostIntent(scope, key, clock)` is L's owner `cancelHostIntent` (#1320), with the same
+  answers from K8 `hostIntentCancelAnswer`, in one transaction under the scope lock. A settled row returns
+  `already_settled` with its conclusion and writes nothing. An untried row concludes `cancelled` and returns `cancelled`:
+  no handler runs, and its FIFO moves on. A tried row keeps the cancel reason and returns `cancel_pending`; the reconciler
+  sends the SDK cancel and settles it at its terminal. It refuses with `HostIntentError`: `not_host_intent` for a Bot Turn
+  key, `unknown_intent` for a key with no Host intent row. It is a Host call: the Host checks the owner, then syncs.
 
 ## Device binding
 

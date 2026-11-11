@@ -69,9 +69,9 @@ export interface AgyAdapterOptions {
 }
 
 const authority = (reason: string) =>
-  new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+  new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 const infrastructure = (reason: string, failure?: TaskFailure) =>
-  new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason, failure });
+  new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason, failure });
 
 /**
  * The Antigravity CLI over its native ACP
@@ -328,14 +328,13 @@ class AgySession implements Session {
       if (turn.kind === 'failed') {
         this.fail(new RuntimeExecutionFailure({
           phase: 'run',
-          category: 'semantic',
           retry: !turn.fromText && turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
           reason: turn.reason,
           // A class OAR took from error text is not structured evidence (docs/spec.md runtime failure class).
           failure: { class: turn.fromText ? 'unknown' : turn.failure },
         }));
       } else if (turn.kind === 'completed' && refused !== undefined) {
-        this.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: refused.reason }));
+        this.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: refused.reason }));
       } else {
         this.queue.push({ type: 'turn_end' });
       }

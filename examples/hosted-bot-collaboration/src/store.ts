@@ -18,7 +18,8 @@ import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } 
 import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefusal, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION } from './ddl';
-import { delegationCancelAnswer, turnCancelAnswer, type DelegationCancelResult, type TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
+import { delegationCancelAnswer, hostIntentCancelAnswer, turnCancelAnswer, type DelegationCancelResult, type IntentCancelResult,
+  type TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
 import { cancelIntent, commandIntentFacts, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { syncDreamSlice } from './dreams';
 import { HostedStoreVersionError, inSchema, lockScope, SCHEMA } from './transaction';
@@ -91,6 +92,8 @@ export class InboundCommandError extends Error {
  * It is Host configuration from verified identity, never a field of the message.
  */
 export interface InboundIdentity { owner: string; self?: Record<string, readonly string[]> }
+/** The one-shot row migrations of `migrate()` (#1756). */
+export interface MigrateResult { wouldDoBackfilled: number; wouldDoArchived: number }
 export interface HostedStoreOptions {
   /**
    * The Host config of a scope: its model templates and read-only toolsets (#793 S9). Every port and sync reads it. A store
@@ -264,9 +267,12 @@ export class HostedCollaborationStore {
     this.timers = timers && { cancelGraceMs: timers.cancelGraceMs, uncertainAfterMs: timers.uncertainAfterMs };
   }
 
-  /** Creates the schema and its tables when they are absent. */
-  async migrate(): Promise<void> {
-    await this.transaction(async client => {
+  /**
+   * Creates the schema and its tables when they are absent, and runs the one-shot row migrations. `wouldDoArchived` counts
+   * the would-do rows that no live Turn owns any more (#1756): they move to the archived rows instead of getting a `turnId`.
+   */
+  async migrate(): Promise<MigrateResult> {
+    return await this.transaction(async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`hosted-collaboration:${this.schema}`]);
       await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
       await client.query(DDL);
@@ -287,6 +293,32 @@ export class HostedCollaborationStore {
         frame.wouldDo = {};
         await client.query('UPDATE scope SET frame = $2::json WHERE scope = $1', [row.scope, JSON.stringify(frame)]);
       }
+      // A would-do row written before #1756 has no `turnId`. The K4 task id names it exactly: the CHECKs pin each intent and
+      // earlier-generation task_id to taskId(key, generation), and a Turn's intent key is the Turn id. A row whose intent
+      // was compacted, or whose Turn left the state, has no live owner: it is archived, as retention would move it.
+      const rows = await client.query<{ scope: string; state_version: number; key: string; body: string; turn: string | null }>(
+        `SELECT e.scope, s.state_version, e.key, e.body::text, owner.key AS turn FROM entity e JOIN scope s ON s.scope = e.scope
+         LEFT JOIN LATERAL (SELECT task.key FROM (SELECT key, task_id FROM intent WHERE scope = e.scope
+           UNION ALL SELECT key, task_id FROM intent_execution WHERE scope = e.scope) task
+           JOIN entity turn ON turn.scope = e.scope AND turn.kind = 'turn' AND turn.key = task.key
+           WHERE task.task_id = e.body ->> 'taskId') owner ON true
+         WHERE e.kind = 'would_do' AND e.body::jsonb ->> 'turnId' IS NULL ORDER BY e.scope, e.key FOR UPDATE OF s, e`);
+      const result: MigrateResult = { wouldDoBackfilled: 0, wouldDoArchived: 0 };
+      for (const row of rows.rows) {
+        if (row.state_version !== STORE_VERSION) throw new HostedStoreVersionError(row.state_version);
+        const body = JSON.parse(row.body) as Record<string, unknown>;
+        if (row.turn === null) {
+          await client.query(`INSERT INTO archived_row (scope, namespace, id, body, expires_at) VALUES ($1, 'wouldDo', $2, $3::json, NULL)
+            ON CONFLICT (scope, namespace, id) DO UPDATE SET body = excluded.body`, [row.scope, row.key, row.body]);
+          await client.query(`DELETE FROM entity WHERE scope = $1 AND kind = 'would_do' AND key = $2`, [row.scope, row.key]);
+          result.wouldDoArchived++;
+        } else {
+          await client.query(`UPDATE entity SET body = $3::json WHERE scope = $1 AND kind = 'would_do' AND key = $2`,
+            [row.scope, row.key, JSON.stringify({ ...body, turnId: idOf(row.turn) })]);
+          result.wouldDoBackfilled++;
+        }
+      }
+      return result;
     }, false);
   }
 
@@ -1708,6 +1740,28 @@ export class HostedCollaborationStore {
 
   private transaction<T>(work: (client: PoolClient) => Promise<T>, readOnly: boolean): Promise<T> {
     return inSchema(this.pool, this.schema, work, readOnly);
+  }
+
+  /**
+   * Host API (#1320): cancels a Host intent with L's `cancelHostIntent` answers (K8 `hostIntentCancelAnswer`), in one
+   * transaction under the scope lock. A settled intent returns `already_settled` and writes nothing. An untried intent
+   * concludes `cancelled` (`cancelIntent`): no handler runs, and its FIFO moves on. A tried intent keeps the cancel reason
+   * and returns `cancel_pending`: the reconciler sends the SDK cancel and settles it at its terminal. Refuses with
+   * `HostIntentError`: `not_host_intent` for a Bot Turn key, `unknown_intent` for a key with no Host intent row.
+   */
+  cancelHostIntent(scope: string, key: string, clock: () => number): Promise<IntentCancelResult<Conclusion>> {
+    const scopeKey = storedKey(scope), stored = storedKey(key);
+    return this.change(scope, undefined, async (state, _publish, client) => {
+      const read = async () => (await client.query<{ handler: string | null; conclusion: Conclusion | null }>(
+        'SELECT handler, conclusion FROM intent WHERE scope = $1 AND key = $2', [scopeKey, stored])).rows[0];
+      const row = await read(), now = clock();
+      const settled = hostIntentCancelAnswer(key, Object.hasOwn(state.turns, key),
+        row && row.handler !== null ? (row.conclusion ? { conclusion: row.conclusion } : {}) : undefined);
+      if (settled) return { value: { key, ...settled }, outbox: [], now };
+      if (!await cancelIntent(client, scope, key, now)) return { value: { key, result: 'cancel_pending' }, outbox: [], now };
+      await switchDueVersions(client, scopeKey, now);
+      return { value: { key, result: 'cancelled', conclusion: (await read())!.conclusion! }, outbox: [], now };
+    });
   }
 }
 

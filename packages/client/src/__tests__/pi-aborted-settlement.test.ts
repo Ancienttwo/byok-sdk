@@ -133,7 +133,7 @@ const __executionScratch = inertScratch();
   session = await admitted.operation.start({ scratch: (runtimeLaunch).scratch,  kind: 'instruction', runtimeLaunch, manifest, instruction: offer.instruction, env: {}, mcpEnv: {} });
   return session.events[Symbol.asyncIterator]();
 }
-const abort = { phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'pi run aborted before completion' };
+const abort = { phase: 'run', retry: 'non-retryable', message: 'pi run aborted before completion' };
 const unavailable = { type: 'usage', contextSource: 'estimate' };
 
 describe('Pi aborted settlement statistics', () => {
@@ -175,7 +175,7 @@ describe('Pi aborted settlement statistics', () => {
     sandbox.stats = () => new Promise<PiRpcMessage>(() => {});
     const iterator = await events(false);
     const failure = expect(iterator.next()).rejects.toMatchObject({
-      phase: 'run', category: 'infrastructure', retry: 'retryable', message: 'pi get_session_stats response timed out',
+      phase: 'run', retry: 'retryable', message: 'pi get_session_stats response timed out',
     });
     await vi.advanceTimersByTimeAsync(1000);
     await failure;

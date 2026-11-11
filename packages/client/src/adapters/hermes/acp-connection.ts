@@ -32,7 +32,7 @@ export class AcpRpcError extends Error {
 
 /** Hermes start classifier: an ACP error answer is a non-retryable failure of unknown class. */
 export const hermesStartClass: RuntimeStartClassifier = (error) =>
-  error instanceof AcpRpcError ? { category: 'infrastructure', retry: 'non-retryable', failure: { class: 'unknown' } } : undefined;
+  error instanceof AcpRpcError ? { retry: 'non-retryable', failure: { class: 'unknown' } } : undefined;
 
 export class AcpMethodNotFound extends Error {
   constructor(method: string) {

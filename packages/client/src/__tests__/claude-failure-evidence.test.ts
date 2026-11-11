@@ -9,7 +9,7 @@ const RESETS_AT = new Date(RESETS_AT_SECONDS * 1000).toISOString();
 const rateLimit = (info: Record<string, unknown>): ClaudeStreamMessage => ({ type: 'rate_limit_event', rate_limit_info: info });
 const assistantError = (error: string): ClaudeStreamMessage => ({ type: 'assistant', message: { content: [] }, error });
 const failedResult = (status: number | null = null): ClaudeStreamMessage => ({ type: 'result', subtype: 'success', is_error: true, api_error_status: status });
-const turnFailure = () => new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'claude reported terminal task failure' });
+const turnFailure = () => new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: 'claude reported terminal task failure' });
 
 /** Feeds one turn's frames and returns the failure attached at its result. */
 function classify(evidence: ClaudeFailureEvidence, frames: readonly ClaudeStreamMessage[]): RuntimeExecutionFailure {
@@ -47,13 +47,13 @@ describe('ClaudeFailureEvidence (#869)', () => {
     expect(attached.failure).toEqual(failure);
   });
 
-  it('keeps the reason, phase, category, retry and cause of the failure it decorates', () => {
+  it('keeps the reason, phase, retry and cause of the failure it decorates', () => {
     const evidence = new ClaudeFailureEvidence();
     for (const frame of [assistantError('authentication_failed'), failedResult(401)]) evidence.observe(frame);
     const cause = new Error('underlying');
-    const original = new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'claude reported terminal task failure' }, { cause });
+    const original = new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: 'claude reported terminal task failure' }, { cause });
     const attached = evidence.attach(failedResult(401), original);
-    expect(attached).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'claude reported terminal task failure', failure: { class: 'auth' } });
+    expect(attached).toMatchObject({ phase: 'run', retry: 'non-retryable', message: 'claude reported terminal task failure', failure: { class: 'auth' } });
     expect(attached.cause).toBe(cause);
   });
 

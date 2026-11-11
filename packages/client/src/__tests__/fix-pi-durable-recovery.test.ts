@@ -80,7 +80,7 @@ async function start(plan: WorkerPlan[], options: { blockConfigWrite?: boolean }
   };
 }
 function assertFailed(f: Awaited<ReturnType<typeof fixture>>) {
-  expect(f.failure()).toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
+  expect(f.failure()).toMatchObject({ phase: 'run', retry: 'non-retryable' });
   expect(f.events.filter(event => event.type === 'error')).toHaveLength(1);
   expect(f.events.filter(event => event.type === 'turn_end')).toHaveLength(0);
   expect(f.events.filter(event => event.type === 'artifact')).toHaveLength(0);
@@ -181,7 +181,7 @@ describe.skipIf(process.platform === 'win32')('durable start contract', () => {
     const { startError, children, release } = started as { startError: unknown; children: ChildProcess[]; release: () => unknown };
     expect(startError).toBeInstanceOf(RuntimeExecutionFailure);
     expect(startError).toMatchObject({
-      phase: 'start', category: 'infrastructure', retry: 'non-retryable',
+      phase: 'start', retry: 'non-retryable',
       message: 'durable runtime start failed', failure: { class: 'runtime_exited' },
     });
     expect(children).toHaveLength(1);
@@ -192,7 +192,7 @@ describe.skipIf(process.platform === 'win32')('durable start contract', () => {
     const started = await start([{ complete: true }], { blockConfigWrite: true });
     const { startError, children, release } = started as { startError: unknown; children: ChildProcess[]; release: () => unknown };
     expect(startError).toMatchObject({
-      phase: 'start', category: 'infrastructure', retry: 'non-retryable',
+      phase: 'start', retry: 'non-retryable',
       message: 'durable runtime start failed', failure: { class: 'unknown' },
     });
     expect(children).toHaveLength(0);
@@ -203,7 +203,7 @@ describe.skipIf(process.platform === 'win32')('durable start contract', () => {
     const started = await start([{ refuseStart: true }]);
     const { startError, release } = started as { startError: unknown; release: () => unknown };
     expect(startError).toMatchObject({
-      phase: 'start', category: 'infrastructure', retry: 'non-retryable',
+      phase: 'start', retry: 'non-retryable',
       message: 'durable runtime start failed', failure: { class: 'unknown' },
     });
     expect(release).toHaveBeenCalledOnce();

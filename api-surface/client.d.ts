@@ -831,7 +831,7 @@ export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInp
 export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection';
 export type { RuntimeObservation } from '../runtime-detection';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
-export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure';
+export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure';
 export { createRuntimeAdapters } from './runtime-adapters';
 export type { PiRuntimeConfig, RuntimeAdaptersConfig, RuntimeAdaptersRuntimes } from './runtime-adapters';
 export { PiAdapter } from './pi/pi-adapter';
@@ -9857,7 +9857,7 @@ export { BYOK_SDK_HELPER_SUBCOMMAND, bundledSdkHelperHost, resolveSdkReservedHel
 export { runSdkReservedHelperCommand } from './lifecycle/sdk-reserved-helper-command';
 export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHelperBin, } from './sdk-reserved-helper-host';
 export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
-export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
+export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema';
 export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
@@ -13146,8 +13146,6 @@ export declare function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescrip
 import type { RuntimeFailureClass, TaskFailure } from '@byok-sdk/protocol';
 /** Closed lifecycle phases for failures after an offer has been admitted. */
 export type RuntimeFailurePhase = 'start' | 'run';
-/** Closed semantic axis. Retryability is explicit and is never inferred from this field. */
-export type RuntimeFailureCategory = 'semantic' | 'infrastructure' | 'authority';
 /** The adapter's explicit retry judgment consumed by TaskRunner. */
 export type RuntimeRetryDisposition = 'retryable' | 'non-retryable';
 /** Disposal is deliberately separate from start/run retryability authority. */
@@ -13159,7 +13157,6 @@ export interface RuntimeDisposalFailureInput {
 }
 export interface RuntimeExecutionFailureInput {
     phase: RuntimeFailurePhase;
-    category: RuntimeFailureCategory;
     retry: RuntimeRetryDisposition;
     /** Stable operator-facing reason. Provider diagnostics may be included, but are never parsed by TaskRunner. */
     reason: string;
@@ -13187,7 +13184,6 @@ export declare function isRuntimeDisposalFailure(value: unknown): value is Runti
  */
 export declare class RuntimeExecutionFailure extends Error {
     readonly phase: RuntimeFailurePhase;
-    readonly category: RuntimeFailureCategory;
     readonly retry: RuntimeRetryDisposition;
     readonly failure: TaskFailure;
     constructor(input: RuntimeExecutionFailureInput, options?: ErrorOptions);

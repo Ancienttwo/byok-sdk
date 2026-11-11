@@ -74,7 +74,7 @@ describe('Claude failed-start resource ownership', () => {
     await flush(); expect(result.status).toBe('pending');
     disposal.resolve(); await flush();
     expect(result.error).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(result.error).toMatchObject({ category: 'authority', retry: 'non-retryable' });
+    expect(result.error).toMatchObject({ retry: 'non-retryable' });
     expect((result.error as Error).message).toMatch(/different session id/);
     expect(fs.rm).toHaveBeenCalledWith(configDir, { recursive: true, force: true });
   });
@@ -90,7 +90,7 @@ describe('Claude failed-start resource ownership', () => {
     expect(fs.rm).not.toHaveBeenCalled();
     const receipt = result.error as RuntimeStartupDisposalFailure;
     expect(receipt.cause).toBeInstanceOf(AggregateError);
-    expect((receipt.cause as AggregateError).errors[0]).toMatchObject({ phase: 'start', category: 'authority', message: expect.stringMatching(/different session id/) });
+    expect((receipt.cause as AggregateError).errors[0]).toMatchObject({ phase: 'start', message: expect.stringMatching(/different session id/) });
     const disposal = deferred();
     tree.dispose.mockReturnValue(disposal.promise);
     const first = receipt.retryDisposal();

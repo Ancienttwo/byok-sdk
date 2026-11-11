@@ -335,7 +335,6 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     const unsupportedAdapter = new StubRuntimeAdapter('pi');
     unsupportedAdapter.startError = new RuntimeExecutionFailure({
       phase: 'start',
-      category: 'authority',
       retry: 'non-retryable',
       reason: 'pi cannot express this policy',
     });

@@ -90,7 +90,7 @@ describe('terminal evidence of the applied Agent-home projection (#318)', () => 
     offer('failing-offer', 'persona-agent', '3');
     await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === 'failing-offer');
     adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
-      phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'runtime ended with failure',
+      phase: 'run', retry: 'non-retryable', reason: 'runtime ended with failure',
     }));
 
     const failed = await server.waitFor((entry) => entry.type === 'task.fail' && entry.task_id === 'failing-offer');

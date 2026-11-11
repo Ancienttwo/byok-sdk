@@ -75,7 +75,6 @@ export interface MapClaudeMessageResult {
 function missingToolCallIdFailure(frame: 'tool_use' | 'tool_result'): RuntimeExecutionFailure {
   return new RuntimeExecutionFailure({
     phase: 'run',
-    category: 'authority',
     retry: 'non-retryable',
     reason: `claude ${frame} frame had no authoritative tool call id`,
   });
@@ -417,7 +416,6 @@ function mapResult(msg: ClaudeStreamMessage): MapClaudeMessageResult {
     events,
     terminalFailure: new RuntimeExecutionFailure({
       phase: 'run',
-      category: msg.is_error === true ? 'semantic' : 'authority',
       retry: 'non-retryable',
       reason: msg.is_error === true ? 'claude reported terminal task failure' : 'claude emitted a malformed terminal result frame',
     }),

@@ -149,7 +149,7 @@ describe('TaskRunner terminal inference usage projection', () => {
 
     session.emit({ type: 'usage', inputTokens: 42 });
     session.fail(new RuntimeExecutionFailure({
-      phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'runtime ended with failure',
+      phase: 'run', retry: 'non-retryable', reason: 'runtime ended with failure',
     }));
 
     await vi.waitFor(() => expect(sent.some((item) => item.type === 'task.fail' && item.task_id === taskId)).toBe(true));

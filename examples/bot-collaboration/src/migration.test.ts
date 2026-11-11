@@ -379,6 +379,8 @@ describe('switch export format (#975)', () => {
       value => { (value.collaboration.team as { homeOperations: unknown }).homeOperations = {}; },
       value => { (value.collaboration.team.bots.b1 as { execution: unknown }).execution = null; },
       value => { value.collaboration.turns.t1 = null as unknown as CollaborationState['turns'][string]; },
+      // A would-do row from before #1756 has no Turn: the source migrates first.
+      value => { value.collaboration.wouldDo = { w: { id: 'w', botId: 'b1', taskId: 't', action: 'delegate', index: 0, at: 0, detail: null } } as never; },
     ]);
   });
 

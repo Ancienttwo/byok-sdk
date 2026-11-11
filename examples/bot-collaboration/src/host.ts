@@ -12,7 +12,8 @@ import { json, stateOf, type CollaborationState, type Turn, type Verdict } from 
 import { contextTurns, DEFAULT_HANDOFF_BUDGETS, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
-import { delegationCancelAnswer, turnCancelAnswer, type CancelOutcome, type DelegationCancelResult, type TurnCancelResult } from './rules/delegation';
+import { delegationCancelAnswer, hostIntentCancelAnswer, HostIntentError, turnCancelAnswer, type DelegationCancelResult, type IntentCancelResult,
+  type TurnCancelResult } from './rules/delegation';
 import { checkReply, collaborationDue, CONNECTOR_OUTCOME_UNKNOWN, replyCheckDue, reportCardDecisions,
   commandBots, type Command, type CommandPorts, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
@@ -166,21 +167,8 @@ export interface BotOptions {
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
 /** Synchronous. A throw rolls the message transaction back, and a thenable or another result throws. */
 export type HostIntentMessageHandler = (input: AgentMessageInput, transaction: MessageTransaction) => MessageDisposition;
-/**
- * A refused intent key. `cancelHostIntent` (#1320): `unknown_intent` as in `IntentOutcomeError`, or `not_host_intent` for a Bot
- * Turn. `failStuckIntent` (#1405): `unknown_intent` for a key with no K4 intent, `already_settled`, or `not_stuck` for an intent
- * whose terminal K8 did not refuse.
- */
-export class HostIntentError extends Error {
-  constructor(readonly key: string, readonly code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck', message: string) {
-    super(message); this.name = 'HostIntentError';
-  }
-}
-/**
- * `cancelled`: the intent was not submitted and settled as `cancelled`. `cancel_pending`: the SDK cancel went out, and K4
- * settles the intent at its terminal. `already_settled`: no cancel was sent; `conclusion` is the earlier one.
- */
-export interface HostIntentCancelResult { key: string; result: CancelOutcome; conclusion?: Conclusion }
+/** The cancel answer of a Host intent (K8 `IntentCancelResult`). */
+export type HostIntentCancelResult = IntentCancelResult<Conclusion>;
 function hostIntent(state: CollaborationState, key: string): { handler: string } | undefined {
   return state.hostIntents && Object.hasOwn(state.hostIntents, key) ? state.hostIntents[key] : undefined;
 }
@@ -614,12 +602,11 @@ export class BotCollaboration {
     return this.exclusive(async () => {
       this.ownerOnly(by, 'cancelHostIntent', key);
       const snapshot = this.ledger.snapshot(), state = stateOf(snapshot.application), intent = snapshot.intents[hash(key)];
-      if (Object.hasOwn(state.turns, key)) throw new HostIntentError(key, 'not_host_intent', 'The key is a Bot Turn: use cancelTurn');
-      if (!hostIntent(state, key) || !intent) throw new HostIntentError(key, 'unknown_intent', 'No Host intent has this key');
-      if (intent.conclusion) return { key, result: 'already_settled', conclusion: intent.conclusion };
+      const settled = hostIntentCancelAnswer(key, Object.hasOwn(state.turns, key), hostIntent(state, key) && intent);
+      if (settled) return { key, ...settled };
       await this.core.cancel(key);
       await this.process();
-      if (intent.phase === 'inflight') return { key, result: 'cancel_pending' };
+      if (intent!.phase === 'inflight') return { key, result: 'cancel_pending' };
       return { key, result: 'cancelled', conclusion: this.core.intent(key)!.conclusion! };
     });
   }

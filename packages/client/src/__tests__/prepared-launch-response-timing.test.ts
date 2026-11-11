@@ -214,7 +214,6 @@ describe('the prepared response now arrives after the run\'s first session event
     // second vocabulary for the one fact the byte gate established.
     await expect(startPrepared(true)).rejects.toMatchObject({
       phase: 'start',
-      category: 'semantic',
       retry: 'non-retryable',
     });
     await expect(startPrepared(true)).rejects.toThrow(/prepared_body_drift/u);

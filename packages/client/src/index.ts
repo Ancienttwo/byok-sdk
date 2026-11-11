@@ -116,7 +116,6 @@ export type {
   RuntimeExecutionFailureInput,
   RuntimeDisposalFailureInput,
   RuntimeDisposalStage,
-  RuntimeFailureCategory,
   RuntimeFailurePhase,
   RuntimeFailureProjection,
   RuntimeRetryDisposition,

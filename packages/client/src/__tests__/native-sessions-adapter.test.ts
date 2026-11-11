@@ -85,7 +85,7 @@ it.each([
   [{ type: 'byok_host_ready', sessionId: 'native-session' }, { type: 'byok_host_ready', sessionId: 'native-session' }],
   [{ type: 'byok_host_ready', sessionId: 'different-session' }],
 ].map(frames => ({ frames })))('rejects a memory lane without one matching readiness receipt: %j', async ({ frames }) => {
-  await expect(fixture(true, frames)).rejects.toMatchObject({ message: 'memory_lane_tool_set_mismatch', category: 'authority', retry: 'non-retryable' });
+  await expect(fixture(true, frames)).rejects.toMatchObject({ message: 'memory_lane_tool_set_mismatch', retry: 'non-retryable' });
 });
 
 it.skipIf(process.platform === 'win32')('drains the memory abort acknowledgement before any process-tree disposal and never sends compact', async () => {

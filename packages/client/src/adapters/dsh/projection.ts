@@ -18,7 +18,7 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
 const count = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 const authority = (reason: string) =>
-  new RuntimeExecutionFailure({ phase: 'run', category: 'authority', retry: 'non-retryable', reason });
+  new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason });
 
 /**
  * The structured tool input: dsh's complete native `arguments` string, never the

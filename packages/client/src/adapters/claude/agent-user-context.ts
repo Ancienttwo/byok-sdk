@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { RuntimeOperationManifest } from '../../types';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 
-const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 // Claude matches excludes with picomatch after turning `\` into `/`, so glob
 // syntax cannot be escaped; `?` stands in for it in a directory part, so a
 // directory named `**` or `(x86)` matches only itself.

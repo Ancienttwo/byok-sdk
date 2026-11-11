@@ -15,9 +15,10 @@ export type WouldDoAction = 'create_routine' | 'delegate' | 'room_call';
 /**
  * One action that an observing Bot would have taken. `id` is stable for the outcome that proposed it, so applying the
  * same outcome twice records one row. `detail` is the frozen-schema action, never a summary written by the model.
+ * `turnId` is the Turn whose outcome proposed the action; retention moves the row with that Turn's root.
  */
 export interface WouldDo {
-  id: string; botId: string; taskId: string; action: WouldDoAction; index: number; at: number; detail: Json;
+  id: string; botId: string; turnId: string; taskId: string; action: WouldDoAction; index: number; at: number; detail: Json;
 }
 /** The Host state that observe adds. It appears at the first observed action, so an older ledger reads no rows. */
 export interface AutonomyState { wouldDo?: Record<string, WouldDo> }
@@ -37,8 +38,18 @@ export function recordWouldDo(state: AutonomyState, row: Omit<WouldDo, 'id'>): W
   (state.wouldDo ??= {})[id] = record;
   return record;
 }
+/**
+ * Refuses a state that still holds a would-do row from before #1756, which has no `turnId`. Only the one-shot migration
+ * links such a row to its Turn, so a store that skipped it fails here instead of keeping the row forever.
+ */
+export function refuseUnmigratedWouldDo(state: AutonomyState): void {
+  if (Object.values(state.wouldDo ?? {}).some(row => typeof row.turnId !== 'string')) {
+    throw new Error('A would-do row has no turnId: run migrateWouldDo (local) or HostedCollaborationStore.migrate() (hosted) first');
+  }
+}
 /** The would-do rows of one Bot, or of every Bot, oldest first. A row of the same instant keeps a stable id order. */
 export function wouldDoRows(state: AutonomyState, botId?: string): WouldDo[] {
+  refuseUnmigratedWouldDo(state);
   return Object.values(state.wouldDo ?? {})
     .filter(row => botId === undefined || row.botId === botId)
     .sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -62,7 +73,7 @@ export function autonomyGate(
 ): AutonomyGate {
   const turn = state.turns[turnId]!;
   return { autonomy: autonomyOf(state.team.bots[turn.botId]), record: (action, index, detail) => {
-    const row = recordWouldDo(state, { botId: turn.botId, taskId, action, index, at: now(), detail });
+    const row = recordWouldDo(state, { botId: turn.botId, turnId, taskId, action, index, at: now(), detail });
     if (row) publish(`would-do:${row.id}`, json(row));
   } };
 }
