@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "53bd9c0597b6e798595c3f91acc8be364154671cce27676609f69185a883d03e"
+    "snapshotSha256": "1a6a7ba01e469cebbadb88c50fad72f2238447333f33a9865694310fb060d9de"
   },
   "configFields": {
     "status": "tracked",
@@ -269,6 +269,18 @@
       "items": [
         "export:@byok-sdk/keys/model-route#ModelRouteHostEntry"
       ]
+    },
+    {
+      "id": "daemon-embedded-pairing",
+      "impact": "additive",
+      "summary": "Daemon.pairEmbedded(server) pairs an embedded Host's daemon against its in-process server and reconciles an existing enrollment; every other state throws the new EmbeddedPairingError (enrollment_missing, device_unknown, re_pair_required, store_not_bound) and writes nothing. EmbeddedPairingServer is the structural server type it reads. Daemon.whenOpen({ signal }) resolves on running/open and rejects with DaemonHaltError, the new DaemonNotOpenError (stopped, crashed) or signal.reason. Both Daemon members are required, so a Host test double typed as Daemon adds them (#1840).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#embedded-pairing-and-connection-wait",
+      "items": [
+        "export:@byok-sdk/client#Daemon",
+        "export:@byok-sdk/client#DaemonNotOpenError",
+        "export:@byok-sdk/client#EmbeddedPairingError",
+        "export:@byok-sdk/client#EmbeddedPairingServer"
+      ]
     }
   ],
   "changes": [
@@ -334,6 +346,11 @@
       "entry": "dts-node-next-specifiers"
     },
     {
+      "item": "export:@byok-sdk/client#Daemon",
+      "change": "changed",
+      "entry": "daemon-embedded-pairing"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonConfig",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
@@ -342,6 +359,11 @@
       "item": "export:@byok-sdk/client#DaemonEffectiveRuntime",
       "change": "changed",
       "entry": "per-runtime-environment"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonNotOpenError",
+      "change": "added",
+      "entry": "daemon-embedded-pairing"
     },
     {
       "item": "export:@byok-sdk/client#DaemonOverrides",
@@ -362,6 +384,16 @@
       "item": "export:@byok-sdk/client#DshAdapterOptions",
       "change": "changed",
       "entry": "version-policy-source"
+    },
+    {
+      "item": "export:@byok-sdk/client#EmbeddedPairingError",
+      "change": "added",
+      "entry": "daemon-embedded-pairing"
+    },
+    {
+      "item": "export:@byok-sdk/client#EmbeddedPairingServer",
+      "change": "added",
+      "entry": "daemon-embedded-pairing"
     },
     {
       "item": "export:@byok-sdk/client#ExpiringClassId",

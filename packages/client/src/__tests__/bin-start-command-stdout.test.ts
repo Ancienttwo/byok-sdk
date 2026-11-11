@@ -55,6 +55,8 @@ function fakeDaemon(): { daemon: Daemon; emit: (event: DaemonEvent) => void } {
   const listeners = new Set<DaemonEventListener>();
   const daemon: Daemon = {
     pair: vi.fn(),
+    pairEmbedded: vi.fn(),
+    whenOpen: vi.fn(),
     start: vi.fn().mockImplementation(async () => { for (const listener of listeners) listener({ kind: 'environment-resolved', ts: new Date().toISOString(), status: { source: 'inherited' } }); }),
     stop: vi.fn().mockResolvedValue(undefined),
     status: vi.fn().mockReturnValue({ paired: true, lifecycle: { phase: 'running', connection: 'open' }, activeTaskCount: 0 }),

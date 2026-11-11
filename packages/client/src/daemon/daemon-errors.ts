@@ -104,3 +104,21 @@ export class DeviceStoreBindingMismatchError extends Error {
     this.bound = bound === undefined ? undefined : { deviceId: bound.deviceId, tenantId: bound.tenantId };
   }
 }
+
+/**
+ * Why `Daemon.pairEmbedded` refused. Each reason leaves the local
+ * enrollment and the server unchanged:
+ * - `enrollment_missing`: this store is unpaired but the server already lists devices.
+ * - `device_unknown`: this store's device is not in the server's machine list.
+ * - `re_pair_required`: the device record has no OS credential entry.
+ * - `store_not_bound`: the OS entry holds an enrollment another storeDir paired.
+ */
+export class EmbeddedPairingError extends Error {
+  constructor(
+    readonly reason: 'enrollment_missing' | 'device_unknown' | 're_pair_required' | 'store_not_bound',
+    options?: { cause?: unknown },
+  ) {
+    super(`embedded pairing refused: ${reason}`, options);
+    this.name = 'EmbeddedPairingError';
+  }
+}

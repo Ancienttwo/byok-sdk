@@ -413,6 +413,14 @@ Before this release such a Host got untyped (`any`) SDK imports with
 Bundler resolution see no change. A NodeNext Host may now see type errors in
 code that compiled against `any`; fix them against the real types.
 
+## Embedded pairing and connection wait
+
+`Daemon` gains two required members, `pairEmbedded(server)` and `whenOpen({ signal })` (#1840). A Host test double typed as `Daemon` must add both.
+
+An embedded Host that pairs its daemon against its own in-process server replaces its `createPairingCode` and `pair` calls with `daemon.pairEmbedded(byokServer)`. It reads the store's enrollment under the daemon owner lease and never starts the daemon. An unpaired store against a server with no devices pairs and returns the new device. A paired store whose device `machines.list()` reports is returned unchanged. Every other state throws `EmbeddedPairingError` and writes nothing: `enrollment_missing` (unpaired store, server already lists devices), `device_unknown` (the server does not list this store's device), `re_pair_required` (the device record has no OS credential entry) or `store_not_bound` (the OS entry holds another storeDir's enrollment). The enrollment record is the one device id authority; a Host that keeps its own copy compares it with the returned `deviceId`. If the server database is lost while the store survives, the refusal is `device_unknown`; if the store is lost while the server keeps devices, it is `enrollment_missing`.
+
+A Host that polls `status().lifecycle` for `running/open` after `start()` calls `await daemon.whenOpen({ signal: AbortSignal.timeout(ms) })` instead. It rejects with `DaemonHaltError` on a halt, `DaemonNotOpenError` (`stopped` or `crashed`) when the run ended otherwise, and with `signal.reason` on abort.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.

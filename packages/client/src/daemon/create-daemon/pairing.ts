@@ -1,11 +1,12 @@
 import { assertServerUrlAllowed, formatServerUrl } from '../url.js';
 import { type DeviceEnrollment, type DeviceRecord, DeviceRecordRePairRequiredError } from '../store.js';
-import { DeviceStoreBindingMismatchError } from '../daemon-errors.js';
+import { DeviceStoreBindingMismatchError, EmbeddedPairingError } from '../daemon-errors.js';
 import { checkVerificationSecret, enrollDeviceMember } from '../device-member.js';
 import { acquireDaemonOwner } from '../../util/daemon-owner.js';
 import { AgentEgressController } from '../agent-egress-controller.js';
 import { PairedWithoutMemberError } from './support.js';
 import type { DaemonScope } from './scope.js';
+import type { EmbeddedPairingServer } from '../create-daemon.js';
 import { runAuthOperation } from './lifecycle.js';
 
 /** Pairing and unpairing the device, each under the daemon owner lease (#926). */
@@ -73,6 +74,42 @@ export async function pair(
   const replaceOtherStore = options?.replaceOtherStore === true;
   const record = await runAuthOperation(daemonScope, () => pairUnderLease(pairingCode, verificationSecret, replaceOtherStore));
   return Object.freeze({ deviceId: record.deviceId });
+}
+
+/** Reconciles this store's enrollment with an in-process server, pairing only a fresh store against an empty server. */
+export async function pairEmbedded(daemonScope: DaemonScope, server: EmbeddedPairingServer): Promise<DeviceEnrollment> {
+  const { checkServerUrl, daemonState, storeDir, config, pairUnderLease } = daemonScope;
+  checkServerUrl();
+  return runAuthOperation(daemonScope, async () => {
+    const acquiredHere = daemonState.daemonOwnerLease === undefined;
+    if (acquiredHere) daemonState.daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
+    try {
+      let current: DeviceRecord | undefined;
+      try {
+        current = await daemonState.auth.readCurrent();
+      } catch (error) {
+        if (error instanceof DeviceRecordRePairRequiredError) throw new EmbeddedPairingError('re_pair_required', { cause: error });
+        if (error instanceof DeviceStoreBindingMismatchError) throw new EmbeddedPairingError('store_not_bound', { cause: error });
+        throw error;
+      }
+      const machines = await server.machines.list();
+      if (current !== undefined) {
+        const { deviceId } = current;
+        if (!machines.some((machine) => machine.deviceId === deviceId)) throw new EmbeddedPairingError('device_unknown');
+        return Object.freeze({ deviceId });
+      }
+      if (machines.length > 0) throw new EmbeddedPairingError('enrollment_missing');
+      const { code } = await server.pairing.createPairingCode({ productId: config.productId });
+      // The lease held here makes pairUnderLease neither acquire nor release it.
+      const record = await pairUnderLease(code);
+      return Object.freeze({ deviceId: record.deviceId });
+    } finally {
+      if (acquiredHere) {
+        await daemonState.daemonOwnerLease?.release();
+        daemonState.daemonOwnerLease = undefined;
+      }
+    }
+  });
 }
 
 export async function pairUnderLease(
