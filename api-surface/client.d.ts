@@ -8828,7 +8828,8 @@ export declare class DeviceStore {
      * roots from one spelling.
      * On POSIX a symbolic link in an existing ancestor is followed only when it
      * and the directory holding it are trusted; an untrusted link throws
-     * `configured_path_untrusted_link`.
+     * `configured_path_untrusted_link`. On Windows any symbolic link or
+     * drive-letter junction in an existing ancestor throws it.
      */
     static resolveDir(productId: string, configured?: string): string;
     load(): Promise<DeviceMetadata | undefined>;
