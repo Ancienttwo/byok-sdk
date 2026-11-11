@@ -126,6 +126,27 @@ const MAILBOX_CURSOR_CLOSED_CAUSE = "closed_cause TEXT CHECK ((closed_cause IS N
   "(closed_cause IN ('device_revoked', 'device_superseded') AND closed_at IS NOT NULL))";
 
 /**
+ * The task instants a v6 file may lack. The #980 phase instants are added
+ * with no backfill: a NULL instant was never recorded. The #1120 archive
+ * instants came during v6, so the 0.31.0 release has none; when they are
+ * missing, a task that is already terminal becomes archivable from its
+ * recorded terminal instant, or from its last update when none was recorded.
+ * `terminal_at` itself stays NULL.
+ */
+function upgradeTaskAttemptFromV6(db: DatabaseSync): void {
+  const taskColumns = new Set((db.prepare('PRAGMA table_info(task_attempt)').all() as unknown as { name: string }[])
+    .map((column) => column.name));
+  const archiveColumnsPresent = TASK_ARCHIVE_COLUMNS.every((column) => taskColumns.has(column));
+  for (const column of [...TASK_PHASE_COLUMNS, ...TASK_ARCHIVE_COLUMNS]) {
+    if (!taskColumns.has(column)) db.exec(`ALTER TABLE task_attempt ADD COLUMN ${column} TEXT`);
+  }
+  if (!archiveColumnsPresent) {
+    db.exec(`UPDATE task_attempt SET archive_after = COALESCE(terminal_at, updated_at)
+      WHERE archive_after IS NULL AND status IN ('complete', 'failed', 'cancelled')`);
+  }
+}
+
+/**
  * The in-place upgrade from v6 to v7, run inside the open transaction. It adds
  * the stream tombstone and closes the stream of every device the directory no
  * longer holds, which was retired before the upgrade, expiring its pending
@@ -133,6 +154,7 @@ const MAILBOX_CURSOR_CLOSED_CAUSE = "closed_cause TEXT CHECK ((closed_cause IS N
  * those streams read as `device_revoked`.
  */
 function upgradeSchemaFromV6(db: DatabaseSync): void {
+  upgradeTaskAttemptFromV6(db);
   db.exec(`ALTER TABLE mailbox_cursor ADD COLUMN ${MAILBOX_CURSOR_CLOSED_AT}`);
   db.exec(`ALTER TABLE mailbox_cursor ADD COLUMN ${MAILBOX_CURSOR_CLOSED_CAUSE}`);
   db.exec(`UPDATE mailbox_cursor SET closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), closed_cause = 'device_revoked'
@@ -368,27 +390,7 @@ class SqliteCoordinator {
           column.pk !== (index < 2 ? index + 1 : 0))) {
           throw schemaError('SQLITE_SCHEMA_INVALID', 'Invalid BYOK SQLite approval timeline schema');
         }
-        // #980 phase instants: added on open to a file from before them, with
-        // no backfill — a NULL instant was never recorded.
-        const taskColumns = new Set((this.db.prepare('PRAGMA table_info(task_attempt)').all() as unknown as { name: string }[])
-          .map((column) => column.name));
-        for (const column of TASK_PHASE_COLUMNS) {
-          if (!taskColumns.has(column)) this.db.exec(`ALTER TABLE task_attempt ADD COLUMN ${column} TEXT`);
-        }
         assertProjection(`${TASK_PHASE_COLUMNS.join(', ')} FROM task_attempt`);
-        // #1120 archive instants. A file from before them gets a one-shot
-        // backfill in the same transaction that adds the column: a task that is
-        // already terminal becomes archivable from its recorded terminal instant,
-        // or from its last update when none was recorded. `terminal_at` itself
-        // stays NULL. Later opens find the column and skip the backfill.
-        const archiveColumnsPresent = TASK_ARCHIVE_COLUMNS.every((column) => taskColumns.has(column));
-        for (const column of TASK_ARCHIVE_COLUMNS) {
-          if (!taskColumns.has(column)) this.db.exec(`ALTER TABLE task_attempt ADD COLUMN ${column} TEXT`);
-        }
-        if (!archiveColumnsPresent) {
-          this.db.exec(`UPDATE task_attempt SET archive_after = COALESCE(terminal_at, updated_at)
-            WHERE archive_after IS NULL AND status IN ('complete', 'failed', 'cancelled')`);
-        }
         assertProjection(`${TASK_ARCHIVE_COLUMNS.join(', ')} FROM task_attempt`);
         // The closure reads the phase columns, so it follows them. An upgraded
         // file's already-closed tasks keep their original deadline.

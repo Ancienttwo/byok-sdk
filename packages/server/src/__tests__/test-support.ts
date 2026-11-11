@@ -571,3 +571,10 @@ export function rewindToV7(idleExpiresAt: string): string {
     DROP TABLE approval_timeline_tail_v8;
     UPDATE byok_sqlite_meta SET value = '7' WHERE key = 'schema_version';`;
 }
+
+/** Rewinds a v8 file to v6: the v7 rewind, then without v7's mailbox stream tombstone. */
+export function rewindToV6(idleExpiresAt: string): string {
+  return `${rewindToV7(idleExpiresAt)}
+    ALTER TABLE mailbox_cursor DROP COLUMN closed_cause; ALTER TABLE mailbox_cursor DROP COLUMN closed_at;
+    UPDATE byok_sqlite_meta SET value = '6' WHERE key = 'schema_version';`;
+}
