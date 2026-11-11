@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { VERSION } from '@earendil-works/pi-coding-agent';
-import { extractPiConfigDigest, readPiHostConfig, applyPiHostNetworkDefaults } from '../adapters/pi/runtime-host-binding';
+import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
+import { applyPiHostNetworkDefaults } from './pi-host-network-defaults';
 import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
 import { parseTaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';

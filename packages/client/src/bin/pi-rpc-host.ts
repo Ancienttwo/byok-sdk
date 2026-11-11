@@ -1,5 +1,6 @@
 import { parsePiAgentResources } from '../adapters/pi/agent-resources';
-import { extractPiConfigDigest, readPiHostConfig, applyPiHostNetworkDefaults } from '../adapters/pi/runtime-host-binding';
+import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
+import { applyPiHostNetworkDefaults } from './pi-host-network-defaults';
 import { readFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
