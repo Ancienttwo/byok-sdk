@@ -39,7 +39,7 @@ import {
  * connection registry, no per-task object that a host holds onto. Sprint 0.1's
  * non-goal is explicit about that — the embedded `TaskHandle` must not become
  * the hosted API — so the host's control-plane input is a function
- * ({@link ByokCloud.enqueueOffer}) and its read model is a store query
+ * ({@link ByokCloud.enqueueAgentOffer}) and its read model is a store query
  * ({@link ByokCloud.readTaskAttempt}).
  *
  * Every route is stateless in the strict sense: it resolves a principal from
