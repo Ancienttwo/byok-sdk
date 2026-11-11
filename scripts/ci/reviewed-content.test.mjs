@@ -1115,11 +1115,13 @@ test('new graph-registered private workspaces and matching lock rows are admitte
   assert.ok(selectImpact([`${desktop}/package.json`, 'bun.lock'], f).dirs.includes(desktop));
   f.write(`${desktop}/package.json`, { ...app, devDependencies: { ...app.devDependencies, electron: '45.3.1' } });
   assert.throws(() => selectImpact([`${desktop}/package.json`], f), /reuse a base dependency spec \(electron\)/);
-  // #1805: the existing desktop example, on base without them, adds exactly its reviewed @byok-sdk workspace edges.
-  const { dependencies: edges, ...edgeless } = app;
-  f.write(`${desktop}/package.json`, edgeless); rebase(f, 'desktop example without workspace edges');
+  // #1805: the existing desktop example gains its reviewed edges and an exact registered addition, and nothing else.
+  const { dependencies: edges, devDependencies: { '@electron/fuses': _fuses, ...withoutFuses }, ...bare } = app;
+  f.write(`${desktop}/package.json`, { ...bare, devDependencies: withoutFuses }); rebase(f, 'desktop example without edges and fuses');
   f.write(`${desktop}/package.json`, app);
   assert.ok(selectImpact([`${desktop}/package.json`], f).dirs.includes(desktop));
+  f.write(`${desktop}/package.json`, { ...app, devDependencies: { ...app.devDependencies, '@electron/fuses': '2.1.4' } });
+  assert.throws(() => selectImpact([`${desktop}/package.json`], f), /reuse a base dependency spec \(@electron\/fuses\)/);
   f.write(`${desktop}/package.json`, { ...app, dependencies: { ...edges, '@byok-sdk/protocol': 'workspace:*' } });
   assert.throws(() => selectImpact([`${desktop}/package.json`], f), /edges differ from reviewed graph/);
 });
