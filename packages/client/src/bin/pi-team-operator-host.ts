@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { VERSION } from '@earendil-works/pi-coding-agent';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
+import { applyPiHostNetworkDefaults } from './pi-host-network-defaults';
 import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
 import { parseTaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
@@ -14,6 +15,7 @@ function fail(message: string): never {
 
 /** Official CLI only: ambient env and explicit extensions; no attestation claim. */
 export async function runPiTeamOperatorHost(argv: readonly string[]): Promise<void> {
+  applyPiHostNetworkDefaults();
   const owned = extractPiConfigDigest(argv, fail);
   if (owned.args.length !== 2 || owned.args[0] !== '--config' || !path.isAbsolute(owned.args[1]!)) fail('expected --config <absolute path>');
   const value = readPiHostConfig(owned.args[1]!, owned.digest);

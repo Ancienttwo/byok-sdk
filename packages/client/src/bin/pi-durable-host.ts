@@ -6,6 +6,7 @@ import { createModels, createProvider } from '@earendil-works/pi-ai/models';
 import type { Model, ProviderStreams, ToolCall } from '@earendil-works/pi-ai';
 import { type ToolExecutionResult, type ToolRegistration } from '@earendil-works/pi-durable';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
+import { applyPiHostNetworkDefaults } from './pi-host-network-defaults';
 import { receiveLauncherCredential } from '../adapters/pi/launcher-credential';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
 import { admitReplica, type DurableReplicaBinding } from '../adapters/pi-durable/replica';
@@ -45,6 +46,7 @@ function projection(expectedProvider: string, expectedModel: string) {
 }
 
 export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
+  applyPiHostNetworkDefaults();
   const { args, digest } = extractPiConfigDigest(argv, message => { process.stderr.write(`byok-pi-durable: ${message}\n`); process.exit(78); });
   if (args.length !== 2 || args[0] !== '--config' || !path.isAbsolute(args[1]!)) throw new Error('durable accepts only --config <absolute path>');
   if (process.platform === 'win32') throw new Error('durable Pi requires validated parent-death process-tree recovery; Windows is unavailable');
