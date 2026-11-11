@@ -44,6 +44,7 @@ assert.deepEqual(Object.keys(agentMemory).sort(), [
   'AgentMemoryRevisionConflictError',
   'AgentMemoryService',
   'captureAgentMemorySnapshot',
+  'checkAgentMemoryHome',
   'isAgentMemoryFilesystemHelperSupported',
   'isAgentMemorySecureFilesystemAvailable',
   'openAgentMemoryFilesystemHelper',
