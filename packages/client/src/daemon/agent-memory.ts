@@ -32,9 +32,13 @@ const SECRET_LIKE = /(?:^|[-_.])(secret|token|credential|password|passwd|api[-_]
 const encoder = new TextEncoder();
 const AGENT_MEMORY_PROJECTION_PUBLISH_TIMEOUT_MS = 10_000;
 
-/** A complete snapshot cannot fit the bounded export contract. No partial result is returned. */
+/**
+ * A complete snapshot cannot fit the bounded export contract. No partial result
+ * is returned. `limit` names the bound: the snapshot file count, its total
+ * UTF-8 bytes, the directory entries a walk reads, or a start record's manifest.
+ */
 export class AgentMemorySnapshotLimitError extends AgentMemoryValidationError {
-  constructor(message: string) { super(message); this.name = 'AgentMemorySnapshotLimitError'; }
+  constructor(readonly limit: 'files' | 'bytes' | 'entries' | 'manifest', message: string) { super(message); this.name = 'AgentMemorySnapshotLimitError'; }
 }
 /**
  * Filesystem I/O failure: an open, read, write, fsync, rename or unlink did not
@@ -877,13 +881,13 @@ async function measuredForSave<T>(measure: () => Promise<T>): Promise<T> {
 async function assertSaveWithinSnapshotLimits(context: AgentMemoryHomeBinding, relativePath: string, content: string): Promise<void> {
   const paths = new Set(['MEMORY.md', ...await measuredForSave(() => memoryNotePaths(context))]);
   if (!paths.has(relativePath) && paths.size >= AGENT_MEMORY_MAX_SNAPSHOT_FILES) {
-    throw new AgentMemorySnapshotLimitError(`memory already has ${paths.size} files, and the limit is ${AGENT_MEMORY_MAX_SNAPSHOT_FILES}; ${SAVE_LIMIT_GUIDANCE}`);
+    throw new AgentMemorySnapshotLimitError('files', `memory already has ${paths.size} files, and the limit is ${AGENT_MEMORY_MAX_SNAPSHOT_FILES}; ${SAVE_LIMIT_GUIDANCE}`);
   }
   let totalBytes = Buffer.byteLength(content, 'utf8');
   for (const candidate of paths) if (candidate !== relativePath) totalBytes += (await measuredForSave(() => readFile(context, candidate))).byteCount;
   if (totalBytes <= AGENT_MEMORY_MAX_SNAPSHOT_BYTES) return;
   if (Buffer.byteLength(content, 'utf8') <= (await measuredForSave(() => readFile(context, relativePath))).byteCount) return;
-  throw new AgentMemorySnapshotLimitError(`this save would bring memory to ${totalBytes} UTF-8 bytes, and the limit is ${AGENT_MEMORY_MAX_SNAPSHOT_BYTES}; ${SAVE_LIMIT_GUIDANCE}`);
+  throw new AgentMemorySnapshotLimitError('bytes', `this save would bring memory to ${totalBytes} UTF-8 bytes, and the limit is ${AGENT_MEMORY_MAX_SNAPSHOT_BYTES}; ${SAVE_LIMIT_GUIDANCE}`);
 }
 
 export class AgentMemoryService {
@@ -946,7 +950,7 @@ async function walkNotesNative(context: AgentMemoryHomeBinding): Promise<AgentMe
     const folded = names.map((name) => asciiLower(name));
     for (const name of names) {
       entriesSeen += 1;
-      if (entriesSeen > AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES) throw new AgentMemorySnapshotLimitError('memory snapshot exceeds bounded directory entries');
+      if (entriesSeen > AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES) throw new AgentMemorySnapshotLimitError('entries', 'memory snapshot exceeds bounded directory entries');
       const candidate = `${relativeDirectory}/${name}`;
       const stat = await fs.lstat(memoryEntryPath(directory, name), { bigint: true });
       if (stat.isSymbolicLink()) throw new AgentMemoryError('memory notes contains a symlink');
@@ -1001,14 +1005,14 @@ export async function captureAgentMemoryHomeSnapshot(input: AgentMemoryHomeBindi
   const candidates = ['MEMORY.md', ...await memoryNotePaths(context)];
   // Validated paths are ASCII. Code-unit order is byte order, independent of locale.
   const paths = [...new Set(candidates)].sort();
-  if (paths.length > AGENT_MEMORY_MAX_SNAPSHOT_FILES) throw new AgentMemorySnapshotLimitError('memory snapshot exceeds bounded file count');
+  if (paths.length > AGENT_MEMORY_MAX_SNAPSHOT_FILES) throw new AgentMemorySnapshotLimitError('files', 'memory snapshot exceeds bounded file count');
   const files: AgentMemoryFile[] = []; let totalBytes = 0;
   for (const relativePath of paths) {
     signal?.throwIfAborted();
     const current = await readFile(context, relativePath);
     if (!current.exists) { if (relativePath === 'MEMORY.md') throw new AgentMemoryError('MEMORY.md disappeared before snapshot'); continue; }
     totalBytes += current.byteCount;
-    if (totalBytes > AGENT_MEMORY_MAX_SNAPSHOT_BYTES) throw new AgentMemorySnapshotLimitError('memory snapshot exceeds bounded total size');
+    if (totalBytes > AGENT_MEMORY_MAX_SNAPSHOT_BYTES) throw new AgentMemorySnapshotLimitError('bytes', 'memory snapshot exceeds bounded total size');
     files.push(Object.freeze({ path: relativePath, revision: current.revision, byteCount: current.byteCount, content: current.content }));
   }
   signal?.throwIfAborted();

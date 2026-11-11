@@ -136,14 +136,15 @@ The vectors need layers 1 and 2: `CollaborationState`, the outcome schema and
 the routine rules come from L files. They also import `hash` and `taskId` from
 the K4 root, and they run on vitest.
 
-The commit vectors import only `template` from K4 `test-support`, and the test
-holds them to that one name. Resolve
-`@byok-sdk/example-host-execution-core/test-support` to a module of your own.
-Copy the `policy` constant and the `template(deviceId, agentId = 'main')`
-function from `examples/host-execution-core/src/test-support.ts` into it. They
-need only `AgentEgressPolicy` from `@byok-sdk/client` and `ExecutionTemplate`
-from `@byok-sdk/server/execution-core`, so the module typechecks against the
-published packages. Keep the returned value the same as the example's.
+The vectors read the K4 test data they need from `src/k4-fixtures.test-support.ts`
+in this layer (#1845): the `policy` constant and the
+`template(deviceId, agentId = 'main')` function. They are K8's own copy, so a
+copy of this layer needs no private example. The module imports only
+`AgentEgressPolicy` as a type from `@byok-sdk/client` and `ExecutionTemplate` as
+a type from `@byok-sdk/server/execution-core`, so it loads and typechecks
+against the published packages. Copy it unchanged: the daemon admits only the
+`policyRevision` of the `template` it returns, and its `egressPolicy` is the
+same object.
 
 The routine and delivery vectors need a running L Host. Vendor
 `src/l-test-host.test-support.ts`: with the published packages only, it starts
@@ -151,16 +152,17 @@ an embedded SQLite server and a paired daemon, opens the `HostLedger`, and runs
 a stub runtime that submits the result document. Write your own subjects after
 `src/routine-contract.test.ts` and `src/delivery-contract.test.ts`, on
 `openLTestHost`. Its daemon admits only the egress policy revision of the
-copied `template`, `k4-v1`, so keep the two the same.
+copied `template`, `k4-v1`, and both come from `src/k4-fixtures.test-support.ts`,
+so keep the two the same.
 
 ```vendor vectors
 src/commit-vectors.test-support.ts
 src/delivery-vectors.test-support.ts
+src/k4-fixtures.test-support.ts
 src/l-test-host.test-support.ts
 src/retention-vectors.test-support.ts
 src/routine-vectors.test-support.ts
 @byok-sdk/client: AgentEgressPolicy Daemon DeviceCredentialBackend RuntimeAdapter RuntimeAdapterPrepareInput RuntimeAdapterPrepareResult RuntimeDetectResult RuntimeDisposalFailure RuntimeEnvironment RuntimeOperationStartInput Session buildRuntimeEnvironment createDaemonWithAdapters freezeRuntimeAdapterDescriptor
-@byok-sdk/example-host-execution-core/test-support: template
 @byok-sdk/protocol
 @byok-sdk/server: CreateByokServerOptions DueWake createByokServer
 @byok-sdk/server/execution-core

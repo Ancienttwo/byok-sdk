@@ -11,7 +11,7 @@ appliesTo:
 
 > **来源**：parent issue [#1851](https://github.com/Ancienttwo/byok-sdk/issues/1851)（owner 2026-11-11 的决定和批准）；做法见 [#1852](https://github.com/Ancienttwo/byok-sdk/issues/1852) 和其上的 planner `decision` 评论。
 > **例外的依据**：Pi 见 [#1855 的 decision 评论](https://github.com/Ancienttwo/byok-sdk/issues/1855#issuecomment-6799690796)；Hermes 见 [#1854](https://github.com/Ancienttwo/byok-sdk/issues/1854) 的第一条评论和 body。
-> **关联**：`packages/client/vendor/oar/45488e7/PROVENANCE.md`（改动清单、bump 流程）、`scripts/ci/oar-sync.mjs`。
+> **关联**：`packages/client/vendor/oar/ac7fde4/PROVENANCE.md`（改动清单、bump 流程）、`scripts/ci/oar-sync.mjs`。
 
 状态：已决定。本 ADR 随 #1852 合入；Claude 驱动的迁移（#1853）和 Hermes adapter 的封存（#1854）各自落地。
 

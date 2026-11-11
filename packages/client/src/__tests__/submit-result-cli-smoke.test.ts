@@ -8,7 +8,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 // The built package: its reserved helpers resolve to the shipped dist/bin scripts.
 import { CodexAdapter, createDaemonWithAdapters, type Daemon } from '@byok-sdk/client';
 import { TestServer } from './fixtures/test-server';
-import { InMemoryDeviceCredentialStore } from './fixtures/device-credentials';
+import { InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
 
@@ -53,7 +53,7 @@ async function run(outcome: unknown) {
     agentHome: { hostStorageRoot: path.join(root, 'home') },
     agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
   }, [new CodexAdapter({ runtimeEnvironment: { pass: ['PATH', 'FAKE_CODEX_*'] }, resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }) })],
-  { deviceCredentials: new InMemoryDeviceCredentialStore() });
+  { deviceCredentials: new InMemoryDeviceCredentialBackend() });
   cleanup.push(() => daemon.stop());
   await daemon.pair('pairing-code');
   await daemon.start();

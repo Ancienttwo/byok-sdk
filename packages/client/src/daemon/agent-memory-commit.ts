@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES, AGENT_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
+import { AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES, AGENT_MEMORY_MAX_SNAPSHOT_FILES, type AgentMemoryStartRefusal } from '@byok-sdk/protocol/constants';
 import { AgentMemoryError, validateAgentMemoryPath, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
 import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, ensureDirectoryNoSymlink, type AgentHomeLease } from '../agent-home.js';
 import {
@@ -67,6 +67,14 @@ export function agentMemoryCommitFailureRetryable(error: unknown): boolean {
   return !(error instanceof AgentMemoryError) || error instanceof AgentMemoryIoError;
 }
 
+/** The `task.fail.failure.class` of a refused start copy (#1843); `undefined` for a failure that may clear. */
+export function agentMemoryCopyRefusal(error: unknown): AgentMemoryStartRefusal | undefined {
+  if (agentMemoryCommitFailureRetryable(error)) return undefined;
+  if (error instanceof AgentMemorySnapshotLimitError && error.limit === 'files') return 'agent_memory_snapshot_over_file_limit';
+  if (error instanceof AgentMemorySnapshotLimitError && error.limit === 'bytes') return 'agent_memory_snapshot_over_byte_limit';
+  return 'agent_memory_snapshot_refused';
+}
+
 /** Appended to the reason of a start refusal over a memory limit: the home stays refused until a write task changes it. */
 export const AGENT_MEMORY_RECOVERY = '; to recover, send a write task with agentMemory:"none" and no agentMemoryCommit that brings memory back within its limits';
 
@@ -105,7 +113,7 @@ async function readStartRecord(home: AgentMemoryHomeBinding, taskId: string): Pr
     files: snapshot.files.map(({ path: memoryPath, revision, byteCount }) => ({ path: memoryPath, revision, byteCount })),
     entries: [...entries],
   } satisfies z.input<typeof ManifestSchema>);
-  if (Buffer.byteLength(manifest, 'utf8') > AGENT_MEMORY_MAX_LOCAL_LOG_BYTES) throw new AgentMemorySnapshotLimitError('memory start record exceeds its bounded manifest');
+  if (Buffer.byteLength(manifest, 'utf8') > AGENT_MEMORY_MAX_LOCAL_LOG_BYTES) throw new AgentMemorySnapshotLimitError('manifest', 'memory start record exceeds its bounded manifest');
   return { snapshot, manifest };
 }
 

@@ -1534,7 +1534,7 @@ export declare function runtimeEnvironmentFor(id: string, config: Pick<RuntimeAd
 /** Validates `piByokLauncher` and folds its `sessionDir`; the daemon and its retention build Pi from this one value. */
 export declare function resolvePiByokLauncher(config: Pick<RuntimeAdaptersConfig, 'piByokLauncher'>): PiByokLauncherConfig | undefined;
 // ==== @byok-sdk/client dist/agent-home-readers.d.ts ====
-import { type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
+import { type AgentMemoryStartRefusal, type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
 /**
  * How one Agent Attempt uses its home. The wire carries only
  * `homeAccess: 'memory-reader'`; an absent value is the writer.
@@ -1564,7 +1564,11 @@ export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
  * read fails; the caller then reports `unmeasured`.
  */
 export declare function digestAgentHomeMemory(home: string): Promise<AgentHomeMemoryDigest | undefined>;
-/** One read of the resident `MEMORY.md`; see {@link readResidentMemory}. */
+/**
+ * One read of the resident `MEMORY.md`; see {@link readResidentMemory}. An
+ * unreadable file names its `refusal` class when the home itself is at fault
+ * (#1843); a missing file, a changed home identity or an I/O error has none.
+ */
 export type ResidentMemoryRead = {
     readonly kind: 'read';
     readonly content: string;
@@ -1576,6 +1580,7 @@ export type ResidentMemoryRead = {
 } | {
     readonly kind: 'unreadable';
     readonly reason: string;
+    readonly refusal?: AgentMemoryStartRefusal;
 };
 /**
  * Reads the resident `MEMORY.md` of a leased home (#1439) with one
@@ -2989,9 +2994,14 @@ export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 /** One atomically replaced audit/outbox state must fit the cross-platform helper contract. */
 export declare const AGENT_MEMORY_MAX_LOCAL_LOG_BYTES: number;
-/** A complete snapshot cannot fit the bounded export contract. No partial result is returned. */
+/**
+ * A complete snapshot cannot fit the bounded export contract. No partial result
+ * is returned. `limit` names the bound: the snapshot file count, its total
+ * UTF-8 bytes, the directory entries a walk reads, or a start record's manifest.
+ */
 export declare class AgentMemorySnapshotLimitError extends AgentMemoryValidationError {
-    constructor(message: string);
+    readonly limit: 'files' | 'bytes' | 'entries' | 'manifest';
+    constructor(limit: 'files' | 'bytes' | 'entries' | 'manifest', message: string);
 }
 /**
  * Filesystem I/O failure: an open, read, write, fsync, rename or unlink did not
@@ -10079,6 +10089,7 @@ export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp.js';
 /** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
 export { isReservedMcpServerName } from './sdk-reserved-mcp.js';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets.js';
+export { resolveSdkHosting, SdkHostingAssetsMissingError, type SdkHosting, type SdkHostingOptions } from './sdk-hosting.js';
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export.js';
 export { classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES, TOOL_FILE_ACCESS, } from './tool-authorization.js';
 export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolAuthorizationMode, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolFileAccess, ToolFileScope, ToolFileScopeRoot, ToolReminder, ToolRisk, ToolRiskReason, ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule, } from './tool-authorization.js';
@@ -13508,6 +13519,47 @@ export declare function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy
  * module's own doc comment for its callers).
  */
 export declare function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions): Record<string, string>;
+// ==== @byok-sdk/client dist/sdk-hosting.d.ts ====
+import type { SdkHelperHostConfig } from './sdk-reserved-helper-host.js';
+export interface SdkHostingOptions {
+    /** Absolute path of the directory `copySdkPackagingAssets` wrote for this platform and architecture. */
+    readonly assetRoot: string;
+    /** Passed through unchanged; `DaemonConfig` validates it. */
+    readonly helperHost: SdkHelperHostConfig;
+}
+/** The SDK hosting values of a packaged Host, all derived from one asset root. */
+export interface SdkHosting {
+    /** Spread into `DaemonConfig`; `nativeAssetRoot` is also the `readDeviceEnrollmentStatus` option. */
+    readonly daemon: {
+        readonly sdkHelperHost: SdkHelperHostConfig;
+        readonly nativeAssetRoot?: string;
+        readonly agentMemoryHelperAssetRoot?: string;
+    };
+    /** Spread into `RuntimeAdaptersConfig`; merge `runtimes.pi` into the Host's own `runtimes`. */
+    readonly adapters: {
+        readonly sdkHelperHost: SdkHelperHostConfig;
+        readonly nativeAssetRoot?: string;
+        readonly runtimes: {
+            readonly pi: {
+                readonly packageDir: string;
+            };
+        };
+    };
+}
+/** The asset root lacks files that `copySdkPackagingAssets` always writes for the running platform and architecture. */
+export declare class SdkHostingAssetsMissingError extends Error {
+    readonly code: 'sdk_hosting_assets_missing';
+    /** Relative to the asset root, `/`-separated, sorted. */
+    readonly missing: readonly string[];
+    constructor(assetRoot: string, missing: readonly string[]);
+}
+/**
+ * The runtime counterpart of `copySdkPackagingAssets`: resolves every SDK hosting value from the shipped asset root, for
+ * `process.platform` and `process.arch`, the target the asset consumers load for. Checks that each file the build always
+ * writes for that target exists (digests stay with the consumers) and throws `SdkHostingAssetsMissingError` with every
+ * missing path, so a Host fails at startup rather than at the first native or Pi use.
+ */
+export declare function resolveSdkHosting(options: SdkHostingOptions): SdkHosting;
 // ==== @byok-sdk/client dist/sdk-native-assets-runtime.d.ts ====
 /** Runtime loader: explicit absolute root only, no download or package-search fallback. */
 export declare function loadSdkKoffiAsset(root: string): unknown;
@@ -13579,8 +13631,25 @@ export type SdkPackagingFormat = keyof typeof sdkPackagingFormats;
 export declare const sdkPackagingAssetLayout: Readonly<{
     readonly pi: 'pi';
     readonly native: 'native';
-    readonly agentMemoryHelper: 'native/agent-memory-fs';
+    readonly agentMemoryHelper: "native/agent-memory-fs";
 }>;
+/** One build target in `sdkPackagingAssetLayout`; every path is relative to the packaging output directory and `/`-separated. */
+export interface SdkPackagingTarget {
+    readonly piPackageDir: typeof sdkPackagingAssetLayout.pi;
+    /** The `copySdkNativeAssets` target, written under `sdkPackagingAssetLayout.native`; absent on Linux. */
+    readonly native?: {
+        readonly platform: 'win32' | 'darwin';
+        readonly arch: 'x64' | 'arm64';
+    };
+    /** Windows x64 only. */
+    readonly nativeAssetRoot?: typeof sdkPackagingAssetLayout.native;
+    /** macOS and Windows x64. Linux memory needs no helper. */
+    readonly agentMemoryHelperAssetRoot?: typeof sdkPackagingAssetLayout.agentMemoryHelper;
+    /** The files every build of this target writes, sorted: the Pi package marker and the native files. */
+    readonly requiredFiles: readonly string[];
+}
+/** The single source of the per-target packaging layout, for `copySdkPackagingAssets` and `resolveSdkHosting`. */
+export declare function sdkPackagingTarget(platform: string, arch: string): SdkPackagingTarget;
 /** Machine-readable build inputs. Target presence is not runtime/platform qualification. */
 export declare const sdkDistributionManifest: Readonly<{
     version: 1;
@@ -13627,7 +13696,7 @@ export declare const sdkDistributionManifest: Readonly<{
     assetLayout: Readonly<{
         readonly pi: 'pi';
         readonly native: 'native';
-        readonly agentMemoryHelper: 'native/agent-memory-fs';
+        readonly agentMemoryHelper: "native/agent-memory-fs";
     }>;
 }>;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
@@ -13702,6 +13771,21 @@ export declare const SDK_RESERVED_MCP_TOOL_NAMES: Readonly<{
     byokagentteam: readonly string[];
     byokagentresult: readonly string[];
 }>;
+// ==== @byok-sdk/client dist/testing/device-credentials.d.ts ====
+import type { DeviceCredentialBackend, DeviceRecord, FirstPairingAttempt } from '../daemon/device-credential-store.js';
+/**
+ * A `DeviceCredentialBackend` held in memory, so a test never reaches the
+ * operating system's credential store. Product source never imports it and
+ * the environment never selects it; a test injects it as `deviceCredentials`.
+ */
+export declare class InMemoryDeviceCredentialBackend implements DeviceCredentialBackend {
+    #private;
+    read(): Promise<DeviceRecord | undefined>;
+    readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
+    saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
+    replace(record: DeviceRecord): Promise<void>;
+    clear(): Promise<boolean>;
+}
 // ==== @byok-sdk/client dist/testing/index.d.ts ====
 import { type RuntimeEnvironment } from '../runtime/environment.js';
 import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types.js';
@@ -13722,6 +13806,7 @@ export interface FakeRuntimeAdapterBehavior {
  * SDK. Only `detect`, `prepare` and `runtimeEnvironment` are the test's.
  */
 export declare function fakeRuntimeAdapter(id: FakeRuntimeAdapterId, behavior?: FakeRuntimeAdapterBehavior): RuntimeAdapter;
+export { InMemoryDeviceCredentialBackend } from './device-credentials.js';
 // ==== @byok-sdk/client dist/tool-authorization.d.ts ====
 import type { AgentRef } from './agent-home.js';
 /**

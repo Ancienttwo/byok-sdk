@@ -641,9 +641,11 @@ export function selectImpact(paths, context = {}) {
     if (path === 'scripts/integration/fixtures/salesko-recurring-daemon.ts' || path === 'scripts/integration/salesko-recurring.test.ts') {
       dirs.add('packages/client'); continue;
     }
-    // Shared by client fixtures and their dependent examples, plus the built
-    // adapter and packaging smokes that import this backend directly.
-    if (path === 'scripts/testing/device-credentials.mjs') {
+    // #1844: the in-memory backend of @byok-sdk/client/testing, imported through
+    // dist/testing by the built adapter and packaging smokes. The two removed
+    // scripts/testing paths stay inputs of the PR and push that deleted them.
+    if (path === 'packages/client/src/testing/device-credentials.ts'
+      || path === 'scripts/testing/device-credentials.mjs' || path === 'scripts/testing/device-credentials.d.mts') {
       dirs.add('packages/client');
       families.add('adapter-lifecycle-smoke'); families.add('packageability-smoke');
       continue;
@@ -728,7 +730,7 @@ export function selectImpact(paths, context = {}) {
       scripts = true; continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.
-    if (/^packages\/client\/vendor\/oar\/45488e7\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+    if (/^packages\/client\/vendor\/oar\/ac7fde4\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {

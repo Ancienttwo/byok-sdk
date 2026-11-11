@@ -1,4 +1,4 @@
-import { InMemoryDeviceCredentialStore } from '../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { validateResultOutcome } from '@byok-sdk/protocol';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -60,7 +60,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' }, productName: 'Example Bot',
       productId: 'goal-btw-test', serverUrl: listening.url, storeDir: path.join(root, 'sdk'),
       agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },
-    }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+    }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialBackend(), longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     const pair = await byok.pairing.createPairingCode({ productId: 'goal-btw-test' });
     deviceId = (await daemon.pair(pair.code)).deviceId;
     await daemon.start(); await waitForReady(daemon);

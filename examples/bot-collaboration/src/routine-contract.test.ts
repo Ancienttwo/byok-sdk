@@ -1,6 +1,6 @@
 import { afterEach, expect, vi } from 'vitest';
 import { hash, taskId } from '@byok-sdk/server/execution-core';
-import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { template } from './k4-fixtures.test-support';
 import { openLTestHost, type LTestHost } from './l-test-host.test-support';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';

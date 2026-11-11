@@ -258,6 +258,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     const stat = await fs.stat(home, { bigint: true });
     const identity = { dev: stat.dev, ino: stat.ino };
     const file = path.join(home, 'MEMORY.md');
+    const notRegular = { kind: 'unreadable', reason: 'not a regular file', refusal: 'agent_memory_resident_not_regular_file' };
     expect(await readResidentMemory(home, identity)).toEqual({ kind: 'unreadable', reason: 'missing' });
     await fs.writeFile(file, 'é');
     expect(await readResidentMemory(home, identity)).toEqual({
@@ -268,10 +269,10 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     expect(await readResidentMemory(home, identity)).toEqual({ kind: 'over-limit', byteCount: 9000 });
     await fs.rm(file);
     await fs.symlink(path.join(home, 'elsewhere'), file);
-    expect(await readResidentMemory(home, identity)).toEqual({ kind: 'unreadable', reason: 'not a regular file' });
+    expect(await readResidentMemory(home, identity)).toEqual(notRegular);
     await fs.rm(file);
     execFileSync('mkfifo', [file]);
-    expect(await readResidentMemory(home, identity)).toEqual({ kind: 'unreadable', reason: 'not a regular file' });
+    expect(await readResidentMemory(home, identity)).toEqual(notRegular);
   });
 
   it('reports unchanged memory, and a writer terminal carries no memory evidence', async () => {

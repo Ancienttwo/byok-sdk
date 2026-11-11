@@ -16,9 +16,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createByokServer, listenLoopback } from '@byok-sdk/server';
-import { bundledSdkHelperHost, createDaemon, runSdkReservedHelperCommand, sdkPackagingAssetLayout } from '@byok-sdk/client';
+import { bundledSdkHelperHost, createDaemon, resolveSdkHosting, runSdkReservedHelperCommand } from '@byok-sdk/client';
 import { InMemorySecretStore, parseModelProviderProfile, parsePiProviderLauncherOptions, runPiProviderLauncher, SqliteProviderProfileStore } from '@byok-sdk/keys';
-import { InMemoryDeviceCredentialStore } from '../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 
 const MARKER = 'BYOK_EMBEDDED_HOST';
 const PRODUCT_ID = 'byok-packaging-embedded';
@@ -65,8 +65,8 @@ function assetRoot(): string {
 }
 
 async function host(): Promise<void> {
-  const assets = assetRoot();
-  const native = process.platform === 'darwin' || process.platform === 'win32';
+  const helperHost = bundledSdkHelperHost();
+  const hosting = resolveSdkHosting({ assetRoot: assetRoot(), helperHost });
   const root = await realpath(await mkdtemp(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'byok-emb-')));
   const requests: string[] = [];
   const model = fakeModel(requests);
@@ -89,20 +89,14 @@ async function host(): Promise<void> {
       compat: { supportsStore: false, supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: 'max_tokens' } },
   }));
   await profiles.close();
-  const helperHost = bundledSdkHelperHost();
   const daemon = createDaemon({
     localAgentRelease: { version: '0.0.0-packaging' }, productName: 'BYOK Packaging', productId: PRODUCT_ID, serverUrl,
     storeDir: path.join(root, 'store'), storage: { scratchRoot: path.join(root, 'scratch') },
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: EGRESS_POLICY },
-    runtimeAllowlist: ['pi'], sdkHelperHost: helperHost,
-    // The SDK gives this asset root to every Pi and Pi host child as PI_PACKAGE_DIR.
-    runtimes: { pi: { packageDir: path.join(assets, sdkPackagingAssetLayout.pi) } },
-    // Windows Pi launches own their process tree with a Job Object, through koffi from this root.
-    ...(process.platform === 'win32' ? { nativeAssetRoot: path.join(assets, sdkPackagingAssetLayout.native) } : {}),
-    ...(native ? { agentMemoryHelperAssetRoot: path.join(assets, sdkPackagingAssetLayout.agentMemoryHelper) } : {}),
+    runtimeAllowlist: ['pi'], ...hosting.daemon, runtimes: hosting.adapters.runtimes,
     piByokLauncher: { command: helperHost.executable, args: [...(helperHost.entry === undefined ? [] : [helperHost.entry]), LAUNCHER_COMMAND],
       profileDbPath, sessionDir: path.join(root, 'sessions') },
-  }, { deviceCredentials: new InMemoryDeviceCredentialStore() });
+  }, { deviceCredentials: new InMemoryDeviceCredentialBackend() });
   try {
     const { deviceId } = await daemon.pairEmbedded(byok);
     await daemon.start();

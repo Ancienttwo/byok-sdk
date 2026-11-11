@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDaemonWithAdapters } from '@byok-sdk/client';
 import { expect, it, vi } from 'vitest';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 import type { ByokServer } from '@byok-sdk/server';
 import { HostLedger } from '@byok-sdk/server/execution-core';
@@ -54,7 +54,7 @@ it('SIGKILL during wake delivery recovers the frozen input and only one executio
       localAgentRelease: { version: '0.0.0-test' }, serverUrl: `http://127.0.0.1:${ready.port}`,
       storeDir: path.join(root, 'sdk'),
       agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },
-    }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
+    }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialBackend() });
     const { deviceId } = await daemon.pair(ready.code);
     await daemon.start(); await waitForReady(daemon);
     processHost.child.send({ kind: 'routine', execution: template(deviceId) });
