@@ -327,6 +327,11 @@ This build reads such a row as an error. On Postgres, a task read, a task page o
    SELECT tenant_id,
           count(*)                                                                 AS no_agent_ref,
           count(*) FILTER (WHERE status NOT IN ('complete','failed','cancelled'))  AS no_agent_ref_live,
+          count(*) FILTER (WHERE status IN ('complete','failed','cancelled') AND EXISTS (
+            SELECT 1 FROM outbox o
+             WHERE o.tenant_id = task.tenant_id AND o.state = 'pending'
+               AND o.device_id IN (task.device_id, task.owner_device_id)
+               AND strpos(o.body, '"task_id":' || to_json(task.task_id)::text) > 0)) AS no_agent_ref_pending_delivery,
           min(updated_at)                                                          AS oldest_update,
           max(updated_at)                                                          AS newest_update
      FROM task
@@ -336,9 +341,9 @@ This build reads such a row as an error. On Postgres, a task read, a task page o
    SELECT count(*) AS no_agent_ref_total FROM task WHERE agent_id IS NULL;
    ```
 
-2. If `no_agent_ref_live` is above 0 anywhere, upgrade to v0.41.0 (its `migrate()` applies 0023–0037 to a 0.22.0 schema) and settle those tasks there. `cancelTask` cancels an unclaimed task at once and asks a claimed task's device to stop; a claimed task stays `cancel_requested` until its device reports. For a task whose device is gone, or that stays `cancel_requested`, call `abandonTask(tenant, taskId, 'operator')`: it moves any unfinished task to `cancelled` without the device. Repeat the count until `no_agent_ref_live` is 0 everywhere.
+2. If `no_agent_ref_live` is above 0 anywhere, upgrade to v0.41.0 (its `migrate()` applies 0023–0037 to a 0.22.0 schema) and settle those tasks there. `cancelTask` cancels an unclaimed task at once and asks a claimed task's device to stop; a claimed task stays `cancel_requested` until its device reports. For a task whose device is gone, or that stays `cancel_requested`, call `abandonTask(tenant, taskId, 'operator')`: it moves any unfinished task to `cancelled` without the device. Repeat the count until `no_agent_ref_live` and `no_agent_ref_pending_delivery` are 0 everywhere.
 
-   Also on v0.41.0: a terminal task can still have an offer or cancel envelope `pending` in a mailbox (its device registered but offline). `retireAgentlessTasks` refuses such a task (`pending_delivery`), because it archives at once instead of after the retention window. Either bring the device online so it receives the rows, or call `revokeDevice(tenant, deviceId)` for a device that will not return: revocation retires the device and moves its pending rows to `expired`.
+   Also on v0.41.0: a terminal task can still have an offer or cancel envelope `pending` in a mailbox (its device registered but offline). `retireAgentlessTasks` refuses such a task (`pending_delivery`), because it archives at once instead of after the retention window. `no_agent_ref_pending_delivery` counts them. Either bring the device online so it receives the rows; or call `revokeDevice(tenant, deviceId)` for a device that will not return: revocation retires the device and moves its pending rows to `expired`; or, keeping the device, dead-letter just those rows with `mailbox.expirePending(tenant, { deviceId, seqs })` on the core stores (`createPostgresCoreStores` from `@byok-sdk/cloud-dataplane`), taking `device_id` and `seq` from the same `outbox` match as the count.
 
    **Export first.** `retireAgentlessTasks` ignores the retention window: every legacy task's receipts become tombstones at once, however recent. On v0.41.0, read what the Host must keep before upgrading: `readTaskResult(tenant, taskId)` (the typed result) or `readTerminalReceipt(tenant, taskId)` (the raw terminal), for each `task_id` from `SELECT tenant_id, task_id FROM task WHERE agent_id IS NULL`. The offer read (`readTaskOffer`) does not serve these tasks on v0.41.0.
 3. Stop the application and install this build. Run the package migrations (`migrate()` over the new `dist/sql`) with only 0001–0038 present, for example a copy of `dist/sql` without `0039_task_agent_ref_not_null.sql`. 0038 creates `task_agentless_retired`. If you run every file instead, 0039 refuses as in step 5, and only 0039 rolls back: each file applies in its own transaction.
