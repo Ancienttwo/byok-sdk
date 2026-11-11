@@ -85,6 +85,11 @@
     "examples/desktop-bot-app": {
       "name": "@byok-sdk/example-desktop-bot-app",
       "version": "0.0.1",
+      "dependencies": {
+        "@byok-sdk/client": "workspace:*",
+        "@byok-sdk/keys": "workspace:*",
+        "@byok-sdk/server": "workspace:*",
+      },
       "devDependencies": {
         "@electron/fuses": "2.1.3",
         "@types/node": "^24",

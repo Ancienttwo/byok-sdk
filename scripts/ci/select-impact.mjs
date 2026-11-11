@@ -47,7 +47,11 @@ export const workspaceGraph = {
   },
   "examples/desktop-bot-app": {
     "name": "@byok-sdk/example-desktop-bot-app",
-    "dependencies": []
+    "dependencies": [
+      "@byok-sdk/client",
+      "@byok-sdk/keys",
+      "@byok-sdk/server"
+    ]
   },
   "examples/host-execution-core": {
     "name": "@byok-sdk/example-host-execution-core",
@@ -836,7 +840,7 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (/^examples\/service-upgrade\/(?:app-installer(?:\.test)?\.ts|upgrade-smoke\.mjs)$/.test(path)) { dirs.add(dir); continue; }
-    if (/^examples\/desktop-bot-app\/(?:brand\.config\.ts|src\/renderer\/index\.html)$/.test(path)) { dirs.add(dir); continue; }
+    if (/^examples\/desktop-bot-app\/(?:brand\.config\.ts|src\/renderer\/index\.html|src\/renderer\/(?:[^/]+\/)*[^/]+\.css)$/.test(path)) { dirs.add(dir); continue; }
     if (path === 'packages/client/src/__tests__/fixtures/native-sessions/pi-1.5.0.jsonl') {
       dirs.add('packages/client'); continue;
     }
