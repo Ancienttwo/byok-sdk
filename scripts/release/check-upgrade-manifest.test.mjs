@@ -47,8 +47,8 @@ function fixture(t) {
   copy('packages/keys/src');
   copy(CONFIG_SCHEMA_PATH);
   for (const example of VENDORED_EXAMPLES) {
-    copy(`${example.dir}/package.json`);
-    copy(`${example.dir}/src`);
+    copy(`examples/${example.id}/package.json`);
+    copy(`examples/${example.id}/src`);
   }
   mkdirSync(path.join(root, 'docs'), { recursive: true });
   writeFileSync(path.join(root, DOC), '# Migration\n\n## Removed export\n\n## New event\n\n## Store bump\n');

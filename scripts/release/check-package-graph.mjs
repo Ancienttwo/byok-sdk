@@ -15,6 +15,7 @@ const dispatchPackages = [
   ['packages/cloud-dataplane', '@byok-sdk/cloud-dataplane'],
   ['packages/cloud-do', '@byok-sdk/cloud-do'],
   ['packages/ui-runtime', '@byok-sdk/ui-runtime'],
+  ['packages/bot-collaboration', '@byok-sdk/bot-collaboration'],
 ];
 const keys = ['packages/keys', '@byok-sdk/keys'];
 const alignedPackages = [...dispatchPackages];
@@ -29,7 +30,6 @@ const alignedPackages = [...dispatchPackages];
 // longer attests tool or runtime executables.
 const publicPackages = [...alignedPackages, keys];
 const privatePackages = [
-  ['packages/bot-collaboration', '@byok-sdk/bot-collaboration'],
   ['packages/conformance', '@byok-sdk/conformance'],
   ['packages/testkit', '@byok-sdk/testkit'],
 ];

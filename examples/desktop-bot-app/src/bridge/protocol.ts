@@ -63,7 +63,22 @@ export type MainMethod = (typeof DOMAINS)[number]['main'][number];
 /** The methods the Host answers behind the bridge, besides `hello` and `shutdown`. */
 export type HostMethods = Omit<BridgeMethods, 'hello' | 'shutdown' | MainMethod>;
 
-/** What the preload exposes to the renderer as `window.byok`. */
+/**
+ * One renderer call's result across IPC. `ipcRenderer.invoke` keeps only a thrown error's message, and the context
+ * bridge copies an error with its message only, so main never throws a refusal across them: it resolves this, and the
+ * renderer root turns a refusal back into an error with its `code`.
+ */
+export type BridgeOutcome =
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false; readonly code: string; readonly message: string };
+
+/** What the preload exposes as `window.byokIpc`: the raw IPC, resolving every call to a {@link BridgeOutcome}. */
+export interface BridgeIpc {
+  invoke(method: string, params: unknown): Promise<BridgeOutcome>;
+  onStateChanged(listener: () => void): () => void;
+}
+
+/** What the renderer calls as `window.byok` (built from {@link BridgeIpc} by `src/renderer/bridge.ts`). */
 export interface ByokBridge {
   call<M extends RendererMethod>(method: M, params: BridgeMethods[M]['params']): Promise<BridgeMethods[M]['result']>;
   /** Calls `listener` after the Host's state changed, at most once per burst; returns the unsubscribe. */

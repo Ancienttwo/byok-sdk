@@ -23,7 +23,7 @@ appliesTo:
 
 ## 2. 决定
 
-**D1. 做梦归 Host 层。** SDK 不定时，不存 Host 历史，也不加做梦存储；v2 的输入与 wire 加法见 [ADR-050](ADR-050-dream-native-session-input.md)。`@byok-sdk/protocol` 提供纯函数 `buildDreamInstruction`：Host 用自己的历史调用它，把结果作为 fresh task 发出。K8 的 `BotCollaboration` 是这样的一个 Host，Host 仓库按 `src/VENDOR.md` 拷贝。
+**D1. 做梦归 Host 层。** SDK 不定时，不存 Host 历史，也不加做梦存储；v2 的输入与 wire 加法见 [ADR-050](ADR-050-dream-native-session-input.md)。`@byok-sdk/protocol` 提供纯函数 `buildDreamInstruction`：Host 用自己的历史调用它，把结果作为 fresh task 发出。K8 的 `BotCollaboration` 是这样的一个 Host，Host 仓库按 `src/VENDOR.md` 拷贝。（#1845 修订：拷贝已取消，Host 安装 `@byok-sdk/bot-collaboration`。）
 
 **D2. K8 Bot 默认开启。** Host 级选项 `dreaming`：
 - 不传就开启，`false` 关掉整个 Host 的做梦，并结束所有未完成的做梦 routine。

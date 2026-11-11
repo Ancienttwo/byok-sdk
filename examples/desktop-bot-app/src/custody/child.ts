@@ -1,17 +1,18 @@
 /**
  * The custody child: the Host executable re-entered with `CUSTODY_COMMAND`.
  * It reads one request from stdin, writes the provider profile and the OS
- * credential through `ProviderRegistry`, prints one secret-free receipt line
- * and exits. Only this process and main ever hold the secret.
+ * credential through `ProviderRegistry` (or lists every profile's status),
+ * prints one secret-free receipt line and exits. Only this process and main
+ * ever hold the secret.
  */
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import {
   ByokKeysError, inspectProviderProfileStore, ProviderProfileRefSchema, ProviderRegistry, SqliteProviderProfileStore,
-  type ModelProviderSecretName, type ProviderConfiguration, type ProviderStatus, type SecretStore,
+  type ModelProviderSecretName, type ProviderConfiguration, type SecretStore,
 } from '@byok-sdk/keys';
-import { CustodyError, type CustodyReceipt, type CustodyRequest } from './protocol.ts';
+import { CustodyError, type CustodyReceipt, type CustodyRequest, type CustodyResult } from './protocol.ts';
 
 const REQUEST_MAX_BYTES = 64 * 1024;
 
@@ -37,6 +38,10 @@ function parseRequest(value: unknown): CustodyRequest {
   const request = value as Record<string, unknown> | null;
   const invalid = (reason: string) => new CustodyError('custody_request_invalid', reason);
   if (typeof request !== 'object' || request === null) throw invalid('Request must be an object');
+  if (request.op === 'list') {
+    if (Object.keys(request).length !== 1) throw invalid('list takes no field but op');
+    return { op: 'list' };
+  }
   if (request.secret !== undefined && typeof request.secret !== 'string') throw invalid('secret must be a string');
   if (request.op === 'configure') {
     if (typeof request.configuration !== 'object' || request.configuration === null) throw invalid('configuration must be an object');
@@ -49,25 +54,29 @@ function parseRequest(value: unknown): CustodyRequest {
     if (!profileRef.success) throw invalid('profileRef is not a provider profile ref');
     return { op: 'replace_secret', profileRef: profileRef.data, secret: request.secret };
   }
-  throw invalid('op must be configure or replace_secret');
+  throw invalid('op must be configure, replace_secret or list');
 }
 
 /**
  * Applies one request to the keys store. The Host migrates that store before
  * any custody child starts, so any verdict but `accepted` or `absent` refuses.
+ * An absent store has no profiles to list, and listing does not create it.
  */
-export async function runCustody(input: Readable, keysDb: string, secretStore: SecretStore<ModelProviderSecretName>): Promise<ProviderStatus> {
+export async function runCustody(input: Readable, keysDb: string, secretStore: SecretStore<ModelProviderSecretName>): Promise<CustodyResult> {
   const request = await readRequest(input);
   const store = await inspectProviderProfileStore(keysDb);
   if (store.verdict !== 'accepted' && store.verdict !== 'absent') {
     throw new CustodyError('keys_store_refused', `Keys store at ${keysDb} is ${store.verdict}: ${store.reason}`);
   }
+  if (request.op === 'list' && store.verdict === 'absent') return { statuses: [] };
   await mkdir(path.dirname(keysDb), { recursive: true, mode: 0o700 });
   const registry = new ProviderRegistry({ profileStore: new SqliteProviderProfileStore({ path: keysDb }), secretStore });
   try {
-    return request.op === 'configure'
-      ? await registry.configure(request.configuration, request.secret)
-      : await registry.replaceSecret(request.profileRef, request.secret);
+    switch (request.op) {
+      case 'list': return { statuses: await registry.list() };
+      case 'configure': return { status: await registry.configure(request.configuration, request.secret) };
+      case 'replace_secret': return { status: await registry.replaceSecret(request.profileRef, request.secret) };
+    }
   } finally {
     await registry.close();
   }
@@ -79,11 +88,11 @@ export function refusalReceipt(error: unknown): CustodyReceipt {
   return { ok: false, code: 'custody_failed', message: error instanceof Error ? error.message : String(error) };
 }
 
-/** The re-entered command: one receipt line on stdout; exit 0 only when the change committed. */
+/** The re-entered command: one receipt line on stdout; exit 0 only when the change committed or the list was read. */
 export async function runCustodyCommand(keysDb: string, secretStore: () => SecretStore<ModelProviderSecretName>): Promise<number> {
   let receipt: CustodyReceipt;
   try {
-    receipt = { ok: true, status: await runCustody(process.stdin, keysDb, secretStore()) };
+    receipt = { ok: true, ...await runCustody(process.stdin, keysDb, secretStore()) };
   } catch (error) {
     receipt = refusalReceipt(error);
   }

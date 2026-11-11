@@ -6,10 +6,10 @@ import { parseBunLock } from '../release/pi-runtime-identity.mjs';
 import { dependencyLockImpact, normalizeDependencyVersions } from './dependency-impact.mjs';
 import { admitDocumentationScripts } from './documentation-checks.mjs';
 
-// The nine published manifests. A contract test keeps this list equal to the
+// The ten published manifests. A contract test keeps this list equal to the
 // non-private packages/*/package.json files.
 export const publicManifests = Object.freeze([
-  'client', 'cloud', 'cloud-dataplane', 'cloud-do', 'core', 'keys', 'protocol', 'server', 'ui-runtime',
+  'bot-collaboration', 'client', 'cloud', 'cloud-dataplane', 'cloud-do', 'core', 'keys', 'protocol', 'server', 'ui-runtime',
 ].map(name => `packages/${name}/package.json`));
 
 // #1102: the upgrade-manifest gate, its test in test:scripts, and the client
@@ -40,15 +40,23 @@ const HOSTED_WORKER = Object.freeze({ dir: 'examples/hosted-bot-collaboration-wo
 const PRIVATE_HOSTED = Object.freeze([HOSTED, HOSTED_WORKER]);
 const HOSTED_FIELDS = new Set(['name', 'version', 'private', 'type', 'description', 'scripts', 'dependencies', 'devDependencies']);
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies'];
-// #1845 S2: K8 is the private package @byok-sdk/bot-collaboration, moved from
-// examples/bot-collaboration. Its manifest has one reviewed shape: the four
-// built entries, and a runtime closure of published packages only. A private
-// example such as the K4 demo Host may be a devDependency, never a runtime or
-// peer dependency, so the package can be published without carrying it (S3).
+// #1845: K8 is the published package @byok-sdk/bot-collaboration. Its manifest
+// has one reviewed shape: the four built entries, the published files, and a
+// runtime closure of published packages only. A private example such as the K4
+// demo Host may be a devDependency, never a runtime or peer dependency, so an
+// install never needs a package that is not on npm.
 const K8 = Object.freeze({ dir: 'packages/bot-collaboration', name: '@byok-sdk/bot-collaboration' });
-const K8_MOVED = Object.freeze({ dir: 'examples/bot-collaboration', name: '@byok-sdk/example-bot-collaboration' });
-const K8_FIELDS = new Set(['name', 'version', 'private', 'type', 'description', 'main', 'types', 'exports', 'sideEffects', 'engines', 'scripts',
-  'dependencies', 'peerDependencies', 'peerDependenciesMeta', 'devDependencies']);
+const K8_FIELDS = new Set(['name', 'version', 'type', 'description', 'license', 'repository', 'bugs', 'homepage', 'engines', 'sideEffects',
+  'main', 'module', 'types', 'exports', 'files', 'publishConfig', 'scripts', 'dependencies', 'peerDependencies', 'peerDependenciesMeta', 'devDependencies']);
+const K8_PUBLISHED = Object.freeze({
+  license: 'MIT',
+  repository: { type: 'git', url: 'git+https://github.com/Ancienttwo/byok-sdk.git', directory: 'packages/bot-collaboration' },
+  bugs: { url: 'https://github.com/Ancienttwo/byok-sdk/issues' },
+  homepage: 'https://github.com/Ancienttwo/byok-sdk#readme',
+  engines: { node: '>=24.22.1' },
+  files: ['dist', 'README.md', 'LICENSE'],
+  publishConfig: { access: 'public' },
+});
 const K8_EXPORTS = Object.freeze({
   '.': { types: './dist/index.d.ts', import: './dist/index.js' },
   './host-kit': { types: './dist/host-kit.d.ts', import: './dist/host-kit.js' },
@@ -184,13 +192,13 @@ function verifyDeclaredSpecs(manifest, fields, { base, cwd }, additions) {
   }
 }
 
-/** #1845 S2: the whole K8 manifest against its reviewed shape (see K8 above), whether new or edited. */
+/** #1845: the whole K8 manifest against its reviewed shape (see K8 above). */
 function verifyK8Manifest(manifest, { base, cwd, workspaceGraph }) {
   const refuse = reason => { throw new Error(`Reviewed CI mapping required: the K8 manifest ${reason}`); };
   if (!plain(manifest) || Object.keys(manifest).some(key => !K8_FIELDS.has(key))) refuse('has an unreviewed field');
-  if (manifest.name !== K8.name || manifest.private !== true || manifest.type !== 'module' || !version(manifest.version)
-    || typeof manifest.description !== 'string' || manifest.main !== K8_EXPORTS['.'].import || manifest.types !== K8_EXPORTS['.'].types
-    || manifest.sideEffects !== false || !isDeepStrictEqual(manifest.engines, { node: '>=24.15.0' })
+  if (manifest.name !== K8.name || manifest.type !== 'module' || !version(manifest.version) || typeof manifest.description !== 'string'
+    || manifest.main !== K8_EXPORTS['.'].import || manifest.module !== K8_EXPORTS['.'].import || manifest.types !== K8_EXPORTS['.'].types
+    || manifest.sideEffects !== false || Object.entries(K8_PUBLISHED).some(([key, value]) => !isDeepStrictEqual(manifest[key], value))
     || !isDeepStrictEqual(manifest.exports, K8_EXPORTS) || !isDeepStrictEqual(manifest.scripts, K8_SCRIPTS)) {
     refuse('has an unreviewed shape');
   }
@@ -205,35 +213,6 @@ function verifyK8Manifest(manifest, { base, cwd, workspaceGraph }) {
   const edges = [...new Set(DEPENDENCY_FIELDS.flatMap(field => Object.keys(manifest[field] ?? {}).filter(name => name.startsWith('@byok-sdk/'))))].sort();
   if (!isDeepStrictEqual(edges, [...(workspaceGraph?.[K8.dir]?.dependencies ?? [])].sort())) refuse('edges differ from the reviewed graph');
   return manifest;
-}
-
-/** #1845 S2: a workspace manifest may rename its K8 edge to the moved package, in the same field with the same spec. */
-function admitK8Rename(before, after) {
-  for (const field of DEPENDENCY_FIELDS) {
-    if (before[field]?.[K8_MOVED.name] === 'workspace:*' && before[field]?.[K8.name] === undefined
-      && after[field]?.[K8.name] === 'workspace:*' && after[field]?.[K8_MOVED.name] === undefined) {
-      delete after[field][K8.name];
-      after[field][K8_MOVED.name] = 'workspace:*';
-    }
-  }
-}
-
-/** #1845 S2: the lock moves the K8 workspace and its row to the new dir and name, matching the reviewed manifest. Returns its record. */
-function admitK8MoveLock(before, after, context) {
-  if (!before.workspaces?.[K8_MOVED.dir] || after.workspaces?.[K8_MOVED.dir] || before.workspaces?.[K8.dir] || !after.workspaces?.[K8.dir]) return [];
-  const manifest = verifyK8Manifest(JSON.parse(readFileSync(resolve(context.cwd, K8.dir, 'package.json'), 'utf8')), context);
-  const expected = { name: manifest.name, version: manifest.version, dependencies: manifest.dependencies, devDependencies: manifest.devDependencies,
-    peerDependencies: manifest.peerDependencies, optionalPeers: K8_OPTIONAL_PEERS };
-  if (!isDeepStrictEqual(after.workspaces[K8.dir], expected)
-    || !isDeepStrictEqual(before.packages?.[K8_MOVED.name], [`${K8_MOVED.name}@workspace:${K8_MOVED.dir}`])
-    || !isDeepStrictEqual(after.packages?.[K8.name], [`${K8.name}@workspace:${K8.dir}`])
-    || after.packages?.[K8_MOVED.name] !== undefined || before.packages?.[K8.name] !== undefined) {
-    throw new Error('Reviewed CI mapping required: the K8 lock rows differ from its moved manifest');
-  }
-  const record = after.workspaces[K8.dir];
-  delete before.workspaces[K8_MOVED.dir]; delete after.workspaces[K8.dir];
-  delete before.packages[K8_MOVED.name]; delete after.packages[K8.name];
-  return [record];
 }
 
 /**
@@ -341,7 +320,6 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   const qualify = [];
   const before = parse(beforeText), after = parse(afterText);
   if (path.startsWith('examples/') && (before.private !== true || after.private !== true)) throw new Error('Example workspaces must stay private');
-  if (/^examples\/[^/]+\/package\.json$/.test(path)) admitK8Rename(before, after);
   // #654 W3: keep the provider in the private root's peer context so cross-workspace helpers share Vitest.
   if (path === 'package.json' && before.private === true && after.private === true
     && after.devDependencies?.vitest === '5.1.0') {
@@ -357,10 +335,9 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     for (const example of PRIVATE_HOSTED) {
       if (!before.workspaces?.[example.dir] && after.workspaces?.[example.dir]) admitHostedLock(before, after, cwd, example);
     }
-    const moved = admitK8MoveLock(before, after, { base, cwd, workspaceGraph });
     const { added, records } = admitRegisteredPrivateLock(before, after, { base, cwd, workspaceGraph });
-    const impact = dependencyLockImpact(before, after, { cwd, admitted: [...moved, ...records] });
-    return { ...impact, dirs: [...new Set([...(moved.length ? [K8.dir] : []), ...added, ...impact.dirs])] };
+    const impact = dependencyLockImpact(before, after, { cwd, admitted: records });
+    return { ...impact, dirs: [...new Set([...added, ...impact.dirs])] };
   } else if (path === `${HOSTED_WORKER.dir}/package.json`) {
     // #654 W4: the browser member page imports core's sealed-payload entry directly.
     if (before.dependencies?.['@byok-sdk/core'] === undefined && after.dependencies?.['@byok-sdk/core'] === 'workspace:*') {
