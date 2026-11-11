@@ -113,7 +113,8 @@ test('docs and known CI contracts select light checks, not release families', ()
 });
 
 test('shared device credential fixtures select client consumers and native smoke owners', () => {
-  const impact = selectImpact(['packages/client/src/testing/device-credentials.ts']);
+  const impact = selectImpact(['packages/client/src/testing/device-credentials.ts',
+    'scripts/testing/device-credentials.mjs', 'scripts/testing/device-credentials.d.mts']);
   for (const dir of ['packages/client', 'examples/basic', 'examples/host-execution-core',
     'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/hosted-bot-collaboration',
     'examples/hosted-bot-collaboration-worker', 'examples/packaging']) {

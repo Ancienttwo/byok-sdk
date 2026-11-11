@@ -641,8 +641,10 @@ export function selectImpact(paths, context = {}) {
       dirs.add('packages/client'); continue;
     }
     // #1844: the in-memory backend of @byok-sdk/client/testing, imported through
-    // dist/testing by the built adapter and packaging smokes.
-    if (path === 'packages/client/src/testing/device-credentials.ts') {
+    // dist/testing by the built adapter and packaging smokes. The two removed
+    // scripts/testing paths stay inputs of the PR and push that deleted them.
+    if (path === 'packages/client/src/testing/device-credentials.ts'
+      || path === 'scripts/testing/device-credentials.mjs' || path === 'scripts/testing/device-credentials.d.mts') {
       dirs.add('packages/client');
       families.add('adapter-lifecycle-smoke'); families.add('packageability-smoke');
       continue;
