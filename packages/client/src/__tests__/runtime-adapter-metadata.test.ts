@@ -7,7 +7,7 @@ import { createEnvelope, HarnessIdSchema, RuntimeIdSchema } from '@byok-sdk/prot
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  AgyAdapter, ClaudeAdapter, CodexAdapter, DshAdapter, GrokAdapter, HermesAdapter, PiAdapter,
+  AgyAdapter, ClaudeAdapter, CodexAdapter, DshAdapter, GrokAdapter, PiAdapter,
   isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult,
 } from '../adapters/index';
 import { fakeRuntimeAdapter, type FakeRuntimeAdapterId } from '../testing/index';
@@ -41,7 +41,6 @@ function builtIns(home: string): Record<FakeRuntimeAdapterId, RuntimeAdapter> {
     codex: new CodexAdapter(),
     pi: new PiAdapter(),
     grok: new GrokAdapter(),
-    hermes: new HermesAdapter({ home }),
     dsh: new DshAdapter({ home, model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' } }),
     agy: new AgyAdapter({ home }),
   };
@@ -64,7 +63,6 @@ describe('session limits', () => {
     ['Grok', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new GrokAdapter(limits), true],
     ['agy', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new AgyAdapter({ home: path.join(os.tmpdir(), 'agy-limits'), ...limits }), true],
     ['dsh', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new DshAdapter({ home: path.join(os.tmpdir(), 'dsh-limits'), model: { provider: 'deepseek', model: 'test', keyEnv: 'TEST_KEY' }, ...limits }), true],
-    ['Hermes', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new HermesAdapter({ home: path.join(os.tmpdir(), 'hermes-limits'), ...limits }), false],
   ] as const)('%s validates limits', (label, create, retained) => {
     expect(() => create({ interruptTimeoutMs: 0.5 })).not.toThrow();
     for (const interruptTimeoutMs of [0, Number.NaN, 2_147_483_648]) {
@@ -96,7 +94,7 @@ describe('selection target', () => {
       if (!wire) expect(HarnessIdSchema.parse(id)).toBe(id);
     }
     expect(Object.values(adapters).map(adapter => taskRuntimeTarget(adapter.descriptor))).toEqual([
-      { runtime: 'claude' }, { runtime: 'codex' }, { runtime: 'pi' }, { harnessId: 'grok' }, { harnessId: 'hermes' }, { harnessId: 'dsh' }, { harnessId: 'agy' },
+      { runtime: 'claude' }, { runtime: 'codex' }, { runtime: 'pi' }, { harnessId: 'grok' }, { harnessId: 'dsh' }, { harnessId: 'agy' },
     ]);
   });
 });
@@ -109,7 +107,6 @@ describe('supported platforms', () => {
       codex: ['darwin', 'linux', 'win32'],
       pi: ['darwin', 'linux', 'win32'],
       grok: ['darwin', 'linux'],
-      hermes: ['darwin', 'linux', 'win32'],
       dsh: ['darwin', 'linux'],
       agy: ['darwin', 'linux', 'win32'],
     });
@@ -145,14 +142,6 @@ describe('supported platforms', () => {
     expect(await onPlatform('win32', () => observeRuntimeDetection(adapter))).toEqual({ kind: 'probe-failed' });
   });
 
-  // #608: a real Hermes run on windows-latest qualified Hermes there.
-  it('Windows probes Hermes', async () => {
-    const resolveBin = vi.fn(() => { throw new Error('resolver failed'); });
-    const adapter = new HermesAdapter({ home: await tempDir(), resolveBin });
-    expect(await onPlatform('win32', () => observeRuntimeDetection(adapter))).toEqual({ kind: 'probe-failed' });
-    expect(resolveBin).toHaveBeenCalled();
-  });
-
   it('the strict decoders accept the platform refusal', () => {
     expect(validateRuntimeDetectResult({ kind: 'refused', reason: 'platform_unsupported' })).toEqual({ kind: 'refused', reason: 'platform_unsupported' });
     expect(parseRuntimeObservations([{ id: 'grok', present: false, outcome: 'refused', reason: 'platform_unsupported', steer: false, resume: true }]))
@@ -170,7 +159,6 @@ describe('adapter-declared facts the daemon reads instead of the runtime id', ()
       codex: { fileScope: undefined, providerProfileBinding: undefined },
       pi: { fileScope: { lanes: ['rpc', 'prepared'] }, providerProfileBinding: true },
       grok: { fileScope: undefined, providerProfileBinding: undefined },
-      hermes: { fileScope: undefined, providerProfileBinding: undefined },
       dsh: { fileScope: undefined, providerProfileBinding: undefined },
       agy: { fileScope: undefined, providerProfileBinding: undefined },
     });
@@ -250,7 +238,7 @@ describe('daemon detection authority', () => {
 });
 
 describe('fakeRuntimeAdapter', () => {
-  it.each(['claude', 'codex', 'pi', 'grok', 'hermes'] as const)('%s carries the real adapter descriptor', async (id) => {
+  it.each(['claude', 'codex', 'pi', 'grok'] as const)('%s carries the real adapter descriptor', async (id) => {
     const real = builtIns(await tempDir())[id];
     const fake = fakeRuntimeAdapter(id);
     expect(fake.descriptor).toEqual(real.descriptor);

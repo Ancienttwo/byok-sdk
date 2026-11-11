@@ -753,7 +753,7 @@ function parseRuntimeEnvironmentLanes(value: unknown): RuntimeEnvironmentLaneRep
     if (item.lane === 'pi-keys-profile' && item.narrowedBy === 'keys-launcher' && hasOnlyKeys(item, ['lane', 'narrowedBy'])) {
       lanes.push({ lane: 'pi-keys-profile', narrowedBy: 'keys-launcher' });
     } else if (
-      (item.lane === 'pi-prepared' || item.lane === 'hermes-custody') && item.narrowedBy === 'sdk' && hasOnlyKeys(item, ['lane', 'narrowedBy', 'removed'])
+      item.lane === 'pi-prepared' && item.narrowedBy === 'sdk' && hasOnlyKeys(item, ['lane', 'narrowedBy', 'removed'])
       && Array.isArray(item.removed) && item.removed.every(isEnvironmentName)
     ) {
       lanes.push({ lane: item.lane, narrowedBy: 'sdk', removed: [...item.removed] });

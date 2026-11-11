@@ -8,14 +8,12 @@ import type { AgentMessageDraftEvent } from '@byok-sdk/server';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
-import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { taskRuntimeTarget } from '../runtime-detection';
 import { createDaemonWithAdapters, type Daemon } from '@byok-sdk/client';
 import type { RuntimeAdapter } from '../types';
 import { InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
 import { testScratchRoot } from './fixtures/execution-scratch';
-import { fakeHermesCommand } from './fixtures/fake-hermes-command';
 import { waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
 
@@ -47,10 +45,10 @@ interface RuntimeCase {
   readonly held: RegExp;
   /** Each fake holds its reply until `<gate>/release`, after two streamed pieces and before the whole message. */
   readonly env: (gate: string) => Record<string, string>;
-  readonly adapter: (command: string, root: string) => RuntimeAdapter;
+  readonly adapter: (command: string) => RuntimeAdapter;
 }
 
-const cases: Record<'claude' | 'codex' | 'grok' | 'hermes', RuntimeCase> = {
+const cases: Record<'claude' | 'codex' | 'grok', RuntimeCase> = {
   claude: {
     fixture: 'fake-claude.mjs',
     held: /^reply-1:[\s\S]*Write a reply\.$/,
@@ -69,12 +67,6 @@ const cases: Record<'claude' | 'codex' | 'grok' | 'hermes', RuntimeCase> = {
     env: gate => ({ FAKE_ACP_REPLY_GATE: gate }),
     adapter: command => new GrokAdapter({ resolveBin: () => ({ command, source: 'path' }) }),
   },
-  hermes: {
-    fixture: 'fake-hermes.mjs',
-    held: /^Done$/,
-    env: gate => ({ FAKE_HERMES_REPLY_GATE: gate }),
-    adapter: (command, dir) => new HermesAdapter({ home: path.join(dir, 'hermes-root'), resolveBin: () => ({ command: fakeHermesCommand(command, dir), source: 'path' }) }),
-  },
 };
 
 /** A launcher that sets the fake's toggles itself, so the test does not depend on which variables an adapter forwards. */
@@ -91,7 +83,7 @@ async function setup(runtime: RuntimeCase) {
   root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-draft-runtime-')));
   const gate = path.join(root, 'gate');
   await fs.mkdir(gate);
-  const adapter = runtime.adapter(await launcher(root, fixture(runtime.fixture), runtime.env(gate)), root);
+  const adapter = runtime.adapter(await launcher(root, fixture(runtime.fixture), runtime.env(gate)));
   const accepted: AgentMessagePublishPlainPayload[] = [];
   const sent: Envelope[] = [];
   real = await startRealServer({ productId, storage: { kind: 'memory' }, longPollHoldMs: 30,
@@ -128,8 +120,8 @@ async function setup(runtime: RuntimeCase) {
 }
 
 describe('Agent message drafts from each bundled runtime through the real server and daemon', () => {
-  // Grok and Hermes declare darwin and linux only.
-  it.skipIf(!posix).each(['grok', 'hermes'] as const)('%s shows the reply mid-turn and ends on the accepted text', id => runtimeCase(id), 40_000);
+  // Grok declares darwin and linux only.
+  it.skipIf(!posix).each(['grok'] as const)('%s shows the reply mid-turn and ends on the accepted text', id => runtimeCase(id), 40_000);
   it.each(['claude', 'codex'] as const)('%s shows the reply mid-turn and ends on the accepted text', id => runtimeCase(id), 40_000);
 });
 

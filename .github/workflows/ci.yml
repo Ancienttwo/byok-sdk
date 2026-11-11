@@ -963,7 +963,7 @@ jobs:
   windows-client:
     needs: select
     if: ${{ contains(fromJSON(needs.select.outputs.families), 'windows-client') }}
-    name: Windows client store, security and Hermes tests (fixed Node)
+    name: Windows client store and security tests (fixed Node)
     runs-on: windows-latest
     defaults:
       run:
@@ -1026,19 +1026,6 @@ jobs:
       # of a three-file projection apply; each file must keep its old or new bytes.
       - name: Run Agent-home file write crash tests on Windows
         run: bun run --filter @byok-sdk/client test -- src/__tests__/agent-home-write-file.test.ts
-
-      # #712: the Hermes gateway control pipe, ownership walk and custody launcher on Windows.
-      # Two steps: the pwsh step fails only on the exit code of its last command.
-      - name: Run Hermes adapter, custody and gateway control tests on Windows
-        run: |
-          bun run --filter @byok-sdk/client test -- `
-            src/__tests__/hermes-adapter.test.ts `
-            src/__tests__/hermes-custody.test.ts `
-            src/__tests__/hermes-gateway-control.test.ts `
-            src/__tests__/hermes-home.test.ts
-
-      - name: Run the Hermes custody launcher tests on Windows
-        run: bun run --filter @byok-sdk/keys test -- src/__tests__/hermes-provider-launcher.test.ts
 
       # #1423: the file-scope guard, policy, launch, discovery and real Pi scoped tools on
       # NTFS (8.3 names on C:, a second volume on D:, junctions, mountvol).
@@ -2096,85 +2083,6 @@ jobs:
           path: ${{ github.workspace }}/.ci-artifacts/credential-isolation
           if-no-files-found: warn
 
-  # #608: the Hermes adapter against a real Hermes on Windows. The qualified
-  # build (`QUALIFIED_HERMES_VERSION` in
-  # packages/client/src/adapters/hermes/hermes-version.ts) uses a vendored,
-  # checksum-verified installer. The model is a local fake
-  # OpenAI-compatible endpoint inside the test: no paid call, no provider key.
-  # Its own job, because the install takes minutes and only Hermes paths select it.
-  hermes-real-windows:
-    needs: select
-    if: ${{ contains(fromJSON(needs.select.outputs.families), 'hermes-real-windows') }}
-    name: Hermes adapter against real Hermes on Windows
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: pwsh
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup fixed Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .node-version
-
-      - name: Verify pinned Bun archive
-        shell: node {0}
-        run: *verify-bun
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
-      - name: Install dependencies
-        run: bun ci
-
-      - name: Build client dependencies
-        run: bun run build
-
-      - name: Cache qualified Hermes tools
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ${{ runner.temp }}/hermes-tools
-          key: hermes-tools-${{ runner.os }}-${{ runner.arch }}-${{
-            hashFiles('scripts/ci/vendor/hermes/manifest.json') }}
-
-      - name: Install the qualified Hermes from the verified vendor copy
-        env:
-          HERMES_RUNTIME_DIR: ${{ runner.temp }}/hermes-tools
-        run: |
-          $verified = node --input-type=module -e '
-            import { qualifiedVersions, vendoredHermesInstaller }
-              from "./scripts/ci/runtime-contract-install.mjs";
-            const v = (await qualifiedVersions()).hermes;
-            console.log(JSON.stringify({
-              installer: vendoredHermesInstaller(v, "install.ps1")
-            }));' | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or -not $verified) {
-            throw 'Hermes installer verification failed'
-          }
-          $installer = $verified.installer
-          $commit = Split-Path (Split-Path $installer -Parent) -Leaf
-          Write-Host "Using vendored Hermes installer: $installer"
-          # The install's own home, apart from the SDK root the test creates.
-          $hermesHome = Join-Path $env:RUNNER_TEMP "hermes-install-home"
-          $started = Get-Date
-          pwsh -NoProfile -File $installer -Commit $commit -NonInteractive -SkipBrowser -SkipComputerUse `
-            -HermesHome $hermesHome -InstallDir (Join-Path $env:RUNNER_TEMP "hermes-agent")
-          if ($LASTEXITCODE -ne 0) { Write-Error "Hermes install failed ($LASTEXITCODE)"; exit 1 }
-          Write-Host "Hermes install took $([int]((Get-Date) - $started).TotalSeconds) s"
-          $bin = Join-Path $hermesHome "bin\hermes.exe"
-          if (-not (Test-Path $bin)) { Get-ChildItem (Join-Path $hermesHome "bin") | Format-Table Name, Length; Write-Error "no $bin"; exit 1 }
-          $env:HERMES_HOME = $hermesHome
-          & $bin --version
-          if ($LASTEXITCODE -ne 0) { Write-Error "hermes --version failed ($LASTEXITCODE)"; exit 1 }
-          "BYOK_HERMES_REAL_BIN=$bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Run the Hermes adapter against real Hermes with a fake model endpoint
-        run: |
-          # The test skips without this variable; never let a missing install pass as a skip.
-          if (-not (Test-Path $env:BYOK_HERMES_REAL_BIN)) { Write-Error "BYOK_HERMES_REAL_BIN is not set to the installed Hermes"; exit 1 }
-          bun run --filter @byok-sdk/client test -- src/__tests__/hermes-real.test.ts
-
   # The agy adapter on Windows against the qualified CLI: the win32 job object
   # with per-session workers, and the owned USERPROFILE. Same suite and
   # loopback provider as the Linux leg.
@@ -2273,7 +2181,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: [pi, claude, codex, grok, hermes, dsh, agy, opencode1, opencode2]
+        runtime: [pi, claude, codex, grok, dsh, agy, opencode1, opencode2]
     env:
       BYOK_RUNTIME_CONTRACT: qualified
     steps:
@@ -2287,16 +2195,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun ci
       - run: bun run build
-      - name: Cache qualified Hermes tools
-        if: matrix.runtime == 'hermes'
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ${{ runner.temp }}/hermes-tools
-          key: hermes-tools-${{ runner.os }}-${{ runner.arch }}-${{
-            hashFiles('scripts/ci/vendor/hermes/manifest.json') }}
       - name: Install the qualified runtime CLI
-        env:
-          HERMES_RUNTIME_DIR: ${{ runner.temp }}/hermes-tools
         run: node scripts/ci/runtime-contract-install.mjs ${{ matrix.runtime }} qualified
       - name: Run the runtime contract suite
         run: bun run --filter @byok-sdk/client test:runtime-contract -- src/__tests__/runtime-contract/${{ matrix.runtime }}.contract.ts
@@ -2561,7 +2460,7 @@ jobs:
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "packaging-consistency", "npm-release-pack", "release-pack-migrate", "service-upgrade-smoke", "linux-systemd-smoke", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "agy-real-windows", "opencode-real-windows", "runtime-contract", "desktop"]
+    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "packaging-consistency", "npm-release-pack", "release-pack-migrate", "service-upgrade-smoke", "linux-systemd-smoke", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "agy-real-windows", "opencode-real-windows", "runtime-contract", "desktop"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

@@ -469,11 +469,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
     if (path === 'packages/client/package.json') {
       if (before.exports?.['./packaging'] === undefined && isDeepStrictEqual(after.exports?.['./packaging'], CLIENT_PACKAGING_EXPORT)) delete after.exports['./packaging'];
+      // #1854 archives the Hermes adapter: exactly its private imports key and its build smoke go.
       const key = '#byok-hermes-session';
       const entry = { types: './dist/adapters/hermes/hermes-session-runtime.d.ts', default: './dist/adapters/hermes/hermes-session-runtime.js' };
-      if (before.imports?.[key] === undefined && isDeepStrictEqual(after.imports?.[key], entry)) delete after.imports[key];
+      if (isDeepStrictEqual(before.imports?.[key], entry) && after.imports?.[key] === undefined) after.imports[key] = entry;
       const smoke = ' && node scripts/check-hermes-session-entry.mjs';
-      if (typeof before.scripts?.build === 'string' && after.scripts?.build === before.scripts.build + smoke) after.scripts.build = before.scripts.build;
+      if (typeof before.scripts?.build === 'string' && typeof after.scripts?.build === 'string' && before.scripts.build === after.scripts.build + smoke) after.scripts.build = before.scripts.build;
       // #1589 retires the sealed Pi host: exactly its private imports key and its build step go.
       const sealedKey = '#byok-pi-runtime-host-sealed';
       const sealedEntry = { types: './dist/bin/pi-runtime-host-sealed.d.ts', default: './dist/bin/pi-runtime-host-sealed.js' };

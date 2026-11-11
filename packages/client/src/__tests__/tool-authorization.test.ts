@@ -359,7 +359,7 @@ describe('high-risk classifier', () => {
     expect(call('write', { path: 'x.txt' }, '/tmp')).toEqual(['write-outside-workspace']);
   });
 
-  it.each(['write_file', 'patch'])('flags the Hermes tool %s outside the workspace only', (toolName) => {
+  it.each(['write_file', 'patch'])('flags the write tool %s outside the workspace only', (toolName) => {
     const call = (path: string) => reasons(classifyToolCall({ toolName, input: { path }, cwd: WORKSPACE }, WORKSPACE, HOME));
     expect(call('inside.txt')).toEqual([]);
     expect(call('/etc/hosts')).toEqual(['write-outside-workspace']);

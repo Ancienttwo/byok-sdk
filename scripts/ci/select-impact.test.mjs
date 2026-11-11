@@ -289,7 +289,6 @@ test('a platform family is selected only by a path it owns', () => {
     desktop: 'examples/desktop-bot-app/src/main/index.ts',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
     'credential-isolation-audit': 'packages/keys/src/index.ts',
-    'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
     'agy-real-windows': 'packages/client/src/__tests__/runtime-contract/agy.contract.ts',
     'opencode-real-windows': 'packages/client/src/__tests__/runtime-contract/opencode-contract.ts',
     'runtime-contract': 'packages/client/src/__tests__/runtime-contract/contract.ts',
@@ -343,15 +342,8 @@ test('service enrollment handover paths select the WinSW control socket check an
   assert.ok(selectImpact(['packages/client/src/__tests__/service-enrollment-handover.test.ts']).families.includes('windows-client'));
 });
 
-test('Hermes adapter, fake and custody launcher paths select the Windows Hermes suites', () => {
+test('runtime environment and MCP context paths select the Windows client suites', () => {
   for (const path of [
-    'packages/client/src/adapters/hermes/gateway-pipe-win32.ts',
-    'packages/client/src/adapters/hermes/hermes-session-runtime.ts',
-    'packages/client/src/__tests__/hermes-custody.test.ts',
-    'packages/client/src/__tests__/fixtures/fake-hermes.mjs',
-    'packages/client/src/__tests__/fixtures/fake-hermes-command.ts',
-    'packages/keys/src/hermes-provider-launcher.ts',
-    'packages/keys/src/__tests__/hermes-provider-launcher.test.ts',
     'packages/client/src/runtime/environment.ts',
     'packages/client/src/__tests__/environment.test.ts',
     'packages/client/src/daemon/task-runner/mcp-contexts.ts',
@@ -359,7 +351,7 @@ test('Hermes adapter, fake and custody launcher paths select the Windows Hermes 
     'packages/client/src/__tests__/task-assertion-broker.test.ts',
   ]) assert.ok(selectImpact([path]).families.includes('windows-client'), path);
   // The job does not run these, so a change to them does not select it.
-  for (const path of ['packages/client/src/adapters/codex/codex-adapter.ts', 'packages/keys/src/pi-provider-launcher.ts', 'packages/client/src/__tests__/hermes-pipe-open-errors.test.ts']) {
+  for (const path of ['packages/client/src/adapters/codex/codex-adapter.ts', 'packages/keys/src/pi-provider-launcher.ts']) {
     assert.ok(!selectImpact([path]).families.includes('windows-client'), path);
   }
 });
@@ -379,25 +371,10 @@ test('OpenCode adapter, its contract and the shared spawn code select the OpenCo
   ]) assert.ok(selectImpact([path]).families.includes('opencode-real-windows'), path);
 });
 
-test('Hermes adapter, real run and custody launcher paths select the real Hermes Windows job (#608)', () => {
-  for (const path of [
-    'packages/client/src/adapters/hermes/gateway-pipe-win32.ts',
-    'packages/client/src/adapters/hermes/hermes-adapter.ts',
-    'packages/client/src/__tests__/hermes-real.test.ts',
-    'packages/client/src/__tests__/fixtures/hermes-fake-model.ts',
-    'packages/keys/src/hermes-provider-launcher.ts',
-  ]) assert.ok(selectImpact([path]).families.includes('hermes-real-windows'), path);
-  // The fake Hermes suites do not run real Hermes, so they do not select it.
-  for (const path of ['packages/client/src/__tests__/hermes-custody.test.ts', 'packages/client/src/__tests__/fixtures/fake-hermes.mjs', 'packages/keys/src/__tests__/hermes-provider-launcher.test.ts']) {
-    assert.ok(!selectImpact([path]).families.includes('hermes-real-windows'), path);
-  }
-});
-
-test('vendored Hermes paths select both real installer jobs', () => {
+test('archived vendored Hermes paths stay mapped as root CI scripts (#1854)', () => {
   for (const path of ['.gitattributes', 'manifest.json', `${'a'.repeat(40)}/install.sh`, `${'a'.repeat(40)}/install.ps1`]) {
-    const impact = selectImpact([`scripts/ci/vendor/hermes/${path}`]);
-    assert.deepEqual(impact.files, [`scripts/ci/vendor/hermes/${path}`]);
-    for (const family of ['hermes-real-windows', 'runtime-contract']) assert.ok(impact.families.includes(family), path);
+    const file = `scripts/ci/vendor/hermes/${path}`;
+    assert.deepEqual(selectImpact([file]), { dirs: [], files: [file], families: [], reason: 'root-ci-scripts' }, path);
   }
 });
 
@@ -431,7 +408,6 @@ const registeredJobInputs = {
     'packages/client/dist/native/agent-memory-fs/darwin-': 'build output that the macOS step compares with its own helper build',
     'packages/client/dist/native/agent-memory-fs/win32-x64.exe': 'build output that the Windows junction smoke runs',
   },
-  'hermes-real-windows': { $installer: 'the verified vendored Hermes installer' },
   desktop: {
     'packages/keys/dist/index.js': 'keys build output that the #1803 D0 Secret Service probe imports',
     'examples/desktop-bot-app/dist/host/host.cjs': 'the build:host output that the #1811 Host bundle smoke starts',
@@ -668,7 +644,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 23);
+  assert.equal(knownFamilies.length, 22);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {
@@ -822,7 +798,7 @@ test('scripts/vitest/tmp-root.mjs selects every workspace that uses it and every
   assert.deepEqual([...vitestTmpRootConsumers].sort(), consumers);
   const plan = selectImpact(['scripts/vitest/tmp-root.mjs']);
   for (const dir of consumers) assert.ok(plan.dirs.includes(dir), dir);
-  assert.deepEqual(plan.families, ['adapter-lifecycle-smoke', 'agent-memory-helper', 'dataplane', 'hermes-real-windows', 'ipc-smoke',
+  assert.deepEqual(plan.families, ['adapter-lifecycle-smoke', 'agent-memory-helper', 'dataplane', 'ipc-smoke',
     'npm-release-pack', 'packageability-smoke', 'windows-client']);
   assert.deepEqual(selectImpact(['scripts/vitest/tmp-root.test.mjs']),
     { dirs: [], files: ['scripts/vitest/tmp-root.test.mjs'], families: [], reason: 'root-ci-scripts' });

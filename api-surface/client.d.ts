@@ -640,7 +640,7 @@ export declare class DshAdapter implements RuntimeAdapter {
      * checked against the provider.
      */
     detect(): Promise<RuntimeDetectResult>;
-    /** Cheap admission, as Hermes: the version probe only. The acp profile probe belongs to `detect()`. */
+    /** Cheap admission: the version probe only. The acp profile probe belongs to `detect()`. */
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -716,116 +716,6 @@ export declare class GrokAdapter implements RuntimeAdapter {
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
-// ==== @byok-sdk/client dist/adapters/hermes/hermes-adapter.d.ts ====
-import { type HermesByokLauncher } from './hermes-custody.js';
-export type { HermesByokLauncher } from './hermes-custody.js';
-import { spawn as nodeSpawn } from 'node:child_process';
-import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types.js';
-import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
-import type { ResolvedBin } from '../codex/resolve-bin.js';
-/** Provider choice written into each execution profile. Credentials stay in the environment. */
-export interface HermesModelSelection {
-    /** Hermes provider id, for example `openrouter`, `anthropic` or `custom`. */
-    readonly provider: string;
-    readonly model: string;
-    /** Endpoint for an OpenAI-compatible `custom` provider. It must not carry credentials. */
-    readonly baseUrl?: string;
-    /** Name of the environment variable that holds the provider key. The value never enters the file. */
-    readonly keyEnv?: string;
-}
-export interface HermesAdapterOptions {
-    /** Absolute product native asset directory; scoped to this adapter. */
-    nativeAssetRoot?: string;
-    /** The environment Hermes and its MCP servers get (#1095). Default: the login-shell snapshot. A `byokLauncher` narrows it further. */
-    runtimeEnvironment?: RuntimeEnvironmentPolicy;
-    /**
-     * Absolute path of the Hermes root that this SDK owns, for example under the
-     * Host's store directory. Each execution runs in a fresh profile home below
-     * it (`hermes-home.ts`). It must not be the user's Hermes home: `~/.hermes`,
-     * or on Windows Hermes's default `%LOCALAPPDATA%\hermes`. Give each
-     * Host process its own root. The first `detect()` on a new root waits while
-     * Hermes builds its environment there.
-     */
-    home: string;
-    /** Provider and model for every execution. Absent: Hermes picks a provider from the credentials in the environment. */
-    model?: HermesModelSelection;
-    /** Optional separate-process credential custody. Mutually exclusive with model; local Host profile selection never enters dispatchSelection. */
-    byokLauncher?: HermesByokLauncher;
-    resolveBin?: () => ResolvedBin;
-    spawnFn?: typeof nodeSpawn;
-    /** Deadline of the `detect()` ACP probe. Covers a first environment build in a new root. Default 180 s. */
-    probeTimeoutMs?: number;
-    /** Deadline for the owned gateway to report ready. Default 20 s. */
-    gatewayReadyTimeoutMs?: number;
-    /** Deadline for a cancelled turn to settle before the session fails. Default 1 s. */
-    interruptTimeoutMs?: number;
-    /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
-    versionPolicy?: RuntimeVersionPolicy;
-}
-/**
- * Hermes Agent over ACP stdio (`hermes acp`). The `hermes acp` process is a
- * viewer: tools, MCP servers and the model loop run in a Hermes gateway. A
- * viewer that finds no gateway starts a detached one that outlives it, so the
- * adapter starts the gateway itself as an owned process tree, waits until the
- * gateway names that pid as ready, and only then starts the viewer. Both
- * trees are disposed at `close()`.
- */
-export declare class HermesAdapter implements RuntimeAdapter {
-    private readonly root;
-    private readonly options;
-    private readonly environmentPolicy;
-    private readonly effectiveVersionPolicy;
-    private readonly interruptTimeoutMs;
-    /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
-    private readonly liveHomes;
-    get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
-    constructor(options: HermesAdapterOptions);
-    private command;
-    runtimeEnvironment(): Promise<RuntimeEnvironment>;
-    /** The custody launcher's lane is the platform baseline of the runtime environment. */
-    private launchEnvironment;
-    private rootEnvironment;
-    /**
-     * Prepares the SDK root, deletes profiles a dead Host left, runs
-     * `hermes --version`, then one ACP `initialize` in a throwaway profile with
-     * the same config and environment a turn gets. `initialize` does not reach
-     * the gateway. `authPresent` is true when Hermes offers a provider auth
-     * method, which it does only when that provider's credentials resolve. On a
-     * new root the probe waits while Hermes builds its Python environment.
-     */
-    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
-    private probeAcp;
-    /** Cheap admission, as Codex: the version probe only. The ACP probe and root build belong to `detect()`. */
-    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
-    private start;
-}
-// ==== @byok-sdk/client dist/adapters/hermes/hermes-custody.d.ts ====
-import type { ProviderProfileBinding } from '@byok-sdk/protocol';
-import type { RuntimeAdapterPrepareInput } from '../../types.js';
-import type { HermesModelSelection } from './hermes-adapter.js';
-type SelectedProfile = Omit<ProviderProfileBinding, 'requiredCapabilities'> & {
-    readonly requiredCapabilities: readonly ProviderProfileBinding['requiredCapabilities'][number][];
-};
-export interface HermesByokLauncher {
-    /** Dedicated Host executable running keys.runHermesProviderLauncher; not the Hermes executable. */
-    readonly command: string;
-    readonly args?: readonly string[];
-    readonly profileDbPath: string;
-    /** Host local authority, called before claim. Returns exact non-secret binding, never a credential. */
-    readonly selectProfile: (offer: RuntimeAdapterPrepareInput['offer']) => SelectedProfile | Promise<SelectedProfile>;
-}
-export interface PreparedHermesCustody {
-    binding: ProviderProfileBinding;
-    model: HermesModelSelection;
-}
-export declare function ownHermesLauncher(value: HermesByokLauncher): HermesByokLauncher;
-export declare function hermesCustodyArgs(launcher: HermesByokLauncher, binding: ProviderProfileBinding, launch?: {
-    hermesBin: string;
-    home: string;
-    role: 'gateway' | 'viewer';
-}): string[];
-export declare function prepareHermesCustody(launcher: HermesByokLauncher, offer: RuntimeAdapterPrepareInput['offer']): Promise<PreparedHermesCustody>;
-export {};
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types.js';
 export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
@@ -843,8 +733,6 @@ export { CodexAdapter } from './codex/codex-adapter.js';
 export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter.js';
 export { GrokAdapter } from './grok/grok-adapter.js';
 export type { GrokAdapterOptions } from './grok/grok-adapter.js';
-export { HermesAdapter } from './hermes/hermes-adapter.js';
-export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter.js';
 export { AgyAdapter } from './antigravity/agy-adapter.js';
 export type { AgyAdapterOptions } from './antigravity/agy-adapter.js';
 export { DshAdapter } from './dsh/dsh-adapter.js';
@@ -10071,7 +9959,6 @@ export { ClaudeAdapter } from './adapters/claude/claude-adapter.js';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter.js';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter.js';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter.js';
-export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter.js';
 export { AgyAdapter, type AgyAdapterOptions } from './adapters/antigravity/agy-adapter.js';
 export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter.js';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor.js';
@@ -13316,7 +13203,7 @@ import { type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from 
  *
  * {@link buildAllowlistedEnv} is the narrow form over a given environment. It
  * is used by the durable Pi tool shell, the prepared Pi lane on the Pi auth
- * store, and Hermes launcher or custody paths.
+ * store.
  *
  * Every name in every list may be an exact match or a `*`-suffixed prefix
  * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
@@ -13395,7 +13282,7 @@ export interface RuntimeEnvironmentReport {
  * so its lane is reported by name only.
  */
 export type RuntimeEnvironmentLaneReport = {
-    readonly lane: 'pi-prepared' | 'hermes-custody';
+    readonly lane: 'pi-prepared';
     readonly narrowedBy: 'sdk';
     readonly removed: readonly string[];
 } | {
@@ -13403,7 +13290,7 @@ export type RuntimeEnvironmentLaneReport = {
     readonly narrowedBy: 'keys-launcher';
 };
 /** The `sdk` lane that launches with `buildAllowlistedEnv({ ambient: env, allow })`: `removed` is every name of `env` it drops, sorted. */
-export declare function sdkLaneReport(lane: 'pi-prepared' | 'hermes-custody', env: Readonly<Record<string, string>>, allow: readonly string[]): RuntimeEnvironmentLaneReport;
+export declare function sdkLaneReport(lane: 'pi-prepared', env: Readonly<Record<string, string>>, allow: readonly string[]): RuntimeEnvironmentLaneReport;
 /** One build: the environment and its {@link RuntimeEnvironmentReport}. `env` is a fresh object. */
 export interface RuntimeEnvironment {
     readonly env: Record<string, string>;
@@ -13790,7 +13677,7 @@ export declare class InMemoryDeviceCredentialBackend implements DeviceCredential
 import { type RuntimeEnvironment } from '../runtime/environment.js';
 import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types.js';
 /** The built-in adapters a fake can stand in for. */
-export type FakeRuntimeAdapterId = 'agy' | 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';
+export type FakeRuntimeAdapterId = 'agy' | 'claude' | 'codex' | 'dsh' | 'grok' | 'pi';
 /** What the fake does. It never spawns a process. */
 export interface FakeRuntimeAdapterBehavior {
     /** Default: `{ kind: 'available' }`. A function is called on every probe. */

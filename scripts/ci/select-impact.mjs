@@ -199,7 +199,7 @@ export const knownFamilies = Object.freeze([
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'packaging-consistency', 'npm-release-pack',
   'release-pack-migrate', 'service-upgrade-smoke', 'linux-systemd-smoke', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
-  'hermes-real-windows', 'agy-real-windows', 'opencode-real-windows', 'runtime-contract', 'desktop',
+  'agy-real-windows', 'opencode-real-windows', 'runtime-contract', 'desktop',
 ]);
 // A routine PR selects a platform family only when it changes a path that the
 // family owns: its tests, smoke scripts and the source they qualify. Package
@@ -229,6 +229,8 @@ export const familyOwners = Object.freeze({
     /^scripts\/release\/agent-memory-helper-source\.test\.mjs$/,
     /^packages\/client\/src\/(?:agent-memory\/|agent-home|daemon\/(?:agent-memory|resolve-agent-memory)|util\/agent-memory-helper)/,
     /^packages\/client\/src\/__tests__\/(?:agent-memory|agent-home-directory-barrier|daemon-conn-hello-capabilities)[^/]*$/,
+    // daemon-conn-hello-capabilities' win32 branch spawns through this fixture; only this Windows leg runs it.
+    /^packages\/client\/src\/__tests__\/fixtures\/script-command\.ts$/,
     // #605 W5: the power-cut harness modules live in their own directory.
     /^packages\/client\/src\/__tests__\/agent-memory-powercut\//,
   ],
@@ -258,10 +260,6 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/daemon\/(?:control-server|create-daemon\/(?:control-methods|lifecycle|start-run|start))\.ts$/,
     // #738: the Agent-home file write crash test, its child process and the code it qualifies.
     /^packages\/client\/src\/(?:agent-home\.ts|__tests__\/(?:fixtures\/)?agent-home-write-file[^/]*)$/,
-    // #712: the Hermes suites this job runs on Windows, their fakes and the code they qualify.
-    /^packages\/client\/src\/adapters\/hermes\//,
-    /^packages\/client\/src\/__tests__\/(?:hermes-(?:adapter|custody|gateway-control|home)\.test\.ts|fixtures\/fake-hermes(?:\.mjs|-command\.ts))$/,
-    /^packages\/keys\/src\/(?:hermes-provider-launcher\.ts|__tests__\/hermes-provider-launcher\.test\.ts)$/,
     // #1423: the file-scope guard on win32, the code it qualifies and the suites the job runs.
     /^packages\/client\/src\/(?:file-scope-[^/]+\.ts|tool-authorization\.ts|daemon\/task-runner\/file-scope-admission\.ts)$/,
     /^packages\/client\/src\/__tests__\/(?:file-scope-(?:guard|policy|launch|tool-approval|discovery-tools)|pi-scoped-file-tools)\.test\.ts$/,
@@ -272,14 +270,6 @@ export const familyOwners = Object.freeze({
     // #1710: the Pi host payload forms and the projection ACL on win32, with the code they qualify.
     /^packages\/client\/src\/__tests__\/(?:pi-host-payload|pi-runtime-launch)\.test\.ts$/,
     /^packages\/client\/src\/(?:adapters\/pi\/runtime-launch|adapters\/win32-job-object|sdk-native-assets-runtime)\.ts$/,
-  ],
-  // #608: the real Hermes run on Windows, its fake model endpoint and the code it qualifies.
-  'hermes-real-windows': [
-    /^packages\/client\/src\/adapters\/hermes\//,
-    /^packages\/client\/src\/__tests__\/(?:hermes-real\.test\.ts|fixtures\/hermes-fake-model\.ts)$/,
-    /^packages\/keys\/src\/hermes-provider-launcher\.ts$/,
-    /^scripts\/ci\/runtime-contract-install(?:\.test)?\.mjs$/,
-    /^scripts\/ci\/vendor\/hermes\//,
   ],
   // The real agy run on Windows, its contract suite and the code it qualifies.
   'agy-real-windows': [
@@ -363,7 +353,6 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
     /^packages\/client\/src\/__tests__\/runtime-contract\//,
     /^scripts\/ci\/runtime-contract-install(?:\.test)?\.mjs$/,
-    /^scripts\/ci\/vendor\/hermes\//,
     /^scripts\/ci\/vendor\/npm-runtimes\//,
     // The reserved helpers' context file: their entries, argv and reader.
     /^packages\/client\/src\/(?:daemon\/task-runner\/mcp-contexts|sdk-reserved-helper-context|bin\/sdk-reserved-helper-runners|bin\/byok-agent-(?:message|result|memory)-mcp|lifecycle\/sdk-reserved-helper-command)\.ts$/,
@@ -666,10 +655,10 @@ export function selectImpact(paths, context = {}) {
     if (Object.hasOwn(reviewedBuildConfigOwners, path)) {
       dirs.add(reviewedBuildConfigOwners[path]); families.add('npm-release-pack'); continue;
     }
-    // Client build inputs: the entry checks, the main build config, the todo
-    // build config (check-adapters-entry.mjs --build-todo runs it) and the
-    // retired vendored-subagents build plugin and sealed host build check
-    // (a PR that deletes a path still lists it).
+    // Client build inputs: the adapters entry check, the main build config, the
+    // todo build config (check-adapters-entry.mjs --build-todo runs it) and the
+    // retired vendored-subagents build plugin, sealed host build check and
+    // Hermes session entry check (a PR that deletes a path still lists it).
     if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/scripts/check-adapters-entry.mjs'
       || path === 'packages/client/tsup.config.ts' || path === 'packages/client/tsup.todo.config.ts' || path === 'packages/client/scripts/build-sealed-host.mjs'
       || path === 'packages/client/scripts/subagents-build.ts') {
@@ -806,12 +795,13 @@ export function selectImpact(paths, context = {}) {
     // run its win32 branch. run-targeted.mjs runs its own test for either path.
     if (path === 'scripts/vitest/tmp-root.mjs') {
       for (const dir of vitestTmpRootConsumers) dirs.add(dir);
-      for (const id of ['adapter-lifecycle-smoke', 'agent-memory-helper', 'hermes-real-windows', 'ipc-smoke', 'npm-release-pack',
+      for (const id of ['adapter-lifecycle-smoke', 'agent-memory-helper', 'ipc-smoke', 'npm-release-pack',
         'packageability-smoke', 'windows-client']) families.add(id);
       continue;
     }
     if (path === 'scripts/vitest/tmp-root.test.mjs') { scripts = true; continue; }
     if (path === 'scripts/ci/security-advisories-fixtures/vulnerable-bun.lock') { scripts = true; continue; }
+    // The archived Hermes installer copies (#1854): a PR that deletes them still lists them.
     if (/^scripts\/ci\/vendor\/hermes\/(?:\.gitattributes|manifest\.json|[a-f0-9]{40}\/install\.(?:sh|ps1))$/.test(path)) { scripts = true; continue; }
     if (/^scripts\/ci\/vendor\/npm-runtimes\/(?:dsh|claude|codex|grok|opencode1|opencode2)\/package(?:-lock)?\.json$/.test(path)) { scripts = true; continue; }
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }

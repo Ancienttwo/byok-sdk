@@ -1271,7 +1271,7 @@ Runtime version policy is one pure data object on an adapter descriptor
 constructor option and `DaemonConfig.runtimes.<id>.versionPolicy` are complete
 objects that replace one another wholesale through one resolver; fields are
 never merged. The default policy preserves today's behavior exactly: Codex,
-Grok, Hermes, dsh and agy warn on an unqualified version, Claude and Pi do not warn, and
+Grok, dsh and agy warn on an unqualified version, Claude and Pi do not warn, and
 no default policy blocks. Only a Host layer may configure a block; a descriptor
 default that carries one is rejected as `invalid_version_policy`
 (`block_requires_host`). A block is enforced locally before claim and produces
@@ -1881,9 +1881,9 @@ makes itself `unknown`, except an Agent-memory start refusal (below). It keeps `
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
 | agy | the vendored OAR turn outcome; a class OAR took from error text stays `unknown` |
 | dsh | the native `LlmFailure` code, then its HTTP status, through the vendored OAR dsh table; no class comes from error text |
-| Pi, Hermes | no structured field: `unknown` |
+| Pi | no structured field: `unknown` |
 
-Claude, Codex, Grok, OpenCode, Pi (the rpc, prepared and durable lanes), Hermes, dsh and agy report a
+Claude, Codex, Grok, OpenCode, Pi (the rpc, prepared and durable lanes), dsh and agy report a
 runtime process that ends on its own before its terminal, during start or a turn,
 as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
 Pi's durable lane recovers a worker that ends on its own during a run (within its
@@ -2170,7 +2170,7 @@ The first protocol slice adds only additive optional observability fields:
   an identity, and only when Claude reports the command and args the SDK wrote
   for that server. A runtime name that two reported tools share gets none. A failed
   or late answer (5 s) leaves the field absent; the task continues. No prefix
-  splitting or title guessing is performed. Builtins and Grok and Hermes ACP
+  splitting or title guessing is performed. Builtins and Grok ACP
   titles are not assigned MCP identity. Claude and Pi assign none to SDK
   helpers. Codex projects its native `mcpToolCall` fields for every server it
   runs, so SDK helper calls carry `mcp` there; whether helpers should carry it
@@ -3914,20 +3914,6 @@ The ordinary `byok-pi-rpc` host launched under `credentialSource: keys-profile` 
 The durable Pi lane runs in a separate `byok-pi-durable` executable launched through the same credential launcher contract as `byok-pi-prepared`. The credential launcher transfers the provider key over a private, one-shot JSON IPC channel bound to the launch config digest; it MUST NEVER place the key in the durable child's environment, argv, stdio RPC or replica files. The worker consumes it into model/provider memory and disconnects IPC before constructing tools or MCP children. Deleting process.env is not an isolation mechanism. Tool exec MUST force `inheritEnv: false` and an explicit allowlist. Conformance tests require no key in both inherited tool env and the worker's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). The daemon communicates with it over stdio RPC, does not depend on `@byok-sdk/keys`, and never reads, proxies or forwards credentials. Its environment is rebuilt by the same EnvironmentBuilder allowlist with the `BYOK_*` deny. One child exclusively owns one durable storage; because upstream pi-durable provides no cross-process lock, the child MUST acquire an OS exclusive lock (flock or sidecar lockfile) bound to the current leaseId before opening storage, and MUST fail closed if it cannot. The child exists only while its daemon holds the home's single-writer lease; lease release requires the child's disposal receipt or confirmed process-tree death (wait after KILL).
 
 
-### Hermes local credential custody (#608 bounded slice)
-
-A Host may opt Hermes into a dedicated keys launcher with a local exact
-non-secret profile selector. Default direct-environment mode is unchanged.
-The launcher validates the binding and pending-custody state at admission and
-again under the configuration lock before each credential read. Credentials
-stay in the launcher/Hermes process boundary and never return to the daemon.
-POSIX process replacement preserves gateway PID identity; unsupported runtimes
-and Windows are rejected. This initial custom-provider mapping admits enabled
-OpenAI-compatible bearer profiles without Pi-specific model overrides. It does
-not widen the Pi-only wire dispatch-selection contract, qualify live providers,
-or complete Windows/bundled-product support requested in #608.
-
-
 ### Durable Pi lane (experimental, flag-gated)
 
 The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). Without an `auto` tool-authorization policy the lane runs YOLO, as every lane does since ADR-037: the `beforeTool` hook admits calls without Host approval and never requests one; a throwing hook blocks the call. Under `auto` (#1061) the hook asks the task's gate as described in Tool authorization; a file-scoped task also gets the six SDK scoped file tools. Without a file scope the structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
@@ -4629,7 +4615,6 @@ it never runs ungated, and no third mode exists. Current coverage:
 | Claude | Supported | SDK `PreToolUse` callback hook registered at `initialize`; the prompt is sent only after the CLI confirms `hooks_applied`. It covers native tools, MCP tools and native subagents and is not skipped by bypass mode, allow rules or `disableAllHooks` (qualified with Claude 2.1.312 against a loopback provider) |
 | Codex | Declined before claim | App-server approvals fire only for sandbox escalations, not before every call |
 | Grok | Declined before claim | Only client-hosted terminal commands pass through the SDK; Grok's own file tools do not |
-| Hermes | Declined before claim | No pre-execution hook |
 | dsh | Declined before claim | No pre-execution hook; the native bridge has no approval channel, so dsh refuses every approval request and returns it to the model as a tool error |
 | agy | Declined before claim | No pre-execution hook; a permission request covers only files outside the workspace |
 

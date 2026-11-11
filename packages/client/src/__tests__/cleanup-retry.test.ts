@@ -3,7 +3,7 @@ import { CLEANUP_MAX_ATTEMPTS, removeDirectoryWithRetry } from './support/cleanu
 
 /** The transient Windows busy-file shape: `code` is the only field the retry reads. */
 function busyError(code: string): NodeJS.ErrnoException {
-  return Object.assign(new Error(`${code}: operation not permitted, unlink 'hermes.exe'`), { code });
+  return Object.assign(new Error(`${code}: operation not permitted, unlink 'launcher.exe'`), { code });
 }
 
 describe('fixture cleanup retry (#1208)', () => {

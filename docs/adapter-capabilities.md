@@ -30,24 +30,24 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 `yes` describes Agent tasks with that option set.
 
 <!-- generated:capability-matrix:start -->
-| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | OpenCode | Pi | Pi (`durableLane`) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `2.2.6` | `1.5.0` | `1.5.0` |
-| Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | yes | no |
-| Redirect the active turn | `steer` | yes | no | yes | yes | no | no | no | yes | no |
-| Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | no | yes | yes |
-| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no | no |
-| Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | no | yes | yes |
-| Prepared lane | `preparedLane` | no | no | no | no | no | no | no | yes | no |
-| Durable worker lane | `durableLane` | no | no | no | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userInstructions` | yes | yes | yes | yes | no | yes | no | yes | no |
-| Keeps the user output style out | `isolation.userOutputStyle` | yes (no source) | yes | no | yes | no | yes | no | yes (no source) | no |
-| Keeps user-level memory out | `isolation.userMemory` | no | yes | yes | yes (no source) | no | yes | no | yes (no source) | no |
-| Keeps user skills out | `isolation.userSkills` | yes | no | no | yes | no | yes | no | yes | no |
-| Keeps user hook context out | `isolation.userHookContext` | yes | no | no | no | no | yes | no | yes | no |
-| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | yes | no | no | no |
-| Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no | no |
+| Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `2.2.6` | `1.5.0` | `1.5.0` |
+| Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
+| Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
+| Display-only message draft | `messageDraft` | no | yes | yes | no | yes | no | yes | yes |
+| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes |
+| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no |
+| Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | yes | yes |
+| Prepared lane | `preparedLane` | no | no | no | no | no | no | yes | no |
+| Durable worker lane | `durableLane` | no | no | no | no | no | no | no | yes |
+| Keeps user-level instructions out | `isolation.userInstructions` | yes | yes | yes | yes | no | no | yes | no |
+| Keeps the user output style out | `isolation.userOutputStyle` | yes (no source) | yes | no | yes | no | no | yes (no source) | no |
+| Keeps user-level memory out | `isolation.userMemory` | no | yes | yes | yes (no source) | no | no | yes (no source) | no |
+| Keeps user skills out | `isolation.userSkills` | yes | no | no | yes | no | no | yes | no |
+| Keeps user hook context out | `isolation.userHookContext` | yes | no | no | no | no | no | yes | no |
+| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | no | no | no |
+| Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
 
 ## Pi background subagents in packaged products (#1589)
@@ -168,7 +168,7 @@ second registry.
 - Resume uses each runtime's exact native identity: Claude `--resume`, Codex
   `thread/resume`, Grok ACP `session/resume`, dsh `agents.resume` through the OAR
   bridge. A `followUp` after an idle turn stays in the same native session or
-  thread on Claude, Codex, Grok, Hermes and Pi. agy and dsh refuse it and a later
+  thread on Claude, Codex, Grok and Pi. agy and dsh refuse it and a later
   turn resumes in a new process; Pi's durable lane refuses it too.
 - Codex steering targets the exact active `expectedTurnId`. An adapter without
   `steer` returns a typed rejection.
@@ -193,8 +193,7 @@ second registry.
   only and passes other `can_use_tool` requests through as allow; Codex relays
   structured question IDs only, keeps `approvalPolicy: never` and refuses
   approval requests; Grok answers every permission request `cancelled`; dsh has
-  no client for them, see the dsh section; Hermes refuses every one with
-  `reject_once`; Pi has none.
+  no client for them, see the dsh section; Pi has none.
 - MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`): Claude sets
   it for task toolset servers from its own `mcp_status` answer; Codex from the
   native `mcpToolCall` `server` and `tool`, for every server it runs, SDK
@@ -224,7 +223,7 @@ non-overridable credential/login-persistence sensitive-path floor. The resolver
 accepts either a mode or `{ mode, rules }`, validates/copies/freezes it before
 claim and re-resolves it on a resume offer. Pi (ordinary RPC with native
 children, prepared and durable) and Claude use their existing gates; Codex,
-Grok, Hermes and dsh still decline `auto` before claim. Rules and audit metadata remain local; the
+Grok and dsh still decline `auto` before claim. Rules and audit metadata remain local; the
 server wire protocol, Pi launch v8 and digest format are unchanged. No reviewer
 model, natural-language matching, deny rule or new dependency is introduced.
 The shared matcher has bounded wildcard syntax and identical Node/Bun results;
@@ -753,31 +752,6 @@ persona into the prepared input; the disabled context loader does not load
 `AGENTS.md` on the Host's behalf. Provider/auth/model resources and the durable Pi
 lane have separate contracts; this does not certify an OS-level sandbox.
 
-### Hermes: user-level configuration
-
-The [Hermes adapter](../packages/client/src/adapters/hermes/hermes-adapter.ts)
-removes ambient `HERMES_*` variables and supplies a fresh execution-specific
-`HERMES_HOME`. Its [profile builder](../packages/client/src/adapters/hermes/hermes-home.ts)
-writes SDK-owned configuration with Hermes memory and user-profile loading
-disabled, carrying only designated model metadata caches. This isolates that
-Hermes profile from the normal user home. It does not promise that arbitrary
-runtime tools, project files or the rest of the process environment are isolated.
-
-Hermes 0.22.2+2364.g0b10b9f reads `SOUL.md` from `HERMES_HOME`, so it seeds
-its own default text in the fresh home. It reads `MEMORY.md` and `USER.md` only
-when they are enabled. Project context comes from the cwd and the git-root
-chain; Hermes has no user-level context file. Skills come from trusted project
-directories, `HERMES_HOME/skills` and configured skill directories, which the
-SDK profile does not set. No user-level instruction source reaches the
-session, so Hermes needs no option.
-
-Hermes declares all five user-context bits. The runtime contract suite puts a
-marker for each in a user `HERMES_HOME`: `SOUL.md`, a skill in `skills/`,
-`memories/MEMORY.md` and `USER.md`, a `display.personality` in `config.yaml`,
-and a `hooks.pre_llm_call` hook whose output adds context. A positive-control
-turn runs the same Hermes binary outside the adapter on that home and sees
-every marker; the adapter turn, on its fresh home, sees none.
-
 ### dsh: user-level configuration
 
 The [dsh adapter](../packages/client/src/adapters/dsh/dsh-adapter.ts) runs
@@ -866,7 +840,6 @@ for Claude it is `agentSessionPersistence: 'disabled'`, below.
 | Pi, ordinary, Keys profile | `DaemonConfig.piByokLauncher.sessionDir/<time>_<id>.jsonl`, one folder for every execution, which the Host chooses |
 | Pi, prepared | None: the session is in memory |
 | Pi, durable | `durable-<taskId>.sqlite` replica in the daemon store, disjoint from the Agent home, removed after its retention TTL; the lane recovers from it |
-| Hermes | `state.db` and `sessions/` in the execution's profile, `<home>/profiles/byok-<id>/`, removed when the execution closes, or by the 15-minute sweep after a crash |
 | dsh | `<home>/sessions/<encoded cwd>/<session id>/` in the Host's dsh root, kept so that `agents.resume` works; the adapter never removes it |
 
 What the upstream runtimes offer that the SDK does not use:
@@ -941,8 +914,7 @@ homes, a reader cwd, `CLAUDE_CONFIG_DIR`, glob syntax in a parent),
 four variables reach the agent process only with
 `compatInstructions: 'disabled'`, and never a hosted terminal command),
 `pi-rpc-host.test.ts` (user resources beside SDK extensions),
-`pi-prepared-tools.test.ts` (frozen tool surface), and
-`hermes-home.test.ts` (profile contents). The
+`pi-prepared-tools.test.ts` (frozen tool surface). The
 [evidence note](researches/2026-10-22-634-runtime-user-config.md) records the
 pinned-version sources, the Claude loader reading, a local Claude probe
 against a fake endpoint, and the `grok inspect` probe. The
@@ -962,10 +934,9 @@ qualified version:
   is absent from the Agent task, and a positive control shows the marker does
   reach the model. The control differs by lane: Claude and Pi run the same
   adapter with the user context inherited; agy and dsh put the marker in the
-  adapter's own home; Hermes, which has no inherit mode, runs the same binary
-  outside the adapter on a user home. `userMcpServers` is checked by whether a
+  adapter's own home. `userMcpServers` is checked by whether a
   user MCP server starts (Claude, Codex, Grok and agy with a positive control,
-  dsh and Hermes without), and `sessionPersistence` by whether a transcript is
+  dsh without), and `sessionPersistence` by whether a transcript is
   written.
 - An absent declaration, `yes (no source)`: no live case runs, and the
   evidence is the adapter's absent-sources record (Pi `userOutputStyle` and
@@ -973,7 +944,7 @@ qualified version:
 
 A `no` bit carries no guarantee, and the sources this section lists for it
 still reach the model.
-Only Hermes and ordinary Pi declare all five user-context bits, so a Host that
+Only ordinary Pi declares all five user-context bits, so a Host that
 needs an “Agent home only” session reads all five bits of the runtime it
 dispatches to. The cases do not cover resume behavior or credential discovery,
 and adding persona text alone does not establish isolation.
@@ -1072,88 +1043,6 @@ dependency.
 
 The fixture suite proves the adapter contract against a fake ACP agent. It is
 not live certification. No live Grok run is part of CI.
-
-## Hermes adapter (custom harness)
-
-`HermesAdapter` (id `hermes`, #519) is outside the shared conformance runner,
-which assumes native resume. It runs on the custom-harness path
-(`harnessId: 'hermes'`). Its declared capabilities are in the
-[capability matrix](#capability-matrix). How it meets them: it does not resume,
-because each execution has a fresh Hermes profile and `prepare()` rejects
-`sessionRef`; steering returns a typed `SteerUnsupportedError`; a new
-instruction after an idle turn stays in the same ACP session; task MCP toolsets
-go to ACP `session/new.mcpServers` stdio entries; and each
-`agent_message_chunk` is one draft `progress`. It sets no MCP identity on tool
-events, because the ACP title is the Hermes registry name, not an authoritative
-identity. It omits the legacy boolean approval and native interactions, and
-declares no trajectory evidence.
-
-Hermes runs edits in ACP mode `dont_ask` and commands under `--yolo`. A
-permission request that still arrives (Hermes's guard on sensitive paths and
-agent instruction files) is refused with its `reject_once` option. The tool
-fails and the model sees the refusal. The adapter owns the Hermes gateway
-process tree and checks the gateway identity before and after the viewer
-attaches.
-
-Hermes declares no `toolAuthorizationAuto`, so nothing asks before a tool runs;
-an `all`-mode Task gets a reminder after the call starts. Hermes's ACP
-`tool_call` has no tool name, and its own tools send no `rawInput`. The
-[projection](../packages/client/src/adapters/hermes/projection.ts) takes the
-name from the title, the path from `locations`, and a shell command from the
-`$ ` content line. These are Hermes display conventions, so a Hermes upgrade
-must check them again. The classifier has three limits on Hermes:
-
-- A call with several `locations` is classified on the first one.
-- A V4A `patch` (`mode: 'patch'`) names no path until its result, so a V4A
-  write outside the workspace raises no reminder.
-- Stdin written to a running `process` and shell commands run from
-  `execute_code` are never seen as commands, so `all`-mode reminders miss them.
-
-Platform notes:
-
-- POSIX: the adapter asks the gateway `identify` over the Unix socket
-  `<profile>/gateway.sock` (or the path in `gateway.sock.path`). The gateway
-  pid must be the pid the adapter spawned.
-- Windows: the adapter uses the named pipe
-  `\\.\pipe\hermes-gateway-<hash>` that Hermes derives from the profile
-  home (`windows_pipe_name` in Hermes `gateway/control_socket.py`). A
-  console-script `hermes.exe` and the custody launcher start Hermes's Python as
-  a child. So a gateway pid at most four parent links below the spawned pid is
-  owned. The adapter reads the process table once per start with PowerShell
-  CIM (about 0.4 s warm, 3.5 s cold on `windows-latest`). Hermes gives the pipe
-  a DACL for the current user only. The adapter dials the pipe through
-  kernel32 at the identification level (Node's `net` client would allow the
-  server to impersonate the daemon), takes the server pid from the kernel and
-  sends `identify` only to a server it owns. It stops a foreign gateway only
-  when that pid runs below the viewer the adapter started. The profiles
-  directory, and a root the adapter creates, get a DACL for the current user,
-  SYSTEM and Administrators. A root that already exists keeps its ACL, so do
-  not put it where other users can write.
-- Windows custody: the launcher cannot replace itself, so it starts Hermes as
-  a child and stays alive until Hermes exits (see the client README).
-- Windows executable: give `resolveBin` the `hermes.exe` that Hermes's
-  installer publishes (`<Hermes home>\bin\hermes.exe`, a console-script
-  launcher). Node does not start a `hermes.cmd` shim without a shell.
-- Windows root: the user's Hermes home there is `%LOCALAPPDATA%\hermes`, so
-  the adapter refuses that path and anything below it as `home`, as it
-  refuses `~/.hermes`.
-
-Evidence: `hermes-adapter.test.ts` and `hermes-custody.test.ts` (synthetic
-`fake-hermes.mjs`, offline), `hermes-gateway-control.test.ts` (pipe name
-against Hermes's own hash, ownership walk), and the
-[S0 note](researches/2026-10-20-519-hermes-acp-s0.md), which records one real Hermes
-`0.22.2+2364.g0b10b9f` turn with a fake model endpoint on macOS. On Windows
-the fake suites run behind a compiled `hermes.exe` that starts Node as a child,
-the same process shape as a venv console script; the
-[Windows note](researches/2026-10-22-608-hermes-windows.md) records the runs.
-`hermes-real.test.ts` runs the adapter against the real qualified Hermes on
-`windows-latest` (CI job `hermes-real-windows`), with a fake model endpoint
-and the custody launcher: `detect()`, `prepare()`, one turn through the owned
-gateway to `turn_end`, the pipe client against the real Hermes pipe server,
-and the key only in the Hermes child; the
-[real-run note](researches/2026-10-26-608-hermes-windows-real.md) records it. No
-live-provider run or Linux run is part of this evidence.
-The descriptor declares `platforms: ['darwin', 'linux', 'win32']`.
 
 ## dsh adapter (custom harness)
 
@@ -1349,7 +1238,7 @@ A Host reads the adapter list, not a table of its own. `taskRuntimeTarget(descri
 from `@byok-sdk/client/adapters` returns `{ runtime }` for a frozen wire runtime
 id (`RUNTIME_IDS` in `@byok-sdk/protocol/constants`) and `{ harnessId }` for any
 other id. `descriptor.platforms` lists the supported `process.platform` values:
-Claude, Codex, Pi, Hermes and agy declare macOS, Linux and Windows; Grok, dsh
+Claude, Codex, Pi and agy declare macOS, Linux and Windows; Grok, dsh
 and durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
 restriction. `observeRuntimeDetection` refuses an unsupported platform with
 `platform_unsupported` before `detect()` runs, and `projectRuntimeObservation`
