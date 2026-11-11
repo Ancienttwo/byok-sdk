@@ -107,7 +107,7 @@ const bundledTesting = readFileSync(new URL('../dist/testing/index.js', import.m
 assert.doesNotMatch(bundledTesting, /(?:from|import\()\s*["']ws["']/);
 assert.doesNotMatch(bundledTesting, /ws-transport|createDaemon/);
 const testing = await import(new URL('../dist/testing/index.js', import.meta.url));
-assert.deepEqual(Object.keys(testing).sort(), ['fakeRuntimeAdapter']);
+assert.deepEqual(Object.keys(testing).sort(), ['InMemoryDeviceCredentialBackend', 'fakeRuntimeAdapter']);
 assert.deepEqual(testing.fakeRuntimeAdapter('claude').descriptor, new adapters.ClaudeAdapter().descriptor);
 const crossEntryFailure = new adapters.RuntimeExecutionFailure({
   phase: 'start',
