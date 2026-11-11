@@ -158,7 +158,7 @@ export {
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals';
-export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner/state';
+export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner/result-reason-prefixes';
 export {
   LocalTeamWorkspace,
   LocalTeamWorkspaceService,
