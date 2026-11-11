@@ -115,6 +115,11 @@ it.skipIf(process.getuid===undefined)('refuses a different reported UID before c
  expect(JSON.parse(stdout)).toEqual({error:{name:'ScratchRootPathError',message:'DaemonConfig.storage.scratchRoot is owned by another user'},chmodCalls:0,mode:0o755});
  expect((await fs.lstat(root)).mode&0o777).toBe(0o755);expect(await exists(path.join(root,'owner.json'))).toBe(false);
 });
+it.skipIf(process.platform==='win32')('an owned scratch root whose mode cannot be set to 0700 is refused with secure_dir_mode',async()=>{
+ const root=path.join(testScratchRoot(),'mode');await fs.mkdir(root,{mode:0o755});await fs.chmod(root,0o755);const failure=Object.assign(new Error('EPERM'),{code:'EPERM'});
+ vi.spyOn(fs,'chmod').mockRejectedValueOnce(failure);
+ await expect(new ScratchRoot(root).create()).rejects.toMatchObject({name:'SecureDirModeError',code:'secure_dir_mode',dir:root,cause:failure});
+});
 it('claims an existing store-owned tmp namespace using canonical filesystem ancestry',async()=>{
  const store=testScratchRoot();
  await fs.mkdir(path.join(store,'tmp','daemon'),{recursive:true});
