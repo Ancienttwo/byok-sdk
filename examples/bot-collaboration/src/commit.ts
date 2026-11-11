@@ -1,5 +1,5 @@
 import { enqueue, hash, project, promoteOccurrence, type ApplicationRows, type HostLedger, type Intent, type LedgerState } from '@byok-sdk/server/execution-core';
-import { stateOf, type Card, type Turn } from './model';
+import { stateOf, type Card, type CollaborationState, type Turn } from './model';
 import { intentFacts } from './delegation';
 import { turnIntentRetired } from './compaction';
 import { concludeRoutineTurn, routineOccurrence, type BotRoutine } from './routines';
@@ -39,13 +39,19 @@ export function writeLedger<T>(ledger: Pick<HostLedger, 'transaction'>, apply: (
  * Moved command records and tombstones come from K4 application rows of the same transaction (#798).
  */
 export function commitInLedger(ledger: HostLedger, request: CommitRequest<Command>, ports: (s: LedgerState) => CommandPorts): CommitResult {
-  return writeLedger(ledger, (s, rows) => {
-    let admitted: AdmittedIds | undefined;
-    const result = commitCommand(stateOf(s.application), request, { scope: ledger.tenant, recordCallbacks: false,
-      archived: id => rows.get('commands', id) as CommandRecord | undefined, admitted: ids => { admitted = ids; } }, ports(s));
-    refuseRetired(admitted, (namespace, id) => rows.isRetired(namespace, id));
-    return result;
-  });
+  return writeLedger(ledger, (s, rows) => commitInRows(stateOf(s.application), ledger.tenant, request, rows, ports(s)));
+}
+/**
+ * One command in a K4 transaction of the ledger with tenant `scope`, which holds `rows`: an owner command, or a K4 outcome,
+ * message or occurrence callback.
+ */
+export function commitInRows(state: CollaborationState, scope: string, request: CommitRequest<Command>, rows: ApplicationRows,
+  ports: CommandPorts): CommitResult {
+  let admitted: AdmittedIds | undefined;
+  const result = commitCommand(state, request, { scope, recordCallbacks: false,
+    archived: id => rows.get('commands', id) as CommandRecord | undefined, admitted: ids => { admitted = ids; } }, ports);
+  refuseRetired(admitted, (namespace, id) => rows.isRetired(namespace, id));
+  return result;
 }
 /** One retention call in one ledger transaction. K4 facts come from the same state. */
 export function retainInLedger(ledger: HostLedger, input: RetentionInput, limits: RetentionLimits): RetentionResult {

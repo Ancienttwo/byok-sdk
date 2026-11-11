@@ -202,17 +202,12 @@ export function retiredIdentity(namespace: RetiredNamespace, id: string, isRetir
 export interface CommandStore {
   scope: string; recordCallbacks: boolean;
   /**
-   * Capability: a command record that retention moved out of the state (#798). The replay check reads it after the state.
-   * A commit that has no command record (a keyless command, or a callback that the caller deduplicates durably) does not
-   * pass it. Absent: skipped, the replay check reads the state only.
+   * A command record that retention moved out of the state (#798). The replay check reads it after the state. A commit
+   * that has no command record (a keyless command, or a callback that the caller deduplicates durably) does not read it.
    */
-  archived?: (commandId: string) => CommandRecord | undefined;
-  /**
-   * Capability: receives the ids that `decide` added. Not called for a replay. The store passes them to `refuseRetired`.
-   * A commit that has no command record (a keyless command, or a callback that the caller deduplicates durably) does not
-   * pass it. Absent: skipped, no retired identity check.
-   */
-  admitted?: (ids: AdmittedIds) => void;
+  archived: (commandId: string) => CommandRecord | undefined;
+  /** Receives the ids that `decide` added. Not called for a replay. The store passes them to `refuseRetired`. */
+  admitted: (ids: AdmittedIds) => void;
 }
 
 const CALLBACKS = new Set<Command['kind']>(['outcome', 'message', 'occurrence']);
@@ -498,15 +493,14 @@ export function commitCommand(state: CommandState, request: CommitRequest<Comman
     const added = (namespace: RetiredNamespace, rows: Record<string, unknown>) => Object.keys(rows).filter(id => !before[namespace].has(id));
     const turns = added('turn', state.turns), rounds = added('round', state.team.rounds);
     // Admission (#798): the store checks these ids before its commit, so a retired identity never comes back as new work.
-    store.admitted?.({ turn: turns, input: added('input', state.inputs ?? {}), round: rounds });
+    store.admitted({ turn: turns, input: added('input', state.inputs ?? {}), round: rounds });
     root = commandRoot(state, command, disposition, turns, rounds);
     return disposition;
   };
-  const archived = store.archived;
   if (isKeyless(command)) return commit(state, request, { scope: store.scope }, decide);
   const deduplicated = !store.recordCallbacks && CALLBACKS.has(command.kind);
   // K4 writes a message receipt only for an acceptance, so a refused message keeps its record here.
   const record = !deduplicated || command.kind === 'message' ? { evidence: commandEvidence(command), conflict: () => conflictMessage(state, command),
     root: () => root, ...(deduplicated ? { keep: (disposition: Disposition) => disposition.outcome === 'refused' } : {}) } : undefined;
-  return commit(state, request, { scope: store.scope, ...(record ? { record } : {}), ...(archived ? { archived } : {}) }, decide);
+  return commit(state, request, { scope: store.scope, ...(record ? { record } : {}), archived: store.archived }, decide);
 }

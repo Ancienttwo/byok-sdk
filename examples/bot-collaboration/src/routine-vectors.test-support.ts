@@ -3,6 +3,7 @@ import { nextRoutineOccurrence, type RoutineSchedule, type RoutineScheduleFields
 import { hash, taskId, type Conclusion, type Intent, type Json, type Occurrence, type Routine } from '@byok-sdk/server/execution-core';
 import { json, type CollaborationState } from './model';
 import { ROUTINE_LATE_AFTER_MS, ROUTINE_WAIT_MS } from './routines';
+import { RetiredIdentityError } from './rules/commands';
 import { archiveBot } from './rules/team';
 
 /**
@@ -18,6 +19,8 @@ export interface RoutineSubject {
   at(now: number): void;
   /** A test edit of the stored collaboration state, outside the contract. */
   change(edit: (state: CollaborationState) => void): void | Promise<void>;
+  /** A test write of the tombstone that retention leaves for Turn id `turnId` (#798), outside the contract. */
+  retire(turnId: string): void | Promise<void>;
   /**
    * A test write of one routine of Bot `owner`, outside the contract: the K4 create command with the K8 Bot definition, as an
    * outcome of that Bot's Turn writes it. Returns the routine id. The other cases create routines through Bot `main`'s outcomes.
@@ -267,5 +270,13 @@ export function routineVectors(name: string, open: () => RoutineSubject | Promis
       expect(await subject.intent(turn)).toBeUndefined();
       expect((await subject.state()).turns[turn]).toMatchObject({ status: 'failed', conclusion: 'cancelled' });
     }, 60_000);
+
+    it('refuses a slot whose routine Turn id retention retired, and records no occurrence', async () => {
+      const subject = await open(), id = await subject.addRoutine('main', daily(subject.now())), slot = (await subject.routine(id))!.nextAt!;
+      await subject.retire(routineTurn(occurrenceKey(id, 1, 'scheduled', slot)));
+      subject.at(slot);
+      await expect(subject.fire(id)).rejects.toThrow(RetiredIdentityError);
+      expect(await subject.occurrences(id)).toEqual([]);
+    });
   });
 }

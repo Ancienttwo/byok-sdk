@@ -260,3 +260,12 @@ it('runs an Agent routine, a Host job routine and a Host occurrence routine side
   for (const id of ['agent', 'job', 'hook']) expect(routine(id).next?.dedupKey).toBe(`${id}:1:${at + 2 * MINUTE}`);
   expect(host.ledger.snapshot().ignoredWakes).toBeUndefined();
 });
+
+it('gives the hook the application rows of the occurrence commit', async () => {
+  await open({ occurrenceHooks: { turn: (run, tx) => tx.rows.put('slots', run.occurrenceKey, run.definitionVersion) } });
+  const at = clock + MINUTE;
+  await host.core.addRoutine(turn('daily', 1, at));
+  clock = at; await deliver(`daily:1:${at}`, at);
+  const [occurrence] = occurrences('daily');
+  expect(host.ledger.transaction((_, rows) => rows.get('slots', occurrence!.key))).toBe(1);
+});

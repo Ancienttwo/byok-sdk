@@ -87,7 +87,7 @@ export async function retiredTurns(client: PoolClient, scopeKey: string, turnIds
 export async function commitStored(client: PoolClient, scope: string, state: CollaborationState, request: CommitRequest<Command>,
   ports: Omit<CommandPorts, 'intents' | 'deliver' | 'promote' | 'outcome'> & { outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
   channel: boolean): Promise<CommitResult> {
-  const scopeKey = storedKey(scope), command = request.command, { outcome, ...rest } = ports;
+  const command = request.command, { outcome, ...rest } = ports;
   // The channel outbox port of a K4 callback (K8 host.ts `deliverPort`). The delivery rules read the intent
   // conclusions committed before this command, so the view is read here, before any write of this transaction (#793 D2b-out-2).
   const taskId = command.kind === 'message' ? command.message.taskId : command.kind === 'outcome' ? command.taskId : undefined;
@@ -98,13 +98,23 @@ export async function commitStored(client: PoolClient, scope: string, state: Col
   // The intent facts come from the intent rows in this transaction, never from the caller (#793 D2f-4). So do the committed
   // intents of an outcome, which a Main Bot cancel reads.
   const intents = await commandIntentFacts(client, scope, Object.keys(state.turns));
+  return commitInStore(client, scope, state, request, true,
+    { ...rest, ...deliver, intents, ...(outcome ? { outcome: { ...outcome, committed: intents } } : {}) });
+}
+/**
+ * H's command store for one command (#798): the moved record of the command id is loaded before the commit, and the
+ * tombstones of the ids that `decide` added are loaded after it, in the same transaction. A throw rolls back.
+ */
+export async function commitInStore(client: PoolClient, scope: string, state: CollaborationState, request: CommitRequest<Command>,
+  recordCallbacks: boolean, ports: CommandPorts): Promise<CommitResult> {
+  const scopeKey = storedKey(scope);
   const archived = typeof request.commandId === 'string' && request.commandId
     ? await archivedRow(client, scopeKey, 'commands', request.commandId) as CommandRecord | undefined : undefined;
   let admitted: AdmittedIds | undefined;
-  const result = commitCommand(state, request, { scope, recordCallbacks: true,
+  const result = commitCommand(state, request, { scope, recordCallbacks,
     // A keyed command that is not in the state checks its row id here, and an over-limit id throws.
     archived: (id: string) => { checkRow('commands', id); return id === request.commandId ? archived : undefined; },
-    admitted: ids => { admitted = ids; } }, { ...rest, ...deliver, intents, ...(outcome ? { outcome: { ...outcome, committed: intents } } : {}) });
+    admitted: ids => { admitted = ids; } }, ports);
   if (admitted) {
     const ids = admitted as AdmittedIds;
     const isRetired = await tombstones(client, scopeKey, (['turn', 'input', 'round'] as const).flatMap(namespace =>

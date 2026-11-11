@@ -1962,7 +1962,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 415144,
+      "budgetBytes": 415178,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

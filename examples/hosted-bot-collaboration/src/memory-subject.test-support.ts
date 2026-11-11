@@ -37,7 +37,9 @@ export function memorySubject(team?: SeedTeam): CommitSubject {
     scope: 'memory',
     commit(request) {
       const next = structuredClone(stored);
-      const result = commitCommand(next.state, request, { scope: 'memory', recordCallbacks: true }, callbackPorts(next.state, (id, value) => {
+      const result = commitCommand(next.state, request, { scope: 'memory', recordCallbacks: true,
+        // No retention here: nothing is archived or retired.
+        archived: () => undefined, admitted: () => {} }, callbackPorts(next.state, (id, value) => {
         if (next.outbox[id] !== undefined && canonical(next.outbox[id]) !== canonical(value)) throw new Error('Projection identity conflict');
         next.outbox[id] = value;
       }, request.command.kind === 'outcome' ? request.command.taskId : undefined));
