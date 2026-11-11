@@ -1520,7 +1520,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
  * connection registry, no per-task object that a host holds onto. Sprint 0.1's
  * non-goal is explicit about that — the embedded `TaskHandle` must not become
  * the hosted API — so the host's control-plane input is a function
- * ({@link ByokCloud.enqueueOffer}) and its read model is a store query
+ * ({@link ByokCloud.enqueueAgentOffer}) and its read model is a store query
  * ({@link ByokCloud.readTaskAttempt}).
  *
  * Every route is stateless in the strict sense: it resolves a principal from
@@ -2885,7 +2885,7 @@ export declare const CLOUD_ERROR_CODES: {
     readonly e2ee_member_key_conflict: 'e2ee_member_key_conflict';
     /** A stored E2EE member row is not the value its schema requires. Whatever wrote it broke the store contract. */
     readonly e2ee_member_state_unreadable: 'e2ee_member_state_unreadable';
-    /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
+    /** A client pairing MAC was relayed to a device that is unknown or revoked in this tenant. */
     readonly device_not_found: 'device_not_found';
     /**
      * The device was retired (revoked or superseded), and its mailbox stream

@@ -385,14 +385,30 @@ export class TaskRunnerHost {
     settle?.(ok);
   }
 
-  rejectTerminal(taskId: string, error: unknown): void {
+  /** Rejects the open terminal receipt; false when there is none to reject. */
+  rejectTerminal(taskId: string, error: unknown): boolean {
     const intent = this.terminalIntents.get(taskId);
-    if (intent === undefined || intent.settled) return;
+    if (intent === undefined || intent.settled) return false;
     intent.settled = true;
     const reject = intent.reject;
     intent.settle = undefined;
     intent.reject = undefined;
     reject?.(error);
+    return true;
+  }
+
+  /**
+   * Dispatches a task event whose rejection fails that task's open terminal
+   * receipt instead of being dropped. With no open receipt (none begun yet, or
+   * already settled) there is nothing to fail, so the rejection is logged.
+   */
+  dispatchOrReject(event: ReducerEvent & { readonly taskId: string }): Promise<ReduceResult | undefined> {
+    return this.dispatch(event).catch((error: unknown) => {
+      if (!this.rejectTerminal(event.taskId, error)) {
+        console.error('[byok/client] TaskRunnerHost dispatch failed with no open terminal receipt', error);
+      }
+      return undefined;
+    });
   }
 
   private newTerminalReceipt(intent: HostTerminalIntent): Promise<boolean> {

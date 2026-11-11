@@ -58,6 +58,7 @@ import type { AuthManager } from './auth-manager';
 import { authedFetch } from './http-client';
 import { toHttpBase } from './url';
 import { atomicWriteFile } from '../util/atomic-write';
+import { ensureSecureDir } from '../util/secure-dir';
 
 /**
  * The hosted capability this pipeline gates on. A plain string, not an import
@@ -351,10 +352,16 @@ async function checkedFile(root: string, relative: string, create: boolean): Pro
   return target;
 }
 
+/**
+ * Owner-only skill-packs directory, checked once per operation before its first
+ * write so a refusal leaves nothing behind (win32 spawns `icacls` here).
+ */
+async function secureSkillPacksDir(dataDir: string): Promise<void> {
+  await ensureSecureDir(await checkedDirectory(dataDir, SKILL_PACKS_DIRNAME, true));
+}
+
 async function appendAuditLine(dataDir: string, record: Record<string, unknown>): Promise<void> {
   const filePath = await checkedFile(dataDir, `${SKILL_PACKS_DIRNAME}/${SKILL_PACK_AUDIT_FILENAME}`, true);
-  const root = path.dirname(filePath);
-  await fs.chmod(root, DIR_MODE).catch(() => {});
   const handle = await fs.open(filePath, 'a', FILE_MODE);
   try {
     // chmod BEFORE the append, for the same reason `daemon/audit-log.ts` does it:
@@ -441,7 +448,16 @@ async function installOne(
   source: string,
   base: string,
 ): Promise<InstalledSkillPack> {
+  // Secured at the first write into the store (a refusal audit or the lock and
+  // revision files), so a refused install that writes nothing leaves nothing.
+  let secured = false;
+  const secureOnce = async (): Promise<void> => {
+    if (secured) return;
+    await secureSkillPacksDir(options.dataDir);
+    secured = true;
+  };
   const refuse = async (code: SkillPackInstallErrorCode, message: string): Promise<never> => {
+    await secureOnce();
     await appendAuditLine(options.dataDir, {
       ts: new Date().toISOString(),
       event: 'skill-pack-rejected',
@@ -513,6 +529,7 @@ async function installOne(
   const packRoot = path.join(skillPacksRoot(options.dataDir), manifest.name);
   const revisionDir = path.join(packRoot, (manifest.contentHash as string).slice('sha256:'.length));
   const revisionRelative = `${SKILL_PACKS_DIRNAME}/${manifest.name}/${(manifest.contentHash as string).slice('sha256:'.length)}`;
+  await secureOnce();
   const targets = new Map<string, string>();
   for (const relative of bodies.keys()) {
     targets.set(relative, await checkedFile(options.dataDir, `${revisionRelative}/${relative}`, true));
@@ -667,6 +684,7 @@ async function projectSkillPackUnderGate(dataDir: string, name: string, targetDi
       packName: name,
     });
   }
+  await secureSkillPacksDir(dataDir);
 
   const copied: string[] = [];
   const paths: { source: string; destination: string }[] = [];

@@ -68,13 +68,13 @@ function approvalHost(this: TaskRunner): TaskRunnerHost {
         approved: false,
         reason: 'approval request could not be sent',
       });
-      void host.dispatch({
+      void host.dispatchOrReject({
         type: 'approval.withdrawn',
         taskId,
         atMs: Date.now(),
         requestId: pending.requestId,
         reason: 'approval request could not be sent',
-      }).catch(() => undefined);
+      });
       throw error;
     }
   });
@@ -114,14 +114,14 @@ function approvalHost(this: TaskRunner): TaskRunnerHost {
         // mailbox, exactly as S5 shipped, so a throwing dispatch callback still
         // reaches the registry caller.
         if (decision === 'reject' && pending.kind === 'task-terminal') {
-          void host.dispatch(decided).catch(() => undefined);
+          void host.dispatchOrReject(decided);
           return;
         }
         if (!host.isDraining(taskId)) {
           host.dispatchSync(decided);
           return;
         }
-        void host.dispatch(decided).catch(() => undefined);
+        void host.dispatchOrReject(decided);
       },
     );
   });
@@ -249,12 +249,12 @@ export async function requestApproval(
 
   return new Promise((resolve) => {
     const onAbort = (): void => {
-      void host.dispatch({
+      void host.dispatchOrReject({
         type: 'approval.withdrawn',
         taskId,
         atMs: Date.now(),
         requestId,
-      }).catch(() => undefined);
+      });
     };
     const request: HostApprovalRequest = {
       taskId,
@@ -320,7 +320,7 @@ export async function handleReject(this: TaskRunner, taskId: string, reason: str
     const finishedHost = hostFor(this);
     if (finishedHost.archivedTask(taskId) !== undefined
       || finishedHost.runnerSnapshot().finished.includes(taskId)) {
-      void finishedHost.dispatch({ type: 'approval.stale', taskId, atMs: Date.now(), approvalId }).catch(() => undefined);
+      void finishedHost.dispatchOrReject({ type: 'approval.stale', taskId, atMs: Date.now(), approvalId });
       this['deps'].onStaleApprovalDecision?.(
         taskId,
         'reject',
@@ -334,7 +334,7 @@ export async function handleReject(this: TaskRunner, taskId: string, reason: str
   if (current?.terminal !== undefined || current?.phase === 'terminalizing' || current?.phase === 'retiring') {
     // The task already selected its terminal; this reject is audit-only and
     // never interrupts or fails it a second time.
-    void host.dispatch({ type: 'approval.stale', taskId, atMs: Date.now(), approvalId }).catch(() => undefined);
+    void host.dispatchOrReject({ type: 'approval.stale', taskId, atMs: Date.now(), approvalId });
     this['deps'].onStaleApprovalDecision?.(
       taskId,
       'reject',
@@ -388,12 +388,12 @@ function pendingMatches(this: TaskRunner, taskId: string, approvalId: string, de
   const pending = host.current(taskId)?.approval.pending;
   if (approvalId === pending?.approvalId) return true;
   if (host.current(taskId) !== undefined) {
-    void host.dispatch({
+    void host.dispatchOrReject({
       type: 'approval.stale',
       taskId,
       atMs: Date.now(),
       approvalId,
-    }).catch(() => undefined);
+    });
   }
   this['deps'].onStaleApprovalDecision?.(
     taskId,

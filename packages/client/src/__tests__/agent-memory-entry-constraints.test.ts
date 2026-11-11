@@ -110,6 +110,7 @@ describe('the embedded agent-memory entry module graph', () => {
     // longer reaches `bin/` at all. #1304: `util/exec-runner.ts` starts system
     // tools from `@byok-sdk/core/system-tool`, whose Node-only entry imports `node:fs` and `node:path`.
     // #1687: agent-home.ts folds configured roots through the leaf util/fold-name-aliases.ts.
+    // #1759: agent-home.ts and path-mutation-gate.ts walk to the deepest existing ancestor through the leaf util/existing-ancestor.ts (node:fs/node:path only).
     expect(GRAPH.modules).toEqual([
       'agent-home-readers.ts',
       'agent-home.ts',
@@ -128,6 +129,7 @@ describe('the embedded agent-memory entry module graph', () => {
       'util/agent-memory-helper-release-pin.ts',
       'util/agent-memory-helper-release.ts',
       'util/atomic-write.ts',
+      'util/existing-ancestor.ts',
       'util/fold-name-aliases.ts',
       'util/path-mutation-gate.ts',
       'util/private-unix-socket.ts',

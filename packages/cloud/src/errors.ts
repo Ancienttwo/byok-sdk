@@ -85,7 +85,7 @@ export const CLOUD_ERROR_CODES = {
   e2ee_member_key_conflict: 'e2ee_member_key_conflict',
   /** A stored E2EE member row is not the value its schema requires. Whatever wrote it broke the store contract. */
   e2ee_member_state_unreadable: 'e2ee_member_state_unreadable',
-  /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
+  /** A client pairing MAC was relayed to a device that is unknown or revoked in this tenant. */
   device_not_found: 'device_not_found',
   /**
    * The device was retired (revoked or superseded), and its mailbox stream

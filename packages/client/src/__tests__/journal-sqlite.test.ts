@@ -758,6 +758,15 @@ describe('SqliteLocalTaskJournal', () => {
       expect(usage).not.toHaveProperty('categories');
     });
 
+    it('measures an absent quarantine directory as 0 but rejects any other stat error', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await expect(journal.measureUsage()).resolves.toMatchObject({ quarantineBytes: 0 });
+      // A regular file where the directory should be makes readdir fail with ENOTDIR.
+      writeFileSync(path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME), 'x');
+      await expect(journal.measureUsage()).rejects.toMatchObject({ code: 'ENOTDIR' });
+    });
+
     it('checkpoints the WAL and returns a bounded, honest result', async () => {
       const storeDir = await tmpStore();
       const journal = build(storeDir);

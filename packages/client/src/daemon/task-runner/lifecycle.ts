@@ -278,10 +278,10 @@ export async function handleCancel(this: TaskRunner, taskId: string, reason: str
     return;
   }
   if (host.current(taskId)?.terminal === undefined) {
-    await host.dispatch({
+    await host.dispatchOrReject({
       type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire',
       ...(reason === undefined ? {} : { reason }),
-    }).catch(() => undefined);
+    });
   }
   void drainApprovals.call(this, taskId);
   await receipt;

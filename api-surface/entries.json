@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2363084,
+      "budgetBytes": 2363938,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -121,7 +121,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 532902,
+      "budgetBytes": 532198,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -453,7 +453,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 494059,
+      "budgetBytes": 493454,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -594,7 +594,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Hermes session runtime; loaded only when starting an execution",
-      "budgetBytes": 23988,
+      "budgetBytes": 24119,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -643,7 +643,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 564259,
+      "budgetBytes": 564354,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1541,7 +1541,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 245586,
+      "budgetBytes": 245412,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1608,7 +1608,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Headless Pi model route: choices, linkage, field errors and submission",
-      "budgetBytes": 314664,
+      "budgetBytes": 314751,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1688,7 +1688,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Pinned pi-ai catalog lookup for pi_model",
-      "budgetBytes": 287478,
+      "budgetBytes": 287539,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2181,7 +2181,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2333820,
+      "budgetBytes": 2334610,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2520,7 +2520,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 181727,
+      "budgetBytes": 181825,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

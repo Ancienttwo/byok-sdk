@@ -21,6 +21,7 @@ import { rewindToV7 } from './test-support';
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const V6_FIXTURE = fileURLToPath(new URL('../../../../scripts/release/fixtures/stores/0.31.0/server-sqlite.db', import.meta.url));
+const V7_FIXTURE = fileURLToPath(new URL('../../../../scripts/release/fixtures/stores/0.32.0/server-sqlite.db', import.meta.url));
 const TENANT = tenantId('tenant-v6-upgrade');
 const NOW = '2026-10-01T00:00:00.000Z';
 
@@ -229,6 +230,33 @@ describeSqlite('SQLite in-place schema upgrades', () => {
       code: 'SQLITE_SCHEMA_INVALID', foundVersion: '8', message: expect.stringContaining(`FROM ${table}`),
     }));
     expect(activityTables(file)).not.toContain(table);
+  });
+
+  it('brings task_attempt in the released v6 and v7 stores to the fresh v8 columns, backfilling archive_after only from v6', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'byok-sqlite-task-columns-'));
+    scratch.push(directory);
+    const columns = (file: string) => {
+      const db = new DatabaseSync(file, { readOnly: true });
+      const result = { info: db.prepare('PRAGMA table_info(task_attempt)').all(),
+        archiveAfter: db.prepare('SELECT task_id, archive_after FROM task_attempt ORDER BY task_id').all().map((row) => row.archive_after) };
+      db.close(); return result;
+    };
+    await open(join(directory, 'fresh.db')).close();
+    // Each release's own file, holding a completed, a failed (no terminal instant) and an offered task.
+    for (const [version, fixture, archiveAfter] of [
+      ['v6', V6_FIXTURE, ['2026-09-01T00:00:00.000Z', '2026-09-03T00:00:00.000Z', null]],
+      ['v7', V7_FIXTURE, [null, null, null]],
+    ] as const) {
+      const file = join(directory, `${version}.db`);
+      copyFileSync(fixture, file);
+      const db = new DatabaseSync(file);
+      db.prepare(`INSERT INTO task_attempt (tenant_id, task_id, device_id, status, terminal_at, updated_at) VALUES
+        (?1, 'a', 'kept', 'complete', '2026-09-01T00:00:00.000Z', '2026-09-02T00:00:00.000Z'),
+        (?1, 'b', 'kept', 'failed', NULL, '2026-09-03T00:00:00.000Z'), (?1, 'c', 'kept', 'offered', NULL, '2026-09-04T00:00:00.000Z')`).run(TENANT);
+      db.close();
+      await open(file).close();
+      expect(columns(file), version).toEqual({ info: columns(join(directory, 'fresh.db')).info, archiveAfter });
+    }
   });
 
   it('still refuses every other older version', () => {

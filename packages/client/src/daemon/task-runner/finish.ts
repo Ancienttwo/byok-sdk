@@ -258,14 +258,14 @@ export function settleSemanticTerminal(
   if (winner) {
     if (current.terminal === undefined
       && (current.phase === 'running' || current.phase === 'awaiting_approval')) {
-      void host.dispatch({
+      void host.dispatchOrReject({
         type: 'terminal.requested',
         taskId: active.taskId,
         atMs: Date.now(),
         kind: plan.kind,
         ...(plan.reason === undefined ? {} : { reason: plan.reason }),
         ...(plan.retryable === undefined ? {} : { retryable: plan.retryable }),
-      }).catch(error => host.rejectTerminal(active.taskId, error));
+      });
       // Drain after selection, before the terminal bytes: a finishing task never
       // dispatches a queued approval and every caller is settled fail-closed.
       void drainApprovals.call(this, active.taskId);
@@ -321,23 +321,23 @@ export function drainApprovals(this: TaskRunner, taskId: string): Promise<void> 
     for (;;) {
       const queued = host.current(taskId)?.approval.queue[0];
       if (queued === undefined) break;
-      await host.dispatch({
+      await host.dispatchOrReject({
         type: 'approval.withdrawn',
         taskId,
         atMs: Date.now(),
         requestId: queued.requestId,
         reason: `task ${taskId} finished before this queued approval request could be dispatched`,
-      }).catch(() => undefined);
+      });
     }
     const pending = host.current(taskId)?.approval.pending;
     if (pending === undefined) return;
-    await host.dispatch({
+    await host.dispatchOrReject({
       type: 'approval.withdrawn',
       taskId,
       atMs: Date.now(),
       requestId: pending.requestId,
       reason: `task ${taskId} finished`,
-    }).catch(() => undefined);
+    });
   };
   return drain();
 }

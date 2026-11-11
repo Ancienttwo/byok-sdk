@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { isSqliteAvailable } from '../sqlite-support';
-import { rewindToV7 } from './test-support';
+import { rewindToV6 } from './test-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
@@ -19,7 +19,7 @@ describeSqlite('SQLite task attempt phase instants (#980)', () => {
     for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   });
 
-  it('adds the phase columns on open to a v7 file from before them, without backfill', async () => {
+  it('adds the phase columns when it upgrades a v6 file from before them, without backfill', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'byok-sqlite-phases-'));
     directories.push(directory);
     const path = join(directory, 'server.sqlite');
@@ -29,10 +29,10 @@ describeSqlite('SQLite task attempt phase instants (#980)', () => {
     const first = open();
     await first.cloud.tasks.open(TENANT, { taskId: 'old', deviceId: 'device-1' });
     await first.close();
-    // v8's activity output closure reads the phase columns, so only an older
-    // file can lack them: rewind this one to v7, which had neither.
+    // Only an upgrade adds a missing column, so rewind this file to v6, the
+    // oldest version upgraded in place.
     const raw = new DatabaseSync(path);
-    raw.exec(rewindToV7('2026-10-27T00:10:00.000Z'));
+    raw.exec(rewindToV6('2026-10-27T00:10:00.000Z'));
     for (const column of PHASE_COLUMNS) raw.exec(`ALTER TABLE task_attempt DROP COLUMN ${column}`);
     raw.close();
 
