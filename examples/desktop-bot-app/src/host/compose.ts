@@ -1,8 +1,8 @@
 import { mkdir, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  createDaemonWithAdapters, DaemonHaltError, type Daemon, type DaemonConfig, type DeviceCredentialBackend,
-  type RuntimeEnvironmentPolicy, type SdkHelperHostConfig,
+  createDaemonWithAdapters, DaemonHaltError, EmbeddedPairingError, resolveSdkHosting, SdkHostingAssetsMissingError,
+  type Daemon, type DaemonConfig, type DeviceCredentialBackend, type RuntimeEnvironmentPolicy, type SdkHosting, type SdkHostingOptions,
 } from '@byok-sdk/client';
 import { createRuntimeAdapters } from '@byok-sdk/client/adapters';
 import { createBotPersonaProjection } from '@byok-sdk/bot-collaboration';
@@ -20,8 +20,11 @@ export interface HostCompositionOptions {
   /** `resolveHostLayout` output: the SDK's `storeDir` and the Host's `hostStorageRoot`. */
   readonly storeDir: string;
   readonly hostStorageRoot: string;
-  /** Re-entry of this Host's own executable for SDK helpers (`bundledSdkHelperHost()`). */
-  readonly sdkHelperHost?: SdkHelperHostConfig;
+  /**
+   * This Host's SDK asset root and the re-entry of its own executable for SDK helpers (`resolveSdkHosting` input).
+   * Omitted, the Host runs without SDK assets, as the tests do.
+   */
+  readonly sdkHosting?: SdkHostingOptions;
   /** Enrollment custody; omitted, the daemon uses this product's OS credential store. */
   readonly deviceCredentials?: DeviceCredentialBackend;
   /** Called when a bridge domain's views changed (`HostContext.changed`). */
@@ -47,7 +50,7 @@ export class HostStoppedError extends Error {
 /**
  * Desktop apps start without the user's login shell, so every runtime takes
  * its environment from it. Pi gets the same policy and no `PI_PACKAGE_DIR`:
- * the SDK sets that from `runtimes.pi.packageDir` alone.
+ * the SDK sets that from `runtimes.pi.packageDir` (the asset root's) alone.
  */
 const LOGIN_SHELL: RuntimeEnvironmentPolicy = { base: 'login-shell' };
 
@@ -88,38 +91,48 @@ function filePortStore(file: string): LoopbackPortStore {
   };
 }
 
-/**
- * Starts the daemon. Whether this device is paired is the daemon's own
- * enrollment authority: `start()` halts with `unpaired` when it holds none, and
- * only then does the Host pair, in process and once, against its own server.
- */
-async function startPaired(daemon: Daemon, pair: () => Promise<void>): Promise<void> {
+/** A missing SDK asset cannot heal by restarting: the Host stops with the missing paths. */
+function hostingOf(options: SdkHostingOptions | undefined): SdkHosting | undefined {
   try {
-    await daemon.start();
-    return;
+    return options && resolveSdkHosting(options);
   } catch (error) {
-    if (!(error instanceof DaemonHaltError) || error.reason !== 'unpaired') throw error;
+    if (error instanceof SdkHostingAssetsMissingError) throw new HostStoppedError(error.message, { cause: error });
+    throw error;
   }
-  await pair();
-  await daemon.start();
 }
 
-/** Prechecks the stores, then composes the embedded server on loopback and the daemon paired to it (#1499 s1.4). */
+/**
+ * Resolves the SDK assets, prechecks the stores, then composes the embedded server on loopback and the daemon paired
+ * to it (#1499 s1.4). Pairing is the daemon's own reconciliation with this server (`pairEmbedded`): a fresh store pairs
+ * against an empty server, a paired store whose device the server lists goes on, and every other state stops the Host.
+ */
 export async function composeHost(options: HostCompositionOptions): Promise<ComposedHost> {
+  const hosting = hostingOf(options.sdkHosting);
   const hostDir = path.join(options.hostStorageRoot, 'host');
   const serverDb = path.join(hostDir, 'server.sqlite');
   await precheckHostStores({ storeDir: options.storeDir, serverDb, keysDb: keysDbPath(options.hostStorageRoot) });
   await mkdir(hostDir, { recursive: true, mode: 0o700 });
 
-  let consumers: ServerConsumers | undefined;
-  const bound = () => {
-    if (!consumers) throw new Error('The conversation is not open yet');
-    return consumers;
-  };
+  // The server delivers wakes from its creation (a wake left due by the last run, at once) and Agent messages once the
+  // daemon runs, both before the k8 domain binds its consumers: a delivery waits for the binding, and one still waiting
+  // when the Host closes is refused, so the server retries it on the next run.
+  let bindConsumers!: (consumers: ServerConsumers) => void;
+  let refuseConsumers!: (reason: Error) => void;
+  const consumers = new Promise<ServerConsumers>((resolve, reject) => { bindConsumers = resolve; refuseConsumers = reject; });
+  // Every waiting delivery gets the refusal; with none waiting, it is not an unhandled rejection.
+  consumers.catch(() => {});
+  let consumersBound = false;
   const server = createByokServer({
     productId: options.productId, storage: { kind: 'sqlite', path: serverDb },
-    wake: { consume: (wake, signal) => bound().consume(wake, signal) },
-    agentMessage: { consume: input => bound().consumeMessage(input) },
+    wake: {
+      consume: async (wake, signal) => {
+        const bound = await consumers;
+        // The server gave up on this delivery while it waited.
+        signal.throwIfAborted();
+        return bound.consume(wake, signal);
+      },
+    },
+    agentMessage: { consume: async input => (await consumers).consumeMessage(input) },
   });
   const listener = await listenLoopback({
     portStore: filePortStore(path.join(hostDir, 'loopback-port')),
@@ -131,6 +144,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
   let daemon: Daemon | undefined;
   let domains: ComposedDomains | undefined;
   const close = async () => {
+    refuseConsumers(new Error('The Host closed before the conversation opened'));
     try {
       await domains?.close();
     } finally {
@@ -146,11 +160,15 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
     }
   };
   try {
-    const launcher = options.sdkHelperHost ? { piByokLauncher: piByokLauncher(options.sdkHelperHost, options.hostStorageRoot) } : {};
+    const launcher = hosting ? { piByokLauncher: piByokLauncher(hosting.daemon.sdkHelperHost, options.hostStorageRoot) } : {};
     const adapters = createRuntimeAdapters({
-      ...(options.sdkHelperHost ? { sdkHelperHost: options.sdkHelperHost } : {}),
+      ...hosting?.adapters,
       ...launcher,
-      runtimes: { pi: { runtimeEnvironment: LOGIN_SHELL }, claude: { runtimeEnvironment: LOGIN_SHELL }, codex: { runtimeEnvironment: LOGIN_SHELL } },
+      runtimes: {
+        pi: { ...hosting?.adapters.runtimes.pi, runtimeEnvironment: LOGIN_SHELL },
+        claude: { runtimeEnvironment: LOGIN_SHELL },
+        codex: { runtimeEnvironment: LOGIN_SHELL },
+      },
     });
     const daemonConfig: DaemonConfig = {
       productId: options.productId,
@@ -161,21 +179,20 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
       agentHome: { hostStorageRoot: options.hostStorageRoot, projection: createBotPersonaProjection() },
       agentEgress: { policy: AGENT_EGRESS_POLICY },
       localAgentRelease: { version: options.releaseVersion },
-      ...(options.sdkHelperHost ? { sdkHelperHost: options.sdkHelperHost } : {}),
+      ...hosting?.daemon,
       ...launcher,
     };
     daemon = createDaemonWithAdapters(daemonConfig, adapters, options.deviceCredentials ? { deviceCredentials: options.deviceCredentials } : {});
     const started = daemon;
-    await startPaired(started, async () => {
-      const { code } = await server.pairing.createPairingCode({ productId: options.productId });
-      await started.pair(code);
-    });
+    await started.pairEmbedded(server);
+    await started.start();
     domains = await composeDomains({
       daemon: started, daemonConfig, server, storeDir: options.storeDir, hostStorageRoot: options.hostStorageRoot,
       consumers: {
         bind: next => {
-          if (consumers) throw new Error('Server consumers are already bound');
-          consumers = next;
+          if (consumersBound) throw new Error('Server consumers are already bound');
+          consumersBound = true;
+          bindConsumers(next);
         },
       },
       changed: options.onChanged,
@@ -184,6 +201,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
   } catch (error) {
     await close();
     if (error instanceof DaemonHaltError) throw new HostStoppedError(`Daemon halted at start: ${error.reason}`, { cause: error });
+    if (error instanceof EmbeddedPairingError) throw new HostStoppedError(`Pairing with the embedded server refused: ${error.reason}`, { cause: error });
     throw error;
   }
 }

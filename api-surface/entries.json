@@ -405,7 +405,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Single-file Host build: esbuild packaging plugin and SDK asset copy",
-      "budgetBytes": 30802,
+      "budgetBytes": 33069,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

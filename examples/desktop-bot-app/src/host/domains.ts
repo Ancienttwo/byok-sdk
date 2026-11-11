@@ -27,7 +27,7 @@ export interface HostContext {
   readonly server: ByokServer;
   readonly storeDir: string;
   readonly hostStorageRoot: string;
-  /** The server exists before any domain, so its consumers refuse until the k8 domain binds them, once. */
+  /** The server exists before any domain, so its deliveries wait until the k8 domain binds the consumers, once. */
   readonly consumers: { bind(consumers: ServerConsumers): void };
   /** A domain's views changed: the Host pushes its state again, so main hints the renderer to pull. */
   changed(): void;
