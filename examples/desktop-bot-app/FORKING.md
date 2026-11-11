@@ -10,17 +10,16 @@ Then replace the workspace dependencies:
 
 | In this repository | In your fork |
 | --- | --- |
-| `@byok-sdk/client`, `@byok-sdk/server`, `@byok-sdk/keys`, `@byok-sdk/ui-runtime`: `workspace:*` | The npm versions of the tag you copied. They are released together under one version, so pin all of them to exactly that version. |
-| `@byok-sdk/bot-collaboration`: `workspace:*` | The same exact version, once it is on npm (#1845). Until its first npm publish, which the repository owner performs, copy K8 into your repository per [`packages/bot-collaboration/src/VENDOR.md`](../../packages/bot-collaboration/src/VENDOR.md) and point the dependency at that copy. Switch to the npm package when it exists and delete the copy. |
+| `@byok-sdk/client`, `@byok-sdk/server`, `@byok-sdk/keys`, `@byok-sdk/ui-runtime`, `@byok-sdk/bot-collaboration`: `workspace:*` | The npm packages at the version of the tag you copied. The SDK packages are released together under one version, K8 (`@byok-sdk/bot-collaboration`) included, so pin all of them to exactly that version. |
 
-The app imports K8 through its four entries only:
+K8 is a dependency, not code you copy: you take its fixes by bumping the version with the rest of the SDK. `@byok-sdk/bot-collaboration` reaches npm with the first release the repository owner publishes after #1845. Until then no version of it exists on npm to pin. The app imports K8 through its entries only:
 
-- `@byok-sdk/bot-collaboration`: `BotCollaboration`, `teamSnapshot`, `createBotPersonaProjection`, `botCompactVeto`.
+- `@byok-sdk/bot-collaboration`: `BotCollaboration`, `teamSnapshot` and `TeamModeError`, `createBotPersonaProjection`, `botCompactVeto`, and the message types.
 - `./host-kit`: Host adapter types and `historyRowFromTurn`, `RetentionRefused`.
 - `./testing`: the synthetic adapter, for tests only.
 - `./rules`: the app does not import it.
 
-Keep that split, so a vendored copy and the package are interchangeable.
+Import only from these entries: a deep import into the package's files is not part of its contract.
 
 What you do not need: `scripts/ci/*` and `.github/workflows/ci.yml` are this repository's gates. Take the `desktop` job of `ci.yml` as the model for your own pipeline, because the package smoke there is the only check that runs the packaged Host on all three platforms.
 
@@ -45,7 +44,7 @@ K8 runs in `team: 'external'` mode with an external history. In this app, the au
 - **Store first, then K8.** Every user command is written to the authority before K8 sees it, keyed by the renderer's action id. A retry with the same id returns the first result, and the same id with other arguments is a conflict (`StoreConflictError`). At the next open, `unboundInputs()` and K8 `inputRoot` finish a send that the authority holds but K8 may not.
 - **Roster revision.** `roster()` returns the Bots with a revision that only grows. On K8 `stale_team`, `raiseRevision(above)` moves the authority above K8's revision, and the roster is sent again. A candidate roster passes K8's own snapshot check (`teamSnapshot`) before the authority commits it.
 - **History.** `history(botId, turnId)` returns the Bot's ended Turns after its clear epoch, each with the reply the user saw. `recordClear` writes only an epoch marker and deletes nothing.
-- **Reply visibility (R1).** `Conversation` hands `recordTurn` a reply only after the Turn's intent concluded `succeeded` with that reply's task id, and after the body read back through `tasks.agentMessage` matches its `contentHash`. See [`VENDOR.md` "Reply visibility"](../../packages/bot-collaboration/src/VENDOR.md#reply-visibility). Your API must not show a reply from any earlier point.
+- **Reply visibility (R1).** `Conversation` hands `recordTurn` a reply only after the Turn's intent concluded `succeeded` with that reply's task id, and after the body read back through `tasks.agentMessage` matches its `contentHash`. See ["Reply visibility"](../../packages/bot-collaboration/README.md#reply-visibility) in K8's README. Your API must not show a reply from any earlier point.
 - **Retention.** `retainableRoots()` lists the roots whose Turns all ended in the authority; only those are offered to K8 `retain`, and `markRetained(root)` records it.
 
 When the authority cannot be reached, the command fails and the UI shows the error. Do not keep a local copy as a second authority. K8's README sections "External team authority" and "External history authority" ([`packages/bot-collaboration/README.md`](../../packages/bot-collaboration/README.md)) define the K8 side of this contract.
@@ -54,9 +53,9 @@ When the authority cannot be reached, the command fails and the UI shows the err
 
 Each SDK release has a Host upgrade guide in `docs/releases/host-upgrade-<version>.md`. Upgrade one release at a time and work through its guide as a checklist:
 
-1. Bump every `@byok-sdk/*` dependency to the same exact version. If you vendor K8, re-copy it from that tag and update its source record (`VENDOR.md` "Record the source").
+1. Bump every `@byok-sdk/*` dependency to the same exact version, `@byok-sdk/bot-collaboration` included.
 2. For each section of the guide, decide whether it touches this app. Sections that always touch it: store compatibility (the Host prechecks `inspectDaemonStores`, `inspectSqliteStore` and `inspectProviderProfileStore` at start and migrates a keys store only on `migration-required`), Pi and packaging (`resolveSdkHosting`, the SEA helper re-entry), runtime environment policy, and anything under "Bot collaboration". Record your decision for each section in your upgrade PR.
-3. Re-check reply visibility against `VENDOR.md` if the guide changes K8 or `tasks.agentMessage`.
+3. Re-check reply visibility against K8's README if the guide changes K8 or `tasks.agentMessage`.
 4. If you change the bridge, raise `BRIDGE_VERSION` in `src/bridge/protocol.ts`. A shell and a Host of different versions refuse each other on purpose.
 5. Run the app's typecheck and tests, then the package smoke on macOS, Windows and Linux before you release.
 
