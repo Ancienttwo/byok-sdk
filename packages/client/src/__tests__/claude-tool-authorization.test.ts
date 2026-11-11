@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ClaudeToolAuthorizationBridge } from '../adapters/claude/tool-authorization';
+import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolCall } from '../tool-authorization';
 import {
   AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MEMORY_RECALL_TOOL_NAME, AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_MESSAGE_TOOL_NAME,
@@ -13,6 +14,7 @@ import {
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { McpStdioServerConfig, MessageDraftDelta, Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+import { memoryClaude } from './fixtures/memory-claude';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-claude-tool-authorization.mjs', import.meta.url));
 const roots: string[] = [];
@@ -228,11 +230,11 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
 });
 
 describe('Claude PreToolUse delivery deadline', () => {
-  const callback = (bridge: ClaudeToolAuthorizationBridge, requestId: string) => {
+  const callback = (bridge: ClaudeToolAuthorizationBridge, requestId: string, respond: (frame: Record<string, unknown>) => Promise<void>) => {
     const hook = (bridge.hooks.PreToolUse as Array<{ hookCallbackIds: string[]; timeout: number }>)[0]!;
     bridge.receive({ type: 'control_request', request_id: requestId, request: { subtype: 'hook_callback', callback_id: hook.hookCallbackIds[0], input: {
       hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: requestId, tool_input: { command: 'sudo rm -rf /var/db' }, cwd: '/tmp',
-    } } });
+    } } }, respond);
     return hook.timeout * 1_000;
   };
 
@@ -243,10 +245,10 @@ describe('Claude PreToolUse delivery deadline', () => {
       const onFatal = vi.fn();
       const gate = createAutoToolAuthorizationGate({ workspace: '/tmp', timeoutMs: 1_000, requestAuthorization: () => new Promise(() => {}) });
       const bridge = new ClaudeToolAuthorizationBridge(gate, onFatal);
-      bridge.bind(async frame => { writes.push(frame); });
-      const nativeTimeoutMs = callback(bridge, 'hook-1');
+      const respond = async (frame: Record<string, any>) => { writes.push(frame); };
+      const nativeTimeoutMs = callback(bridge, 'hook-1', respond);
       await vi.advanceTimersByTimeAsync(300);
-      callback(bridge, 'hook-2');
+      callback(bridge, 'hook-2', respond);
       await vi.advanceTimersByTimeAsync(1_300);
       expect(1_300).toBeLessThan(nativeTimeoutMs);
       expect(writes.map(frame => [frame.response.request_id, frame.response.response.hookSpecificOutput.permissionDecision])).toEqual([['hook-1', 'deny'], ['hook-2', 'deny']]);
@@ -265,13 +267,71 @@ describe('Claude PreToolUse delivery deadline', () => {
       const onFatal = vi.fn();
       const gate: ToolAuthorizationGate = { timeoutMs: 1_000, authorize: () => new Promise(() => {}) };
       const bridge = new ClaudeToolAuthorizationBridge(gate, onFatal);
-      bridge.bind(async () => {});
-      const nativeTimeoutMs = callback(bridge, 'hook-1');
+      const nativeTimeoutMs = callback(bridge, 'hook-1', async () => {});
       await vi.advanceTimersByTimeAsync(nativeTimeoutMs - 1);
       expect(onFatal).toHaveBeenCalledTimes(1);
       bridge.close();
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('Claude runtime requests on the OAR stream-json session', () => {
+  const deny: ToolAuthorizationGate = { timeoutMs: 1_000, authorize: async () => ({ decision: 'deny', code: 'tool_authorization_denied', reason: 'refused' }) };
+
+  async function open() {
+    const claude = memoryClaude();
+    const stream = new ClaudeStreamSession(claude.child as never);
+    const gate = new ClaudeToolAuthorizationBridge(deny, () => {});
+    await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: (message, respond) => { gate.receive(message, respond); } });
+    const callbackId = (gate.hooks.PreToolUse as Array<{ hookCallbackIds: string[] }>)[0]!.hookCallbackIds[0];
+    return { claude, stream, callbackId };
+  }
+  const records = (stream: ClaudeStreamSession, id: string) => stream.raw.records().filter(record =>
+    (record.kind === 'request' && (record as unknown as { id: string }).id === id) || (record.kind === 'response' && (record as unknown as { requestId: string }).requestId === id));
+
+  it('records a hook_callback and its deny reply, and answers nothing else', async () => {
+    const { claude, stream, callbackId } = await open();
+    claude.send({ type: 'control_request', request_id: 'hook-1', request: { subtype: 'hook_callback', callback_id: callbackId, input: {
+      hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'tool-1', tool_input: { command: 'rm -rf /' }, cwd: '/tmp',
+    } } });
+    await vi.waitFor(() => expect(records(stream, 'hook-1')).toHaveLength(2));
+    const [request, response] = records(stream, 'hook-1');
+    expect(request).toMatchObject({ kind: 'request', direction: 'toApp', body: { kind: 'native', type: 'hook_callback' } });
+    expect(response).toMatchObject({ kind: 'response', body: { kind: 'accepted', native: { response: { request_id: 'hook-1',
+      response: { hookSpecificOutput: { permissionDecision: 'deny' } } } } } });
+    expect(claude.written).toMatchObject([{ type: 'control_response', response: { request_id: 'hook-1' } }]);
+  });
+
+  it('writes nothing after a fatal bridge failure, neither a late verdict nor a new one', async () => {
+    const claude = memoryClaude();
+    const stream = new ClaudeStreamSession(claude.child as never);
+    let allow!: () => void;
+    const pending: ToolAuthorizationGate = { timeoutMs: 1_000, authorize: () => new Promise(resolve => { allow = () => resolve({ decision: 'allow' }); }) };
+    // Only the stream latch, not a closed bridge, stands between a verdict and stdin here.
+    const gate = new ClaudeToolAuthorizationBridge(pending, error => stream.fail(error));
+    await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: (message, respond) => { gate.receive(message, respond); } });
+    const callbackId = (gate.hooks.PreToolUse as Array<{ hookCallbackIds: string[] }>)[0]!.hookCallbackIds[0];
+    const hook = (id: string, callback = callbackId) => claude.send({ type: 'control_request', request_id: id, request: { subtype: 'hook_callback', callback_id: callback, input: {
+      hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: id, tool_input: { command: 'ls' }, cwd: '/tmp',
+    } } });
+    hook('hook-1');
+    hook('forged', 'unregistered');
+    allow();
+    hook('hook-2');
+    await new Promise(resolve => setImmediate(resolve));
+    expect(claude.written).toEqual([]);
+    expect(await stream.mcpStatus()).toBeUndefined();
+    expect(claude.written).toEqual([]);
+    gate.close();
+  });
+
+  it('leaves a request it does not know unanswered and unallowed', async () => {
+    const { claude, stream } = await open();
+    claude.send({ type: 'control_request', request_id: 'odd-1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' } } });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(records(stream, 'odd-1')).toMatchObject([{ kind: 'request', direction: 'toApp', body: { type: 'can_use_tool' } }]);
+    expect(claude.written).toEqual([]);
   });
 });

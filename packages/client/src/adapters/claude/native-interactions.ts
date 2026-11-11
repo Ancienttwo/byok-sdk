@@ -7,7 +7,7 @@ import {
   type NativeQuestion,
 } from '../../native-interactions.js';
 import { snapshotPlainData } from '../../util/plain-data.js';
-import type { ClaudeStreamMessage } from './events.js';
+import type { ClaudeStreamMessage } from './projection.js';
 
 /** Questions only: tool permission is the SDK `auto | all` decision. */
 export const CLAUDE_NATIVE_INTERACTION_CAPABILITIES = Object.freeze({
@@ -49,7 +49,6 @@ export class ClaudeNativeInteractionBridge {
   private readonly controller: NativeInteractionController;
   private readonly active = new Map<string, string>();
   private readonly seen = new Set<string>();
-  private write: ((frame: Record<string, unknown>) => Promise<void>) | undefined;
   private sessionRef: string | undefined;
   private accepting = false;
   private ended = false;
@@ -69,8 +68,6 @@ export class ClaudeNativeInteractionBridge {
   }
 
   get channel() { return this.controller.channel; }
-
-  bind(write: (frame: Record<string, unknown>) => Promise<void>): void { this.write = write; }
 
   beginTurn(): void {
     if (this.ended) throw new NativeInteractionError('closed', 'Claude native process generation is closed');
@@ -105,8 +102,12 @@ export class ClaudeNativeInteractionBridge {
       if (requestId !== undefined) this.controller.withdraw(requestId, 'provider-cancelled');
       return;
     }
-    if (message.type !== 'control_request') return;
-    try { this.open(message); }
+  }
+
+  /** A runtime request no other bridge took; `respond` writes and records the reply. */
+  request(message: ClaudeStreamMessage, respond: (reply: Record<string, unknown>) => Promise<void>): void {
+    if (this.ended) return;
+    try { this.open(message, respond); }
     catch (error) {
       // An unrecognized/ambiguous request cannot safely be answered. Dispose
       // the owned process instead of silently ignoring or approving it.
@@ -114,10 +115,10 @@ export class ClaudeNativeInteractionBridge {
     }
   }
 
-  private open(message: ClaudeStreamMessage): void {
-    if (!text(message.request_id) || !this.write) invalid();
+  private open(message: ClaudeStreamMessage, reply: (frame: Record<string, unknown>) => Promise<void>): void {
+    if (!text(message.request_id)) invalid();
     const id = message.request_id;
-    const respond = (response: Record<string, unknown>) => this.write!({
+    const respond = (response: Record<string, unknown>) => reply({
       type: 'control_response', response: { subtype: 'success', request_id: id, response },
     });
     const raw = message.request;

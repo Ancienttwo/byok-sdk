@@ -1,7 +1,7 @@
 import type { RuntimeFailureClass, RuntimeQuotaScope, TaskFailure } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 import { failureFromStatus } from '../../runtime/oar-failure-runtime.js';
-import type { ClaudeStreamMessage } from './events.js';
+import type { ClaudeStreamMessage } from './projection.js';
 
 /**
  * Classes of the public `assistant.error` values of Claude Code 2.1.302

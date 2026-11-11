@@ -112,6 +112,12 @@
 //                                          phase); `aborted_tools` is what the
 //                                          real binary reports when the
 //                                          interrupt lands in the tool phase.
+//   FAKE_CLAUDE_OWN_TURN=1             -> after turn 1, Claude runs a turn of
+//                                          its own: init at once, result 300ms
+//                                          later.
+//   FAKE_CLAUDE_USER_RECEIPT=<path>     -> append each user message's text.
+//   FAKE_CLAUDE_INTERRUPT_ERROR=1       -> answer an interrupt with an error
+//                                          control_response and no result.
 //   FAKE_CLAUDE_UNKNOWN_TOP_LEVEL=1     -> before the normal turn, emit one
 //                                          extra frame with a top-level
 //                                          `type` this adapter has never
@@ -514,6 +520,7 @@ function runProbeOrTurnFlow() {
     if (msg.type === 'control_request' && msg.request?.subtype === 'interrupt') {
       if (process.env.FAKE_CLAUDE_CONTROL_RECEIPT) writeFileSync(process.env.FAKE_CLAUDE_CONTROL_RECEIPT, JSON.stringify(msg));
       if (process.env.FAKE_CLAUDE_INTERRUPT_NO_ACK === '1') return;
+      if (process.env.FAKE_CLAUDE_INTERRUPT_ERROR === '1') { send({ type:'control_response',response:{subtype:'error',request_id:msg.request_id,error:'interrupt refused'} }); return; }
       send({ type:'control_response',response:{subtype:'success',request_id:msg.request_id,response:{still_queued:[]}} });
       const result = process.env.FAKE_CLAUDE_INTERRUPT_LATE_SUCCESS === '1'
         ? {type:'result',subtype:'success',is_error:false,session_id:reportedSessionId,usage:{},result:'late completion'}
@@ -532,6 +539,7 @@ function runProbeOrTurnFlow() {
     }
     if (msg.type !== 'user') return; // only real input shape this fixture accepts, per --input-format stream-json
     const text = msg.message?.content?.[0]?.text ?? '';
+    if (process.env.FAKE_CLAUDE_USER_RECEIPT) appendFileSync(process.env.FAKE_CLAUDE_USER_RECEIPT, `${text}\n`);
     void runTurn(text).catch((error) => {
       process.stderr.write(`fake claude MCP flow failed: ${error instanceof Error ? error.message : String(error)}\n`);
       process.exit(1);
@@ -751,6 +759,14 @@ function runProbeOrTurnFlow() {
           ? [{ tool_name: artifactPath ? 'Write' : 'Bash', tool_use_id: toolUseId, tool_input: {} }]
           : [],
     });
+    if (process.env.FAKE_CLAUDE_OWN_TURN === '1' && turn === 1) {
+      // A turn of Claude's own (a background task wake): init at once, its result 300ms later.
+      send({ type: 'system', subtype: 'init', session_id: reportedSessionId, model: 'fake-model' });
+      setTimeout(() => {
+        send({ type: 'assistant', message: { model: 'fake-model', id: 'msg_own', role: 'assistant', content: [{ type: 'text', text: 'own turn' }] }, session_id: reportedSessionId });
+        send({ type: 'result', subtype: 'success', is_error: false, num_turns: turn, session_id: reportedSessionId, usage: {}, result: 'own turn' });
+      }, 300);
+    }
   }
 
   process.on('SIGTERM', () => process.exit(143));

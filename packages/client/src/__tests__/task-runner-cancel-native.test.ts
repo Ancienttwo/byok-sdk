@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope, type RuntimeId } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import { ClaudeProcessClient } from '../adapters/claude/process-client';
+import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -32,8 +32,8 @@ const releaseDisposalFixtures: (() => void)[] = [];
 /** A missing cleanup receipt is explicit, not inferred from a delayed init frame. */
 function failClaudeDisposalUntilReleased() {
   let released = false;
-  const realDispose = ClaudeProcessClient.prototype.dispose;
-  const dispose = vi.spyOn(ClaudeProcessClient.prototype, 'dispose').mockImplementation(function (this: ClaudeProcessClient) {
+  const realDispose = ClaudeStreamSession.prototype.dispose;
+  const dispose = vi.spyOn(ClaudeStreamSession.prototype, 'dispose').mockImplementation(function (this: ClaudeStreamSession) {
     if (!released) return Promise.reject(new RuntimeDisposalFailure({ stage: 'cleanup', reason: 'fixture withholds startup disposal receipt' }));
     return realDispose.call(this);
   });
@@ -74,8 +74,8 @@ async function setup(runtime: RuntimeId, scenario: string, {
     // Claude aborts native init immediately. Run its REAL tree disposal, then
     // withhold only the acknowledgement so retention does not depend on init
     // being uncancellable. A retry cannot claim quiescence before release.
-    const dispose = ClaudeProcessClient.prototype.dispose;
-    vi.spyOn(ClaudeProcessClient.prototype, 'dispose').mockImplementation(async function (this: ClaudeProcessClient) {
+    const dispose = ClaudeStreamSession.prototype.dispose;
+    vi.spyOn(ClaudeStreamSession.prototype, 'dispose').mockImplementation(async function (this: ClaudeStreamSession) {
       await dispose.call(this);
       timing.record('startup.disposal.real.complete');
       startupDisposed.resolve();

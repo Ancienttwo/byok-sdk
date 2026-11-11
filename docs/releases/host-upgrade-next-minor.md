@@ -34,6 +34,10 @@ A Grok follow-up sent while Grok runs a turn of its own is held until that turn 
 
 The Grok adapter qualifies Grok 1.0.77 (#1884). A device on another version, 1.0.52 included, now reports `runtime_version_unqualified` with `qualifiedVersion: '1.0.77'`; the default policy stays `warn`, so tasks still run. A Host that pins its own Grok `versionPolicy` is unchanged. Grok's own turns, and the follow-up hold they cause, need 1.0.70 or later.
 
+## Claude on the OAR stream-json session (#1853)
+
+No Host action. The Claude adapter's events, capabilities, launch arguments and failure classes are unchanged. Two failure texts change: a Claude process that exits after the first instruction but before `system/init` fails the start with `claude exited before yielding an authoritative session id: …` (was `claude initial instruction transport failed`), and the exit diagnostic reads `claude exited (code=N); stderr: …`. A Host that matches those texts should branch on `failure.class`, which is unchanged. A follow-up sent while Claude runs a turn of its own (a background task wake) is held and sent when that turn ends; budget the task deadline for that wait.
+
 ## OpenCode start failures
 
 OpenCode now reports unclassified start failures as retryable infrastructure failures. A native process that exits on its own reports `runtime_exited` during start or a turn; an archived resume target is non-retryable, while a target in use is retryable. Session limits accept fractional interrupt milliseconds and report invalid limits as `invalid opencode interrupt timeout` or `invalid opencode retention budget` (#1681).

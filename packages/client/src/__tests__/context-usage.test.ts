@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mapPiContextUsage } from '../adapters/pi/events';
-import { createToolUseCorrelation, mapClaudeMessageToAgentEvents } from '../adapters/claude/events';
+import { createToolUseCorrelation, mapClaudeMessageToAgentEvents } from '../adapters/claude/projection';
 
 describe('context usage is independent of provider cost', () => {
   it('Pi reports actual zero as estimate without any provider counters', () => {
