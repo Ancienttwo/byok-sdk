@@ -1,4 +1,4 @@
-import type { TurnCancelResult } from '@byok-sdk/example-bot-collaboration';
+import type { TurnCancelResult } from '@byok-sdk/bot-collaboration/host-kit';
 import type { ByokServer } from '@byok-sdk/server';
 import { BridgeError } from '../../bridge/protocol.ts';
 import type { Conversation } from '../k8/conversation.ts';

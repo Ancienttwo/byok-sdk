@@ -33,7 +33,7 @@ import type { ZeroHitSession } from '../../hosted-bot-collaboration/src/zero-hit
 import { runDeviceRunner, runnerCommand, runnerOptions } from './device-runner.js';
 import { hash, taskId, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
+import { seedCollaboration } from '@byok-sdk/bot-collaboration/testing';
 import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
 import { openSubstrate, RUN, startDevice, startWorker, until, type DeviceProcess, type Substrate, type WorkerInstance } from './worker.test-support';
 
@@ -168,6 +168,7 @@ describe('device runner boundaries', () => {
     let wrapped!: client.RuntimeAdapter;
     const daemon = { subscribe: () => () => {}, stop: vi.fn(), pair: vi.fn(async () => ({ deviceId: 'device' })), start: vi.fn(),
       status: () => ({ activeTaskCount: 0, lifecycle: { phase: 'running', connection: 'open' } }),
+      whenTaskSettled: vi.fn(async () => ({ terminal: 'complete', delivery: 'accepted', disposal: 'disposed' })),
     } as unknown as client.Daemon;
     const compose = vi.spyOn(client, 'createDaemonWithAdapters').mockImplementation((_config, adapters) => { wrapped = adapters[0]!; return daemon; });
     const send = vi.fn(), approve = vi.fn(async () => ({ approved: true }));
@@ -193,6 +194,7 @@ describe('device runner boundaries', () => {
       ]);
       expect(await import('node:fs/promises').then(fs => fs.readFile(path.join(root, 'notes.txt'), 'utf8'))).toBe(`private${'.'.repeat(70_000)}`);
       expect(session.finish).toHaveBeenCalledWith({ text: 'private' });
+      expect(daemon.whenTaskSettled).toHaveBeenCalledWith('task', expect.objectContaining({ signal: expect.any(AbortSignal) }));
       expect(send.mock.calls.at(-1)).toEqual([{ type: 'finished', taskId: 'task' }]);
       await device.stop();
     } finally { compose.mockRestore(); await rm(root, { recursive: true, force: true }); }

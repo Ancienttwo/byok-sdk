@@ -13,7 +13,7 @@ import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credent
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import type { SpawnFn as PiSpawnFn } from '../adapters/pi/rpc-client';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import type { SpawnFn as ClaudeSpawnFn } from '../adapters/claude/process-client';
+import type { SpawnFn as ClaudeSpawnFn } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import type { spawn as codexNodeSpawn } from 'node:child_process';
 type CodexSpawnFn = typeof codexNodeSpawn;

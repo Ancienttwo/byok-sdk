@@ -1,4 +1,4 @@
-import type { Turn } from '@byok-sdk/example-bot-collaboration';
+import type { Turn } from '@byok-sdk/bot-collaboration/host-kit';
 
 /** One Bot of the roster. The Host store is the team authority; K8 receives the roster as `applyTeam` snapshots. */
 export interface BotProfile {

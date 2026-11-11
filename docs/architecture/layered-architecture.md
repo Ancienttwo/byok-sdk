@@ -124,7 +124,7 @@ flowchart TB
 检查覆盖：
 
 - `bun run check:release-graph` 调用 [`scripts/architecture/dependency-graph.mjs`](../../scripts/architecture/dependency-graph.mjs)：使用已安装 TypeScript 7 的 AST API 区分类型边和值边，解析 workspace export 到源码，保留 barrel re-export 边以检测文件级环；同时检查 workspace manifest 的运行时依赖方向与源码值导入的 `dependencies` 声明。
-- K8 单独复制的 `examples/bot-collaboration/src/rules` 另做真实闭包检查：从规则文件出发沿 workspace export 解析值导入，禁止到达 `node:async_hooks` 与 `node:sqlite`（含 `process.getBuiltinModule('node:sqlite')`）。K4 根入口 `@byok-sdk/server/execution-core` 会失败，`./execution-core/canonical` 只到 `node:crypto`。该检查不依赖基线。
+- K8 单独复制的 `packages/bot-collaboration/src/rules` 另做真实闭包检查：从规则文件出发沿 workspace export 解析值导入，禁止到达 `node:async_hooks` 与 `node:sqlite`（含 `process.getBuiltinModule('node:sqlite')`）。K4 根入口 `@byok-sdk/server/execution-core` 会失败，`./execution-core/canonical` 只到 `node:crypto`。该检查不依赖基线。
 - client 目录层级为入口（`bin`、`lifecycle`、`diagnostics`、`testing`）→ `daemon` → runtime 适配 → 共享；cloud 为 `composition` → `cloud.ts` → `api` / `handlers` / `router` → `stores` → 根领域文件 → 叶子目录。同层允许，纯 re-export 入口不计逆层边，但仍参与环检测。
 - [`dependency-baseline.json`](../../scripts/architecture/dependency-baseline.json) 记录当前 client/cloud 的逆层边、环内每条边，以及 conformance → testkit 的 manifest 缺口。当前基线为 0 条环内边 + 0 条目录逆层边 + 1 条 manifest 缺口 = 1，唯一条目是 `manifest: packages/conformance/src/simulator/harness.ts -> @byok-sdk/testkit`（#1205/#1211 清除了 9 条目录逆层边，#1213 清除了 diagnostics ↔ bin 的 8 条文件级环边，#1219 的 `state.ts` 常量下沉清除了最后 34 条 TaskRunner 环内边）。新违规或已消失但未删除的基线项均失败；CI 还用精确 `CI_BASE` 检查基线不得增加。基线清空后可删除文件，检查等同零容忍。首次引入基线由本 PR review 确认。
 - R-L4 的 2 条 `ui-runtime → cloud` 值导入不在 baseline 里：checker 用带理由的 reviewed allowlist 锁定精确文件、说明符与成员名，多一条、少一条或成员集合变化都失败。把它们迁到 `protocol` 会新增公开导出并改写 cloud/ui-runtime 的声明面，故留到后续。

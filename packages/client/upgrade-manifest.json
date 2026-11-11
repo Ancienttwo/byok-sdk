@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "7b0f8e7b8a520678ca429b538ad4e0ca5645ea7d7c543a5e075501cf4dedc89e"
+    "snapshotSha256": "c982cf7205dc477ff90ca68ff4e349715da249f1520b109f3f77f5a1b4ea3550"
   },
   "configFields": {
     "status": "tracked",
@@ -279,6 +279,17 @@
       ]
     },
     {
+      "id": "daemon-when-task-settled",
+      "impact": "additive",
+      "summary": "Daemon.whenTaskSettled(taskId, { signal }) resolves DaemonTaskSettlement (terminal, delivery, disposal) once the terminal's first outbound settlement was published locally and the runtime owner reported its first disposal outcome; disposal is failed exactly when runtime-disposal-failed was emitted for the task's runtime (an offer-owned scratch release excepted) and none when the daemon holds no runtime for the task, including every task settled before a restart. A task with no journal row and no in-memory record rejects with the new DaemonTaskUnknownError (daemon_task_unknown). The Daemon member is required, so a Host test double typed as Daemon adds it (#1838).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#per-task-settlement-awaitable",
+      "items": [
+        "export:@byok-sdk/client#DaemonTaskSettlement",
+        "export:@byok-sdk/client#DaemonTaskTerminal",
+        "export:@byok-sdk/client#DaemonTaskUnknownError"
+      ]
+    },
+    {
       "id": "hermes-runtime-adapter-removed",
       "impact": "breaking",
       "summary": "The Hermes runtime adapter is archived (tag archive/hermes-runtime-adapter): HermesAdapter and its option, model and launcher types leave @byok-sdk/client and @byok-sdk/client/adapters, the Hermes custody launcher exports leave @byok-sdk/keys, and FakeRuntimeAdapterId drops hermes. A Host that constructed HermesAdapter deletes it, its imports and its custody launcher; the device no longer advertises the hermes harness. No alias or stub remains.",
@@ -322,6 +333,17 @@
         "export:@byok-sdk/client#resolveSdkHosting",
         "export:@byok-sdk/client#sdkDistributionManifest",
         "export:@byok-sdk/client#sdkPackagingAssetLayout"
+      ]
+    },
+    {
+      "id": "service-payload-meta",
+      "impact": "additive",
+      "summary": "ServicePayloadManifest gains the optional meta, a Host JSON object the SDK does not interpret; version stays 1, so older readers ignore it. ServiceInstallationOptions gains verifyPayload(stagedDir, manifest), the Host's payload policy, run with a frozen copy of the manifest on the staged copy before it becomes versions/<id> and on a matched existing versions/<id>; a throw is payload_invalid with the cause. @byok-sdk/client/packaging exports writeServicePayloadManifest(dir, { id, meta? }), which writes byok-payload.json at build time and returns its bytes. The staged manifest is the exact bytes stage parsed, the same id with different manifest bytes is now version_conflict, and a listed file missing from the payload is payload_invalid instead of a raw ENOENT (#1842).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#service-payload-manifest-meta-and-host-verification",
+      "items": [
+        "export:@byok-sdk/client#ServiceInstallationOptions",
+        "export:@byok-sdk/client#ServicePayloadManifest",
+        "export:@byok-sdk/client/packaging#writeServicePayloadManifest"
       ]
     },
     {
@@ -393,7 +415,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
-      "after": "K8 0.0.1 src-sha256=708b24f55f86244f",
+      "after": "K8 0.0.0 src-sha256=ef4b685c00aff257",
       "entry": "example-bot-collaboration-autonomy"
     },
     {
@@ -472,6 +494,21 @@
       "item": "export:@byok-sdk/client#DaemonOverrides",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonTaskSettlement",
+      "change": "added",
+      "entry": "daemon-when-task-settled"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonTaskTerminal",
+      "change": "added",
+      "entry": "daemon-when-task-settled"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonTaskUnknownError",
+      "change": "added",
+      "entry": "daemon-when-task-settled"
     },
     {
       "item": "export:@byok-sdk/client#DeviceEnrollmentClearError",
@@ -612,6 +649,16 @@
       "item": "export:@byok-sdk/client#SdkHostingOptions",
       "change": "added",
       "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
+      "change": "changed",
+      "entry": "service-payload-meta"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServicePayloadManifest",
+      "change": "changed",
+      "entry": "service-payload-meta"
     },
     {
       "item": "export:@byok-sdk/client#clearDeviceEnrollment",
@@ -782,6 +829,11 @@
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",
       "change": "changed",
       "entry": "agent-memory-helper-protocol-4"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#writeServicePayloadManifest",
+      "change": "added",
+      "entry": "service-payload-meta"
     },
     {
       "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterId",

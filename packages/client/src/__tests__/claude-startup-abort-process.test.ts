@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import type { SpawnFn } from '../adapters/claude/process-client';
+import type { SpawnFn } from '../adapters/claude/claude-adapter';
 import { RuntimeStartupDisposalFailure } from '../runtime-failure';
 import { sealRuntimeOperationManifest } from '../types';
 

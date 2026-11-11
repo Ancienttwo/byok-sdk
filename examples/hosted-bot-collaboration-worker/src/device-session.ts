@@ -254,9 +254,9 @@ export function createDeviceSession(config: DaemonConfig, runtime: RuntimeMode, 
       session.emit({ type: 'artifact', name: 'notes.txt', contentType: 'text/plain' });
       for (let i = 0; i < 2; i++) session.emit({ type: 'progress', text: `${text}${'.'.repeat(sealed ? 140_000 : 60_000)}` });
       await session.finish({ text });
-      for (const deadline = Date.now() + 60_000; !session.closed || daemon.status().activeTaskCount > 0;) {
-        if (Date.now() > deadline) throw new Error('canary cleanup timed out');
-        await delay(25, undefined, { signal });
+      const settled = await daemon.whenTaskSettled(taskId, { signal });
+      if (settled.terminal !== 'complete' || settled.delivery !== 'accepted' || settled.disposal !== 'disposed') {
+        throw new Error(`canary did not settle cleanly: ${settled.terminal}/${settled.delivery}/${settled.disposal}`);
       }
       send({ type: 'finished', taskId });
     },

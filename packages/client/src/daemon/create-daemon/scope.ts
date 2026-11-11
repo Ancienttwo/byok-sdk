@@ -11,6 +11,7 @@ import type { OutboundStatus } from '../outbound-settlement.js';
 import type { RetentionRegistry } from '../retention/registry.js';
 import type { RetentionSweeper } from '../retention/sweeper.js';
 import type { TerminalCommitQueue } from '../terminal-commit-queue.js';
+import type { TaskSettlementRegistry } from '../task-settlement.js';
 import type { DaemonConfigScope } from './config.js';
 import type { DaemonFunctions } from './functions.js';
 import type { DaemonState } from './state.js';
@@ -34,6 +35,7 @@ interface DaemonBodyValues {
   readonly terminalCommits: TerminalCommitQueue;
   readonly outbound: OutboundStatus;
   readonly observer: DaemonObserver;
+  readonly taskSettlement: TaskSettlementRegistry;
   readonly approvalRegistry: ApprovalRegistry;
   readonly capabilityDiscoveryTimeoutMs: number;
   readonly pendingLateMutationBarriers: Set<Promise<void>>;

@@ -4,12 +4,10 @@ import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, occurrenceIntentKey, taskId, type FrozenSubmitPort, type Json,
   type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { commitImport, importForSwitch, sealLedger } from '@byok-sdk/example-bot-collaboration/switch';
-import { sealSwitchExport, verifySwitchExport, type IntentRecord, type SwitchContent, type SwitchExport } from '@byok-sdk/example-bot-collaboration/migration';
-import { routineCalendar } from '@byok-sdk/example-bot-collaboration/routines';
-import type { InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
-import { DEVICE_SWITCHING } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
+import { commitImport, importForSwitch, type InboundMessage, type IntentRecord, routineCalendar, sealLedger, sealSwitchExport, type SwitchContent,
+  type SwitchExport, verifySwitchExport } from '@byok-sdk/bot-collaboration/host-kit';
+import { DEVICE_SWITCHING } from '@byok-sdk/bot-collaboration/rules';
+import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/bot-collaboration/testing';
 import { HostedDueScheduler } from './due';
 import { HostedCommandEntry, type EntryCaller } from './entry';
 import { HostedReplyChecker } from './replies';

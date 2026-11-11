@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import { syncDreams, type DreamSync } from '@byok-sdk/example-bot-collaboration/dream';
+import { type DreamSync, syncDreams } from '@byok-sdk/bot-collaboration/host-kit';
 import { cancelIntent, freezeIntent } from './intents';
 import type { RoutineSlice } from './routines';
 

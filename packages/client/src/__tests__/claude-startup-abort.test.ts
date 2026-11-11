@@ -3,8 +3,7 @@ import { EventEmitter, getEventListeners } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { promises as fs } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import type { SpawnFn } from '../adapters/claude/process-client';
+import { ClaudeAdapter, type SpawnFn } from '../adapters/claude/claude-adapter';
 import { startOwnedRuntime } from '../daemon/runtime-start';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 import { sealRuntimeOperationManifest, type RuntimeOperationStartInput } from '../types';
@@ -39,7 +38,8 @@ function fixture(holdWrite = false, onSpawn?: () => void) {
   });
   const child = Object.assign(new EventEmitter(), { stdin: new Writable({ write }), stdout: new PassThrough(), stderr: new PassThrough() });
   children.push(child);
-  const spawnFn = vi.fn(() => { onSpawn?.(); return child; }) as unknown as SpawnFn;
+  // The owned line process adopts the tree on the child's own 'spawn' event.
+  const spawnFn = vi.fn(() => { onSpawn?.(); queueMicrotask(() => child.emit('spawn')); return child; }) as unknown as SpawnFn;
   return { child, spawnFn, write, finishWrite: () => finishWrite(), init: () => child.stdout.write('{"type":"system","subtype":"init","session_id":"ready"}\n') };
 }
 async function operation(spawnFn: SpawnFn, signal?: AbortSignal, withMcp = false) {
@@ -62,12 +62,13 @@ beforeEach(() => vi.resetAllMocks());
 afterEach(() => { for (const child of children.splice(0)) child.emit('close', 1, null); vi.restoreAllMocks(); });
 
 describe('Claude startup exit class (#869)', () => {
+  // The OAR prompt write has no receipt: an exit after it ends the start at the init wait.
   it('marks an exit while the initial instruction write is pending runtime_exited', async () => {
     const fake = fixture(true);
     const op = await operation(fake.spawnFn);
     const result = observe(op.start()); await flush();
     fake.child.emit('close', 1, null); await flush();
-    expect(result.error).toMatchObject({ phase: 'start', message: 'claude initial instruction transport failed', failure: { class: 'runtime_exited' } });
+    expect(result.error).toMatchObject({ phase: 'start', message: expect.stringMatching(/^claude exited before yielding an authoritative session id/), failure: { class: 'runtime_exited' } });
   });
 
   it('keeps a transport failure on the initial write unknown', async () => {
@@ -76,7 +77,7 @@ describe('Claude startup exit class (#869)', () => {
     const op = await operation(fake.spawnFn);
     const result = observe(op.start()); await flush();
     fake.child.emit('close', 1, null); await flush();
-    expect(result.error).toMatchObject({ phase: 'start', message: 'claude initial instruction transport failed', failure: { class: 'unknown' } });
+    expect(result.error).toMatchObject({ phase: 'start', message: expect.stringMatching(/^claude exited before yielding an authoritative session id: write EPIPE/), failure: { class: 'unknown' } });
   });
 
   it('keeps a startup cancelled before init unknown when the process then closes', async () => {

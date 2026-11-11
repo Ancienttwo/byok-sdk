@@ -3,10 +3,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { hash, taskId, type Json } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import type { Command, DelegationTimers } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { deviceVectors, replyVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, VECTOR_NOW, type DeviceSubject, type ReplySubject,
-  type SettlementSubject, type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
+import type { CollaborationState, Command } from '@byok-sdk/bot-collaboration/host-kit';
+import type { DelegationTimers } from '@byok-sdk/bot-collaboration/rules';
+import { type DeviceSubject, deviceVectors, type ReplySubject, replyVectors, seedCollaboration, type SettlementSubject, settlementVectors,
+  SYNC_OPTIONS, type SyncIntentRecord, VECTOR_NOW } from '@byok-sdk/bot-collaboration/testing';
 import type { FrozenInput } from '@byok-sdk/server/execution-core';
 import { frozenIntent, settleFacts } from './intents';
 import { storedKey } from './layout';

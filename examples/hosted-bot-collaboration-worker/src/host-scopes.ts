@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import type { Json } from '@byok-sdk/server/execution-core';
-import type { Principal } from '@byok-sdk/example-bot-collaboration/channel';
+import type { Principal } from '@byok-sdk/bot-collaboration/host-kit';
 import type { HostConfig, ProjectionPort } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 
 /**

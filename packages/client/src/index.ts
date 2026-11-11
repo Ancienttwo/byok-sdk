@@ -488,6 +488,7 @@ export type {
   VerifiedTruthRecord,
 } from './daemon/truth-memory-client.js';
 export type { ConnectionState } from './daemon/connection-manager.js';
+export { DaemonTaskUnknownError, type DaemonTaskSettlement, type DaemonTaskTerminal } from './daemon/task-settlement.js';
 export { DAEMON_HALT_REASONS, DaemonHaltError, DaemonNotOpenError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
 export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle.js';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';
@@ -529,13 +530,13 @@ export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation }
 export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service.js';
 // #1097 slice 2: versioned installs from a Host-verified payload, upgrade with
 // the candidate's store precheck and snapshot, health-checked switch, rollback.
-export {
-  createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError,
-} from './lifecycle/service-installation.js';
+export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, ServiceInstallationError } from './lifecycle/service-installation.js';
 export type {
   ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord,
-  ServicePayloadManifest, ServiceStoreVerdict, ServiceUpgradeReceipt,
+  ServiceStoreVerdict, ServiceUpgradeReceipt,
 } from './lifecycle/service-installation.js';
+export { SERVICE_PAYLOAD_MANIFEST } from './service-payload-manifest.js';
+export type { ServicePayloadManifest } from './service-payload-manifest.js';
 export {
   claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError,
 } from './lifecycle/service-unit.js';

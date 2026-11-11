@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import {
-  BotCollaboration, botCompactVeto, historyRowFromTurn, RetentionRefused, TeamModeError, teamSnapshot as checkTeamSnapshot, type AgentMessageInput, type ContextTurn, type MessageServer, type TeamSnapshot,
-} from '@byok-sdk/example-bot-collaboration';
+import { BotCollaboration, botCompactVeto, TeamModeError, teamSnapshot as checkTeamSnapshot, type AgentMessageInput, type MessageServer,
+  type TeamSnapshot } from '@byok-sdk/bot-collaboration';
+import { historyRowFromTurn, RetentionRefused, type ContextTurn } from '@byok-sdk/bot-collaboration/host-kit';
 import type { DueWake } from '@byok-sdk/server';
 import { HostLedger, type ExecutionTemplate, type Json } from '@byok-sdk/server/execution-core';
 import type { HostStore } from '../store/store.ts';

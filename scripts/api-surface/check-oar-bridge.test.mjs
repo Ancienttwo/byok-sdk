@@ -6,6 +6,7 @@
 // packages/client/src/runtime/oar-process-tree.js,
 // packages/client/src/runtime/acp-session-runtime.js,
 // packages/client/src/runtime/dsh-session-runtime.js,
+// packages/client/src/runtime/claude-session-runtime.js,
 // packages/client/src/runtime/oar-failure-runtime.js, this test, and
 // scripts/api-surface/oar-bridge-types.ts.
 // The bridge is outside the API golden. New type exports need explicit checks.
@@ -109,6 +110,22 @@ test('OAR failure JS bridge re-exports the checked vendored failure tables', () 
   assert.deepEqual(reexports, [
     ['../../vendor/oar/ac7fde4/runtimes/codex/failure.js', [['codexFailure', 'codexFailure']]],
     ['../../vendor/oar/ac7fde4/shared/failure-class.js', [['failureFromStatus', 'failureFromStatus']]],
+  ]);
+});
+
+test('OAR Claude JS bridge re-exports the checked stream-json session and Claude projection', () => {
+  const source = readFileSync(path.join(repoRoot, 'packages/client/src/runtime/claude-session-runtime.js'), 'utf8');
+  const { body } = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+  const reexports = body.map((statement) => {
+    assert.equal(statement.type, 'ExportNamedDeclaration');
+    return [statement.source?.value, statement.specifiers.map(({ local, exported }) => [local.name, exported.name])];
+  });
+  assert.deepEqual(reexports, [
+    ['../../vendor/oar/ac7fde4/shared/stream-json/session.js', [['streamJsonSession', 'streamJsonSession']]],
+    ['../../vendor/oar/ac7fde4/runtimes/claude/projection.js', [
+      ['claudeProjectionProfile', 'claudeProjectionProfile'], ['initialClaudeProjection', 'initialClaudeProjection'], ['resumedClaudeProjection', 'resumedClaudeProjection'],
+    ]],
+    ['../../vendor/oar/ac7fde4/shared/credential-redactor.js', [['sessionCredentialRedactor', 'sessionCredentialRedactor']]],
   ]);
 });
 

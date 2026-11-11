@@ -5,7 +5,7 @@
  * instance's storage dir, so the clock keeps its alarm with no new arm.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { ROUTINE_LATE_AFTER_MS } from '@byok-sdk/example-bot-collaboration/routines';
+import { ROUTINE_LATE_AFTER_MS } from '@byok-sdk/bot-collaboration/host-kit';
 import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
 import { alarmReports, openHome, RUN, until, type Home, type WorkerOptions } from './worker.test-support';
 

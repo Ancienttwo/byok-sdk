@@ -1,4 +1,4 @@
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
+import type { CollaborationState } from '@byok-sdk/bot-collaboration/host-kit';
 
 // How H stores one `CollaborationState` (#793 D2a). Each map entry is one `entity` row and each list
 // element is one `entry` row, keyed by stable identity. The `frame` is the state with each map emptied and

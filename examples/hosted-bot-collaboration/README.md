@@ -1,7 +1,7 @@
 # Hosted Bot collaboration (H)
 
 Private reference example for #793 (#606 D2). It is the hosted (H) adapter of the K8 collaboration
-commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
+commit contract (`packages/bot-collaboration`, #739 D1), on Node and Postgres.
 
 Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
 reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2), their scheduler (D2f-3), the outbox
@@ -155,7 +155,7 @@ In history mode, `options.history` maps each Turn id to that Turn's history rows
 
 ### Dreaming (#1516)
 
-H runs K8's `dream.ts` through the `@byok-sdk/example-bot-collaboration/dream` export.
+H runs K8's `dream.ts` through the `@byok-sdk/bot-collaboration` root entry.
 The scope's Host config accepts `dreaming` with L's `timeZone`, `models` and `maxDurationMs` options;
 absent means on and `false` turns it off. A sync reconciles one daily routine per eligible Bot.
 Each `fire` records an open dream; the next sync decides its skip or freezes a fresh writer.

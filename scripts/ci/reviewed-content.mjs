@@ -40,19 +40,26 @@ const HOSTED_WORKER = Object.freeze({ dir: 'examples/hosted-bot-collaboration-wo
 const PRIVATE_HOSTED = Object.freeze([HOSTED, HOSTED_WORKER]);
 const HOSTED_FIELDS = new Set(['name', 'version', 'private', 'type', 'description', 'scripts', 'dependencies', 'devDependencies']);
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies'];
-// #793 D2a-0: the K8 entries that the hosted example imports. H and HW must not
-// import the K8 root entry, which loads the K8 host (src/host.ts); since the
-// desktop app added that entry (#1806), only review enforces this. The K8 rules
-// still import the K4 root, which loads HostLedger and node:sqlite.
-const K8_HOSTED_EXPORTS = Object.freeze({
-  './rules/commands': './src/rules/commands.ts',
-  './rules/commit': './src/rules/commit.ts',
-  './model': './src/model.ts',
-  './coalesce': './src/coalesce.ts',
-  './team': './src/team.ts',
-  './test-support': './src/commit-vectors.test-support.ts',
+// #1845 S2: K8 is the private package @byok-sdk/bot-collaboration, moved from
+// examples/bot-collaboration. Its manifest has one reviewed shape: the four
+// built entries, and a runtime closure of published packages only. A private
+// example such as the K4 demo Host may be a devDependency, never a runtime or
+// peer dependency, so the package can be published without carrying it (S3).
+const K8 = Object.freeze({ dir: 'packages/bot-collaboration', name: '@byok-sdk/bot-collaboration' });
+const K8_MOVED = Object.freeze({ dir: 'examples/bot-collaboration', name: '@byok-sdk/example-bot-collaboration' });
+const K8_FIELDS = new Set(['name', 'version', 'private', 'type', 'description', 'main', 'types', 'exports', 'sideEffects', 'engines', 'scripts',
+  'dependencies', 'peerDependencies', 'peerDependenciesMeta', 'devDependencies']);
+const K8_EXPORTS = Object.freeze({
+  '.': { types: './dist/index.d.ts', import: './dist/index.js' },
+  './host-kit': { types: './dist/host-kit.d.ts', import: './dist/host-kit.js' },
+  './rules': { types: './dist/rules/index.d.ts', import: './dist/rules/index.js' },
+  './testing': { types: './dist/testing.d.ts', import: './dist/testing.js' },
+  './package.json': './package.json',
 });
-const K8_DREAM_EXPORTS = Object.freeze({ './dream': './src/dream.ts', './rules/priority': './src/rules/priority.ts' });
+const K8_SCRIPTS = Object.freeze({ build: 'tsup && tsc -p tsconfig.build.json', typecheck: 'tsc --noEmit', test: 'vitest run', clean: 'rm -rf dist' });
+const K8_RUNTIME = Object.freeze({ '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' });
+// `./testing` imports these; a Host that installs only `.` or `./rules` does not need them.
+const K8_OPTIONAL_PEERS = Object.freeze(['@hono/node-server', 'vitest']);
 // #1106: K4 moves into @byok-sdk/server/execution-core. The example keeps only
 // its daemon-backed test harness entry and a description that says so.
 const K4_EXPORTS = Object.freeze({ '.': './src/index.ts', './canonical': './src/canonical.ts', './test-support': './src/test-support.ts' });
@@ -68,44 +75,6 @@ const SERVER_EXECUTION_CORE_EXPORTS = Object.freeze({
 });
 // #1104: the single-file packaging entry.
 const CLIENT_PACKAGING_EXPORT = Object.freeze({ types: './dist/adapters/packaging.d.ts', import: './dist/adapters/packaging.js' });
-// #793 D2g: the K8 retention rule and its shared vectors, added to the hosted
-// entries for H's retention slice (owner question §53d).
-const K8_RETENTION_EXPORTS = Object.freeze({
-  './retention': './src/retention.ts',
-  './retention-vectors': './src/retention-vectors.test-support.ts',
-});
-// #793 D2f-1: the K8 Bot routine policy and its shared vectors, added to the
-// hosted and retention entries. src/routines.ts does not load the K8 host.
-const K8_ROUTINE_EXPORTS = Object.freeze({
-  './routines': './src/routines.ts',
-  './routine-vectors': './src/routine-vectors.test-support.ts',
-});
-// #793 D2b-out-1: the K8 channel and delivery rules and their shared vectors, added
-// to the hosted, retention and routine entries (owner question §54b). They do not
-// load the K8 host.
-const K8_DELIVERY_EXPORTS = Object.freeze({
-  './channel': './src/channel.ts',
-  './delivery': './src/delivery.ts',
-  './delivery-routing': './src/delivery-routing.ts',
-  './delivery-vectors': './src/delivery-vectors.test-support.ts',
-});
-// #975 slice 2: the K8 owner switch format, added to the hosted, retention,
-// routine and delivery entries. src/migration.ts has no I/O and does not load
-// the K8 host.
-const K8_MIGRATION_EXPORTS = Object.freeze({ './migration': './src/migration.ts' });
-// #975 slice 5: the L side of the owner switch, added on top of the migration
-// entry, so the H tests can import an H export into an L tenant
-// (importForSwitch, commitImport). src/switch.ts loads the K4 root entry, and
-// with it node:sqlite (ledger.ts) and node:async_hooks (core.ts); it does not
-// load the K8 host. Only H tests import it; H's src does not.
-const K8_SWITCH_EXPORTS = Object.freeze({ './switch': './src/switch.ts' });
-// #1325: the L test Host that the routine and delivery vectors run on, added on
-// top of the switch entry. It is test support that a Host vendors; it imports
-// only published packages.
-const K8_L_TEST_HOST_EXPORTS = Object.freeze({ './l-test-host': './src/l-test-host.test-support.ts' });
-// #1362: the K8 message rule, added on top of the L test Host entry, so H checks a
-// Host intent message handler's result with K8's own hostMessageDisposition.
-const K8_MESSAGE_EXPORTS = Object.freeze({ './rules/message': './src/rules/message.ts' });
 /** The other workspace manifests, each with its dir. */
 function otherWorkspaceManifests(cwd, self) {
   const manifests = [];
@@ -195,10 +164,16 @@ function verifyRegisteredPrivateManifest(manifest, dir, { base, cwd, workspaceGr
   }
   const localEdges = [...new Set(DEPENDENCY_FIELDS.flatMap(field => Object.keys(manifest[field] ?? {}).filter(name => name.startsWith('@byok-sdk/'))))].sort();
   if (!isDeepStrictEqual(localEdges, [...registration.dependencies].sort())) throw new Error('New workspace edges differ from reviewed graph');
+  verifyDeclaredSpecs(manifest, DEPENDENCY_FIELDS, { base, cwd }, additions);
+  return manifest;
+}
+
+/** Each local edge names a base workspace by `workspace:*`; each external spec is one a base workspace already declares, or an exact registered addition. */
+function verifyDeclaredSpecs(manifest, fields, { base, cwd }, additions) {
   const basePaths = execFileSync('git', ['ls-tree', '-r', '--name-only', base, '--', 'packages', 'examples'], { cwd, encoding: 'utf8' })
     .split('\n').filter(path => /^(packages|examples)\/[^/]+\/package\.json$/.test(path));
   const declarations = basePaths.map(path => JSON.parse(execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8' })));
-  for (const field of DEPENDENCY_FIELDS) {
+  for (const field of fields) {
     if (manifest[field] !== undefined && !plain(manifest[field])) throw new Error('Invalid new workspace dependencies');
     for (const [name, spec] of Object.entries(manifest[field] ?? {})) {
       const valid = name.startsWith('@byok-sdk/')
@@ -207,7 +182,58 @@ function verifyRegisteredPrivateManifest(manifest, dir, { base, cwd, workspaceGr
       if (!valid) throw new Error(`New workspace must reuse a base dependency spec (${name})`);
     }
   }
+}
+
+/** #1845 S2: the whole K8 manifest against its reviewed shape (see K8 above), whether new or edited. */
+function verifyK8Manifest(manifest, { base, cwd, workspaceGraph }) {
+  const refuse = reason => { throw new Error(`Reviewed CI mapping required: the K8 manifest ${reason}`); };
+  if (!plain(manifest) || Object.keys(manifest).some(key => !K8_FIELDS.has(key))) refuse('has an unreviewed field');
+  if (manifest.name !== K8.name || manifest.private !== true || manifest.type !== 'module' || !version(manifest.version)
+    || typeof manifest.description !== 'string' || manifest.main !== K8_EXPORTS['.'].import || manifest.types !== K8_EXPORTS['.'].types
+    || manifest.sideEffects !== false || !isDeepStrictEqual(manifest.engines, { node: '>=24.15.0' })
+    || !isDeepStrictEqual(manifest.exports, K8_EXPORTS) || !isDeepStrictEqual(manifest.scripts, K8_SCRIPTS)) {
+    refuse('has an unreviewed shape');
+  }
+  if (!isDeepStrictEqual(manifest.dependencies, K8_RUNTIME)) refuse('runtime dependencies must be exactly client, protocol and server');
+  const peers = manifest.peerDependencies, meta = manifest.peerDependenciesMeta;
+  if (!plain(peers) || !isDeepStrictEqual(Object.keys(peers).sort(), K8_OPTIONAL_PEERS)
+    || !isDeepStrictEqual(meta, Object.fromEntries(K8_OPTIONAL_PEERS.map(name => [name, { optional: true }])))
+    || K8_OPTIONAL_PEERS.some(name => peers[name] !== manifest.devDependencies?.[name])) {
+    refuse('peers must be the optional testing peers at the tested devDependency specs');
+  }
+  verifyDeclaredSpecs(manifest, ['devDependencies'], { base, cwd });
+  const edges = [...new Set(DEPENDENCY_FIELDS.flatMap(field => Object.keys(manifest[field] ?? {}).filter(name => name.startsWith('@byok-sdk/'))))].sort();
+  if (!isDeepStrictEqual(edges, [...(workspaceGraph?.[K8.dir]?.dependencies ?? [])].sort())) refuse('edges differ from the reviewed graph');
   return manifest;
+}
+
+/** #1845 S2: a workspace manifest may rename its K8 edge to the moved package, in the same field with the same spec. */
+function admitK8Rename(before, after) {
+  for (const field of DEPENDENCY_FIELDS) {
+    if (before[field]?.[K8_MOVED.name] === 'workspace:*' && before[field]?.[K8.name] === undefined
+      && after[field]?.[K8.name] === 'workspace:*' && after[field]?.[K8_MOVED.name] === undefined) {
+      delete after[field][K8.name];
+      after[field][K8_MOVED.name] = 'workspace:*';
+    }
+  }
+}
+
+/** #1845 S2: the lock moves the K8 workspace and its row to the new dir and name, matching the reviewed manifest. Returns its record. */
+function admitK8MoveLock(before, after, context) {
+  if (!before.workspaces?.[K8_MOVED.dir] || after.workspaces?.[K8_MOVED.dir] || before.workspaces?.[K8.dir] || !after.workspaces?.[K8.dir]) return [];
+  const manifest = verifyK8Manifest(JSON.parse(readFileSync(resolve(context.cwd, K8.dir, 'package.json'), 'utf8')), context);
+  const expected = { name: manifest.name, version: manifest.version, dependencies: manifest.dependencies, devDependencies: manifest.devDependencies,
+    peerDependencies: manifest.peerDependencies, optionalPeers: K8_OPTIONAL_PEERS };
+  if (!isDeepStrictEqual(after.workspaces[K8.dir], expected)
+    || !isDeepStrictEqual(before.packages?.[K8_MOVED.name], [`${K8_MOVED.name}@workspace:${K8_MOVED.dir}`])
+    || !isDeepStrictEqual(after.packages?.[K8.name], [`${K8.name}@workspace:${K8.dir}`])
+    || after.packages?.[K8_MOVED.name] !== undefined || before.packages?.[K8.name] !== undefined) {
+    throw new Error('Reviewed CI mapping required: the K8 lock rows differ from its moved manifest');
+  }
+  const record = after.workspaces[K8.dir];
+  delete before.workspaces[K8_MOVED.dir]; delete after.workspaces[K8.dir];
+  delete before.packages[K8_MOVED.name]; delete after.packages[K8.name];
+  return [record];
 }
 
 /**
@@ -265,6 +291,10 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     verifyHostedManifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), cwd, hosted);
     return { dirs: [] };
   }
+  if (path === `${K8.dir}/package.json`) {
+    verifyK8Manifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), { base, cwd, workspaceGraph });
+    return { dirs: [K8.dir] };
+  }
   if (!existed && /^examples\/[^/]+\/package\.json$/.test(path)) {
     const dir = path.slice(0, -'/package.json'.length);
     verifyRegisteredPrivateManifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), dir, { base, cwd, workspaceGraph });
@@ -311,6 +341,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   const qualify = [];
   const before = parse(beforeText), after = parse(afterText);
   if (path.startsWith('examples/') && (before.private !== true || after.private !== true)) throw new Error('Example workspaces must stay private');
+  if (/^examples\/[^/]+\/package\.json$/.test(path)) admitK8Rename(before, after);
   // #654 W3: keep the provider in the private root's peer context so cross-workspace helpers share Vitest.
   if (path === 'package.json' && before.private === true && after.private === true
     && after.devDependencies?.vitest === '5.1.0') {
@@ -326,9 +357,10 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     for (const example of PRIVATE_HOSTED) {
       if (!before.workspaces?.[example.dir] && after.workspaces?.[example.dir]) admitHostedLock(before, after, cwd, example);
     }
+    const moved = admitK8MoveLock(before, after, { base, cwd, workspaceGraph });
     const { added, records } = admitRegisteredPrivateLock(before, after, { base, cwd, workspaceGraph });
-    const impact = dependencyLockImpact(before, after, { cwd, admitted: records });
-    return { ...impact, dirs: [...new Set([...added, ...impact.dirs])] };
+    const impact = dependencyLockImpact(before, after, { cwd, admitted: [...moved, ...records] });
+    return { ...impact, dirs: [...new Set([...(moved.length ? [K8.dir] : []), ...added, ...impact.dirs])] };
   } else if (path === `${HOSTED_WORKER.dir}/package.json`) {
     // #654 W4: the browser member page imports core's sealed-payload entry directly.
     if (before.dependencies?.['@byok-sdk/core'] === undefined && after.dependencies?.['@byok-sdk/core'] === 'workspace:*') {
@@ -338,69 +370,6 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       && after.scripts?.['test:browser'] === 'vitest run --config src/browser/vitest.config.ts') {
       delete after.scripts['test:browser'];
     }
-  } else if (path === 'examples/bot-collaboration/package.json') {
-    if (before.private !== true || after.private !== true) throw new Error('The bot collaboration fixture must stay private');
-    // #658: the private fixture cloud edge.
-    if (before.devDependencies?.['@byok-sdk/cloud'] === undefined && after.devDependencies?.['@byok-sdk/cloud'] === 'workspace:*') {
-      delete after.devDependencies['@byok-sdk/cloud'];
-    }
-    // #1375: only the tests import core, so its edge moves from dependencies to devDependencies.
-    if (before.dependencies?.['@byok-sdk/core'] === 'workspace:*' && before.devDependencies?.['@byok-sdk/core'] === undefined
-      && after.dependencies?.['@byok-sdk/core'] === undefined && after.devDependencies?.['@byok-sdk/core'] === 'workspace:*') {
-      delete after.devDependencies['@byok-sdk/core'];
-      after.dependencies['@byok-sdk/core'] = 'workspace:*';
-    }
-    // #793 D2a-0: the K8 entries for the hosted example.
-    if (before.exports === undefined && isDeepStrictEqual(after.exports, K8_HOSTED_EXPORTS)) delete after.exports;
-    // #793 D2g: the retention entries, only on top of exactly the hosted entries.
-    if (isDeepStrictEqual(before.exports, K8_HOSTED_EXPORTS) && isDeepStrictEqual(after.exports, { ...K8_HOSTED_EXPORTS, ...K8_RETENTION_EXPORTS })) {
-      after.exports = before.exports;
-    }
-    // #793 D2f-1: the routine entries, only on top of exactly the hosted and retention entries.
-    const retained = { ...K8_HOSTED_EXPORTS, ...K8_RETENTION_EXPORTS };
-    if (isDeepStrictEqual(before.exports, retained) && isDeepStrictEqual(after.exports, { ...retained, ...K8_ROUTINE_EXPORTS })) {
-      after.exports = before.exports;
-    }
-    // #793 D2b-out-1: the delivery entries, only on top of exactly the hosted, retention and routine entries.
-    const routed = { ...retained, ...K8_ROUTINE_EXPORTS };
-    if (isDeepStrictEqual(before.exports, routed) && isDeepStrictEqual(after.exports, { ...routed, ...K8_DELIVERY_EXPORTS })) {
-      after.exports = before.exports;
-    }
-    // #975 slice 2: the migration entry, only on top of exactly the hosted, retention, routine and delivery entries.
-    const delivered = { ...routed, ...K8_DELIVERY_EXPORTS };
-    if (isDeepStrictEqual(before.exports, delivered) && isDeepStrictEqual(after.exports, { ...delivered, ...K8_MIGRATION_EXPORTS })) {
-      after.exports = before.exports;
-    }
-    // #975 slice 5: the switch entry, only on top of exactly the entries up to and including the migration entry.
-    const migrated = { ...delivered, ...K8_MIGRATION_EXPORTS };
-    if (isDeepStrictEqual(before.exports, migrated) && isDeepStrictEqual(after.exports, { ...migrated, ...K8_SWITCH_EXPORTS })) {
-      after.exports = before.exports;
-    }
-    // #1325: the L test Host entry, only on top of exactly the entries up to and including the switch entry.
-    const switched = { ...migrated, ...K8_SWITCH_EXPORTS };
-    if (isDeepStrictEqual(before.exports, switched) && isDeepStrictEqual(after.exports, { ...switched, ...K8_L_TEST_HOST_EXPORTS })) {
-      after.exports = before.exports;
-    }
-    // #1362: the message rule entry, only on top of exactly the entries up to and including the L test Host entry.
-    const hosted = { ...switched, ...K8_L_TEST_HOST_EXPORTS };
-    if (isDeepStrictEqual(before.exports, hosted) && isDeepStrictEqual(after.exports, { ...hosted, ...K8_MESSAGE_EXPORTS })) {
-      after.exports = before.exports;
-    }
-    // #1516: H imports the shared dreaming and priority rules; only this pair of exact additions is reviewed.
-    if (Object.keys(K8_DREAM_EXPORTS).every(key => before.exports?.[key] === undefined
-      && isDeepStrictEqual(after.exports?.[key], K8_DREAM_EXPORTS[key]))) {
-      for (const key of Object.keys(K8_DREAM_EXPORTS)) delete after.exports[key];
-    }
-    // #1664: both adapters import this exact shared assembly entry.
-    if (before.exports?.['./adapter-steps'] === undefined && after.exports?.['./adapter-steps'] === './src/adapter-steps.ts') {
-      delete after.exports['./adapter-steps'];
-    }
-    // #1666: H cancel results import the shared delegation rules entry.
-    if (before.exports?.['./rules/delegation'] === undefined && after.exports?.['./rules/delegation'] === './src/rules/delegation.ts') {
-      delete after.exports['./rules/delegation'];
-    }
-    // #1806: the desktop app imports BotCollaboration from the root entry.
-    if (before.exports?.['.'] === undefined && after.exports?.['.'] === './src/index.ts') delete after.exports['.'];
   } else if (path === 'examples/byok-mcp-server/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The MCP server example must stay private');
     // #1375: the routine calendar moved to protocol, so the core edge goes.

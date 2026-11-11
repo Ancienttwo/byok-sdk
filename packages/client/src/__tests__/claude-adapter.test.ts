@@ -6,12 +6,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import type { SpawnFn } from '../adapters/claude/process-client';
+import { ClaudeAdapter, type SpawnFn } from '../adapters/claude/claude-adapter';
 import { SteerUnsupportedError, type Session, type MessageDraftDelta } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, projectRuntimeBoundaryFailure } from '../runtime-failure';
 import { createEnvelope, decodeEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
+import { memoryClaude } from './fixtures/memory-claude';
+import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 
@@ -380,6 +381,25 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const session=await startAdapter(adapter,baseTask,ctx);openSessions.push(session);
     await session.interrupt();expect(()=>process.kill(pid,0)).toThrow();await session.close();
   });
+  it('an interrupt Claude refuses reaches owned termination fallback at once, not at the deadline', async () => {
+    let pid=0;const adapter=new ClaudeAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'path'}),interruptTimeoutMs:10_000,spawnFn:((...args:Parameters<typeof realSpawn>)=>{const child=realSpawn(...args);pid=child.pid??0;return child;}) as typeof realSpawn});
+    const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1',FAKE_CLAUDE_INTERRUPT_ERROR:'1'};
+    const session=await startAdapter(adapter,baseTask,ctx);openSessions.push(session);
+    const started=Date.now();await session.interrupt();expect(Date.now()-started).toBeLessThan(5_000);
+    expect(()=>process.kill(pid,0)).toThrow();await session.close();
+  });
+  it.each([
+    ['an unwritable interrupt', 'interrupt', (_claude: ReturnType<typeof memoryClaude>) => {}],
+    ['a process exit during the interrupt', undefined, (claude: ReturnType<typeof memoryClaude>) => { claude.exit(1); }],
+  ] as const)('settles %s as not interrupted, so the owner terminates', async (_label, refuse, during) => {
+    const claude = memoryClaude(refuse);
+    const stream = new ClaudeStreamSession(claude.child as never);
+    await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
+    const settled = stream.interruptAndSettle(1_000);
+    during(claude);
+    await expect(settled).resolves.toBe(false);
+  });
   it('ACK does not synthesize terminal completion; a late real result remains a runtime fact', async () => {
     const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1',FAKE_CLAUDE_INTERRUPT_LATE_SUCCESS:'1',FAKE_CLAUDE_INTERRUPT_RESULT_DELAY_MS:'40'};
     const session=await startAdapter(fakeClaudeAdapter(),baseTask,ctx);openSessions.push(session);
@@ -494,6 +514,31 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await expect(startAdapter(fakeClaudeAdapter(), task, await makeCtx())).rejects.toMatchObject({
       phase: 'start', message: expect.stringMatching(/No conversation found/), failure: { class: 'runtime_exited' },
     });
+  });
+
+  it('followUp() during a turn Claude runs on its own is held and sent when that turn ends', async () => {
+    const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_OWN_TURN: '1' });
+    const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
+    openSessions.push(session);
+    await takeTurn(session);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await expect(session.followUp({ instruction: 'next' })).resolves.toBeUndefined();
+    expect((await takeTurn(session)).filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'own turn' }]);
+    expect((await takeTurn(session)).filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'reply-2:next' }]);
+  });
+
+  it('interrupt() withdraws a follow-up held during a Claude-own turn: the instruction is never written', async () => {
+    const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_OWN_TURN: '1' });
+    const receipt = path.join(ctx.workspaceDir, 'user.log');
+    ctx.env.FAKE_CLAUDE_USER_RECEIPT = receipt;
+    const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
+    openSessions.push(session);
+    await takeTurn(session);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await session.followUp({ instruction: 'next' });
+    await session.interrupt();
+    await new Promise(resolve => setTimeout(resolve, 500));
+    expect((await fs.readFile(receipt, 'utf8')).split('\n')).not.toContain('next');
   });
 
   it('followUp() fails closed on a blob-ref instruction, same as start()', async () => {

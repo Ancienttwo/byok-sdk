@@ -2,12 +2,9 @@ import type { Pool, PoolClient } from 'pg';
 import { agentKey, canonical, fifoHeads, frozenInput, hash, isSealed, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, SealedDispatchUnavailableError,
   submitFrozen, taskId,
   type Conclusion, type RetryPolicy, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution, type Json } from '@byok-sdk/server/execution-core';
-import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { dreamIntentIds } from '@byok-sdk/example-bot-collaboration/dream';
-import { admitDeviceSlot, autonomousIntentIds, DEVICE_CONCURRENCY, userFirst, type DispatchIntent } from '@byok-sdk/example-bot-collaboration/rules/priority';
-import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
-import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
-import type { SeatFacts, settleDelegations, SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { type CollaborationState, concludeRoutineTurn, DEVICE_CONCURRENCY, dreamIntentIds, type IntentConclusions, routineOccurrence, type Turn } from '@byok-sdk/bot-collaboration/host-kit';
+import { admitDeviceSlot, autonomousIntentIds, type DispatchIntent, type SeatFacts, type settleDelegations, type SyncFacts, type SyncStep,
+  userFirst } from '@byok-sdk/bot-collaboration/rules';
 import { activeBinding, DeviceBindingError, deviceRefusals } from './binding';
 import { STORE_VERSION } from './ddl';
 import { idOf, storedKey } from './layout';

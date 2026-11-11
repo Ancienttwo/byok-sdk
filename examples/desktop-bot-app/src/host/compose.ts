@@ -5,7 +5,7 @@ import {
   type Daemon, type DaemonConfig, type DeviceCredentialBackend, type RuntimeEnvironmentPolicy, type SdkHosting, type SdkHostingOptions,
 } from '@byok-sdk/client';
 import { createRuntimeAdapters } from '@byok-sdk/client/adapters';
-import { createBotPersonaProjection } from '@byok-sdk/example-bot-collaboration';
+import { createBotPersonaProjection } from '@byok-sdk/bot-collaboration';
 import { createByokServer, listenLoopback, type LoopbackPortStore } from '@byok-sdk/server';
 import { AGENT_EGRESS_POLICY } from './conversation/catalog.ts';
 import { composeDomains, type ComposedDomains, type ServerConsumers } from './domains.ts';

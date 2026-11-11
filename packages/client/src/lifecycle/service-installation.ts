@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createConnection } from 'node:net';
 import path from 'node:path';
@@ -12,25 +12,11 @@ import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-pr
 import { acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate.js';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
 import type { ManagedServiceLifecycle } from './managed-lifecycle.js';
+import {
+  isJsonObject, isPayloadPath, listPayloadFiles, SERVICE_PAYLOAD_MANIFEST, sha256File, SHA256_HEX, VERSION_ID, type ServicePayloadManifest,
+} from '../service-payload-manifest.js';
 import { serviceStateDir } from './service-unit.js';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types.js';
-
-/** The manifest every payload directory carries at its root. */
-export const SERVICE_PAYLOAD_MANIFEST = 'byok-payload.json';
-
-/**
- * A payload's manifest (#1097). The Host verifies the payload's signature
- * before handing it to the SDK; the SDK checks every file against `files`
- * and accepts no file the manifest does not list.
- */
-export interface ServicePayloadManifest {
-  format: 'byok-service-payload';
-  version: 1;
-  /** The version id: 1-64 of `A-Z a-z 0-9 . _ -`, starting with a letter or digit. Becomes `versions/<id>`. */
-  id: string;
-  /** Every file of the payload except the manifest: `/`-separated relative path → lowercase hex SHA-256. */
-  files: Record<string, string>;
-}
 
 /**
  * One store the candidate's precheck reports (#1328): an SDK `LocalStoreId`
@@ -117,6 +103,15 @@ export interface ServiceInstallationOptions {
   daemonStores?(): Promise<readonly ServiceDaemonStore[]>;
   /** How long a stop may take to leave every daemon store quiescent, shared by all of them. Default 30000. */
   stopTimeoutMs?: number;
+  /**
+   * The Host's own payload policy (#1842), such as a Node floor, file-size
+   * ceilings or file modes. Runs on the staged copy after every digest
+   * passed and before it becomes `versions/<id>`, and on an existing
+   * `versions/<id>` whose manifest matched, so it checks the exact bytes
+   * that will run. `manifest` is a frozen copy. A throw is `payload_invalid` with the error as `cause`;
+   * nothing new appears under `versions/`.
+   */
+  verifyPayload?(stagedDir: string, manifest: ServicePayloadManifest): void | Promise<void>;
   /** Test seams for the underlying lifecycle. */
   lifecycle?: CreateServiceLifecycleOptions;
 }
@@ -244,8 +239,6 @@ export async function readServiceInstallationRecord(storeDir: string): Promise<S
   return record as ServiceInstallationRecord;
 }
 
-const VERSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const POINTERS = ['current', 'previous'] as const;
 type Pointer = (typeof POINTERS)[number];
 /** A SQLite store is its main file plus a WAL or a hot rollback journal; `-shm` is rebuilt and is removed on restore. */
@@ -406,11 +399,13 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   /** Copies the payload into `versions/<id>`, checking every file against the manifest. Returns the id. */
   async function stage(payloadDir: string): Promise<string> {
-    const manifest = await readPayloadManifest(payloadDir);
-    const target = path.join(versionsDir, manifest.id);
+    const { manifest, bytes } = await readPayload(payloadDir);
+    const id = manifest.id;
+    const target = path.join(versionsDir, id);
     if (await exists(target)) {
-      if (!(await matchesManifest(target, manifest))) throw new ServiceInstallationError('version_conflict');
-      return manifest.id;
+      if (!(await matchesManifest(target, manifest, bytes))) throw new ServiceInstallationError('version_conflict');
+      await verifyStaged(target, manifest);
+      return id;
     }
     const staging = path.join(versionsDir, `.staging-${randomUUID()}`);
     await fs.mkdir(staging, { recursive: true });
@@ -423,13 +418,25 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         const mode = (await fs.stat(path.join(payloadDir, ...relative.split('/')))).mode & 0o777;
         await fs.chmod(destination, mode);
       }
-      await fs.copyFile(path.join(payloadDir, SERVICE_PAYLOAD_MANIFEST), path.join(staging, SERVICE_PAYLOAD_MANIFEST));
+      // The parsed bytes, not a second read: a manifest swapped after the check never lands in `versions/`.
+      await fs.writeFile(path.join(staging, SERVICE_PAYLOAD_MANIFEST), bytes);
+      await verifyStaged(staging, manifest);
       await fs.rename(staging, target);
     } catch (error) {
       await fs.rm(staging, { recursive: true, force: true });
       throw error;
     }
-    return manifest.id;
+    return id;
+  }
+
+  async function verifyStaged(dir: string, manifest: ServicePayloadManifest): Promise<void> {
+    if (opts.verifyPayload === undefined) return;
+    try {
+      // A frozen copy: the hook reads the manifest and cannot change what stage uses.
+      await opts.verifyPayload(dir, deepFreeze(structuredClone(manifest)));
+    } catch (error) {
+      throw new ServiceInstallationError('payload_invalid', undefined, { cause: error });
+    }
   }
 
   async function writeRecord(): Promise<void> {
@@ -811,32 +818,39 @@ function directoryStorePath(input: string): string {
 }
 
 export async function readPayloadManifest(payloadDir: string): Promise<ServicePayloadManifest> {
+  return (await readPayload(payloadDir)).manifest;
+}
+
+/** The payload's manifest and its exact bytes; every file it lists must exist and no other file may. */
+async function readPayload(payloadDir: string): Promise<{ manifest: ServicePayloadManifest; bytes: Uint8Array }> {
+  let bytes: Uint8Array;
   let manifest: Partial<ServicePayloadManifest>;
   try {
-    manifest = JSON.parse(await fs.readFile(path.join(payloadDir, SERVICE_PAYLOAD_MANIFEST), 'utf8')) as Partial<ServicePayloadManifest>;
+    bytes = await fs.readFile(path.join(payloadDir, SERVICE_PAYLOAD_MANIFEST));
+    manifest = JSON.parse(Buffer.from(bytes).toString('utf8')) as Partial<ServicePayloadManifest>;
   } catch {
     throw new ServiceInstallationError('payload_invalid');
   }
+  if (!isJsonObject(manifest)) throw new ServiceInstallationError('payload_invalid');
   const files = manifest.files;
   const valid = manifest.format === 'byok-service-payload' && manifest.version === 1
     && typeof manifest.id === 'string' && VERSION_ID.test(manifest.id)
     && typeof files === 'object' && files !== null && Object.keys(files).length > 0
-    && Object.entries(files).every(([relative, digest]) => isPayloadPath(relative) && typeof digest === 'string' && SHA256_HEX.test(digest));
+    && Object.entries(files).every(([relative, digest]) => isPayloadPath(relative) && typeof digest === 'string' && SHA256_HEX.test(digest))
+    && (manifest.meta === undefined || isJsonObject(manifest.meta));
   if (!valid) throw new ServiceInstallationError('payload_invalid');
+  const present = (await listFiles(payloadDir)).filter((relative) => relative !== SERVICE_PAYLOAD_MANIFEST);
   const listed = new Set(Object.keys(files!));
-  for (const relative of await listFiles(payloadDir)) {
-    if (relative !== SERVICE_PAYLOAD_MANIFEST && !listed.has(relative)) throw new ServiceInstallationError('payload_invalid');
-  }
-  return manifest as ServicePayloadManifest;
+  if (present.length !== listed.size || !present.every((relative) => listed.has(relative))) throw new ServiceInstallationError('payload_invalid');
+  return { manifest: manifest as ServicePayloadManifest, bytes };
 }
 
-function isPayloadPath(relative: string): boolean {
-  return relative !== SERVICE_PAYLOAD_MANIFEST && relative.split('/').every((part) => part !== '' && part !== '.' && part !== '..' && !part.includes('\\'));
-}
-
-async function matchesManifest(dir: string, manifest: ServicePayloadManifest): Promise<boolean> {
+/** Whether `dir` holds exactly the manifest's files and the same manifest bytes. */
+async function matchesManifest(dir: string, manifest: ServicePayloadManifest, bytes: Uint8Array): Promise<boolean> {
   const files = await listFiles(dir);
   if (files.length !== Object.keys(manifest.files).length + 1) return false;
+  const staged = path.join(dir, SERVICE_PAYLOAD_MANIFEST);
+  if (!(await exists(staged)) || !Buffer.from(bytes).equals(await fs.readFile(staged))) return false;
   for (const [relative, digest] of Object.entries(manifest.files)) {
     const file = path.join(dir, ...relative.split('/'));
     if (!(await exists(file)) || (await sha256File(file)) !== digest) return false;
@@ -844,16 +858,9 @@ async function matchesManifest(dir: string, manifest: ServicePayloadManifest): P
   return true;
 }
 
-/** Every regular file under `dir`, `/`-separated and relative. A symlink or other entry fails the payload. */
-async function listFiles(dir: string, prefix = ''): Promise<string[]> {
-  const result: string[] = [];
-  for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
-    const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
-    if (entry.isDirectory()) result.push(...await listFiles(path.join(dir, entry.name), relative));
-    else if (entry.isFile()) result.push(relative);
-    else throw new ServiceInstallationError('payload_invalid');
-  }
-  return result;
+/** Every regular file under `dir`; a symlink or other entry fails the payload. */
+function listFiles(dir: string): Promise<string[]> {
+  return listPayloadFiles(dir, () => new ServiceInstallationError('payload_invalid'));
 }
 
 function isServiceStoreVerdict(value: unknown): value is ServiceStoreVerdict {
@@ -926,10 +933,6 @@ function runProgram(program: ServiceProgram): Promise<{ code: number | null; std
   });
 }
 
-async function sha256File(file: string): Promise<string> {
-  return createHash('sha256').update(await fs.readFile(file)).digest('hex');
-}
-
 async function exists(file: string): Promise<boolean> {
   try {
     await fs.lstat(file);
@@ -954,6 +957,14 @@ async function writeFileAtomic(file: string, content: string): Promise<void> {
   const temp = `${file}.${randomUUID()}.tmp`;
   await fs.writeFile(temp, content, 'utf8');
   await fs.rename(temp, file);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === 'object' && value !== null) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function delay(ms: number): Promise<void> {

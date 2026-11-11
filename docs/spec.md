@@ -2782,9 +2782,9 @@ command name never reaches admission or a runtime `start()`. A server accepts
 only `command`, `args` and `approveTools` (`toolset-registry.ts:180`).
 `readOnlyToolsets` is the Host's list and is enforced where the Host composes
 offers: `ownReadOnlyToolsets` validates the ids
-(`examples/bot-collaboration/src/toolset-policy.ts:4`) and `admitBotToolsets`
+(`packages/bot-collaboration/src/toolset-policy.ts:4`) and `admitBotToolsets`
 refuses an execution whose `requiredToolsets` names a toolset the list does not
-hold (`examples/bot-collaboration/src/rules/team.ts:14`).
+hold (`packages/bot-collaboration/src/rules/team.ts:14`).
 
 One declaration per product toolset is enough. A toolset carrying
 `approveTools` runs on every runtime since 0.35.0: the daemon projects the
@@ -3734,6 +3734,8 @@ create a remote maintenance channel or automatically replay tasks.
 
 The journal owns one immutable terminal byte record, including pre-claim declines. ConnectionManager uses its existing authenticated POST queue and retries the exact original envelope. Accepted transport disposition is durably recorded as confirmed before local delivery state is retired; an acknowledgement write failure retains the original batch. Every rejected envelope emits a payload-free `outbound-rejected` event and increments `status().outbound` (also control status). A rejected terminal is durably failed with its coarse wire reason in `last_error` before retirement; support bundles report `journal.failedTerminalCount` and live outbound counts. `byok-agent tasks` marks refused terminal rows `delivery=rejected`, preserving the local terminal state even after restart; its rejection record carries a closed `taskState` and no payload. A refused progress batch is counted and reported without marking terminal delivery. Progress and terminal observer events follow successful settlement. Rejection is a delivery fact, separate from operational liveness health. Since wire v3 every answer correlates each envelope with its own outcome, and a rejected outcome carries its reason. Confirmation records delivery acceptance; the cloud's immutable first terminal and cancellation authority remain product truth.
 
+`Daemon.whenTaskSettled(taskId, { signal })` is the per-task awaitable for "terminal settled and runtime released"; a Host uses it instead of combining the five local terminal events (`completed`, `failed`, `cancelled`, a terminal `outbound-rejected`, `execution-record`) with its own close tracking. It resolves `{ terminal, delivery, disposal }` no earlier than the local event of the terminal's first outbound settlement (`delivery` `accepted`, which includes a duplicate, or `rejected`), and only after the task's runtime owner, the active session or startup ownership, reported its first disposal outcome. `disposal` is `failed` exactly when `runtime-disposal-failed` was emitted for the task's runtime (a failed release of an offer-owned scratch, `runtimeId: 'scratch'`, can race the decline or failure settlement and is not covered), and `none` when this daemon holds no runtime and no disposal receipt for it: a decline, a failure before start, and every task that settled before a restart, because no durable record says a runtime was released. A task the running daemon has not seen is read from the journal; a terminal still pending there waits for its replay. After a restart the result reflects the journal's current truth: a refused terminal that was replaced reads as its replacement (for example `failed`/`accepted`), never the reverse. A task with no journal row that the daemon has not seen offered rejects with `DaemonTaskUnknownError` (`daemon_task_unknown`) without waiting. Before `start()` it rejects as `approve()` does, and an abort rejects with `signal.reason` and leaves the task untouched. `stop()` rejects no pending wait, so a Host whose wait can span `stop()` passes a signal; after `stop()` an unseen id rejects with the closed journal's error. The result reads a per-Daemon registry fed by the outbound settlement site, the runtime owners and the journal, not public events; no wire message, event kind, event order or table changes.
+
 Unknown or invalid executable messages cannot silently advance the mailbox cursor. The observer consumes the protocol offer classifier. The new journal format requires complete terminal bytes: a valid hash-only predecessor is preserved and rejected with an explicit format error, never silently upgraded, quarantined as corruption, or synthesized into replayable evidence.
 
 ### Execution receipts, bounded startup and custom harness identity (#158–#167)
@@ -4514,7 +4516,7 @@ storage, Windows persona persistence or two-process relay.
 A dream is a background writer task that checks and tidies an Agent's memory
 against the turns a Host holds. [ADR-049](adr/ADR-049-host-owned-bot-dreaming.md)
 records the decision, and the
-[K8 README](../examples/bot-collaboration/README.md#dreaming-1475) holds the
+[K8 README](../packages/bot-collaboration/README.md#dreaming-1475) holds the
 operating details.
 
 Dreaming belongs to the Host layer. The SDK schedules nothing, stores no history

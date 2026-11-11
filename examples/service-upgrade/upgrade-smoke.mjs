@@ -23,14 +23,14 @@
 // (`loginctl enable-linger`); a missing one fails the run.
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { promises as fs, mkdtempSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { sdkNativeAssetTargets } from '@byok-sdk/client';
-import { byokSdkPackaging } from '@byok-sdk/client/packaging';
+import { byokSdkPackaging, writeServicePayloadManifest } from '@byok-sdk/client/packaging';
 import { createByokServer, listenLoopback } from '@byok-sdk/server';
 import { writeKoffiAssetRoot } from '../../scripts/testing/sdk-koffi-asset-root.mjs';
 
@@ -63,13 +63,11 @@ async function ok(args, options) {
 
 async function writePayload(owner, id, files) {
   const dir = path.join(work, 'payloads', `${owner}-${id}`);
-  const digests = {};
   for (const [name, content] of Object.entries(files)) {
     await fs.mkdir(path.dirname(path.join(dir, name)), { recursive: true });
     await fs.writeFile(path.join(dir, name), content);
-    digests[name] = createHash('sha256').update(content).digest('hex');
   }
-  await fs.writeFile(path.join(dir, 'byok-payload.json'), JSON.stringify({ format: 'byok-service-payload', version: 1, id, files: digests }));
+  await writeServicePayloadManifest(dir, { id });
   return dir;
 }
 

@@ -14,7 +14,7 @@ import { createDeviceSimulator } from '../../../packages/testkit/src/index';
 import { alarmReports, openHome, RUN, until, type Home } from './worker.test-support';
 import { readHostScope, sha256Hex } from './host-scopes';
 import { vectorClock } from '../../hosted-bot-collaboration/src/memory-subject.test-support';
-import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
+import { seedCollaboration } from '@byok-sdk/bot-collaboration/testing';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 
 const tsx = createRequire(import.meta.url).resolve('tsx');

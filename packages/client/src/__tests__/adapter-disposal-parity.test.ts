@@ -2,7 +2,6 @@ import { spawn as realSpawn, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ClaudeProcessClient } from '../adapters/claude/process-client';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
 
@@ -20,7 +19,6 @@ import { PiRpcClient } from '../adapters/pi/rpc-client';
 
 const RUNTIME_CLIENTS = [
   { runtime: 'pi', file: '../adapters/pi/rpc-client.ts' },
-  { runtime: 'claude', file: '../adapters/claude/process-client.ts' },
   { runtime: 'codex', file: '../runtime/owned-line-process.ts' },
 ];
 
@@ -102,17 +100,6 @@ function fakeRuntimeSpawn(readyFrame: string, pids: number[]): unknown {
 }
 
 const FAIL_CLOSED_CLIENTS: FailClosedClient[] = [
-  {
-    runtime: 'claude',
-    readyFrame: `${JSON.stringify({ type: 'system', subtype: 'init', session_id: 'already-initialised' })}\n`,
-    async start(spawnFn, jobObject) {
-      const client = new ClaudeProcessClient({
-        command: 'claude', args: [], cwd: process.cwd(), env: process.env,
-        spawnFn: spawnFn as never, platform: 'win32', jobObject,
-      });
-      return client.waitForInit().then(() => undefined, (error: unknown) => error);
-    },
-  },
   {
     runtime: 'pi',
     readyFrame: `${JSON.stringify({ type: 'event', name: 'ready' })}\n`,

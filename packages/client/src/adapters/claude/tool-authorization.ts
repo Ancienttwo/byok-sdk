@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { formatToolAuthorizationDenial, type ToolAuthorizationGate, type ToolAuthorizationVerdict, type ToolCall } from '../../tool-authorization.js';
-import type { ClaudeStreamMessage } from './events.js';
+import type { ClaudeStreamMessage } from './projection.js';
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -40,7 +40,6 @@ const NATIVE_MARGIN_MS = 5_000;
  */
 export class ClaudeToolAuthorizationBridge {
   private readonly callbackId = randomUUID();
-  private write: ((frame: Record<string, unknown>) => Promise<void>) | undefined;
   private ended = false;
   private readonly deliveryDeadlineMs: number;
   private readonly undelivered = new Set<ReturnType<typeof setTimeout>>();
@@ -56,18 +55,17 @@ export class ClaudeToolAuthorizationBridge {
     this.hooks = { PreToolUse: [{ hookCallbackIds: [this.callbackId], timeout: Math.ceil((gate.timeoutMs + NATIVE_MARGIN_MS) / 1_000) }] };
   }
 
-  bind(write: (frame: Record<string, unknown>) => Promise<void>): void { this.write = write; }
   close(): void {
     this.ended = true;
     for (const timer of this.undelivered) clearTimeout(timer);
     this.undelivered.clear();
   }
 
-  /** True only for this bridge's hook callbacks; native question relay receives the rest. */
-  receive(message: ClaudeStreamMessage): boolean {
+  /** True only for this bridge's hook callbacks; native question relay receives the rest. `respond` writes and records the reply. */
+  receive(message: ClaudeStreamMessage, respond: (reply: Record<string, unknown>) => Promise<void>): boolean {
     if (message.type !== 'control_request' || !record(message.request) || message.request.subtype !== 'hook_callback') return false;
     if (this.ended) return true;
-    if (!text(message.request_id) || message.request.callback_id !== this.callbackId || !this.write) {
+    if (!text(message.request_id) || message.request.callback_id !== this.callbackId) {
       this.onFatal(new Error('Claude sent an unregistered tool authorization callback'));
       return true;
     }
@@ -77,13 +75,13 @@ export class ClaudeToolAuthorizationBridge {
       if (!this.ended) this.onFatal(new Error('Claude tool authorization verdict was not delivered before the native hook timeout'));
     }, this.deliveryDeadlineMs);
     this.undelivered.add(backstop);
-    void this.respond(requestId, message.request.input)
+    void this.respond(requestId, message.request.input, respond)
       .then(() => { clearTimeout(backstop); this.undelivered.delete(backstop); })
       .catch(error => this.onFatal(error instanceof Error ? error : new Error('Claude tool authorization response failed')));
     return true;
   }
 
-  private async respond(requestId: string, payload: unknown): Promise<void> {
+  private async respond(requestId: string, payload: unknown, respond: (reply: Record<string, unknown>) => Promise<void>): Promise<void> {
     let verdict: ToolAuthorizationVerdict;
     try {
       const call = decodeClaudePreToolUse(payload);
@@ -92,6 +90,6 @@ export class ClaudeToolAuthorizationBridge {
       verdict = { decision: 'deny', code: 'tool_authorization_unavailable', reason: 'invalid Claude tool authorization request' };
     }
     if (this.ended) return;
-    await this.write!({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: encodeClaudePreToolUse(verdict) } });
+    await respond({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: encodeClaudePreToolUse(verdict) } });
   }
 }

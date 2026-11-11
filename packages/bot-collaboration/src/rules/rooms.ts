@@ -1,0 +1,367 @@
+import type { BotTurnOutcome, RoomFields } from '@byok-sdk/protocol';
+import { canonical, hash } from '@byok-sdk/server/execution-core/canonical';
+import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS, historyWindow } from './history.js';
+import { json, type TurnFields, type TurnsState } from './turn.js';
+import { observes, type AutonomyGate } from './autonomy.js';
+import { inactive, refuseSuspended, type TeamSnapshotRoom } from './team.js';
+import type { Publish } from './delegation.js';
+
+/**
+ * Room seat arbitration as pure rules (#606 R1). Each function changes only the room slice that the
+ * caller passes, does no I/O and takes `now` from the caller. The Host stores the slice, gives the
+ * execution facts of each seat, queues the returned seat Turns and cancels the returned work.
+ */
+export const ROOM_GRACE_MS = 240_000;
+export const ROOM_CONTEXT_BYTES = HISTORY_MAX_BYTES;
+export const ROOM_CONTEXT_MESSAGES = HISTORY_MAX_ITEMS;
+export type Mentions = readonly string[] | 'all';
+/**
+ * Whether a structured mention from a human who is not the owner opens seats in a room (#1230).
+ * `execute` is the default, from the owner ruling of 2026-10-31 that keeps the 2026-10-19 behavior.
+ * `ignore` keeps the message as background.
+ */
+export type MemberMentions = 'execute' | 'ignore';
+export const DEFAULT_MEMBER_MENTIONS: MemberMentions = 'execute';
+/** One room message, as stored and as an external room history authority gives it (#883). */
+export interface RoomMessage { id: string; from: string; text: string; late: boolean }
+export interface Room {
+  id: string; name: string; members: string[]; admin?: string; mode: 'mention'; announcement: string;
+  visibleFrom: Record<string, number>;
+  messages: RoomMessage[];
+  /** Host setting (#1230). Absent: `execute`, so a ledger written before the setting reads the ruling's default. */
+  memberMentions?: MemberMentions;
+  /** #1321: a team snapshot in the external rooms mode no longer lists the room. Permanent, as a Bot archive. */
+  archived?: true;
+}
+export interface Round {
+  id: string; root: string; roomId: string; input: string; seats: string[];
+  limit: number; counts: Record<string, number>; admin?: string; closed: boolean;
+}
+export interface Seat {
+  id: string; roundId: string; botId: string;
+  status: 'waiting' | 'queued' | 'running' | 'late' | 'post' | 'pass' | 'failed' | 'busy' | 'removed' | 'blocked';
+  triggerMessageId?: string; released: boolean; deadline?: number; startedAt?: number; late: boolean; reason?: string;
+}
+/** The team slice that the rules read and change. Of a Bot, they read only `archived` and `participation` (#1319). */
+export interface RoomsState {
+  bots: Readonly<Record<string, { readonly archived: boolean; readonly participation?: 'suspended' }>>;
+  rooms: Record<string, Room>; rounds: Record<string, Round>; seats: Record<string, Seat>;
+  roots: Record<string, { autonomous: number; late: number }>;
+}
+/** Execution facts of one seat Turn. `admitted`: the Host queued it for execution. A seat without facts is not admitted. */
+export interface SeatFacts { admitted: boolean; started: boolean; conclusion?: string }
+/**
+ * `cancel`: seats whose work lost admission. The Host cancels admitted work; a Turn that it never
+ * admitted ends with `conclusion`. `turns`: the new seat Turns, in queue order. `settled`: the seats that this call made
+ * terminal, in seat order.
+ */
+export interface RoomAdvance {
+  cancel: Array<{ seatId: string; conclusion: 'cancelled' | 'expired' }>;
+  turns: Array<{ id: string; botId: string; request: string }>;
+  settled: string[];
+}
+const NOT_ADMITTED: SeatFacts = { admitted: false, started: false };
+/** A seat in one of these statuses never changes again. `late` is released but waits for its Turn's terminal. */
+const TERMINAL: ReadonlySet<Seat['status']> = new Set(['post', 'pass', 'failed', 'busy', 'removed', 'blocked']);
+export function seatSettled(seat: Pick<Seat, 'status'>): boolean {
+  return TERMINAL.has(seat.status);
+}
+/** The projection id of a seat that became terminal (#1393). */
+export function roomSeatProjection(roomId: string, seatId: string): string {
+  return `room-seat:${roomId}:${seatId}`;
+}
+/** The projection id of a round root whose seats are all terminal, the `room_call` seats included (#1393). */
+export function roomRootProjection(roomId: string, root: string): string {
+  return `room-root:${roomId}:${root}`;
+}
+/** Publishes `room-root:` when every seat of every round of `root` is terminal. A root without seats is settled at once. */
+function publishRoot(team: Pick<RoomsState, 'rounds' | 'seats'>, roomId: string, root: string, publish: Publish): void {
+  const seats = Object.values(team.rounds).filter(round => round.root === root).flatMap(round => round.seats);
+  if (seats.every(id => seatSettled(team.seats[id]!))) publish(roomRootProjection(roomId, root), { roomId, root, seats });
+}
+/**
+ * Publishes `room-seat:` for each seat that just became terminal, then `room-root:` for each of their roots that settled.
+ * A terminal seat never changes and a settled root takes no new seat, so each projection is published once (#1393).
+ */
+export function publishSettled(team: Pick<RoomsState, 'rounds' | 'seats'>, seatIds: readonly string[], publish: Publish): void {
+  const roots = new Map<string, string>();
+  for (const seatId of seatIds) {
+    const seat = team.seats[seatId]!, round = team.rounds[seat.roundId]!;
+    publish(roomSeatProjection(round.roomId, seat.id), { roomId: round.roomId, root: round.root, roundId: round.id, seatId: seat.id,
+      botId: seat.botId, status: seat.status, late: seat.late, ...(seat.reason ? { reason: seat.reason } : {}),
+      ...(seat.triggerMessageId ? { triggerMessageId: seat.triggerMessageId } : {}) });
+    roots.set(round.root, round.roomId);
+  }
+  for (const [root, roomId] of roots) publishRoot(team, roomId, root, publish);
+}
+
+function activeBot(team: Pick<RoomsState, 'bots'>, botId: string): void {
+  const bot = team.bots[botId];
+  if (!bot || bot.archived) throw new Error('Bot is archived or absent');
+}
+function reserve(team: RoomsState, round: Round, botId: string, triggerMessageId?: string): void {
+  const room = team.rooms[round.roomId]!;
+  activeBot(team, botId);
+  // A room_call to a suspended Bot is a refused action.
+  refuseSuspended(team, botId);
+  if (!room.members.includes(botId)) throw new Error('Called Bot is not a member');
+  if (round.seats.length >= round.limit) throw new Error('Round seat budget reached');
+  if ((round.counts[botId] ?? 0) >= (botId === round.admin ? 4 : 2)) throw new Error('Member seat budget reached');
+  const id = hash([round.id, round.seats.length, botId]);
+  round.counts[botId] = (round.counts[botId] ?? 0) + 1;
+  round.seats.push(id);
+  team.seats[id] = { id, roundId: round.id, botId, status: 'waiting', released: false, late: false, ...(triggerMessageId ? { triggerMessageId } : {}) };
+}
+/** A room that takes a new message or round (#1321): the Host stops giving K8 the messages of an archived room. */
+function openRoom(team: Pick<RoomsState, 'rooms'>, roomId: string): Room {
+  const room = team.rooms[roomId];
+  if (!room) throw new Error('Room not found');
+  if (room.archived) throw new Error('Room is archived');
+  return room;
+}
+function newRound(team: RoomsState, id: string, root: string, roomId: string, input: string, members: readonly string[], triggerMessageId?: string): Round {
+  const room = openRoom(team, roomId);
+  // Validate all members before changing any budget or round row. A suspended member gets no seat, named or not (#1319).
+  const distinct = [...new Set(members)].filter(botId => {
+    if (!room.members.includes(botId)) throw new Error('Mention is not a member');
+    activeBot(team, botId);
+    return !inactive(team.bots[botId]);
+  });
+  const round: Round = { id, root, roomId, input, seats: [], counts: {}, limit: distinct.length + 4 + (room.admin ? 4 : 0),
+    ...(room.admin ? { admin: room.admin } : {}), closed: distinct.length === 0 };
+  distinct.forEach(botId => reserve(team, round, botId, triggerMessageId));
+  team.rounds[id] = round;
+  return round;
+}
+/** Offsets index `room.messages`. Retention moves messages of archived roots out of it and lowers each offset to match (#1394). */
+export function roomVisibility(room: Room, members: readonly string[]): Record<string, number> {
+  return Object.fromEntries(members.map(id => [id,
+    room.members.includes(id) ? room.visibleFrom?.[id] ?? room.messages.length : room.messages.length,
+  ]));
+}
+/** `empty`: a room of a team snapshot (#1321) may have no member. Every other rule is the same. */
+export function roomFields(team: Pick<RoomsState, 'bots'>, fields: RoomFields, empty = false): Omit<Room, 'id' | 'messages'> {
+  if (fields.mode && fields.mode !== 'mention') throw new Error('Only mention mode is supported');
+  const members = [...fields.members], least = empty ? 0 : 1;
+  if (members.length < least || members.length > 12 || new Set(members).size !== members.length) throw new Error(`Room needs ${least} to 12 distinct members`);
+  members.forEach(id => activeBot(team, id));
+  if (fields.admin && !members.includes(fields.admin)) throw new Error('Admin must be a room member');
+  return { name: fields.name, members, visibleFrom: Object.fromEntries(members.map(id => [id, 0])), ...(fields.admin ? { admin: fields.admin } : {}), mode: 'mention', announcement: fields.announcement ?? '' };
+}
+/** Owner `create_room` (#1321): the Host gives the room id. A room that a Main Bot outcome created has its id too. */
+export function createRoom(team: Pick<RoomsState, 'bots' | 'rooms'>, roomId: string, fields: RoomFields): void {
+  if (Object.hasOwn(team.rooms, roomId)) throw new Error('Room already exists');
+  team.rooms[roomId] = { id: roomId, ...roomFields(team, fields), messages: [] };
+}
+/**
+ * The rooms of a team snapshot in the external rooms mode (#1321), after its Bots. Each listed room takes the snapshot's
+ * fields as a whole: an omitted admin, announcement or memberMentions is cleared. A room that the list lacks is archived for
+ * good: no member, no visibility, no admin. Its seats and rounds settle at the next `advanceRooms`, as for a member that left.
+ */
+export function applyRoomSnapshot(team: Pick<RoomsState, 'bots' | 'rooms'>, rooms: readonly TeamSnapshotRoom[]): void {
+  const listed = new Set(rooms.map(room => room.id));
+  for (const room of Object.values(team.rooms)) {
+    if (room.archived || listed.has(room.id)) continue;
+    room.archived = true; room.members = []; room.visibleFrom = {};
+    delete room.admin;
+  }
+  for (const { id, memberMentions, ...fields } of rooms) {
+    const next = roomFields(team, fields, true), room = team.rooms[id], setting = memberMentions ? { memberMentions } : {};
+    if (!room) { team.rooms[id] = { id, ...next, messages: [], ...setting }; continue; }
+    next.visibleFrom = roomVisibility(room, next.members);
+    delete room.admin; delete room.memberMentions;
+    Object.assign(room, next, setting);
+  }
+}
+/** Owner room edit. An admin that leaves the members is dropped unless the update names one. */
+export function updateRoom(team: Pick<RoomsState, 'bots' | 'rooms'>, roomId: string, update: Partial<RoomFields>): void {
+  const room = team.rooms[roomId];
+  if (!room) throw new Error('Room not found');
+  const fields = { ...room, ...update };
+  if (!update.admin && !fields.members.includes(fields.admin ?? '')) delete fields.admin;
+  const next = roomFields(team, fields);
+  next.visibleFrom = roomVisibility(room, next.members);
+  // A team command never changes the Host setting of #1230, so it stays on the room row.
+  Object.assign(room, next); if (!next.admin) delete room.admin;
+}
+/** The group's memberMentions setting. A room without the field is at the default, `execute` (#1230). */
+export function memberMentions(room: Pick<Room, 'memberMentions'>): MemberMentions {
+  return room.memberMentions ?? DEFAULT_MEMBER_MENTIONS;
+}
+/**
+ * The owner setting of #1230. It changes no message, root or seat, so it applies only to inbound messages that
+ * arrive after it; a root or seat that is already open keeps its admission.
+ */
+export function setMemberMentions(team: Pick<RoomsState, 'rooms'>, roomId: string, value: MemberMentions): void {
+  if (value !== 'execute' && value !== 'ignore') throw new Error('memberMentions is execute or ignore');
+  const room = team.rooms[roomId];
+  if (!room) throw new Error('Room not found');
+  room.memberMentions = value;
+}
+/** `from` is the sender's principal id (#552). Without it, the message is from `user` and the input identity is the K8b one. */
+/** A round that opens no seat settles its root at once, so its `room-root:` projection is published in this commit (#1393). */
+export function roomInput(team: RoomsState, key: string, roomId: string, text: string, mentions: Mentions, publish: Publish, from?: string): string {
+  const room = openRoom(team, roomId);
+  if (!text.trim()) throw new Error('Room input is empty');
+  const id = hash(['room-input', roomId, key]), input = JSON.stringify({ text, mentions, from });
+  const prior = team.rounds[id];
+  if (prior) { if (canonical(prior.input) !== canonical(input)) throw new Error('Room input identity conflict'); return id; }
+  newRound(team, id, id, roomId, input, mentions === 'all' ? room.members : mentions);
+  room.visibleFrom = roomVisibility(room, room.members);
+  team.roots[id] = { autonomous: 0, late: 0 };
+  room.messages.push({ id, from: from ?? 'user', text, late: false });
+  publishRoot(team, roomId, id, publish);
+  return id;
+}
+export function memberPresent(team: RoomsState, seat: Seat): boolean {
+  const room = team.rooms[team.rounds[seat.roundId]!.roomId];
+  return !!room?.members.includes(seat.botId) && !inactive(team.bots[seat.botId]);
+}
+function observeStart(seat: Seat, now: number): void {
+  if (seat.startedAt !== undefined) return;
+  seat.startedAt = now;
+  seat.deadline = now + ROOM_GRACE_MS;
+}
+/**
+ * Apply the speech of the seat Turn `seatId`. An accepted `room_call` is copied back into `team`,
+ * so pass the stored team object itself, not a copy of it.
+ * #1229: an observing Bot records an accepted `room_call` as would-do, so it creates no round and no seat.
+ * A seat that the speech makes terminal is published after the `room_call`, which can add seats to its root (#1393).
+ */
+export function applySpeech(team: RoomsState, seatId: string, document: Pick<BotTurnOutcome, 'speech' | 'room_call'>, taskId: string, now: number,
+  publish: Publish, accept: (action: string, work: () => void) => void, gate: AutonomyGate): void {
+  const seat = team.seats[seatId]!;
+  const round = team.rounds[seat.roundId]!, room = team.rooms[round.roomId]!;
+  const settled = seatSettled(seat);
+  let accepted = false;
+  accept('speech', () => {
+    if (!memberPresent(team, seat) || seat.status === 'busy' || seat.status === 'removed' || seat.status === 'blocked') throw new Error('Seat no longer has speech authority');
+    const speech = document.speech;
+    // A blank post breaks the bot-turn-outcome.v1 contract rules, so it never reaches here (#1374).
+    if (!speech) {
+      seat.status = 'failed'; seat.released = true; throw new Error('A seat needs a post or explicit pass');
+    }
+    observeStart(seat, now);
+    seat.late ||= now >= seat.deadline!;
+    if (speech.kind === 'post') {
+      if (seat.late && team.roots[round.root]!.late >= 10) {
+        seat.status = 'failed'; seat.released = true; throw new Error('Late post budget is 10');
+      }
+      room.messages.push({ id: seat.id, from: seat.botId, text: speech.text, late: seat.late });
+      if (seat.late) team.roots[round.root]!.late++;
+    }
+    seat.status = speech.kind; seat.released = true; accepted = true;
+  });
+  if (accepted && document.room_call) accept('room_call', () => {
+    if (observes(gate)) { gate.record('room_call', 0, json(document.room_call!)); return; }
+    const members = [...document.room_call!.members];
+    // A batch is atomic. Refusal must not consume any seat or round budget.
+    const copy = structuredClone(team);
+    const triggerMessageId = document.speech?.kind === 'post' ? seat.id : (seat.triggerMessageId ?? round.root);
+    if (round.closed) {
+      if (copy.roots[round.root]!.autonomous >= 3) throw new Error('Autonomous round budget is 3');
+      // newRound skips a suspended member, so a room_call that names one is refused here, as `reserve` refuses it.
+      for (const botId of members) refuseSuspended(copy, botId);
+      const id = hash([taskId, 'room_call']);
+      newRound(copy, id, round.root, round.roomId, JSON.stringify({ calledBy: seat.botId }), members, triggerMessageId);
+      copy.roots[round.root]!.autonomous++;
+    } else {
+      for (const botId of members) reserve(copy, copy.rounds[round.id]!, botId, triggerMessageId);
+    }
+    Object.assign(team, copy);
+  });
+  if (!settled && seatSettled(team.seats[seatId]!)) publishSettled(team, [seatId], publish);
+}
+/** Cancel only work that has lost admission. Never release a running writer. */
+export function advanceRooms(team: RoomsState, facts: Readonly<Record<string, SeatFacts>>, now: number): RoomAdvance {
+  const result: RoomAdvance = { cancel: [], turns: [], settled: [] };
+  for (const seat of Object.values(team.seats)) {
+    // Keep completed speech and failures immutable. A released late seat is
+    // still waiting for terminal, so membership changes must still revoke it.
+    if (seatSettled(seat)) continue;
+    const fact = facts[seat.id] ?? NOT_ADMITTED;
+    if (!memberPresent(team, seat)) {
+      seat.status = 'removed'; seat.released = true; result.settled.push(seat.id);
+      if (!fact.admitted || !fact.started && !fact.conclusion) result.cancel.push({ seatId: seat.id, conclusion: 'cancelled' });
+      continue;
+    }
+    if (fact.conclusion) {
+      seat.status = fact.conclusion === 'expired' ? 'busy' : 'failed'; seat.released = true;
+      seat.reason = fact.conclusion; result.settled.push(seat.id); continue;
+    }
+    if (seat.released) continue;
+    if (fact.started) { observeStart(seat, now); seat.status = 'running'; }
+    if (seat.deadline !== undefined && now >= seat.deadline) {
+      if (fact.started) { seat.status = 'late'; seat.late = true; }
+      else { seat.status = 'busy'; result.cancel.push({ seatId: seat.id, conclusion: 'expired' }); result.settled.push(seat.id); }
+      seat.released = true;
+    }
+  }
+  for (const round of Object.values(team.rounds)) {
+    const seat = round.seats.map(id => team.seats[id]!).find(row => !row.released);
+    if (!seat) { round.closed = true; continue; }
+    if (seat.status !== 'waiting') continue;
+    seat.status = 'queued'; seat.deadline = now + ROOM_GRACE_MS;
+    const room = team.rooms[round.roomId]!;
+    const requestIndex = room.messages.findIndex(message => message.id === (seat.triggerMessageId ?? round.root));
+    const visibleFrom = room.visibleFrom?.[seat.botId] ?? room.messages.length;
+    const message = requestIndex >= visibleFrom ? room.messages[requestIndex] : undefined;
+    result.turns.push({ id: seat.id, botId: seat.botId,
+      request: JSON.stringify({ roomId: round.roomId, roundId: round.id, request: message?.text, requestFrom: message?.from }) });
+  }
+  return result;
+}
+/** The projection id of an accepted seat post in room history mode (#883): one per message, so a replay is identical. */
+export function roomMessageProjection(roomId: string, messageId: string): string {
+  return `room-message:${roomId}:${messageId}`;
+}
+/** The fields of a seat Turn. Seats never manage or delegate (§5), so no seat Turn carries owner authority. */
+export function seatTurn(id: string, botId: string, request: string): TurnFields {
+  return { id, root: id, source: 'room_slot', request, botId, hop: 0, authority: 'bot' };
+}
+/**
+ * The room step of a Host sync (#793 S6): `advanceRooms` on the seat facts, then its results. A seat Turn whose work was not
+ * admitted fails with the seat's conclusion; `add` queues each new seat Turn; `publish` gets the `room-seat:` and `room-root:`
+ * projections of the seats that became terminal (#1393). Returns the seats whose admitted work the Host must cancel, as K4
+ * `cancel` of their intents.
+ */
+export function advanceRoomSeats(state: { team: RoomsState } & Pick<TurnsState, 'turns'>, facts: Readonly<Record<string, SeatFacts>>,
+  now: number, add: (id: string, botId: string, request: string) => void, publish: Publish): string[] {
+  const { cancel, turns, settled } = advanceRooms(state.team, facts, now);
+  publishSettled(state.team, settled, publish);
+  const admitted: string[] = [];
+  for (const { seatId, conclusion } of cancel) {
+    const turn = state.turns[seatId];
+    if (facts[seatId]?.admitted) admitted.push(seatId);
+    else if (turn) { turn.status = 'failed'; turn.conclusion = conclusion; }
+  }
+  for (const turn of turns) add(turn.id, turn.botId, turn.request);
+  return admitted;
+}
+/** Checks rows from an external room history authority. A row in another shape refuses the whole read. */
+export function roomMessages(value: unknown): RoomMessage[] {
+  const fail = (): never => { throw new Error('Invalid injected room messages'); };
+  if (!Array.isArray(value)) fail();
+  return (value as unknown[]).map(row => {
+    const r = (row ?? fail()) as Record<string, unknown>;
+    const text = (key: string) => typeof r[key] === 'string' ? r[key] as string : fail();
+    if (typeof r.late !== 'boolean') fail();
+    return { id: text('id'), from: text('from'), text: text('text'), late: r.late as boolean };
+  });
+}
+/**
+ * The room view of a seat Turn's ContextPack: the messages that the seat Bot can see, newest last.
+ * `injected` are the messages from an external room history authority, which already selected them for this seat's Bot (#883).
+ */
+export function roomContext(team: Pick<RoomsState, 'rooms' | 'rounds' | 'seats'>, turn: { id: string }, turnLimit = ROOM_CONTEXT_MESSAGES,
+  injected?: readonly RoomMessage[]) {
+  const seat = team.seats[turn.id];
+  if (!seat) throw new Error('Room seat not found');
+  const round = team.rounds[seat.roundId]!, room = team.rooms[round.roomId]!;
+  const visible = injected ? [...injected] : room.messages.slice(room.visibleFrom?.[seat.botId] ?? room.messages.length);
+  const messages = visible.slice(-turnLimit);
+  return { historyWindow: historyWindow('messages', visible.length - messages.length, turnLimit),
+    room: { id: room.id, name: room.name, members: room.members, announcement: room.announcement,
+      visibility: 'after_join' as const, messages },
+    round: { id: round.id, limit: round.limit, counts: round.counts }, seat: { id: seat.id, deadline: seat.deadline } };
+}

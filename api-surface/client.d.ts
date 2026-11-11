@@ -54,7 +54,8 @@ import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolic
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { type ResolvedBin } from './resolve-bin.js';
 import { type NativeInteractionHostOptions } from '../../native-interactions.js';
-import { type SpawnFn } from './process-client.js';
+import type { spawn } from 'node:child_process';
+export type SpawnFn = typeof spawn;
 export interface ClaudeAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
@@ -125,290 +126,6 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
      */
     private probeAuthPresent;
     private resolveBin;
-}
-// ==== @byok-sdk/client dist/adapters/claude/events.d.ts ====
-import type { McpEventIdentities } from '../../mcp/event-identity.js';
-import type { AgentEvent } from '@byok-sdk/protocol';
-import type { MessageDraftDelta } from '../../types.js';
-import { RuntimeExecutionFailure } from '../../runtime-failure.js';
-/**
- * A raw parsed line from `claude --output-format stream-json`. Shapes vary
- * a lot by `type` (and, for `system`, by `subtype`) — see the doc comments
- * on the individual mapping functions below for the concrete shapes this
- * was empirically captured against. Kept as a loose bag rather than a full
- * discriminated union for the same reason pi's `PiRpcMessage` is: this
- * module only needs a handful of fields off of each frame.
- */
-export interface ClaudeStreamMessage {
-    type: string;
-    [key: string]: unknown;
-}
-/**
- * Cross-message correlation state a single {@link ClaudeSession} (in
- * `../claude-adapter.ts`) owns for its whole lifetime.
- *
- * Unlike pi's `tool_execution_start`/`tool_execution_end` frames (which
- * both carry `toolName` directly, so `../pi/events.ts` can stay a pure,
- * stateless function), claude's Messages-API-shaped transcript splits a
- * tool call across two DIFFERENT frame types: the `assistant` frame's
- * `tool_use` content block carries `{id, name, input}`, but the later
- * `user` frame's `tool_result` content block carries only `{tool_use_id,
- * content, is_error}` — no tool name at all. Since this protocol's own
- * `AgentEvent` schema requires `tool_result.tool: string`, this mapper has
- * no choice but to remember `tool_use_id -> name` from the `tool_use` block
- * and look it up when the matching `tool_result` arrives later. This is a
- * genuine, disclosed structural difference from pi, not an arbitrary
- * design choice — see the M2-a report for the full reasoning.
- */
-export interface ToolUseCorrelation {
-    readonly toolNameByUseId: Map<string, string>;
-    readonly mcpIdentities?: McpEventIdentities;
-}
-export declare function createToolUseCorrelation(mcpIdentities?: McpEventIdentities): ToolUseCorrelation;
-export interface MapClaudeMessageOptions {
-    /** `ctx.workspaceDir` for the task — used only to compute a workspace-relative `name` for a possible `artifact` AgentEvent (see `tryBuildArtifactEvent`'s doc comment). */
-    workspaceDir: string;
-}
-export interface MapClaudeMessageResult {
-    events: Array<AgentEvent | MessageDraftDelta>;
-    /** Present only when this frame is authoritative terminal failure evidence. */
-    terminalFailure?: RuntimeExecutionFailure;
-    /**
-     * Set when this exact frame (or, for `assistant`/`user` frames, one
-     * content block inside it) was genuinely unrecognized — a frame/subtype/
-     * block-type this adapter has never been told to expect — as opposed to
-     * routine bookkeeping this mapper deliberately ignores (see
-     * `ROUTINE_CLAUDE_SYSTEM_SUBTYPES` and the `thinking`/`redacted_thinking`
-     * cases below). The caller (`ClaudeSession`'s event iterator) is
-     * responsible for actually recording it (via
-     * `ClaudeProcessClient.recordUnmappedFrame`) — mirrors pi's
-     * `ROUTINE_PI_EVENT_TYPES` check living in `PiSession`'s iterator rather
-     * than inside `mapPiMessageToAgentEvent` itself. At most one label per
-     * call even if a frame has several unmapped things in it — sufficient
-     * for the "did this regress" self-diagnosing purpose this exists for,
-     * without needing a list.
-     */
-    unmappedLabel?: string;
-}
-/**
- * `system` frame subtypes empirically observed on real stream-json output
- * from the installed claude 2.1.212 binary that carry no `AgentEvent`
- * equivalent — routine bookkeeping, deliberately ignored:
- *
- * - `init`: session/turn start. Carries `session_id`, `tools`, `cwd`,
- *   `permissionMode`, etc. `session_id` specifically is NOT read here —
- *   `ClaudeProcessClient.waitForInit()` (`process-client.ts`) captures it
- *   directly off the raw line as part of this adapter's own
- *   `start()`/sessionRef bookkeeping, since it's needed before any
- *   `AgentEvent` mapping is even relevant.
- * - `hook_started` / `hook_response`: fired when the user's own Claude Code
- *   installation has configured lifecycle hooks (e.g. `SessionStart`) —
- *   machine/config-specific, not part of this protocol's surface at all.
- * - `thinking_tokens`: periodic token-count-estimate bookkeeping emitted
- *   while the model is reasoning; no user-visible content.
- *
- * A `system` frame whose `subtype` is NOT in this set is treated as
- * genuinely unmapped (see `mapClaudeMessageToAgentEvents`'s `system` case)
- * rather than silently folded into "system frames are always routine" —
- * this is deliberately finer-grained than lumping the whole `system` type
- * together, so a future/unobserved subtype (e.g. something compaction- or
- * budget-related) shows up as a one-time warning instead of disappearing
- * the way the pi adapter's own root-cause hang (a real settle event with no
- * mapping, silently swallowed) did before that bug was found.
- */
-export declare const ROUTINE_CLAUDE_SYSTEM_SUBTYPES: ReadonlySet<string>;
-/**
- * Claude sends one `assistant` frame per content block, so one message can
- * span several frames that share `message.id`, and each text block is its
- * own `progress` event. This records which of those events continue a
- * message whose non-blank text already started, for
- * `Session.progressStartsMessage`. Text blocks in one frame always share a
- * message. Routine `system` frames and `stream_event` frames can arrive
- * mid-message and do not end it; any other frame does. A frame with no
- * string id never continues an earlier frame.
- *
- * Draft deltas (`stream_event`, from `--include-partial-messages`) carry the
- * message's `api_message_id`. The first non-blank delta of a new id starts a
- * draft message. Claude 2.1.302 sends a block's deltas before its `assistant`
- * frame, so the draft message starts before its `progress` does.
- */
-export declare class AssistantMessageTracker {
-    private readonly continuations;
-    private open;
-    private draft;
-    observe(msg: ClaudeStreamMessage, events: ReadonlyArray<AgentEvent | MessageDraftDelta>): void;
-    startsMessage(event: AgentEvent): boolean;
-}
-/**
- * Map one raw claude stream-json line to zero or more normalized
- * `AgentEvent`s (a single `user` frame can produce two: `tool_result` plus
- * a derived `artifact`). See the per-`type` mapping functions above for the
- * concrete, empirically-captured shapes each branch handles.
- */
-export declare function mapClaudeMessageToAgentEvents(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, options: MapClaudeMessageOptions): MapClaudeMessageResult;
-// ==== @byok-sdk/client dist/adapters/claude/process-client.d.ts ====
-import { spawn } from 'node:child_process';
-import type { ClaudeStreamMessage } from './events.js';
-export type SpawnFn = typeof spawn;
-export interface ClaudeProcessClientOptions {
-    nativeAssetRoot?: string;
-    command: string;
-    args: string[];
-    cwd: string;
-    env: NodeJS.ProcessEnv;
-    spawnFn?: SpawnFn;
-    /** Internal control-plane binding; control frames never enter the user/result event queue. */
-    control?: {
-        bind(write: (frame: Record<string, unknown>) => Promise<void>): void;
-        receive(message: ClaudeStreamMessage): void;
-        closed(): void;
-    };
-    /**
-     * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
-     * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
-     * from POSIX. Disposal keeps `process.platform` as its own authority — this
-     * must never silently reroute the taskkill sweep on a real host.
-     */
-    platform?: NodeJS.Platform;
-    /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. `release()` is called by this client's disposal once the tree is proved gone. */
-    jobObject?: {
-        assign(pid: number): Promise<{
-            release(): void;
-        }>;
-    };
-}
-/**
- * NDJSON process transport for `claude -p --input-format stream-json
- * --output-format stream-json`.
- *
- * Structurally simpler than pi's `PiRpcClient` in one real way, and
- * different (not simpler) in another:
- *
- * - No user-turn request/response correlation. Optional native controls are
- *   correlated on a separate channel. pi's RPC mode replies to each command
- *   with a `{type:"response", id, success, ...}` — claude's stream-json has
- *   no such acknowledgement at all; writing a `{"type":"user",...}` line
- *   just starts (or queues) a turn, and the ONLY confirmation is the
- *   ordinary event stream itself (starting with a `system/init` frame).
- *   There is therefore no `pending` id->resolver map here.
- * - `waitForInit()` exists specifically to compensate for that missing
- *   ack: pi's `start()` fails fast because a bad flag/auth error rejects
- *   the pending `send()` promise for the first command. Claude's own
- *   `AsyncQueue.end()` (used for the `events` stream) is a CLEAN,
- *   non-throwing end — a process that crashes before ever emitting a line
- *   would otherwise look, from the async-iteration protocol alone, exactly
- *   like a session that legitimately produced zero events, silently
- *   swallowing the real failure. `waitForInit()` is a dedicated promise
- *   that resolves with the real `session_id` once claude's own
- *   `system/init` frame arrives, or rejects with the same enriched
- *   exit-error `events` would otherwise swallow — this is what lets
- *   `ClaudeAdapter.start()` fail loudly and immediately for a bad
- *   `--resume` target etc., mirroring pi's own fail-fast contract with a
- *   mechanism suited to claude's ack-less protocol instead of copying pi's
- *   request/response one verbatim.
- *
- * Framing, stderr-ring, and unmapped-frame-tally-in-exit-error all mirror
- * `../pi/rpc-client.ts`'s already-proven design directly (LF-delimited
- * JSONL, `node:readline` avoided for the same U+2028/U+2029 reason pi's
- * doc comment explains, `close` not `exit` for the same complete-stderr
- * guarantee) — these are generic, sound patterns, not pi-specific logic,
- * so re-implementing them independently here (rather than importing from
- * `../pi/`) keeps this adapter fully self-contained, matching this repo's
- * existing per-adapter isolation.
- */
-export declare class ClaudeProcessClient {
-    private readonly child;
-    private buffer;
-    private readonly eventQueue;
-    private closed;
-    private exitError;
-    private exited;
-    private transportError;
-    private readonly pendingWrites;
-    private readonly closedPromise;
-    private resolveClosed;
-    private disposalAttempt;
-    /** Resolves once this tree is backstopped; rejection carries either completed disposal or an owned retry receipt. */
-    private readonly adopted;
-    /** Set before the fail-closed termination starts, so it — not the exit code of the kill we ourselves requested — becomes this client's exit error. */
-    private adoptionFailure;
-    private readonly stderrRing;
-    private readonly unmappedFrameCounts;
-    private sessionId;
-    private initWaiter;
-    constructor(options: ClaudeProcessClientOptions);
-    /**
-     * Write a new user turn onto stdin (`--input-format stream-json`'s wire
-     * shape: `{"type":"user","message":{"role":"user","content":[{"type":
-     * "text","text":...}]}}`). Used identically for the very first turn
-     * (`ClaudeAdapter.start()`) and any later same-session turn
-     * (`ClaudeSession.followUp()`) — empirically confirmed live that claude
-     * keeps a `--input-format stream-json` process alive across multiple
-     * sequential turns on ONE persistent process/session (same `session_id`
-     * reported on each turn's own `system/init` and `result` frames), only
-     * exiting when stdin is closed or the process is killed. This is the
-     * mechanism `followUp()` relies on instead of spawning a fresh
-     * `--resume`'d process per follow-up.
-     */
-    writeUserMessage(text: string): Promise<void>;
-    private writeFrame;
-    /** Stop startup admission immediately, independently of the process-close receipt.
-     * The stopped transport latch is checked again after adoption, so an abandoned
-     * write cannot send a late prompt when delayed adoption eventually resolves.
-     */
-    abortStartup(error: Error): void;
-    private onTransportError;
-    /**
-     * Resolves with claude's own `session_id` once its `system/init` frame
-     * arrives (see this class's doc comment for why this exists at all).
-     * Idempotent: once resolved, further calls resolve immediately with the
-     * same id; if the process already closed before init ever arrived,
-     * every call rejects with that same exit error.
-     */
-    waitForInit(): Promise<string>;
-    /** Every non-control parsed stream-json line — `system/init` is consumed internally (see `waitForInit`) but is also forwarded here like any other frame, so routine-frame accounting in `ClaudeSession`'s mapper stays uniform. */
-    get events(): AsyncIterable<ClaudeStreamMessage>;
-    /** Local transport diagnostic retained when the process closes; consumers classify it at the session boundary. */
-    get terminalError(): Error | undefined;
-    /** The child process closed on its own (a `close` event, not a spawn error), and no adoption or transport failure outranked that exit; consumers classify it at the session boundary. */
-    get processExited(): boolean;
-    /**
-     * Record a claude stream-json frame/subtype/content-block label that
-     * `ClaudeSession`'s event iterator (`../claude-adapter.ts`) decided has
-     * no `AgentEvent` mapping and isn't routine bookkeeping (see
-     * `events.ts`'s `MapClaudeMessageResult.unmappedLabel` doc comment) —
-     * i.e. genuinely unexpected traffic. Mirrors pi's
-     * `PiRpcClient.recordUnmappedFrame` exactly: logs once per distinct
-     * label, folds the running tally into a later exit error for a
-     * post-mortem without separate log scraping.
-     */
-    recordUnmappedFrame(label: string): void;
-    /**
-     * Immediate process-tree termination request. `dispose()` is the settlement
-     * receipt, so this stays fire-and-forget: an interrupt must not block on a
-     * terminator. A request that could not be spawned is left unrecorded, so
-     * `dispose()` re-issues it and raises the typed `stage:'signal'` failure —
-     * swallowing it here loses nothing.
-     */
-    kill(): void;
-    waitClosed(): Promise<void>;
-    dispose(): Promise<void>;
-    private processTreeOptions;
-    /**
-     * Backstop this tree, or tear it down. Adoption failure is a start-time
-     * precondition, not a degraded mode: the child is terminated through the one
-     * disposal authority and the failure is re-thrown, which is what makes
-     * `waitForInit()` — and therefore `ClaudeAdapter.start()` — fail before any
-     * session is published. If disposal fails, retain both failures and a retry
-     * owner; adoption rejection alone is never a tree-quiescence receipt.
-     */
-    private adoptOwnedTree;
-    private onData;
-    private onLine;
-    private onStderr;
-    /** Mirrors pi's `buildExitError` exactly — stderr tail + unmapped-frame tally folded into one self-diagnosing message. */
-    private buildExitError;
-    private onClosed;
 }
 // ==== @byok-sdk/client dist/adapters/claude/resolve-bin.d.ts ====
 export interface ResolvedBin {
@@ -778,6 +495,7 @@ export declare class OpenCodeAdapter implements RuntimeAdapter {
 import { type SdkPackagingFormat } from '../sdk-native-assets.js';
 export type { SdkPackagingFormat } from '../sdk-native-assets.js';
 export { loadSdkKoffiAsset } from '../sdk-native-assets-runtime.js';
+export { writeServicePayloadManifest } from '../service-payload-manifest.js';
 /** The part of an esbuild build that this plugin reads and sets. Declared here so esbuild is not an SDK dependency. */
 export interface SdkPackagingBuild {
     readonly initialOptions: {
@@ -5139,6 +4857,7 @@ export declare function parseInputPreparationLookupParams(value: unknown): Input
 export declare function parseInputPreparationCancelParams(value: unknown): InputPreparationCancelParamsV1 | undefined;
 // ==== @byok-sdk/client dist/daemon/create-daemon.d.ts ====
 import type { OutboundStatus } from './outbound-settlement.js';
+import { type DaemonTaskSettlement } from './task-settlement.js';
 import { type RuntimeObservation } from '../runtime-detection.js';
 import { type ServiceEnvironmentStatus } from '../login-shell-environment.js';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
@@ -5833,6 +5552,21 @@ export interface Daemon {
         readonly signal: AbortSignal;
     }): Promise<void>;
     stop(): Promise<void>;
+    /**
+     * Resolves once the task's terminal had its first outbound settlement (no
+     * earlier than its local terminal event) and the runtime owner reported
+     * its first disposal outcome. A task this daemon has not seen is read from
+     * the journal: after a restart the result reflects the journal's current
+     * truth, so a refused terminal that was replaced reads as its replacement,
+     * never the reverse. Rejects with {@link DaemonTaskUnknownError} for a task
+     * with neither, before `start()` the way `approve()` does, and with
+     * `signal.reason` on abort; the task is untouched. `stop()` rejects no
+     * pending wait, so pass a signal if one can span it; after `stop()` an
+     * unseen id rejects with the closed journal's error.
+     */
+    whenTaskSettled(taskId: string, options?: {
+        readonly signal?: AbortSignal;
+    }): Promise<DaemonTaskSettlement>;
     status(): DaemonStatus;
     /** Append one sanitized reliable record before its first transport attempt. */
     publishReliableAgentEgress?(input: AgentReliableEgressInput): Promise<AgentEgressReliableAppendResult>;
@@ -8935,6 +8669,55 @@ export declare const RESULT_NOT_SUBMITTED_REASON_PREFIX = "result_not_submitted"
  * preserved for repair.
  */
 export declare const RESULT_UNREADABLE_REASON_PREFIX = "result_unreadable";
+// ==== @byok-sdk/client dist/daemon/task-settlement.d.ts ====
+import type { TerminalTruthState } from './journal/journal.js';
+/** {@link DaemonTaskSettlement.terminal}: the kind of the task's terminal envelope. */
+export type DaemonTaskTerminal = 'complete' | 'failed' | 'cancelled' | 'declined';
+/** What `Daemon.whenTaskSettled` resolves with. */
+export interface DaemonTaskSettlement {
+    readonly terminal: DaemonTaskTerminal;
+    /** The first settlement of the terminal; `accepted` includes a duplicate. */
+    readonly delivery: 'accepted' | 'rejected';
+    /**
+     * `failed` exactly when `runtime-disposal-failed` was emitted for the task's
+     * runtime; a failed release of an offer-owned scratch (`runtimeId: 'scratch'`)
+     * can race the decline or failure settlement and is not covered.
+     * `none`: this daemon holds no runtime for the task and has no disposal
+     * receipt, as for a decline, a failure before start, or any task that
+     * finished before a restart.
+     */
+    readonly disposal: 'disposed' | 'failed' | 'none';
+}
+/** `whenTaskSettled` was asked about a task with no journal row and no in-memory record. */
+export declare class DaemonTaskUnknownError extends Error {
+    readonly taskId: string;
+    readonly code: 'daemon_task_unknown';
+    constructor(taskId: string);
+}
+/** The durable facts one daemon run reads for a task it has not seen. */
+export interface TaskSettlementJournal {
+    readTask(taskId: string): Promise<{
+        readonly localState: string;
+    } | undefined>;
+    /** Truth state of an unconfirmed terminal; `undefined` once confirmed or when there is none. */
+    unconfirmedTerminal(taskId: string): Promise<TerminalTruthState | undefined>;
+}
+/** Runtime ownership facts the task runner reports; a disposal failure arrives with `runtime-disposal-failed`. */
+export interface TaskRuntimeOwnership {
+    /** Before any terminal of the task is sent. */
+    runtimeHeld(taskId: string): void;
+    runtimeDisposed(taskId: string): void;
+}
+export declare class TaskSettlementRegistry implements TaskRuntimeOwnership {
+    #private;
+    bindJournal(journal: TaskSettlementJournal): void;
+    offerSeen(taskId: string): void;
+    runtimeHeld(taskId: string): void;
+    runtimeDisposed(taskId: string): void;
+    runtimeDisposalFailed(taskId: string): void;
+    terminalSettled(taskId: string, terminal: DaemonTaskTerminal, delivery: DaemonTaskSettlement['delivery']): void;
+    wait(taskId: string, signal?: AbortSignal): Promise<DaemonTaskSettlement>;
+}
 // ==== @byok-sdk/client dist/daemon/team-workspace.d.ts ====
 /**
  * The local team channel is deliberately a small, versioned contract.  It is
@@ -10005,6 +9788,7 @@ export type { InstallSkillPacksOptions, InstalledSkillPack, ProjectedSkillPack, 
 export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client.js';
 export type { LocalMemoryFilter, MemorySelector, TruthManifestQueryInput, TruthManifestRecord, TruthMemoryClientErrorCode, TruthMemoryClientOptions, TruthMemoryMetric, TruthSnapshotCandidateInput, TruthSnapshotWriteInput, TruthTerminalWriteInput, TruthWriteBody, TruthWriteResult, VerifiedTruthRecord, } from './daemon/truth-memory-client.js';
 export type { ConnectionState } from './daemon/connection-manager.js';
+export { DaemonTaskUnknownError, type DaemonTaskSettlement, type DaemonTaskTerminal } from './daemon/task-settlement.js';
 export { DAEMON_HALT_REASONS, DaemonHaltError, DaemonNotOpenError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
 export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle.js';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';
@@ -10024,8 +9808,10 @@ export { generateSystemdUnit } from './lifecycle/systemd.js';
 export { generateWinswXml } from './lifecycle/winsw.js';
 export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service.js';
 export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service.js';
-export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError, } from './lifecycle/service-installation.js';
-export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation.js';
+export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, ServiceInstallationError } from './lifecycle/service-installation.js';
+export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation.js';
+export { SERVICE_PAYLOAD_MANIFEST } from './service-payload-manifest.js';
+export type { ServicePayloadManifest } from './service-payload-manifest.js';
 export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit.js';
 export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit.js';
 export { checkUpgradeFrom } from './lifecycle/upgrade-from.js';
@@ -11374,22 +11160,8 @@ export declare function captureAndApply(options: ApplyLoginShellEnvironmentOptio
 import type { StoreCompatibilityVerdict } from '@byok-sdk/core';
 import { type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
 import type { ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { type ServicePayloadManifest } from '../service-payload-manifest.js';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types.js';
-/** The manifest every payload directory carries at its root. */
-export declare const SERVICE_PAYLOAD_MANIFEST = "byok-payload.json";
-/**
- * A payload's manifest (#1097). The Host verifies the payload's signature
- * before handing it to the SDK; the SDK checks every file against `files`
- * and accepts no file the manifest does not list.
- */
-export interface ServicePayloadManifest {
-    format: 'byok-service-payload';
-    version: 1;
-    /** The version id: 1-64 of `A-Z a-z 0-9 . _ -`, starting with a letter or digit. Becomes `versions/<id>`. */
-    id: string;
-    /** Every file of the payload except the manifest: `/`-separated relative path → lowercase hex SHA-256. */
-    files: Record<string, string>;
-}
 /**
  * One store the candidate's precheck reports (#1328): an SDK `LocalStoreId`
  * or a Host store id, with the verdict the candidate gives it. The snapshot
@@ -11473,6 +11245,15 @@ export interface ServiceInstallationOptions {
     daemonStores?(): Promise<readonly ServiceDaemonStore[]>;
     /** How long a stop may take to leave every daemon store quiescent, shared by all of them. Default 30000. */
     stopTimeoutMs?: number;
+    /**
+     * The Host's own payload policy (#1842), such as a Node floor, file-size
+     * ceilings or file modes. Runs on the staged copy after every digest
+     * passed and before it becomes `versions/<id>`, and on an existing
+     * `versions/<id>` whose manifest matched, so it checks the exact bytes
+     * that will run. `manifest` is a frozen copy. A throw is `payload_invalid` with the error as `cause`;
+     * nothing new appears under `versions/`.
+     */
+    verifyPayload?(stagedDir: string, manifest: ServicePayloadManifest): void | Promise<void>;
     /** Test seams for the underlying lifecycle. */
     lifecycle?: CreateServiceLifecycleOptions;
 }
@@ -12828,15 +12609,6 @@ export declare class McpStdioClient {
      */
     private classify;
 }
-// ==== @byok-sdk/client dist/mcp/event-identity.d.ts ====
-import type { AgentEvent } from '@byok-sdk/protocol';
-import type { McpToolsetToolObservation } from '../types.js';
-export type McpEventIdentity = NonNullable<Extract<AgentEvent, {
-    type: 'tool_use';
-}>['mcp']>;
-export type McpEventIdentities = ReadonlyMap<string, McpEventIdentity>;
-/** Exact admitted names, never split an arbitrary runtime label (names may contain __). */
-export declare function mcpEventIdentities(observation?: McpToolsetToolObservation): McpEventIdentities;
 // ==== @byok-sdk/client dist/mcp/observation.d.ts ====
 import { type McpStdioClientOptions, type McpStdioServerSpec } from './client.js';
 /**
@@ -13751,6 +13523,42 @@ export declare const SDK_RESERVED_MCP_TOOL_NAMES: Readonly<{
     byokagentteam: readonly string[];
     byokagentresult: readonly string[];
 }>;
+// ==== @byok-sdk/client dist/service-payload-manifest.d.ts ====
+import type { JsonObject } from '@byok-sdk/core';
+/** The manifest every payload directory carries at its root. */
+export declare const SERVICE_PAYLOAD_MANIFEST = "byok-payload.json";
+/**
+ * A payload's manifest (#1097). The Host verifies the payload's signature
+ * before handing it to the SDK; the SDK checks every file against `files`
+ * and accepts no file the manifest does not list.
+ */
+export interface ServicePayloadManifest {
+    format: 'byok-service-payload';
+    version: 1;
+    /** The version id: 1-64 of `A-Z a-z 0-9 . _ -`, starting with a letter or digit. Becomes `versions/<id>`. */
+    id: string;
+    /** Every file of the payload except the manifest: `/`-separated relative path → lowercase hex SHA-256. */
+    files: Record<string, string>;
+    /** Host data (#1842). Not interpreted by the SDK. Must be a JSON object. */
+    meta?: JsonObject;
+}
+export declare const VERSION_ID: RegExp;
+export declare const SHA256_HEX: RegExp;
+export declare function isPayloadPath(relative: string): boolean;
+export declare function isJsonObject(value: unknown): value is JsonObject;
+/** Every regular file under `dir`, `/`-separated and relative. Any other entry type throws `refuse(relative)`. */
+export declare function listPayloadFiles(dir: string, refuse: (relative: string) => Error, prefix?: string): Promise<string[]>;
+export declare function sha256File(file: string): Promise<string>;
+/**
+ * Writes `byok-payload.json` for the payload in `dir` at build time (#1842)
+ * and returns the bytes written. Every regular file is listed; a symlink or
+ * other entry type, an existing manifest, an empty directory, an invalid id
+ * and a `meta` that is not a JSON object throw.
+ */
+export declare function writeServicePayloadManifest(dir: string, options: {
+    id: string;
+    meta?: JsonObject;
+}): Promise<Uint8Array>;
 // ==== @byok-sdk/client dist/testing/device-credentials.d.ts ====
 import type { DeviceCredentialBackend, DeviceRecord, FirstPairingAttempt } from '../daemon/device-credential-store.js';
 /**

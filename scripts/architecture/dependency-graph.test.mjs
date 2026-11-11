@@ -21,7 +21,7 @@ function repositorySubset(t) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const skipGenerated = source => !source.split(path.sep).some(part => part === 'node_modules' || part === 'dist');
   cpSync(path.join(repo, 'packages'), path.join(root, 'packages'), { recursive: true, filter: skipGenerated });
-  cpSync(path.join(repo, 'examples/bot-collaboration'), path.join(root, 'examples/bot-collaboration'), { recursive: true, filter: skipGenerated });
+  cpSync(path.join(repo, 'packages/bot-collaboration'), path.join(root, 'packages/bot-collaboration'), { recursive: true, filter: skipGenerated });
   return root;
 }
 
@@ -188,12 +188,12 @@ test('K8 rules importing the K4 root entry reach node:sqlite and fail the check'
   const root = repositorySubset(t);
   assert.deepEqual(inspectExamplePortability(root), []);
   appendFileSync(
-    path.join(root, 'examples/bot-collaboration/src/rules/outcome.ts'),
+    path.join(root, 'packages/bot-collaboration/src/rules/outcome.ts'),
     "\nimport { HostLedger } from '@byok-sdk/server/execution-core';\nvoid HostLedger;\n",
   );
   const violations = inspectExamplePortability(root);
-  assert.ok(violations.includes('portability: examples/bot-collaboration/src/rules/outcome.ts -> node:sqlite'), violations.join('\n'));
-  assert.ok(violations.includes('portability: examples/bot-collaboration/src/rules/outcome.ts -> node:async_hooks'), violations.join('\n'));
+  assert.ok(violations.includes('portability: packages/bot-collaboration/src/rules/outcome.ts -> node:sqlite'), violations.join('\n'));
+  assert.ok(violations.includes('portability: packages/bot-collaboration/src/rules/outcome.ts -> node:async_hooks'), violations.join('\n'));
   const baselineFile = path.join(root, 'scripts/architecture/dependency-baseline.json');
   mkdirSync(path.dirname(baselineFile), { recursive: true });
   writeFileSync(baselineFile, JSON.stringify(inspectRepository(root)));

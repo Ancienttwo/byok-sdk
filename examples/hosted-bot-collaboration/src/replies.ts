@@ -1,4 +1,4 @@
-import type { ReplyCheck, ReplyReadback } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import type { ReplyCheck, ReplyReadback } from '@byok-sdk/bot-collaboration/rules';
 import type { DueReplyCheck, HostedCollaborationStore } from './store';
 
 /** The SDK reply readback of one tenant: the SDK `readTaskAgentMessage`. */

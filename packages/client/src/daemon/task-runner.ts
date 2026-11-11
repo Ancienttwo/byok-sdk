@@ -2,6 +2,7 @@ import { type ResultReplyFailure } from './result-reply-failure.js';
 import type { RuntimeTaskInput } from '../types.js';
 import type { ActivityIngress } from '@byok-sdk/protocol';
 import type { ExecutionScratch, ScratchRoot } from './retention/scratch.js';
+import type { TaskRuntimeOwnership } from './task-settlement.js';
 import { StartupOwnership } from './startup-ownership.js';
 import {
   createEnvelope,
@@ -206,6 +207,8 @@ export interface TaskRunnerDeps {
   beforeClaim?: (taskId: string, runtime: string) => Promise<void>;
   blobClient: BlobResolver;
   batcherOptions?: ProgressBatcherOptions;
+  /** Runtime ownership facts for `Daemon.whenTaskSettled`. */
+  runtimeOwnership?: TaskRuntimeOwnership;
   /** Local-only evidence that a semantic terminal outcome could not yet release its runtime ownership. */
   onRuntimeDisposalFailure?: (event: {
     taskId: string;
@@ -590,7 +593,9 @@ export class TaskRunner {
       isOfferInFlight: taskId => this.inFlightOffers.has(taskId),
       allowRetry: () => !this.stoppingOffers,
       awaitTerminalCommit: taskId => this.deps.awaitTerminalCommit?.(taskId),
+      onRegistered: taskId => this.deps.runtimeOwnership?.runtimeHeld(taskId),
       onDisposed: taskId => {
+        this.deps.runtimeOwnership?.runtimeDisposed(taskId);
         this.pendingMessageTasks.delete(taskId);
         this.revokeAgentMessageContext(taskId);
         this.revokeAgentResultContext(taskId);

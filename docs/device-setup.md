@@ -430,13 +430,27 @@ payload is a directory plus `byok-payload.json`:
 
 ```
 { "format": "byok-service-payload", "version": 1, "id": "0.32.0",
-  "files": { "byok-agent.mjs": "<sha256 hex>" } }
+  "files": { "byok-agent.mjs": "<sha256 hex>" },
+  "meta": { "release": "2026.11" } }
 ```
 
+`meta` is optional Host data: any JSON object, which the SDK copies verbatim
+and does not interpret. Write the manifest at build time with
+`writeServicePayloadManifest(dir, { id, meta })` from
+`@byok-sdk/client/packaging`; it lists every regular file sorted by UTF-16
+code unit, refuses a symlink, an existing manifest and an empty directory,
+and returns the bytes it wrote, so the Host can sign exactly those.
+
 Verify the payload's signature before handing it to the SDK; the SDK only
-checks every file against `files` and refuses a file the manifest does not
-list. A `byok-agent` payload ships the single-file bundle `byok-agent.mjs`
-(built with `@byok-sdk/client/packaging`).
+checks every file against `files`, refuses a file the manifest does not list
+or a listed file that is missing, and stages the manifest bytes it parsed.
+The same `id` with different manifest bytes is `version_conflict`. Host
+policy such as a Node floor, file-size ceilings or file modes goes in
+`verifyPayload(stagedDir, manifest)`: it runs on the staged copy after every
+digest passed and before it becomes `versions/<id>` (and on an existing
+`versions/<id>` that matched), and a throw is `payload_invalid` with nothing
+new under `versions/`. A `byok-agent` payload ships the single-file bundle
+`byok-agent.mjs` (built with `@byok-sdk/client/packaging`).
 
 ```sh
 byok-agent install --payload ./payload-0.31.0 --install-root ~/Applications/Acme/agent --config device.json

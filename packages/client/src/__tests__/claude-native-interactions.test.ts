@@ -4,11 +4,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import { createClaudeControlChannel } from '../adapters/claude/control-channel';
+import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { ClaudeNativeInteractionBridge } from '../adapters/claude/native-interactions';
 import type { NativeInteractionHostOptions, NativeInteractionReceipt, NativeInteractionRequest } from '../native-interactions';
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+import { memoryClaude } from './fixtures/memory-claude';
 
 const fixture = fileURLToPath(new URL('./fixtures/claude-native-interactions.mjs', import.meta.url));
 const sessions: Session[] = [];
@@ -233,10 +234,9 @@ describe('Claude native bridge transport fencing', () => {
   function bridge(write: (frame: Record<string, unknown>) => Promise<void>, onFatal = vi.fn(), extras: Partial<NativeInteractionHostOptions> = {}) {
     const requests: NativeInteractionRequest[] = [];
     const native = new ClaudeNativeInteractionBridge({ onRequest: request => { requests.push(request); }, onFatal, ...extras });
-    native.bind(write);
     native.beginTurn();
     native.receive({ type: 'system', subtype: 'init', session_id: 'session-1' });
-    native.receive(permission);
+    native.request(permission, write);
     return { native, request: requests[0]!, onFatal };
   }
 
@@ -244,10 +244,9 @@ describe('Claude native bridge transport fencing', () => {
     const write = vi.fn(async (_frame: Record<string, unknown>) => {});
     const onRequest = vi.fn();
     const native = new ClaudeNativeInteractionBridge({ onRequest, onFatal: vi.fn() });
-    native.bind(write);
     native.beginTurn();
     native.receive({ type: 'system', subtype: 'init', session_id: 'session-1' });
-    native.receive({ type: 'control_request', request_id: 'perm-1', request: { subtype: 'can_use_tool', tool_name: toolName, input: { command: 'rm -rf build' }, tool_use_id: 't' } });
+    native.request({ type: 'control_request', request_id: 'perm-1', request: { subtype: 'can_use_tool', tool_name: toolName, input: { command: 'rm -rf build' }, tool_use_id: 't' } }, write);
     await Promise.resolve();
     expect(onRequest).not.toHaveBeenCalled();
     expect(native.channel.pending()).toEqual([]);
@@ -260,7 +259,6 @@ describe('Claude native bridge transport fencing', () => {
     const onRequest = vi.fn();
     const onFatal = vi.fn();
     const native = new ClaudeNativeInteractionBridge({ onRequest, onFatal, maxRequests: 1 });
-    native.bind(write);
     native.beginTurn();
     native.receive({ type: 'system', subtype: 'init', session_id: 'session-1' });
     let deep: Record<string, unknown> = { leaf: true };
@@ -268,7 +266,7 @@ describe('Claude native bridge transport fencing', () => {
     const large = { content: 'x'.repeat(200 * 1024), deep };
     for (const [index, input] of [{ command: 'ls' }, large, { command: 'pwd' }].entries()) {
       // A repeated pass-through ID is answered too: it never enters the question ledger.
-      native.receive({ type: 'control_request', request_id: index === 2 ? 'pass-0' : `pass-${index}`, request: { subtype: 'can_use_tool', tool_name: 'Write', input } });
+      native.request({ type: 'control_request', request_id: index === 2 ? 'pass-0' : `pass-${index}`, request: { subtype: 'can_use_tool', tool_name: 'Write', input } }, write);
     }
     await Promise.resolve();
     expect(onFatal).not.toHaveBeenCalled();
@@ -276,9 +274,9 @@ describe('Claude native bridge transport fencing', () => {
     expect(write).toHaveBeenCalledTimes(3);
     expect(write.mock.calls[1]![0]).toEqual({ type: 'control_response', response: { subtype: 'success', request_id: 'pass-1', response: { behavior: 'allow', updatedInput: large } } });
     // The single-request question budget is still whole after three pass-throughs.
-    native.receive(permission);
+    native.request(permission, write);
     expect(onRequest).toHaveBeenCalledTimes(1);
-    native.receive({ ...permission, request_id: 'native-2' });
+    native.request({ ...permission, request_id: 'native-2' }, write);
     expect(onFatal).toHaveBeenCalledTimes(1);
     expect(onFatal.mock.calls[0]![0]).toMatchObject({ code: 'capacity' });
   });
@@ -291,10 +289,9 @@ describe('Claude native bridge transport fencing', () => {
     const onRequest = vi.fn();
     const write = vi.fn(async () => {});
     const native = new ClaudeNativeInteractionBridge({ onRequest, onFatal });
-    native.bind(write);
     native.beginTurn();
     native.receive({ type: 'system', subtype: 'init', session_id: 'session-1' });
-    native.receive({ ...permission, request: { ...permission.request, input } });
+    native.request({ ...permission, request: { ...permission.request, input } }, write);
     expect(onRequest).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
     expect(onFatal).toHaveBeenCalledTimes(1);
@@ -314,7 +311,7 @@ describe('Claude native bridge transport fencing', () => {
     const receipts: NativeInteractionReceipt[] = [];
     const write = vi.fn(async () => {});
     const { native, request } = bridge(write, vi.fn(), { onResolved: receipt => { receipts.push(receipt); } });
-    native.receive({ ...permission, request_id: 'native-2' });
+    native.request({ ...permission, request_id: 'native-2' }, write);
     const other = native.channel.pending().find(pending => pending.requestId !== request.requestId)!;
     await native.channel.respond({ kind: 'cancel', requestId: request.requestId });
     expect(receipts).toContainEqual({ requestId: other.requestId, status: 'cancelled', reason: 'interrupted' });
@@ -333,29 +330,25 @@ describe('Claude native bridge transport fencing', () => {
     const onRequest = vi.fn();
     const write = vi.fn(async () => {});
     const native = new ClaudeNativeInteractionBridge({ onRequest, onFatal });
-    native.bind(write);
     native.beginTurn();
     native.receive({ type: 'system', subtype: 'init', session_id: 'session-1' });
-    native.receive(message);
+    native.request(message, write);
     expect(onRequest).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
     expect(onFatal).toHaveBeenCalledTimes(1);
   });
 
-  it('bounds initialization and never mistakes an initialize ACK for an interrupt ACK', async () => {
+  it('bounds initialization and never takes an unrelated ACK for it', async () => {
     vi.useFakeTimers();
-    const control = createClaudeControlChannel(20);
-    const write = vi.fn(async (_frame: Record<string, unknown>) => {});
-    control.bind(write);
-    const initialized = control.initialize();
-    expect(await control.interrupt()).toBe(false);
-    control.receive({ type: 'control_response', response: { subtype: 'success', request_id: 'unrelated' } });
+    const claude = memoryClaude();
+    const stream = new ClaudeStreamSession(claude.child as never);
+    const opened = stream.open({ env: {}, mcpServers: {}, initialize: { hooks: null }, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    const refused = expect(opened).rejects.toMatchObject({ phase: 'start', message: expect.stringContaining('Claude native control initialization failed') });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(claude.written).toMatchObject([{ type: 'control_request', request: { subtype: 'initialize', hooks: null } }]);
+    claude.send({ type: 'control_response', response: { subtype: 'success', request_id: 'unrelated' } });
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(await initialized).toBe(false);
-    const interrupted = control.interrupt();
-    control.receive({ type: 'control_response', response: { subtype: 'success', request_id: write.mock.calls[0]![0].request_id } });
-    await vi.advanceTimersByTimeAsync(20);
-    expect(await interrupted).toBe(false);
+    await refused;
     expect(vi.getTimerCount()).toBe(0);
   });
 

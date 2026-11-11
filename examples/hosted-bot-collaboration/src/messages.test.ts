@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ByokCloudOptions } from '@byok-sdk/cloud';
 import { taskId } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
+import { seedCollaboration } from '@byok-sdk/bot-collaboration/testing';
 import { freezeIntent } from './intents';
 import { storedKey } from './layout';
 import { vectorClock } from './memory-subject.test-support';

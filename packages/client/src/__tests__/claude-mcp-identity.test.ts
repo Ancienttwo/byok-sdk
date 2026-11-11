@@ -5,11 +5,12 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentEventSchema, type AgentEvent } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import { createClaudeControlChannel } from '../adapters/claude/control-channel';
+import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { claudeMcpEventIdentities, createClaudeMcpIdentityResolver } from '../adapters/claude/mcp-identity';
 import { AGENT_MESSAGE_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
 import type { Session, MessageDraftDelta } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+import { memoryClaude } from './fixtures/memory-claude';
 
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 const SALESKO_MCP_FIXTURE = fileURLToPath(new URL('./fixtures/fake-salesko-mcp.mjs', import.meta.url));
@@ -115,40 +116,25 @@ describe('Claude MCP identity from its own mcp_status answer', () => {
 });
 
 describe('Claude mcp_status control request', () => {
-  afterEach(() => vi.useRealTimers());
-
-  it('returns the response body and never blocks a concurrent interrupt', async () => {
-    const channel = createClaudeControlChannel(1000);
-    const frames: Array<{ request_id: string; request: { subtype: string } }> = [];
-    channel.bind(async frame => { frames.push(frame as never); });
-    const lookup = channel.mcpStatus();
-    expect(await channel.mcpStatus()).toBeUndefined();
-    const interrupt = channel.interrupt();
-    expect(frames.map(frame => frame.request.subtype)).toEqual(['mcp_status', 'interrupt']);
-    channel.receive({ type: 'control_response', response: { subtype: 'success', request_id: frames[1]!.request_id } });
-    expect(await interrupt).toBe(true);
+  it('returns the body, and undefined on an error answer or the process exit', async () => {
+    const claude = memoryClaude();
+    const stream = new ClaudeStreamSession(claude.child as never);
+    await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    const respond = (index: number, subtype: string, response?: unknown) =>
+      claude.send({ type: 'control_response', response: { subtype, request_id: claude.written[index]!.request_id, response } });
     const body = status({ name: 'market', tools: ['quote'] });
-    channel.receive({ type: 'control_response', response: { subtype: 'success', request_id: frames[0]!.request_id, response: body } });
+    const lookup = stream.mcpStatus();
+    respond(0, 'success', body);
     expect(await lookup).toEqual(body);
-  });
-
-  it('settles undefined on an error answer, a timeout or process close', async () => {
-    const channel = createClaudeControlChannel(1000);
-    const frames: Array<{ request_id: string }> = [];
-    channel.bind(async frame => { frames.push(frame as never); });
-    const failed = channel.mcpStatus();
-    channel.receive({ type: 'control_response', response: { subtype: 'error', request_id: frames[0]!.request_id, response: status() } });
+    const failed = stream.mcpStatus();
+    respond(1, 'error', status());
     expect(await failed).toBeUndefined();
-
-    vi.useFakeTimers();
-    const slow = channel.mcpStatus();
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(await slow).toBeUndefined();
-    vi.useRealTimers();
-
-    const open = channel.mcpStatus();
-    channel.closed();
+    const open = stream.mcpStatus();
+    claude.exit(0);
     expect(await open).toBeUndefined();
+    expect(claude.written.map(frame => frame.request.subtype)).toEqual(['mcp_status', 'mcp_status', 'mcp_status']);
+    // The consumed answers never reach the session records.
+    expect(stream.raw.records().some(record => (record.body as { type?: unknown }).type === 'control_response')).toBe(false);
   });
 });
 

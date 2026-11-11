@@ -1,9 +1,8 @@
 import type { PoolClient } from 'pg';
 import { agentKey, occurrenceIntentKey, taskId, type FrozenExecutionInput, type Intent, type Json, type RetryPolicy, type Routine,
   type RoutineDefinition } from '@byok-sdk/server/execution-core';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { SwitchExportError, type ArchivedRecord, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord, type RoutineRecord,
-  type SwitchContent, type SwitchExportRefusal, type SwitchHeader, type TombstoneRecord } from '@byok-sdk/example-bot-collaboration/migration';
+import { type ArchivedRecord, type CollaborationState, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord,
+  type RoutineRecord, type SwitchContent, SwitchExportError, type SwitchExportRefusal, type SwitchHeader, type TombstoneRecord } from '@byok-sdk/bot-collaboration/host-kit';
 import { storedKey } from './layout';
 import { hostJobRowKey } from './routines';
 

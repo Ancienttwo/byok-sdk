@@ -154,8 +154,8 @@ test('a bin API entry selects the package that declares the bin; an undeclared b
   const f = fixture(t);
   f.write('packages/client/package.json', { ...f.manifest, bin: { 'byok-agent-memory-mcp': './dist/bin/byok-agent-memory-mcp.js' } });
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 1 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } }, 'bin:byok-agent-memory-mcp': { policy: { budgetBytes: 2 } } });
-  // The owner, then its one package dependent: cloud-do tests import client source (#927).
-  assert.deepEqual(selectImpact(['api-surface/entries.json'], f).dirs.filter(dir => dir.startsWith('packages/')), ['packages/client', 'packages/cloud-do']);
+  // The owner, then its package dependents: K8 (#1845) and cloud-do, whose tests import client source (#927).
+  assert.deepEqual(selectImpact(['api-surface/entries.json'], f).dirs.filter(dir => dir.startsWith('packages/')), ['packages/bot-collaboration', 'packages/client', 'packages/cloud-do']);
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 1 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } }, 'bin:byok-unknown': {} });
   assert.throws(() => selectImpact(['api-surface/entries.json'], f), /unmapped API entry bin:byok-unknown/);
 });
@@ -186,43 +186,6 @@ test('published release registration fixture tests protocol without propagating 
 });
 
 
-test('reviewed private bot fixture cloud edge is accepted only as an additive workspace dev dependency', t => {
-  const f = fixture(t);
-  const dir = 'examples/bot-collaboration';
-  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.0', devDependencies: {} };
-  f.write(`${dir}/package.json`, manifest);
-  f.lock.workspaces[dir] = { name: manifest.name, version: manifest.version, devDependencies: {} };
-  f.write('bun.lock', f.lock);
-  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'private fixture');
-  f.base = git('rev-parse', 'HEAD').trim();
-  manifest.devDependencies['@byok-sdk/cloud'] = 'workspace:*';
-  f.write(`${dir}/package.json`, manifest);
-  f.lock.workspaces[dir].devDependencies['@byok-sdk/cloud'] = 'workspace:*';
-  f.write('bun.lock', f.lock);
-  const plan = selectImpact(['bun.lock', `${dir}/package.json`], f);
-  assert.ok(plan.dirs.includes(dir));
-  assert.ok(plan.families.includes('npm-release-pack'));
-  f.write(`${dir}/package.json`, { ...manifest, scripts: { test: 'echo bypass' } });
-  assert.throws(() => selectImpact([`${dir}/package.json`], f), /more than/);
-  f.write(`${dir}/package.json`, { ...manifest, devDependencies: {}, dependencies: manifest.devDependencies });
-  assert.throws(() => selectImpact([`${dir}/package.json`], f));
-  f.write(`${dir}/package.json`, manifest);
-  for (const value of ['^0.28.1', 'workspace:^']) {
-    f.lock.workspaces[dir].devDependencies['@byok-sdk/cloud'] = value;
-    f.write('bun.lock', f.lock);
-    assert.throws(() => selectImpact(['bun.lock'], f));
-  }
-  f.lock.workspaces[dir].devDependencies['@byok-sdk/cloud'] = 'workspace:*';
-  f.write('packages/client/package.json', { ...f.manifest, dependencies: { x: '2.0.0' } });
-  f.lock.workspaces['packages/client'].dependencies = { x: '2.0.0' };
-  f.lock.packages.x = ['x@2.0.0']; f.write('bun.lock', f.lock);
-  assert.ok(selectImpact(['bun.lock'], f).dirs.includes('packages/client'));
-  f.lock.packages.x = ['x@1.0.0']; f.write('bun.lock', f.lock);
-  manifest.private = false; f.write(`${dir}/package.json`, manifest);
-  assert.throws(() => selectImpact(['bun.lock'], f));
-});
-
 
 test('reviewed root-level basic fixtures select their workspace while unknown root files fail closed', () => {
   for (const path of ['examples/basic/clarification.test.ts', 'examples/basic/goal-btw.test.ts']) {
@@ -233,8 +196,8 @@ test('reviewed root-level basic fixtures select their workspace while unknown ro
 
 test('shared goal fixture selects its consumers without broadening unknown root support files', () => {
   const plan = selectImpact(['examples/basic/goal-btw.test-support.ts']);
-  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/desktop-bot-app', 'examples/host-execution-core',
-    'examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker']);
+  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/byok-mcp-server', 'examples/desktop-bot-app', 'examples/host-execution-core',
+    'examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker', 'packages/bot-collaboration']);
   assert.deepEqual(plan.families, ['adapter-lifecycle-smoke', 'dataplane']);
   assert.throws(() => selectImpact(['examples/basic/other.test-support.ts']));
 });
@@ -498,275 +461,63 @@ test('#794 D3: the Worker example manifest and lock rows are admitted by the sam
   assert.throws(() => selectImpact(['bun.lock'], f), /lock rows differ/, 'a lock entry that differs from the manifest');
 });
 
-test('#793: the K8 manifest admits only the reviewed hosted entries, and stays private', t => {
+test('#1845 S2: K8 moves to packages/bot-collaboration with its reviewed manifest; the K4 example stays a devDependency', t => {
   const f = fixture(t);
-  const dir = 'examples/bot-collaboration', path = `${dir}/package.json`;
-  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', devDependencies: { '@byok-sdk/cloud': 'workspace:*' } };
+  for (const id of ['protocol', 'server', 'cloud', 'core']) {
+    const manifest = { name: `@byok-sdk/${id}`, version: '0.28.0' };
+    f.write(`packages/${id}/package.json`, manifest); f.lock.workspaces[`packages/${id}`] = manifest;
+  }
+  const k4 = { name: '@byok-sdk/example-host-execution-core', version: '0.0.1', private: true, devDependencies: { '@hono/node-server': '^2.1.3', vitest: '^5.1.0' } };
+  f.write('examples/host-execution-core/package.json', k4); f.lock.workspaces['examples/host-execution-core'] = k4;
+  const old = { dir: 'examples/bot-collaboration', name: '@byok-sdk/example-bot-collaboration' };
+  const oldManifest = { name: old.name, version: '0.0.1', private: true };
+  f.write(`${old.dir}/package.json`, oldManifest); f.lock.workspaces[old.dir] = oldManifest;
+  f.lock.packages[old.name] = [`${old.name}@workspace:${old.dir}`];
+  const hosted = 'examples/hosted-bot-collaboration';
+  const hostedManifest = { name: '@byok-sdk/example-hosted-bot-collaboration', version: '0.0.1', private: true, dependencies: { [old.name]: 'workspace:*' } };
+  f.write(`${hosted}/package.json`, hostedManifest); f.lock.workspaces[hosted] = hostedManifest;
+  f.write('bun.lock', f.lock); rebase(f, 'K8 as an example');
+
+  const dir = 'packages/bot-collaboration', path = `${dir}/package.json`, name = '@byok-sdk/bot-collaboration';
+  const peers = { '@hono/node-server': '^2.1.3', vitest: '^5.1.0' };
+  const manifest = { name, version: '0.0.0', private: true, type: 'module', description: 'K8', main: './dist/index.js', types: './dist/index.d.ts',
+    exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' }, './host-kit': { types: './dist/host-kit.d.ts', import: './dist/host-kit.js' },
+      './rules': { types: './dist/rules/index.d.ts', import: './dist/rules/index.js' },
+      './testing': { types: './dist/testing.d.ts', import: './dist/testing.js' }, './package.json': './package.json' },
+    sideEffects: false, engines: { node: '>=24.15.0' }, scripts: { build: 'tsup && tsc -p tsconfig.build.json', typecheck: 'tsc --noEmit', test: 'vitest run', clean: 'rm -rf dist' },
+    dependencies: { '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' },
+    peerDependencies: peers, peerDependenciesMeta: { '@hono/node-server': { optional: true }, vitest: { optional: true } },
+    devDependencies: { '@byok-sdk/cloud': 'workspace:*', '@byok-sdk/core': 'workspace:*', '@byok-sdk/example-host-execution-core': 'workspace:*', ...peers } };
+  rmSync(join(f.cwd, old.dir), { recursive: true });
   f.write(path, manifest);
-  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the cloud edge');
-  f.base = git('rev-parse', 'HEAD').trim();
-  const exports = {
-    './rules/commands': './src/rules/commands.ts', './rules/commit': './src/rules/commit.ts', './model': './src/model.ts',
-    './coalesce': './src/coalesce.ts', './team': './src/team.ts', './test-support': './src/commit-vectors.test-support.ts',
-  };
-  f.write(path, { ...manifest, exports });
-  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
+  f.write(`${hosted}/package.json`, { ...hostedManifest, dependencies: { [name]: 'workspace:*' } });
+  delete f.lock.workspaces[old.dir]; delete f.lock.packages[old.name];
+  f.lock.workspaces[dir] = { name, version: manifest.version, dependencies: manifest.dependencies, devDependencies: manifest.devDependencies,
+    peerDependencies: peers, optionalPeers: ['@hono/node-server', 'vitest'] };
+  f.lock.packages[name] = [`${name}@workspace:${dir}`];
+  f.lock.workspaces[hosted] = { ...hostedManifest, dependencies: { [name]: 'workspace:*' } };
+  f.write('bun.lock', f.lock);
+  const plan = selectImpact([`${old.dir}/package.json`, path, `${hosted}/package.json`, 'bun.lock'], f);
+  for (const selected of [dir, hosted]) assert.ok(plan.dirs.includes(selected), selected);
+
+  const { '@byok-sdk/example-host-execution-core': k4Edge, ...devDependencies } = manifest.devDependencies;
   for (const [candidate, reason] of [
-    [{ ...manifest, exports: { ...exports, '.': './src/index.ts' } }, 'a root entry'],
-    [{ ...manifest, exports: { ...exports, './host': './src/host.ts' } }, 'another entry'],
-    [{ ...manifest, exports, scripts: { test: 'echo bypass' } }, 'another field'],
-    [{ ...manifest, exports: { ...exports, './model': './src/index.ts' } }, 'an entry retargeted to another file'],
-    [{ ...manifest, exports: Object.fromEntries(Object.entries(exports).filter(([key]) => key !== './team')) }, 'a subset of the entries'],
-    [{ ...manifest, exports, devDependencies: { '@byok-sdk/cloud': '^0.28.0' } }, 'a cloud edge retargeted to a registry spec'],
+    [{ ...manifest, dependencies: { ...manifest.dependencies, '@byok-sdk/example-host-execution-core': k4Edge }, devDependencies }, /runtime dependencies/],
+    [{ ...manifest, peerDependenciesMeta: { vitest: { optional: true } } }, /optional testing peers/],
+    [{ ...manifest, exports: { ...manifest.exports, './internal': './dist/internal.js' } }, /unreviewed shape/],
+    [{ ...manifest, private: false }, /unreviewed shape/],
+    [{ ...manifest, bin: { k8: './dist/bin.js' } }, /unreviewed field/],
+    [{ ...manifest, devDependencies: { ...manifest.devDependencies, 'left-pad': '1.0.0' } }, /reuse a base dependency spec \(left-pad\)/],
+    [{ ...manifest, devDependencies: (({ '@byok-sdk/cloud': _cloud, ...rest }) => rest)(manifest.devDependencies) }, /edges differ from the reviewed graph/],
   ]) {
     f.write(path, candidate);
-    assert.throws(() => selectImpact([path], f), /more than/, reason);
+    assert.throws(() => selectImpact([path], f), reason);
   }
-  f.write(path, { ...manifest, exports, private: false });
-  assert.throws(() => selectImpact([path], f), /must stay private/);
-  // The entries are admitted only as a new field: a base that already has other entries cannot become these.
-  f.write(path, { ...manifest, exports: { './other': './src/other.ts' } });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with other entries');
-  f.base = git('rev-parse', 'HEAD').trim();
-  f.write(path, { ...manifest, exports });
-  assert.throws(() => selectImpact([path], f), /more than/, 'a base that already has exports');
-});
-
-test('#793 D2g: the K8 manifest admits the retention entries only on top of the hosted entries', t => {
-  const f = fixture(t);
-  const dir = 'examples/bot-collaboration', path = `${dir}/package.json`;
-  const hosted = {
-    './rules/commands': './src/rules/commands.ts', './rules/commit': './src/rules/commit.ts', './model': './src/model.ts',
-    './coalesce': './src/coalesce.ts', './team': './src/team.ts', './test-support': './src/commit-vectors.test-support.ts',
-  };
-  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', exports: hosted };
   f.write(path, manifest);
-  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the hosted entries');
-  f.base = git('rev-parse', 'HEAD').trim();
-  const retention = { './retention': './src/retention.ts', './retention-vectors': './src/retention-vectors.test-support.ts' };
-  f.write(path, { ...manifest, exports: { ...hosted, ...retention } });
-  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
-  for (const [candidate, reason] of [
-    [{ ...manifest, exports: { ...hosted, './retention': './src/retention.ts' } }, 'one of the two entries'],
-    [{ ...manifest, exports: { ...hosted, ...retention, './host': './src/host.ts' } }, 'another entry'],
-    [{ ...manifest, exports: { ...hosted, ...retention, './retention': './src/host.ts' } }, 'an entry retargeted to another file'],
-    [{ ...manifest, exports: { ...retention } }, 'the retention entries without the hosted entries'],
-  ]) {
-    f.write(path, candidate);
-    assert.throws(() => selectImpact([path], f), /more than/, reason);
-  }
-});
-
-test('#793 D2f-1: the K8 manifest admits the routine entries only on top of the hosted and retention entries', t => {
-  const f = fixture(t);
-  const dir = 'examples/bot-collaboration', path = `${dir}/package.json`;
-  const hosted = {
-    './rules/commands': './src/rules/commands.ts', './rules/commit': './src/rules/commit.ts', './model': './src/model.ts',
-    './coalesce': './src/coalesce.ts', './team': './src/team.ts', './test-support': './src/commit-vectors.test-support.ts',
-    './retention': './src/retention.ts', './retention-vectors': './src/retention-vectors.test-support.ts',
-  };
-  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', exports: hosted };
-  f.write(path, manifest);
-  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the hosted and retention entries');
-  f.base = git('rev-parse', 'HEAD').trim();
-  const routines = { './routines': './src/routines.ts', './routine-vectors': './src/routine-vectors.test-support.ts' };
-  f.write(path, { ...manifest, exports: { ...hosted, ...routines } });
-  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
-  const { './retention': _retention, './retention-vectors': _vectors, ...withoutRetention } = hosted;
-  for (const [candidate, reason] of [
-    [{ ...manifest, exports: { ...hosted, './routines': './src/routines.ts' } }, 'one of the two entries'],
-    [{ ...manifest, exports: { ...hosted, ...routines, './host': './src/host.ts' } }, 'another entry'],
-    [{ ...manifest, exports: { ...hosted, ...routines, './routines': './src/host.ts' } }, 'an entry retargeted to another file'],
-    [{ ...manifest, exports: { ...withoutRetention, ...routines } }, 'the routine entries without the retention entries'],
-  ]) {
-    f.write(path, candidate);
-    assert.throws(() => selectImpact([path], f), /more than/, reason);
-  }
-});
-
-test('#793 D2b-out-1: the K8 manifest admits the delivery entries only on top of the hosted, retention and routine entries', t => {
-  const f = fixture(t);
-  const dir = 'examples/bot-collaboration', path = `${dir}/package.json`;
-  const routed = {
-    './rules/commands': './src/rules/commands.ts', './rules/commit': './src/rules/commit.ts', './model': './src/model.ts',
-    './coalesce': './src/coalesce.ts', './team': './src/team.ts', './test-support': './src/commit-vectors.test-support.ts',
-    './retention': './src/retention.ts', './retention-vectors': './src/retention-vectors.test-support.ts',
-    './routines': './src/routines.ts', './routine-vectors': './src/routine-vectors.test-support.ts',
-  };
-  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', exports: routed };
-  f.write(path, manifest);
-  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the hosted, retention and routine entries');
-  f.base = git('rev-parse', 'HEAD').trim();
-  const delivery = { './channel': './src/channel.ts', './delivery': './src/delivery.ts', './delivery-routing': './src/delivery-routing.ts',
-    './delivery-vectors': './src/delivery-vectors.test-support.ts' };
-  f.write(path, { ...manifest, exports: { ...routed, ...delivery } });
-  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
-  const { './routines': _routines, './routine-vectors': _vectors, ...withoutRoutines } = routed;
-  for (const [candidate, reason] of [
-    [{ ...manifest, exports: { ...routed, './channel': './src/channel.ts' } }, 'one of the four entries'],
-    [{ ...manifest, exports: { ...routed, ...delivery, './host': './src/host.ts' } }, 'another entry'],
-    [{ ...manifest, exports: { ...routed, ...delivery, './delivery': './src/host.ts' } }, 'an entry retargeted to another file'],
-    [{ ...manifest, exports: { ...withoutRoutines, ...delivery } }, 'the delivery entries without the routine entries'],
-  ]) {
-    f.write(path, candidate);
-    assert.throws(() => selectImpact([path], f), /more than/, reason);
-  }
-});
-
-test('#975 slice 2: the K8 manifest admits the migration entry only on top of the hosted, retention, routine and delivery entries', t => {
-  const f = fixture(t);
-  const dir = 'examples/bot-collaboration', path = `${dir}/package.json`;
-  const delivered = {
-    './rules/commands': './src/rules/commands.ts', './rules/commit': './src/rules/commit.ts', './model': './src/model.ts',
-    './coalesce': './src/coalesce.ts', './team': './src/team.ts', './test-support': './src/commit-vectors.test-support.ts',
-    './retention': './src/retention.ts', './retention-vectors': './src/retention-vectors.test-support.ts',
-    './routines': './src/routines.ts', './routine-vectors': './src/routine-vectors.test-support.ts',
-    './channel': './src/channel.ts', './delivery': './src/delivery.ts', './delivery-routing': './src/delivery-routing.ts',
-    './delivery-vectors': './src/delivery-vectors.test-support.ts',
-  };
-  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', exports: delivered };
-  f.write(path, manifest);
-  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the hosted, retention, routine and delivery entries');
-  f.base = git('rev-parse', 'HEAD').trim();
-  const migration = { './migration': './src/migration.ts' };
-  f.write(path, { ...manifest, exports: { ...delivered, ...migration } });
-  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
-  const { './delivery': _delivery, ...withoutDelivery } = delivered;
-  for (const [candidate, reason] of [
-    [{ ...manifest, exports: { ...delivered, ...migration, './host': './src/host.ts' } }, 'another entry'],
-    [{ ...manifest, exports: { ...delivered, './migration': './src/host.ts' } }, 'the entry retargeted to another file'],
-    [{ ...manifest, exports: { ...withoutDelivery, ...migration } }, 'the migration entry without a delivery entry'],
-  ]) {
-    f.write(path, candidate);
-    assert.throws(() => selectImpact([path], f), /more than/, reason);
-  }
-});
-
-test('#975 slice 5: the K8 manifest admits the switch entry only on top of the entries up to the migration entry', t => {
-  const f = fixture(t);
-  const dir = 'examples/bot-collaboration', path = `${dir}/package.json`;
-  const migrated = {
-    './rules/commands': './src/rules/commands.ts', './rules/commit': './src/rules/commit.ts', './model': './src/model.ts',
-    './coalesce': './src/coalesce.ts', './team': './src/team.ts', './test-support': './src/commit-vectors.test-support.ts',
-    './retention': './src/retention.ts', './retention-vectors': './src/retention-vectors.test-support.ts',
-    './routines': './src/routines.ts', './routine-vectors': './src/routine-vectors.test-support.ts',
-    './channel': './src/channel.ts', './delivery': './src/delivery.ts', './delivery-routing': './src/delivery-routing.ts',
-    './delivery-vectors': './src/delivery-vectors.test-support.ts', './migration': './src/migration.ts',
-  };
-  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', exports: migrated };
-  f.write(path, manifest);
-  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the entries up to the migration entry');
-  f.base = git('rev-parse', 'HEAD').trim();
-  const sw = { './switch': './src/switch.ts' };
-  f.write(path, { ...manifest, exports: { ...migrated, ...sw } });
-  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
-  const { './migration': _migration, ...withoutMigration } = migrated;
-  for (const [candidate, reason] of [
-    [{ ...manifest, exports: { ...migrated, ...sw, './host': './src/host.ts' } }, 'another entry'],
-    [{ ...manifest, exports: { ...migrated, './switch': './src/host.ts' } }, 'the entry retargeted to another file'],
-    [{ ...manifest, exports: { ...withoutMigration, ...sw } }, 'the switch entry without the migration entry'],
-  ]) {
-    f.write(path, candidate);
-    assert.throws(() => selectImpact([path], f), /more than/, reason);
-  }
-  // #1325: the L test Host entry, only on top of exactly the entries up to the switch entry.
-  const lTestHost = { './l-test-host': './src/l-test-host.test-support.ts' };
-  f.write(path, { ...manifest, exports: { ...migrated, ...lTestHost } });
-  assert.throws(() => selectImpact([path], f), /more than/, 'the L test Host entry without the switch entry');
-  f.write(path, { ...manifest, exports: { ...migrated, ...sw } });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the switch entry');
-  f.base = git('rev-parse', 'HEAD').trim();
-  f.write(path, { ...manifest, exports: { ...migrated, ...sw, ...lTestHost } });
-  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
-  // #1362: the message rule entry, only on top of exactly the entries up to the L test Host entry.
-  const message = { './rules/message': './src/rules/message.ts' };
-  f.write(path, { ...manifest, exports: { ...migrated, ...sw, ...message } });
-  assert.throws(() => selectImpact([path], f), /more than/, 'the message rule entry without the L test Host entry');
-  f.write(path, { ...manifest, exports: { ...migrated, ...sw, ...lTestHost } });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the L test Host entry');
-  f.base = git('rev-parse', 'HEAD').trim();
-  f.write(path, { ...manifest, exports: { ...migrated, ...sw, ...lTestHost, ...message } });
-  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
-  // #1516: exactly the dream and priority entries together, preserving every earlier export.
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the message rule entry');
-  f.base = git('rev-parse', 'HEAD').trim();
-  const current = { ...migrated, ...sw, ...lTestHost, ...message };
-  const dreams = { './dream': './src/dream.ts', './rules/priority': './src/rules/priority.ts' };
-  f.write(path, { ...manifest, exports: { ...current, ...dreams } });
-  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
-  for (const changed of [
-    { ...current, './dream': './src/dream.ts' },
-    { ...current, ...dreams, './rules/priority': './src/host.ts' },
-    { ...current, ...dreams, './host': './src/host.ts' },
-  ]) {
-    f.write(path, { ...manifest, exports: changed });
-    assert.throws(() => selectImpact([path], f), /more than/);
-  }
-});
-
-test('#1664: K8 adds only the shared adapter-steps export', t => {
-  const f = fixture(t), path = 'examples/bot-collaboration/package.json';
-  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1',
-    exports: { './model': './src/model.ts' } };
-  f.write(path, manifest);
-  rebase(f, 'K8 before shared adapter steps');
-  const exports = { ...manifest.exports, './adapter-steps': './src/adapter-steps.ts' };
-  f.write(path, { ...manifest, exports });
-  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
-  f.write(path, { ...manifest, exports: { ...exports, './other': './src/other.ts' } });
-  assert.throws(() => selectImpact([path], f), /more than/, 'an extra export');
-});
-
-test('#1666: K8 adds only the shared delegation rules export', t => {
-  const f = fixture(t), path = 'examples/bot-collaboration/package.json';
-  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1',
-    exports: { './model': './src/model.ts' } };
-  f.write(path, manifest);
-  rebase(f, 'K8 before delegation rules export');
-  const exports = { ...manifest.exports, './rules/delegation': './src/rules/delegation.ts' };
-  f.write(path, { ...manifest, exports });
-  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
-  f.write(path, { ...manifest, exports: { ...exports, './other': './src/other.ts' } });
-  assert.throws(() => selectImpact([path], f), /more than/, 'an extra export');
-  // #1806: the root entry for the desktop app.
-  f.write(path, { ...manifest, exports: { '.': './src/index.ts', ...manifest.exports } });
-  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
-});
-
-test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
-  const f = fixture(t);
-  const path = 'examples/bot-collaboration/package.json';
-  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', devDependencies: {} };
-  f.write(path, manifest);
-  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 without the cloud edge');
-  f.base = git('rev-parse', 'HEAD').trim();
-  f.write(path, { ...manifest, devDependencies: { '@byok-sdk/cloud': 'workspace:*' } });
-  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
-  for (const spec of ['^0.28.0', 'workspace:^', 'file:../../packages/cloud']) {
-    f.write(path, { ...manifest, devDependencies: { '@byok-sdk/cloud': spec } });
-    assert.throws(() => selectImpact([path], f), /more than/, spec);
-  }
-});
-
-test('#1375: the K8 core edge moves to devDependencies, and only that move is admitted', t => {
-  const f = fixture(t);
-  const path = 'examples/bot-collaboration/package.json';
-  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1' };
-  f.write(path, { ...manifest, dependencies: { '@byok-sdk/core': 'workspace:*', '@byok-sdk/protocol': 'workspace:*' }, devDependencies: {} });
-  rebase(f, 'K8 with core as a dependency');
-  f.write(path, { ...manifest, dependencies: { '@byok-sdk/protocol': 'workspace:*' }, devDependencies: { '@byok-sdk/core': 'workspace:*' } });
-  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
-  f.write(path, { ...manifest, dependencies: { '@byok-sdk/protocol': 'workspace:*' }, devDependencies: { '@byok-sdk/core': '^0.36.0' } });
-  assert.throws(() => selectImpact([path], f), /more than/, 'another spec');
-  f.write(path, { ...manifest, dependencies: { '@byok-sdk/protocol': 'workspace:*' }, devDependencies: {} });
-  assert.throws(() => selectImpact([path], f), /more than/, 'a dropped edge');
+  f.write(`${hosted}/package.json`, { ...hostedManifest, dependencies: { [name]: 'workspace:^' } });
+  assert.throws(() => selectImpact([`${hosted}/package.json`], f), /more than the reviewed fields/, 'a renamed edge with another spec');
+  f.lock.workspaces[dir].optionalPeers = ['vitest']; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /K8 lock rows differ/);
 });
 
 test('#1375: the MCP server example drops its core edge, and stays private', t => {
@@ -1082,8 +833,8 @@ test('new graph-registered private workspaces and matching lock rows are admitte
     f.write(`packages/${id}/package.json`, manifest); f.lock.workspaces[`packages/${id}`] = manifest;
   }
   // #1806: the desktop example's K8 edge needs K8 declared in the base.
-  const k8 = { name: '@byok-sdk/example-bot-collaboration', version: '0.0.1', private: true };
-  f.write('examples/bot-collaboration/package.json', k8); f.lock.workspaces['examples/bot-collaboration'] = k8;
+  const k8 = { name: '@byok-sdk/bot-collaboration', version: '0.0.1', private: true };
+  f.write('packages/bot-collaboration/package.json', k8); f.lock.workspaces['packages/bot-collaboration'] = k8;
   f.write('bun.lock', f.lock); rebase(f, 'base dependency declarations');
   const dir = 'examples/basic';
   const manifest = { name: '@byok-sdk/example-basic', version: '0.0.1', private: true, type: 'module',

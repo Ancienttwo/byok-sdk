@@ -1,0 +1,587 @@
+{
+  "default": [
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_1"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_1",
+        "isError": false
+      },
+      {
+        "type": "progress",
+        "text": "reply-1:say hi",
+        "startsMessage": true
+      },
+      {
+        "type": "usage",
+        "inputTokens": 15,
+        "cachedInputTokens": 0,
+        "outputTokens": 20
+      },
+      {
+        "type": "turn_end"
+      },
+      {
+        "ended": true
+      }
+    ],
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_2"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_2",
+        "isError": false
+      },
+      {
+        "type": "progress",
+        "text": "reply-2:turn 2",
+        "startsMessage": true
+      },
+      {
+        "type": "usage",
+        "inputTokens": 15,
+        "cachedInputTokens": 0,
+        "outputTokens": 20
+      },
+      {
+        "type": "turn_end"
+      },
+      {
+        "ended": true
+      }
+    ]
+  ],
+  "deny": [
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_1"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "Claude requested permissions to use Bash, but you haven't granted it yet."
+        },
+        "toolCallId": "toolu_fake_1",
+        "isError": true
+      },
+      {
+        "type": "progress",
+        "text": "reply-1:say hi",
+        "startsMessage": true
+      },
+      {
+        "type": "usage",
+        "inputTokens": 15,
+        "cachedInputTokens": 0,
+        "outputTokens": 20
+      },
+      {
+        "type": "turn_end"
+      },
+      {
+        "ended": true
+      }
+    ]
+  ],
+  "artifact": [
+    [
+      {
+        "type": "tool_use",
+        "tool": "Write",
+        "input": {
+          "file_path": "<ws>/out/hello.md",
+          "content": "artifact-body"
+        },
+        "toolCallId": "toolu_fake_1"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Write",
+        "output": {
+          "content": "File created successfully at: <ws>/out/hello.md"
+        },
+        "toolCallId": "toolu_fake_1",
+        "isError": false
+      },
+      {
+        "type": "artifact",
+        "name": "out/hello.md",
+        "contentType": "text/markdown"
+      },
+      {
+        "type": "progress",
+        "text": "reply-1:say hi",
+        "startsMessage": true
+      },
+      {
+        "type": "usage",
+        "inputTokens": 15,
+        "cachedInputTokens": 0,
+        "outputTokens": 20
+      },
+      {
+        "type": "turn_end"
+      },
+      {
+        "ended": true
+      }
+    ]
+  ],
+  "outsideArtifact": [
+    [
+      {
+        "type": "tool_use",
+        "tool": "Write",
+        "input": {
+          "file_path": "/tmp/byok-claude-parity-outside.md",
+          "content": "artifact-body"
+        },
+        "toolCallId": "toolu_fake_1"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Write",
+        "output": {
+          "content": "File created successfully at: /tmp/byok-claude-parity-outside.md"
+        },
+        "toolCallId": "toolu_fake_1",
+        "isError": false
+      },
+      {
+        "type": "progress",
+        "text": "reply-1:say hi",
+        "startsMessage": true
+      },
+      {
+        "type": "usage",
+        "inputTokens": 15,
+        "cachedInputTokens": 0,
+        "outputTokens": 20
+      },
+      {
+        "type": "turn_end"
+      },
+      {
+        "ended": true
+      }
+    ]
+  ],
+  "unknownFrames": [
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_1"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_1",
+        "isError": false
+      },
+      {
+        "type": "progress",
+        "text": "reply-1:say hi",
+        "startsMessage": true
+      },
+      {
+        "type": "usage",
+        "inputTokens": 15,
+        "cachedInputTokens": 0,
+        "outputTokens": 20
+      },
+      {
+        "type": "turn_end"
+      },
+      {
+        "ended": true
+      }
+    ]
+  ],
+  "splitClosingText": [
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_1"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_1",
+        "isError": false
+      },
+      {
+        "type": "progress",
+        "text": "reply-1",
+        "startsMessage": true
+      },
+      {
+        "type": "progress",
+        "text": ":say hi",
+        "startsMessage": false
+      },
+      {
+        "type": "usage",
+        "inputTokens": 15,
+        "cachedInputTokens": 0,
+        "outputTokens": 20
+      },
+      {
+        "type": "turn_end"
+      },
+      {
+        "ended": true
+      }
+    ]
+  ],
+  "repeatClosingText": [
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_1"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_1",
+        "isError": false
+      },
+      {
+        "type": "progress",
+        "text": "reply-1:say hi",
+        "startsMessage": true
+      },
+      {
+        "type": "progress",
+        "text": "reply-1:say hi",
+        "startsMessage": true
+      },
+      {
+        "type": "usage",
+        "inputTokens": 15,
+        "cachedInputTokens": 0,
+        "outputTokens": 20,
+        "model": "fake-model"
+      },
+      {
+        "type": "turn_end"
+      },
+      {
+        "ended": true
+      }
+    ]
+  ],
+  "subagentModels": [
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_1"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_1",
+        "isError": false
+      },
+      {
+        "type": "progress",
+        "text": "reply-1:say hi",
+        "startsMessage": true
+      },
+      {
+        "type": "usage",
+        "inputTokens": 15,
+        "cachedInputTokens": 0,
+        "outputTokens": 20
+      },
+      {
+        "type": "turn_end"
+      },
+      {
+        "ended": true
+      }
+    ]
+  ],
+  "partialMessages": [
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_1"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_1",
+        "isError": false
+      },
+      {
+        "type": "message_draft_delta",
+        "text": "reply-1",
+        "startsMessage": true
+      },
+      {
+        "type": "message_draft_delta",
+        "text": ":say hi",
+        "startsMessage": false
+      },
+      {
+        "type": "progress",
+        "text": "reply-1:say hi",
+        "startsMessage": true
+      },
+      {
+        "type": "usage",
+        "inputTokens": 15,
+        "cachedInputTokens": 0,
+        "outputTokens": 20,
+        "model": "fake-model"
+      },
+      {
+        "type": "turn_end"
+      },
+      {
+        "ended": true
+      }
+    ],
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_2"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_2",
+        "isError": false
+      },
+      {
+        "type": "message_draft_delta",
+        "text": "reply-2",
+        "startsMessage": true
+      },
+      {
+        "type": "message_draft_delta",
+        "text": ":turn 2",
+        "startsMessage": false
+      },
+      {
+        "type": "progress",
+        "text": "reply-2:turn 2",
+        "startsMessage": true
+      },
+      {
+        "type": "usage",
+        "inputTokens": 15,
+        "cachedInputTokens": 0,
+        "outputTokens": 20,
+        "model": "fake-model"
+      },
+      {
+        "type": "turn_end"
+      },
+      {
+        "ended": true
+      }
+    ]
+  ],
+  "failures": [
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_1"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_1",
+        "isError": false
+      },
+      {
+        "type": "progress",
+        "text": "API Error: fixture failure",
+        "startsMessage": true
+      },
+      {
+        "type": "error",
+        "message": "API Error: fixture failure"
+      },
+      {
+        "thrown": "RuntimeExecutionFailure: claude reported terminal task failure",
+        "failure": {
+          "class": "rate_limited"
+        }
+      }
+    ],
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_2"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_2",
+        "isError": false
+      },
+      {
+        "type": "progress",
+        "text": "API Error: fixture failure",
+        "startsMessage": true
+      },
+      {
+        "type": "error",
+        "message": "API Error: fixture failure"
+      },
+      {
+        "thrown": "RuntimeExecutionFailure: claude reported terminal task failure",
+        "failure": {
+          "class": "auth"
+        }
+      }
+    ],
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_3"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_3",
+        "isError": false
+      },
+      {
+        "thrown": "RuntimeExecutionFailure: claude runtime process ended before a terminal result frame",
+        "failure": {
+          "class": "runtime_exited"
+        }
+      }
+    ]
+  ],
+  "malformedResult": [
+    [
+      {
+        "type": "tool_use",
+        "tool": "Bash",
+        "input": {
+          "command": "echo hi"
+        },
+        "toolCallId": "toolu_fake_1"
+      },
+      {
+        "type": "tool_result",
+        "tool": "Bash",
+        "output": {
+          "content": "hi\n"
+        },
+        "toolCallId": "toolu_fake_1",
+        "isError": false
+      },
+      {
+        "type": "progress",
+        "text": "reply-1:say hi",
+        "startsMessage": true
+      },
+      {
+        "type": "error",
+        "message": "claude result frame had a missing/invalid is_error flag (got undefined) — treating as failure, fail-closed; diagnostic content on the frame: reply-1:say hi"
+      },
+      {
+        "thrown": "RuntimeExecutionFailure: claude emitted a malformed terminal result frame",
+        "failure": {
+          "class": "unknown"
+        }
+      }
+    ]
+  ]
+}
