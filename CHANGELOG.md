@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1774)** — A task runner reducer dispatch that rejects now fails the task's open terminal receipt through `TaskRunnerHost.dispatchOrReject` instead of being dropped; with no open receipt (not yet begun or already settled) the rejection is logged. An event that `JSON.stringify` cannot serialize now fails the task through the event pump instead of counting as 0 bytes toward `maxTaskOutputBytes`.
+
 - **Fixed (client; #1760)** — Redelivered offers for tasks that failed after claim but before the runtime started (instruction blob, native sessions, Agent memory, resident MEMORY.md or file scope failures) no longer claim and fail the task again. These failures now retain the task in the bounded finished collection; the first `task.claim` and `task.fail` are unchanged.
 
 - **Fixed (client; #1732)** — `byok-agent doctor` now names `secure_dir_mode <storeDir>` with a hint when the daemon is offline, no refusal is recorded, and the process-owned store root's mode is not 0700. A daemon that cannot set that mode refuses to start before it can record anything, so doctor previously showed only `daemon offline`. A foreign-owned store root is still not reported.

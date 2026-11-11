@@ -180,11 +180,11 @@ export function sendAgentMessageRecord(this: TaskRunner, outbox: AgentMessageOut
     active.messageDraft?.finalize(record.body);
     active.messageDraft?.stop();
     // M3: the send attempt only affects a failed terminal's outbox revoke.
-    void hostFor(this).dispatch({
+    void hostFor(this).dispatchOrReject({
       type: 'message.send_attempted',
       taskId: record.taskId,
       atMs: Date.now(),
-    }).catch(() => undefined);
+    });
   }
   const envelope = this['agentMessageEnvelopes'].get(record) ?? createEnvelope('agent.message.publish', outbox.publishPayload(record), {
     taskId: record.taskId,
@@ -250,10 +250,10 @@ export async function handleAgentMessageDisposition(this: TaskRunner, taskId: st
     host.clearMessageCompletion(taskId);
     if (current?.terminal !== undefined) {
       // M4: the terminal was selected first; a late refusal only audits.
-      void host.dispatch({
+      void host.dispatchOrReject({
         type: 'message.refused', taskId, atMs: Date.now(),
         ...(completionToken === undefined ? {} : { completionToken }),
-      }).catch(() => undefined);
+      });
       return;
     }
     await this['fail'](taskId, 'required Agent message was refused', false);
@@ -267,10 +267,10 @@ export async function handleAgentMessageDisposition(this: TaskRunner, taskId: st
   this['revokeAgentMessageContext'](taskId);
   if (current?.terminal !== undefined) {
     // M4: cancel/terminal first; acceptance never revives the task.
-    void host.dispatch({
+    void host.dispatchOrReject({
       type: 'message.accepted', taskId, atMs: Date.now(),
       ...(completionToken === undefined ? {} : { completionToken }),
-    }).catch(() => undefined);
+    });
     return;
   }
   const completion = host.clearMessageCompletion(taskId);
@@ -286,19 +286,19 @@ export async function handleAgentMessageDisposition(this: TaskRunner, taskId: st
     const receipt = beginTerminal.call(this, active, successfulCompletionPlan.call(
       this, active, completion?.finalOutput ?? '', completion?.document,
     ));
-    void host.dispatch({
+    void host.dispatchOrReject({
       type: 'message.accepted',
       taskId,
       atMs: Date.now(),
       completionToken: current.completion.token,
-    }).catch((error: unknown) => host.rejectTerminal(taskId, error));
+    });
     await receipt;
     return;
   }
   // M0: accepted before turn_end only records the flag; the turn keeps running.
-  void host.dispatch({
+  void host.dispatchOrReject({
     type: 'message.accepted', taskId, atMs: Date.now(),
-  }).catch(() => undefined);
+  });
 }
 
 export function agentResultStore(this: TaskRunner, homeDir: string): Promise<AgentResultStore> {
