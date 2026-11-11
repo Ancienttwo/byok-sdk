@@ -71,4 +71,14 @@ describe('desktop bridge', () => {
     await expect(host.stop()).rejects.toThrow('Host did not shut down within 100 ms');
     expect((await exited)[1]).toBe('SIGTERM');
   });
+
+  it('kills a Host that never answers hello when the app quits, and the quit fails', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['pipe', 'pipe', 'ignore'] });
+    const host = new HostProcess({ spawnHost: () => child, onState: () => {}, shutdownGraceMs: 100 });
+    host.start();
+
+    const exited = once(child, 'exit');
+    await expect(host.stop()).rejects.toThrow('Host did not shut down within 100 ms');
+    expect((await exited)[1]).toBe('SIGTERM');
+  });
 });

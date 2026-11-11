@@ -39,6 +39,7 @@ export function spawnDevHost(): HostChild {
  */
 export class HostProcess {
   readonly #options: Required<HostProcessOptions>;
+  #child: HostChild | undefined;
   #client: BridgeClient | undefined;
   #launching: Promise<void> = Promise.resolve();
   #restartTimer: NodeJS.Timeout | undefined;
@@ -66,18 +67,24 @@ export class HostProcess {
   async stop(): Promise<void> {
     this.#stopping = true;
     clearTimeout(this.#restartTimer);
-    // A Host that is saying hello now gets the same acknowledged shutdown.
-    await this.#launching;
-    const client = this.#client;
-    if (!client) return;
+    const child = this.#child;
+    if (!child) return;
+    // Armed on the spawned child, so a Host that never answers hello is killed too.
     let killed = false;
-    const timer = setTimeout(() => { killed = true; client.kill(); }, this.#options.shutdownGraceMs);
+    const timer = setTimeout(() => { killed = true; child.kill(); }, this.#options.shutdownGraceMs);
     try {
+      // A Host that is saying hello now gets the same acknowledged shutdown.
+      await this.#launching;
+      const client = this.#client;
+      if (!client) {
+        if (killed) throw new Error('Host never answered hello');
+        return;
+      }
       await client.call('shutdown', undefined);
       const code = await client.exited;
       if (code !== 0) throw new Error(`Host exited with code ${code} after shutdown`);
     } catch (error) {
-      client.kill();
+      child.kill();
       if (killed) throw new Error(`Host did not shut down within ${this.#options.shutdownGraceMs} ms`, { cause: error });
       throw error;
     } finally {
@@ -89,7 +96,8 @@ export class HostProcess {
     const startedAt = Date.now();
     let client: BridgeClient;
     try {
-      client = await BridgeClient.connect(this.#options.spawnHost(), this.#options.onState);
+      this.#child = this.#options.spawnHost();
+      client = await BridgeClient.connect(this.#child, this.#options.onState);
     } catch (error) {
       if (error instanceof BridgeError && error.code === 'bridge_version_mismatch') {
         this.#options.onState({ state: 'failed', reason: error.message });
@@ -101,6 +109,7 @@ export class HostProcess {
     this.#client = client;
     void client.exited.then(code => {
       this.#client = undefined;
+      this.#child = undefined;
       this.#restart(startedAt, `Host exited with code ${code}`);
     });
   }
