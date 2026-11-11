@@ -1,13 +1,13 @@
-import { computeCapabilities } from './support';
-import { AgentHomeProjectionCompletionClient } from '../agent-home-projection-client';
-import { createProviderProvisioningNoticeProcessor } from '../provider-provisioning';
-import { createAgentMemoryIntentProcessor } from '../agent-memory-intent';
-import { InputPreparationCompletionClient } from '../input-preparation-completion-client';
-import { createRemoteInputPreparationHandler } from '../input-preparation-remote';
-import { BlobClient } from '../blob-client';
-import { SealedTasks } from '../sealed-task';
-import type { DaemonScope } from './scope';
-import type { StartRun } from './start-run';
+import { computeCapabilities } from './support.js';
+import { AgentHomeProjectionCompletionClient } from '../agent-home-projection-client.js';
+import { createProviderProvisioningNoticeProcessor } from '../provider-provisioning.js';
+import { createAgentMemoryIntentProcessor } from '../agent-memory-intent.js';
+import { InputPreparationCompletionClient } from '../input-preparation-completion-client.js';
+import { createRemoteInputPreparationHandler } from '../input-preparation-remote.js';
+import { BlobClient } from '../blob-client.js';
+import { SealedTasks } from '../sealed-task.js';
+import type { DaemonScope } from './scope.js';
+import type { StartRun } from './start-run.js';
 
 /**
  * The second stage of `runStartUnderLease` (#926), synchronous: computes the

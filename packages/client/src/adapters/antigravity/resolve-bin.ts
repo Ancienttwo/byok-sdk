@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ResolvedBin } from '../codex/resolve-bin';
-import { findRuntimeCommandOnPath, runtimeInvocationHost } from '../runtime-invocation';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
+import { findRuntimeCommandOnPath, runtimeInvocationHost } from '../runtime-invocation.js';
 
 function officialLocation(platform: NodeJS.Platform): string {
   if (platform !== 'win32') return path.posix.join(os.homedir(), '.local', 'bin', 'agy');

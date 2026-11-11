@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path';
-import type { AgentRef } from './agent-home';
+import type { AgentRef } from './agent-home.js';
 
 /**
  * The only product tool-authorization modes, chosen by the local Host per task

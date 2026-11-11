@@ -17,7 +17,7 @@ import { DEDUP_RING_CAPACITY, type InboundDedupStore } from '@byok-sdk/cloud';
 import type { TenantId } from '@byok-sdk/core';
 import type { AgentRef } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
-import type { ByokPool } from '../pool';
+import type { ByokPool } from '../pool.js';
 
 export class PostgresInboundDedupStore implements InboundDedupStore {
   readonly #pool: Pool;

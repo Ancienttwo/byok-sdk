@@ -8,8 +8,8 @@ import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpire
  * value leaks.
  */
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
-import type { CloudCrypto } from '../../crypto/port';
-import type { NonceStore } from '../ports';
+import type { CloudCrypto } from '../../crypto/port.js';
+import type { NonceStore } from '../ports.js';
 
 /** ~5min, matching the reference server (docs/protocol.md §6.2). */
 export const NONCE_TTL_MS = 5 * 60 * 1000;

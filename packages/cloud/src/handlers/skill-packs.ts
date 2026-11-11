@@ -21,7 +21,7 @@
  */
 import { principalTenant, type SkillPackStore } from '@byok-sdk/core';
 import type { Context } from 'hono';
-import { admitDeviceRequest, type DeviceRouteDeps } from './shared';
+import { admitDeviceRequest, type DeviceRouteDeps } from './shared.js';
 
 /** Rows per `GET /byok/skill-packs` response. A tenant's pack catalogue is small by design. */
 export const DEFAULT_SKILL_PACK_PAGE_LIMIT = 50;

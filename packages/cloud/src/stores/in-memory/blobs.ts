@@ -28,14 +28,14 @@
  */
 import { ByokCoreError, type Clock, type ContentHash, type ObjectStore, type StorageReservation, type TenantId } from '@byok-sdk/core';
 import { byokBlobContentPath } from '@byok-sdk/protocol';
-import type { CloudCrypto } from '../../crypto/port';
+import type { CloudCrypto } from '../../crypto/port.js';
 import type {
   BlobContentProxy,
   BlobObservation,
   BlobReadResult,
   BlobWriteResult,
   CloudBlobStore,
-} from '../ports';
+} from '../ports.js';
 
 /** How long a presigned upload/download URL stays valid. */
 export const BLOB_URL_TTL_MS = 15 * 60 * 1000;

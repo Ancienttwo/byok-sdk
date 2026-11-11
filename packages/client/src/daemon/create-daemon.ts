@@ -1,8 +1,8 @@
-import { agySessionStoreOf } from '../util/agy-session-retention';
-import type { OutboundStatus } from './outbound-settlement';
-import { TerminalCommitQueue } from './terminal-commit-queue';
-import { type RuntimeObservation } from '../runtime-detection';
-import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../login-shell-environment';
+import { agySessionStoreOf } from '../util/agy-session-retention.js';
+import type { OutboundStatus } from './outbound-settlement.js';
+import { TerminalCommitQueue } from './terminal-commit-queue.js';
+import { type RuntimeObservation } from '../runtime-detection.js';
+import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../login-shell-environment.js';
 import type {
   AgentEgressPolicy,
   Envelope,
@@ -15,78 +15,78 @@ import type {
   McpToolsetObservation,
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
-} from '../types';
+} from '../types.js';
 import {
   type AgentHomeExecutionStatus,
   type AgentHomeProjection,
-} from '../agent-home';
-import type { AgentRef } from '../agent-home';
-import { agentMemoryCommitStore } from './create-daemon/services';
+} from '../agent-home.js';
+import type { AgentRef } from '../agent-home.js';
+import { agentMemoryCommitStore } from './create-daemon/services.js';
 import {
   type LocalAgentReleaseIdentity,
-} from '../release-identity';
-import { assertCodexSandboxSetting, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
-import type { RuntimeEnvironmentPolicy } from '../runtime/environment';
-import { ApprovalRegistry, type LocalToolApprovalPolicy } from './approvals';
-import { AuthManager } from './auth-manager';
-import { resolveMachineId } from './machine-id';
-import { DaemonHaltError, type DaemonLifecycle } from './daemon-lifecycle';
+} from '../release-identity.js';
+import { assertCodexSandboxSetting, type CodexSandboxSetting } from '../adapters/codex/codex-adapter.js';
+import type { RuntimeEnvironmentPolicy } from '../runtime/environment.js';
+import { ApprovalRegistry, type LocalToolApprovalPolicy } from './approvals.js';
+import { AuthManager } from './auth-manager.js';
+import { resolveMachineId } from './machine-id.js';
+import { DaemonHaltError, type DaemonLifecycle } from './daemon-lifecycle.js';
 import {
   type ControlStorageStatus,
-} from './control-protocol';
+} from './control-protocol.js';
 import {
   type InputPreparationAuthorityResolver,
   type InputPreparationCounterAdapter,
   type InputPreparationLimitsPolicyV1,
-} from '../input-preparation';
-import { deterministicJitterMs } from './deterministic-jitter';
-import { type OperationalHealthSnapshot } from './operational-health';
-import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
-import { type DeviceEnrollment } from './store';
-import { type DeviceMemberStatus } from './e2ee-key-package-notice';
-import { type LocalTaskJournal } from './journal/journal';
-import type { JournalOpenFaultSeam } from '../util/sqlite-support';
+} from '../input-preparation.js';
+import { deterministicJitterMs } from './deterministic-jitter.js';
+import { type OperationalHealthSnapshot } from './operational-health.js';
+import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer.js';
+import { type DeviceEnrollment } from './store.js';
+import { type DeviceMemberStatus } from './e2ee-key-package-notice.js';
+import { type LocalTaskJournal } from './journal/journal.js';
+import type { JournalOpenFaultSeam } from '../util/sqlite-support.js';
 import { promises as fs } from 'node:fs';
-import { type StorageConfig } from './retention/config';
-import { RetentionSweeper, type RetentionTimers } from './retention/sweeper';
-import { createRetentionRegistry } from './retention/producers';
+import { type StorageConfig } from './retention/config.js';
+import { RetentionSweeper, type RetentionTimers } from './retention/sweeper.js';
+import { createRetentionRegistry } from './retention/producers.js';
 
-import { DEFAULT_MAX_INLINE_EVENT_BYTES, MIN_MAX_INLINE_EVENT_BYTES } from './event-spill';
+import { DEFAULT_MAX_INLINE_EVENT_BYTES, MIN_MAX_INLINE_EVENT_BYTES } from './event-spill.js';
 import {
   DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME,
   DEFAULT_MAX_CONCURRENT_TASKS,
   DEFAULT_MAX_TASK_OUTPUT_BYTES,
-} from './task-runner';
+} from './task-runner.js';
 import {
   type ProgressBatcherOptions,
-} from './progress-batcher';
-import { type AgentEgressReliableAppendResult } from './agent-egress-controller';
-import { type AgentEgressStatus } from './agent-egress-policy';
-import type { AgentReliableEgressRecord } from './agent-egress-spool';
+} from './progress-batcher.js';
+import { type AgentEgressReliableAppendResult } from './agent-egress-controller.js';
+import { type AgentEgressStatus } from './agent-egress-policy.js';
+import type { AgentReliableEgressRecord } from './agent-egress-spool.js';
 import {
   type ProviderProvisioningHandler,
-} from './provider-provisioning';
-import { exportAgentMemoryHome, type AgentMemoryExportOptions } from './agent-memory-export';
-import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
-import { assertRuntimeEnvironmentPolicies, buildRuntimeAdapters, type DaemonRuntimesConfig } from '../adapters/runtime-adapters';
+} from './provider-provisioning.js';
+import { exportAgentMemoryHome, type AgentMemoryExportOptions } from './agent-memory-export.js';
+import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host.js';
+import { assertRuntimeEnvironmentPolicies, buildRuntimeAdapters, type DaemonRuntimesConfig } from '../adapters/runtime-adapters.js';
 import {
   type AgentMemoryHostedProjection,
-} from './agent-memory';
+} from './agent-memory.js';
 import {
   type AgentContentReadRoot,
-} from './agent-content-read';
-import type { DaemonState } from './create-daemon/state';
-import { injectedAdapterConfigConflicts } from './create-daemon/support';
-import { resolveDaemonConfig } from './create-daemon/config';
-import { composeDaemonStores } from './create-daemon/stores';
-import { composeDaemonWorkspaces } from './create-daemon/workspaces';
-import type { DaemonScope } from './create-daemon/scope';
-import { bindDaemonFunctions } from './create-daemon/functions';
-import { createControlMethods } from './create-daemon/control-methods';
-import type { ToolAuthorizationPolicy } from '../tool-authorization';
-import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './config-schema/effective';
-import { DaemonConfigInvalidError } from '../daemon-config-invalid-error';
-import { toolAuthorizationIssues } from './config-schema/static-tool-authorization';
+} from './agent-content-read.js';
+import type { DaemonState } from './create-daemon/state.js';
+import { injectedAdapterConfigConflicts } from './create-daemon/support.js';
+import { resolveDaemonConfig } from './create-daemon/config.js';
+import { composeDaemonStores } from './create-daemon/stores.js';
+import { composeDaemonWorkspaces } from './create-daemon/workspaces.js';
+import type { DaemonScope } from './create-daemon/scope.js';
+import { bindDaemonFunctions } from './create-daemon/functions.js';
+import { createControlMethods } from './create-daemon/control-methods.js';
+import type { ToolAuthorizationPolicy } from '../tool-authorization.js';
+import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './config-schema/effective.js';
+import { DaemonConfigInvalidError } from '../daemon-config-invalid-error.js';
+import { toolAuthorizationIssues } from './config-schema/static-tool-authorization.js';
 import type { AgentMemoryExport, AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 /**
@@ -162,7 +162,7 @@ export interface DaemonConfig {
    */
   localToolApproval?: LocalToolApprovalPolicy;
   /** Select an explicit macOS keychain for device enrollment custody. */
-  deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
+  deviceCredentials?: import('./device-credential-store.js').DeviceCredentialConfig;
   storage?: StorageConfig;
   /** Distribution-owned application release; observability only, never a protocol/capability gate. */
   localAgentRelease: LocalAgentReleaseIdentity;
@@ -295,7 +295,7 @@ export interface DaemonConfig {
    * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
    * Pi tasks do not invoke it.
    */
-  piByokLauncher?: import('../adapters/pi/pi-adapter').PiByokLauncherConfig;
+  piByokLauncher?: import('../adapters/pi/pi-adapter.js').PiByokLauncherConfig;
   /**
    * M5 batch-3 (workstream 1): explicit auto-select priority order for
    * `TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)
@@ -774,7 +774,7 @@ export interface DaemonOverrides {
    * Explicit enrollment-custody dependency. The caller owns its secret storage
    * and lifetime; omission composes the platform OS credential store.
    */
-  deviceCredentials?: import('./device-credential-store').DeviceCredentialBackend;
+  deviceCredentials?: import('./device-credential-store.js').DeviceCredentialBackend;
   retention?: { clock?: () => Date; timers?: RetentionTimers; freeBytesProvider?: () => Promise<number> };
   /** Test-only synchronous kill points; never supplied by production configuration. */
   executionRecoveryFault?: (step: 'terminal:before-send' | 'terminal:queued' | 'outbound:before-post' | 'outbound:after-ack') => void;

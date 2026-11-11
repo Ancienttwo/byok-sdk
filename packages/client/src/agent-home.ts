@@ -10,20 +10,20 @@ import {
   type AgentRef,
   type TerminalAgentHomeProjection,
 } from '@byok-sdk/protocol';
-import { atomicWriteFile } from './util/atomic-write';
-import { type ExistingAncestor, resolveExistingAncestor } from './util/existing-ancestor';
-import { ConfiguredPathLinkError, foldNameAliases } from './util/fold-name-aliases';
+import { atomicWriteFile } from './util/atomic-write.js';
+import { type ExistingAncestor, resolveExistingAncestor } from './util/existing-ancestor.js';
+import { ConfiguredPathLinkError, foldNameAliases } from './util/fold-name-aliases.js';
 import {
   AGENT_HOME_READER_RUN_MAX_RETAINED,
   AGENT_HOME_READER_RUNS_DIRECTORY,
   isReaderRunName,
   type AgentHomeAccessMode,
-} from './agent-home-readers';
+} from './agent-home-readers.js';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
   type PathMutationGate,
-} from './util/path-mutation-gate';
+} from './util/path-mutation-gate.js';
 
 export type { AgentRef } from '@byok-sdk/protocol';
 

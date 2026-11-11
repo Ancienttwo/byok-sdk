@@ -1,9 +1,9 @@
-import type { AgentReliableEgressRecord } from '../agent-egress-spool';
+import type { AgentReliableEgressRecord } from '../agent-egress-spool.js';
 import { createEnvelope, AgentContentReceiptPayloadSchema } from '@byok-sdk/protocol';
 import type { AgentEgressReliablePayload } from '@byok-sdk/protocol';
-import type { AgentEgressReliableAppendResult } from '../agent-egress-controller';
-import type { AgentReliableEgressInput } from '../create-daemon';
-import type { DaemonScope } from './scope';
+import type { AgentEgressReliableAppendResult } from '../agent-egress-controller.js';
+import type { AgentReliableEgressInput } from '../create-daemon.js';
+import type { DaemonScope } from './scope.js';
 
 /** Reliable Agent egress dispatch and publication (#926). */
 

@@ -9,8 +9,8 @@
  */
 import { tenantKey, type TenantId } from '@byok-sdk/core';
 import type { AgentRef } from '@byok-sdk/protocol';
-import { agentReliabilityKey } from '../../agent-reliability';
-import type { InboundDedupStore } from '../ports';
+import { agentReliabilityKey } from '../../agent-reliability.js';
+import type { InboundDedupStore } from '../ports.js';
 
 /** Ids retained per physical or Agent-bound key. Same depth as the reference server's ring. */
 export const DEDUP_RING_CAPACITY = 1024;

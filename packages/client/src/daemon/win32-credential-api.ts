@@ -1,4 +1,4 @@
-import { loadKoffi } from '../adapters/win32-job-object';
+import { loadKoffi } from '../adapters/win32-job-object.js';
 
 /**
  * Windows Credential Manager through advapi32, in this process.

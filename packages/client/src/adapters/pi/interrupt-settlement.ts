@@ -1,4 +1,4 @@
-import type { PiRpcClient } from './rpc-client';
+import type { PiRpcClient } from './rpc-client.js';
 
 type Waiter = { resolve: () => void; reject: (error: Error) => void };
 // Private protocol state: neither the client declaration nor its constructor

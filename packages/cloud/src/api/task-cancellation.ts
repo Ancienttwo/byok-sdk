@@ -1,9 +1,9 @@
-import type { ByokCloud, ByokCloudOptions } from '../cloud';
+import type { ByokCloud, ByokCloudOptions } from '../cloud.js';
 import { contentHash, type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import { createEnvelope, decodeEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
-import { ByokCloudError } from '../errors';
-import { isTaskRedactionTombstone } from '../task-redaction';
-import { tenantStoresFor, type CloudRootStores } from '../tenant-stores';
+import { ByokCloudError } from '../errors.js';
+import { isTaskRedactionTombstone } from '../task-redaction.js';
+import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
 
 interface Dependencies {
   root: CloudRootStores;

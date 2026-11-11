@@ -6,7 +6,7 @@
  * or accepting flakes. A composition under test injects one of these and moves
  * time explicitly.
  */
-import type { MutableClock } from '../stores';
+import type { MutableClock } from '../stores.js';
 
 /** Fixed start instant, so golden-ish assertions in the suite read the same on every run. */
 export const IN_MEMORY_CLOCK_EPOCH = '2026-01-01T00:00:00.000Z';

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PI_THINKING_LEVELS } from './pi-model-catalog.generated';
+import { PI_THINKING_LEVELS } from './pi-model-catalog.generated.js';
 
 /**
  * Pi's own `MODEL_THINKING_LEVELS`, generated from the pinned

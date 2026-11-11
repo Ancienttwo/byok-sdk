@@ -1,4 +1,4 @@
-import { ByokKeysError } from './errors';
+import { ByokKeysError } from './errors.js';
 
 /**
  * Legal secret-entry names, 3 to 96 characters.

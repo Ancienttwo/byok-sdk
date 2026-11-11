@@ -1,13 +1,13 @@
 import path from 'node:path';
 
-import { type CommandRunner, runCommand } from './command-runner';
-import { ByokKeysError } from './errors';
-import { assertSecretName, assertSecretNamespace } from './secret-name';
+import { type CommandRunner, runCommand } from './command-runner.js';
+import { ByokKeysError } from './errors.js';
+import { assertSecretName, assertSecretNamespace } from './secret-name.js';
 import {
   DEFAULT_SECRET_SERVICE_PREFIX,
   type SecretStore,
   decodeStrictBase64Utf8,
-} from './secret-store';
+} from './secret-store.js';
 
 /**
  * Marker written in front of every stored value so a read can tell a value this

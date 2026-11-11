@@ -1,13 +1,13 @@
-import { startControlServer, AnotherControlServerRunningError } from '../control-server';
-import { type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError } from '../daemon-lifecycle';
-import { InsecureServerUrlError } from '../url';
-import { DeviceRecordRePairRequiredError } from '../store';
-import { DeviceStoreBindingMismatchError } from '../daemon-errors';
-import { CursorUnreadableError } from '../cursor-store';
-import { AuthRequestAbortedError, DeviceRevokedError } from '../auth-manager';
-import { PrivateDirectoryRefusedError, PrivateSocketModeError, PrivateSocketPathError } from '../../util/private-unix-socket';
-import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS } from './support';
-import type { DaemonScope } from './scope';
+import { startControlServer, AnotherControlServerRunningError } from '../control-server.js';
+import { type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError } from '../daemon-lifecycle.js';
+import { InsecureServerUrlError } from '../url.js';
+import { DeviceRecordRePairRequiredError } from '../store.js';
+import { DeviceStoreBindingMismatchError } from '../daemon-errors.js';
+import { CursorUnreadableError } from '../cursor-store.js';
+import { AuthRequestAbortedError, DeviceRevokedError } from '../auth-manager.js';
+import { PrivateDirectoryRefusedError, PrivateSocketModeError, PrivateSocketPathError } from '../../util/private-unix-socket.js';
+import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS } from './support.js';
+import type { DaemonScope } from './scope.js';
 
 /** The daemon lifecycle: the serialized mutation slot, lifecycle phases, start and stop (#926). */
 

@@ -18,7 +18,7 @@ import { NONCE_TTL_MS, type NonceStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
-import type { ByokPool } from '../pool';
+import type { ByokPool } from '../pool.js';
 
 const NONCE_BYTES = 24;
 

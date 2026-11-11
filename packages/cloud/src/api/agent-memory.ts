@@ -1,4 +1,4 @@
-import type { ByokCloud, ByokCloudOptions } from '../cloud';
+import type { ByokCloud, ByokCloudOptions } from '../cloud.js';
 import { type TenantId } from '@byok-sdk/core';
 import {
   type AgentMemoryProjectionPlainMutation,
@@ -6,10 +6,10 @@ import {
   type AgentMemoryProjectionEraseResult,
   type AgentMemoryProjectionSealedMutation,
 } from '@byok-sdk/protocol';
-import type { AgentMemoryProjectionSealing } from '../agent-memory-projection';
-import { ByokCloudError } from '../errors';
-import type { TenantStores } from '../tenant-stores';
-import { sameAgentRef } from './enqueue';
+import type { AgentMemoryProjectionSealing } from '../agent-memory-projection.js';
+import { ByokCloudError } from '../errors.js';
+import type { TenantStores } from '../tenant-stores.js';
+import { sameAgentRef } from './enqueue.js';
 
 interface Dependencies {
   options: ByokCloudOptions;

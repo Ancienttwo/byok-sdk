@@ -17,10 +17,10 @@
  *   tenant they act on is the row's, by construction.
  */
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { CloudCrypto } from '../crypto/port';
-import type { CloudStores, DeviceRecord, PairingCodeInfo } from '../stores/ports';
-import { ACCESS_TOKEN_TTL_SECONDS, type TokenSigner } from './tokens';
-import { verifyNonceSignature } from './verify';
+import type { CloudCrypto } from '../crypto/port.js';
+import type { CloudStores, DeviceRecord, PairingCodeInfo } from '../stores/ports.js';
+import { ACCESS_TOKEN_TTL_SECONDS, type TokenSigner } from './tokens.js';
+import { verifyNonceSignature } from './verify.js';
 
 /** ~10min, matching the reference server's pairing-code lifetime. */
 export const PAIRING_CODE_TTL_MS = 10 * 60 * 1000;

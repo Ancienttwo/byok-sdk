@@ -39,10 +39,8 @@ function code(text: string): string {
 }
 
 function resolveRelative(fromFile: string, specifier: string): string {
-  const base = path.resolve(path.dirname(fromFile), specifier);
-  for (const candidate of [`${base}.ts`, path.join(base, 'index.ts')]) {
-    if (existsSync(candidate)) return candidate;
-  }
+  const candidate = path.resolve(path.dirname(fromFile), specifier).replace(/\.js$/, '.ts');
+  if (existsSync(candidate)) return candidate;
   throw new Error(`unresolved relative import ${specifier} from ${path.relative(SRC_ROOT, fromFile)}`);
 }
 

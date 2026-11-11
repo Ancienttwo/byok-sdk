@@ -13,13 +13,13 @@ import {
   type RuntimeUnavailableEntry,
   type ToolsetId,
 } from '@byok-sdk/protocol';
-import { AuthManager } from './auth-manager';
-import type { CursorStore } from './cursor-store';
-import type { DaemonHaltReason } from './daemon-lifecycle';
-import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
-import { LongPollClient, type CorrelatedOutcome, type MessageBatchPostResult } from './long-poll-transport';
+import { AuthManager } from './auth-manager.js';
+import type { CursorStore } from './cursor-store.js';
+import type { DaemonHaltReason } from './daemon-lifecycle.js';
+import { createFleetJitter, type FleetJitter } from './deterministic-jitter.js';
+import { LongPollClient, type CorrelatedOutcome, type MessageBatchPostResult } from './long-poll-transport.js';
 
-export { ReplayCursorTooOldError } from './replay-cursor';
+export { ReplayCursorTooOldError } from './replay-cursor.js';
 
 /**
  * #1121: the most bytes of droppable envelopes the outbox holds while the

@@ -1,14 +1,14 @@
-import { ConnectionManager } from '../connection-manager';
-import { toJournalEnvelopeRecord, terminalKindOf } from './support';
-import { JournalRecordTooLargeError, journalHash } from '../journal/journal';
+import { ConnectionManager } from '../connection-manager.js';
+import { toJournalEnvelopeRecord, terminalKindOf } from './support.js';
+import { JournalRecordTooLargeError, journalHash } from '../journal/journal.js';
 import { createEnvelope, decodeEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
-import { terminalIdentity } from '../terminal-identity';
-import { hostFor } from '../task-runner/host';
-import type { DaemonScope } from './scope';
-import type { StartRun } from './start-run';
-import type { StartLanes } from './start-lanes';
-import type { StartTerminals } from './start-terminals';
-import type { StartEnvelopes } from './start-envelopes';
+import { terminalIdentity } from '../terminal-identity.js';
+import { hostFor } from '../task-runner/host.js';
+import type { DaemonScope } from './scope.js';
+import type { StartRun } from './start-run.js';
+import type { StartLanes } from './start-lanes.js';
+import type { StartTerminals } from './start-terminals.js';
+import type { StartEnvelopes } from './start-envelopes.js';
 
 /**
  * The last stage of `runStartUnderLease` (#926), synchronous: builds this

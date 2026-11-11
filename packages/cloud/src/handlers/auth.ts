@@ -23,8 +23,8 @@ import {
   type PairResponse,
   type TokenResponse,
 } from '@byok-sdk/protocol';
-import type { AuthPlane } from '../auth/plane';
-import { readBoundedJsonBody } from './shared';
+import type { AuthPlane } from '../auth/plane.js';
+import { readBoundedJsonBody } from './shared.js';
 
 const AUTH_JSON_BODY_MAX_BYTES = 16 * 1024;
 /** One body for an unknown and a revoked device alike, so the code is no existence oracle. */

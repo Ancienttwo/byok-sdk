@@ -6,7 +6,7 @@ import { StringDecoder } from 'node:string_decoder';
 import type { Context } from '@earendil-works/chord';
 import { ExecutionError, ok, err, type ShellExecOptions, type ShellExecResult, type Result } from '@earendil-works/pi-durable/env';
 import type { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
-import { disposeOwnedProcessTree } from '../process-tree';
+import { disposeOwnedProcessTree } from '../process-tree.js';
 
 // Only defer a suffix that can still become a valid UTF-8 character.
 function utf8Boundary(chunk: Buffer): number {

@@ -2,8 +2,8 @@ import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import { tenantKey, type TenantId } from '@byok-sdk/core';
 import { SealedTaskOutputSchema } from '@byok-sdk/protocol';
 import { z } from 'zod';
-import { ByokCloudError } from './errors';
-import { sameSealedProjection } from './sealed-comparison';
+import { ByokCloudError } from './errors.js';
+import { sameSealedProjection } from './sealed-comparison.js';
 
 export const DEFAULT_APPROVAL_TIMELINE_CAPACITY = 50;
 /** How long a timeline stays readable after its task's output closes; there is no idle expiry (#1113 A3). */

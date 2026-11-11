@@ -1,5 +1,5 @@
-import type { ToolAuthorizationLane } from '../../tool-authorization';
-import type { RuntimeAdapterDescriptor } from '../../types';
+import type { ToolAuthorizationLane } from '../../tool-authorization.js';
+import type { RuntimeAdapterDescriptor } from '../../types.js';
 
 /**
  * The local support matrix of the explicit file-scope policy (#1061 slice 1,

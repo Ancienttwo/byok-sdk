@@ -1,9 +1,9 @@
 import path from 'node:path';
 import type { StoreCompatibility } from '@byok-sdk/core';
-import { readServiceInstallationState, type ServiceInstallation, type ServiceUpgradeReceipt } from '../../lifecycle/service-installation';
-import { inspectDaemonStores } from '../../diagnostics/store-compatibility';
-import { checkUpgradeFrom } from '../../lifecycle/upgrade-from';
-import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../official-release';
+import { readServiceInstallationState, type ServiceInstallation, type ServiceUpgradeReceipt } from '../../lifecycle/service-installation.js';
+import { inspectDaemonStores } from '../../diagnostics/store-compatibility.js';
+import { checkUpgradeFrom } from '../../lifecycle/upgrade-from.js';
+import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../official-release.js';
 
 /** Exit code when the check ran and at least one store is `new-path-repair` or `rejected`. */
 export const UPGRADE_CHECK_REFUSED_EXIT_CODE = 2;

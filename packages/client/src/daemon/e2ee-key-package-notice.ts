@@ -11,9 +11,9 @@
  * open or seal at that epoch fetches again on its cache miss.
  */
 import type { E2eeKeyPackageAvailablePayload } from '@byok-sdk/protocol';
-import type { DeviceMemberLog } from './device-member';
-import type { DeviceMemberKeyring, ScopeKeyFetchResult } from './e2ee-keyring';
-import { E2eeMemberClientError } from './e2ee-member-client';
+import type { DeviceMemberLog } from './device-member.js';
+import type { DeviceMemberKeyring, ScopeKeyFetchResult } from './e2ee-keyring.js';
+import { E2eeMemberClientError } from './e2ee-member-client.js';
 
 /** This run's member: still resuming, none, or the verified keyring. */
 export type DeviceMemberStatus = 'resuming' | 'none' | DeviceMemberKeyring;

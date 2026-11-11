@@ -1,22 +1,22 @@
 import type { CapabilityDeclaration } from '@byok-sdk/core';
 import type { CapabilityFlag, RuntimeInfo, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
-import type { ServiceEnvironmentStatus } from '../../login-shell-environment';
-import type { RuntimeObservation } from '../../runtime-detection';
-import type { AgentEgressController } from '../agent-egress-controller';
-import type { AuthManager } from '../auth-manager';
-import type { BlobClient } from '../blob-client';
-import type { ConnectionManager } from '../connection-manager';
-import type { ControlServerHandle } from '../control-server';
-import type { DaemonLifecycle } from '../daemon-lifecycle';
-import type { DaemonOwnerLease } from '../../util/daemon-owner';
-import type { FleetJitter } from '../deterministic-jitter';
-import type { DeviceMemberKeyring, MemberFreshness } from '../e2ee-keyring';
-import type { InputPreparationService } from '../input-preparation-service';
-import type { JournalIdentity, LocalTaskJournal } from '../journal/journal';
-import type { SqliteLocalTaskJournal } from '../journal/sqlite-journal';
-import type { PresencePublisher } from '../presence-publisher';
-import type { SealedTasks } from '../sealed-task';
-import type { TaskRunner } from '../task-runner';
+import type { ServiceEnvironmentStatus } from '../../login-shell-environment.js';
+import type { RuntimeObservation } from '../../runtime-detection.js';
+import type { AgentEgressController } from '../agent-egress-controller.js';
+import type { AuthManager } from '../auth-manager.js';
+import type { BlobClient } from '../blob-client.js';
+import type { ConnectionManager } from '../connection-manager.js';
+import type { ControlServerHandle } from '../control-server.js';
+import type { DaemonLifecycle } from '../daemon-lifecycle.js';
+import type { DaemonOwnerLease } from '../../util/daemon-owner.js';
+import type { FleetJitter } from '../deterministic-jitter.js';
+import type { DeviceMemberKeyring, MemberFreshness } from '../e2ee-keyring.js';
+import type { InputPreparationService } from '../input-preparation-service.js';
+import type { JournalIdentity, LocalTaskJournal } from '../journal/journal.js';
+import type { SqliteLocalTaskJournal } from '../journal/sqlite-journal.js';
+import type { PresencePublisher } from '../presence-publisher.js';
+import type { SealedTasks } from '../sealed-task.js';
+import type { TaskRunner } from '../task-runner.js';
 
   /**
  * The daemon's reassigned state, one field per value that used to be a

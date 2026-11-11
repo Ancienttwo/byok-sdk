@@ -3,11 +3,11 @@ import {
   type CollectExpiredCounts, type CollectExpiredInput, type CollectExpiredResult, type CoreStores, type DeviceAssertionReplayAuthority,
   type Clock, type TenantId,
 } from '@byok-sdk/core';
-import { MAX_DEVICE_PROOF_CLOCK_SKEW_MS } from './auth/device-proof';
-import { ByokCloudError } from './errors';
-import type { CloudCrypto } from './crypto/port';
-import type { CloudStores } from './stores/ports';
-import { archiveTerminalTasks, type TaskArchiveStepCounts } from './task-archive';
+import { MAX_DEVICE_PROOF_CLOCK_SKEW_MS } from './auth/device-proof.js';
+import { ByokCloudError } from './errors.js';
+import type { CloudCrypto } from './crypto/port.js';
+import type { CloudStores } from './stores/ports.js';
+import { archiveTerminalTasks, type TaskArchiveStepCounts } from './task-archive.js';
 
 export interface RetentionPolicy {
   readonly mailboxAckedRetentionMs: bigint;

@@ -1,11 +1,11 @@
 import { execFileSync, spawn, spawnSync, type ChildProcess, type SpawnOptions, type SpawnSyncOptions } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { RuntimeDisposalFailure } from '../runtime-failure';
+import { RuntimeDisposalFailure } from '../runtime-failure.js';
 import { resolveSystemTool } from '@byok-sdk/core/system-tool';
-import { walkTaskkillPidSet } from './taskkill-pid-set';
+import { walkTaskkillPidSet } from './taskkill-pid-set.js';
 // OAR 0.37.0 `shared/executable/process-tree.ts`, vendored with upstream bytes.
 import { descendantsOf, killEntries, readProcessTable, type ProcessEntry, type ProcessTable } from '../runtime/oar-process-tree.js';
-import { processSignalState } from '../util/process-signal-state';
+import { processSignalState } from '../util/process-signal-state.js';
 
 const DEFAULT_TERM_GRACE_MS = 750;
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -293,7 +293,7 @@ export interface AdoptOwnedProcessTreeOptions {
  */
 const defaultJobObject = {
   async assign(pid: number, nativeAssetRoot?: string): Promise<{ release(): void }> {
-    const { assignOwnedProcessToJob } = await import('./win32-job-object');
+    const { assignOwnedProcessToJob } = await import('./win32-job-object.js');
     return assignOwnedProcessToJob(pid, { nativeAssetRoot });
   },
 };

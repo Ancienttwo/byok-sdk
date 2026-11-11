@@ -1,7 +1,7 @@
 import { TASK_STATES, type TaskState } from '@byok-sdk/protocol';
-import { type DaemonTaskInfo } from '../index';
-import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import type { DaemonRecord } from '../daemon/daemon-record';
+import { type DaemonTaskInfo } from '../index.js';
+import type { DaemonLifecycle } from '../daemon/daemon-lifecycle.js';
+import type { DaemonRecord } from '../daemon/daemon-record.js';
 
 /**
  * A task as the audit log describes it: `DaemonTaskInfo`'s lifecycle fields,

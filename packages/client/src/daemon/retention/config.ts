@@ -1,7 +1,7 @@
-import { EXPIRING_CLASS_IDS, type ExpiringClassId } from './registry';
-import { defaultScratchRoot, validateScratchRoot } from './scratch';
+import { EXPIRING_CLASS_IDS, type ExpiringClassId } from './registry.js';
+import { defaultScratchRoot, validateScratchRoot } from './scratch.js';
 import path from 'node:path';
-import { foldNameAliases } from '../../util/fold-name-aliases';
+import { foldNameAliases } from '../../util/fold-name-aliases.js';
 
 export class LocalStorageConfigError extends Error {
   constructor(field: string, reason?: string) { super(`DaemonConfig.storage.${field} ${reason ?? 'is invalid'}`); this.name = 'LocalStorageConfigError'; }

@@ -2,8 +2,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
-import { acquirePiSessionDiscovery, acquirePiSessionRebinding, acquirePiSessionWriter, type PiSessionRetentionLease } from '../util/pi-session-retention';
-import { resolvePathWithoutCreate, type PathMutationGate } from '../util/path-mutation-gate';
+import { acquirePiSessionDiscovery, acquirePiSessionRebinding, acquirePiSessionWriter, type PiSessionRetentionLease } from '../util/pi-session-retention.js';
+import { resolvePathWithoutCreate, type PathMutationGate } from '../util/path-mutation-gate.js';
 import {
   createAgentSession, createAgentSessionRuntime, createAgentSessionServices, createCodingTools,
   getAgentDir, ModelRuntime, resolveCliModel, runRpcMode, SessionManager, SettingsManager,
@@ -81,7 +81,7 @@ export async function runPiSessionRuntime(options: {
   tools?: string[]; excludeTools?: string[]; noTools?: 'all' | 'builtin';
   customTools?: CreateAgentSessionOptions['customTools'];
   /** Fixed, fresh memory-only lane; it cannot resume or replace a transcript. */
-  memoryLane?: ReturnType<typeof import('./pi-memory-lane').createPiMemoryLane>;
+  memoryLane?: ReturnType<typeof import('./pi-memory-lane.js').createPiMemoryLane>;
   /** Apply host boundaries to every initial or replacement session. */
   configureSession?: (session: CreateAgentSessionResult['session']) => void;
   /** Called once after creation/assertion, before the RPC loop can accept a prompt. */

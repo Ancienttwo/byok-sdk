@@ -1,8 +1,8 @@
-import type { MemoryState } from './memory';
-import { canonical, hash } from './canonical';
+import type { MemoryState } from './memory.js';
+import { canonical, hash } from './canonical.js';
 import type { AgentExecutionInput } from '@byok-sdk/cloud';
-import type { ByokServer } from '../index';
-import type { WakeScheduleInput } from '../wakes/types';
+import type { ByokServer } from '../index.js';
+import type { WakeScheduleInput } from '../wakes/types.js';
 import { HarnessIdSchema, RuntimeIdSchema, HostOfferSealedPayloadSchema, type HostOfferSealedPayload, type AgentMessageServerContext } from '@byok-sdk/protocol';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };

@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import type { StoreCompatibility } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
-import { createSqliteEmbeddedStores } from './stores/sqlite';
-import { SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
+import { createSqliteEmbeddedStores } from './stores/sqlite/index.js';
+import { SqliteSchemaError, SqliteUnavailableError } from './sqlite-support.js';
 
 /** A SQLite store is its main file plus a WAL or a hot rollback journal. `-shm` is rebuilt from the WAL. */
 const SQLITE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;

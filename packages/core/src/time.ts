@@ -27,7 +27,7 @@
  * both stay happy. `Date.parse` is used for *calendar validity only* — the
  * pattern is what pins the shape.
  */
-import { ByokCoreError } from './errors';
+import { ByokCoreError } from './errors.js';
 
 /**
  * Exactly what `toISOString()` produces: four-digit year, `T` separator,

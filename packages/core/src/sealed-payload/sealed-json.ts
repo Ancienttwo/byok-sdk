@@ -12,8 +12,8 @@
  * chain entries and key packages keep `canonicalizeJson`, whose safe-integer
  * rule belongs to the attestation contract.
  */
-import type { JsonValue } from '../attestation';
-import { invalidInput } from './primitives';
+import type { JsonValue } from '../attestation.js';
+import { invalidInput } from './primitives.js';
 
 function canonicalValue(value: unknown, seen: Set<object>): string {
   if (value === null) return 'null';

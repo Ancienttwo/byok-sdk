@@ -16,7 +16,7 @@
  * routes, so the declaration and the surface cannot disagree.
  */
 import { CapabilityDeclarationSchema, hasCapability, type CapabilityDeclaration } from '@byok-sdk/core';
-import type { ByokCloudOptions } from './cloud';
+import type { ByokCloudOptions } from './cloud.js';
 
 /** The hosted capability vocabulary this package knows how to serve. */
 export const CLOUD_CAPABILITIES = {

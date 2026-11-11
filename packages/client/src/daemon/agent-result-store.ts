@@ -2,9 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs, type Dirent } from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import type { AgentRef } from '../agent-home';
-import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureDir } from '../util/secure-dir';
+import type { AgentRef } from '../agent-home.js';
+import { atomicWriteFile } from '../util/atomic-write.js';
+import { ensureSecureDir } from '../util/secure-dir.js';
 
 /** Agent-home directory of staged `submit_result` outcomes, beside `.byok/messages`. */
 export const AGENT_RESULT_DIRECTORY = path.join('.byok', 'results');

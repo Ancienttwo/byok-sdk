@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { TerminalProjectionSelectionSchema } from './terminal-projection';
-import { AgentEgressContentHashSchema } from './agent-egress';
+import { TerminalProjectionSelectionSchema } from './terminal-projection.js';
+import { AgentEgressContentHashSchema } from './agent-egress.js';
 
 /**
  * Remote authenticated runtime input preparation — the wire half of
@@ -29,7 +29,7 @@ import { AgentEgressContentHashSchema } from './agent-egress';
  *    breaking change.
  */
 
-import { PREPARED_AGENT_MEMORY_MODES } from './capability-constants';
+import { PREPARED_AGENT_MEMORY_MODES } from './capability-constants.js';
 
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
 export const InputPreparationContentHashSchema = AgentEgressContentHashSchema;

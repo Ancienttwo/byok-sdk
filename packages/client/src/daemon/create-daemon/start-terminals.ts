@@ -1,16 +1,16 @@
 import type { Envelope } from '@byok-sdk/protocol';
 import { encodeEnvelope, decodeEnvelope, createEnvelope, isSealedPayload } from '@byok-sdk/protocol';
-import { terminalKindOf } from './support';
-import { journalHash, JournalRecordTooLargeError, type ReceivedEnvelopeRecord } from '../journal/journal';
-import type { AgentRef } from '../../agent-home';
-import { DAEMON_TASK_FAILURE } from '../task-failure';
-import { terminalIdentity } from '../terminal-identity';
-import type { SealedTasks } from '../sealed-task';
-import type { TaskRunnerDeps } from '../task-runner';
-import { resultReplyFailureFromState } from '../result-reply-failure';
-import type { DaemonScope } from './scope';
-import type { StartRun } from './start-run';
-import type { StartLanes } from './start-lanes';
+import { terminalKindOf } from './support.js';
+import { journalHash, JournalRecordTooLargeError, type ReceivedEnvelopeRecord } from '../journal/journal.js';
+import type { AgentRef } from '../../agent-home.js';
+import { DAEMON_TASK_FAILURE } from '../task-failure.js';
+import { terminalIdentity } from '../terminal-identity.js';
+import type { SealedTasks } from '../sealed-task.js';
+import type { TaskRunnerDeps } from '../task-runner.js';
+import { resultReplyFailureFromState } from '../result-reply-failure.js';
+import type { DaemonScope } from './scope.js';
+import type { StartRun } from './start-run.js';
+import type { StartLanes } from './start-lanes.js';
 
 /**
  * The third stage of `runStartUnderLease` (#926), synchronous: builds the
@@ -215,7 +215,7 @@ export function composeStartTerminals(daemonScope: DaemonScope, run: Pick<StartR
     resultReplyTransitionTail = operation.catch(() => {});
     return operation;
   };
-  const recordReplyState = (taskId: string, failure?: import('../result-reply-failure').ResultReplyFailure): Promise<void> => {
+  const recordReplyState = (taskId: string, failure?: import('../result-reply-failure.js').ResultReplyFailure): Promise<void> => {
     return withReplyTransition(async () => {
       const task = await activeJournal.readTask(taskId, journalIdentity);
       if (!task || task.localState.startsWith('terminal:')) return;

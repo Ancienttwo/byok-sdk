@@ -1,7 +1,7 @@
 import { ByokCloudError, isCloudError, type ActivityTail, type TaskEventsWake, type TenantId } from '@byok-sdk/cloud';
 import { TASK_STATES, type TaskState } from '@byok-sdk/protocol';
-import type { TaskEventRelay } from './relay';
-import { TaskEventsUnavailableError, type ServerTaskEvent, type TaskEventEntry } from './types';
+import type { TaskEventRelay } from './relay.js';
+import { TaskEventsUnavailableError, type ServerTaskEvent, type TaskEventEntry } from './types.js';
 
 const TERMINAL_STATES: ReadonlySet<TaskState> = new Set<TaskState>(['Complete', 'Failed', 'Cancelled']);
 const TRUNCATED: ServerTaskEvent = { kind: 'error', reason: 'events_truncated' };

@@ -1,37 +1,37 @@
 import type { HostOfferPlainPayload, HostOfferSealedPayload } from '@byok-sdk/protocol';
-import { createTenantApi } from './api/tenant';
-import { createTaskReadsApi } from './api/task-reads';
-import { createTaskCancellationApi } from './api/task-cancellation';
-import { createTaskAbandonmentApi } from './api/task-abandonment';
-import { createE2eeApi } from './api/e2ee';
-import { createAgentControlsApi } from './api/agent-controls';
-import { createOffersApi } from './api/offers';
-import { createMaintenanceApi } from './api/maintenance';
-import { createAgentExecutionsApi } from './api/agent-executions';
-import { createAgentMemoryApi } from './api/agent-memory';
-import { createApprovalsApi } from './api/approvals';
-import { createEnqueuePaths, sameAgentRef } from './api/enqueue';
-import { createProjectionReceiptsApi } from './api/projection-receipts';
-import { createSteeringApi } from './api/steering';
-import { createTaskRedactionsApi } from './api/task-redactions';
+import { createTenantApi } from './api/tenant.js';
+import { createTaskReadsApi } from './api/task-reads.js';
+import { createTaskCancellationApi } from './api/task-cancellation.js';
+import { createTaskAbandonmentApi } from './api/task-abandonment.js';
+import { createE2eeApi } from './api/e2ee.js';
+import { createAgentControlsApi } from './api/agent-controls.js';
+import { createOffersApi } from './api/offers.js';
+import { createMaintenanceApi } from './api/maintenance.js';
+import { createAgentExecutionsApi } from './api/agent-executions.js';
+import { createAgentMemoryApi } from './api/agent-memory.js';
+import { createApprovalsApi } from './api/approvals.js';
+import { createEnqueuePaths, sameAgentRef } from './api/enqueue.js';
+import { createProjectionReceiptsApi } from './api/projection-receipts.js';
+import { createSteeringApi } from './api/steering.js';
+import { createTaskRedactionsApi } from './api/task-redactions.js';
 import { z } from 'zod';
 import {
   readTaskAgentMessageDraft,
   type AgentMessageDraftCursor,
   type AgentMessageDraftReadback,
-} from './agent-message-draft';
+} from './agent-message-draft.js';
 import {
   resolveProofReceiptRetention,
   type MaintenanceInput,
   type MaintenanceReport,
   type ProofReceiptRetentionOptions,
-} from './maintenance';
+} from './maintenance.js';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
-import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
+import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message.js';
 import {
   type AgentExecutionInput,
   type SealedAgentExecutionInput,
-} from './agent-execution';
+} from './agent-execution.js';
 /**
  * `createByokCloud` — the hosted device surface, assembled.
  *
@@ -65,9 +65,9 @@ import {
   type TenantId,
   type TenantReadiness,
 } from '@byok-sdk/core';
-import type { ActivityTail, ActivityReadOptions } from './activity';
-import type { ApprovalTimelineTail } from './approval-timeline';
-import type { StaleApprovalError } from './approval-control';
+import type { ActivityTail, ActivityReadOptions } from './activity.js';
+import type { ApprovalTimelineTail } from './approval-timeline.js';
+import type { StaleApprovalError } from './approval-control.js';
 import {
   BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
   BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
@@ -124,36 +124,36 @@ import {
   type E2eeScopeKeyPackage,
   type E2eeScopeKeyPackageSchema,
 } from '@byok-sdk/protocol';
-import type { SteerRejectedError } from './steer-control';
-import { createAuthPlane, type AuthPlane } from './auth/plane';
-import type { TokenSigner } from './auth/tokens';
-import { CAPABILITY_PORTS, CLOUD_CAPABILITIES, declares, type CapabilityPorts, type CloudCapability } from './capabilities';
+import type { SteerRejectedError } from './steer-control.js';
+import { createAuthPlane, type AuthPlane } from './auth/plane.js';
+import type { TokenSigner } from './auth/tokens.js';
+import { CAPABILITY_PORTS, CLOUD_CAPABILITIES, declares, type CapabilityPorts, type CloudCapability } from './capabilities.js';
 import {
   DEFAULT_ACTIVITY_BOUNDS,
   DEFAULT_PRESENCE_DETAIL_MAX_BYTES,
   DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
   DEFAULT_PRESENCE_TTL_MS,
   type ActivityBounds,
-} from './coordination';
-import type { CloudCrypto } from './crypto/port';
-import { ByokCloudError } from './errors';
+} from './coordination.js';
+import type { CloudCrypto } from './crypto/port.js';
+import { ByokCloudError } from './errors.js';
 import {
   blobDownloadContentHandler,
   blobDownloadUrlHandler,
   blobUploadContentHandler,
   createBlobHandler,
   finalizeBlobHandler,
-} from './handlers/blobs';
-import { capabilitiesHandler } from './handlers/capabilities';
-import { challengeHandler, pairHandler, tokenHandler } from './handlers/auth';
-import { eventsHandler } from './handlers/events';
-import { messagesHandler } from './handlers/messages';
-import { agentHomeProjectionCompletionHandler } from './handlers/agent-home-projections';
+} from './handlers/blobs.js';
+import { capabilitiesHandler } from './handlers/capabilities.js';
+import { challengeHandler, pairHandler, tokenHandler } from './handlers/auth.js';
+import { eventsHandler } from './handlers/events.js';
+import { messagesHandler } from './handlers/messages.js';
+import { agentHomeProjectionCompletionHandler } from './handlers/agent-home-projections.js';
 import {
   inputPreparationCompletionHandler,
   inputPreparationStatusHandler,
-} from './handlers/input-preparations';
-import { agentMemoryProjectionHandler } from './handlers/agent-memory-projections';
+} from './handlers/input-preparations.js';
+import { agentMemoryProjectionHandler } from './handlers/agent-memory-projections.js';
 import {
   boardClaimHandler,
   boardListHandler,
@@ -164,13 +164,13 @@ import {
   DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS,
   DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS,
   DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS,
-} from './handlers/board';
-import { presencePublishHandler } from './handlers/presence';
+} from './handlers/board.js';
+import { presencePublishHandler } from './handlers/presence.js';
 import {
   DEFAULT_SKILL_PACK_PAGE_LIMIT,
   skillPackFileHandler,
   skillPackListHandler,
-} from './handlers/skill-packs';
+} from './handlers/skill-packs.js';
 import {
   DEFAULT_MAX_E2EE_REQUEST_BYTES,
   e2eeMemberChainAppendHandler,
@@ -179,27 +179,27 @@ import {
   e2eePairingMacReadHandler,
   e2eeScopeKeyPackagePutHandler,
   e2eeScopeKeyPackageReadHandler,
-} from './handlers/e2ee-member';
+} from './handlers/e2ee-member.js';
 import {
   DEFAULT_MAX_TRUTH_REQUEST_BYTES,
   truthGetHandler,
   truthManifestHandler,
   truthPutHandler,
-} from './handlers/truth';
-import { CloudRouteRegistry, type CloudRouteHandler, type RouteDescriptor } from './router/registry';
-import { readAgentMessageDisposition, type ByokCloudObserver } from './inbound';
-import type { AgentMessageConsumers } from './agent-message-disposition';
+} from './handlers/truth.js';
+import { CloudRouteRegistry, type CloudRouteHandler, type RouteDescriptor } from './router/registry.js';
+import { readAgentMessageDisposition, type ByokCloudObserver } from './inbound.js';
+import type { AgentMessageConsumers } from './agent-message-disposition.js';
 import {
   type AgentHomeProjectionReceiptInput,
-} from './agent-home-projections';
+} from './agent-home-projections.js';
 import {
   readInputPreparationStatus,
   type InputPreparationReceiptInput,
-} from './input-preparations';
+} from './input-preparations.js';
 import type {
   AgentMemoryProjectionAuthorizer,
   AgentMemoryProjectionStore,
-} from './agent-memory-projection';
+} from './agent-memory-projection.js';
 import type {
   BlobContentProxy,
   CloudStores,
@@ -211,17 +211,17 @@ import type {
   TaskAttempt,
   TaskAttemptListQuery,
   TaskAttemptPage,
-} from './stores/ports';
-import { type DeviceTerminal, type TerminalResult } from './terminal-result';
-import type { MailboxWake } from './mailbox-wake';
+} from './stores/ports.js';
+import { type DeviceTerminal, type TerminalResult } from './terminal-result.js';
+import type { MailboxWake } from './mailbox-wake.js';
 import {
   type TaskRedactionResult,
   type TaskRedactionStore,
-} from './task-redaction';
-import { type CloudRootStores, type TenantStores } from './tenant-stores';
-import * as e2eeMember from './e2ee-member';
-import type { E2eeMemberStore } from './e2ee-member';
-import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
+} from './task-redaction.js';
+import { type CloudRootStores, type TenantStores } from './tenant-stores.js';
+import * as e2eeMember from './e2ee-member.js';
+import type { E2eeMemberStore } from './e2ee-member.js';
+import type { TruthCommitter, TruthObjectDownloads } from './truth/contract.js';
 
 /** Matches the reference server's ceiling (§7). */
 export const DEFAULT_MAX_BLOB_SIZE_BYTES = 100 * 1024 * 1024;
@@ -869,7 +869,7 @@ export interface ByokCloud {
    */
   listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
   /** Store-aggregated task counts, with host cancellation separated from coarse status. */
-  countTaskAttempts(tenant: TenantId): Promise<import('./stores/ports').TaskAttemptCounts>;
+  countTaskAttempts(tenant: TenantId): Promise<import('./stores/ports.js').TaskAttemptCounts>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). Throws `task_content_redacted` after {@link ByokCloud.redactTasks}. */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
   /** Actual device terminal only; cancellation intent never creates this observation. */

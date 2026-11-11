@@ -1,4 +1,4 @@
-import type { StorageBudget } from './config';
+import type { StorageBudget } from './config.js';
 
 export type StoragePressureState = 'normal' | 'pressure' | 'hard-pressure' | 'emergency';
 export class LocalStorageEmergencyError extends Error {

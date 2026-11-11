@@ -1,4 +1,4 @@
-import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
+import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host.js';
 
 export interface ResolvedAgentMessageMcpBin {
   readonly command: string;

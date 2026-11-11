@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { TenantId } from '@byok-sdk/core';
-import { WAKE_RETENTION_MS, type WakeScheduleInput, type WakeScheduleResult } from '../../wakes/types';
-import { assertCollectLimit, assertWakeContent, type StoredWake, type WakeStore } from '../../wakes/store';
+import { WAKE_RETENTION_MS, type WakeScheduleInput, type WakeScheduleResult } from '../../wakes/types.js';
+import { assertCollectLimit, assertWakeContent, type StoredWake, type WakeStore } from '../../wakes/store.js';
 
 export const WAKE_SCHEMA = `
 CREATE TABLE wake (

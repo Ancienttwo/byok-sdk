@@ -18,11 +18,11 @@ import type {
   TaskArchiveWork,
 } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
-import type { ByokPool } from '../pool';
-import { assertByokPool } from '../pool-brand';
-import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer';
-import { readTask, refusalFor, rewriteTaskBodies, type Querier } from './task-redaction';
-import { TASK_SELECT_COLUMNS, taskRowToAttempt, type TaskRow } from './task-attempts';
+import type { ByokPool } from '../pool.js';
+import { assertByokPool } from '../pool-brand.js';
+import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer.js';
+import { readTask, refusalFor, rewriteTaskBodies, type Querier } from './task-redaction.js';
+import { TASK_SELECT_COLUMNS, taskRowToAttempt, type TaskRow } from './task-attempts.js';
 
 interface WorkRow extends TaskRow {
   readonly phase: 'archive' | 'settle';

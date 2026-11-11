@@ -31,8 +31,8 @@
  * and the callers fail closed on it. A dropped-then-expired approval is not
  * silently approved.
  */
-import type { ApprovalTimelineTail } from './approval-timeline';
-import { pendingApprovalObservation } from './approval-timeline';
+import type { ApprovalTimelineTail } from './approval-timeline.js';
+import { pendingApprovalObservation } from './approval-timeline.js';
 
 /**
  * M5 (approval targeting): thrown by `ByokCloud.approveTask`/`rejectTask` when

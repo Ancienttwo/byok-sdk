@@ -12,10 +12,10 @@
  */
 import { z } from 'zod';
 
-import { canonicalizeJson, canonicalizeJsonBytes, type JsonObject } from '../attestation';
-import { CONTENT_HASH_PATTERN } from '../blob';
-import { safeParseTotal } from '../total-parse';
-import type { WebCryptoKey } from '../webcrypto';
+import { canonicalizeJson, canonicalizeJsonBytes, type JsonObject } from '../attestation.js';
+import { CONTENT_HASH_PATTERN } from '../blob.js';
+import { safeParseTotal } from '../total-parse.js';
+import type { WebCryptoKey } from '../webcrypto.js';
 import {
   base64UrlBytes,
   concat,
@@ -29,7 +29,7 @@ import {
   utf8,
   type Bytes,
   type P256PublicJwk,
-} from './primitives';
+} from './primitives.js';
 
 /** Domain separation for {@link deriveMemberId}. */
 export const MEMBER_ID_DOMAIN = 'byok-member-id-v1\n';

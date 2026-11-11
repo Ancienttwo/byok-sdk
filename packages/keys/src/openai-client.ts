@@ -7,14 +7,14 @@ import {
   providerRequestTimeoutMs,
   readModelProviderResponse,
   type ProviderFetch,
-} from './http';
-import { providerHeaders, requiredProviderSecret } from './headers';
-import { ByokKeysError } from './errors';
+} from './http.js';
+import { providerHeaders, requiredProviderSecret } from './headers.js';
+import { ByokKeysError } from './errors.js';
 import {
   parseModelProviderProfile,
   type ModelProviderProfile,
-} from './provider-profile';
-import { isLoopbackProviderUrl } from './url';
+} from './provider-profile.js';
+import { isLoopbackProviderUrl } from './url.js';
 
 /** One chat message. `content` is `unknown` so multimodal block arrays pass through. */
 export interface ChatMessage {

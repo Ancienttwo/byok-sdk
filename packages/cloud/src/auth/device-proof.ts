@@ -7,8 +7,8 @@ import {
   type DevicePrincipal,
   type DeviceProofEnvelopeV1,
 } from '@byok-sdk/core';
-import type { CloudCrypto } from '../crypto/port';
-import type { DeviceDirectory } from '../stores/ports';
+import type { CloudCrypto } from '../crypto/port.js';
+import type { DeviceDirectory } from '../stores/ports.js';
 
 export const DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS = 60_000;
 export const MAX_DEVICE_PROOF_CLOCK_SKEW_MS = 5 * 60_000;

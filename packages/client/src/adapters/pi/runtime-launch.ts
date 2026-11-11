@@ -1,12 +1,12 @@
-import type { ExecutionScratch } from '../../daemon/retention/scratch';
-import type { RuntimeLaunchResources } from '../../types';
-import { buildAllowlistedEnv } from '../../runtime/environment';
-import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated';
+import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
+import type { RuntimeLaunchResources } from '../../types.js';
+import { buildAllowlistedEnv } from '../../runtime/environment.js';
+import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { createPrivateTempDir, ensurePiProjectionDir, ensureSecureDir } from '../../util/secure-dir';
-import { RuntimeExecutionFailure } from '../../runtime-failure';
-import { CONTROLLED_PI_DIRECTORY_ENV_NAMES } from './mcp-environment';
+import { createPrivateTempDir, ensurePiProjectionDir, ensureSecureDir } from '../../util/secure-dir.js';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
+import { CONTROLLED_PI_DIRECTORY_ENV_NAMES } from './mcp-environment.js';
 
 /** The SDK-owned Pi entry a launch starts. */
 export type PiRuntimeLaunchKind = 'pi-rpc' | 'pi-prepared' | 'pi-durable';

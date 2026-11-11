@@ -4,13 +4,13 @@ import {
   inputPreparationRuntimeIdentityString,
   preparedToolBindingDigest,
   type InputPreparationRuntimeIdentityV1,
-} from '../input-preparation';
-import type { RuntimePreparedLaunchV1 } from '../types';
-import type { McpToolsetServerObservation } from '../mcp/observation';
-import { fingerprintPreparedToolSurface } from './prepared-tool-surface';
-import type { InputPreparationRecord } from './input-preparation-store';
-import { inputPreparationReadinessReasons } from './input-preparation-service';
-import type { PreparedAgentMemoryState } from '../agent-memory/prepared-agent-memory';
+} from '../input-preparation.js';
+import type { RuntimePreparedLaunchV1 } from '../types.js';
+import type { McpToolsetServerObservation } from '../mcp/observation.js';
+import { fingerprintPreparedToolSurface } from './prepared-tool-surface.js';
+import type { InputPreparationRecord } from './input-preparation-store.js';
+import { inputPreparationReadinessReasons } from './input-preparation-service.js';
+import type { PreparedAgentMemoryState } from '../agent-memory/prepared-agent-memory.js';
 
 /**
  * The item-by-item comparison one prepared `task.offer` must survive before a

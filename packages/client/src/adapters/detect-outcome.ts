@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { RuntimeEnvironmentUnavailableError } from '../runtime/environment';
-import type { RuntimeDetectResult } from '../types';
+import { RuntimeEnvironmentUnavailableError } from '../runtime/environment.js';
+import type { RuntimeDetectResult } from '../types.js';
 
 type ProbeFailure = Exclude<RuntimeDetectResult, { kind: 'available' }>;
 type VersionProbeResult = ProbeFailure | { kind: 'available'; stdout: string; stderr: string };

@@ -1,19 +1,19 @@
-import type { ToolFileScope } from './tool-authorization';
-import type { MemoryFileScope } from './file-scope-types';
+import type { ToolFileScope } from './tool-authorization.js';
+import type { MemoryFileScope } from './file-scope-types.js';
 import {
   FileScopeGuardError,
   resolveFileScopeGrant,
   type FileScopeGrant,
   type FileScopeIo,
-} from './file-scope-guard';
-import type { SerializedFileScopeGrant } from './file-scope-serialization';
+} from './file-scope-guard.js';
+import type { SerializedFileScopeGrant } from './file-scope-serialization.js';
 
 export {
   parseSerializedFileScopeGrant,
   serializeFileScopeGrant,
   type SerializedFileScopeGrant,
   type SerializedFileScopeRoot,
-} from './file-scope-serialization';
+} from './file-scope-serialization.js';
 
 export interface VerifySerializedFileScopeGrantOptions {
   readonly platform?: NodeJS.Platform;

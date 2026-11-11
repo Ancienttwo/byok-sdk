@@ -3,15 +3,15 @@ import type { Context } from '@earendil-works/chord';
 import type { JsonObject } from '@earendil-works/pi-ai';
 import { Harness, ToolTask, createRegistry, defineExtension, hook, type AgentChange, type ConversationId, type ToolExecutionApi, type ToolExecutionResult, type Storage, type Cursor } from '@earendil-works/pi-durable';
 import { validateToolArguments } from '@earendil-works/pi-ai/utils/validation';
-import { CloudDoError, safeCloudError, type CloudDoErrorCode } from './errors';
-import { admitCloudPayload, prepareCloudGuard, type CloudOperationGuard } from './input-guard';
-import { CloudState, CLOUD_CONTEXT_BYTES, type RunRow } from './cloud-state';
-import { InvocationLedger, type ExecutionRow, type InvocationRow, type InvocationTerminalState } from './invocation-ledger';
-import { createPlatformModels, type CloudModelAccount } from './platform-provider';
-import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } from './platform-credentials';
-import { CLOUD_BUDGET, CLOUD_LIMITS, admitSessionConfig, type CloudSessionConfig } from './session-config';
-import { openDurableObjectStorage } from './storage';
-import { admitCloudDispatcher, dispatcherDigest, CLOUD_DOMAIN_ERROR_CODES, argsDigest, canonicalArgs, invocationId, replayForTool, type CloudToolDispatcher } from './tools';
+import { CloudDoError, safeCloudError, type CloudDoErrorCode } from './errors.js';
+import { admitCloudPayload, prepareCloudGuard, type CloudOperationGuard } from './input-guard.js';
+import { CloudState, CLOUD_CONTEXT_BYTES, type RunRow } from './cloud-state.js';
+import { InvocationLedger, type ExecutionRow, type InvocationRow, type InvocationTerminalState } from './invocation-ledger.js';
+import { createPlatformModels, type CloudModelAccount } from './platform-provider.js';
+import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } from './platform-credentials.js';
+import { CLOUD_BUDGET, CLOUD_LIMITS, admitSessionConfig, type CloudSessionConfig } from './session-config.js';
+import { openDurableObjectStorage } from './storage.js';
+import { admitCloudDispatcher, dispatcherDigest, CLOUD_DOMAIN_ERROR_CODES, argsDigest, canonicalArgs, invocationId, replayForTool, type CloudToolDispatcher } from './tools.js';
 
 /**
  * `restartLimit: Infinity` keeps the Pi 1.3 behavior: a task that an eviction,

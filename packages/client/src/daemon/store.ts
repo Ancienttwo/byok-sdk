@@ -9,22 +9,22 @@ import {
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
-import { atomicWriteFile } from '../util/atomic-write';
-import { pickPlainDataProperties } from '../util/plain-data';
-import { sameContent, sameFile } from '../util/file-state';
-import { ensureSecureStoreRoot, type EnsureSecureDirOptions } from '../util/secure-dir';
+import { atomicWriteFile } from '../util/atomic-write.js';
+import { pickPlainDataProperties } from '../util/plain-data.js';
+import { sameContent, sameFile } from '../util/file-state.js';
+import { ensureSecureStoreRoot, type EnsureSecureDirOptions } from '../util/secure-dir.js';
 import {
   type DeviceCredentialBackend,
   type DeviceCredentialConfig,
   type DeviceMetadata,
   type DeviceRecord,
-} from './device-credential-store';
-import { createDeviceCredentialStore } from './device-credential-provider';
-import { DeviceStoreBindingMismatchError } from './daemon-errors';
-import { foldNameAliases } from '../util/fold-name-aliases';
-import { defaultStoreDir } from './host-layout';
+} from './device-credential-store.js';
+import { createDeviceCredentialStore } from './device-credential-provider.js';
+import { DeviceStoreBindingMismatchError } from './daemon-errors.js';
+import { foldNameAliases } from '../util/fold-name-aliases.js';
+import { defaultStoreDir } from './host-layout.js';
 
-export type { DeviceMetadata, DeviceRecord } from './device-credential-store';
+export type { DeviceMetadata, DeviceRecord } from './device-credential-store.js';
 
 /**
  * Non-secret projection of an authenticated device enrollment. This is the

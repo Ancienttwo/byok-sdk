@@ -1,5 +1,5 @@
 import { promises as fs, constants } from 'node:fs';
-import type { NativeSessionsIO } from './renderer';
+import type { NativeSessionsIO } from './renderer.js';
 
 /** Renderer owns read/record/time budgets; this adapter only opens existing, read-only files. */
 export const nativeSessionsIO: NativeSessionsIO = {

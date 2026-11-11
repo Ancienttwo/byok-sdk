@@ -1,7 +1,7 @@
 import { encodePairingVerificationSecret, parsePairingInput } from '@byok-sdk/core/sealed-payload';
-import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
-import { connectControlClient } from '../../daemon/control-client';
-import { resolveStoreDir } from '../config';
+import { createDaemon, type Daemon, type DaemonConfig } from '../../index.js';
+import { connectControlClient } from '../../daemon/control-client.js';
+import { resolveStoreDir } from '../config.js';
 
 /**
  * The control request timeout for `enrollment.pair`. The handler runs many

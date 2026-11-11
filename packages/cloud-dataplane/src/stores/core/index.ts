@@ -1,4 +1,4 @@
-import { R2ObjectMaintenanceStore, type R2ObjectMaintenanceOptions } from '../r2-blobs';
+import { R2ObjectMaintenanceStore, type R2ObjectMaintenanceOptions } from '../r2-blobs.js';
 /**
  * The Postgres composition of the seven `@byok-sdk/core` ports.
  *
@@ -18,23 +18,23 @@ import { R2ObjectMaintenanceStore, type R2ObjectMaintenanceOptions } from '../r2
  * either a sleep or a flake.
  */
 import type { Clock, CoreStores } from '@byok-sdk/core';
-import type { ByokPool } from '../../pool';
-import { assertByokPool } from '../../pool-brand';
-import { PostgresPresenceStore } from './presence';
-import { PostgresBoardStore } from './board';
-import { PostgresMailboxStore } from './mailbox';
-import { PostgresObjectStore } from './objects';
-import { PostgresQuotaStore } from './quota';
-import { PostgresSkillPackStore } from './skill-pack';
-import { PostgresTruthStore } from './truth';
+import type { ByokPool } from '../../pool.js';
+import { assertByokPool } from '../../pool-brand.js';
+import { PostgresPresenceStore } from './presence.js';
+import { PostgresBoardStore } from './board.js';
+import { PostgresMailboxStore } from './mailbox.js';
+import { PostgresObjectStore } from './objects.js';
+import { PostgresQuotaStore } from './quota.js';
+import { PostgresSkillPackStore } from './skill-pack.js';
+import { PostgresTruthStore } from './truth.js';
 
-export { PostgresMailboxStore } from './mailbox';
-export { PostgresBoardStore } from './board';
-export { PostgresTruthStore } from './truth';
-export { PostgresPresenceStore } from './presence';
-export { PostgresObjectStore } from './objects';
-export { PostgresQuotaStore } from './quota';
-export { PostgresSkillPackStore } from './skill-pack';
+export { PostgresMailboxStore } from './mailbox.js';
+export { PostgresBoardStore } from './board.js';
+export { PostgresTruthStore } from './truth.js';
+export { PostgresPresenceStore } from './presence.js';
+export { PostgresObjectStore } from './objects.js';
+export { PostgresQuotaStore } from './quota.js';
+export { PostgresSkillPackStore } from './skill-pack.js';
 
 export interface PostgresCoreStoreOptions {
   readonly objectStorage: R2ObjectMaintenanceOptions;

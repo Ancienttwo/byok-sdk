@@ -1,9 +1,9 @@
-import { inspectServiceLogs } from '../lifecycle/service-log';
-import { serviceLogDir } from '../daemon/host-layout';
-import { createDaemonScratch } from '../daemon/retention/scratch';
-import { AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../agent-home';
-import type { DiagnosticCheck, DiagnosticsSnapshot } from './types';
-import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeDetectResult } from '../types';
+import { inspectServiceLogs } from '../lifecycle/service-log.js';
+import { serviceLogDir } from '../daemon/host-layout.js';
+import { createDaemonScratch } from '../daemon/retention/scratch.js';
+import { AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../agent-home.js';
+import type { DiagnosticCheck, DiagnosticsSnapshot } from './types.js';
+import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeDetectResult } from '../types.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -21,20 +21,20 @@ import {
 } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { DaemonConfig } from '../daemon/create-daemon';
-import type { RuntimeAdapter } from '../types';
-import { readLastLifecycleRecord, readLastEnvironmentRecord, parseEnvironmentRecord } from '../daemon/audit-log';
-import { attachRuntimeExecutables, attachRuntimeVersionChanges, attachRuntimeVersionVerdicts, parseRuntimeObservations, type RuntimeObservation } from '../runtime-detection';
-import { connectControlClient } from '../daemon/control-client';
-import { formatLifecycle, formatLifecycleRemedy } from '../diagnostics/format';
-import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { probeRuntimes } from './runtime-probe';
-import { buildRuntimeAdapters, resolvePiByokLauncher } from '../adapters/runtime-adapters';
-import { isRecord, RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, type ControlRuntimesEnvironmentResult, type ControlStatusResult } from '../daemon/control-protocol';
-import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
-import type { RuntimeEnvironmentLaneReport, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentSource } from '../runtime/environment';
-import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal';
-import { isSqliteAvailable, loadSqliteModule } from '../util/sqlite-support';
+import type { DaemonConfig } from '../daemon/create-daemon.js';
+import type { RuntimeAdapter } from '../types.js';
+import { readLastLifecycleRecord, readLastEnvironmentRecord, parseEnvironmentRecord } from '../daemon/audit-log.js';
+import { attachRuntimeExecutables, attachRuntimeVersionChanges, attachRuntimeVersionVerdicts, parseRuntimeObservations, type RuntimeObservation } from '../runtime-detection.js';
+import { connectControlClient } from '../daemon/control-client.js';
+import { formatLifecycle, formatLifecycleRemedy } from '../diagnostics/format.js';
+import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle.js';
+import { probeRuntimes } from './runtime-probe.js';
+import { buildRuntimeAdapters, resolvePiByokLauncher } from '../adapters/runtime-adapters.js';
+import { isRecord, RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, type ControlRuntimesEnvironmentResult, type ControlStatusResult } from '../daemon/control-protocol.js';
+import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
+import type { RuntimeEnvironmentLaneReport, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentSource } from '../runtime/environment.js';
+import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal.js';
+import { isSqliteAvailable, loadSqliteModule } from '../util/sqlite-support.js';
 import {
   inspectOperationalHealthHandle,
   inspectOperationalHealthFile,
@@ -42,10 +42,10 @@ import {
   openOperationalHealthFile,
   type OperationalHealthFileInspection,
   OPERATIONAL_HEALTH_FILENAME,
-} from '../daemon/operational-health';
-import { acquireDaemonOwner } from '../util/daemon-owner';
-import { ensureSecureDir, isModeNot0700 } from '../util/secure-dir';
-import { sameContent, sameFile } from '../util/file-state';
+} from '../daemon/operational-health.js';
+import { acquireDaemonOwner } from '../util/daemon-owner.js';
+import { ensureSecureDir, isModeNot0700 } from '../util/secure-dir.js';
+import { sameContent, sameFile } from '../util/file-state.js';
 
 /**
  * The server rejects a device proof whose `issuedAt` is further than its skew
@@ -66,7 +66,7 @@ export const MAX_DEVICE_RECORD_BYTES = 64 * 1024;
 export const MAX_JOURNAL_COPY_BYTES = 512 * 1024 * 1024;
 const MAX_QUARANTINE_MANIFEST_BYTES = 64 * 1024;
 
-export type { DiagnosticStatus, DiagnosticCheck, DiagnosticsSnapshot } from './types';
+export type { DiagnosticStatus, DiagnosticCheck, DiagnosticsSnapshot } from './types.js';
 
 export interface CollectDiagnosticsOptions {
   clock?: () => Date;
@@ -75,8 +75,8 @@ export interface CollectDiagnosticsOptions {
   runtimeProbeTimeoutMs?: number;
 }
 
-import type { OperationalHealthFixResult } from './types';
-export type { OperationalHealthFixResult } from './types';
+import type { OperationalHealthFixResult } from './types.js';
+export type { OperationalHealthFixResult } from './types.js';
 
 function safeProtocol(serverUrl: string): DiagnosticsSnapshot['config']['serverProtocol'] {
   try {

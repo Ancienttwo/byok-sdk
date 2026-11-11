@@ -1,6 +1,6 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { inspectServiceLogs } from './service-log';
+import { inspectServiceLogs } from './service-log.js';
 import {
   assertServiceOwner,
   claimHeldServiceLifecycleOwner,
@@ -11,8 +11,8 @@ import {
   withServiceOwnerGate,
   type ServiceUnitFile,
   type ServiceUnitInspection,
-} from './service-unit';
-import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceStatusResult } from './service-types';
+} from './service-unit.js';
+import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceStatusResult } from './service-types.js';
 
 export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod'>;
 

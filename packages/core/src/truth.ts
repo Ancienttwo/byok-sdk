@@ -17,8 +17,8 @@
  * bodies to fetch is a local decision (§S6.4), so shipping bodies in the list
  * response would both defeat that and make the response unbounded.
  */
-import type { ContentHash } from './blob';
-import type { TenantId } from './tenant';
+import type { ContentHash } from './blob.js';
+import type { TenantId } from './tenant.js';
 
 export const TRUTH_RECORD_KINDS = ['task.terminal', 'profile', 'memory'] as const;
 export type TruthRecordKind = (typeof TRUTH_RECORD_KINDS)[number];

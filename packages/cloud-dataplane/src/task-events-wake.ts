@@ -1,5 +1,5 @@
 import { createInProcessTaskEventsWake, type TaskEventsWake } from '@byok-sdk/cloud';
-import { createPostgresWake, type PostgresWakeOptions } from './postgres-wake';
+import { createPostgresWake, type PostgresWakeOptions } from './postgres-wake.js';
 
 export type PostgresTaskEventsWakeOptions = PostgresWakeOptions;
 

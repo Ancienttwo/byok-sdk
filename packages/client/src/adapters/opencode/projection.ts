@@ -1,7 +1,7 @@
-import { BufferedToolUse } from '../buffered-tool-use';
+import { BufferedToolUse } from '../buffered-tool-use.js';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { AcpRecord } from '../../runtime/acp-session-runtime';
-import { runtimeFailureClassOf } from '../../runtime-failure';
+import type { AcpRecord } from '../../runtime/acp-session-runtime.js';
+import { runtimeFailureClassOf } from '../../runtime-failure.js';
 
 export const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;

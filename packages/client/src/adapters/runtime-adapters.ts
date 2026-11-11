@@ -1,19 +1,19 @@
-import { OpenCodeAdapter, type OpenCodeAdapterOptions } from './opencode/opencode-adapter';
+import { OpenCodeAdapter, type OpenCodeAdapterOptions } from './opencode/opencode-adapter.js';
 import type { RuntimeId } from '@byok-sdk/protocol';
 import { isAbsolute } from 'node:path';
-import type { RuntimeAdapter, RuntimeVersionPolicy } from '../types';
-import { assertRuntimeEnvironmentPolicy, type RuntimeEnvironmentPolicy } from '../runtime/environment';
-import type { SdkHelperHostConfig } from '../sdk-reserved-helper-host';
-import { foldNameAliases } from '../util/fold-name-aliases';
-import { DaemonConfigInvalidError } from '../daemon-config-invalid-error';
-import type { DaemonConfigIssue } from '../daemon/config-schema/validate';
-import { versionPolicyConfigIssues } from '../daemon-config-version-policy';
-import { PiAdapter, PI_PACKAGE_DIR_ENV, validatePiByokLauncherConfig, type PiAdapterOptions, type PiByokLauncherConfig } from './pi/pi-adapter';
-import { ClaudeAdapter, type ClaudeAdapterOptions } from './claude/claude-adapter';
-import { CodexAdapter, assertCodexSandboxSetting, type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter';
-import { GrokAdapter, type GrokAdapterOptions } from './grok/grok-adapter';
-import { DshAdapter, type DshAdapterOptions } from './dsh/dsh-adapter';
-import { AgyAdapter, type AgyAdapterOptions } from './antigravity/agy-adapter';
+import type { RuntimeAdapter, RuntimeVersionPolicy } from '../types.js';
+import { assertRuntimeEnvironmentPolicy, type RuntimeEnvironmentPolicy } from '../runtime/environment.js';
+import type { SdkHelperHostConfig } from '../sdk-reserved-helper-host.js';
+import { foldNameAliases } from '../util/fold-name-aliases.js';
+import { DaemonConfigInvalidError } from '../daemon-config-invalid-error.js';
+import type { DaemonConfigIssue } from '../daemon/config-schema/validate.js';
+import { versionPolicyConfigIssues } from '../daemon-config-version-policy.js';
+import { PiAdapter, PI_PACKAGE_DIR_ENV, validatePiByokLauncherConfig, type PiAdapterOptions, type PiByokLauncherConfig } from './pi/pi-adapter.js';
+import { ClaudeAdapter, type ClaudeAdapterOptions } from './claude/claude-adapter.js';
+import { CodexAdapter, assertCodexSandboxSetting, type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter.js';
+import { GrokAdapter, type GrokAdapterOptions } from './grok/grok-adapter.js';
+import { DshAdapter, type DshAdapterOptions } from './dsh/dsh-adapter.js';
+import { AgyAdapter, type AgyAdapterOptions } from './antigravity/agy-adapter.js';
 
 /** `RuntimeAdaptersConfig.runtimes.pi`: the Pi options a Host can configure. */
 export interface PiRuntimeConfig {

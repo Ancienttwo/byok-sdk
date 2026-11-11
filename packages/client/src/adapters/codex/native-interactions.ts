@@ -1,8 +1,8 @@
 import {
   NativeInteractionController, NativeInteractionError, type NativeInteractionChannel, type NativeInteractionHostOptions,
   type NativeInteractionIdentity, type NativeQuestion,
-} from '../../native-interactions';
-import { snapshotPlainData } from '../../util/plain-data';
+} from '../../native-interactions.js';
+import { snapshotPlainData } from '../../util/plain-data.js';
 
 export interface CodexNativeReply {
   respond(value: Record<string, unknown>): Promise<void>;

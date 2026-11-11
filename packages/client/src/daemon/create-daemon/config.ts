@@ -1,24 +1,24 @@
-import { assertDaemonConfigValid, removedFieldError } from '../config-schema/errors';
-import { DaemonConfigInvalidError } from '../../daemon-config-invalid-error';
-import type { DaemonMemoryHelperResolution } from '../config-schema/effective';
-import { resolveAgentMemoryFilesystemHelper } from '../../util/agent-memory-helper-release';
-import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host';
-import { isAgentMemoryFilesystemHelperSupported } from '../agent-memory-fs-helper';
-import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
-import { resolveAgentMemoryMcpBin, resolveAgentMemoryDescribeBin } from '../resolve-agent-memory-mcp-bin';
-import { resolveLocalAgentReleaseIdentity } from '../../release-identity';
-import { LocalStorageConfigError } from '../retention/config';
-import { McpToolsetRegistry } from '../toolset-registry';
-import { resolvePiByokLauncher } from '../../adapters/runtime-adapters';
-import { DEFAULT_MAX_TASK_OUTPUT_BYTES, DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME, DEFAULT_MAX_CONCURRENT_TASKS } from '../task-runner';
-import { MIN_MAX_INLINE_EVENT_BYTES, DEFAULT_MAX_INLINE_EVENT_BYTES } from '../event-spill';
-import { validateProgressBatcherOptions } from '../progress-batcher';
-import type { DaemonConfig, DaemonStatus } from '../create-daemon';
-import type { DaemonInputs } from './scope';
+import { assertDaemonConfigValid, removedFieldError } from '../config-schema/errors.js';
+import { DaemonConfigInvalidError } from '../../daemon-config-invalid-error.js';
+import type { DaemonMemoryHelperResolution } from '../config-schema/effective.js';
+import { resolveAgentMemoryFilesystemHelper } from '../../util/agent-memory-helper-release.js';
+import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host.js';
+import { isAgentMemoryFilesystemHelperSupported } from '../agent-memory-fs-helper.js';
+import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory.js';
+import { resolveAgentMemoryMcpBin, resolveAgentMemoryDescribeBin } from '../resolve-agent-memory-mcp-bin.js';
+import { resolveLocalAgentReleaseIdentity } from '../../release-identity.js';
+import { LocalStorageConfigError } from '../retention/config.js';
+import { McpToolsetRegistry } from '../toolset-registry.js';
+import { resolvePiByokLauncher } from '../../adapters/runtime-adapters.js';
+import { DEFAULT_MAX_TASK_OUTPUT_BYTES, DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME, DEFAULT_MAX_CONCURRENT_TASKS } from '../task-runner.js';
+import { MIN_MAX_INLINE_EVENT_BYTES, DEFAULT_MAX_INLINE_EVENT_BYTES } from '../event-spill.js';
+import { validateProgressBatcherOptions } from '../progress-batcher.js';
+import type { DaemonConfig, DaemonStatus } from '../create-daemon.js';
+import type { DaemonInputs } from './scope.js';
 import {
   FileScopePolicyError, parseToolAuthorizationPolicy, toolAuthorizationResolver as deriveToolAuthorizationResolver,
   type ToolAuthorizationPolicy, type ToolAuthorizationResolver,
-} from '../../tool-authorization';
+} from '../../tool-authorization.js';
 
 function admitToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy {
   try {

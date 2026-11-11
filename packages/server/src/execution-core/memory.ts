@@ -10,10 +10,10 @@ import {
   type AgentMemoryIntentV1,
   type AgentMemoryProjectionMutation,
 } from '@byok-sdk/protocol';
-import { HostLedger } from './ledger';
-import { MemoryRestoreCoordinator, memoryRestoreBlocked, recordRestoreTerminal, type MemoryRestoreInput, type MemoryRestoreResult, type MemoryRestoreRow } from './memory-restore';
-import { canonical, hash } from './model';
-import type { LedgerState } from './model';
+import { HostLedger } from './ledger.js';
+import { MemoryRestoreCoordinator, memoryRestoreBlocked, recordRestoreTerminal, type MemoryRestoreInput, type MemoryRestoreResult, type MemoryRestoreRow } from './memory-restore.js';
+import { canonical, hash } from './model.js';
+import type { LedgerState } from './model.js';
 import type { AgentMemoryExport, AgentMemoryIntentTransport, AgentMemoryProjectionPort } from '@byok-sdk/protocol/agent-memory';
 import { RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
 

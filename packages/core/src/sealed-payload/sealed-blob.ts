@@ -14,10 +14,10 @@
  */
 import { z } from 'zod';
 
-import { canonicalizeJsonBytes } from '../attestation';
-import { safeParseTotal } from '../total-parse';
-import { copy, decodeBase64Url, encodeBase64Url, invalidInput, randomBytes, base64UrlBytes, type Bytes } from './primitives';
-import { SEALED_SALT_BYTES, deriveScopeKeyId, deriveSealedContentKey } from './scope-key';
+import { canonicalizeJsonBytes } from '../attestation.js';
+import { safeParseTotal } from '../total-parse.js';
+import { copy, decodeBase64Url, encodeBase64Url, invalidInput, randomBytes, base64UrlBytes, type Bytes } from './primitives.js';
+import { SEALED_SALT_BYTES, deriveScopeKeyId, deriveSealedContentKey } from './scope-key.js';
 import {
   AEAD_TAG_BYTES,
   PositiveIntegerSchema,
@@ -41,7 +41,7 @@ import {
   type SealedContentHeaderV1,
   type SealedContentOpenFailure,
   type SealedContentRandomness,
-} from './sealed-content';
+} from './sealed-content.js';
 
 /**
  * An RFC 6901 JSON Pointer from the moved-fields object to one BlobRef node,

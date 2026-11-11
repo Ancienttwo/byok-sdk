@@ -1,6 +1,6 @@
 // ==== @byok-sdk/ui-runtime dist/approval-timeline.d.ts ====
 import { type ApprovalObservation, type ApprovalTimelineTail } from '@byok-sdk/cloud';
-import { type ApprovalProjectionMetadata, type ApprovalProjectionState, type TaskApprovalSnapshot } from './approval-types';
+import { type ApprovalProjectionMetadata, type ApprovalProjectionState, type TaskApprovalSnapshot } from './approval-types.js';
 export declare function createApprovalProjectionState(taskId: string, metadata?: ApprovalProjectionMetadata): ApprovalProjectionState;
 export declare function withApprovalProjectionMetadata(state: ApprovalProjectionState, metadata: ApprovalProjectionMetadata): ApprovalProjectionState;
 export declare function foldApprovalObservation(state: ApprovalProjectionState, input: ApprovalObservation): ApprovalProjectionState;
@@ -56,13 +56,13 @@ export declare class ApprovalProjectionError extends Error {
     constructor(code: ApprovalProjectionErrorCode, message: string, options?: ErrorOptions);
 }
 // ==== @byok-sdk/ui-runtime dist/index.d.ts ====
-export * from './approval-timeline';
-export * from './approval-types';
-export * from './timeline';
-export * from './types';
+export * from './approval-timeline.js';
+export * from './approval-types.js';
+export * from './timeline.js';
+export * from './types.js';
 // ==== @byok-sdk/ui-runtime dist/timeline.d.ts ====
 import { type ActivityTail, type TimelineEvent } from '@byok-sdk/cloud';
-import { type TaskTimelineSnapshot, type TimelineMetadata, type TimelineState } from './types';
+import { type TaskTimelineSnapshot, type TimelineMetadata, type TimelineState } from './types.js';
 export declare function createTimelineState(taskId: string, metadata?: TimelineMetadata): TimelineState;
 export declare function withTimelineMetadata(state: TimelineState, metadata: TimelineMetadata): TimelineState;
 export declare function foldTimelineEvent(state: TimelineState, input: TimelineEvent): TimelineState;

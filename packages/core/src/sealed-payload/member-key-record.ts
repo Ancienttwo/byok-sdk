@@ -25,10 +25,10 @@
  */
 import { z } from 'zod';
 
-import { canonicalizeJson } from '../attestation';
-import { safeParseTotal } from '../total-parse';
-import { webCryptoSubtle, type WebCryptoKey } from '../webcrypto';
-import { P256PublicJwkSchema, base64UrlBytes, invalidInput, randomBytes, type P256PublicJwk } from './primitives';
+import { canonicalizeJson } from '../attestation.js';
+import { safeParseTotal } from '../total-parse.js';
+import { webCryptoSubtle, type WebCryptoKey } from '../webcrypto.js';
+import { P256PublicJwkSchema, base64UrlBytes, invalidInput, randomBytes, type P256PublicJwk } from './primitives.js';
 
 export const MEMBER_KEY_RECORD_VERSION = 1;
 

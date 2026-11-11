@@ -1,8 +1,8 @@
 import { copyFileSync, constants, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmdirSync, unlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { AGENT_MEMORY_HELPER_RELEASE } from './agent-memory-helper-release-pin';
-import { agentMemoryHelperTargetDigest } from './agent-memory-helper-digest';
+import { AGENT_MEMORY_HELPER_RELEASE } from './agent-memory-helper-release-pin.js';
+import { agentMemoryHelperTargetDigest } from './agent-memory-helper-digest.js';
 
 function installedReleaseDirectory(): string {
   const root = path.dirname(createRequire(import.meta.url).resolve('@byok-sdk/client/package.json'));

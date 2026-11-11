@@ -1,5 +1,5 @@
-import { ByokKeysError } from './errors';
-import { normalizeProviderUrl } from './url';
+import { ByokKeysError } from './errors.js';
+import { normalizeProviderUrl } from './url.js';
 
 /** Injectable `fetch`. Defaults to `globalThis.fetch` at every call site. */
 export type ProviderFetch = (

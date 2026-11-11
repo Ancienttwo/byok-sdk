@@ -1,20 +1,20 @@
 import os from 'node:os';
 import path from 'node:path';
-import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import { CodexAdapter } from '../adapters/codex/codex-adapter';
-import { AgyAdapter } from '../adapters/antigravity/agy-adapter';
-import { DshAdapter } from '../adapters/dsh/dsh-adapter';
-import { GrokAdapter } from '../adapters/grok/grok-adapter';
-import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
-import { PiAdapter } from '../adapters/pi/pi-adapter';
-import { buildRuntimeEnvironment, type RuntimeEnvironment } from '../runtime/environment';
+import { ClaudeAdapter } from '../adapters/claude/claude-adapter.js';
+import { CodexAdapter } from '../adapters/codex/codex-adapter.js';
+import { AgyAdapter } from '../adapters/antigravity/agy-adapter.js';
+import { DshAdapter } from '../adapters/dsh/dsh-adapter.js';
+import { GrokAdapter } from '../adapters/grok/grok-adapter.js';
+import { HermesAdapter } from '../adapters/hermes/hermes-adapter.js';
+import { PiAdapter } from '../adapters/pi/pi-adapter.js';
+import { buildRuntimeEnvironment, type RuntimeEnvironment } from '../runtime/environment.js';
 import type {
   RuntimeAdapter,
   RuntimeAdapterDescriptor,
   RuntimeAdapterPrepareInput,
   RuntimeAdapterPrepareResult,
   RuntimeDetectResult,
-} from '../types';
+} from '../types.js';
 
 /** The built-in adapters a fake can stand in for. */
 export type FakeRuntimeAdapterId = 'agy' | 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';

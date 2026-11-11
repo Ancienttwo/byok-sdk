@@ -18,7 +18,7 @@
  * - **conflicts return the snapshot they lost to**, so the caller re-decides
  *   against real state instead of retrying blind.
  */
-import type { TenantId } from './tenant';
+import type { TenantId } from './tenant.js';
 
 /** The five board statuses. `closed` means "terminated, unaccepted" (§12.3). */
 export const BOARD_STATUSES = ['todo', 'in_progress', 'in_review', 'done', 'closed'] as const;

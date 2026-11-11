@@ -1,4 +1,4 @@
-import type { CollectExpiredInput, CollectExpiredResult } from './retention';
+import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 /**
  * Tenant storage entitlement, usage, reservation and retention (§12.7.6-12.7.7).
  *
@@ -19,9 +19,9 @@ import type { CollectExpiredInput, CollectExpiredResult } from './retention';
  * checked under the reservation lock, which is what makes concurrent uploads
  * unable to oversell the tenant.
  */
-import type { ContentHash } from './blob';
-import type { CoreErrorCode } from './errors';
-import type { TenantId } from './tenant';
+import type { ContentHash } from './blob.js';
+import type { CoreErrorCode } from './errors.js';
+import type { TenantId } from './tenant.js';
 
 /**
  * The host-issued numeric entitlement (§12.7.6, verbatim).

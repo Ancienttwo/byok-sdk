@@ -1,4 +1,4 @@
-import type { CollectExpiredInput, CollectExpiredResult } from './retention';
+import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 /**
  * Content addressing and the object manifest (§12.7.4, §12.7.8).
  *
@@ -14,8 +14,8 @@ import type { CollectExpiredInput, CollectExpiredResult } from './retention';
  * cross-tenant oracle, which is why §12.7.4 forbids it even though it would
  * deduplicate better.
  */
-import { ByokCoreError } from './errors';
-import type { TenantId } from './tenant';
+import { ByokCoreError } from './errors.js';
+import type { TenantId } from './tenant.js';
 
 /** `sha256:<64 lowercase hex>`. The only content-address form core accepts. */
 export const CONTENT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;

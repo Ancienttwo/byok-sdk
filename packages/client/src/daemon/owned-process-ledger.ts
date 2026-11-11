@@ -6,9 +6,9 @@ import {
   type OwnedProcessGroupLedger,
   type OwnedProcessGroupReap,
   type OwnedProcessGroupRecord,
-} from '../adapters/process-tree';
-import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureDir } from '../util/secure-dir';
+} from '../adapters/process-tree.js';
+import { atomicWriteFile } from '../util/atomic-write.js';
+import { ensureSecureDir } from '../util/secure-dir.js';
 
 /**
  * #393 / #384 item 3: the durable record of every POSIX runtime process group

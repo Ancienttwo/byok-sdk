@@ -5,13 +5,13 @@ import {
   validateActivityAppend,
   type ActivityAppendInput,
   type ActivityTail,
-} from './activity';
-import { ByokCloudError } from './errors';
-import type { TenantBoundActivity } from './tenant-stores';
+} from './activity.js';
+import { ByokCloudError } from './errors.js';
+import type { TenantBoundActivity } from './tenant-stores.js';
 
 export const DEFAULT_BOARD_CHANNEL_MAX_BYTES = 128;
 export const DEFAULT_BOARD_TITLE_MAX_BYTES = 512;
-export { DEFAULT_ACTIVITY_CAPACITY } from './activity';
+export { DEFAULT_ACTIVITY_CAPACITY } from './activity.js';
 export const DEFAULT_ACTIVITY_TTL_MS = ACTIVITY_TERMINAL_TTL_MS;
 export const DEFAULT_PRESENCE_TTL_MS = 90_000;
 export const DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS = 5_000;

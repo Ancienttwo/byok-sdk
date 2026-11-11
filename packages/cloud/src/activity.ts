@@ -2,8 +2,8 @@ import type { CollectExpiredInput, CollectExpiredResult, TenantId } from '@byok-
 import { tenantKey } from '@byok-sdk/core';
 import { AgentEventOrUnknownSchema, SealedTaskOutputSchema, TaskArtifactPayloadSchema, type AgentEventOrUnknown, type SealedPayload, type TaskArtifactPayload } from '@byok-sdk/protocol';
 import { z } from 'zod';
-import { ByokCloudError } from './errors';
-import { sealedComparisonProjection } from './sealed-comparison';
+import { ByokCloudError } from './errors.js';
+import { sealedComparisonProjection } from './sealed-comparison.js';
 
 export const DEFAULT_ACTIVITY_CAPACITY = 1000;
 export const MAX_ACTIVITY_BYTES = 4 * 1024 * 1024;

@@ -38,7 +38,7 @@ function stripComments(source: string): string {
 describe('runtime clients share one process-tree disposal authority', () => {
   it.each(RUNTIME_CLIENTS)('$runtime imports every process-tree entry point from ../process-tree', ({ file }) => {
     const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
-    const importMatch = source.match(/import\s*\{([^}]*)\}\s*from\s*'[^']*process-tree';/);
+    const importMatch = source.match(/import\s*\{([^}]*)\}\s*from\s*'[^']*process-tree\.js';/);
 
     const importedNames = importMatch?.[1];
     expect(importedNames).toBeDefined();

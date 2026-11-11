@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
-import { ByokKeysError } from './errors';
+import { ByokKeysError } from './errors.js';
 
 export type SqliteOpenStep = 'after-open' | 'after-wal' | 'after-synchronous';
 

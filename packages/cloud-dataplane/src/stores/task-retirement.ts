@@ -21,8 +21,8 @@ import {
 } from '@byok-sdk/cloud';
 import type { TenantId } from '@byok-sdk/core';
 import type { PoolClient } from 'pg';
-import { closeDeviceStreams, expirePendingRows, lockDeviceStreams } from './core/outbox-writer';
-import { readOutbox } from './task-redaction';
+import { closeDeviceStreams, expirePendingRows, lockDeviceStreams } from './core/outbox-writer.js';
+import { readOutbox } from './task-redaction.js';
 
 type Querier = Pick<PoolClient, 'query'>;
 

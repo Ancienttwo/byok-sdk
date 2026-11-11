@@ -36,10 +36,10 @@ import {
   type SealedSplitEntry,
   type TaskSealing,
 } from '@byok-sdk/protocol';
-import { BlobHttpError } from './blob-http-error';
-import type { AgentMemoryProjectionSealer } from './agent-memory';
-import { routineTemplateBinding, routineTemplateExpired, type RoutineRef } from './sealed-routine-template';
-import { DAEMON_TASK_FAILURE } from './task-failure';
+import { BlobHttpError } from './blob-http-error.js';
+import type { AgentMemoryProjectionSealer } from './agent-memory.js';
+import { routineTemplateBinding, routineTemplateExpired, type RoutineRef } from './sealed-routine-template.js';
+import { DAEMON_TASK_FAILURE } from './task-failure.js';
 
 type JsonObject = { [key: string]: unknown };
 

@@ -1,6 +1,6 @@
-import type { WakeStore, StoredWake } from './store';
+import type { WakeStore, StoredWake } from './store.js';
 import { WAKE_WAIT_MS, WakeClosedError, WakeHookMissingError, validateWakeInput, validateWakeKey,
-  type WakeConsumer, type WakeRecord, type WakeScheduleInput, type WakeScheduleResult } from './types';
+  type WakeConsumer, type WakeRecord, type WakeScheduleInput, type WakeScheduleResult } from './types.js';
 
 interface Delivery { row: StoredWake; controller: AbortController; deliveredAt: number }
 function errorText(error: unknown): string {

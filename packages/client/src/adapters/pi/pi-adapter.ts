@@ -1,16 +1,16 @@
-import { PI_MEMORY_LANE } from './memory-lane-contract';
-import { parsePiHostReadyEvent } from './host-ready';
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, sdkLaneReport, type RuntimeEnvironment, type RuntimeEnvironmentLaneReport, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from './pi-capabilities';
-import { parsePiAgentResources, INHERITED_PI_AGENT_RESOURCES, type PiAgentResources } from './agent-resources';
-import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity';
-import type { RuntimeTaskInput } from '../../types';
-import type { ExecutionScratch } from '../../daemon/retention/scratch';
-import { startDurablePi } from '../pi-durable/session';
-import { serializePiHostConfig } from './runtime-host-binding';
-import { parsePiMcpEnvironment, projectPiMcpEnvironment } from './mcp-environment';
-import { PI_PREPARED_ENV_ALLOW, piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from './runtime-launch';
-import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
+import { PI_MEMORY_LANE } from './memory-lane-contract.js';
+import { parsePiHostReadyEvent } from './host-ready.js';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, sdkLaneReport, type RuntimeEnvironment, type RuntimeEnvironmentLaneReport, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from './pi-capabilities.js';
+import { parsePiAgentResources, INHERITED_PI_AGENT_RESOURCES, type PiAgentResources } from './agent-resources.js';
+import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity.js';
+import type { RuntimeTaskInput } from '../../types.js';
+import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
+import { startDurablePi } from '../pi-durable/session.js';
+import { serializePiHostConfig } from './runtime-host-binding.js';
+import { parsePiMcpEnvironment, projectPiMcpEnvironment } from './mcp-environment.js';
+import { PI_PREPARED_ENV_ALLOW, piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from './runtime-launch.js';
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path, { isAbsolute } from 'node:path';
@@ -34,35 +34,35 @@ import {
   type RuntimePreparedLaunchV1,
   type Session,
   type SessionEvidence,
-} from '../../types';
-import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME, isReservedMcpServerName } from '../../sdk-reserved-mcp';
-import { McpAuthorityError } from '../../mcp/authority-error';
-import { projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
+} from '../../types.js';
+import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME, isReservedMcpServerName } from '../../sdk-reserved-mcp.js';
+import { McpAuthorityError } from '../../mcp/authority-error.js';
+import { projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection.js';
 import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_VERSION,
-} from '../../input-preparation';
-import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { clientPackageRoot, readClientPiRuntimePin } from './client-manifest';
-import { PI_VERSION_POLICY } from './pi-version';
-import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
-import { locateBundledPiAssets } from './todo-locale-assets';
-import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
-import { resolvePiBin, type ResolvedBin } from './resolve-bin';
-import { runtimeExecutableFields } from '../runtime-executable';
-import { mapPiContextUsage, mapPiMessageToAgentEvent, piAssistantError, ROUTINE_PI_EVENT_TYPES } from './events';
+} from '../../input-preparation.js';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
+import { clientPackageRoot, readClientPiRuntimePin } from './client-manifest.js';
+import { PI_VERSION_POLICY } from './pi-version.js';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
+import { locateBundledPiAssets } from './todo-locale-assets.js';
+import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../../sdk-reserved-helper-host.js';
+import { resolvePiBin, type ResolvedBin } from './resolve-bin.js';
+import { runtimeExecutableFields } from '../runtime-executable.js';
+import { mapPiContextUsage, mapPiMessageToAgentEvent, piAssistantError, ROUTINE_PI_EVENT_TYPES } from './events.js';
 import { boundFailureReason } from '@byok-sdk/protocol/constants';
-import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
-import { abortPiRpcAndSettle } from './interrupt-settlement';
-import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame';
+import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client.js';
+import { abortPiRpcAndSettle } from './interrupt-settlement.js';
+import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame.js';
 import {
   withoutProviderCredentials,
-} from '../provider-credential-environment';
-import { probePiAuthPresent } from './auth-presence';
-import { startToolAuthorizationIpc } from '../../tool-authorization-ipc';
-import type { ToolAuthorizationGate } from '../../tool-authorization';
-import { serializeFileScopeGrant } from '../../file-scope-serialization';
-import { acquirePiSessionRetention, type PiSessionRetentionLease } from '../../util/pi-session-retention';
+} from '../provider-credential-environment.js';
+import { probePiAuthPresent } from './auth-presence.js';
+import { startToolAuthorizationIpc } from '../../tool-authorization-ipc.js';
+import type { ToolAuthorizationGate } from '../../tool-authorization.js';
+import { serializeFileScopeGrant } from '../../file-scope-serialization.js';
+import { acquirePiSessionRetention, type PiSessionRetentionLease } from '../../util/pi-session-retention.js';
 
 async function disposePiStartup(rpc: PiRpcClient | undefined, scratch: ExecutionScratch, cause?: unknown): Promise<void> {
   const retry = async (): Promise<void> => {

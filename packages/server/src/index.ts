@@ -1,13 +1,13 @@
-import { ProjectionWaiters } from './projection-waiters';
-export { listenLoopback } from './loopback';
-export type { LoopbackPortStore, LoopbackHandler, LoopbackListenerOptions, LoopbackListener } from './loopback';
-import type { AgentMessageDraftEvent } from './types';
-export type { AgentMessageDraftEvent } from './types';
-import { WakeScheduler } from './wakes/scheduler';
-import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
-export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, WAKE_MAX_FUTURE_MS } from './wakes/types';
-export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
-import { MaintenanceScheduler, assertMaintenanceInterval, DEFAULT_MAINTENANCE_INTERVAL_MS } from './maintenance-scheduler';
+import { ProjectionWaiters } from './projection-waiters.js';
+export { listenLoopback } from './loopback.js';
+export type { LoopbackPortStore, LoopbackHandler, LoopbackListenerOptions, LoopbackListener } from './loopback.js';
+import type { AgentMessageDraftEvent } from './types.js';
+export type { AgentMessageDraftEvent } from './types.js';
+import { WakeScheduler } from './wakes/scheduler.js';
+import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types.js';
+export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, WAKE_MAX_FUTURE_MS } from './wakes/types.js';
+export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types.js';
+import { MaintenanceScheduler, assertMaintenanceInterval, DEFAULT_MAINTENANCE_INTERVAL_MS } from './maintenance-scheduler.js';
 import { resolveRetentionPolicy, DEFAULT_MAINTENANCE_LIMIT, ByokCloudError, type MaintenanceReport } from '@byok-sdk/cloud';
 export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
@@ -46,11 +46,11 @@ import {
   type AgentMessageDispositionPayload,
   type TaskState,
 } from '@byok-sdk/protocol';
-import { TaskEventRelay } from './relay';
-import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
-import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
-import { approvePendingApproval, createTaskHandle, noteAbandoned, rejectPendingApproval } from './task-handle';
-import { readTaskEvents, type TaskEventDeps, type TaskEventFacts, type TaskEventSources } from './task-events';
+import { TaskEventRelay } from './relay.js';
+import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot.js';
+import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores.js';
+import { approvePendingApproval, createTaskHandle, noteAbandoned, rejectPendingApproval } from './task-handle.js';
+import { readTaskEvents, type TaskEventDeps, type TaskEventFacts, type TaskEventSources } from './task-events.js';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
@@ -68,7 +68,7 @@ import type {
   TaskHandle,
   TaskResult,
   TaskSnapshot,
-} from './types';
+} from './types.js';
 
 export type {
   ByokServerEvent,
@@ -87,8 +87,8 @@ export type {
   TaskHandle,
   TaskResult,
   TaskSnapshot,
-} from './types';
-export { TaskEventsUnavailableError } from './types';
+} from './types.js';
+export { TaskEventsUnavailableError } from './types.js';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
@@ -109,7 +109,7 @@ export { StaleApprovalError } from '@byok-sdk/cloud';
  * `task-handle.ts` for the full reasoning and for why `SteerRejectionCode` and
  * {@link StaleApprovalError} stay kernel re-exports.
  */
-export { SteerRejectedError } from './task-handle';
+export { SteerRejectedError } from './task-handle.js';
 export type { SteerRejectionCode } from '@byok-sdk/cloud';
 /**
  * Auth v2 types an embedder needs to talk about devices and tokens. All owned
@@ -118,10 +118,10 @@ export type { SteerRejectionCode } from '@byok-sdk/cloud';
  */
 export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenSigner } from '@byok-sdk/cloud';
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
-export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
-export type { SqliteSchemaErrorCode } from './sqlite-support';
-export { inspectSqliteStore } from './store-compatibility';
-export type { RateLimiterOptions } from './rate-limiter';
+export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support.js';
+export type { SqliteSchemaErrorCode } from './sqlite-support.js';
+export { inspectSqliteStore } from './store-compatibility.js';
+export type { RateLimiterOptions } from './rate-limiter.js';
 
 /** `GET /byok/events` hold duration (§8): ~50s unless overridden (e.g. for tests). */
 const DEFAULT_LONG_POLL_HOLD_MS = 50_000;

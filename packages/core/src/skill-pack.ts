@@ -33,9 +33,9 @@
  * pushes into a task stream.
  */
 import { z } from 'zod';
-import { CONTENT_HASH_PATTERN, contentHash, type ContentHash } from './blob';
-import { ByokCoreError } from './errors';
-import type { TenantId } from './tenant';
+import { CONTENT_HASH_PATTERN, contentHash, type ContentHash } from './blob.js';
+import { ByokCoreError } from './errors.js';
+import type { TenantId } from './tenant.js';
 
 export const SKILL_PACK_MANIFEST_SCHEMA_ID = 'byok-skill-pack-v1';
 

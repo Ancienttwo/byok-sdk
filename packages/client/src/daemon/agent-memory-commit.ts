@@ -3,7 +3,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES, AGENT_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
 import { AgentMemoryError, validateAgentMemoryPath, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
-import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, ensureDirectoryNoSymlink, type AgentHomeLease } from '../agent-home';
+import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, ensureDirectoryNoSymlink, type AgentHomeLease } from '../agent-home.js';
 import {
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   agentMemoryHomeBinding,
@@ -19,8 +19,8 @@ import {
   recordAgentMemoryHomeEntries,
   replaceAgentMemoryHomeInternalFileStrict,
   type AgentMemoryHomeBinding,
-} from './agent-memory';
-import type { AgentMemoryIntentBackend } from './agent-memory-intent';
+} from './agent-memory.js';
+import type { AgentMemoryIntentBackend } from './agent-memory-intent.js';
 
 const MANIFEST_FILENAME = 'agent-memory-commit-manifest.json';
 const contentFilename = (index: number): string => `agent-memory-commit-content-${index}`;

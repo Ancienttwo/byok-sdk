@@ -2,20 +2,20 @@ import { DurableObject } from 'cloudflare:workers';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { Harness, type ConversationId, type ConversationView, type EntryRecord, type LiveState } from '@earendil-works/pi-durable';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
-import { admitCloudSubmission } from './admission';
-import { CloudDoError, cloudErrorResponse, type CloudDoErrorCode } from './errors';
-import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } from './platform-credentials';
-import { admitCloudText } from './input-guard';
-import { SessionRuntime, type CloudRenewRequest, type CloudRenewResult, type CloudRunSettlement, type ExecutionLease } from './session-runtime';
-import type { CloudToolDispatcher } from './tools';
-import type { InvocationTerminalState, InvocationRow } from './invocation-ledger';
-import { admitCloudInbox } from './inbox-admission';
-import { runInputSeqs, utf8Prefix, type AdmissionIdentity, type InboxRow, type TranscriptCursor, type TranscriptRun } from './cloud-state';
-import { CloudEventDoorbell, CloudEventStreams } from './event-stream';
-import { runCloudWake, committedRunOutcome, type CloudWakeAdmission } from './wake-runner';
-import { safeCloudError } from './errors';
+import { admitCloudSubmission } from './admission.js';
+import { CloudDoError, cloudErrorResponse, type CloudDoErrorCode } from './errors.js';
+import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } from './platform-credentials.js';
+import { admitCloudText } from './input-guard.js';
+import { SessionRuntime, type CloudRenewRequest, type CloudRenewResult, type CloudRunSettlement, type ExecutionLease } from './session-runtime.js';
+import type { CloudToolDispatcher } from './tools.js';
+import type { InvocationTerminalState, InvocationRow } from './invocation-ledger.js';
+import { admitCloudInbox } from './inbox-admission.js';
+import { runInputSeqs, utf8Prefix, type AdmissionIdentity, type InboxRow, type TranscriptCursor, type TranscriptRun } from './cloud-state.js';
+import { CloudEventDoorbell, CloudEventStreams } from './event-stream.js';
+import { runCloudWake, committedRunOutcome, type CloudWakeAdmission } from './wake-runner.js';
+import { safeCloudError } from './errors.js';
 
-export { CLOUD_HARNESS_SETTINGS } from './session-runtime';
+export { CLOUD_HARNESS_SETTINGS } from './session-runtime.js';
 
 function modelFailureCode(message: string | undefined): CloudDoErrorCode {
   return safeCloudError(new Error(message)).code;

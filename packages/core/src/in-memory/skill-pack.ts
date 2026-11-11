@@ -23,9 +23,9 @@ import {
   type SkillPackManifest,
   type SkillPackPublishInput,
   type SkillPackStore,
-} from '../skill-pack';
-import { ByokCoreError } from '../errors';
-import { tenantKey, type TenantId } from '../tenant';
+} from '../skill-pack.js';
+import { ByokCoreError } from '../errors.js';
+import { tenantKey, type TenantId } from '../tenant.js';
 
 const DEFAULT_LIST_LIMIT = 50;
 

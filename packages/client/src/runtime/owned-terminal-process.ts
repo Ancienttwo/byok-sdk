@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import {
   adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree,
-} from '../adapters/process-tree';
+} from '../adapters/process-tree.js';
 
 const LABEL = 'acp terminal';
 

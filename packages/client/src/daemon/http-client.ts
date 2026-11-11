@@ -1,4 +1,4 @@
-import type { AuthManager } from './auth-manager';
+import type { AuthManager } from './auth-manager.js';
 
 /**
  * `fetch` with the current device bearer token attached. On a 401, renews

@@ -1,9 +1,9 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { ToolAuthorizationReason, ToolFileAccess, ToolRiskReason } from '../tool-authorization';
-import type { DaemonLifecycle } from './daemon-lifecycle';
-import { MAX_TRACKED_TASKS, type AssertionLane, type DaemonEvent } from './observer';
-import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentStatus, type ServiceEnvironmentRecord, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
-import type { RuntimeObservation } from '../runtime-detection';
+import type { ToolAuthorizationReason, ToolFileAccess, ToolRiskReason } from '../tool-authorization.js';
+import type { DaemonLifecycle } from './daemon-lifecycle.js';
+import { MAX_TRACKED_TASKS, type AssertionLane, type DaemonEvent } from './observer.js';
+import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentStatus, type ServiceEnvironmentRecord, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
+import type { RuntimeObservation } from '../runtime-detection.js';
 
 /**
  * The content-free projection of what a daemon observed — the ONE shape every

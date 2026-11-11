@@ -1,16 +1,16 @@
-import type { DaemonConfig } from '../../index';
+import type { DaemonConfig } from '../../index.js';
 import {
   collectDoctorDiagnostics,
   quarantineCorruptOperationalHealth,
   type CollectDiagnosticsOptions,
   type DoctorDiagnostics,
   type OperationalHealthFixResult,
-} from '../../diagnostics/diagnostics';
-import { resolveStoreDir } from '../config';
-import { serviceLogDir } from '../../daemon/host-layout';
-import type { ServiceEnvironmentRecord } from '../../login-shell-environment';
-import { formatRuntimeEnvironmentLines, formatRuntimeExecutable, formatServiceEnvironment } from '../../diagnostics/format';
-import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from '../../diagnostics/device-doctor';
+} from '../../diagnostics/diagnostics.js';
+import { resolveStoreDir } from '../config.js';
+import { serviceLogDir } from '../../daemon/host-layout.js';
+import type { ServiceEnvironmentRecord } from '../../login-shell-environment.js';
+import { formatRuntimeEnvironmentLines, formatRuntimeExecutable, formatServiceEnvironment } from '../../diagnostics/format.js';
+import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from '../../diagnostics/device-doctor.js';
 
 export interface DoctorOptions extends CollectDiagnosticsOptions {
   json?: boolean;

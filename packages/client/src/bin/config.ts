@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
-import type { DaemonConfig } from '../daemon/create-daemon';
-import { DeviceStore } from '../daemon/store';
-import { validateDaemonConfig, type DaemonConfigIssue } from '../daemon/config-schema/validate';
-import { removedFieldError } from '../daemon/config-schema/errors';
-import { OFFICIAL_LOCAL_AGENT_RELEASE } from './official-release';
+import type { DaemonConfig } from '../daemon/create-daemon.js';
+import { DeviceStore } from '../daemon/store.js';
+import { validateDaemonConfig, type DaemonConfigIssue } from '../daemon/config-schema/validate.js';
+import { removedFieldError } from '../daemon/config-schema/errors.js';
+import { OFFICIAL_LOCAL_AGENT_RELEASE } from './official-release.js';
 
 /**
  * Shared CLI plumbing: config-file loading and a tiny hand-rolled arg

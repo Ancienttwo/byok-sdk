@@ -1,7 +1,7 @@
 import path from 'node:path';
-import { parseSessionEntries, sessionFileName, type AgentSessionHandoff } from '../agent-session-handoff-store';
-import { isAgentSessionLedgerName, piSessionRefFromFileName } from '../retention/session-ledgers';
-import { argumentSummary, redactSummary } from './summary';
+import { parseSessionEntries, sessionFileName, type AgentSessionHandoff } from '../agent-session-handoff-store.js';
+import { isAgentSessionLedgerName, piSessionRefFromFileName } from '../retention/session-ledgers.js';
+import { argumentSummary, redactSummary } from './summary.js';
 
 const RECORD_BYTES = 256 * 1024;
 const TAIL_BYTES = 8 * 1024 * 1024;

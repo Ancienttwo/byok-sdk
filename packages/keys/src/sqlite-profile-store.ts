@@ -13,12 +13,12 @@ import {
   type ProviderCustodyReceipt,
   type ProviderCustodyReservation,
   type ProviderKeyCheckOutcome,
-} from './custody';
-import { ByokKeysError } from './errors';
+} from './custody.js';
+import { ByokKeysError } from './errors.js';
 import {
   type ProviderProfileStore,
   providerNotConfigured,
-} from './profile-store';
+} from './profile-store.js';
 import {
   MODEL_PROVIDER_ADAPTERS,
   MODEL_PROVIDER_KINDS,
@@ -26,13 +26,13 @@ import {
   type ModelProviderProfile,
   type ProviderProfileRef,
   parseModelProviderProfile,
-} from './provider-profile';
+} from './provider-profile.js';
 import {
   closeSqliteDatabaseAfterInitializationFailure,
   loadSqliteModule,
   openSqliteDatabase,
   secureSqliteFilePermissions,
-} from './sqlite-support';
+} from './sqlite-support.js';
 
 export interface SqliteProviderProfileStoreOptions {
   /**

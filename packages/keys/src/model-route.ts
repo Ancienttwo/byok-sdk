@@ -1,6 +1,6 @@
-import { PI_MODEL_CATALOG } from './pi-model-catalog.generated';
-import type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog';
-import { piApiOf } from './pi-api';
+import { PI_MODEL_CATALOG } from './pi-model-catalog.generated.js';
+import type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog.js';
+import { piApiOf } from './pi-api.js';
 import {
   PI_MODEL_APIS,
   PI_OPENAI_COMPATIBLE_APIS,
@@ -9,14 +9,14 @@ import {
   type PiModelApi,
   type PiModelConfig,
   type PiThinkingLevel,
-} from './pi-model-config';
-import { PI_DEFAULT_THINKING_LEVEL } from './pi-runtime-defaults.generated';
+} from './pi-model-config.js';
+import { PI_DEFAULT_THINKING_LEVEL } from './pi-runtime-defaults.generated.js';
 import {
   MODEL_PROVIDER_VENDOR_IDS,
   modelProviderVendor,
   type ModelProviderVendor,
   type ModelProviderVendorId,
-} from './provider-catalog';
+} from './provider-catalog.js';
 import {
   MODEL_PROVIDER_ADAPTERS,
   ModelProviderProfileSchema,
@@ -29,9 +29,9 @@ import {
   type ModelProviderProfileInput,
   type ProviderAuthMode,
   type ProviderModelCapability,
-} from './provider-profile';
-import { PROVIDER_PROVISIONING_SECRET_MAX_BYTES, isSharedSecretValue } from './secret-value';
-import { normalizeProviderUrl } from './url';
+} from './provider-profile.js';
+import { PROVIDER_PROVISIONING_SECRET_MAX_BYTES, isSharedSecretValue } from './secret-value.js';
+import { normalizeProviderUrl } from './url.js';
 
 /** The draft fields, in the order a Host renders them. */
 export const MODEL_ROUTE_FIELDS = [
@@ -752,15 +752,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS } from './provider-catalog';
-export type { ModelProviderVendor, ModelProviderVendorId } from './provider-catalog';
-export { PI_THINKING_LEVELS, piSupportedThinkingLevels } from './pi-model-config';
-export type { PiModelApi, PiModelConfig, PiThinkingLevel } from './pi-model-config';
+export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS } from './provider-catalog.js';
+export type { ModelProviderVendor, ModelProviderVendorId } from './provider-catalog.js';
+export { PI_THINKING_LEVELS, piSupportedThinkingLevels } from './pi-model-config.js';
+export type { PiModelApi, PiModelConfig, PiThinkingLevel } from './pi-model-config.js';
 export { PI_DEFAULT_THINKING_LEVEL };
-export type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog';
+export type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog.js';
 export type {
   ModelProviderAdapter,
   ModelProviderKind,
   ProviderAuthMode,
   ProviderModelCapability,
-} from './provider-profile';
+} from './provider-profile.js';

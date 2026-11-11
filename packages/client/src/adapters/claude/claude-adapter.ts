@@ -1,10 +1,10 @@
-import { resolveInterruptTimeoutMs } from '../session-limits';
-import type { RuntimeTaskInput } from '../../types';
-import { createClaudeMcpIdentityResolver } from './mcp-identity';
-import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities';
-import { claudeAgentUserContextSettings } from './agent-user-context';
-import type { ExecutionScratch } from '../../daemon/retention/scratch';
-import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
+import { resolveInterruptTimeoutMs } from '../session-limits.js';
+import type { RuntimeTaskInput } from '../../types.js';
+import { createClaudeMcpIdentityResolver } from './mcp-identity.js';
+import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities.js';
+import { claudeAgentUserContextSettings } from './agent-user-context.js';
+import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { execFile } from 'node:child_process';
 import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
@@ -24,22 +24,22 @@ import {
   type RuntimeAdapterPrepareResult,
   type RuntimeOperationStartInput,
   type Session,
-} from '../../types';
-import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentConflictRule, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
-import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation';
-import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
-import { createClaudeControlChannel } from './control-channel';
-import { ClaudeToolAuthorizationBridge } from './tool-authorization';
-import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
-import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
-import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './events';
-import { ClaudeFailureEvidence } from './failure-evidence';
-import { ClaudeProcessClient, type SpawnFn } from './process-client';
-import { servedModelName } from '../served-model';
-import { CLAUDE_VERSION_POLICY, claudeVersionToken } from './claude-version';
-import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
+} from '../../types.js';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure.js';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentConflictRule, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { resolveClaudeBin, type ResolvedBin } from './resolve-bin.js';
+import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { createClaudeControlChannel } from './control-channel.js';
+import { ClaudeToolAuthorizationBridge } from './tool-authorization.js';
+import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions.js';
+import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
+import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './events.js';
+import { ClaudeFailureEvidence } from './failure-evidence.js';
+import { ClaudeProcessClient, type SpawnFn } from './process-client.js';
+import { servedModelName } from '../served-model.js';
+import { CLAUDE_VERSION_POLICY, claudeVersionToken } from './claude-version.js';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 
 
 const execFileAsync = promisify(execFile);
@@ -682,7 +682,7 @@ class ClaudeSession implements Session {
                 return { value: undefined as never, done: true };
               }
 
-              let raw: IteratorResult<import('./events').ClaudeStreamMessage>;
+              let raw: IteratorResult<import('./events.js').ClaudeStreamMessage>;
               try {
                 raw = await inner.next();
               } catch (cause) {

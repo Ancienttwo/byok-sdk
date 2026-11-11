@@ -1,6 +1,6 @@
 import path from 'node:path';
-import type { RuntimeOperationManifest } from '../../types';
-import { RuntimeExecutionFailure } from '../../runtime-failure';
+import type { RuntimeOperationManifest } from '../../types.js';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 
 const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 // Claude matches excludes with picomatch after turning `\` into `/`, so glob

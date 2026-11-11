@@ -2,11 +2,11 @@ import { spawn } from 'node:child_process';
 import { readSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { SqliteProviderProfileStore } from './sqlite-profile-store';
-import { ProviderProfileRefSchema, ProviderModelCapabilitySchema, type ModelProviderProfile } from './provider-profile';
-import { assertExactProviderProfileBinding, type ExactProviderProfileBinding } from './provider-profile-binding';
-import { assertProviderCustodyIdle, readProviderCustodySnapshot, projectKeysPiInheritedEnvironment } from './pi-provider-launcher-core';
-import { assertSharedSecretValue, type SecretStore } from './secret-store';
+import { SqliteProviderProfileStore } from './sqlite-profile-store.js';
+import { ProviderProfileRefSchema, ProviderModelCapabilitySchema, type ModelProviderProfile } from './provider-profile.js';
+import { assertExactProviderProfileBinding, type ExactProviderProfileBinding } from './provider-profile-binding.js';
+import { assertProviderCustodyIdle, readProviderCustodySnapshot, projectKeysPiInheritedEnvironment } from './pi-provider-launcher-core.js';
+import { assertSharedSecretValue, type SecretStore } from './secret-store.js';
 
 const absolute = z.string().refine(path.isAbsolute).refine(value => !value.includes('\0'));
 const Binding = z.object({ profileRef: ProviderProfileRefSchema, profileRevision: z.string().regex(/^(?:0|[1-9][0-9]{0,19})$/u),

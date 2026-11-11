@@ -1,6 +1,6 @@
 import type { TenantId } from '@byok-sdk/core';
-import type { MailboxWake, MailboxWakeSubscription } from '../../mailbox-wake';
-import type { TaskEventsWake } from '../../task-events-wake';
+import type { MailboxWake, MailboxWakeSubscription } from '../../mailbox-wake.js';
+import type { TaskEventsWake } from '../../task-events-wake.js';
 
 export const DEFAULT_MAILBOX_WAKE_FALLBACK_MS = 5_000;
 /** How long a task event reader no hint reached waits before it re-reads (#1113 A4). */

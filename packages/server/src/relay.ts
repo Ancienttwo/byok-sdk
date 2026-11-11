@@ -1,7 +1,7 @@
 import type { InboundCommitted, ByokCloudObserver } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
-import { AsyncEventQueue } from './event-queue';
-import type { ByokServerEvent } from './types';
+import { AsyncEventQueue } from './event-queue.js';
+import type { ByokServerEvent } from './types.js';
 
 /** Cross-task server events a slow `events.subscribe()` reader leaves buffered before the oldest are dropped. */
 const SERVER_EVENT_BUFFER_LIMIT = 1000;

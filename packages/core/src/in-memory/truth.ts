@@ -7,9 +7,9 @@
  * because the device holding the context is the only party that can decide what
  * the merged truth should be.
  */
-import { CoreConflictError } from '../errors';
-import type { Clock } from '../stores';
-import { tenantKey, type TenantId } from '../tenant';
+import { CoreConflictError } from '../errors.js';
+import type { Clock } from '../stores.js';
+import { tenantKey, type TenantId } from '../tenant.js';
 import type {
   SnapshotWriteInput,
   TerminalWriteInput,
@@ -18,7 +18,7 @@ import type {
   TruthRecord,
   TruthRecordSelector,
   TruthStore,
-} from '../truth';
+} from '../truth.js';
 
 const DEFAULT_MANIFEST_LIMIT = 100;
 

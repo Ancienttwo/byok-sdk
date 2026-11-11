@@ -1,6 +1,6 @@
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
-import { agentReliabilityKey } from '../../agent-reliability';
-import type { AgentEgressRecord, AgentEgressStore } from '../ports';
+import { agentReliabilityKey } from '../../agent-reliability.js';
+import type { AgentEgressRecord, AgentEgressStore } from '../ports.js';
 
 /** Reference egress fact store. Duplicate event ids return, never overwrite, the first receipt. */
 export class InMemoryAgentEgressStore implements AgentEgressStore {

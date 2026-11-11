@@ -1,6 +1,6 @@
-import { hasUserKeyShape } from './admission';
-import { CloudDoError } from './errors';
-import { platformProfile, type PlatformProfileId } from './platform-credentials';
+import { hasUserKeyShape } from './admission.js';
+import { CloudDoError } from './errors.js';
+import { platformProfile, type PlatformProfileId } from './platform-credentials.js';
 
 export type InboxSource = 'message' | 'schedule' | 'invocation';
 export interface CloudInboxAdmission {

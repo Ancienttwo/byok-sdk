@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, openSync, promises as fs } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import path from 'node:path';
-import { resolveExistingAncestor } from './existing-ancestor';
-import { ensureOwnedPrivateDirectory } from './private-unix-socket';
+import { resolveExistingAncestor } from './existing-ancestor.js';
+import { ensureOwnedPrivateDirectory } from './private-unix-socket.js';
 
 export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
 

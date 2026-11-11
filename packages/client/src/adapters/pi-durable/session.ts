@@ -1,18 +1,18 @@
-import { assertDurableShellOwner, disposeDurableShellGroups } from './process-groups';
+import { assertDurableShellOwner, disposeDurableShellGroups } from './process-groups.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { RuntimeOperationInstructionStartInput, Session } from '../../types';
-import { piLaunchCommand, type PiRuntimeLaunchResources } from '../pi/runtime-launch';
-import type { PiByokLauncherConfig } from '../pi/pi-adapter';
-import { serializePiHostConfig } from '../pi/runtime-host-binding';
-import { startToolAuthorizationIpc } from '../../tool-authorization-ipc';
-import { serializeFileScopeGrant } from '../../file-scope-serialization';
-import { PiRpcClient, type SpawnFn } from '../pi/rpc-client';
-import { RuntimeExecutionFailure } from '../../runtime-failure';
-import { AsyncQueue } from '../../util/async-queue';
-import { admitReplica, resetReplica } from './replica';
-import { DurableRecovery } from './recovery';
+import type { RuntimeOperationInstructionStartInput, Session } from '../../types.js';
+import { piLaunchCommand, type PiRuntimeLaunchResources } from '../pi/runtime-launch.js';
+import type { PiByokLauncherConfig } from '../pi/pi-adapter.js';
+import { serializePiHostConfig } from '../pi/runtime-host-binding.js';
+import { startToolAuthorizationIpc } from '../../tool-authorization-ipc.js';
+import { serializeFileScopeGrant } from '../../file-scope-serialization.js';
+import { PiRpcClient, type SpawnFn } from '../pi/rpc-client.js';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
+import { AsyncQueue } from '../../util/async-queue.js';
+import { admitReplica, resetReplica } from './replica.js';
+import { DurableRecovery } from './recovery.js';
 
 export interface DurableStart {
   nativeAssetRoot?: string;

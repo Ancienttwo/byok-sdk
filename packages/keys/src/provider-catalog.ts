@@ -1,4 +1,4 @@
-import type { ModelProviderAdapter, ProviderAuthMode } from './provider-profile';
+import type { ModelProviderAdapter, ProviderAuthMode } from './provider-profile.js';
 
 /**
  * One vendor the SDK can address without the consumer typing its endpoint.

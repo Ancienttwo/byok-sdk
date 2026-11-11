@@ -17,7 +17,7 @@
  */
 import pg from 'pg';
 import type { Pool, PoolClient, PoolConfig } from 'pg';
-import { BYOK_POOL } from './pool-brand';
+import { BYOK_POOL } from './pool-brand.js';
 
 /**
  * `pg`'s default parser for every other oid, so this config ADDS one decoding

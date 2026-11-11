@@ -48,32 +48,32 @@
  */
 
 /** Per-task memory authority: `recall`/`save` under sha256 compare-and-swap, bound to one exact active Agent task context. */
-export { AgentMemoryService } from '../daemon/agent-memory';
+export { AgentMemoryService } from '../daemon/agent-memory.js';
 /** Bounded, audited snapshot of the Agent's local memory files, taken after `Session.close()` while the home lease still exists. */
-export { captureAgentMemorySnapshot } from '../daemon/agent-memory';
+export { captureAgentMemorySnapshot } from '../daemon/agent-memory.js';
 /** The sole platform gate for the memory write authority: native Linux, macOS and Windows x64 only with the host's helper. */
-export { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
+export { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory.js';
 /** Compare-and-swap failure carrying the expected and actual content revisions. */
-export { AgentMemoryRevisionConflictError } from '../daemon/agent-memory';
+export { AgentMemoryRevisionConflictError } from '../daemon/agent-memory.js';
 
 /** The exact active-task binding required to construct the service; every field is validated on each call. */
-export type { AgentMemoryTaskContext } from '../daemon/agent-memory';
+export type { AgentMemoryTaskContext } from '../daemon/agent-memory.js';
 /** Result of `recall`, including the metadata-only audit warning when the audit write failed but the read did not. */
-export type { AgentMemoryRecallResult } from '../daemon/agent-memory';
+export type { AgentMemoryRecallResult } from '../daemon/agent-memory.js';
 /** Result of `save`, distinguishing a replace (with new revision) from a delete. */
-export type { AgentMemorySaveResult } from '../daemon/agent-memory';
+export type { AgentMemorySaveResult } from '../daemon/agent-memory.js';
 /** Metadata-only signal that the audit record could not be written; the source operation still succeeded. */
-export type { AgentMemoryAuditWarning } from '../daemon/agent-memory';
+export type { AgentMemoryAuditWarning } from '../daemon/agent-memory.js';
 
 /** Whether this platform can admit an external filesystem helper at all (macOS and Windows x64 today). */
-export { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper';
+export { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper.js';
 /** Admits the host's absolute signed/notarized helper binary and returns the root-pinned filesystem for one Agent home. */
-export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
+export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper.js';
 
 /** Root-bound filesystem authority the service operates through; the host supplies it only on macOS. */
-export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem';
+export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem.js';
 /** One file's state as reported by that filesystem authority. */
-export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
+export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem.js';
 /** Types of the observe, walk and restore cleanup methods of `AgentMemoryFilesystem`. */
 export type {
   AgentMemoryFileObservation,
@@ -82,21 +82,21 @@ export type {
   AgentMemoryWalk,
   AgentMemoryWalkEntry,
   AgentMemoryWalkEntryKind,
-} from '../daemon/agent-memory-filesystem';
+} from '../daemon/agent-memory-filesystem.js';
 
 /** Serves `memory_recall`/`memory_save` as a stdio MCP server over host-provided streams. */
-export { serveAgentMemoryMcpOverStdio } from './mcp-server';
+export { serveAgentMemoryMcpOverStdio } from './mcp-server.js';
 /** MCP tool name a host must allowlist for reads. */
-export { AGENT_MEMORY_RECALL_TOOL_NAME } from './mcp-server';
+export { AGENT_MEMORY_RECALL_TOOL_NAME } from './mcp-server.js';
 /** MCP tool name a host must allowlist for writes. */
-export { AGENT_MEMORY_SAVE_TOOL_NAME } from './mcp-server';
+export { AGENT_MEMORY_SAVE_TOOL_NAME } from './mcp-server.js';
 /** The two calls the stdio server delegates to; an `AgentMemoryService` satisfies it directly. */
-export type { AgentMemoryMcpDeps } from './mcp-server';
+export type { AgentMemoryMcpDeps } from './mcp-server.js';
 
 /** Runtime-neutral instructions telling the model how to use `MEMORY.md` and `notes/`. */
-export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance';
+export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance.js';
 /** Prepends that guidance to an Agent instruction, exactly as the daemon's task runner does. */
-export { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
+export { prependAgentMemoryGuidance } from '../daemon/memory-guidance.js';
 
 /** The validated Agent identity carried by `AgentMemoryTaskContext`. */
-export type { AgentRef } from '../agent-home';
+export type { AgentRef } from '../agent-home.js';

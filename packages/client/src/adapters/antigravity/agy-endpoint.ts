@@ -1,4 +1,4 @@
-import { assertAgyGeminiBaseUrl } from './agy-profile';
+import { assertAgyGeminiBaseUrl } from './agy-profile.js';
 
 const AGY_ENDPOINTS = new WeakMap<object, string>();
 

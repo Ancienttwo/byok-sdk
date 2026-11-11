@@ -55,7 +55,7 @@ export default defineConfig({
     setup(build) {
       // Both public entries must use the same error class and method core.
       // Inlining this import would create a private McpServerToolError copy.
-      build.onResolve({ filter: /^\.\/index$/ }, args => {
+      build.onResolve({ filter: /^\.\/index\.js$/ }, args => {
         if (args.importer.replace(/\\/g, '/').endsWith('/src/mcp-server/http.ts')) {
           return { path: './index.js', external: true };
         }

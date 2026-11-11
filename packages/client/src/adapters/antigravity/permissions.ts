@@ -1,6 +1,6 @@
 import path from 'node:path';
-import type { AcpPermissionRequest } from '../../runtime/acp-session-runtime';
-import { comparablePath } from '../../util/comparable-path';
+import type { AcpPermissionRequest } from '../../runtime/acp-session-runtime.js';
+import { comparablePath } from '../../util/comparable-path.js';
 
 /** A memory reader's Agent home and its own run directory, the only place below the home it may write. */
 export interface AgyReaderScope {

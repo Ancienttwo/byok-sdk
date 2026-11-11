@@ -3,7 +3,7 @@ import {
   ProviderModelCapabilitySchema,
   ProviderProfileBindingSchema,
   ProviderProfileRefSchema,
-} from './provider-profile-binding';
+} from './provider-profile-binding.js';
 
 /**
  * Sealed provider provisioning — the wire half.

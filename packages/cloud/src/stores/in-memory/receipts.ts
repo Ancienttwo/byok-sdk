@@ -1,6 +1,6 @@
 import { assertCollectExpiredInput, assertCanonicalTimestamp, type CollectExpiredResult } from '@byok-sdk/core';
-import { REQUEST_RECEIPT_PREFIXES } from '../../receipt-retention';
-import type { ReceiptCollectExpiredInput } from '../ports';
+import { REQUEST_RECEIPT_PREFIXES } from '../../receipt-retention.js';
+import type { ReceiptCollectExpiredInput } from '../ports.js';
 /**
  * In-memory {@link RequestReceiptStore}: first write wins.
  *
@@ -9,7 +9,7 @@ import type { ReceiptCollectExpiredInput } from '../ports';
  * false` is how the caller learns it was a replay rather than a new fact.
  */
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
-import type { RequestReceipt, RequestReceiptStore } from '../ports';
+import type { RequestReceipt, RequestReceiptStore } from '../ports.js';
 
 const INTERNALS = new WeakMap<InMemoryRequestReceiptStore, { readonly receipts: Map<string, RequestReceipt>; readonly clock: Clock }>();
 

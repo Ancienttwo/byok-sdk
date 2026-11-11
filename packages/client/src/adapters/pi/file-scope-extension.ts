@@ -1,13 +1,13 @@
 import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-agent';
-import { FileScopeGuardError, type FileScopeGrant } from '../../file-scope-guard';
+import { FileScopeGuardError, type FileScopeGrant } from '../../file-scope-guard.js';
 import {
   createScopedFileTools,
   formatScopedFileDenial,
   isScopedFileToolName,
   precheckScopedFileCall,
   type ScopedFileDenial,
-} from '../../file-scope-tools';
-import { reportFileScopeDenial, type ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc';
+} from '../../file-scope-tools.js';
+import { reportFileScopeDenial, type ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc.js';
 
 export interface PiFileScopeExtensionOptions {
   readonly grant: FileScopeGrant;

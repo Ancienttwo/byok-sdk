@@ -1,20 +1,20 @@
 import { z } from 'zod';
 
-import { ByokKeysError } from './errors';
+import { ByokKeysError } from './errors.js';
 import {
   MODEL_PROVIDER_VENDOR_IDS,
   modelProviderVendor,
   type ModelProviderVendorId,
-} from './provider-catalog';
-import { normalizeProviderUrl } from './url';
-import { piApiOf } from './pi-api';
+} from './provider-catalog.js';
+import { normalizeProviderUrl } from './url.js';
+import { piApiOf } from './pi-api.js';
 import {
   PI_ANTHROPIC_PROFILE_COMPAT_KEYS,
   PI_COMPAT_KEYS_BY_API,
   PiModelConfigSchema,
   piCompatIssues,
   type PiModelConfig,
-} from './pi-model-config';
+} from './pi-model-config.js';
 
 /**
  * Opaque, portable identity of one locally configured provider profile.

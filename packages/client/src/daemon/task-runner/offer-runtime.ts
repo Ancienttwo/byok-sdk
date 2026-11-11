@@ -1,18 +1,18 @@
 // `TaskRunner` members that select the runtime adapter and prepare its
 // operation for an offer (see ./support.ts for how a member module runs).
-import { awaitAdmission } from '../admission-wait';
-import { observeRuntimeDetection } from '../../runtime-detection';
-import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable';
-import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../../types';
-import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment';
-import type { McpStdioServerConfig } from '../../types';
-import type { ExecutionScratch } from '../retention/scratch';
-import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
-import { McpAuthorityError, MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from '../mcp-tools-probe';
-import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } from '../../mcp/observation';
-import type { PickResult, OfferPhaseContext, OfferRuntimeInput, RuntimeRequirements } from './support';
-import { DEFAULT_RUNTIME_PREFERENCE, orderByPreference, unmetRequirements, requirementPhrases, runtimeTaskInput, errorMessage, outboundErrorMessage } from './support';
-import type { TaskRunner } from '../task-runner';
+import { awaitAdmission } from '../admission-wait.js';
+import { observeRuntimeDetection } from '../../runtime-detection.js';
+import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
+import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../../types.js';
+import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment.js';
+import type { McpStdioServerConfig } from '../../types.js';
+import type { ExecutionScratch } from '../retention/scratch.js';
+import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../../sdk-reserved-mcp.js';
+import { McpAuthorityError, MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from '../mcp-tools-probe.js';
+import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } from '../../mcp/observation.js';
+import type { PickResult, OfferPhaseContext, OfferRuntimeInput, RuntimeRequirements } from './support.js';
+import { DEFAULT_RUNTIME_PREFERENCE, orderByPreference, unmetRequirements, requirementPhrases, runtimeTaskInput, errorMessage, outboundErrorMessage } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
 
 export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseContext, input: OfferRuntimeInput) {
   const { taskId, decline, admissionWithdrawn } = phase;

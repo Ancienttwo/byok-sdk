@@ -1,6 +1,6 @@
-import { CloudDoError, type CloudDoErrorCode } from './errors';
-import type { CloudOperationGuard } from './input-guard';
-import { PLATFORM_MAX_OUTPUT_TOKENS, REQUEST_FRAMING_BYTES } from './platform-provider';
+import { CloudDoError, type CloudDoErrorCode } from './errors.js';
+import type { CloudOperationGuard } from './input-guard.js';
+import { PLATFORM_MAX_OUTPUT_TOKENS, REQUEST_FRAMING_BYTES } from './platform-provider.js';
 
 export type InvocationState = 'accepted' | 'running' | 'succeeded' | 'failed' | 'aborted' | 'interrupted' | 'timed_out';
 export type InvocationTerminalState = Exclude<InvocationState, 'accepted' | 'running'>;

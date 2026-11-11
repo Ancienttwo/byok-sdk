@@ -1,5 +1,6 @@
 import { readRegistryExpectations, runtimeDependencyMetadata } from './registry-contract.mjs';
 import { cloudDoConsumerSmoke } from './cloud-do-consumer-smoke.mjs';
+import { nodeNextConsumerProbe } from './node-next-consumer-probe.mjs';
 import { assertNoStorePaths } from './published-store-paths.mjs';
 import { runtimeSmokeImports } from '../api-surface/entry-closure.mjs';
 import { createHash } from 'node:crypto';
@@ -498,6 +499,7 @@ try {
     );
     run(nodeBin, ['smoke.mjs'], smokeDir);
     await cloudDoConsumerSmoke(smokeDir, smokeImports.worker);
+    nodeNextConsumerProbe(smokeDir);
     copyFileSync(path.join(repoRoot, 'scripts/release/execution-submit-smoke.mjs'), path.join(smokeDir, 'execution-submit-smoke.mjs'));
     run(nodeBin, ['execution-submit-smoke.mjs'], smokeDir);
     // #1104: the packaging plugin builds and runs single-file bundles from the installed tarballs.

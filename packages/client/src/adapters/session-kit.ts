@@ -1,5 +1,5 @@
-import { RuntimeExecutionFailure } from '../runtime-failure';
-import type { RawAcpSession } from '../runtime/acp-session-runtime';
+import { RuntimeExecutionFailure } from '../runtime-failure.js';
+import type { RawAcpSession } from '../runtime/acp-session-runtime.js';
 
 function failure(reason: string): RuntimeExecutionFailure {
   return new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason });

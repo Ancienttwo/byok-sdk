@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AgentMemoryCommitSchema, offerSelectionViolation, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, type AgentMemoryCommit, type TaskOfferPlainPayload, type TaskOfferSealedPayload } from './messages';
+import { AgentMemoryCommitSchema, offerSelectionViolation, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, type AgentMemoryCommit, type TaskOfferPlainPayload, type TaskOfferSealedPayload } from './messages.js';
 
 /** Host policy; only the resolved wire value is persisted with a task offer. */
 const commit = z.union([AgentMemoryCommitSchema, z.literal('on-success-if-advertised')]).optional();

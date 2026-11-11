@@ -7,11 +7,11 @@ import type {
   InputPreparationProjectionV1,
   InputPreparationResidualKeyV1,
   InputPreparationRuntimeIdentityV1,
-} from '../../input-preparation';
-import type { McpToolsetServerObservation } from '../../mcp/observation';
-import { McpAuthorityError } from '../../mcp/authority-error';
-import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection';
-import { resolvePiRuntimeIdentity } from './resolve-bin';
+} from '../../input-preparation.js';
+import type { McpToolsetServerObservation } from '../../mcp/observation.js';
+import { McpAuthorityError } from '../../mcp/authority-error.js';
+import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection.js';
+import { resolvePiRuntimeIdentity } from './resolve-bin.js';
 import {
   buildPreparedTranscriptMessages,
   canonicalPreparedDigest,
@@ -26,7 +26,7 @@ import {
   sha256Hex,
   type PreparedRequestOptionsV1,
   type PreparedTranscriptV1,
-} from './prepared-request';
+} from './prepared-request.js';
 
 /**
  * The prepared-input compiler bound to the official Pi release the SDK pins.

@@ -1,6 +1,6 @@
 // Types and helpers shared by `TaskRunner` (../task-runner.ts) and the member
-import type { ToolAuthorizationPolicy } from '../../tool-authorization';
-import type { RuntimeTaskInput } from '../../types';
+import type { ToolAuthorizationPolicy } from '../../tool-authorization.js';
+import type { RuntimeTaskInput } from '../../types.js';
 // modules in this directory.
 //
 // A member module holds the bodies of `TaskRunner` methods as functions that
@@ -10,28 +10,28 @@ import type { RuntimeTaskInput } from '../../types';
 // A body reads private state as `this['name']`, which TypeScript type-checks
 // like the dot form, and calls other members through the runner so that a
 // stub, a test spy or a fixture override still sees every call.
-import type { ResultReplyFailure } from '../result-reply-failure';
-import { AgentMessageDraftPublisher } from '../agent-message-draft';
-import type { ExecutionScratch } from '../retention/scratch';
+import type { ResultReplyFailure } from '../result-reply-failure.js';
+import { AgentMessageDraftPublisher } from '../agent-message-draft.js';
+import type { ExecutionScratch } from '../retention/scratch.js';
 import { randomBytes } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { createEnvelope, RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TerminalProjectionSelection, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../types';
-import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable';
-import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home';
-import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-home-readers';
-import type { BlobResolver } from '../blob-client';
-import { ExecutionRecordAccumulator, type ExecutionRecord } from '../execution-record';
-import type { DeclaredSessionMembers } from '../session-contract';
-import { ProgressBatcher } from '../progress-batcher';
-import { AgentMessageOutbox, type AgentMessageDraftSealer } from '../agent-message-outbox';
-import { AgentResultStore } from '../agent-result-store';
-import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
-import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state';
-import { hostFor, type HostOfferContext } from './host';
-import type { OfferAdmissionTiming } from './offer-admission-timing';
+import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../types.js';
+import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable.js';
+import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home.js';
+import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-home-readers.js';
+import type { BlobResolver } from '../blob-client.js';
+import { ExecutionRecordAccumulator, type ExecutionRecord } from '../execution-record.js';
+import type { DeclaredSessionMembers } from '../session-contract.js';
+import { ProgressBatcher } from '../progress-batcher.js';
+import { AgentMessageOutbox, type AgentMessageDraftSealer } from '../agent-message-outbox.js';
+import { AgentResultStore } from '../agent-result-store.js';
+import type { TaskRunner, TaskRunnerDeps } from '../task-runner.js';
+import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state.js';
+import { hostFor, type HostOfferContext } from './host.js';
+import type { OfferAdmissionTiming } from './offer-admission-timing.js';
 
 /**
  * The offer union `task-runner.ts` declares. It stays unexported there because
@@ -127,7 +127,7 @@ export function observePreparedCall(
 }
 
 export interface ActiveTask {
-  readonly memoryLane?: typeof import('../../adapters/pi/memory-lane-contract').PI_MEMORY_LANE;
+  readonly memoryLane?: typeof import('../../adapters/pi/memory-lane-contract.js').PI_MEMORY_LANE;
   taskId: string;
   /** Cancels every blob transfer owned by this task before its terminal path runs. */
   blobAbort: AbortController;

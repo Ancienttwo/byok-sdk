@@ -1,5 +1,5 @@
-import { observeRuntimeDetection, projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection';
-import type { RuntimeAdapter } from '../types';
+import { observeRuntimeDetection, projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection.js';
+import type { RuntimeAdapter } from '../types.js';
 
 export const RUNTIME_PROBE_TIMEOUT_MS = 5_000;
 const MAX_RUNTIME_ID_CHARS = 128;

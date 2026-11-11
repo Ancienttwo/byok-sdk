@@ -1,14 +1,14 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { AgentEgressReliablePayloadSchema, type AgentEvent } from '@byok-sdk/protocol';
-import type { AgentRef } from '../agent-home';
+import type { AgentRef } from '../agent-home.js';
 import {
   type AgentEgressDropReason,
   type AgentEgressDropReceipt,
   type AgentEgressLaneStatus,
   type AgentEgressPolicy,
   type AgentEgressStatus,
-} from './agent-egress-policy';
+} from './agent-egress-policy.js';
 import {
   AGENT_EGRESS_DIRECTORY,
   AgentLatestValueState,
@@ -19,7 +19,7 @@ import {
   type AgentContentReceiptAppendInput,
   type AgentContentReceiptWithoutReliableIdentity,
   type AgentReliableEgressRecord,
-} from './agent-egress-spool';
+} from './agent-egress-spool.js';
 
 export interface AgentEgressControllerOptions {
   readonly policy: Readonly<AgentEgressPolicy>;

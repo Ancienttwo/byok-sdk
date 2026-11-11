@@ -7,7 +7,7 @@ import {
 } from '@byok-sdk/core';
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { admitDeviceRequest, authenticateDevice, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
+import { admitDeviceRequest, authenticateDevice, readBoundedJsonBody, type DeviceRouteDeps } from './shared.js';
 
 export const DEFAULT_BOARD_PAGE_LIMIT = 50;
 export const DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS = 5_000;

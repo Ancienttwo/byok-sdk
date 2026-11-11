@@ -1,5 +1,5 @@
 import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
-import type { DeviceMetadata } from './device-credential-store';
+import type { DeviceMetadata } from './device-credential-store.js';
 
 /**
  * A `DaemonConfig` field that no longer exists was supplied. Construction

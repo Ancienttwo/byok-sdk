@@ -1,4 +1,4 @@
-import type { PreparedGateRefusalCode } from './prepared-prompt-frame';
+import type { PreparedGateRefusalCode } from './prepared-prompt-frame.js';
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -11,8 +11,8 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { Api, AssistantMessageEventStream, Message, Model, SimpleStreamOptions, TranscriptContext } from '@earendil-works/pi-ai';
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
-import type { InputPreparationModelV1 } from '../../input-preparation';
-import type { PreparedPiInputV1 } from './input-preparation';
+import type { InputPreparationModelV1 } from '../../input-preparation.js';
+import type { PreparedPiInputV1 } from './input-preparation.js';
 import {
   buildPreparedTranscriptMessages,
   canonicalPreparedValue,
@@ -20,9 +20,9 @@ import {
   projectPreparedModel,
   PreparedSessionError,
   sha256Hex,
-} from './prepared-request';
-import { createPiToolAuthorizationHook } from './tool-authorization-hook';
-import type { ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc';
+} from './prepared-request.js';
+import { createPiToolAuthorizationHook } from './tool-authorization-hook.js';
+import type { ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc.js';
 
 /**
  * The prepared session on OFFICIAL Pi: a public `createAgentSession` whose

@@ -1,4 +1,4 @@
-import { time, type RoutineDefinition } from './model';
+import { time, type RoutineDefinition } from './model.js';
 
 /** The Host can inject its shared cron/time-zone calendar. K4 does not define a cron dialect. */
 export type NextOccurrence = (definition: Readonly<RoutineDefinition>, after: number) => number | null;

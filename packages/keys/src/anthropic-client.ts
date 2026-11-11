@@ -7,15 +7,15 @@ import {
   providerRequestTimeoutMs,
   readModelProviderResponse,
   type ProviderFetch,
-} from './http';
-import { providerHeaders, requiredProviderSecret } from './headers';
-import { ByokKeysError } from './errors';
+} from './http.js';
+import { providerHeaders, requiredProviderSecret } from './headers.js';
+import { ByokKeysError } from './errors.js';
 import {
   parseModelProviderProfile,
   type ModelProviderProfile,
-} from './provider-profile';
-import type { ModelProviderClientOptions } from './openai-client';
-import { isLoopbackProviderUrl } from './url';
+} from './provider-profile.js';
+import type { ModelProviderClientOptions } from './openai-client.js';
+import { isLoopbackProviderUrl } from './url.js';
 
 /** One Anthropic message. `content` is `unknown` so block arrays pass through. */
 export interface AnthropicMessage {

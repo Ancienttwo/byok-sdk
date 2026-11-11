@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { WAKE_RETENTION_MS, WakeConflictError, type WakeScheduleInput, type WakeScheduleResult, type WakeRecord } from './types';
+import { WAKE_RETENTION_MS, WakeConflictError, type WakeScheduleInput, type WakeScheduleResult, type WakeRecord } from './types.js';
 
 export interface StoredWake extends Omit<WakeRecord, 'state'> {
   state: 'queued' | 'done';

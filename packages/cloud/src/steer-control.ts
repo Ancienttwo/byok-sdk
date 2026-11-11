@@ -35,7 +35,7 @@
  * `packages/server/src/__tests__/steer-runtime-capability-gate.test.ts`.
  */
 import type { RuntimeId } from '@byok-sdk/protocol';
-import type { TaskAttemptStatus } from './stores/ports';
+import type { TaskAttemptStatus } from './stores/ports.js';
 
 /**
  * Stable strings a caller switches on (an operator UI, an HTTP surface mapping

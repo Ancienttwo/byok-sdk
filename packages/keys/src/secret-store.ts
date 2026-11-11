@@ -1,10 +1,10 @@
-import { ByokKeysError } from './errors';
+import { ByokKeysError } from './errors.js';
 import {
   ProviderProfileRefSchema,
   type ProviderProfileRef,
-} from './provider-profile';
-import { assertSecretName, assertSecretNamespace } from './secret-name';
-import { isSharedSecretValue } from './secret-value';
+} from './provider-profile.js';
+import { assertSecretName, assertSecretNamespace } from './secret-name.js';
+import { isSharedSecretValue } from './secret-value.js';
 
 /**
  * Storage contract for a single secret entry in an operating-system credential

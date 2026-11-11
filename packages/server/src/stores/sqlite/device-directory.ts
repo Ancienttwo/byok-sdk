@@ -9,7 +9,7 @@ import {
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
 import { HarnessInventorySchema, type HarnessInfo } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
-import { reopenMailboxStream, retireDevice } from './task-retirement';
+import { reopenMailboxStream, retireDevice } from './task-retirement.js';
 
 export const DEVICE_SCHEMA = `
 CREATE TABLE device_directory (

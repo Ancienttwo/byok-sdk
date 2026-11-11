@@ -1,5 +1,5 @@
-import type { AbortedStart } from './runtime-start';
-import { isRuntimeDisposalFailure, RuntimeDisposalFailure } from '../runtime-failure';
+import type { AbortedStart } from './runtime-start.js';
+import { isRuntimeDisposalFailure, RuntimeDisposalFailure } from '../runtime-failure.js';
 
 /** Resources owned by startup until synchronous transfer to an active task. */
 export interface StartupOwner {

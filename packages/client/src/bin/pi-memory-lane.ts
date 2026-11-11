@@ -1,10 +1,10 @@
 import type { AgentSessionRuntime, CreateAgentSessionOptions, CreateAgentSessionServicesOptions, ExtensionFactory, ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { createScopedFileTools, type ScopedFileToolOptions } from '../file-scope-tools';
-import { isScopedFileToolName, SCOPED_FILE_TOOL_NAMES } from '../file-scope-types';
-import type { PiToolLoadoutSession } from './pi-session-runtime';
+import { createScopedFileTools, type ScopedFileToolOptions } from '../file-scope-tools.js';
+import { isScopedFileToolName, SCOPED_FILE_TOOL_NAMES } from '../file-scope-types.js';
+import type { PiToolLoadoutSession } from './pi-session-runtime.js';
 
-import { PI_MEMORY_LANE } from '../adapters/pi/memory-lane-contract';
-export { PI_MEMORY_LANE } from '../adapters/pi/memory-lane-contract';
+import { PI_MEMORY_LANE } from '../adapters/pi/memory-lane-contract.js';
+export { PI_MEMORY_LANE } from '../adapters/pi/memory-lane-contract.js';
 
 export class PiMemoryLaneError extends Error {
   constructor(readonly code: 'memory_lane_tool_set_mismatch' | 'memory_lane_closed' | 'memory_lane_operation_denied') {

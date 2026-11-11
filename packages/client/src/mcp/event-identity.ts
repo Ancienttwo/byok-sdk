@@ -1,6 +1,6 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { McpToolsetToolObservation } from '../types';
-import { projectMcpTools, qualifiedMcpToolName } from './projection';
+import type { McpToolsetToolObservation } from '../types.js';
+import { projectMcpTools, qualifiedMcpToolName } from './projection.js';
 
 export type McpEventIdentity = NonNullable<Extract<AgentEvent, { type: 'tool_use' }>['mcp']>;
 export type McpEventIdentities = ReadonlyMap<string, McpEventIdentity>;

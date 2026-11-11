@@ -1,4 +1,4 @@
-import type { DaemonConfigIssue } from './daemon/config-schema/validate';
+import type { DaemonConfigIssue } from './daemon/config-schema/validate.js';
 
 /**
  * `DaemonConfig` failed {@link validateDaemonConfig} at daemon construction:

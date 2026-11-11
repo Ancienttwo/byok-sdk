@@ -1,15 +1,15 @@
-import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from '../../adapters/pi/input-preparation';
-import { createInputPreparationService, type InputPreparationService, InputPreparationRequestError } from '../input-preparation-service';
-import type { InputPreparationResult } from '../control-protocol';
-import { ControlError } from '../control-protocol';
-import type { LocalTaskJournal } from '../journal/journal';
-import { SqliteLocalTaskJournal, JournalHandleCleanupError } from '../journal/sqlite-journal';
-import { type AgentMemoryIntentBackend, NATIVE_AGENT_MEMORY_INTENT_BACKEND, helperAgentMemoryIntentBackend } from '../agent-memory-intent';
-import { isAgentMemorySecureFilesystemAvailable, probeAgentMemoryStrictDirectorySync } from '../agent-memory';
+import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from '../../adapters/pi/input-preparation.js';
+import { createInputPreparationService, type InputPreparationService, InputPreparationRequestError } from '../input-preparation-service.js';
+import type { InputPreparationResult } from '../control-protocol.js';
+import { ControlError } from '../control-protocol.js';
+import type { LocalTaskJournal } from '../journal/journal.js';
+import { SqliteLocalTaskJournal, JournalHandleCleanupError } from '../journal/sqlite-journal.js';
+import { type AgentMemoryIntentBackend, NATIVE_AGENT_MEMORY_INTENT_BACKEND, helperAgentMemoryIntentBackend } from '../agent-memory-intent.js';
+import { isAgentMemorySecureFilesystemAvailable, probeAgentMemoryStrictDirectorySync } from '../agent-memory.js';
 import { promises as fs } from 'node:fs';
-import { createAgentMemoryCommitStore, type AgentMemoryCommitStore } from '../agent-memory-commit';
-import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper';
-import type { DaemonScope } from './scope';
+import { createAgentMemoryCommitStore, type AgentMemoryCommitStore } from '../agent-memory-commit.js';
+import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper.js';
+import type { DaemonScope } from './scope.js';
 
 /** The daemon's lazily initialized local services: input preparation, the owned hosted journal and the Agent memory intent backend (#926). */
 

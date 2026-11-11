@@ -31,8 +31,8 @@ export type {
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
   AgentEgressPolicy,
-} from './types';
-export type { AgentRef } from './agent-home';
+} from './types.js';
+export type { AgentRef } from './agent-home.js';
 export {
   AgentHomeError,
   AgentRefValidationError,
@@ -49,20 +49,20 @@ export {
   AGENT_HOME_PROJECTION_STATE_FILE,
   stableAgentHomeOwnerId,
   validateAgentRef,
-} from './agent-home';
+} from './agent-home.js';
 export {
   AgentSessionHandoffStore,
   AgentSessionHandoffStoreError,
   AgentSessionHandoffCorruptError,
   AgentSessionHandoffMismatchError,
-} from './daemon/agent-session-handoff-store';
+} from './daemon/agent-session-handoff-store.js';
 export type {
   AgentSessionHandoff,
   AgentSessionHandoffMatch,
   AgentTaskTerminalEvidence,
   AgentTaskTerminalMatch,
   AgentTerminalCause,
-} from './daemon/agent-session-handoff-store';
+} from './daemon/agent-session-handoff-store.js';
 export type {
   AgentHomeResolution,
   AgentHomeProjection,
@@ -75,32 +75,32 @@ export type {
   AgentHomeExecutionLease,
   AgentHomeExecutionBinding,
   AgentHomeExecutionStatus,
-} from './agent-home';
-export type { AgentHomeAccessMode } from './agent-home-readers';
+} from './agent-home.js';
+export type { AgentHomeAccessMode } from './agent-home-readers.js';
 export {
   localStateRelocation,
   LocalStateRelocationError,
   LocalStateRelocationBusyError,
   LocalStateRelocationIntegrityError,
-} from './local-state-relocation';
+} from './local-state-relocation.js';
 export type {
   LocalStateRelocationInput,
   LocalStateRelocationLease,
-} from './local-state-relocation';
-export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
-export { resolveLocalAgentReleaseIdentity } from './release-identity';
-export type { LocalAgentReleaseIdentity } from './release-identity';
+} from './local-state-relocation.js';
+export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types.js';
+export { resolveLocalAgentReleaseIdentity } from './release-identity.js';
+export type { LocalAgentReleaseIdentity } from './release-identity.js';
 export {
   BYOK_SDK_HELPER_SUBCOMMAND,
   bundledSdkHelperHost,
   resolveSdkReservedHelperBin,
-} from './sdk-reserved-helper-host';
-export { runSdkReservedHelperCommand } from './lifecycle/sdk-reserved-helper-command';
+} from './sdk-reserved-helper-host.js';
+export { runSdkReservedHelperCommand } from './lifecycle/sdk-reserved-helper-command.js';
 export type {
   SdkHelperHostConfig,
   SdkReservedHelperKind,
   ResolvedSdkReservedHelperBin,
-} from './sdk-reserved-helper-host';
+} from './sdk-reserved-helper-host.js';
 export {
   RuntimeExecutionFailure,
   RuntimeStartupDisposalFailure,
@@ -111,7 +111,7 @@ export {
   isRuntimeExecutionFailure,
   projectRuntimeBoundaryFailure,
   projectRuntimeExecutionFailure,
-} from './runtime-failure';
+} from './runtime-failure.js';
 export type {
   RuntimeExecutionFailureInput,
   RuntimeDisposalFailureInput,
@@ -119,11 +119,11 @@ export type {
   RuntimeFailurePhase,
   RuntimeFailureProjection,
   RuntimeRetryDisposition,
-} from './runtime-failure';
+} from './runtime-failure.js';
 
 
 
-export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
+export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export {
   DAEMON_CONFIG_SCHEMA_VERSION,
   DaemonConfigInvalidError,
@@ -140,24 +140,24 @@ export {
   type DaemonEffectiveRuntime,
   type DaemonEffectiveToolAuthorization,
   type DaemonMemoryHelperResolution,
-} from './daemon/config-schema';
+} from './daemon/config-schema/index.js';
 export {
   DaemonConfigFieldRemovedError,
   DaemonJournalProtocolUnsupportedError,
   DeviceStoreBindingMismatchError,
   HostLayoutInputError,
   type DaemonJournalProtocolRecord,
-} from './daemon/daemon-errors';
+} from './daemon/daemon-errors.js';
 export {
   resolveHostLayout,
   type HostLayout,
   type HostLayoutOptions,
   type HostLayoutPlatform,
-} from './daemon/host-layout';
+} from './daemon/host-layout.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
-export { APPROVAL_REQUIRES_HOST } from './daemon/approvals';
-export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals';
-export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner/result-reason-prefixes';
+export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
+export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals.js';
+export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner/result-reason-prefixes.js';
 export {
   LocalTeamWorkspace,
   LocalTeamWorkspaceService,
@@ -176,8 +176,8 @@ export {
   type TeamMessage,
   type TeamMemberLease,
   type TeamWorkspaceMemberReceipt,
-} from './daemon/team-workspace';
-export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './util/team-tmux-view';
+} from './daemon/team-workspace.js';
+export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './util/team-tmux-view.js';
 export type {
   Daemon,
   DaemonConfig,
@@ -190,46 +190,46 @@ export type {
   AgentContentReadConfig,
   AgentContentReadSurfaceConfig,
   AgentReliableEgressInput,
-} from './daemon/create-daemon';
+} from './daemon/create-daemon.js';
 export {
   ProviderProvisioningNoticeError,
   PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS,
-} from './daemon/provider-provisioning';
+} from './daemon/provider-provisioning.js';
 export type {
   ProviderProvisioningHandler,
   ProviderProvisioningNotice,
   ProviderProvisioningNoticeFailureReason,
-} from './daemon/provider-provisioning';
+} from './daemon/provider-provisioning.js';
 export {
   AgentMemoryIntentNoticeError,
   AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS,
-} from './daemon/agent-memory-intent';
+} from './daemon/agent-memory-intent.js';
 export type {
   AgentMemoryIntentNoticeFailureReason,
-} from './daemon/agent-memory-intent';
+} from './daemon/agent-memory-intent.js';
 export {
   AgentMemorySnapshotLimitError,
   AgentMemoryRevisionConflictError,
   isAgentMemorySecureFilesystemAvailable,
   AGENT_MEMORY_AUDIT_FILENAME,
   AGENT_MEMORY_OUTBOX_FILENAME,
-} from './daemon/agent-memory';
+} from './daemon/agent-memory.js';
 export type {
   AgentMemoryRedactor,
   AgentMemoryProjectionGrant,
   AgentMemoryHostedProjection,
-} from './daemon/agent-memory';
+} from './daemon/agent-memory.js';
 export type {
   AgentEgressDropReceipt,
   AgentEgressLaneStatus,
   AgentEgressStatus,
-} from './daemon/agent-egress-policy';
+} from './daemon/agent-egress-policy.js';
 export {
   AGENT_CONTENT_READ_CAPABILITIES,
   AGENT_CONTENT_READ_CAPABILITY_WORKSPACE,
   AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT,
   AGENT_CONTENT_READ_CAPABILITY_ARTIFACT,
-} from './daemon/agent-content-read';
+} from './daemon/agent-content-read.js';
 export type {
   AgentContentReadSurface,
   AgentContentReadDecision,
@@ -243,12 +243,12 @@ export type {
   AgentContentReadDenied,
   AgentContentSessionIdentity,
   AgentContentAuditReceipt,
-} from './daemon/agent-content-read';
+} from './daemon/agent-content-read.js';
 export {
   McpToolsetRevisionConflictError,
   McpToolsetDefinitionRevisionConflictError,
-} from './daemon/toolset-registry';
-export type { ProgressBatcherOptions } from './daemon/progress-batcher';
+} from './daemon/toolset-registry.js';
+export type { ProgressBatcherOptions } from './daemon/progress-batcher.js';
 
 /**
  * Plan `device-assertion-broker`: the ONLY control-socket capability this
@@ -258,7 +258,7 @@ export type { ProgressBatcherOptions } from './daemon/progress-batcher';
  * would make all of it public API in one line. See `daemon/assertion-client.ts`
  * and the constraint test that pins this.
  */
-export { requestDeviceAssertion, requestTaskAssertion } from './daemon/assertion-client';
+export { requestDeviceAssertion, requestTaskAssertion } from './daemon/assertion-client.js';
 export type {
   RequestDeviceAssertionOptions,
   RequestDeviceAssertionResult,
@@ -266,7 +266,7 @@ export type {
   RequestTaskAssertionOptions,
   RequestTaskAssertionResult,
   RequestTaskAssertionErrorCode,
-} from './daemon/assertion-client';
+} from './daemon/assertion-client.js';
 /**
  * Contract §8.1 / §8.2(1): the task lane's wire contract.
  *
@@ -281,13 +281,13 @@ export {
   parseTaskAssertionIssueParams,
   TASK_ASSERTION_ISSUE_ERROR_CODES,
   TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES,
-} from './daemon/control-protocol';
+} from './daemon/control-protocol.js';
 export type {
   TaskAssertionIssueParams,
   TaskAssertionIssueResult,
   TaskAssertionIssueErrorCode,
-} from './daemon/control-protocol';
-export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon/operational-health';
+} from './daemon/control-protocol.js';
+export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon/operational-health.js';
 /**
  * B-P2 local primitive (`docs/researches/runtime-input-preparation-contract.md`
  * §10.3 / §10.4): the task-free `input_preparation.*` control surface's public
@@ -317,7 +317,7 @@ export {
   INPUT_PREPARATION_VERSION,
   InputPreparationPolicyError,
   validateInputPreparationLimits,
-} from './input-preparation';
+} from './input-preparation.js';
 export type {
   InputPreparationArtifactSummaryV1,
   InputPreparationAuthorityGrantV1,
@@ -358,7 +358,7 @@ export type {
   InputPreparationStateV1,
   InputPreparationToolV1,
   InputPreparationUserMessageV1,
-} from './input-preparation';
+} from './input-preparation.js';
 export {
   INPUT_PREPARATION_CANCEL_METHOD,
   INPUT_PREPARATION_IDENTIFIER_MAX_BYTES,
@@ -367,8 +367,8 @@ export {
   parseInputPreparationCancelParams,
   parseInputPreparationLookupParams,
   parseInputPreparationRequestParams,
-} from './daemon/control-protocol';
-export type { InputPreparationResult } from './daemon/control-protocol';
+} from './daemon/control-protocol.js';
+export type { InputPreparationResult } from './daemon/control-protocol.js';
 
 // S3b (L-001/L-002): the durable local journal (architecture §12.7.2). The
 // PORT is exported, not just the SQLite implementation, because §12.7.2 lets a
@@ -384,7 +384,7 @@ export {
   JournalRecordTooLargeError,
   JournalUnknownTaskError,
   JournalClosedError,
-} from './daemon/journal/journal';
+} from './daemon/journal/journal.js';
 export type {
   LocalTaskJournal,
   JournalIdentity,
@@ -402,41 +402,41 @@ export type {
   LocalStorageUsage,
   CompactOptions,
   CompactResult,
-} from './daemon/journal/journal';
-export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal';
-export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal';
-export { inspectDaemonStores } from './diagnostics/store-compatibility';
-export type { InspectDaemonStoresInput } from './diagnostics/store-compatibility';
+} from './daemon/journal/journal.js';
+export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal.js';
+export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal.js';
+export { inspectDaemonStores } from './diagnostics/store-compatibility.js';
+export type { InspectDaemonStoresInput } from './diagnostics/store-compatibility.js';
 
-export { LocalStorageConfigError, resolveStorageConfig, DEFAULT_RETENTION_TTL_MS } from './daemon/retention/config';
-export type { StorageConfig, StorageBudgetInput } from './daemon/retention/config';
-export { LocalStorageEmergencyError } from './daemon/retention/pressure';
-export type { StoragePressureState } from './daemon/retention/pressure';
-export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry';
-export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store';
-export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store';
-export { AuthResponseInvalidError } from './daemon/auth-manager';
-export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store';
+export { LocalStorageConfigError, resolveStorageConfig, DEFAULT_RETENTION_TTL_MS } from './daemon/retention/config.js';
+export type { StorageConfig, StorageBudgetInput } from './daemon/retention/config.js';
+export { LocalStorageEmergencyError } from './daemon/retention/pressure.js';
+export type { StoragePressureState } from './daemon/retention/pressure.js';
+export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry.js';
+export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store.js';
+export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store.js';
+export { AuthResponseInvalidError } from './daemon/auth-manager.js';
+export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store.js';
 export type {
   DeviceEnrollment,
   DeviceEnrollmentIdentity,
   DeviceEnrollmentIdentityStatus,
   DeviceEnrollmentStatus,
   DeviceEnrollmentStatusOptions,
-} from './daemon/store';
+} from './daemon/store.js';
 /**
  * Host device proofs signed with the stored enrollment key, scoped to one
  * enrollment identity and an explicit operation allowlist. The key never
  * leaves the signer; `DeviceProofSigner` is also what `TruthMemoryClient` takes.
  */
-export { createStoredDeviceProofSigner, DeviceProofSignerError } from './daemon/device-proof-signer';
+export { createStoredDeviceProofSigner, DeviceProofSignerError } from './daemon/device-proof-signer.js';
 export type {
   CreateStoredDeviceProofSignerOptions,
   DeviceProofRequest,
   DeviceProofSigner,
   DeviceProofSignerErrorCode,
   HostDeviceProofSigner,
-} from './daemon/device-proof-signer';
+} from './daemon/device-proof-signer.js';
 /**
  * Plan `skill-pack-delivery-channel`: the device half of the `skills.pack`
  * channel. The install pipeline and the two read APIs are public because the
@@ -457,7 +457,7 @@ export {
   listInstalledSkillPacks,
   projectSkillPack,
   skillPacksRoot,
-} from './daemon/skill-pack-installer';
+} from './daemon/skill-pack-installer.js';
 export type {
   InstallSkillPacksOptions,
   InstalledSkillPack,
@@ -465,9 +465,9 @@ export type {
   SkillPackInstallErrorCode,
   SkillPackInstallResult,
   SkillPackLock,
-} from './daemon/skill-pack-installer';
+} from './daemon/skill-pack-installer.js';
 
-export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client';
+export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client.js';
 export type {
   LocalMemoryFilter,
   MemorySelector,
@@ -482,30 +482,30 @@ export type {
   TruthWriteBody,
   TruthWriteResult,
   VerifiedTruthRecord,
-} from './daemon/truth-memory-client';
-export type { ConnectionState } from './daemon/connection-manager';
-export { DAEMON_HALT_REASONS, DaemonHaltError, isDaemonHaltReason } from './daemon/daemon-lifecycle';
-export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle';
-export { ReplayCursorTooOldError } from './daemon/replay-cursor';
-export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client';
-export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client';
+} from './daemon/truth-memory-client.js';
+export type { ConnectionState } from './daemon/connection-manager.js';
+export { DAEMON_HALT_REASONS, DaemonHaltError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
+export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle.js';
+export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';
+export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client.js';
+export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client.js';
 // M3-2a: local observability — the seam the CLI (M3-2b) consumes for a live
 // task feed, a task list, and approve/reject/unpair, all local to a running
 // daemon. See `daemon/observer.ts`.
-export { DaemonObserver } from './daemon/observer';
-export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer';
+export { DaemonObserver } from './daemon/observer.js';
+export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer.js';
 // Issue #395: the content-free projection every durable sink writes (`start`
 // stdout and `audit.jsonl`). `DaemonEvent` carries content and is only for
 // authenticated live views. See `daemon/daemon-record.ts`.
-export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record';
-export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record';
+export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record.js';
+export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record.js';
 // Octop ③ (#553): the local execution record a `DaemonEvent` carries. See `daemon/execution-record.ts`.
-export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, ExecutionRecordUnknown } from './daemon/execution-record';
+export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, ExecutionRecordUnknown } from './daemon/execution-record.js';
 
 // M3-4: OS service lifecycle (launchd/systemd/WinSW) — see `lifecycle/create-service-lifecycle.ts`.
-export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle';
-export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle';
-export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types';
+export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle.js';
+export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle.js';
+export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types.js';
 export type {
   NodeAgentProgramOptions,
   ServiceDefinition,
@@ -514,46 +514,46 @@ export type {
   ServiceProgram,
   ServiceStatusResult,
   ServiceWindowsOptions,
-} from './lifecycle/service-types';
-export { generateLaunchdPlist } from './lifecycle/launchd';
-export { generateSystemdUnit } from './lifecycle/systemd';
-export { generateWinswXml } from './lifecycle/winsw';
+} from './lifecycle/service-types.js';
+export { generateLaunchdPlist } from './lifecycle/launchd.js';
+export { generateSystemdUnit } from './lifecycle/systemd.js';
+export { generateWinswXml } from './lifecycle/winsw.js';
 // #1097: one service implementation for the CLI and embedded Hosts — the stable
 // launcher, unit classification and repair, the lifecycle owner, the exit-code
 // contract and the daemon-owned rotated log.
-export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service';
-export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service';
+export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service.js';
+export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service.js';
 // #1097 slice 2: versioned installs from a Host-verified payload, upgrade with
 // the candidate's store precheck and snapshot, health-checked switch, rollback.
 export {
   createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError,
-} from './lifecycle/service-installation';
+} from './lifecycle/service-installation.js';
 export type {
   ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord,
   ServicePayloadManifest, ServiceStoreVerdict, ServiceUpgradeReceipt,
-} from './lifecycle/service-installation';
+} from './lifecycle/service-installation.js';
 export {
   claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError,
-} from './lifecycle/service-unit';
+} from './lifecycle/service-unit.js';
 export type {
   ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState,
-} from './lifecycle/service-unit';
+} from './lifecycle/service-unit.js';
 // #1316: the breaking upgrade-manifest entries since a version, and the @byok-sdk/* train check.
-export { checkUpgradeFrom } from './lifecycle/upgrade-from';
+export { checkUpgradeFrom } from './lifecycle/upgrade-from.js';
 export type {
   UpgradeFromBreakingEntry, UpgradeFromRefusalCode, UpgradeFromReport, UpgradeTrainPackage,
-} from './lifecycle/upgrade-from';
-export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes';
-export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes';
-export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log';
-export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log';
+} from './lifecycle/upgrade-from.js';
+export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes.js';
+export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes.js';
+export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log.js';
+export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log.js';
 // Issue #392: one-time login-shell environment capture for service-launched (or Dock-launched) hosts.
-export { applyLoginShellEnvironment } from './lifecycle/service-environment';
-export { serviceEnvironmentStatus } from './login-shell-environment';
-export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment';
-export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from './runtime/environment';
-export type { RuntimeObservation, RuntimeVersionChange, RuntimeVersionChangeDirection } from './runtime-detection';
-export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment';
+export { applyLoginShellEnvironment } from './lifecycle/service-environment.js';
+export { serviceEnvironmentStatus } from './login-shell-environment.js';
+export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment.js';
+export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from './runtime/environment.js';
+export type { RuntimeObservation, RuntimeVersionChange, RuntimeVersionChangeDirection } from './runtime-detection.js';
+export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
 
 // Finding F7: the storeDir-hardening chokepoint (`DeviceStore.save()`/
 // `control-server.ts`'s `startControlServer` both funnel through this) —
@@ -564,70 +564,70 @@ export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnviron
 // can now reject with this typed error if `icacls` fails, and a product
 // wrapping this SDK may want to catch it specifically (e.g. to render a
 // dedicated "couldn't secure the credential directory" message).
-export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
-export type { EnsureSecureDirOptions } from './util/secure-dir';
+export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir.js';
+export type { EnsureSecureDirOptions } from './util/secure-dir.js';
 // #1304: a service-lifecycle or `icacls` step whose system tool has no trusted location rejects with this.
 export { SystemToolUnavailableError } from '@byok-sdk/core/system-tool';
 
-export { PiAdapter } from './adapters/pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
-export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
-export { copyPiRuntimeAssets } from './adapters/pi/runtime-assets';
-export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/pi/runtime-assets';
+export { PiAdapter } from './adapters/pi/pi-adapter.js';
+export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter.js';
+export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin.js';
+export { copyPiRuntimeAssets } from './adapters/pi/runtime-assets.js';
+export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/pi/runtime-assets.js';
 
-export { ClaudeAdapter } from './adapters/claude/claude-adapter';
-export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
+export { ClaudeAdapter } from './adapters/claude/claude-adapter.js';
+export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter.js';
 
-export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
-export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
+export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter.js';
+export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter.js';
 
-export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter';
-export { AgyAdapter, type AgyAdapterOptions } from './adapters/antigravity/agy-adapter';
-export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter';
+export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter.js';
+export { AgyAdapter, type AgyAdapterOptions } from './adapters/antigravity/agy-adapter.js';
+export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter.js';
 
-export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor';
+export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor.js';
 export type {
   DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus,
   RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode,
   ResetDeviceCursorInput, DeviceCursorResetResult, DeviceCursorResetErrorCode,
-} from './diagnostics/device-doctor';
+} from './diagnostics/device-doctor.js';
 
-export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
+export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions.js';
 export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput,
   DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult,
-  DeviceOperatorErrorCode } from './diagnostics/operator-actions';
+  DeviceOperatorErrorCode } from './diagnostics/operator-actions.js';
 
-export { NativeInteractionController, NativeInteractionError } from './native-interactions';
+export { NativeInteractionController, NativeInteractionError } from './native-interactions.js';
 export type {
   NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity,
   NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest,
   NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason,
   NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode,
-} from './native-interactions';
+} from './native-interactions.js';
 
-export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement';
-export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch';
-export type { ExecutionScratch } from './daemon/retention/scratch';
+export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement.js';
+export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch.js';
+export type { ExecutionScratch } from './daemon/retention/scratch.js';
 
-export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './util/agent-memory-helper-release';
+export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './util/agent-memory-helper-release.js';
 /** The reserved name of the SDK memory MCP server in an Agent task's MCP servers. */
-export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
+export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp.js';
 /** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
-export { isReservedMcpServerName } from './sdk-reserved-mcp';
+export { isReservedMcpServerName } from './sdk-reserved-mcp.js';
 
-export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets';
+export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets.js';
 
-export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
+export type { AgentMemoryExportOptions } from './daemon/agent-memory-export.js';
 
 export {
   classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode,
   parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES, TOOL_FILE_ACCESS,
-} from './tool-authorization';
+} from './tool-authorization.js';
 export type {
   ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane,
   ToolAuthorizationMode, ToolAuthorizationTask,
   ToolAuthorizationVerdict, ToolCall, ToolFileAccess, ToolFileScope, ToolFileScopeRoot, ToolReminder, ToolRisk, ToolRiskReason,
   ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule,
-} from './tool-authorization';
+} from './tool-authorization.js';
 
-export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './adapters/opencode/opencode-adapter';
+export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './adapters/opencode/opencode-adapter.js';

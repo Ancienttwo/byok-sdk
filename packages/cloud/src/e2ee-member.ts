@@ -37,9 +37,9 @@ import {
   type E2eeScopeKeyPackage,
 } from '@byok-sdk/protocol';
 import { z } from 'zod';
-import { PAIRING_CODE_TTL_MS } from './auth/plane';
-import type { DeviceDirectory } from './stores/ports';
-import { ByokCloudError, DeviceRetiredError } from './errors';
+import { PAIRING_CODE_TTL_MS } from './auth/plane.js';
+import type { DeviceDirectory } from './stores/ports.js';
+import { ByokCloudError, DeviceRetiredError } from './errors.js';
 
 /** One stored chain entry: its seq and its canonical JSON. */
 export interface E2eeMemberChainRow {
