@@ -374,10 +374,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
     for (const [key, source] of [['bot-a', 'bot'], ['bot-b', 'bot'], ['user-c', 'user']] as const) {
       await store.enqueueHostIntent(scope, input({ key, source, execution: template('device', key) }), 'research', Date.now);
     }
-    const run = () => new HostedSubmitter(opened!.pool, opened!.store.schema, { port: () => port, deviceConcurrency: 2 }).run();
+    const run = (batch?: number) => new HostedSubmitter(opened!.pool, opened!.store.schema, { port: () => port, deviceConcurrency: 2, batch }).run();
     expect(await run()).toEqual({ tried: 2, failed: [] });
     expect(await run()).toEqual({ tried: 0, failed: [] });
-    expect((await rows(scope)).map(found => [found.key, found.submission])).toEqual([['bot-a', 'delivered'], ['bot-b', 'reserved'], ['user-c', 'delivered']]);
+    // A held head ahead of it in the scan does not fill a batch of 1: a row on another device still gets submitted.
+    await store.bindDevice(scope, 'other');
+    await store.enqueueHostIntent(scope, input({ key: 'bot-d', source: 'bot', execution: template('other', 'bot-d') }), 'research', Date.now);
+    expect(await run(1)).toEqual({ tried: 1, failed: [] });
+    expect((await rows(scope)).map(found => [found.key, found.submission]))
+      .toEqual([['bot-a', 'delivered'], ['bot-b', 'reserved'], ['user-c', 'delivered'], ['bot-d', 'delivered']]);
   });
 
   it('compaction removes a settled Host intent with its handler, and its key can never freeze again', async () => {

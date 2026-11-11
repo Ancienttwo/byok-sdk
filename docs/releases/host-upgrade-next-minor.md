@@ -233,7 +233,7 @@ The hosted `HostedCommandEntry.cancelTurn` and `cancelDelegation` return `TurnCa
 
 ## Hosted device slots and Host intent cancel (#1756)
 
-The hosted submitter now applies the local Host's device slot rule: per scope and device, at most `deviceConcurrency` (default 8, a new `HostedSubmitter` option, also in `HostedPassTimings.submitter`) tried rows hold a slot, and a row that is not user-source leaves one slot free. A row with no slot waits at its FIFO head; nothing is cancelled to make room. A Host that relied on submitting more than 7 non-user rows per device at once sets `deviceConcurrency` to its daemon's `maxConcurrentTasks`. `HostedCollaborationStore.cancelHostIntent(scope, key, clock)` is new: check the owner, call it, then sync the scope. It returns `IntentCancelResult` and refuses with `HostIntentError`, both exported from `@byok-sdk/example-hosted-bot-collaboration` and from K8 `rules/delegation`.
+The hosted submitter now applies the local Host's device slot rule: per scope and device, at most `deviceConcurrency` (default 8, a new `HostedSubmitter` option, also in `HostedPassTimings.submitter`) tried rows hold a slot, and a row that is not user-source leaves one slot free. A row with no slot waits at its FIFO head; nothing is cancelled to make room. A Host that relied on submitting more than 7 non-user rows per device at once sets a larger `deviceConcurrency`. `HostedCollaborationStore.cancelHostIntent(scope, key, clock)` is new: check the owner, call it, then sync the scope. It returns `IntentCancelResult` and refuses with `HostIntentError`, both exported from `@byok-sdk/example-hosted-bot-collaboration` and from K8 `rules/delegation`.
 
 ## Bot collaboration switch contract
 

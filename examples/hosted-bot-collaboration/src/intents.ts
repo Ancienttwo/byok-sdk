@@ -338,18 +338,9 @@ export class HostedSubmitter {
    * whose try throws is backed off when its scope can be locked, and the pass goes on with the next row.
    */
   async run(): Promise<SubmitPass> {
-    // The NOT EXISTS head filter must match K4 fifoHeads, which the claim checks again under the scope lock.
-    // A scope of a store version this code does not support is left out before the limit: its rows cannot be
-    // claimed or written, so they must not fill a pass ahead of the healthy scopes. So is an exported scope, and one with an
-    // uncommitted import (#975).
-    const due = await inSchema(this.pool, this.schema, client => client.query<{ scope: string; key: string }>(
-      `SELECT i.scope, i.key FROM intent i JOIN scope s ON s.scope = i.scope
-        WHERE s.state_version = $3 AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
-        AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
-          AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
-        ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100, STORE_VERSION]), true);
+    const due = await this.due();
     const pass: SubmitPass = { tried: 0, failed: [] }, changed = new Set<string>();
-    for (const row of due.rows) {
+    for (const row of due) {
       try { if (await this.try(row.scope, row.key, changed)) pass.tried++; }
       catch (error) {
         pass.failed.push({ scope: JSON.parse(row.scope) as string, turnId: JSON.parse(row.key) as string, error });
@@ -359,6 +350,38 @@ export class HostedSubmitter {
     }
     for (const scope of changed) this.options.changed?.(scope);
     return pass;
+  }
+
+  /**
+   * The due FIFO heads of one pass, at most `batch`. The NOT EXISTS head filter must match K4 fifoHeads, which the claim
+   * checks again under the scope lock. A scope of a store version this code does not support is left out before the
+   * limit: its rows cannot be claimed or written, so they must not fill a pass ahead of the healthy scopes. So is an
+   * exported scope, and one with an uncommitted import (#975). A head that its device has no slot for (#1229) keeps its
+   * `next_at`, as L does not delay it, so the scan reads on in pages past it and the held heads cannot fill the batch.
+   */
+  private due(): Promise<Array<{ scope: string; key: string }>> {
+    const batch = this.options.batch ?? 100, now = this.now();
+    return inSchema(this.pool, this.schema, async client => {
+      const picked: Array<{ scope: string; key: string }> = [];
+      let after: [string, string, string] | undefined;
+      for (;;) {
+        const page = await client.query<{ scope: string; key: string; next_at: string; ordinal: string }>(
+          `SELECT i.scope, i.key, i.next_at::text, i.ordinal::text FROM intent i JOIN scope s ON s.scope = i.scope
+            WHERE s.state_version = $3 AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
+            AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
+              AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
+            ${after ? 'AND (i.next_at, i.scope, i.ordinal) > ($4::bigint, $5::text, $6::bigint)' : ''}
+            ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [now, batch, STORE_VERSION, ...(after ?? [])]);
+        for (const row of page.rows) {
+          if (!await admitsDeviceSlot(client, row.scope, row.key, this.deviceConcurrency)) continue;
+          picked.push({ scope: row.scope, key: row.key });
+          if (picked.length === batch) return picked;
+        }
+        const last = page.rows.at(-1);
+        if (page.rows.length < batch || !last) return picked;
+        after = [last.next_at, last.scope, last.ordinal];
+      }
+    }, true);
   }
 
   /** Saves the error of a failed try and delays the row. It does not touch a row that another try holds. */
