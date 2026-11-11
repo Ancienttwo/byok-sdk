@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "7b0f8e7b8a520678ca429b538ad4e0ca5645ea7d7c543a5e075501cf4dedc89e"
+    "snapshotSha256": "71342a3cd71f857aef03dfc281091c10446fa29de41e4808b799cd8727ba803e"
   },
   "configFields": {
     "status": "tracked",
@@ -485,16 +485,6 @@
       "entry": "dts-node-next-specifiers"
     },
     {
-      "item": "export:@byok-sdk/client#DeviceEnrollmentClearError",
-      "change": "added",
-      "entry": "clear-device-enrollment"
-    },
-    {
-      "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
-      "change": "added",
-      "entry": "clear-device-enrollment"
-    },
-    {
       "item": "export:@byok-sdk/client#DaemonTaskSettlement",
       "change": "added",
       "entry": "daemon-when-task-settled"
@@ -508,6 +498,16 @@
       "item": "export:@byok-sdk/client#DaemonTaskUnknownError",
       "change": "added",
       "entry": "daemon-when-task-settled"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentClearError",
+      "change": "added",
+      "entry": "clear-device-enrollment"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+      "change": "added",
+      "entry": "clear-device-enrollment"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
