@@ -5,6 +5,9 @@ Draft checklist for a Host moving from the current release to the next MINOR. Ea
 ## Loopback listener close waits for handlers
 
 `LoopbackListener.close()` now resolves only after every dispatched handler has settled; before, it destroyed connections and resolved while a handler could still run. Requests not yet dispatched get 503. There is no timeout. Shut down in the order `daemon.stop()`, `listener.close()`, `server.close()`, and do not make a request-scoped hook wait on anything the Host releases after `listener.close()`, or `close()` never resolves. See [Embedded path](../device-setup.md#embedded-path).
+## Packaged Hosts resolve SDK hosting from the asset root
+
+A single-file Host that ships `copySdkPackagingAssets` output can replace its hand-built `sdkHelperHost`, `runtimes.pi.packageDir`, `nativeAssetRoot` and `agentMemoryHelperAssetRoot` with one `resolveSdkHosting({ assetRoot, helperHost })` call at startup (#1839). Spread `hosting.daemon` into `DaemonConfig` and `hosting.adapters` into `RuntimeAdaptersConfig`, merging `hosting.adapters.runtimes.pi` into the Host's own `runtimes`; pass `hosting.daemon.nativeAssetRoot` to `readDeviceEnrollmentStatus` and to `loadSdkKoffiAsset` in a provider launcher. A missing required asset now throws `SdkHostingAssetsMissingError` at that call instead of failing at the first Windows credential, Job Object or memory helper use. Hosts that keep setting the four fields directly need no change.
 
 ## OpenCode start failures
 

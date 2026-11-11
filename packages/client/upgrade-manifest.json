@@ -290,6 +290,20 @@
       "items": [
         "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
         "example:host-execution-core"
+        ]
+      },
+      {
+      "id": "resolve-sdk-hosting",
+      "impact": "additive",
+      "summary": "resolveSdkHosting({ assetRoot, helperHost }) resolves a packaged Host's SDK hosting values from the copySdkPackagingAssets directory for process.platform and process.arch: daemon spreads into DaemonConfig and adapters into RuntimeAdaptersConfig. A missing required asset throws the new SdkHostingAssetsMissingError (code sdk_hosting_assets_missing, sorted relative missing paths); an unsupported target throws. sdkPackagingAssetLayout and sdkDistributionManifest keep the same values; only their declaration text changed (the agent-memory-fs directory now has one definition). The four existing configuration fields are unchanged (#1839).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#packaged-hosts-resolve-sdk-hosting-from-the-asset-root",
+      "items": [
+        "export:@byok-sdk/client#SdkHosting",
+        "export:@byok-sdk/client#SdkHostingAssetsMissingError",
+        "export:@byok-sdk/client#SdkHostingOptions",
+        "export:@byok-sdk/client#resolveSdkHosting",
+        "export:@byok-sdk/client#sdkDistributionManifest",
+        "export:@byok-sdk/client#sdkPackagingAssetLayout"
       ]
     }
   ],
@@ -493,9 +507,39 @@
       "entry": "dts-node-next-specifiers"
     },
     {
+      "item": "export:@byok-sdk/client#SdkHosting",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkHostingAssetsMissingError",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkHostingOptions",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveSdkHosting",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
       "item": "export:@byok-sdk/client#resolveStorageConfig",
       "change": "changed",
       "entry": "codex-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkDistributionManifest",
+      "change": "changed",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkPackagingAssetLayout",
+      "change": "changed",
+      "entry": "resolve-sdk-hosting"
     },
     {
       "item": "export:@byok-sdk/client/adapters#AgyAdapter",
