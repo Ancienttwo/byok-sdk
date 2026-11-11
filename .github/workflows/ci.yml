@@ -2462,6 +2462,8 @@ jobs:
               if [ "$target" = deb ]; then cmd=("$bin"); else cmd=("$(ls "$PWD/$out"/*.AppImage | head -1)" --appimage-extract-and-run); fi
               chmod +x "${cmd[0]}"
               text="$(timeout 20 xvfb-run -a "${cmd[@]}" 2>&1)"; code=$?
+              # timeout ends xvfb-run only: end the app, its Host and Xvfb too, so no later step meets them.
+              pkill -f 'byok-desktop-bots|resources/host/host' ; pkill Xvfb ; sleep 1
               set -e
               echo "$target exit=$code (124 = still running after 20 s)"
               echo "$text" | grep -E 'sandbox|FATAL|apparmor|namespace' | head -5
