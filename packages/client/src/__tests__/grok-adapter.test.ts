@@ -254,7 +254,8 @@ describe('GrokAdapter sessions', () => {
     expect(prompts(resources.log)).toEqual(['own-turn']);
     await fs.writeFile(gate, '');
     // Grok's turn end is no task turn end; the drained prompt's turn_active has no input id and is the task's.
-    expect(await turn(s)).toEqual([{ type: 'progress', text: 'background' }, { type: 'progress', text: 'echo:hello' }, { ...usage, contextTokens: 1002 }, { type: 'turn_end' }]);
+    // Grok's own ledger (50/5) is counted once, with the task turn's (100/7).
+    expect(await turn(s)).toEqual([{ type: 'progress', text: 'background' }, { type: 'progress', text: 'echo:hello' }, { ...usage, inputTokens: 150, outputTokens: 12, contextTokens: 1002 }, { type: 'turn_end' }]);
     expect(prompts(resources.log)).toEqual(['own-turn', 'hello']);
   });
 
@@ -272,6 +273,31 @@ describe('GrokAdapter sessions', () => {
     await s.followUp({ instruction: 'hello' });
     expect((await turn(s)).at(-1)).toEqual({ type: 'turn_end' });
     expect(prompts(resources.log)).toEqual(['own-turn', 'hello']);
+  });
+
+  it('holds a follow-up behind a Grok turn that OAR reports after the task turn closes', async () => {
+    const gate = path.join(await tempDir(), 'gate');
+    const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });
+    const s = await open(adapter(), { instruction: 'own-turn-deferred' }, resources);
+    expect((await turn(s)).at(-1)).toEqual({ type: 'turn_end' });
+    await s.followUp({ instruction: 'hello' });
+    expect(prompts(resources.log)).toEqual(['own-turn-deferred']);
+    await fs.writeFile(gate, '');
+    expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, { ...usage, contextTokens: 1002 }, { type: 'turn_end' }]);
+  });
+
+  it('cancels a held follow-up that the drain already sent', async () => {
+    const gate = path.join(await tempDir(), 'gate');
+    const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });
+    const s = await open(adapter(), { instruction: 'own-turn' }, resources);
+    await turn(s);
+    await ownTurnStarted(s);
+    await s.followUp({ instruction: 'hold' });
+    await fs.writeFile(gate, '');
+    await vi.waitFor(() => expect(prompts(resources.log)).toEqual(['own-turn', 'hold']));
+    await s.interrupt();
+    expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(true);
+    expect((await turn(s)).at(-1)).toEqual({ type: 'turn_end' });
   });
 
   it('fails the session on a Grok turn end while no turn is open', async () => {

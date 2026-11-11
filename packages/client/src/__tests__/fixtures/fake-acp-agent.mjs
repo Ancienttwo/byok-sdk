@@ -124,10 +124,22 @@ async function prompt(message) {
       log({ kind: 'own-started' });
       const gate = process.env.FAKE_ACP_OWN_TURN_GATE;
       while (gate && !existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
-      vendor({ sessionUpdate: 'turn_completed', prompt_id: 'bash-completed-1', stop_reason: 'end_turn' });
+      // Grok's own ledger for the turn: OAR counts it once, and the SDK reports it with the next task turn.
+      send({ method: '_x.ai/session_notification', params: { sessionId: SESSION, _meta: { eventId: 'own-1' }, update: { sessionUpdate: 'turn_completed', prompt_id: 'bash-completed-1', stop_reason: 'end_turn', usage: { inputTokens: 50, outputTokens: 5 } } } });
       send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: '', entries: [] } });
       log({ kind: 'own-ended' });
     }, 20);
+    return;
+  }
+  // Grok starts its own turn while the prompt still runs; OAR reports it after the prompt's turn closes.
+  if (input === 'own-turn-deferred') {
+    text('first');
+    send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: 'bash-completed-1', entries: [] } });
+    result(message.id, answer());
+    const gate = process.env.FAKE_ACP_OWN_TURN_GATE;
+    while (gate && !existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
+    vendor({ sessionUpdate: 'turn_completed', prompt_id: 'bash-completed-1', stop_reason: 'end_turn' });
+    send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: '', entries: [] } });
     return;
   }
   // Grok's end report for a turn it never said was running.

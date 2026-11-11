@@ -45,6 +45,7 @@ export class GrokProjection {
   private sdkTurn?: { readonly inputId: string; drained: boolean };
   /** OAR adopted a turn Grok runs on its own (a background command or sub-agent wake) as the active turn. */
   private grokTurn = false;
+  private closedGrokTurns = 0;
 
   constructor(private readonly rootSessionId: string) {}
 
@@ -58,6 +59,10 @@ export class GrokProjection {
   /** OAR holds a prompt as busy while this is true. */
   get grokTurnOpen(): boolean {
     return this.grokTurn;
+  }
+  /** How many of Grok's own turns have closed. */
+  get grokTurnsClosed(): number {
+    return this.closedGrokTurns;
   }
 
   /** Events for one record; `outcome` receives the root turn end of an SDK turn, after its events. `GrokSession` decides whether the turn ends or fails. */
@@ -141,6 +146,7 @@ export class GrokProjection {
     if (this.grokTurn) {
       // Grok's own turn is no SDK task turn: its usage stays pending and is reported with the next one.
       this.grokTurn = false;
+      this.closedGrokTurns += 1;
       return;
     }
     this.flushUsage(emit);
