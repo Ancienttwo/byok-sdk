@@ -1,15 +1,15 @@
 import type { ProviderStatus } from '@byok-sdk/keys';
 import { applyModelRouteChange, modelRouteSubmission, type ModelRouteContext, type ModelRouteDraft, type ModelRouteSubmission } from '@byok-sdk/keys/model-route';
-import type { CustodyRequest } from '../../custody/protocol.ts';
+import type { CustodyChange } from '../../custody/protocol.ts';
 
 /** `keys.submit` as the renderer calls it: main hands the request to a custody child and returns its secret-free status. */
-export type KeysSubmit = (request: CustodyRequest) => Promise<ProviderStatus>;
+export type KeysSubmit = (request: CustodyChange) => Promise<ProviderStatus>;
 
 /** What one submission shows: the custody receipt, or the refusal exactly as the bridge reported it. */
 export type SubmitOutcome = { readonly receipt: ProviderStatus } | { readonly error: string };
 
 /** A `configure` request for a valid draft. Only a `replace` key travels; `keep` and `none` send none. */
-export function custodyRequest(submission: Extract<ModelRouteSubmission, { ok: true }>): CustodyRequest {
+export function custodyRequest(submission: Extract<ModelRouteSubmission, { ok: true }>): CustodyChange {
   const { kind: _kind, ...configuration } = submission.profile;
   const { secret } = submission;
   return { op: 'configure', configuration, ...(typeof secret === 'object' ? { secret: secret.replace } : {}) };

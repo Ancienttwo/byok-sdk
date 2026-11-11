@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { ProviderStatus } from '@byok-sdk/keys';
 import { applyModelRouteChange, createModelRouteDraft, modelRouteContext, type ModelRouteChange } from '@byok-sdk/keys/model-route';
 import { describe, expect, it, vi } from 'vitest';
-import type { CustodyRequest } from '../../custody/protocol.ts';
+import type { CustodyChange } from '../../custody/protocol.ts';
 import { Receipt } from './keys-section.tsx';
 import { submitModelRoute } from './submit.ts';
 
@@ -19,7 +19,7 @@ const draft = changes.reduce((current, change) => applyModelRouteChange(current,
 
 describe('keys form submission', () => {
   it('sends the key once to keys.submit, clears it and shows the receipt', async () => {
-    const submit = vi.fn(async (request: CustodyRequest) => {
+    const submit = vi.fn(async (request: CustodyChange) => {
       expect(request).toMatchObject({ op: 'configure', secret: 'test-provider-key', configuration: { profile_ref: 'zai-main', model: 'glm-4.7' } });
       return { profile_ref: 'zai-main', display_name: 'GLM main', provider_kind: 'zai', model: 'glm-4.7', secret_configured: true, profile_revision: 'r1' } as ProviderStatus;
     });
