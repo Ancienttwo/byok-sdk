@@ -150,7 +150,7 @@ test('unchanged format and dependency-only changes retain their existing scope r
     reason: LOCKFILE_VERSION_REASON, families: [...knownFamilies], release: true });
   assert.equal(plan.reason, 'impacted');
   assert.equal(plan.mode, 'targeted');
-  assert.deepEqual(plan.dirs, ['examples/live-activity-host', 'packages/ui-runtime']);
+  assert.deepEqual(plan.dirs, ['examples/desktop-bot-app', 'examples/live-activity-host', 'packages/ui-runtime']);
   assert.deepEqual(plan.families, ['npm-release-pack']);
 });
 

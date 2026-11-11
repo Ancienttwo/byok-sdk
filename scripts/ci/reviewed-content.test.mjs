@@ -1076,7 +1076,8 @@ test('root CI composition admits only the exact helper and prefix, retaining the
 
 test('new graph-registered private workspaces and matching lock rows are admitted; unregistered additions fail', t => {
   const f = fixture(t);
-  for (const id of ['protocol', 'server', 'keys']) {
+  // #1808: the desktop example's ui-runtime edge needs ui-runtime declared in the base.
+  for (const id of ['protocol', 'server', 'keys', 'ui-runtime']) {
     const manifest = { name: `@byok-sdk/${id}`, version: '0.28.0' };
     f.write(`packages/${id}/package.json`, manifest); f.lock.workspaces[`packages/${id}`] = manifest;
   }
