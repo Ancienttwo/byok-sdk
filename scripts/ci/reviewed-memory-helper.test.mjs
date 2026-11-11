@@ -45,24 +45,25 @@ test('helper smoke and source contract select client and packaging without accep
 });
 
 
-test('Hermes private session mapping and smoke admit exact additions only', t => {
-  const cwd = mkdtempSync(join(tmpdir(), 'ci-hermes-entry-'));
+test('Hermes adapter retirement admits only its private session mapping and smoke', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-hermes-retire-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(join(cwd, 'packages/client'), { recursive: true });
   const file = join(cwd, 'packages/client/package.json');
-  const baseline = { name: '@byok-sdk/client', version: '0.28.1', imports: { '#existing': './dist/existing.js' }, scripts: { build: 'tsup' } };
+  const session = { types: './dist/adapters/hermes/hermes-session-runtime.d.ts', default: './dist/adapters/hermes/hermes-session-runtime.js' };
+  const baseline = { name: '@byok-sdk/client', version: '0.28.1', imports: { '#existing': './dist/existing.js', '#byok-hermes-session': session },
+    scripts: { build: 'tsup && node scripts/check-hermes-session-entry.mjs' } };
   writeFileSync(file, JSON.stringify(baseline));
   const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
   const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
   const candidate = structuredClone(baseline);
-  candidate.imports['#byok-hermes-session'] = { types: './dist/adapters/hermes/hermes-session-runtime.d.ts', default: './dist/adapters/hermes/hermes-session-runtime.js' };
-  candidate.scripts.build += ' && node scripts/check-hermes-session-entry.mjs';
+  delete candidate.imports['#byok-hermes-session'];
+  candidate.scripts.build = 'tsup';
   const write = value => writeFileSync(file, JSON.stringify(value));
   write(candidate);
   assert.ok(selectImpact(['packages/client/package.json'], context).families.includes('npm-release-pack'));
   for (const mutate of [
-    m => { m.imports['#byok-hermes-session'].default = './dist/other.js'; },
     m => { m.imports['#existing'] = './dist/replaced.js'; },
     m => { m.scripts.build = 'echo skipped'; },
     m => { m.dependencies = { unreviewed: '1.0.0' }; },

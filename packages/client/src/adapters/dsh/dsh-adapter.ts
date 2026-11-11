@@ -208,7 +208,7 @@ export class DshAdapter implements RuntimeAdapter {
     }
   }
 
-  /** Cheap admission, as Hermes: the version probe only. The acp profile probe belongs to `detect()`. */
+  /** Cheap admission: the version probe only. The acp profile probe belongs to `detect()`. */
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     try {
       dshMcpRows(Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server })), '.');

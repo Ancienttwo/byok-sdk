@@ -328,3 +328,25 @@ it('close() resolves only after a dispatched handler settles', async () => {
   await closing;
   expect(closed).toBe(true);
 });
+
+it('answers 503 to a request whose body finishes after close() started, without dispatching it', async () => {
+  // closeAllConnections would drop the socket and hide the response, so keep it open.
+  const spy = vi.spyOn(Server.prototype, 'closeAllConnections').mockImplementation(() => {});
+  try {
+    const handler = vi.fn(async () => new Response('x'));
+    const { listener, selected } = await start(handler);
+    const socket = connect(selected, '127.0.0.1');
+    let response = '';
+    socket.on('data', chunk => { response += chunk; });
+    const ended = new Promise<void>(resolve => { socket.on('close', () => resolve()); });
+    await new Promise<void>(resolve => socket.on('connect', resolve));
+    socket.write(`POST / HTTP/1.1\r\nHost: 127.0.0.1:${selected}\r\nContent-Length: 8\r\nConnection: close\r\n\r\nab`);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const closing = listener.close();
+    socket.write('cdefgh');
+    await ended;
+    await closing;
+    expect(response.startsWith('HTTP/1.1 503')).toBe(true);
+    expect(handler).not.toHaveBeenCalled();
+  } finally { spy.mockRestore(); }
+});

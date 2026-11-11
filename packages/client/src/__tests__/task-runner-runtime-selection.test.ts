@@ -72,7 +72,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     return daemon;
   }
 
-  it.each(['pi', 'hermes'] as const)('declines %s resume before preparing or claiming', async (id) => {
+  it.each(['pi'] as const)('declines %s resume before preparing or claiming', async (id) => {
     const adapter = new StubRuntimeAdapter(id, { kind: 'available' }, { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true });
     const prepare = vi.spyOn(adapter, 'prepare');
     await setup([adapter]);

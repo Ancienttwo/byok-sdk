@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "e3bae2b266eba2295c7db08c52d0a270d0c7e771d9851ed0d4aafa8a2095e1e4"
+    "snapshotSha256": "415b9418b8163dabc9f39d6e9d3f97759ca7c143b603ecdfbafab76ce4687870"
   },
   "configFields": {
     "status": "tracked",
@@ -70,7 +70,7 @@
     {
       "id": "adapter-session-limits",
       "impact": "additive",
-      "summary": "agy, dsh and Hermes accept fractional interruptTimeoutMs; session limits are defined once across six adapters.",
+      "summary": "agy and dsh accept fractional interruptTimeoutMs; session limits are defined once across five adapters.",
       "migration": "CHANGELOG.md#unreleased",
       "items": [
         "export:@byok-sdk/client#AgyAdapter",
@@ -78,13 +78,11 @@
         "export:@byok-sdk/client#CodexAdapter",
         "export:@byok-sdk/client#DshAdapter",
         "export:@byok-sdk/client#GrokAdapter",
-        "export:@byok-sdk/client#HermesAdapter",
         "export:@byok-sdk/client/adapters#AgyAdapter",
         "export:@byok-sdk/client/adapters#ClaudeAdapter",
         "export:@byok-sdk/client/adapters#CodexAdapter",
         "export:@byok-sdk/client/adapters#DshAdapter",
-        "export:@byok-sdk/client/adapters#GrokAdapter",
-        "export:@byok-sdk/client/adapters#HermesAdapter"
+        "export:@byok-sdk/client/adapters#GrokAdapter"
       ]
     },
     {
@@ -109,7 +107,7 @@
     {
       "id": "version-policy-source",
       "impact": "breaking",
-      "summary": "The eight built-in adapter option types (Agy, Claude, Codex, Dsh, Grok, Hermes, OpenCode, Pi) drop the internal option that tagged whether versionPolicy came from the adapter option or daemon config. A Host that constructs an adapter directly deletes that tag from the options object (see the migration section for its name); versionPolicy and the version verdicts it produces are unchanged.",
+      "summary": "The seven built-in adapter option types (Agy, Claude, Codex, Dsh, Grok, OpenCode, Pi) drop the internal option that tagged whether versionPolicy came from the adapter option or daemon config. A Host that constructs an adapter directly deletes that tag from the options object (see the migration section for its name); versionPolicy and the version verdicts it produces are unchanged.",
       "migration": "docs/releases/host-upgrade-next-minor.md#version-policy-source",
       "items": [
         "export:@byok-sdk/client#AgyAdapterOptions",
@@ -117,7 +115,6 @@
         "export:@byok-sdk/client#CodexAdapterOptions",
         "export:@byok-sdk/client#DshAdapterOptions",
         "export:@byok-sdk/client#GrokAdapterOptions",
-        "export:@byok-sdk/client#HermesAdapterOptions",
         "export:@byok-sdk/client#OpenCodeAdapterOptions",
         "export:@byok-sdk/client#PiAdapterOptions",
         "export:@byok-sdk/client/adapters#AgyAdapterOptions",
@@ -125,7 +122,6 @@
         "export:@byok-sdk/client/adapters#CodexAdapterOptions",
         "export:@byok-sdk/client/adapters#DshAdapterOptions",
         "export:@byok-sdk/client/adapters#GrokAdapterOptions",
-        "export:@byok-sdk/client/adapters#HermesAdapterOptions",
         "export:@byok-sdk/client/adapters#OpenCodeAdapterOptions",
         "export:@byok-sdk/client/adapters#PiAdapterOptions"
       ]
@@ -280,6 +276,28 @@
         "export:@byok-sdk/client#DaemonNotOpenError",
         "export:@byok-sdk/client#EmbeddedPairingError",
         "export:@byok-sdk/client#EmbeddedPairingServer"
+      ]
+    },
+    {
+      "id": "hermes-runtime-adapter-removed",
+      "impact": "breaking",
+      "summary": "The Hermes runtime adapter is archived (tag archive/hermes-runtime-adapter): HermesAdapter and its option, model and launcher types leave @byok-sdk/client and @byok-sdk/client/adapters, the Hermes custody launcher exports leave @byok-sdk/keys, and FakeRuntimeAdapterId drops hermes. A Host that constructed HermesAdapter deletes it, its imports and its custody launcher; the device no longer advertises the hermes harness. No alias or stub remains.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#hermes-runtime-adapter-removed",
+      "items": [
+        "export:@byok-sdk/client#HermesAdapter",
+        "export:@byok-sdk/client#HermesAdapterOptions",
+        "export:@byok-sdk/client#HermesByokLauncher",
+        "export:@byok-sdk/client#HermesModelSelection",
+        "export:@byok-sdk/client/adapters#HermesAdapter",
+        "export:@byok-sdk/client/adapters#HermesAdapterOptions",
+        "export:@byok-sdk/client/adapters#HermesByokLauncher",
+        "export:@byok-sdk/client/adapters#HermesModelSelection",
+        "export:@byok-sdk/client/testing#FakeRuntimeAdapterId",
+        "export:@byok-sdk/keys#HERMES_PROVIDER_KEY_ENV",
+        "export:@byok-sdk/keys#HermesProviderLauncherRequest",
+        "export:@byok-sdk/keys#hermesProviderModel",
+        "export:@byok-sdk/keys#parseHermesProviderLauncherRequest",
+        "export:@byok-sdk/keys#runHermesProviderLauncher"
       ]
     },
     {
@@ -465,13 +483,23 @@
     },
     {
       "item": "export:@byok-sdk/client#HermesAdapter",
-      "change": "changed",
-      "entry": "adapter-session-limits"
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
     },
     {
       "item": "export:@byok-sdk/client#HermesAdapterOptions",
-      "change": "changed",
-      "entry": "version-policy-source"
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#HermesByokLauncher",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#HermesModelSelection",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
     },
     {
       "item": "export:@byok-sdk/client#OpenCodeAdapter",
@@ -615,13 +643,23 @@
     },
     {
       "item": "export:@byok-sdk/client/adapters#HermesAdapter",
-      "change": "changed",
-      "entry": "adapter-session-limits"
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
     },
     {
       "item": "export:@byok-sdk/client/adapters#HermesAdapterOptions",
-      "change": "changed",
-      "entry": "version-policy-source"
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#HermesByokLauncher",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#HermesModelSelection",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
     },
     {
       "item": "export:@byok-sdk/client/adapters#OpenCodeAdapter",
@@ -687,6 +725,11 @@
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",
       "change": "changed",
       "entry": "agent-memory-helper-protocol-4"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterId",
+      "change": "changed",
+      "entry": "hermes-runtime-adapter-removed"
     },
     {
       "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
@@ -799,6 +842,16 @@
       "entry": "scope-key-package-v1-removed"
     },
     {
+      "item": "export:@byok-sdk/keys#HERMES_PROVIDER_KEY_ENV",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/keys#HermesProviderLauncherRequest",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
       "item": "export:@byok-sdk/keys#MODEL_PROVIDER_VENDORS",
       "change": "changed",
       "entry": "opencode-go-keys-store"
@@ -812,6 +865,21 @@
       "item": "export:@byok-sdk/keys#PiModelConfigSchema",
       "change": "changed",
       "entry": "pi-opencode-go-provider-id"
+    },
+    {
+      "item": "export:@byok-sdk/keys#hermesProviderModel",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/keys#parseHermesProviderLauncherRequest",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/keys#runHermesProviderLauncher",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
     },
     {
       "item": "export:@byok-sdk/keys/model-route#MODEL_PROVIDER_VENDORS",

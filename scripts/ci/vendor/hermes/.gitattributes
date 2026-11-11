@@ -1,3 +1,0 @@
-# Preserve the upstream bytes used by the SHA-256 manifest on every runner.
-*.sh -text
-*.ps1 -text

@@ -54,7 +54,6 @@ flowchart LR
       Shell["/bin/bash -c"]:::runtime
     end
     subgraph GH["进程组 · Host 注入"]
-      Hermes["hermes gateway<br/>hermes --yolo acp"]:::runtime
       Grok["grok agent stdio"]:::runtime
     end
 
@@ -66,7 +65,6 @@ flowchart LR
     Daemon --> Codex
     Daemon --> Launcher
     PiHost --> Shell
-    Daemon --> Hermes
     Daemon --> Grok
     Daemon --> Direct
     Daemon --> Ledger
@@ -94,7 +92,7 @@ flowchart LR
 | 工具授权闸门 | 每 runtime 一个 loopback HTTP server，仅 `auto` 模式 | daemon 进程内 | `packages/client/src/tool-authorization-ipc.ts:74-103` |
 | 直接子进程 | 短命，不建组 | daemon | git、memory helper、`daemon/mcp-tools-probe.ts`、`daemon/device-credential-store.ts` |
 
-- **内置与注入**：`createDaemon` 只构建 pi、claude、codex（`packages/client/src/daemon/create-daemon/support.ts:288-292`）；Hermes 与 Grok 由 Host 经 `createDaemonWithAdapters` 加入。
+- **内置与注入**：`createDaemon` 只构建 pi、claude、codex（`packages/client/src/daemon/create-daemon/support.ts:288-292`）；Grok 由 Host 经 `createDaemonWithAdapters` 加入。
 - **控制通道**：POSIX 用 `<storeDir>/control.sock`，路径过长时退到 `/tmp/byok-<hash>/sock`（`packages/client/src/daemon/control-protocol.ts:119-121`）；Windows 用 `\\.\pipe\byok-<id>`（`:147`）；双方用 `control.token` 做 HMAC-SHA256 双向认证，token 本身不上线（`:180-193`）。能以 daemon 同一 OS 用户运行的进程都能读到这个 token，这是同用户信任边界（R-T2）。
 
 ## 2. 受监督执行协议
@@ -218,12 +216,12 @@ flowchart LR
     B2["TMPDIR · TEMP · TMP"]:::how
     B3["命令行参数<br/>claude --mcp-config / --settings<br/>codex -c sandbox_mode"]:::how
     B4["协议消息携带 MCP 列表<br/>Codex thread/start<br/>ACP session/new"]:::how
-    B5["SDK 设置的目录变量<br/>PI_CODING_AGENT_DIR · HERMES_HOME"]:::how
+    B5["SDK 设置的目录变量<br/>PI_CODING_AGENT_DIR"]:::how
     B6["原样继承<br/>不改 HOME · CLAUDE_CONFIG_DIR<br/>CODEX_HOME"]:::how
     B7["Claude：stdio control hook<br/>Pi：rpc-launch.json 交给 Pi host<br/>Pi host 再经环境变量交给子会话"]:::how
   end
 
-  RT["runtime 子进程<br/>claude · codex · pi<br/>hermes · grok"]:::rt
+  RT["runtime 子进程<br/>claude · codex · pi<br/>grok"]:::rt
 
   Cwd --> B1 --> RT
   Tmp --> B2 --> RT
@@ -241,13 +239,12 @@ flowchart LR
 | Claude，内置 | `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages` | claude 按 `--mcp-config` 文件拉起 | 默认 `--dangerously-skip-permissions`；Host 开启 native interactions 时改为 `--permission-prompt-tool stdio --permission-mode acceptEdits` | 支持，PreToolUse hook 走 stdio control |
 | Codex，内置 | `codex app-server -c sandbox_mode=… --listen stdio://` | codex 按 `thread/start` / `thread/resume` 的 `mcp_servers` 拉起 | `approvalPolicy` 默认 `never`；`sandbox_mode` 默认 `danger-full-access`，`codexSandbox: 'inherit'` 时不覆盖 | 不支持，`auto` 会被 decline |
 | Pi，内置 | Pi host bin，可经 `byok-pi-provider-launcher` 启动 | Pi host 的 `McpServerPool`，配置在 `sdk/rpc-launch.json` | 预信任会话 cwd | 只在普通 `pi-rpc` lane 支持，loopback IPC；prepared offer 与 durable lane 在准入时以 `tool_authorization_unsupported` decline（durable 的 descriptor 不声明 `toolAuthorizationAuto`，启动时的检查只是兜底） |
-| Hermes，Host 注入 | `hermes gateway run --quiet --external-supervisor --force` 与 `hermes --yolo acp` | Hermes 按 ACP `session/new` 的 `mcpServers` 拉起 | `--yolo` | 不支持 |
 | Grok，Host 注入 | `grok agent --always-approve --no-leader stdio` | Grok 按 ACP `session/new` 的 `mcpServers` 拉起 | `--always-approve` | 不支持 |
 
-出处：`packages/client/src/adapters/claude/claude-adapter.ts:128-139,344-366`；`packages/client/src/adapters/codex/codex-adapter.ts:49-65,236,271`；`packages/client/vendor/oar/ac7fde4/runtimes/codex/app-server-client.ts:108`；`packages/client/vendor/oar/ac7fde4/runtimes/codex/open.ts:108,133`；`packages/client/src/adapters/pi/pi-adapter.ts:227,436-440,525-555`；`packages/client/src/adapters/hermes/hermes-adapter.ts:100,335,346`；`packages/client/vendor/oar/ac7fde4/runtimes/grok/session.ts:143`；`auto` 准入见 `packages/client/src/daemon/task-runner/offer-launch.ts:61`。
+出处：`packages/client/src/adapters/claude/claude-adapter.ts:128-139,344-366`；`packages/client/src/adapters/codex/codex-adapter.ts:49-65,236,271`；`packages/client/vendor/oar/ac7fde4/runtimes/codex/app-server-client.ts:108`；`packages/client/vendor/oar/ac7fde4/runtimes/codex/open.ts:108,133`；`packages/client/src/adapters/pi/pi-adapter.ts:227,436-440,525-555`；`packages/client/vendor/oar/ac7fde4/runtimes/grok/session.ts:143`；`auto` 准入见 `packages/client/src/daemon/task-runner/offer-launch.ts:61`。
 
-- **环境变量**：`buildRuntimeEnv` 继承 daemon 的完整环境，只去掉 `CLAUDECODE` 与 `BYOK_*`（`packages/client/src/daemon/environment.ts:1-11,102-103,154`），再叠加 scratch 的 `TMPDIR`、`TEMP`、`TMP`（`packages/client/src/daemon/retention/scratch.ts:187`）。环境里的 provider key 等秘密会传到 agent 子进程（R-T1）。窄 allowlist `buildAllowlistedEnv` 用在 durable Pi 工具 shell、Pi 受控目录 lane，以及经 launcher 或 custody 的 Hermes（`adapters/pi-durable/environment.ts:7`；`adapters/pi/runtime-launch.ts:93`；`adapters/hermes/hermes-adapter.ts:228,262,325`；R-T4）。
-- **目录变量**：`PI_CODING_AGENT_DIR` 只在经 keys launcher 时指向 launcher 的投影目录（`packages/keys/src/pi-provider-launcher-core.ts:396`）；`HERMES_HOME` 指向每次运行新建的 profile `<Hermes home>/profiles/byok-<id>`（`packages/client/src/adapters/hermes/hermes-home.ts:98-104`；`hermes-adapter.ts:100`）。
+- **环境变量**：`buildRuntimeEnv` 继承 daemon 的完整环境，只去掉 `CLAUDECODE` 与 `BYOK_*`（`packages/client/src/daemon/environment.ts:1-11,102-103,154`），再叠加 scratch 的 `TMPDIR`、`TEMP`、`TMP`（`packages/client/src/daemon/retention/scratch.ts:187`）。环境里的 provider key 等秘密会传到 agent 子进程（R-T1）。窄 allowlist `buildAllowlistedEnv` 用在 durable Pi 工具 shell 和 Pi 受控目录 lane（`adapters/pi-durable/environment.ts:7`；`adapters/pi/runtime-launch.ts:93`）。
+- **目录变量**：`PI_CODING_AGENT_DIR` 只在经 keys launcher 时指向 launcher 的投影目录（`packages/keys/src/pi-provider-launcher-core.ts:396`）。
 - **Claude 的 `agentUserContext: 'excluded'`**：只对 Agent 任务生效，加 `--strict-mcp-config` 与 `--settings <sdk>/claude-settings.json`，排除 Agent home 之外的 `CLAUDE.md` 和 auto memory（`packages/client/src/adapters/claude/claude-adapter.ts:105-106,297-314`；`adapters/claude/agent-user-context.ts:17`）。
 - **skill packs** 只装到 `<dataDir>/skill-packs/<name>/<hash>/`，由 Host 调 `projectSkillPack` 复制到它选的目录；SDK 不替 runtime 决定技能目录（`packages/client/src/daemon/skill-pack-installer.ts:20-32,72`）。
 
@@ -309,7 +306,6 @@ flowchart TB
 | --- | --- | --- | --- | --- |
 | R-T1 | 高 | 默认环境是完整继承：除 `CLAUDECODE` 与 `BYOK_*` 外，daemon 环境里的变量都会进入 agent 子进程及其 MCP server。继承本身是有意的（ADR-037 D2：用户自己的 agent 读自己的凭据），问题在于 daemon 内嵌在 Host 进程里时，Host 自己放进 `process.env` 的变量也被当成用户的一并传过去；Host 直接构造的 adapter 也不受 `DaemonConfig` 约束。 | `packages/client/src/daemon/environment.ts:1-14,100-103`；`packages/client/src/lifecycle/service-environment.ts:1-30` | 环境策略落到 adapter 层；基底改为登录 shell 环境的快照，`allowlist` 作为可选的严格模式（Q2'，owner 2026-10-29 批准）。[#1095](https://github.com/Ancienttwo/byok-sdk/issues/1095)。 |
 | R-T2 | 中 | 设备侧的本地认证（`control.token`、工具授权闸门 token）只防跨用户，不防同用户进程；闸门 token 还经环境变量传给 Pi 的子会话。控制通道的 `approvals.resolve` 不区分审批种类，同用户进程能以本地来源批准 `auto` 闸门登记的工具授权审批，审计记录显示为本机批准。 | `packages/client/src/daemon/control-server.ts:549`；`packages/client/src/daemon/create-daemon/control-methods.ts:189-199`；`packages/client/src/daemon/approvals.ts:29-34,115`；`packages/client/src/tool-authorization-ipc.ts:5-17` | `auto` 不是沙箱，这仍在威胁模型之内（`packages/client/src/tool-authorization.ts:6-11`），但工具授权的批准应只认 Host：[#1101](https://github.com/Ancienttwo/byok-sdk/issues/1101)。闸门 token 改为文件传递：[#1095](https://github.com/Ancienttwo/byok-sdk/issues/1095)。两者写进 [`security.md`](../security.md)。 |
-| R-T3 | 中 | `auto` 工具授权只有 Claude 与普通 Pi RPC lane 支持。Codex、Hermes、Grok、durable Pi 与 prepared offer 收到 `auto` 都在准入时 decline（durable Pi 的 descriptor 把 `toolAuthorizationAuto` 设为 false，启动时的检查只是兜底）。wire 上的 runtime 能力不含这一项，Host 派工前看不到；CLI 路径设不了 resolver，总是 `all`。 | `packages/client/src/daemon/task-runner/offer-launch.ts:61-66`；`packages/client/src/adapters/pi/pi-adapter.ts:243,436-440`；`packages/client/src/adapters/claude/claude-adapter.ts:166`；`packages/protocol/src/messages.ts:87-94` | 公开 `toolAuthorizationAuto`，resolver 输入带 `autoSupported`：[#1061](https://github.com/Ancienttwo/byok-sdk/issues/1061)；扩成按 runtime × lane 的能力矩阵：[#1103](https://github.com/Ancienttwo/byok-sdk/issues/1103)；CLI 路径的静态 `toolAuthorization`：[#1094](https://github.com/Ancienttwo/byok-sdk/issues/1094)。 |
-| R-T4 | 低 | `environment.ts` 的文件头说 `buildAllowlistedEnv` "只有两个 Pi lane 使用"，实际 Hermes 在 launcher 或 custody 下也用它。 | `packages/client/src/daemon/environment.ts:13-14`；`packages/client/src/adapters/hermes/hermes-adapter.ts:228,262,325`；`adapters/hermes/hermes-custody.ts:38` | 更新注释。[#1095](https://github.com/Ancienttwo/byok-sdk/issues/1095) 第 1 步。 |
+| R-T3 | 中 | `auto` 工具授权只有 Claude 与普通 Pi RPC lane 支持。Codex、Grok、durable Pi 与 prepared offer 收到 `auto` 都在准入时 decline（durable Pi 的 descriptor 把 `toolAuthorizationAuto` 设为 false，启动时的检查只是兜底）。wire 上的 runtime 能力不含这一项，Host 派工前看不到；CLI 路径设不了 resolver，总是 `all`。 | `packages/client/src/daemon/task-runner/offer-launch.ts:61-66`；`packages/client/src/adapters/pi/pi-adapter.ts:243,436-440`；`packages/client/src/adapters/claude/claude-adapter.ts:166`；`packages/protocol/src/messages.ts:87-94` | 公开 `toolAuthorizationAuto`，resolver 输入带 `autoSupported`：[#1061](https://github.com/Ancienttwo/byok-sdk/issues/1061)；扩成按 runtime × lane 的能力矩阵：[#1103](https://github.com/Ancienttwo/byok-sdk/issues/1103)；CLI 路径的静态 `toolAuthorization`：[#1094](https://github.com/Ancienttwo/byok-sdk/issues/1094)。 |
 | R-T5 | 中 | 下游的安装与配置没有契约。CLI 只校验 `productName`、`productId`、`serverUrl`，`DaemonConfig` 其余 36 个字段原样透传。`toolAuthorization` 是函数，adapter 的隔离选项只能在构造 adapter 时设置，所以 CLI 路径既设不了 `auto`，也设不了隔离。OS 凭据库的服务名只由 productId 派生，同一 productId 的第二个 `storeDir` 会读到前一个的配对。两个下游因此各自写了配置组装、目录布局与 adapter 构造。 | `packages/client/src/bin/config.ts:14,40-67`；`packages/client/src/daemon/create-daemon/support.ts:285-294`；`packages/client/src/daemon/device-credential-store.ts:221-225` | SDK 提供下游指引、配置 schema、`config check`（含生效值）、布局 helper，以及 CLI 路径的 `runtimes` 配置块和静态 `toolAuthorization`。[#1094](https://github.com/Ancienttwo/byok-sdk/issues/1094)。 |
 | R-T6 | 中 | 服务与升级只在 CLI 路径上有，而且不完整：服务管理器追加写日志，从不轮转；store 格式只能单向升级（server SQLite v6 既不接受旧文件也不接受新文件，client journal 的旧格式要人工处理），只换回旧二进制回不到旧状态。内嵌 Host 只能自己写服务注册、payload 切换与回滚。 | `packages/client/src/lifecycle/launchd.ts:87-91`；`packages/server/src/stores/sqlite/index.ts:237-239,1391`；`packages/client/src/daemon/journal/sqlite-journal.ts:417` | 服务单元、升级（含 store 兼容预检与快照）、日志轮转、运维操作做成 CLI 与内嵌共用的库 API：[#1097](https://github.com/Ancienttwo/byok-sdk/issues/1097)；store 兼容预检与 Host 可见变更清单：[#1102](https://github.com/Ancienttwo/byok-sdk/issues/1102)。 |

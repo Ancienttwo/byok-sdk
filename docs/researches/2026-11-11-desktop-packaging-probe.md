@@ -285,6 +285,41 @@ On both Ubuntu 24.04 and 26.04 the unprivileged user-namespace restriction is on
 
 Limits: the container proves the store logic against a real Secret Service, but not on Ubuntu's libsecret build or on x64; the runner result in the `desktop` lane replaces it. The `=1` read is the Colima VM's Ubuntu 24.04 kernel, which shows the restriction is on by default there, not what an end user's desktop session or AppArmor profile allows. Neither the container nor the runner installs the packaged app: whether a deb-installed (setuid `chrome-sandbox`) or AppImage build starts under Ubuntu 24.04's restriction without a custom AppArmor profile is open until A7 (#1811) builds the Linux packages.
 
+## A7 packaged results (#1811, PR #1859)
+
+The A7 package job (`desktop` lane, three-OS matrix) ran D0's steps 3-6 on GitHub runners, against the real app instead of the probe. Run 43081239021 (head `9f4e79225`), all three legs green. `scripts/package/package-smoke.mjs` checks the package. A smoke Host SEA (`scripts/package/smoke-host.ts`, the D0 probe fixture with its three changes) runs from inside the packaged `resources/host/`.
+
+| | macOS arm64 (`macos-latest`) | Windows x64 (`windows-latest`) | Linux x64 (`ubuntu-latest`, 26.04) |
+| --- | --- | --- | --- |
+| Packages | DMG + ZIP, ad-hoc signed, hardened runtime | NSIS (per user) | AppImage + deb |
+| Unpacked | 432.6 MiB (`.app`) | 502.9 MiB (`win-unpacked`) | 447.5 MiB (`linux-unpacked`) |
+| `resources/host` | 172.7 MiB | 144.0 MiB | 171.4 MiB |
+| Installers | DMG 166.7 MiB, ZIP 161.9 MiB | NSIS 150.4 MiB | AppImage 173.8 MiB, deb 137.3 MiB |
+| `resources/host` vs stage | 1349 files equal; re-signed: SEA, both memory helpers | 1351 files equal (unsigned run) | 1346 files equal |
+| Fuses read back | `APP_FUSES` | `APP_FUSES` | `APP_FUSES` |
+| Packaged product SEA Host over the bridge | hello → running → shutdown, exit 0 | skipped until the integration owner adopts #1839 (below) | hello → running → shutdown, exit 0 |
+| Smoke Host: Pi keys lane + `memory_recall` | Complete | Complete | Complete |
+| Smoke Host: R2 (`pi_background_unavailable`) | refused, task Complete | refused, task Complete | refused, task Complete |
+| `agentMemoryMcp` | admitted | admitted | admitted |
+
+Windows, D0 step 6, signing with a throwaway certificate. The self-signed code-signing `.pfx` is made with `openssl` in the job's temp dir and deleted by the step's EXIT trap; nothing is uploaded. Results:
+
+- `host.exe` and `native/agent-memory-fs/win32-x64.exe` carry the throwaway signature.
+- `koffi.node` is `NotSigned`, and its SHA-256 `38c7361513d2d26716b5da8d4e0b78bfe6500f51e0e87f7fefacc362f1e198cf` equals the pin before and after signing.
+- The smoke Host passes again on the signed build.
+- First attempt: signtool refused the SEA (`SignedCode::Sign returned error: 0x800700C1`). Node's own Authenticode table goes stale once postject injects. `bundle-host.mjs` now drops the PE security directory before injection, as `codesign --remove-signature` does on macOS.
+
+Windows, product Host: on `windows-latest` the packaged product Host stops with `DeviceCredentialStoreUnavailableError: Windows Credential Manager requires the koffi optional dependency`, because `compose.ts` passes no `nativeAssetRoot` yet. The Windows smoke runs with `--without-product-host` and prints the skip. The integration owner's adoption of #1839 (`resolveSdkHosting`), right after #1859, removes the flag and the option.
+
+Linux, packaged sandbox (report only, `ubuntu-latest` = Ubuntu 26.04, `kernel.apparmor_restrict_unprivileged_userns=1`):
+
+- The deb installs `/opt/BYOK Bots/byok-desktop-bots` with `chrome-sandbox` mode `755 root`, not setuid.
+- Both the installed deb and the AppImage (`--appimage-extract-and-run`) were still running after 20 s under xvfb (exit 124), with no SUID-sandbox `FATAL` line.
+- Electron from `node_modules` on the same runner still aborts without `--no-sandbox`.
+- Not checked: which mechanism lets the packaged builds start (for example an AppArmor profile installed by the deb), and whether the renderer runs sandboxed.
+
+macOS: the packaged product Host ran on the runner's login keychain with no prompt. The packaged builds are ad-hoc signed; Developer ID, notarization, stapling and Keychain prompts per signed binary stay owner steps.
+
 ## What is proven, what is open
 
 Proven (macOS arm64, this machine):
@@ -301,6 +336,6 @@ Open:
 
 - Developer ID signing, notarization, stapling and `spctl` (owner steps above), and whether the SEA needs more than `allow-jit` with a team ID.
 - Keychain prompts per signed binary.
-- Windows: sizes, the packaged run and the post-signing `koffi.node` hash (win-ci slot).
-- Linux: whether a deb (setuid `chrome-sandbox`) or an AppImage with an AppArmor profile starts sandboxed on Ubuntu 24.04 (A7).
+- Windows: the packaged product Host and the Electron-level packaged launch, after the integration owner adopts #1839 (A7 results above).
+- Linux: which mechanism lets the deb and the AppImage start under the userns restriction, and whether the renderer is sandboxed (A7 results above).
 - macOS x64 (not built).
