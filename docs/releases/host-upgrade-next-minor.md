@@ -190,6 +190,17 @@ The hosted Bot collaboration index no longer exports `HostedSubmitter`, `HostedR
 
 Pass the command entry `sync: passes.syncScope` and `failStuckIntent: (scope, key) => passes.failStuckIntent(scope, key)`; the latter syncs the touched scope after the call.
 
+## Hosted Bot autonomy (#1662)
+
+The hosted Bot collaboration example now enforces Bot autonomy: an outcome of a Bot in `observe` no longer runs `create_routine`, a cross-Bot `delegate` or `room_call`; it stores a `would_do` entity and a `would-do:<id>` projection instead, as the local Host does. Two steps, in order:
+
+1. Run `HostedCollaborationStore.migrate()` once on every existing schema before the new code serves. It replaces `entity_kind_check` and moves any `wouldDo` rows that an older L import left in a scope frame into `would_do` entity rows. Without it the first would-do write fails with `violates check constraint "entity_kind_check"`.
+2. Every existing Bot is now `observe`. Call `HostedCommandEntry.setBotAutonomy(credential, botId, 'auto')` for each Bot that must keep acting on its own. The method is owner only.
+
+## Hosted outbox sender (#1663)
+
+The hosted Bot collaboration Worker now runs `HostedOutboxSender` in every pass, after the submitter: projections reach the new `host_projection` table, and a Bot with a pending home operation becomes ready, so its Turn freezes. Before serving the new code, run `hostProjectionDdl(HOST_SCHEMA)` once from Node (`CREATE TABLE IF NOT EXISTS`, safe to repeat). The first pass then sends the backlog, at most 100 rows per pass. A card or delivery row that the Worker has no port for is listed in the pass report's `send.failed` instead of staying silent.
+
 ## Isolated service lifecycle gate root
 
 No Host change is required (#1732). `CreateServiceLifecycleOptions` gains an optional `gateRoot`. On macOS, install, repair and uninstall then hold the `service-lifecycle` gate in that directory instead of `/tmp/byok-pm-<uid>`, so tests or parallel consumers can drive separate lifecycles without refusing each other with `lifecycle_owner_busy`. Lifecycles exclude each other only when they use the same root, so production code should omit it. Only the lifecycle's gate moves: `claimServiceLifecycleOwner`, `releaseServiceLifecycleOwner` and `localStateRelocation` still lock the default root, so a lifecycle on a `gateRoot` no longer excludes them. The root must be an absolute path and gets the same check as the default root. An absent root is created with mode 0700. A gateRoot owned by the process user is set to 0700; a symlink, non-directory or foreign-owned path is refused. The refusal's code is `private_dir_symlink`, `private_dir_not_directory` or `private_dir_foreign_owner`, and `private_dir_mode` when the root cannot be set to 0700. The check covers the root itself, not a swap of its parent, so choose a root whose parent directory other users cannot write. The option takes effect on macOS only: Linux and Windows ignore it, a relative path included, because their gate is an abstract socket or a named pipe with no filesystem root.
@@ -248,6 +259,8 @@ These declines are non-retryable, and their `reason` is `<rule>: <message>`. Cla
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
 - [ ] Run the H `unmigrated_dreams` and L `legacy_home` queries on v0.41.0; both must be 0 before the upgrade (#1669).
+- [ ] Run `HostedCollaborationStore.migrate()` on every existing hosted schema, then set `setBotAutonomy(..., 'auto')` for each Bot that must keep acting on its own (#1662).
+- [ ] Run `hostProjectionDdl(HOST_SCHEMA)` once before serving the new Worker, and watch `send.failed` in the first pass reports (#1663).
 - [ ] Pin the Host's direct and resolved SDK dependencies to the release graph.
 - [ ] Apply the Host's backup, stop, precheck, smoke and rollback gates, adjusted to the final release.
 - [ ] Check Codex retention settings and resume behavior where `agentUserContext: 'excluded'` is enabled.
