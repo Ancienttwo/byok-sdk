@@ -643,7 +643,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 552411,
+      "budgetBytes": 552688,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

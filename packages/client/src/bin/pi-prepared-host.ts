@@ -4,6 +4,7 @@ import { MODEL_THINKING_LEVELS as THINKING_LEVELS } from '@earendil-works/pi-ai/
 import { AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
 import { PI_PROJECTED_KEY_ENV } from '../adapters/provider-credential-environment';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
+import { applyPiHostNetworkDefaults } from './pi-host-network-defaults';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import process from 'node:process';
@@ -678,6 +679,7 @@ function parseArgs(argv: readonly string[]): string {
 }
 
 export async function runPiPreparedHost(argv: readonly string[]): Promise<void> {
+  applyPiHostNetworkDefaults();
   const owned = extractPiConfigDigest(argv, fail);
   const config = loadConfig(parseArgs(owned.args), owned.digest);
 
