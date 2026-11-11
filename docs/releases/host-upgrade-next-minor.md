@@ -436,3 +436,7 @@ On Windows, the SDK now refuses a configured root that passes through a symbolic
 Before, a `hostStorageRoot` behind a link was followed silently, and relocation already refused the same root. A `storeDir` behind a link failed later in the scratch, retention or relocation checks. Subst drives, mapped network drives and mount points to a volume with a drive letter still resolve to their final path. A mount point to a volume with no drive letter is expected to fail construction. A subst or mapped drive whose backing path contains a link is still followed, because only the configured spelling is checked. POSIX keeps its trusted-link rule.
 
 Before upgrading a Windows Host, check every configured root for a link in its existing ancestors, for example with `dir /AL` on each parent or `(Get-Item <path>).LinkType` in PowerShell. Point a linked setting at the physical directory, the link's target. Roots without a link keep their identities. Changing `storeDir` to its physical spelling changes its control pipe name and Agent-home owner id, so stop the daemon before changing it.
+
+## In-memory device credential backend (#1844)
+
+`@byok-sdk/client/testing` exports `InMemoryDeviceCredentialBackend`, a `DeviceCredentialBackend` held in memory. A Host that hand-rolls a memory backend for its tests deletes it and injects this one as `deviceCredentials`, so a test that builds a daemon never writes an enrollment to the Keychain or Credential Manager. No runtime Host change is required.
