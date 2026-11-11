@@ -831,7 +831,9 @@ for that product share one OS credential entry. A new directory does not create
 an unpaired device. Before replacing server state, stop all daemons for that
 product and unpair with the old configuration (`byok-agent unpair --config <path>`).
 Alternatively, use a new `productId` for an independent enrollment. Unpair clears
-the shared credential for every directory of that product.
+the shared credential for every directory of that product. A Host without the
+`byok-agent` bin can unpair in process; see
+[Clearing an enrollment without running the daemon](../../docs/device-setup.md#clearing-an-enrollment-without-running-the-daemon).
 
 On macOS, `deviceCredentials: { macosKeychainPath: '/absolute/path/test.keychain-db' }`
 selects one explicit keychain for all enrollment reads, writes and deletion.
