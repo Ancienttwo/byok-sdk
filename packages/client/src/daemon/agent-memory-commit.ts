@@ -1,26 +1,22 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES, AGENT_MEMORY_MAX_SNAPSHOT_FILES, type AgentMemoryStartRefusal } from '@byok-sdk/protocol/constants';
-import { AgentMemoryError, validateAgentMemoryPath, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
+import { AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES, AGENT_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
+import { AgentMemoryError, validateAgentMemoryPath } from '@byok-sdk/protocol/agent-memory';
 import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, ensureDirectoryNoSymlink, type AgentHomeLease } from '../agent-home.js';
 import {
-  AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   agentMemoryHomeBinding,
-  AgentMemoryIoError,
-  AgentMemorySnapshotLimitError,
   appendAgentMemoryHomeAudit,
-  captureAgentMemoryHomeSnapshot,
   cleanupAgentMemoryHomeForRestore,
   compareAndSwapAgentMemoryHomeFile,
   deleteAgentMemoryHomeInternalFileStrict,
   observeAgentMemoryHomeFile,
   readAgentMemoryHomeInternalFile,
-  recordAgentMemoryHomeEntries,
   replaceAgentMemoryHomeInternalFileStrict,
   type AgentMemoryHomeBinding,
 } from './agent-memory.js';
 import type { AgentMemoryIntentBackend } from './agent-memory-intent.js';
+import { agentMemoryCommitFailureRetryable, readStartRecord, type StartRecordManifest } from './agent-memory-start-record.js';
 
 const MANIFEST_FILENAME = 'agent-memory-commit-manifest.json';
 const contentFilename = (index: number): string => `agent-memory-commit-content-${index}`;
@@ -41,6 +37,8 @@ const ManifestSchema = z.object({
   }).strict()).max(AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES),
 }).strict();
 type Manifest = z.infer<typeof ManifestSchema>;
+/** Compile-time proof that what `readStartRecord` writes is what the schema reads back. */
+export type StartRecordIsManifest = StartRecordManifest extends z.input<typeof ManifestSchema> ? true : never;
 
 export type AgentMemoryCommitHome = Pick<AgentHomeLease, 'canonicalHome' | 'homeIdentity'>;
 
@@ -61,22 +59,6 @@ export interface AgentMemoryCommitStore {
    */
   settle(home: AgentMemoryCommitHome): Promise<void>;
 }
-
-/** A refused snapshot stays refused until someone changes the home; an I/O failure may clear. */
-export function agentMemoryCommitFailureRetryable(error: unknown): boolean {
-  return !(error instanceof AgentMemoryError) || error instanceof AgentMemoryIoError;
-}
-
-/** The `task.fail.failure.class` of a refused start copy (#1843); `undefined` for a failure that may clear. */
-export function agentMemoryCopyRefusal(error: unknown): AgentMemoryStartRefusal | undefined {
-  if (agentMemoryCommitFailureRetryable(error)) return undefined;
-  if (error instanceof AgentMemorySnapshotLimitError && error.limit === 'files') return 'agent_memory_snapshot_over_file_limit';
-  if (error instanceof AgentMemorySnapshotLimitError && error.limit === 'bytes') return 'agent_memory_snapshot_over_byte_limit';
-  return 'agent_memory_snapshot_refused';
-}
-
-/** Appended to the reason of a start refusal over a memory limit: the home stays refused until a write task changes it. */
-export const AGENT_MEMORY_RECOVERY = '; to recover, send a write task with agentMemory:"none" and no agentMemoryCommit that brings memory back within its limits';
 
 async function writeInternal(home: AgentMemoryHomeBinding, fileName: string, content: string): Promise<void> {
   const current = await readAgentMemoryHomeInternalFile(home, fileName);
@@ -101,20 +83,6 @@ async function readVerifiedContent(home: AgentMemoryHomeBinding, manifest: Manif
     contents.push(stored.content);
   }
   return contents;
-}
-
-/** The whole of what a home must pass to be copied. Throws what `copy` refuses, before anything is written. */
-async function readStartRecord(home: AgentMemoryHomeBinding, taskId: string): Promise<{ readonly snapshot: AgentMemorySnapshot; readonly manifest: string }> {
-  const snapshot = await captureAgentMemoryHomeSnapshot(home);
-  const entries = await recordAgentMemoryHomeEntries(home);
-  const manifest = JSON.stringify({
-    version: 1,
-    taskId,
-    files: snapshot.files.map(({ path: memoryPath, revision, byteCount }) => ({ path: memoryPath, revision, byteCount })),
-    entries: [...entries],
-  } satisfies z.input<typeof ManifestSchema>);
-  if (Buffer.byteLength(manifest, 'utf8') > AGENT_MEMORY_MAX_LOCAL_LOG_BYTES) throw new AgentMemorySnapshotLimitError('manifest', 'memory start record exceeds its bounded manifest');
-  return { snapshot, manifest };
 }
 
 async function restore(home: AgentMemoryHomeBinding, manifest: Manifest): Promise<void> {

@@ -7,7 +7,8 @@ import { appendAgentMemoryHomeAudit, compareAndSwapAgentMemoryHomeFile, isAgentM
 import type { AgentMemoryCommitHome } from '../agent-memory-commit.js';
 import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper.js';
 import type { ActiveTask } from './support.js';
-import { errorMessage, outboundErrorMessage, taskFinalizing } from './support.js';
+import { outboundErrorMessage } from '../outbound-error.js';
+import { errorMessage, taskFinalizing } from './support.js';
 import type { TaskRunner } from '../task-runner.js';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 

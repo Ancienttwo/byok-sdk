@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type AgentMemorySelection, type Envelope } from '@byok-sdk/protocol';
 import { AGENT_MEMORY_MAX_FILE_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
 import { AGENT_HOME_DIRECTORY, AgentHomeManager } from '../agent-home';
-import { AGENT_MEMORY_RECOVERY } from '../daemon/agent-memory-commit';
+import { AGENT_MEMORY_RECOVERY } from '../daemon/agent-memory-start-record';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import { resolveAgentMemoryMcpBin } from '../daemon/resolve-agent-memory-mcp-bin';
