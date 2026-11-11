@@ -62,6 +62,7 @@ export async function awaitActiveSessionClose(this: TaskRunner, active: ActiveTa
     });
     return false;
   }
+  this['deps'].runtimeOwnership?.runtimeDisposed(active.taskId);
   return true;
 }
 

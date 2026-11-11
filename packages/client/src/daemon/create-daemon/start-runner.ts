@@ -21,12 +21,18 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     observer, approvalRegistry, storeDir,
     localAgentRelease, overrides, terminalCommits, agentMemoryMcpBin, agentMemoryDescribeBin,
     resolveAgentMemoryFilesystemHelperBin, taskContextCapabilityAvailable, waitForHostTaskContext,
-    toolAuthorizationResolver,
+    toolAuthorizationResolver, taskSettlement,
   } = daemonScope;
   const {
     record, sendEnvelope, withReplyTransition, activeJournal, journalIdentity, recordReplyState,
     blobClient, opened, activePressureEngine,
   } = run;
+  // The runner and the settlement registry read the same journal in this run.
+  taskSettlement.bindJournal({
+    readTask: (taskId) => activeJournal.readTask(taskId, journalIdentity),
+    unconfirmedTerminal: async (taskId) => (await activeJournal.listPendingTerminals(journalIdentity))
+      .find((row) => row.taskId === taskId)?.truthState,
+  });
   const deps: TaskRunnerDeps = {
     adapters,
     ...(run.capabilities.includes('native-sessions') ? { nativeSessions: { sessionDir: config.piByokLauncher!.sessionDir! } } : {}),
@@ -88,7 +94,11 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     batcherOptions: egressBatcherOptions,
     agentEgress: daemonState.agentEgress,
     ...(config.agentEgress === undefined ? {} : { agentEgressPolicy: egressPolicy }),
-    onRuntimeDisposalFailure: (event) => observer.noteRuntimeDisposalFailure(event),
+    runtimeOwnership: taskSettlement,
+    onRuntimeDisposalFailure: (event) => {
+      observer.noteRuntimeDisposalFailure(event);
+      taskSettlement.runtimeDisposalFailed(event.taskId);
+    },
     onExecutionRecord: (record) => observer.noteExecutionRecord(record),
 
     // M4 Phase 3: the SAME `ApprovalRegistry` instance the control

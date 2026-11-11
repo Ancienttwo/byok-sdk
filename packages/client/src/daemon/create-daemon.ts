@@ -1,5 +1,6 @@
 import { agySessionStoreOf } from '../util/agy-session-retention.js';
 import type { OutboundStatus } from './outbound-settlement.js';
+import { TaskSettlementRegistry, type DaemonTaskSettlement, type DaemonTaskUnknownError } from './task-settlement.js';
 import { TerminalCommitQueue } from './terminal-commit-queue.js';
 import { type RuntimeObservation } from '../runtime-detection.js';
 import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../login-shell-environment.js';
@@ -743,6 +744,15 @@ export interface Daemon {
    */
   whenOpen(options: { readonly signal: AbortSignal }): Promise<void>;
   stop(): Promise<void>;
+  /**
+   * Resolves once the task's terminal had its first outbound settlement (no
+   * earlier than its local terminal event) and the runtime owner reported
+   * its first disposal outcome. A task this daemon has not seen is read from
+   * the journal. Rejects with {@link DaemonTaskUnknownError} for a task with
+   * neither, before `start()` the way `approve()` does, and with
+   * `signal.reason` on abort; the task is untouched.
+   */
+  whenTaskSettled(taskId: string, options?: { readonly signal?: AbortSignal }): Promise<DaemonTaskSettlement>;
   status(): DaemonStatus;
   /** Append one sanitized reliable record before its first transport attempt. */
   publishReliableAgentEgress?(input: AgentReliableEgressInput): Promise<AgentEgressReliableAppendResult>;
@@ -963,6 +973,7 @@ function buildDaemon(
   // internal stop()/start() cycle within the same instance. See `observer.ts`.
   const outbound: OutboundStatus = { accepted: 0, duplicate: 0, rejected: 0, rejectedByReason: {}, rejectedTerminals: 0, droppedEphemeral: 0 };
   const observer = new DaemonObserver();
+  const taskSettlement = new TaskSettlementRegistry();
   // The one pending-approval registry: `TaskRunner` registers, and wire,
   // in-process and control-socket decisions resolve — see `approvals.ts`.
   const approvalRegistry = new ApprovalRegistry({ localToolApproval: config.localToolApproval });
@@ -1058,7 +1069,7 @@ function buildDaemon(
     logMember, operationalHealth, ownedProcessLedger, cursorStore,
     agentHomeManager, agentSessionHandoffs, agentContentReadPolicies, initialAgentEgress,
     retentionRegistry, retentionSweeper, terminalCommits,
-    outbound, observer, approvalRegistry, capabilityDiscoveryTimeoutMs, pendingLateMutationBarriers,
+    outbound, observer, taskSettlement, approvalRegistry, capabilityDiscoveryTimeoutMs, pendingLateMutationBarriers,
     buildAuthManager, daemonState,
     get controlMethods() { return controlMethods; },
     get reliableEnvelopes() { return reliableEnvelopes; },
@@ -1095,6 +1106,7 @@ function buildDaemon(
     unpair,
     approve,
     reject,
+    whenTaskSettled: (taskId, options) => taskSettlement.wait(taskId, options?.signal),
   };
 }
 

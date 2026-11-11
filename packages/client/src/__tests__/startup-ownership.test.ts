@@ -21,6 +21,7 @@ function setup(options: {
       events.push('commit');
       await options.commit?.();
     },
+    onRegistered: () => undefined,
     onDisposed: () => { events.push('contexts'); },
     onDisposalFailure: (_taskId, _runtimeId, failure) => { failures.push(failure); },
   });
