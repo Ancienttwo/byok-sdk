@@ -51,7 +51,8 @@ export const workspaceGraph = {
       "@byok-sdk/client",
       "@byok-sdk/example-bot-collaboration",
       "@byok-sdk/keys",
-      "@byok-sdk/server"
+      "@byok-sdk/server",
+      "@byok-sdk/ui-runtime"
     ]
   },
   "examples/host-execution-core": {
