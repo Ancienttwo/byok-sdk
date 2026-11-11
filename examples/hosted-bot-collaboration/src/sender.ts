@@ -80,7 +80,7 @@ type DueRow = { scope: string; key: string; kind: 'projection' | 'delivery' | 'c
  *   the claim commits before the send, and a claim whose lease passed becomes `unknown`.
  * - A card calls its connector at most once (#793 S12): the claim (`claimCard`) takes a try and a lease before the call, the
  *   call runs with no lock and `connectorTimeoutMs`, and the settle (`settleCard`) is fenced by that try. A claim whose lease
- *   passed with no settle ends the card as a timeout, where L calls again after a crash (owner Q3 A).
+ *   passed with no settle ends the card with `CONNECTOR_OUTCOME_UNKNOWN` and never calls again (owner Q3 A).
  * - An Agent home operation runs L's `flushHomes` step (#793 S13): the claim (`claimHome`) checks that it is its Bot's head
  *   and takes a lease, the readbacks and the enqueue run with no lock, and each settle is fenced by the operation's retry
  *   count. The operation is the authority: its `retryAt` is the row's `next_at`, so H enqueues at `retryAt` where L enqueues

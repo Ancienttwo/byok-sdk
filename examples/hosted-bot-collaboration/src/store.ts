@@ -922,7 +922,7 @@ export class HostedCollaborationStore {
 
   /**
    * Claims the Host job of occurrence `occurrenceKey` (#793 S14), in one transaction under the scope lock, at the clock read
-   * after the lock: the row takes a try and a lease. A claim
+   * after the lock: the row takes a try and a lease before the handler runs. A claim
    * whose lease passed runs the job again, so a handler runs at least once. A row whose
    * occurrence is no longer open settles with no run.
    */
