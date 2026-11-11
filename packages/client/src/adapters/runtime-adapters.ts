@@ -227,18 +227,10 @@ function configuredRuntimeEnvironments(config: Pick<RuntimeAdaptersConfig, 'runt
 }
 
 /**
- * Validates the top-level `runtimeEnvironment` and each
- * `runtimes.<id>.runtimeEnvironment`; throws a `TypeError` for an invalid one.
- *
- * @internal
- */
-export function assertRuntimeEnvironmentPolicies(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): void {
-  for (const [path, value] of configuredRuntimeEnvironments(config)) assertRuntimeEnvironmentPolicy(value, `DaemonConfig.${path}`);
-}
-
-/**
- * {@link assertRuntimeEnvironmentPolicies} as config issues, one per invalid
- * policy at its own path, for `checkDaemonConfig`.
+ * The one validation of every configured environment policy: the top-level
+ * `runtimeEnvironment` and each `runtimes.<id>.runtimeEnvironment`, as config
+ * issues at their own paths. `checkDaemonConfig` reports them, and
+ * {@link assertRuntimeEnvironmentPolicies} throws the first.
  *
  * @internal
  */
@@ -253,6 +245,18 @@ export function runtimeEnvironmentPolicyIssues(config: Pick<RuntimeAdaptersConfi
     }
   }
   return issues;
+}
+
+/**
+ * {@link runtimeEnvironmentPolicyIssues} for `createDaemon` and
+ * `createRuntimeAdapters`: throws a `TypeError` with the first issue's
+ * message, the message `assertRuntimeEnvironmentPolicy` threw.
+ *
+ * @internal
+ */
+export function assertRuntimeEnvironmentPolicies(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): void {
+  const [issue] = runtimeEnvironmentPolicyIssues(config);
+  if (issue !== undefined) throw new TypeError(issue.message);
 }
 
 /**

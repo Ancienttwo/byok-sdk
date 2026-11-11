@@ -205,7 +205,10 @@ describe('daemon wiring', () => {
     expect((await adapter!.runtimeEnvironment()).env.HOST_PASSED_SENTINEL).toBe('passed');
     expect(() => createDaemonWithAdapters({ ...base, runtimeEnvironment: {} }, [new StubRuntimeAdapter()]))
       .toThrow('DaemonConfig.runtimeEnvironment is only supported by createDaemon');
-    expect(() => createDaemon({ ...base, runtimeEnvironment: { base: 'inherit' } as never })).toThrow('DaemonConfig.runtimeEnvironment.base must be login-shell or allowlist');
+    expect(() => createDaemon({ ...base, runtimeEnvironment: { base: 'inherit' } as never })).toThrow(new TypeError('DaemonConfig.runtimeEnvironment.base must be login-shell or allowlist'));
+    expect(() => createDaemon({ ...base, runtimeEnvironment: { base: 'inherit' } as never })).toThrow(TypeError);
+    expect(() => createRuntimeAdapters({ runtimes: { codex: { runtimeEnvironment: { pass: ['BYOK_X'] } } } }))
+      .toThrow(new TypeError('DaemonConfig.runtimes.codex.runtimeEnvironment.pass must not name CLAUDECODE or BYOK_*'));
   });
 
   it('a task child gets the adapter environment; a failed capture declines the offer and reports the refusal', async () => {

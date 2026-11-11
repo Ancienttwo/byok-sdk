@@ -1507,19 +1507,22 @@ export declare function createRuntimeAdapters(config: RuntimeAdaptersConfig): Ru
  */
 export declare function buildRuntimeAdapters(config: DaemonRuntimeAdaptersConfig, piByokLauncher: PiByokLauncherConfig | undefined): RuntimeAdapter[];
 /**
- * Validates the top-level `runtimeEnvironment` and each
- * `runtimes.<id>.runtimeEnvironment`; throws a `TypeError` for an invalid one.
- *
- * @internal
- */
-export declare function assertRuntimeEnvironmentPolicies(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): void;
-/**
- * {@link assertRuntimeEnvironmentPolicies} as config issues, one per invalid
- * policy at its own path, for `checkDaemonConfig`.
+ * The one validation of every configured environment policy: the top-level
+ * `runtimeEnvironment` and each `runtimes.<id>.runtimeEnvironment`, as config
+ * issues at their own paths. `checkDaemonConfig` reports them, and
+ * {@link assertRuntimeEnvironmentPolicies} throws the first.
  *
  * @internal
  */
 export declare function runtimeEnvironmentPolicyIssues(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): DaemonConfigIssue[];
+/**
+ * {@link runtimeEnvironmentPolicyIssues} for `createDaemon` and
+ * `createRuntimeAdapters`: throws a `TypeError` with the first issue's
+ * message, the message `assertRuntimeEnvironmentPolicy` threw.
+ *
+ * @internal
+ */
+export declare function assertRuntimeEnvironmentPolicies(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): void;
 /**
  * The one environment policy of an SDK-built runtime (#1759):
  * `runtimes.<id>.runtimeEnvironment` replaces the top-level policy wholesale,
