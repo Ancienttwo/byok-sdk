@@ -5071,7 +5071,7 @@ export declare const SessionSelectionSchema: z.ZodDiscriminatedUnion<[z.ZodObjec
     mode: z.ZodLiteral<"fresh">;
 }, z.core.$strict>], "mode">;
 export type SessionSelection = z.infer<typeof SessionSelectionSchema>;
-declare const OFFER_SELECTION_RULES: readonly ['agent_memory_selection_invalid', 'runtime_selection_mismatch', 'harness_selection_conflict'];
+declare const OFFER_SELECTION_RULES: readonly ['agent_memory_selection_invalid', 'native_sessions_selection_invalid', 'runtime_selection_mismatch', 'harness_selection_conflict'];
 /** A semantic offer selection rule; also the `task.decline` code a device sends when the rule fails. */
 export type OfferSelectionRule = (typeof OFFER_SELECTION_RULES)[number];
 export type OfferSelectionViolation = {
@@ -5082,12 +5082,24 @@ export type OfferSelectionViolation = {
 /**
  * The single definition of the offer selection rules. The Host offer schemas
  * report a violation as an issue whose `params.rule` is the rule; the daemon
- * declines with `code` equal to the rule. Rules are checked reader, runtime,
- * harness, and only the first violation is returned.
+ * declines with `code` equal to the rule. Only the first violation is
+ * returned; the check order is the "Offer selection rules" table in
+ * docs/protocol.md §3.2.
  */
 export declare function offerSelectionViolation(payload: {
+    readonly session?: {
+        readonly mode: string;
+    };
     readonly homeAccess?: AgentHomeAccess;
     readonly agentMemory?: AgentMemorySelection;
+    readonly agentMemoryCommit?: unknown;
+    readonly nativeSessions?: unknown;
+    readonly terminalProjection?: {
+        readonly mode: string;
+    };
+    readonly preparation?: unknown;
+    readonly requiredToolsets?: unknown;
+    readonly messageEgress?: unknown;
     readonly runtime?: string;
     readonly harnessId?: string;
     readonly dispatchSelection?: {
@@ -6393,7 +6405,7 @@ export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
  */
 export declare const TaskStartedPayloadSchema: z.ZodObject<{}, z.core.$strip>;
 export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
-declare const DECLINE_CODES: readonly ["agent_home_writer_busy", "agent_home_reader_busy", "sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch", "native_sessions_unsupported", "agent_memory_selection_invalid", "runtime_selection_mismatch", "harness_selection_conflict"];
+declare const DECLINE_CODES: readonly ["agent_home_writer_busy", "agent_home_reader_busy", "sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch", "native_sessions_unsupported", "agent_memory_selection_invalid", "native_sessions_selection_invalid", "runtime_selection_mismatch", "harness_selection_conflict"];
 export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
 /** A decline code as this version understands it: one it does not know reads as `unknown`, its raw token kept. */
 export type TaskDeclineCodeReading = {
@@ -6956,6 +6968,7 @@ export declare const TaskDeclineSealedPayloadSchema: z.ZodObject<{
         agent_home_writer_busy: "agent_home_writer_busy";
         agent_memory_selection_invalid: "agent_memory_selection_invalid";
         harness_selection_conflict: "harness_selection_conflict";
+        native_sessions_selection_invalid: "native_sessions_selection_invalid";
         runtime_selection_mismatch: "runtime_selection_mismatch";
     }>, z.ZodString]>>;
     sealed: z.ZodObject<{
@@ -7204,6 +7217,7 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
         agent_home_writer_busy: "agent_home_writer_busy";
         agent_memory_selection_invalid: "agent_memory_selection_invalid";
         harness_selection_conflict: "harness_selection_conflict";
+        native_sessions_selection_invalid: "native_sessions_selection_invalid";
         native_sessions_unsupported: "native_sessions_unsupported";
         runtime_selection_mismatch: "runtime_selection_mismatch";
         sealed_content_mac_mismatch: "sealed_content_mac_mismatch";
@@ -7273,6 +7287,7 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
         agent_home_writer_busy: "agent_home_writer_busy";
         agent_memory_selection_invalid: "agent_memory_selection_invalid";
         harness_selection_conflict: "harness_selection_conflict";
+        native_sessions_selection_invalid: "native_sessions_selection_invalid";
         runtime_selection_mismatch: "runtime_selection_mismatch";
     }>, z.ZodString]>>;
     sealed: z.ZodObject<{

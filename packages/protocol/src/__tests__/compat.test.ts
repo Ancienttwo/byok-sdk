@@ -21,6 +21,7 @@ import {
   decodeEnvelope,
   encodeEnvelope,
   isServerToDaemonType,
+  offerSelectionViolation,
   parseMessage,
   requiredReceiverCapabilities,
   type MessageType,
@@ -558,10 +559,12 @@ describe('compat v6: corpus coverage and WIRE_ADDITIONS', () => {
     }
   });
 
-  it('refuses agentMemoryCommit on a memory-reader offer (#1440)', () => {
+  it('declines agentMemoryCommit on a memory-reader offer by the selection rule, not the decoder (#1440, #1757)', () => {
     const line = v6Corpus.find((candidate) => candidate.type === 'task.offer' && candidate.payload.agentMemoryCommit !== undefined)!;
     expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(line.payload).success).toBe(true);
-    expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({ ...line.payload, homeAccess: 'memory-reader' }).success).toBe(false);
+    const reader = { ...line.payload, homeAccess: 'memory-reader' };
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(reader).success).toBe(true);
+    expect(offerSelectionViolation(reader as never)?.rule).toBe('agent_memory_selection_invalid');
   });
 
   it('every entry is exercised by a v6 corpus line', () => {

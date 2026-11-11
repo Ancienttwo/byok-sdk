@@ -474,15 +474,9 @@ type OfferRuleInput = {
   readonly session: SessionSelection;
   readonly preparation?: unknown;
   readonly agentMemory?: AgentMemorySelection;
-  readonly agentMemoryCommit?: AgentMemoryCommit;
-  readonly homeAccess?: AgentHomeAccess;
   readonly egressPolicy?: unknown;
   readonly messageEgress?: unknown;
   readonly routineRef?: unknown;
-  readonly nativeSessions?: unknown;
-  readonly terminalProjection?: { readonly mode: string };
-  readonly requiredToolsets?: unknown;
-  readonly harnessId?: unknown;
 };
 
 /**
@@ -495,13 +489,11 @@ type OfferRuleInput = {
  *   offer's instruction is checked by {@link sealedOfferRule}.
  * - A fresh or prepared offer carries an `egressPolicy`; `messageEgress` needs one.
  * - A `routineRef` names an execution, so it needs a fresh session.
- * - `agentMemoryCommit` needs a writer.
- * - `nativeSessions` runs only a fresh memory-only task, without other tool or output lanes.
  *
  * Structural rules live here; a violation stops the receiving cursor. Semantic cross-field rules live only in `offerSelectionViolation`, which the Host offer schemas and the daemon both run.
  */
 function offerRule(payload: OfferRuleInput, ctx: z.RefinementCtx, plaintext: boolean): void {
-  const { instruction, session, preparation, agentMemory, agentMemoryCommit, homeAccess, egressPolicy, messageEgress, routineRef } = payload;
+  const { instruction, session, preparation, agentMemory, egressPolicy, messageEgress, routineRef } = payload;
   if (preparation !== undefined) {
     if (instruction !== undefined) ctx.addIssue({ code: 'custom', path: ['instruction'], message: 'a prepared offer carries no instruction' });
     if (session.mode !== 'fresh') ctx.addIssue({ code: 'custom', path: ['session'], message: 'a prepared offer never resumes' });
@@ -520,22 +512,9 @@ function offerRule(payload: OfferRuleInput, ctx: z.RefinementCtx, plaintext: boo
   if (routineRef !== undefined && session.mode !== 'fresh') {
     ctx.addIssue({ code: 'custom', path: ['routineRef'], message: 'a routine occurrence is an execution, so it needs a fresh session' });
   }
-  if (payload.nativeSessions !== undefined) {
-    if (session.mode !== 'fresh') ctx.addIssue({ code: 'custom', path: ['session'], message: 'nativeSessions needs a fresh session' });
-    if (agentMemory !== 'none') ctx.addIssue({ code: 'custom', path: ['agentMemory'], message: 'nativeSessions needs agentMemory none' });
-    if (payload.terminalProjection !== undefined && payload.terminalProjection.mode !== 'none') {
-      ctx.addIssue({ code: 'custom', path: ['terminalProjection'], message: 'nativeSessions forbids terminal projection' });
-    }
-    for (const field of ['agentMemoryCommit', 'homeAccess', 'preparation', 'requiredToolsets', 'messageEgress', 'harnessId'] as const) {
-      if (payload[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message: `nativeSessions forbids ${field}` });
-    }
-  }
-  if (agentMemoryCommit !== undefined && homeAccess === 'memory-reader') {
-    ctx.addIssue({ code: 'custom', path: ['agentMemoryCommit'], message: 'agentMemoryCommit needs a writer; a memory-reader Attempt reads the live files' });
-  }
 }
 
-const OFFER_SELECTION_RULES = ['agent_memory_selection_invalid', 'runtime_selection_mismatch', 'harness_selection_conflict'] as const;
+const OFFER_SELECTION_RULES = ['agent_memory_selection_invalid', 'native_sessions_selection_invalid', 'runtime_selection_mismatch', 'harness_selection_conflict'] as const;
 /** A semantic offer selection rule; also the `task.decline` code a device sends when the rule fails. */
 export type OfferSelectionRule = (typeof OFFER_SELECTION_RULES)[number];
 export type OfferSelectionViolation = { readonly rule: OfferSelectionRule; readonly path: readonly string[]; readonly message: string };
@@ -543,19 +522,42 @@ export type OfferSelectionViolation = { readonly rule: OfferSelectionRule; reado
 /**
  * The single definition of the offer selection rules. The Host offer schemas
  * report a violation as an issue whose `params.rule` is the rule; the daemon
- * declines with `code` equal to the rule. Rules are checked reader, runtime,
- * harness, and only the first violation is returned.
+ * declines with `code` equal to the rule. Only the first violation is
+ * returned; the check order is the "Offer selection rules" table in
+ * docs/protocol.md §3.2.
  */
 export function offerSelectionViolation(payload: {
+  readonly session?: { readonly mode: string };
   readonly homeAccess?: AgentHomeAccess;
   readonly agentMemory?: AgentMemorySelection;
+  readonly agentMemoryCommit?: unknown;
+  readonly nativeSessions?: unknown;
+  readonly terminalProjection?: { readonly mode: string };
+  readonly preparation?: unknown;
+  readonly requiredToolsets?: unknown;
+  readonly messageEgress?: unknown;
   readonly runtime?: string;
   readonly harnessId?: string;
   readonly dispatchSelection?: { readonly runtimeId: string };
 }): OfferSelectionViolation | undefined {
-  const { homeAccess, agentMemory, runtime, harnessId, dispatchSelection } = payload;
+  const { session, homeAccess, agentMemory, agentMemoryCommit, runtime, harnessId, dispatchSelection } = payload;
   if (homeAccess === 'memory-reader' && (agentMemory === 'read-write' || agentMemory === 'read-write-if-admitted')) {
     return { rule: 'agent_memory_selection_invalid', path: ['agentMemory'], message: `agentMemory ${agentMemory} requires a writer; a memory-reader Attempt reads memory only` };
+  }
+  if (agentMemoryCommit !== undefined && homeAccess === 'memory-reader') {
+    return { rule: 'agent_memory_selection_invalid', path: ['agentMemoryCommit'], message: 'agentMemoryCommit needs a writer; a memory-reader Attempt reads the live files' };
+  }
+  if (payload.nativeSessions !== undefined) {
+    // nativeSessions runs only a fresh memory-only task, without other tool or output lanes.
+    const rule = 'native_sessions_selection_invalid';
+    if (session?.mode !== 'fresh') return { rule, path: ['session'], message: 'nativeSessions needs a fresh session' };
+    if (agentMemory !== 'none') return { rule, path: ['agentMemory'], message: 'nativeSessions needs agentMemory none' };
+    if (payload.terminalProjection !== undefined && payload.terminalProjection.mode !== 'none') {
+      return { rule, path: ['terminalProjection'], message: 'nativeSessions forbids terminal projection' };
+    }
+    for (const field of ['agentMemoryCommit', 'homeAccess', 'preparation', 'requiredToolsets', 'messageEgress', 'harnessId'] as const) {
+      if (payload[field] !== undefined) return { rule, path: [field], message: `nativeSessions forbids ${field}` };
+    }
   }
   if (runtime !== undefined && dispatchSelection !== undefined && runtime !== dispatchSelection.runtimeId) {
     return { rule: 'runtime_selection_mismatch', path: ['runtime'], message: `runtime ${runtime} does not match dispatchSelection.runtimeId ${dispatchSelection.runtimeId}` };
