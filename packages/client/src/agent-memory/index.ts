@@ -100,9 +100,9 @@ export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance.js';
 export { prependAgentMemoryGuidance } from '../daemon/memory-guidance.js';
 
 /** Whether the device would refuse a task on this Agent home over its memory, with the same code and reason; read-only and advisory. */
-export { checkAgentMemoryHome } from './check-home.js';
+export { checkAgentMemoryHome } from '../daemon/agent-memory-home-check.js';
 /** The verdict of `checkAgentMemoryHome`. */
-export type { AgentMemoryHomeCheck } from './check-home.js';
+export type { AgentMemoryHomeCheck } from '../daemon/agent-memory-home-check.js';
 
 /** The validated Agent identity carried by `AgentMemoryTaskContext`. */
 export type { AgentRef } from '../agent-home.js';

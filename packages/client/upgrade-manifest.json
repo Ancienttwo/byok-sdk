@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "e3bae2b266eba2295c7db08c52d0a270d0c7e771d9851ed0d4aafa8a2095e1e4"
+    "snapshotSha256": "66c14086b7f153f5108904f05587eea9dc83e51d0b49dbed8beef44d5f9b6eb8"
   },
   "configFields": {
     "status": "tracked",
@@ -321,6 +321,16 @@
         "export:@byok-sdk/protocol#TaskFailureSchema",
         "export:@byok-sdk/protocol/constants#AGENT_MEMORY_START_REFUSALS",
         "export:@byok-sdk/protocol/constants#AgentMemoryStartRefusal"
+      ]
+    },
+    {
+      "id": "agent-memory-home-check",
+      "impact": "additive",
+      "summary": "checkAgentMemoryHome(home, { commit?: { filesystem? } }) in @byok-sdk/client/agent-memory returns the AgentMemoryStartRefusal code and the task.fail reason the device would send for an Agent home, read-only, or throws when it cannot decide. It holds no lease and is advisory; the repair task is never refused.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-home-check",
+      "items": [
+        "export:@byok-sdk/client/agent-memory#AgentMemoryHomeCheck",
+        "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome"
       ]
     }
   ],
@@ -682,6 +692,16 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryHomeCheck",
+      "change": "added",
+      "entry": "agent-memory-home-check"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome",
+      "change": "added",
+      "entry": "agent-memory-home-check"
     },
     {
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",

@@ -1973,41 +1973,6 @@ export declare function createAgentHomeProjection(prepare: AgentHomeProjectionFu
  * no task-time fallback is inferred.
  */
 export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjectionApplyFunction): AgentHomeProjection;
-// ==== @byok-sdk/client dist/agent-memory/check-home.d.ts ====
-import type { AgentMemoryStartRefusal } from '@byok-sdk/protocol/constants';
-import type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem.js';
-/** The verdict of {@link checkAgentMemoryHome}. `reason` is the `task.fail` reason the device sends for the same home. */
-export type AgentMemoryHomeCheck = {
-    readonly ok: true;
-} | {
-    readonly ok: false;
-    readonly code: AgentMemoryStartRefusal;
-    readonly reason: string;
-};
-/**
- * Whether the device would refuse a task on this Agent home because of its
- * memory (#1843), with the code and reason it fails that task with. It runs the
- * device's own readers, read-only, so the two cannot drift.
- *
- * It throws and decides nothing when it cannot read: a `MEMORY.md` that is
- * missing (every lease creates one), a changed home identity, an I/O error, or
- * no secure memory backend on this platform. On macOS and Windows pass the
- * helper's filesystem for this home as `commit.filesystem`; the caller closes it.
- *
- * The verdict is about the home, and the device applies each half to one kind
- * of task: resident refusals to a task that carries `MEMORY.md` into its
- * prompt, start-record refusals to a task with `agentMemoryCommit`. The repair
- * task (`agentMemory:"none"`, no commit) is never refused, so this verdict does
- * not gate it.
- *
- * The check holds no home lease and has no task id, so it is advisory: a home
- * within a task id's length of the start-record bound can pass and still be refused.
- */
-export declare function checkAgentMemoryHome(home: string, options?: {
-    readonly commit?: {
-        readonly filesystem?: AgentMemoryFilesystem;
-    };
-}): Promise<AgentMemoryHomeCheck>;
 // ==== @byok-sdk/client dist/agent-memory/index.d.ts ====
 /**
  * `@byok-sdk/client/agent-memory` — the embedded-host composition surface for
@@ -2097,9 +2062,9 @@ export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance.js';
 /** Prepends that guidance to an Agent instruction, exactly as the daemon's task runner does. */
 export { prependAgentMemoryGuidance } from '../daemon/memory-guidance.js';
 /** Whether the device would refuse a task on this Agent home over its memory, with the same code and reason; read-only and advisory. */
-export { checkAgentMemoryHome } from './check-home.js';
+export { checkAgentMemoryHome } from '../daemon/agent-memory-home-check.js';
 /** The verdict of `checkAgentMemoryHome`. */
-export type { AgentMemoryHomeCheck } from './check-home.js';
+export type { AgentMemoryHomeCheck } from '../daemon/agent-memory-home-check.js';
 /** The validated Agent identity carried by `AgentMemoryTaskContext`. */
 export type { AgentRef } from '../agent-home.js';
 // ==== @byok-sdk/client dist/agent-memory/mcp-server.d.ts ====
@@ -2838,6 +2803,41 @@ export declare function openAgentMemoryFilesystemHelper(input: Readonly<{
     ancestorRoot: string;
     homeIdentity: AgentHomeLease['homeIdentity'];
 }>): Promise<AgentMemoryFilesystem>;
+// ==== @byok-sdk/client dist/daemon/agent-memory-home-check.d.ts ====
+import type { AgentMemoryStartRefusal } from '@byok-sdk/protocol/constants';
+import type { AgentMemoryFilesystem } from './agent-memory-filesystem.js';
+/** The verdict of {@link checkAgentMemoryHome}. `reason` is the `task.fail` reason the device sends for the same home. */
+export type AgentMemoryHomeCheck = {
+    readonly ok: true;
+} | {
+    readonly ok: false;
+    readonly code: AgentMemoryStartRefusal;
+    readonly reason: string;
+};
+/**
+ * Whether the device would refuse a task on this Agent home because of its
+ * memory (#1843), with the code and reason it fails that task with. It runs the
+ * device's own readers, read-only, so the two cannot drift.
+ *
+ * It throws and decides nothing when it cannot read: a `MEMORY.md` that is
+ * missing (every lease creates one), a changed home identity, an I/O error, or
+ * no secure memory backend on this platform. On macOS and Windows pass the
+ * helper's filesystem for this home as `commit.filesystem`; the caller closes it.
+ *
+ * The verdict is about the home, and the device applies each half to one kind
+ * of task: resident refusals to a task that carries `MEMORY.md` into its
+ * prompt, start-record refusals to a task with `agentMemoryCommit`. The repair
+ * task (`agentMemory:"none"`, no commit) is never refused, so this verdict does
+ * not gate it.
+ *
+ * The check holds no home lease and has no task id, so it is advisory: a home
+ * within a task id's length of the start-record bound can pass and still be refused.
+ */
+export declare function checkAgentMemoryHome(home: string, options?: {
+    readonly commit?: {
+        readonly filesystem?: AgentMemoryFilesystem;
+    };
+}): Promise<AgentMemoryHomeCheck>;
 // ==== @byok-sdk/client dist/daemon/agent-memory-intent.d.ts ====
 import { type AgentMemoryIntentAvailablePayload, type AgentMemoryIntentCompletion, type AgentMemoryIntentFileObservation, type AgentMemoryIntentOperation, type AgentMemoryIntentReadback, type AgentMemoryIntentRejectionCode } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentHomeManager } from '../agent-home.js';

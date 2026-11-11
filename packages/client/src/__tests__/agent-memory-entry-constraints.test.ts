@@ -112,12 +112,12 @@ describe('the embedded agent-memory entry module graph', () => {
     expect(GRAPH.modules).toEqual([
       'agent-home-readers.ts',
       'agent-home.ts',
-      'agent-memory/check-home.ts',
       'agent-memory/index.ts',
       'agent-memory/mcp-server.ts',
       'agent-memory/tool-manifest.ts',
       'daemon/agent-memory-filesystem.ts',
       'daemon/agent-memory-fs-helper.ts',
+      'daemon/agent-memory-home-check.ts',
       'daemon/agent-memory-start-record.ts',
       'daemon/agent-memory.ts',
       'daemon/memory-guidance.ts',

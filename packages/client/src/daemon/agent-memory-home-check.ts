@@ -2,11 +2,11 @@ import { promises as fs } from 'node:fs';
 import type { AgentMemoryStartRefusal } from '@byok-sdk/protocol/constants';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 import { readResidentMemory } from '../resident-memory.js';
-import { agentMemoryHomeBinding, isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory.js';
-import type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem.js';
+import { agentMemoryHomeBinding, isAgentMemorySecureFilesystemAvailable } from './agent-memory.js';
+import type { AgentMemoryFilesystem } from './agent-memory-filesystem.js';
 import {
   agentMemoryCopyRefusal, copyStartFailure, readStartRecord, residentMemoryStartFailure,
-} from '../daemon/agent-memory-start-record.js';
+} from './agent-memory-start-record.js';
 
 /** A task id of a typical length: the start record carries one, so its size bound depends on it. */
 const PLACEHOLDER_TASK_ID = '00000000-0000-0000-0000-000000000000';
