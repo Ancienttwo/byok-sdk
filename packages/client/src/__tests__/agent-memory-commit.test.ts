@@ -400,16 +400,17 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
   });
 
   it.each([
-    ['a symlink in notes/', (home: string) => fs.symlink(home, path.join(home, 'notes', 'link'))],
-    ['too many files', async (home: string) => {
-      await Promise.all(Array.from({ length: 128 }, (_, index) => fs.writeFile(path.join(home, 'notes', `n-${index}.md`), 'x')));
-    }],
-  ])('fails before the runtime starts on %s', async (_label, prepare) => {
+    ['a symlink in notes/', 'agent_memory_snapshot_refused', (home: string) => fs.symlink(home, path.join(home, 'notes', 'link'))],
+    ['too many files', 'agent_memory_snapshot_over_file_limit', (home: string) => overfill(home, 128)],
+    ['too many bytes', 'agent_memory_snapshot_over_byte_limit', (home: string) => overfill(home, 5, 250 * 1024)],
+  ])('fails before the runtime starts on %s', async (_label, failureClass, prepare) => {
     const { pi, home } = await start();
     await prepare(home);
     offer('refused');
     const failure = await terminal('task.fail', 'refused');
-    expect(failure.payload).toMatchObject({ retryable: false, reason: expect.stringContaining('agent_memory_commit_unavailable') });
+    expect(failure.payload).toMatchObject({
+      retryable: false, reason: expect.stringContaining('agent_memory_commit_unavailable'), failure: { class: failureClass },
+    });
     expect(pi.startCalls).toHaveLength(0);
     expect((failure.payload as { reason: string }).reason).toContain('a write task with agentMemory:"none" and no agentMemoryCommit');
     await released();

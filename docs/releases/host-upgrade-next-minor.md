@@ -2,6 +2,12 @@
 
 Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Agent memory start refusal classes
+
+A task that an Agent home's memory refuses before its runtime starts now carries a typed `task.fail.failure.class` (#1843): `agent_memory_resident_over_limit`, `agent_memory_resident_multiple_links`, `agent_memory_resident_not_regular_file`, `agent_memory_resident_not_utf8`, `agent_memory_snapshot_over_file_limit`, `agent_memory_snapshot_over_byte_limit` or `agent_memory_snapshot_refused`. The list is `AGENT_MEMORY_START_REFUSALS` from `@byok-sdk/protocol/constants`. The reason text is unchanged, so a Host that parses the reason prefix keeps working, but it should branch on `readTaskFailure(failure).class` instead.
+
+A Host on 0.41.0 reads these as `unknown` with `reportedClass` until it upgrades. A missing file, a changed home identity and an I/O failure stay `unknown`. A sealed task sends `unknown` for every refusal, so a Host that seals tasks still needs its own pre-dispatch check until the device-side check ships. `agent_memory_resident_not_regular_file` cannot be repaired by a write task: the file has to be replaced outside a task. A `MEMORY.md` that is already not a regular file when the offer arrives is declined before claim with reason text and no class. Code that constructs `AgentMemorySnapshotLimitError` must pass the bound it hit as the new first argument.
+
 ## OpenCode start failures
 
 OpenCode now reports unclassified start failures as retryable infrastructure failures. A native process that exits on its own reports `runtime_exited` during start or a turn; an archived resume target is non-retryable, while a target in use is retryable. Session limits accept fractional interrupt milliseconds and report invalid limits as `invalid opencode interrupt timeout` or `invalid opencode retention budget` (#1681).
