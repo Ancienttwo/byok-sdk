@@ -2306,8 +2306,15 @@ jobs:
   desktop:
     needs: select
     if: ${{ contains(fromJSON(needs.select.outputs.families), 'desktop') }}
-    name: desktop app (ubuntu-latest)
-    runs-on: ubuntu-latest
+    # #1811: the same lane packages the app on all three platforms; the D0 and
+    # Host bundle steps stay on Linux. One job timeout bounds every wait in it.
+    name: desktop app (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2324,12 +2331,24 @@ jobs:
         run: bun ci
       - name: Build
         run: bun run build
+      # The packaged asset root holds the Agent memory helper on macOS and Windows.
+      - name: Setup Go for the Agent memory helper
+        if: runner.os != 'Linux'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: packages/client/native/agent-memory-fs/go.mod
+      - name: Build the Agent memory helper release assets
+        if: runner.os != 'Linux'
+        shell: bash
+        run: bun run --filter @byok-sdk/client build:agent-memory-helper
       - name: Download the Electron binary
         working-directory: examples/desktop-bot-app
         run: node -p "require('electron')"
       - name: Bridge test
+        if: runner.os == 'Linux'
         run: bun run --filter @byok-sdk/example-desktop-bot-app test
       - name: Flip the app fuses on a copy of Electron and read them back
+        if: runner.os == 'Linux'
         working-directory: examples/desktop-bot-app
         run: |
           copy="$RUNNER_TEMP/electron-fuses"
@@ -2346,6 +2365,7 @@ jobs:
       # report of what this runner shows about the Ubuntu AppArmor user-namespace
       # restriction for the Electron sandbox.
       - name: D0 Linux - Secret Service session (xvfb, dbus, gnome-keyring)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq gnome-keyring libsecret-tools dbus-x11 xvfb
@@ -2354,6 +2374,7 @@ jobs:
           echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
           dpkg -s libsecret-tools gnome-keyring | grep -E '^(Package|Version)'
       - name: D0 Linux - LinuxSecretServiceSecretStore round trip and fail-closed
+        if: runner.os == 'Linux'
         shell: node {0}
         run: |
           const assert = require('node:assert/strict');
@@ -2379,12 +2400,14 @@ jobs:
       # #1811: the one Host bundle that dev runs under Node (a package runs it as
       # a SEA), started through the bridge as main starts it, with a throwaway HOME.
       - name: Bundle the Host (build:host) and start it through the bridge (hello, running, shutdown)
+        if: runner.os == 'Linux'
         run: |
           bun run --filter @byok-sdk/example-desktop-bot-app build:host
           HOME="$RUNNER_TEMP/host-home" node examples/desktop-bot-app/scripts/package/host-smoke.mjs node examples/desktop-bot-app/dist/host/host.cjs
       # Report only: Electron from node_modules (chrome-sandbox not setuid). A deb
       # install makes chrome-sandbox setuid; the packaged-app answer waits for #1811.
       - name: D0 Linux - AppArmor and the Electron sandbox (report)
+        if: runner.os == 'Linux'
         working-directory: examples/desktop-bot-app
         run: |
           {
@@ -2405,11 +2428,79 @@ jobs:
               echo "$out" | grep -E 'D0_ELECTRON_READY|sandbox|FATAL|apparmor|namespace' | head -5
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
+      # #1811: package for this runner (macOS DMG + ZIP ad-hoc signed, Windows NSIS
+      # unsigned, Linux AppImage + deb), then check the package. Nothing is uploaded.
+      - name: Package the app
+        shell: bash
+        run: bun run --filter @byok-sdk/example-desktop-bot-app package
+      - name: Package smoke (resources/host, fuses, signature, packaged Host, Pi + memory + R2, sizes)
+        shell: bash
+        run: |
+          # Linux keeps the Host's stores under a throwaway HOME; the Secret Service session is the D0 one above.
+          if [ "$RUNNER_OS" = Linux ]; then export HOME="$RUNNER_TEMP/package-home"; fi
+          # #1811, until #1839: on Windows the product Host stops with "DeviceCredentialStoreUnavailableError:
+          # Windows Credential Manager requires the koffi optional dependency", because compose.ts does not pass
+          # nativeAssetRoot yet. The Desktop adoption of #1839 removes this flag in the same change.
+          flags=(); [ "$RUNNER_OS" = Windows ] && flags=(--without-product-host)
+          node examples/desktop-bot-app/scripts/package/package-smoke.mjs "${flags[@]}"
+      # Report only: does the deb (setuid chrome-sandbox) or the AppImage start under
+      # Ubuntu's unprivileged user-namespace restriction without --no-sandbox?
+      - name: Linux packages and the Electron sandbox (report)
+        if: runner.os == 'Linux'
+        run: |
+          out=examples/desktop-bot-app/dist/package/out
+          {
+            echo '### Desktop Linux packages and the sandbox'
+            sudo apt-get install -y -qq "$PWD/$(ls "$out"/*.deb | head -1)" > /dev/null
+            bin="$(dpkg -L byok-desktop-bots 2>/dev/null | grep -E '/byok-desktop-bots$' | head -1)"
+            echo "deb executable: $bin"
+            stat -c 'chrome-sandbox %a %U' "$(dirname "$bin")/chrome-sandbox"
+            for target in deb appimage; do
+              set +e
+              if [ "$target" = deb ]; then cmd=("$bin"); else cmd=("$(ls "$PWD/$out"/*.AppImage | head -1)" --appimage-extract-and-run); fi
+              chmod +x "${cmd[0]}"
+              text="$(timeout 20 xvfb-run -a "${cmd[@]}" 2>&1)"; code=$?
+              set -e
+              echo "$target exit=$code (124 = still running after 20 s)"
+              echo "$text" | grep -E 'sandbox|FATAL|apparmor|namespace' | head -5
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      # #1803 D0 step 6: a signing pass with a throwaway self-signed certificate made
+      # in this job's temp dir (never a repository secret, never on an uploaded
+      # artifact, deleted when the step ends); koffi.node must stay the pinned addon.
+      - name: Windows signing pass with a throwaway certificate, then the package smoke again
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          d="$RUNNER_TEMP/throwaway-sign"
+          trap 'rm -rf "$d"' EXIT
+          mkdir -p "$d"
+          pass="$(openssl rand -hex 16)"
+          echo "::add-mask::$pass"
+          MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=BYOK throwaway CI signing' \
+            -addext 'extendedKeyUsage=codeSigning' -keyout "$d/key.pem" -out "$d/cert.pem"
+          openssl pkcs12 -export -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1 \
+            -inkey "$d/key.pem" -in "$d/cert.pem" -out "$d/throwaway.pfx" -passout "pass:$pass"
+          CSC_LINK="$d/throwaway.pfx" CSC_KEY_PASSWORD="$pass" node examples/desktop-bot-app/scripts/package/build.mjs
+          pwsh -NoProfile -Command '
+            $host_ = "examples/desktop-bot-app/dist/package/out/win-unpacked/resources/host"
+            foreach ($file in "host.exe", "native/agent-memory-fs/win32-x64.exe") {
+              $signer = (Get-AuthenticodeSignature "$host_/$file").SignerCertificate
+              if ($signer.Subject -notmatch "BYOK throwaway CI signing") { throw "$file is not signed by the throwaway certificate" }
+              "signed: $file"
+            }
+            $koffi = Get-AuthenticodeSignature "$host_/native/win32-x64/koffi.node"
+            if ($koffi.Status -ne "NotSigned") { throw "koffi.node was signed" }
+            "koffi.node: NotSigned, SHA-256 $((Get-FileHash -Algorithm SHA256 "$host_/native/win32-x64/koffi.node").Hash.ToLower())"
+          '
+          # --without-product-host: see the package smoke step (#1811, until #1839).
+          node examples/desktop-bot-app/scripts/package/package-smoke.mjs --without-product-host
       # #1830: the built renderer loads in the real app, under main's CSP: React
       # mounts one slot per section, the bundled stylesheet supplies the theme
       # tokens, and an injected inline script stays blocked. After the AppArmor
       # report, so that report still shows the runner default.
       - name: Renderer loads under the CSP (xvfb)
+        if: runner.os == 'Linux'
         working-directory: examples/desktop-bot-app
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

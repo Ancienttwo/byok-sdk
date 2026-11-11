@@ -168,9 +168,12 @@ const REGISTERED_PRIVATE_ADDITIONS = Object.freeze({
       // #1811: the one Host bundle (CommonJS under Node in dev, a SEA when packaged); dev runs it.
       'build:host': 'node scripts/package/bundle-host.mjs --format cjs',
       dev: 'bun run build && bun run build:host && electron dist/src/main/index.js',
+      // #1811: the platform packages (electron-builder, #1499 D9).
+      package: 'bun run build && node scripts/package/build.mjs',
     }),
+    dependencies: Object.freeze({ 'electron-updater': '6.8.11' }),
     devDependencies: Object.freeze({
-      electron: '45.3.0', '@electron/fuses': '2.1.3',
+      electron: '45.3.0', '@electron/fuses': '2.1.3', 'electron-builder': '26.18.0',
       react: '19.3.1', 'react-dom': '19.3.1', '@types/react': '19.3.0', '@types/react-dom': '19.3.0',
     }),
   }),

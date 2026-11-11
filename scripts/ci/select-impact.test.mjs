@@ -304,8 +304,10 @@ test('a platform family is selected only by a path it owns', () => {
   // #1805: renderer stylesheets select the desktop example; other renderer assets stay unmapped.
   assert.ok(selectImpact(['examples/desktop-bot-app/src/renderer/styles/theme.css']).families.includes('desktop'));
   assert.throws(() => selectImpact(['examples/desktop-bot-app/src/renderer/theme.scss']), /mapping/i);
-  // #1811: the packaging scripts select the desktop example.
-  assert.ok(selectImpact(['examples/desktop-bot-app/scripts/package/bundle-host.mjs']).families.includes('desktop'));
+  // #1811: the packaging scripts and configuration select the desktop example.
+  for (const path of ['scripts/package/bundle-host.mjs', 'scripts/package/smoke-host.ts', 'scripts/package/entitlements-mac.plist', 'electron-builder.config.mjs']) {
+    assert.ok(selectImpact([`examples/desktop-bot-app/${path}`]).families.includes('desktop'), path);
+  }
   for (const path of ['packages/client/src/bin/sdk-reserved-helper-runners.ts', 'packages/client/src/bin/byok-agent-result-mcp.ts', 'packages/client/src/lifecycle/sdk-reserved-helper-command.ts']) {
     for (const family of ['runtime-contract', 'credential-isolation-audit', 'npm-release-pack']) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
   }
@@ -432,6 +434,10 @@ const registeredJobInputs = {
   desktop: {
     'packages/keys/dist/index.js': 'keys build output that the #1803 D0 Secret Service probe imports',
     'examples/desktop-bot-app/dist/host/host.cjs': 'the build:host output that the #1811 Host bundle smoke starts',
+    'examples/desktop-bot-app/dist/package/out': 'the package output that the #1811 Linux sandbox report installs and runs',
+    'examples/desktop-bot-app/dist/package/out/win-unpacked/resources/host': 'the packaged Host whose signatures the #1811 Windows signing pass reads',
+    'packages/client/scripts/build-agent-memory-helper.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
+    'packages/client/scripts/check-agent-memory-helper-build.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
   },
   'packageability-smoke': {
     'packages/client/scripts/build-agent-memory-helper.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
