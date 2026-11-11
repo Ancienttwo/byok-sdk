@@ -62,7 +62,7 @@ export async function composeDomains(context: HostContext): Promise<ComposedDoma
     return domain.handlers;
   };
   try {
-    const handlers = joinHandlers(
+    const handlers: ComposedDomains['handlers'] = joinHandlers(
       await open(createK8Domain),
       await open(createActivityDomain),
       await open(createSettingsDomain),
@@ -70,7 +70,7 @@ export async function composeDomains(context: HostContext): Promise<ComposedDoma
     );
     const misplaced = MAIN_METHODS.find(name => Object.hasOwn(handlers, name));
     if (misplaced) throw new Error(`Bridge method ${misplaced} is answered by main, not the Host`);
-    return { handlers: handlers as ComposedDomains['handlers'], close: () => closeAll(opened) };
+    return { handlers, close: () => closeAll(opened) };
   } catch (error) {
     await closeAll(opened);
     throw error;
