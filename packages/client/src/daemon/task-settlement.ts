@@ -81,7 +81,7 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
   offerJournaled(taskId: string): void { this.#offersSeen.delete(taskId); }
 
   /** The journal refused the offer's append; its waiters fail closed. A redelivery starts a new window. */
-  offerRefused(taskId: string, reason: Error): void {
+  offerRefused(taskId: string, reason: unknown): void {
     this.#offersSeen.delete(taskId);
     const entry = this.#entries.get(taskId);
     if (entry === undefined) return;

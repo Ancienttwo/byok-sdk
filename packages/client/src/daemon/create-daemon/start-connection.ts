@@ -87,26 +87,26 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
       // for it. Nothing is deleted to make space.
       try {
         activePressureEngine?.assertAckCriticalAllowed();
+        const record = toJournalEnvelopeRecord(envelope, journalIdentity);
+        try {
+          await activeJournal.appendEnvelope(record);
+        } catch (error: unknown) {
+          if (!(error instanceof JournalRecordTooLargeError)) throw error;
+          await refuseOverBoundEnvelope(envelope, record, error.actualBytes);
+          if (envelope.type === 'task.offer' && envelope.task_id !== undefined) taskSettlement.offerJournaled(envelope.task_id);
+          return;
+        }
       } catch (error: unknown) {
-        // A task with no journal row never reaches a terminal in this run unless
-        // the mailbox redelivers it; its waiters fail instead of waiting.
-        if (envelope.type === 'task.offer' && envelope.task_id !== undefined
-          && await activeJournal.readTask(envelope.task_id, journalIdentity) === undefined) {
-          taskSettlement.offerRefused(envelope.task_id, error as Error);
+        // An offer with no journal row never reaches a terminal in this run unless
+        // the mailbox redelivers it; its waiters fail with this error instead of waiting.
+        if (envelope.type === 'task.offer' && envelope.task_id !== undefined) {
+          if (await activeJournal.readTask(envelope.task_id, journalIdentity) === undefined) taskSettlement.offerRefused(envelope.task_id, error);
+          else taskSettlement.offerJournaled(envelope.task_id);
         }
         throw error;
       }
-      const record = toJournalEnvelopeRecord(envelope, journalIdentity);
-      try {
-        await activeJournal.appendEnvelope(record);
-      } catch (error: unknown) {
-        if (!(error instanceof JournalRecordTooLargeError)) throw error;
-        await refuseOverBoundEnvelope(envelope, record, error.actualBytes);
-        if (envelope.type === 'task.offer' && envelope.task_id !== undefined) taskSettlement.offerJournaled(envelope.task_id);
-        return;
-      }
-      if (envelope.type === 'task.offer' && envelope.task_id !== undefined) taskSettlement.offerJournaled(envelope.task_id);
       if (envelope.type === 'task.offer' && envelope.task_id !== undefined) {
+        taskSettlement.offerJournaled(envelope.task_id);
         // A selected terminal fences admission even if its transaction rolled
         // back to received. Check before reading a possibly stale task row.
         if (terminalCommits.hasPending(envelope.task_id)) {

@@ -9,6 +9,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DaemonTaskUnknownError, TaskSettlementRegistry, type DaemonTaskSettlement } from '../daemon/task-settlement';
 import { LocalStorageEmergencyError } from '../daemon/retention/pressure';
+import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -154,6 +155,21 @@ describe('Daemon.whenTaskSettled', () => {
     await expect(restarted.whenTaskSettled('no-such-task')).rejects.toMatchObject({
       constructor: DaemonTaskUnknownError, code: 'daemon_task_unknown', taskId: 'no-such-task',
     });
+  });
+
+  it('rejects the waiter of an offer whose journal append failed with that error', async () => {
+    const append = vi.spyOn(SqliteLocalTaskJournal.prototype, 'appendEnvelope').mockRejectedValueOnce(new Error('disk I/O error'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { d } = await started(new StubRuntimeAdapter());
+    let settlement: Promise<DaemonTaskSettlement> | undefined;
+    d.subscribe((event) => {
+      if (event.kind === 'offered' && event.taskId === 'task-append-failed') settlement = d.whenTaskSettled('task-append-failed');
+    });
+    offer('task-append-failed');
+    await vi.waitFor(() => expect(settlement).toBeDefined());
+    await expect(settlement).rejects.toThrow('disk I/O error');
+    expect(append).toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 
   describe('TaskSettlementRegistry waiters', () => {

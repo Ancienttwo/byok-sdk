@@ -14,7 +14,7 @@ An uninstaller that built a daemon per store only to call `daemon.unpair()` can 
 
 A Host that decides a task is over by combining `completed`, `failed`, `cancelled`, a terminal `outbound-rejected` and `execution-record` with its own wrapper around each adapter's `session.close()` can replace both with `await daemon.whenTaskSettled(taskId, { signal })` (#1838). It resolves once the terminal's first settlement was published locally and the runtime's first disposal outcome is known: `disposal: 'failed'` matches a `runtime-disposal-failed` event for the task's runtime (not a failed release of an offer-owned scratch, `runtimeId: 'scratch'`), and `disposal: 'none'` means this daemon held no runtime for the task, including every task that settled before a restart. Call it after the task's `offered` event or later; an id the daemon never saw offered and has no journal row for rejects with `DaemonTaskUnknownError`. After a restart the result reflects the journal's current truth, so a refused terminal that was replaced reads as its replacement, never the reverse. `stop()` rejects no pending wait: pass a signal if a wait can span `stop()`. `Daemon` gains the member, so a test double typed as `Daemon` adds `whenTaskSettled`.
 
-A wait on a task whose offer the journal refused under local-storage emergency now rejects with `LocalStorageEmergencyError` (#1901); retry the wait after the offer is redelivered. An aborted wait keeps nothing on the daemon.
+A wait on a task whose offer the journal refused now rejects with the append's error, `LocalStorageEmergencyError` under local-storage emergency (#1901); retry the wait after the offer is redelivered. An aborted wait keeps nothing on the daemon.
 
 ## Packaged Hosts resolve SDK hosting from the asset root
 
