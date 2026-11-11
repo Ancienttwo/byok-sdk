@@ -192,6 +192,22 @@ example when the daemon stops before its outcome commits.
   `taskId` equal to the reply's task id. For example, AiphaBee adds this check
   to its `k8RootUploads` before it returns a body. A failed Turn then shows its
   failure, never its reply.
+- The conclusion check covers replies that K8 accepted while the Turn was
+  running. K4 `consumeMessage` has no conclusion check, so a message that
+  arrives after its intent concluded is still accepted and recorded in
+  `replies`, and the check passes it when the intent concluded `succeeded`.
+  K8 stages any delivery it queues for that message, and the next sync
+  withholds it as `outcome_not_applied`. The SDK daemon is not expected to
+  publish such a message, but a Host with a channel takes K8's delivery state
+  as the authority: it shows a reply only when its delivery was promoted, not
+  `staged` and not rejected `outcome_not_applied`. A Host without a channel has
+  only the conclusion check.
+- A Turn that outlives its reply route token cannot answer on that route. If
+  the token has expired at acceptance, K8 queues the reply on the conversation's
+  active push route, or records `reply_route_expired` and queues nothing. If it
+  expires after acceptance, the promoted delivery is rejected
+  `reply_route_expired`, and an active push route gets a new delivery with its
+  own id.
 - A send is at-least-once from the durable outbox. The receiver deduplicates by
   the delivery id, which stays the same across resends of one row; a Host
   upload deduplicates by task id, and only the task that concluded the intent
