@@ -1,0 +1,32 @@
+{
+  "name": "@byok-sdk/bot-collaboration",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "K8 Bot collaboration on the K4 Host execution core",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./host-kit": { "types": "./dist/host-kit.d.ts", "import": "./dist/host-kit.js" },
+    "./rules": { "types": "./dist/rules/index.d.ts", "import": "./dist/rules/index.js" },
+    "./testing": { "types": "./dist/testing.d.ts", "import": "./dist/testing.js" },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "engines": { "node": ">=24.15.0" },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@byok-sdk/client": "workspace:*",
+    "@byok-sdk/protocol": "workspace:*",
+    "@byok-sdk/server": "workspace:*"
+  },
+  "peerDependencies": { "@hono/node-server": "^2.1.3", "vitest": "^5.1.0" },
+  "peerDependenciesMeta": { "@hono/node-server": { "optional": true }, "vitest": { "optional": true } },
+  "devDependencies": { "@byok-sdk/cloud": "workspace:*", "@byok-sdk/core": "workspace:*", "@byok-sdk/example-host-execution-core": "workspace:*", "@hono/node-server": "^2.1.3", "@types/node": "^24", "typescript": "^7.0.2", "vitest": "^5.1.0" }
+}

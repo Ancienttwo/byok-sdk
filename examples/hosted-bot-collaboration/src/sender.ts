@@ -1,10 +1,8 @@
 import type { Pool } from 'pg';
 import { validateJson, type Json } from '@byok-sdk/server/execution-core';
-import type { ChannelPort } from '@byok-sdk/example-bot-collaboration/channel';
-import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { type ChannelPort, checkHomeReadback, type HomeReadback, homeRequests, SwitchExportedError } from '@byok-sdk/bot-collaboration/host-kit';
+import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/bot-collaboration/rules';
 import { STORE_VERSION } from './ddl';
-import { SwitchExportedError } from '@byok-sdk/example-bot-collaboration/migration';
-import { checkHomeReadback, homeRequests, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { inSchema, lockScope } from './transaction';
 import { errorText, HOST_JOB_EXECUTION_UNSUPPORTED, type DeliveryTimes, type HomeClaim, type HomeStep,
   type HostedCollaborationStore, type HostJobOutcome } from './store';

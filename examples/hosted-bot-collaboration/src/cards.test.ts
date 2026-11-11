@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FrozenInput } from '@byok-sdk/server/execution-core';
-import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { cardCallVectors, seedCollaboration, SYNC_OPTIONS, VECTOR_NOW, type CardCallSubject, type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
+import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/bot-collaboration/rules';
+import { type CardCallSubject, cardCallVectors, seedCollaboration, SYNC_OPTIONS, type SyncIntentRecord, VECTOR_NOW } from '@byok-sdk/bot-collaboration/testing';
 import { storedKey } from './layout';
 import { vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';

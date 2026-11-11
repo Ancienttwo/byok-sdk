@@ -151,8 +151,9 @@ export const INTERPROCESS_PROTOCOLS = [
 
 /** Examples that Hosts copy (vendor) instead of installing. */
 export const VENDORED_EXAMPLES = [
-  { id: 'host-execution-core', label: 'K4' },
-  { id: 'bot-collaboration', label: 'K8' },
+  { id: 'host-execution-core', label: 'K4', dir: 'examples/host-execution-core' },
+  // #1845 S2: K8 is a private package until it is published (S3).
+  { id: 'bot-collaboration', label: 'K8', dir: 'packages/bot-collaboration' },
 ];
 
 /**
@@ -335,7 +336,7 @@ export function buildSnapshot(root) {
 
   // Vendored examples.
   for (const example of VENDORED_EXAMPLES) {
-    const dir = `examples/${example.id}`;
+    const { dir } = example;
     const manifest = JSON.parse(read(root, track(`${dir}/package.json`)));
     if (!existsSync(path.join(root, dir, 'src'))) throw new Error(`${dir}/src is missing`);
     const files = listFiles(root, `${dir}/src`).filter((file) => !/\.test\.[cm]?[jt]sx?$/.test(file));

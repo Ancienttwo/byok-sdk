@@ -1,9 +1,8 @@
 import type { PoolClient } from 'pg';
 import type { AgentMessageConsumers, TenantId } from '@byok-sdk/cloud';
 import { canonical } from '@byok-sdk/server/execution-core';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { CommitConflict, revisionOf, type CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { hostMessageDisposition, type MessageDisposition } from '@byok-sdk/example-bot-collaboration/rules/message';
+import { type CollaborationState, CommitConflict, type CommitResult, type MessageDisposition, revisionOf } from '@byok-sdk/bot-collaboration/host-kit';
+import { hostMessageDisposition } from '@byok-sdk/bot-collaboration/rules';
 import { earlierIntent, frozenIntent } from './intents';
 import { storedKey } from './layout';
 import { acceptedReply, commitStored } from './retention';

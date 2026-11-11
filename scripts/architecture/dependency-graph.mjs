@@ -90,6 +90,8 @@ const allowed = {
   server: ['core', 'protocol', 'cloud'], 'cloud-dataplane': ['core', 'protocol', 'cloud'],
   'ui-runtime': ['core', 'protocol', 'cloud'], client: ['core', 'protocol'], keys: ['core'],
   conformance: ['core', 'protocol', 'cloud', 'testkit'], testkit: ['core', 'protocol'],
+  // #1845: K8 sits on top of the published packages; no package imports it (ADR-046 D4).
+  'bot-collaboration': ['client', 'protocol', 'server'],
 };
 export function packageDirection(from, to) {
   return from === to || allowed[from]?.includes(to) === true;
@@ -298,7 +300,7 @@ export function inspectRepository(root) {
  * where `node:sqlite` and `node:async_hooks` are unavailable (#884).
  */
 export const NON_PORTABLE_MODULES = ['node:async_hooks', 'node:sqlite'];
-const PORTABLE_EXAMPLE_ROOTS = [{ root: 'examples/bot-collaboration/src/rules' }];
+const PORTABLE_EXAMPLE_ROOTS = [{ root: 'packages/bot-collaboration/src/rules' }];
 
 function resolveExistingSource(file) {
   const stem = file.replace(/\.(?:js|mjs|cjs)$/, '');

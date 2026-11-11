@@ -2,9 +2,8 @@ import type { Pool, PoolClient } from 'pg';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, type FrozenExecutionInput, type FrozenSubmitPort,
   type Json } from '@byok-sdk/server/execution-core';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { IntentOutcomeError, outcomeFailure, botOutcomePorts, routeTerminal, runHostIntentHandler } from '@byok-sdk/example-bot-collaboration/adapter-steps';
-import { revisionOf, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
+import { botOutcomePorts, type CollaborationState, IntentOutcomeError, type OutboxIntent, outcomeFailure, revisionOf, routeTerminal,
+  runHostIntentHandler } from '@byok-sdk/bot-collaboration/host-kit';
 import { STORE_VERSION } from './ddl';
 import { deliverCancels } from './intents';
 import { commitStored } from './retention';

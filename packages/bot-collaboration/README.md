@@ -1,0 +1,1996 @@
+# Bot collaboration
+
+This copy-and-own example implements K8a and K8b in the Bot PRD.
+It uses the K4 Host execution core and K8-S public schema and calendar APIs.
+It has no paid runtime call. Tests use a synthetic adapter with the real SDK,
+daemon, HTTP transport, SQLite stores, and `submit_result` helper.
+To copy K8 into a Host repository, see [src/VENDOR.md](src/VENDOR.md): what
+to copy in each layer, how to resolve K4, and how to record the source.
+
+## Entries
+
+`@byok-sdk/bot-collaboration` is a private workspace package (#1845); it is not on npm yet. Each symbol has one entry.
+
+| Entry | Contents | Loads where |
+| --- | --- | --- |
+| `.` | `BotCollaboration` and its option types, `botCompactVeto`, `createBotPersonaProjection`, `teamSnapshot` and its errors | Node only. It loads the L Host and `@byok-sdk/client`. |
+| `./host-kit` | The L modules a Host adapter composes: model, channel, delivery, routines, team, migration, retention, dreaming, adapter steps | Node or a Worker. It loads the K4 root entry, but not the L Host or `@byok-sdk/client`. The hosted Worker example bundles it. |
+| `./rules` | The pure rules that the two entries above do not export | Anywhere. It loads only `@byok-sdk/protocol` and `@byok-sdk/server/execution-core/canonical`, so no `node:sqlite`. |
+| `./testing` | The shared vectors, the L test Host, and the K4 test data `policy` and `template` | Tests on Node. It needs the optional peers `vitest` and `@hono/node-server`. |
+
+## Run
+
+Use Node 24.15 or later and Bun. From the repository root:
+
+```sh
+bun install --frozen-lockfile
+bun run build
+bun run --cwd packages/bot-collaboration typecheck
+bun run --cwd packages/bot-collaboration test
+```
+
+`src/host.test.ts` shows the embedded setup. Create one `BotCollaboration`
+per tenant and ledger. Open that ledger with the K8 compact veto:
+`new HostLedger(file, tenant, { compactVeto: botCompactVeto })`. The
+constructor refuses a ledger without it ([Compaction](#compaction)). Give it a valid Agent execution template and a Host
+connector. Route the embedded server's `wake.consume` to `bot.consume`.
+Route its `agentMessage.consume` to `bot.consumeMessage`.
+Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
+server or the ledger. Do not call the K4 core's mutation methods directly.
+Use `input`, `answer`, `decide`, `cancelTurn`, `enqueueHostIntent`, `cancelHostIntent`, `updateRoutine`, `setRoutineLifecycle`, `endRoutine`, `cancelDelegation`, and `abandonDelegation`.
+Use `receive` for IM messages ([IM channel input](#im-channel-input)).
+Use `autonomy`, `wouldDoRecords` and `setBotAutonomy` for the owner's observe/auto switch
+([Bot autonomy](#bot-autonomy-observe-and-auto-1229)).
+Read `inboundDispositions` for the destination of every inbound human message
+([Inbound disposition](#inbound-disposition-1229)).
+Read `snapshot` or upload K4 projections with `core.flushProjections`.
+Read `inputRoot` to learn whether an `input` committed ([Input root](#input-root-1407)).
+
+The execution template selects this Bot's Agent. It must use a runtime profile
+without external-effect connector tools or ambient credentials. Required MCP
+toolsets are refused by default. A Host may explicitly declare logical IDs with
+`readOnlyToolsets: ['market.read']` when it controls the local tool server and
+enforces read-only behavior there. The execution's `requiredToolsets` still
+selects those IDs through the ordinary daemon admission path. This declaration
+is not inferred from model output or MCP annotations and is not proof that a
+tool has no effects. The Host connector stays outside the Agent. This example does not
+provide a runtime sandbox. The deployment owns that boundary.
+
+The constructor owns copies of execution/model templates and the allowlist;
+mutating the caller's configuration later cannot widen admission. Every model, restored non-archived Bot execution and outstanding frozen intent/execution
+must satisfy the policy, as must Bot creation,
+updates and turn enqueue. A restart with a narrower policy fails closed when
+persisted Bot templates or pending execution inputs require removed IDs. The
+check covers the current Bot template, so it skips archived Bots. An archived
+Bot never runs a new Turn. Its outstanding frozen work still must satisfy the
+policy. Settled historical execution records remain readable. Change those
+templates through an authorized Host migration before reopening; this slice adds
+no migration API.
+Effectful actions still use `confirmable_action` and owner confirmation.
+This is the same-device read-only toolset slice of #606; external-authority
+storage and two-process relay remain separate.
+
+`bot.core` is public, but the rule to avoid direct K4 mutation calls still
+holds. To run the Host's own work on this tenant's core, register a handler in
+`hostIntents` and call `enqueueHostIntent(input, handler)` (#882). One ledger
+transaction enqueues the K4 intent and stores the handler name, so the owner of
+the intent survives a restart. A restart refuses an open Host intent whose
+handler is not registered. At a `task.complete` terminal, the handler runs
+synchronously in the terminal transaction with the result document. Bot output
+never reaches it. The call uses the Host's own authority and bypasses Bot
+policy. Its execution still passes the read-only toolset admission, because a
+restart admits every open intent. A Host intent shares the FIFO of its Agent: on
+a Bot's agentRef, that Bot's later Turns wait until it settles. An exact replay
+returns the same intent while K4 keeps it.
+
+An Agent message of a Host intent goes to the message handler of the same name
+in `hostIntentMessages` (#1356). The handler runs synchronously in the K4
+message transaction and returns the `MessageDisposition` that K4 records:
+`{ outcome: 'accepted' }` or `{ outcome: 'refused', reasonCode }`. K8 does not
+deliver the body; the handler delivers it with `tx.publish` or the Host's own
+channel. A handler that throws rolls the transaction back, so neither K8 nor K4
+writes anything, and a handler that returns a promise or another shape throws
+too. An accepted message is recorded in `replies` under its task id, with the
+intent key as `turnId` and no body, so a replay is accepted without the
+handler. A refused message keeps its command record, so a replay gets the same
+refusal without the handler and other content for the same message id gets
+`message_conflict`. A Host intent whose name has no message handler refuses its
+messages with `binding_mismatch`. A name in `hostIntentMessages` needs a
+`hostIntents` handler. `enqueueHostIntent` refuses an execution with
+`messageEgress` whose name has no message handler, and a restart refuses an
+open such intent whose message handler is not registered. The pass that removes
+a compacted Host intent's record also removes its replies.
+
+Cancel a Host intent with the owner call `cancelHostIntent(key)` (#1320), not
+with `bot.core.cancel`. K4 records the cancel on the intent row, so a restart
+reads the same fact. An intent that was not submitted settles as `cancelled`
+inside the call, which returns `{ result: 'cancelled' }`: its handler does not
+run, and its FIFO moves on. A submitted or running intent gets an SDK cancel, and
+the call returns `{ result: 'cancel_pending' }` at once. K4 then settles it: a
+cancelled terminal runs no handler, but a `task.complete` that arrived before the
+cancel still runs the handler once. Read the final conclusion with
+`bot.core.intent(key)`. A settled intent returns `{ result: 'already_settled' }`
+with its conclusion and sends nothing, so a replay does not fail. The call throws
+`HostIntentError` with `unknown_intent` for a key that is not a Host intent and
+`not_host_intent` for a Bot Turn key; cancel a Bot Turn with `cancelTurn`. A
+cancel does not release a `handler_failed` intent, because K4 applies its
+terminal again; `failStuckIntent` below is the way out.
+
+A K4 terminal that K8 cannot apply leaves its intent open: a key that is neither
+a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`
+(`unknown_intent`), a Host handler that throws or returns a promise
+(`handler_failed`), or a Bot Turn whose outcome commit throws, for example a
+document outside its frozen schema (`outcome_failed`). After the owner call, the
+next sync settles such a Bot Turn as `failed` and reports it. Then `drain()` rejects with
+`IntentOutcomeError`, and so does every API that runs a pass, including `input`
+and the `wake.consume` hook. The audit gets one row for each key and reason. The
+intent stays at the head of its FIFO until its outcome applies, for example
+after a restart with a fixed handler, or until the owner calls
+`failStuckIntent(key)`. That call runs a K4 drain first, so it also works right
+after a restart. If that drain refuses the intent's terminal again, one
+transaction settles the intent as `failed` with the K4 `settle` transition and
+adds the audit row `Intent failed by owner <code>: <key> <reason>`. The settle
+runs no handler, and the intent records no terminal; the server task keeps it.
+The drain before the settle applies the terminal once more, so a `handler_failed`
+handler runs once inside the call. If that drain applies the outcome, the call
+refuses with `already_settled`. If that drain rejects and the intent has
+no refusal of its own, the call throws the drain error. Later drains move past
+the intent. The call settles the key first. Its closing pass, like every API
+that runs a pass, rejects if another intent is stuck, and a retry for this key
+then refuses with `already_settled`. A Host intent keeps its `hostIntents` record until K4 compacts it,
+so an exact replay of `enqueueHostIntent` returns the failed intent. The call
+refuses with `HostIntentError`: `unknown_intent` for a key with no K4 intent,
+`already_settled` for a settled intent, and `not_stuck` for an intent whose
+terminal K8 did not refuse, such as one still running. The settle of a Bot Turn
+also writes the refusal code to the Turn as `settleCode: 'outcome_failed'`, in
+the ledger and in its `bot-turn:<id>` projection, so a reader does not match the
+audit row (#1405). A Host intent and a key that K8 did not write keep the code
+only in the audit row. `BotOptions` passes `reconcileMs` (default 100) and
+`onOutbox` to the K4 core.
+
+### Idempotent owner cancels (#1405)
+
+`cancelTurn(id)` and `cancelDelegation(id)` return a result in the shape of
+`cancelHostIntent`, read from the ledger, so a replay and a restart give the
+same answer: `TurnCancelResult` `{ turnId, result, conclusion? }` and
+`DelegationCancelResult` `{ delegationId, result, verdict? }`.
+
+- `cancelled`: this call committed the cancel.
+- `cancel_pending`: an earlier cancel has no terminal yet: the Turn's K4 intent
+  has a `cancelReason`, or the delegation has a cancel fact and no verdict. The
+  call writes nothing and does not call `core.cancel`. A cancel fact that is not
+  delivered yet still goes out with the next pass.
+- `already_settled`: the target had ended, and the call writes nothing. A Turn
+  gives its earlier `conclusion` (its K4 intent's when it has one), a
+  delegation its `verdict`.
+
+`cancelTurn` on B's chain Turn whose delegation has no verdict answers as
+`cancelDelegation` does; once the verdict is in, it answers from the Turn. An
+input batch id or a member input id names the batch Turn, and an open batch
+commits its seal, so it gives `cancelled`. A Turn id that is not in the state
+still throws `Turn not found`.
+
+`cancelDelegation` refuses with `DelegationError`, whose `key` is the
+delegation id: `unknown_delegation`, and `not_cancellable` for a `reply_held`
+or `uncertain` delegation; end those with `abandonDelegation`. Both error
+classes extend `Error`, so an `instanceof Error` check still holds, and the
+messages are the same as before.
+
+### Input root (#1407)
+
+`input` commits first and then runs a pass, so it can reject with a drain error
+after the input committed, and the Turn still runs. `inputRoot(key, botId)` is
+read-only: it returns the id that `input` returns for that key and Bot, from the
+input's command record, or `undefined` when no input with that key committed.
+It runs no pass, writes nothing and does not change the K8 revision, so it
+gives the same answer after a restart. A record that retention moved still
+answers until its row expires; the key then reads as not committed. The call
+checks no principal and does not compare the request text: a replay of `input`
+does both.
+
+## Actions and context
+
+The Host applies management actions, Main Bot delegation cancels, routine
+actions, confirmation cards, questions, then delegations. Each turn freezes
+the ordinary Bot schema and its ContextPack
+when its K4 intent is enqueued. Waiting turns and retries reuse that frozen
+input. The wait limit is five minutes before execution starts. For a routine
+Turn, it counts from the occurrence record. A started
+execution waits for canonical device terminal evidence.
+The schema offers delegation, `ask_user`, `confirmable_action`, and the
+three routine actions. It offers all current routine ids, up to eight.
+It never offers a `target` field. A user input starts one
+root budget. Self delegation permits four continuations for that root. A
+continuation keeps the hop, authority, and open delegation of its parent.
+It does not consume the Bot budget. A refused action
+enters only its originating Bot's `ContextPack.rejectedActions`. Other accepted actions still apply.
+A Bot in `observe` records `create_routine`, a cross-Bot `delegate` and
+`room_call` instead of applying them; every other action applies as above
+([Bot autonomy](#bot-autonomy-observe-and-auto-1229)).
+
+`BotOptions.outcome` narrows that offer (#881). `actions.turn` lists the
+actions of a Bot Turn outside a room, from `delegate`, `ask_user`,
+`confirmable_action` and the three routine actions. `actions.main` lists the
+extra actions of an owner Main Bot Turn, from the Bot and room management
+actions, `team_note` and `cancel_delegation`. A list only removes actions, and
+an empty list removes all of that kind. `timeZones` holds 1 to 8 IANA zones for
+`create_routine` and `update_routine`, checked by the `@byok-sdk/protocol` routine
+calendar. The default is `UTC` and `America/New_York`. `confirmable` holds 1 to
+16 `confirmable_action` branches, each an action name and its draft schema. The
+default is `send_message`, and the connector receives only the offered names.
+Sixteen branches with the `send_message` draft and 64-byte names fit both
+bounds with eight long time zones at the eight-routine limit, with room for
+heavier drafts (`CONFIRMABLE_MAX`).
+The constructor checks the offer and composes one schema with it. Turns that
+froze before keep their schema. A room seat always gets `speech`. A schema
+that is over budget blocks its Turn. The H
+sync takes the same offer as `SyncOptions.offer`, a value from `outcomeOffer`.
+An offer with `actions.turn` also narrows the system
+prompt of a Bot Turn: it keeps only the sentences for every Bot Turn and for the
+actions in that Turn's frozen schema (`systemPrompt`, `promptActions`). With only
+`delegate`, the prompt names no `ask_user`, `confirmable_action` or routine.
+A narrowed prompt never names `speech` or `room_call`, which only a room seat
+gets. An offer without `actions.turn` keeps
+`SYSTEM_PROMPT`. A narrowed prompt is shorter, so the
+`minimumInstructionBytes(SYSTEM_PROMPT)` check still bounds it.
+
+Questions support text and single choice. An answer creates an `answer` turn.
+It is a new user input with its own stable budget root. Replaying the same
+answer does not reset that budget. The rules that read only the outcome are
+`bot-turn-outcome.v1` contract rules (#1374, #1375): blank model text after
+`trim()`, a repeated option id, delegate target, `create_bot` localId,
+cancel id, room member or weekday, a `create_room` admin outside its members,
+an update that changes nothing, and an invalid schedule. The device refuses
+such an outcome on `submit_result`, and the Host refuses it whole.
+An expired card can appear in the recent ContextPack window. It creates no model turn.
+A confirmation card starts as `pending`. The owner can choose `confirmed` or
+`rejected`. A card becomes `expired` after 24 hours. Only a committed
+`confirmed` card calls the Host connector. Confirmation results and explicit
+rejection return as an `action_result` turn. Passive expiry creates no turn.
+Connector success, error, and external id enter that turn.
+Late and conflicting decisions return an error. Replaying the same completed
+decision is idempotent. Decision projections are committed once, so uploading
+them does not cause later syncs to publish them again.
+
+The connector receives an AbortSignal and must deduplicate by the card id.
+The Host enforces `connectorTimeoutMs` (default 30 seconds), even if the
+connector ignores cancellation. A timeout releases the serial chain and
+commits a failed action_result with an unknown external outcome. A late connector
+result cannot overwrite that committed result. The Host calls the connector at
+most once per card (#958): one transaction claims the call before it runs, and
+the transaction that commits its result or error drops the claim. A claim found
+with no result at a later pass (a crash after the call, or a failed result
+commit) ends the card the same way as a timeout, with no second call. No
+exactly-once external effect is claimed.
+
+The system rules are in `src/rules/schema.ts`. K4 carries them in the instruction.
+They require an acknowledgement and self delegation for long work. Final text
+uses messageEgress. Progress uses messageDraft or typed activity. A failed,
+cancelled, or missing-outcome continuation has a failed owner projection.
+The Host publishes final turns with `owner`, source, status, and conclusion.
+It does not turn an outcome document into a second chat message. K8 stores no
+reply text that the user saw. In history mode the external authority gives it
+as a row's `reply` (see External history authority).
+
+`src/rules/` holds the collaboration rules as pure functions (#606, #739 D1):
+room seats, input coalescing, Turns, delegation, the result schema, the
+ContextPack and the order of outcome actions. They take rows and K4 intent
+facts, do no I/O and import no ledger type. The ContextPack functions take the
+Bot's history as an argument. This example reads that history from the device
+ledger. The other `src/` files are the K8 adapter around these rules.
+
+From K4, the rules import only `hash` and `canonical`, from the
+`@byok-sdk/server/execution-core/canonical` entry (#884). That entry
+imports only `node:crypto`. The K4 root entry also loads `node:sqlite` and
+`node:async_hooks`, so the rules never import it. `src/rules-boundary.test.ts`
+holds both rules. The rules still need `node:crypto` and the global `Buffer`.
+Workers with `nodejs_compat` have both.
+
+## Bot autonomy: observe and auto (#1229)
+
+A Bot's autonomous actions start in `observe`. The owner sees what the
+Bot would do, then switches the Bot to `auto` per Bot. This is the
+owner ruling of 2026-10-31 on #1229. It is Host policy over the same
+frozen schema. K4, K8-S, the SDK wire and the protocol do not change.
+
+| Action | observe | auto |
+| --- | --- | --- |
+| `create_routine` | Recorded as would-do. No K4 routine, occurrence or wake. | Applied. |
+| `delegate` to another Bot | Recorded as would-do. No delegation row, `bot_request` Turn or budget unit. | Applied. |
+| `room_call` of a seat | Recorded as would-do. No new round or seat. The seat's speech still applies. | Applied. |
+| Self `delegate` (continuation) | Applied, as in auto. | Applied. |
+| `messageEgress`, `confirmable_action`, `ask_user` | Applied, as in auto. | Applied. |
+
+An outcome is still checked against its frozen schema in observe, and a
+would-do row is keyed by `hash([taskId, 'would-do', action, index])`. So
+applying the same outcome twice records one row. The row holds the frozen
+action itself, never a model summary. Rows live in
+`snapshot().wouldDo` and are published once as `would-do:<id>`, so a
+Host UI reads either the ledger or that projection. They are Host UI
+history: never in a ContextPack and never on the wire. Each row names its
+Turn in `turnId`, and retention moves it with that Turn's root (#1756), so
+`wouldDoRecords` lists only the rows of roots still in the state.
+
+The default of a new Bot is `observe`. A Bot profile without the field
+(an older ledger) reads as `observe` too. Only the owner principal
+switches it:
+
+```ts
+// The Host UI: the would-do feed and one switch per Bot.
+const records = bot.wouldDoRecords(reviewerId); // oldest first; omit the id for every Bot
+const current = bot.autonomy(reviewerId);        // 'observe' | 'auto'
+await bot.setBotAutonomy(reviewerId, 'auto', principal); // owner only
+```
+
+`setBotAutonomy` writes `bot-autonomy:<botId>:<revision>` for the Host
+UI. It applies to outcomes recorded after the switch. It does not replay
+a would-do row. A non-owner fails with `not_owner`; an unverified caller
+fails with `unverified_sender`. Both write an audit row first. The team
+authority's profile does not own this field, so a team snapshot cannot
+change it.
+
+Coalesced input is a policy before enqueue: see
+[User input priority](#user-input-priority-1229) for how it interacts
+with queued autonomous work.
+
+## Routine invariants
+
+Bot routines are K4 routines. Each one is a `hostOccurrence` definition with
+the `bot-routine` hook. The K4 ledger stores the definition, the pending
+version, the reserved slot, the occurrences and the wake outbox. K8 keeps no
+routine state. The Host core uses `nextRoutineOccurrence` as its calendar: a
+routine rule is a `RoutineSchedule` whose `tz` is the definition time zone.
+K4, K8-S and the SDK all use the 368-day wake horizon.
+
+K8 keeps the Bot policy. A Bot creates routines only for itself. Each owner
+has at most eight routines that are not completed. The routine id is
+`hash([taskId, 'create_routine', index])`. The hook input holds `owner`,
+`authority` and `prompt`, and a new version keeps the owner and the authority.
+An update must change the schedule or the prompt, and a schedule repeats no
+weekday. The contract checks an outcome's routine actions; the owner
+`updateRoutine` and the sealed create and reseal check the same at their entry.
+The routine actions run as K4 routine commands in the outcome
+commit. A refused action changes no routine.
+
+The hook writes the routine Turn in the occurrence commit. The Turn id is the
+K4 intent key `occurrence:<occurrence key>`. The next sync promotes the Turn
+with `promoteOccurrence` and its frozen schema and ContextPack. Its wait limit
+is five minutes from the occurrence record, not from the promotion. A routine
+Turn that ends before promotion, for example on cancel or for an archived
+owner, concludes its occurrence as `cancelled`. Redelivery reads the stored
+occurrence and does not call the hook again.
+
+K4 keeps a running occurrence and only the latest queued one. A new slot
+settles an older queued routine Turn as `superseded`. On update, the new
+version stays `pending` while an occurrence is unsettled or an old slot is
+due. The old chain gets no new slot, and the version switches when that work
+settles. K4 stores only the current and the pending definition; the Host
+service keeps the version history. Pause cancels the reserved slot. Resume
+keeps the current version while work is unsettled. Cancel marks the routine
+completed and stops new occurrences. Accepted work finishes with its old
+version. To stop an execution too, use K4 cancellation explicitly. Routine
+results are owner turns with source `routine`.
+
+`updateRoutine` and `setRoutineLifecycle` change only the routines of this
+Host's Bot. `endRoutine(id)` runs the keyless `end_routine` command (§55c): the
+Main Bot completes any open Bot routine, an archived owner's too, as cancel
+does. Without it, the routine of an archived Bot would fire at every slot. The
+command needs the Main Bot role and gets the K4 rows through the
+`CommandPorts.routines` port.
+
+### Sealed Bot routines
+
+A sealed Bot routine (#953, #654 E3d-4) is a `bot-routine` whose Turn
+instruction only a member and the device can read. The owner's member endpoint
+seals the whole instruction once per routine version with K4
+`sealRoutineTemplate`. The instruction is `sealedRoutineInstruction(prompt)`:
+the K8 Turn frame with every action, `Request:` and the prompt, and no
+ContextPack, because v1 has no plaintext field for Host content next to a
+sealed instruction. The Turn's frozen outcome schema stays the authority on
+which actions the Bot may take.
+
+- `sealedDefinition` makes version 1. The member picks the routine id, a fresh
+  UUID, because the template binds it, and an id that any routine row already
+  has is refused. `resealDefinition` stages the next version of a sealed
+  routine only. A template sealed for another version throws
+  `SealedRoutineVersionError`, and nothing is written. Both check that
+  `sealing.categories` is exactly `['task-input']`, that the template is
+  sealed for the Bot's current Agent revision, and that the occurrence offer
+  parses. A sealed routine counts toward the limit of eight.
+- The authority is `owner`, and a routine stays sealed. `update_routine`, from
+  a Bot or the owner, is refused on a sealed routine, and the outcome schema
+  offers no sealed id for it. Cancel and `end_routine` complete it as any
+  routine.
+- The view in each ContextPack shows `sealed: true` and nothing of the
+  template.
+- The hook writes the occurrence Turn with an empty `request` and
+  `sealedRoutine: { routineId, definitionVersion }`. The sync freezes it from
+  the Host's `sealedTemplate` lookup: the Bot's execution template with
+  `sealing`, the template byte for byte as `sealed`, and `routineRef`, with no
+  `instruction`, no history and the plaintext `bot-turn-outcome.v1` contract.
+  K4 then promotes it as a sealed occurrence intent.
+- A Turn whose template is missing (`sealed_routine_template_missing`), or
+  whose Bot Agent revision differs from the one the template is sealed for
+  (`sealed_routine_agent_changed`), ends `failed` with the projection
+  `sealed-routine-failed:<turnId>`. It never blocks: a blocked routine Turn
+  keeps its occurrence open, and that stops the version switch a reseal needs.
+  An outcome schema over budget depends on the state, not on the version, so
+  it blocks a sealed Turn as a plain one until the state shrinks.
+- The outcome and every projection stay plaintext, even when they carry
+  content derived from the sealed instruction.
+
+L has no sealed dispatch. Its embedded server declares no `e2ee.member`, so
+no daemon paired to it advertises `sealed-payload-v1`, and its K4 port has no
+`submitSealed`: L has no command that creates a sealed routine, and a sealed
+intent would fail with `sealed_dispatch_unavailable` before any submit. H
+runs sealed routines on a cloud tenant.
+
+`compact` removes settled routine rows: a promoted
+occurrence through its intent key, and a concluded occurrence through its
+occurrence key. `botRoutines` reads the Bot routine views from the K4 rows.
+Other K4 routines of the Host, for example Host jobs from `BotOptions.hostJobs`,
+are not Bot routines. A Host job may return only a summary: L sets K4
+`hostJobExecution: 'fail'`, so a result with `execution` concludes its
+occurrence `failed` and promotes nothing, as H does, because no K8 Turn could
+settle that intent. K4 alone promotes it by default.
+
+K8 owns only Turn intents, Host intents (#882) and dream intents (#1475), so L
+also sets K4 `executionRoutines: 'refuse'`; H refuses them too (#954). An
+`execution` routine is refused at creation, from `bot.core.addRoutine`,
+`bot.core.updateRoutine` or a Host intent handler's `tx.routines`, and no routine
+row is written. The constructor refuses a ledger that still holds one that is
+not completed. Only K8's own hooks promote an occurrence: the routine Turn and
+`bot-dream`. Host code that needs Agent work for an occurrence calls
+`enqueueHostIntent` itself, outside a Host job handler, with its own key.
+`enqueueHostIntent` refuses `occurrence:<key>`.
+
+### Dreaming (#1475)
+
+Each unarchived Bot with a usable model template has a dream routine: a daily
+task that checks and tidies its memory against the Host's history, built with
+`buildDreamInstruction`. Dreaming is on by default.
+
+**Cost.** The default is one run per Bot per day that had a new completed Turn,
+on the Bot's own model. Set `dreaming.models` to cheap templates, or pass
+`dreaming: false` to turn it off for the whole Host.
+
+```ts
+new BotCollaboration(server, ledger, { ...options,
+  dreaming: { timeZone: 'Asia/Hong_Kong', models: ['cheap', 'fast'], maxDurationMs: 900_000 } });
+```
+
+- **Lifecycle.** Every sync adds the routine of a new Bot, ends the routine of an
+  archived Bot, and with `dreaming: false` ends them all. `recover()` is a sync,
+  so it does both. A routine whose template goes away later stays and records
+  `model_unavailable`. `dreaming: false` ends routines for good, so turning it
+  back on creates a new routine id with the same record. Default-on needs
+  `wake.consume` routed to `bot.consume` even with no Bot routines, and a Host clock
+  outside the years 2000 to 2200 throws in sync unless `dreaming: false`.
+- **Time.** 03:00 daily, in `dreaming.timeZone`. Without it, the routine takes this
+  process's local zone when it is created and stores it in its definition, so a
+  later restart in another zone does not move it. A Host on a server should set
+  `dreaming.timeZone`: server clocks are usually UTC, and 03:00 UTC may be the
+  middle of the user's day.
+- **Model.** A dream always runs on the Bot's own device, because its memory home
+  is there. It takes the first name in `dreaming.models` that exists in the current
+  `models` and is on that device. Otherwise it falls back to the Bot's own template,
+  with or without a list. Only the list decides what is cheap: K8 infers nothing
+  from a runtime name.
+- **Task.** A fresh writer with `agentMemory: 'none'` and no `agentMemoryCommit`, on
+  every platform, and `terminalProjection: { mode: 'none' }`. The offer always sets
+  `agentMemory: 'none'`: with it unset, a daemon could attach the memory MCP, and a
+  `MEMORY.md` over its limit would then fail the dream before it starts, though the
+  dream is what repairs it. There is no rollback, so the instruction orders every
+  step to leave usable memory. It carries no message egress and no toolsets, and
+  drops the template's `homeAccess`, `preparation` and `agentMemoryCommit`.
+- **Memory paths.** The task is not `homeAccess`, so its cwd is the Bot's home. In
+  `none` mode the device injects no `MEMORY.md` and no memory guidance.
+  `MEMORY.md` and `notes/` in the instruction resolve from the cwd, and the runtime
+  uses its own file tools.
+- **Input.** The Bot's completed Turns after the last successful dream's mark, up
+  to the first Turn that is still queued or processing, so a Turn that user input
+  overtook is covered by a later dream. A blocked Turn does not stop the run; if it
+  later completes, no dream covers it. With `BotOptions.history`, K8 reads the rows
+  there with `turnId` set to the dream's intent key. The mark advances only through
+  the settled rows that history returned. A failed read skips that day; no completed
+  row read after the mark skips it with `no_new_turns`, leaving the mark unchanged,
+  just as in K8-state mode. A Bot whose history authority never returns completed
+  rows never dreams. The pack fills what `instructionMaxBytes` leaves after the fixed text.
+  The first dream window starts when dreaming was set up for the Bot; older Turns
+  of an upgraded ledger still go into its pack.
+- **Native sessions.** `dreaming.nativeSessions` defaults to `true` and requests
+  native session input for the same window when the device advertises support.
+  Set it to `false` to omit the request. The device switch is off by default;
+  see [Native session input](../../docs/security.md#native-session-input) for
+  what it sends to the configured model provider.
+- **Queue.** A dream joins the Bot's FIFO behind the Turns of its sync, and user
+  input goes ahead of a dream that has not started (#1229). A running dream is not
+  interrupted, so user input waits for it, at most `maxDurationMs` (default 15
+  minutes). A queued dream waits at most an hour, and a newer slot supersedes it.
+- **Record.** `snapshot().dreams.bots[botId]` holds `since`, `throughTurn` and `last`:
+  the occurrence's outcome, its reason, the template and whether it was a fallback.
+  A dream that does not succeed leaves `since` and `throughTurn`, so the next one
+  covers the same Turns. A skip concludes its occurrence `cancelled`, with one of
+  `no_new_turns`, `model_unavailable`, `history_unavailable`, `bot_not_ready`,
+  `bot_archived`, `bot_suspended`, `device_unavailable`, `dreaming_off` or
+  `superseded` (concluded `superseded`).
+- **Owner.** `dreams.open` owns each dream intent, so its terminal never reaches a
+  Host intent handler. `cancelHostIntent` and `failStuckIntent` refuse it.
+- **On H.** H does not run dreams yet. An owner switch moves the routines and the
+  record, and H concludes each `bot-dream` occurrence `cancelled` with no task,
+  recording `H does not support dreaming yet`. A dream queued or running at export
+  blocks it like other open work, until it settles.
+
+### Compaction
+
+A Turn id is its K4 intent key. K8 reads the intent of a Turn after K4 settles
+it: the next pass copies the conclusion into the Turn, and delegation, room and
+reply checks read it later. So `botCompactVeto` refuses an acknowledged key
+while one of these holds:
+
+- its Turn is not concluded, or the Turn still has its K4 intent and its
+  conclusion is not reported;
+- a delegation without a verdict has the Turn in `chainTurnIds` or as
+  `cancel.targetTurnId`, or any delegation has it as `lateTurnId`;
+- its room seat is not released;
+- one of its reply receipts is not settled: K4 does not hold the receipt for
+  message replay, or a delegated reply body has no verdict yet;
+- it is the intent of a dream that the sync has not closed (`dreams.open`), so
+  the dream's result is not in K8 yet.
+
+K4 runs the veto inside `compact`'s own transaction. A refusal throws
+`CompactVetoError` and changes nothing. Retry the key after a later pass.
+Any other key without a Turn, for example a Host job, is not a K8 key.
+
+The veto guards each `HostLedger` instance that has it. Another instance on
+the same file without the veto can still compact a Turn intent early. Then the
+next pass fails that Turn with conclusion `failed`, because K8 did not see the
+K4 result. It writes an audit line and reports the Turn once, with
+`reason: 'result_retired'`. The Turn fails even when K4 already applied its
+outcome, because K8 does not read the K4 application tombstone. A routine
+Turn's intent tombstone expires with its slot. K4 removes the occurrence with
+the intent, so the pass also fails a routine Turn whose occurrence is gone,
+after its tombstone expired. The check runs before the archived Bot check, so a
+retired Turn of an archived Bot also fails with `result_retired`. The archived
+Bot check cancels only a Turn that has no conclusion. A retired room seat Turn
+also releases its seat as `failed`, with reason `result_retired`, so its round
+moves on. At Host start, a business reply receipt of a compacted Turn stays,
+also for a routine Turn after its tombstone expired. A due reply check of a compacted chain intent takes
+the failed readback path. The Host keeps processing other work.
+
+### Retention
+
+Every transaction reads and rewrites the collaboration state, so settled
+history must leave it. `bot.retain({ acknowledgedRoots, now, retentionMs })`
+does that on the Host's explicit acknowledgement. It never runs on its own.
+
+- A root is the `root` field of a Turn projection, the round root that
+  `roomInput` and a room `receive` return, or the `root` field of a
+  `room-seat:` or `room-root:` projection. One root holds its Turns,
+  budget, delegations and their batches and units, replies, schemas, cards,
+  questions, the rejections that its Turns consumed, its input batch and
+  inputs, its rounds with their seats, seat Turns and `team.roots` row, its
+  inbounds, and the deliveries that its Turns queued (each delivery stores
+  its `turnId`). A seat Turn belongs to its round's root, but
+  its projection shows its seat id as `root`. Acknowledging a seat id throws
+  `RetentionRefused` with code `seat_root` and the round's root in
+  `roundRoot`. Acknowledge that root instead.
+- One ledger transaction moves every row of each acknowledged root into K4
+  application rows by map name and id (the K4 row port). It retires the
+  root's Turn, input and round ids for good.
+- `RetentionRefused` with code `protected_root` rolls back the whole call while a
+  root is still in use: a Turn that is not concluded, or that still has its
+  K4 intent and is not reported; an unresolved delegation, an unreleased
+  batch or a reserved unit; an open card or question; an open input batch; an
+  open round or seat; an open delivery or a live reply route; an open routine
+  occurrence; or a Turn, card or question in the ContextPack window of its
+  Bot (the Turns from the oldest turn of its handoff pack to its newest, and
+  the last 12 cards and questions, bounded by `contextTurnLimit`).
+  Unconsumed rejections stay in the state.
+- An unknown root throws. A root that is already archived counts as
+  `alreadyArchivedRoots`.
+- Each call also moves the command records of archived roots and the records
+  with no root. They answer replays for at least `retentionMs`, which must be
+  seven days or more; a later call removes them after that. A retry after the
+  window decides again, and an archived Turn, input or round id makes the
+  commit throw `RetiredIdentityError` and change nothing. A store makes that
+  check itself: `commitCommand` hands the ids that `decide` added to
+  `CommandStore.admitted`, and the store calls `refuseRetired` before it
+  commits. Sync fails a Turn with a retired id instead of running it. A Turn
+  id and an input id are one identity space (`retiredIdentity`): an input
+  that does not coalesce becomes a Turn with its own id, and the coalescing
+  policy can change between retention and a retry.
+- The handoff pack of the window leaves out the Bot's Turns that can still
+  freeze (queued or blocked), and its total is at least `recentBytes +
+  earlyBytes` plus the pack frame, so `earlier` always gets all of `earlyBytes`.
+  A freeze has no more than that, a Cross-Bot Turn often less, and the Turns it
+  adds only start `earlier` at a newer turn, so no freeze reads a turn older
+  than the window. `Host.retain` uses the `handoff` budgets of a freeze, and
+  `RetentionLimits.handoff` is required, so a store that calls `retainRoots`
+  passes the budgets it freezes with. Room messages and rejections still go by
+  `contextTurnLimit`.
+- Each call moves the audit lines, revoked push routes that no delivery uses,
+  and settled persona deliveries: applied ones except the newest of each Bot,
+  and failures of an older profile revision. These archived rows stay.
+- `historyWindow.omitted*` counts only rows still in the state.
+- Each call moves the room messages of archived roots to application rows in
+  namespace `roomMessages`, by message id, with or without `roomHistory`. The
+  last `contextTurnLimit` messages of each room stay, because a seat
+  ContextPack reads at most that many. A message of a root that is still in
+  the state stays too. The same call recomputes `visibleFrom`: it is an offset
+  in the kept list, so each member sees the same kept messages as before. The
+  state, and so a snapshot, no longer holds the whole room history.
+  `historyWindow.omittedMessages` and `notice` of a seat ContextPack count only
+  messages still in the state, as `history.omittedTurns` does; a count over moved
+  messages would need a stored count for each Bot.
+
+After retention, a late message for an archived Turn gets `binding_mismatch`,
+and an echo can no longer match an archived delivery. Back up the whole SQLite
+database: a JSON-only restore loses the archived rows and tombstones.
+
+`CollaborationState.version` is 3. Version 1 kept the routines in K8 state.
+The Host refuses a version 1 ledger and changes nothing. Restore a ledger
+backup made before this change, or start a new ledger.
+
+The Host drains application commands until all new turns have a K4 intent.
+An immediate terminal cannot leave a continuation without a wake.
+K4 schedules and cancels routine wakes through its outbox. A resume of the
+same key replaces a pending cancel with the schedule, so the SDK holds one
+wake. A failed SDK wake call rejects the K4 drain, and the Host call that
+started it rejects after its commit. The K4 outbox keeps the row with
+`lastError`. The K4 retry timer retries it with backoff from 1 s to 60 s, for
+at most about 5 min, and each later drain, wake delivery or `recover()` also
+retries it. A failed K4 drain does
+not stop the rest of its process pass, and the pass arms the timer, so card
+expiry, delivery retries, reply checks, seat deadlines and input batch seals
+keep their times. The pass then rethrows the drain error. Startup schedules a reserved wake that the SDK
+no longer holds. K4 rejects a wake whose time differs from its reservation,
+and the SDK delivers it again. K4 records an unknown, inactive or superseded
+wake in `ignoredWakes`. Calendar errors stop the chain, record an audit, and
+let the accepted occurrence finish. Pause and resume retry the calendar.
+
+## Boundaries
+
+The collaboration state has version 3. The Host rejects version 2, unsupported
+and unversioned stored state. It does not reset or migrate that state. A
+version 2 ledger cannot hold archived rows, so restore a ledger backup made
+before this change, or start a new ledger.
+
+This example has one team and one owner per ledger. Paid Pi success-rate
+measurement belongs to [WO-10b](../../docs/submit-result-measurement.md); the method defines per-runtime/model/platform cells and does not supply live data. Retention of the
+collaboration history is explicit ([Retention](#retention)). K4 routine
+versions have no retention policy in this small example.
+
+## Commit contract
+
+Each collaboration command goes through one commit (#739 D1,
+`src/rules/commit.ts`). A commit takes a scope, a command id, an optional
+expected revision and the command. It returns the new revision, the
+disposition and the outbox rows that it wrote. One store transaction holds
+the state change, the command record and the outbox rows.
+
+- A replay of a command id with the same evidence returns the first result
+  and changes nothing. The evidence is the hash of the fields that decide the
+  command's effect.
+- The same command id with other evidence is an `identity_conflict`. The Host
+  keeps the existing error text, for example `Input identity conflict`.
+- Without an expected revision, the commit decides on the head. An explicit
+  revision that is not the head is a `stale_revision` conflict. A replay is
+  checked first, so a retry with its original revision gets its first result.
+- The revision counts committed commands only (#739 6b). Each new commit adds
+  1, also for a refused disposition. A command that throws commits nothing.
+  Host passes that only apply evidence (sync, reconcile, reply checks,
+  deliveries, device refresh) do not change the revision.
+- A keyless command has no record (#739 6a). Each call applies and adds 1 to
+  the revision, so its command id is not a dedup key. Only an explicit expected
+  revision protects a retry: the first commit moved the head, so the retry is a
+  `stale_revision` conflict.
+
+The keyed commands are owner input, received IM input, room input, answers,
+card decisions, team snapshots, and three K4 callbacks: a terminal outcome, an Agent message
+and a Bot routine occurrence. The keyless commands are `setMainBot`,
+`updateRoom`, `retryPersona`, `personaReady`, `enablePushRoute`, `revokePushRoute`,
+`resendDelivery`, `cancelDelegation`, `abandonDelegation`, `cancelTurn` and `endRoutine`.
+A `cancelTurn` or `cancelDelegation` that answers `cancel_pending` or
+`already_settled` commits nothing ([idempotent owner cancels](#idempotent-owner-cancels-1405)).
+`src/rules/commands.ts` decides all of them. The Host checks the principal
+and the channel before the commit, and it calls K4 cancel and delivers cancel
+facts after the commit. `updateRoutine` and `setRoutineLifecycle` are K4
+commands on K4 rows and do not commit here; `endRoutine` commits `end_routine`,
+whose port runs K4 `setLifecycle`.
+
+In this L example the scope is the ledger tenant. Owner APIs pass no expected
+revision. K4 already deduplicates terminals (`applied`) and accepted messages (the
+message receipt), so L stores no record for those callbacks. K4 writes no
+receipt for a refused message, so L keeps a record for it: a retry gets the
+same refusal and does not change the revision. When retention moves that
+record, the message hook reads it from the K4 rows of its own transaction. Other content for the same
+message id is refused with `message_conflict`. The D1 vectors in
+`src/commit-vectors.test-support.ts` run against a pure in-memory store and
+against the L ledger; the D2 H adapter runs the same vectors.
+
+### Sync step
+
+A sync step freezes the offer of a Turn without an intent, and settles the
+Turn of a concluded intent (#793 D2b). `syncTurn` in `src/rules/sync.ts`
+decides it for one Turn. `src/rules/commands.ts` exports it with the
+commands. The rule changes the state, publishes projections and returns the
+write for the store:
+
+- `freeze`: store this intent input (`key`, `source`, `waitUntil`,
+  `execution`). The rule sets `waitUntil` to `now` plus 5 minutes.
+- `routine`: a routine Turn joins the FIFO as its occurrence intent.
+- `cancel`: the Bot is archived. Cancel the intent, which has not started.
+- `ended`: the Turn has no intent and is concluded. A routine Turn concludes
+  its open occurrence.
+
+A Host that binds devices gives the step the optional fact
+`deviceRefusal(botId)` (#956, §55a): `unbound`, `revoked`, `mode` or
+`switching` for the device of the Bot's current execution template, which a
+freeze would use. The step then holds that Bot's Turns that have no intent: it
+returns no write, sets `held` on the Turn, publishes the hold once, and adds an
+audit row with the reason. `unbound`, `revoked` and `mode` hold with
+`device_not_bound` and publish `held:<turnId>`; `switching` (#957) holds with
+`device_switching` and publishes `held-switching:<turnId>`. Each body is
+`{ owner, turnId, code }`. The rest of the scope syncs. The hold comes before
+the profile check, since a refused device may never apply a profile. The next
+sync with no refusal (the device is bound, or a `team_snapshot` moved the Bot)
+clears `held` and freezes the Turn with the current template. A held room
+seat Turn waits for its seat deadline, as any seat that does not start. Each
+hold code has its own projection id with one body, so a changed reason never
+conflicts. L sets the fact from its topology records (see "Topology switch").
+`DEVICE_NOT_BOUND` is H's `DeviceBindingError` code.
+
+A store runs the step for each stored Turn, in insertion order, in one
+transaction under the same scope lock as a commit. It reads the facts inside
+that transaction. The projections that the step publishes reach the store's
+outbox in the same transaction. A projection with the same id and the same
+body adds nothing. Another body for that id throws `Projection identity
+conflict`. The step is a Host pass that only applies evidence, so it writes
+no command record and keeps the revision. A client's expected revision does
+not go stale because of a sync. If one Turn throws, the store writes nothing.
+L runs the step in its sync transaction through `syncTurnInLedger`
+(`src/commit.ts`), which keeps the K4 writes: `enqueue`, `promoteOccurrence`,
+the intent cancel and the occurrence conclusion. The L sync transaction also
+runs other Host steps before and after the per-Turn steps. Before them, it
+seals due input batches, expires pending cards and advances rooms. After
+them, it settles delegations, reports card decisions and adds their action
+result Turns, cleans reply tokens and projects input batches. The card steps
+are the K8 rule `src/rules/cards.ts` (`expireCards`, `reportCardDecisions`),
+which the `cardVectors` hold for L and H. This contract
+defines only the per-Turn step. The `syncVectors` in
+`src/commit-vectors.test-support.ts` hold these rules for the in-memory store
+and for L. The `coalesceVectors` there hold the batch seal before the
+per-Turn steps and the batch projection after them, for L and H.
+
+`collaborationDue(state, timers)` in `src/rules/due.ts` lists the times when a
+sync has collaboration work to do: each open input batch's seal, each pending
+card's expiry, each unreleased seat's deadline, and the delegation times
+(`delegationDue`). `src/rules/commands.ts` exports it. L arms its timer with
+these times and its own L-only ones. H stores their minimum as the scope's due
+time (#793 S4). Routine slots are K4's, so they are not in the list.
+
+The room step of a Host sync is `advanceRoomSeats(state, facts, now, add, publish)`
+in `src/rules/rooms.ts` (#793 S6). It runs `advanceRooms` on the seat facts,
+fails a seat Turn whose work was not admitted, queues each new seat Turn
+through `add` (`seatTurn` gives its fields), publishes the room projections
+of the seats that became terminal through `publish`, and returns the seats
+whose admitted work the Host cancels. `src/rules/commands.ts` exports both. L builds
+the facts from its K4 intents; H builds them from its intent rows. A Turn
+step can release a seat (a blocked or retired seat Turn). Both Hosts then run
+the room step and the Turn steps again in the same sync, so the next seat gets
+its Turn: L in `advanceRoomsAndTurns` (`src/rooms.ts`), H in its sync loop.
+The `roomVectors` run on both.
+
+`checkReply(state, d, check, now, emit, uncertainAfterMs)` in
+`src/rules/delegation.ts` decides one reply check of a `reply_pending`
+delegation: a reply body that the Host holds answers it, a failed read
+retries with backoff, and otherwise the SDK readback decides.
+`replyCheckDue(d, now)` selects the due checks. `src/rules/commands.ts`
+exports both. L's `flushReplies` runs them with its own SDK read, and H runs
+them in `HostedReplyChecker` (#793 S7). The `replyVectors` hold the decision
+for L and H.
+
+Known L limit: K4 stores the whole Host ledger, with the collaboration state,
+in one JSON row per tenant. Turns, replies, audit rows and command records
+make that row grow. Command records are dedup evidence; retention must not
+delete a record while a retry of its command can still arrive. Per-entity L
+storage and K8 retention are #798.
+
+## External history authority
+
+With the `history` option, the ContextPack history of a Bot Turn comes from an
+external authority, not from this ledger (#739 D1, #606). Before a Bot Turn
+freezes its offer, the Host reads the Bot's earlier history outside the ledger
+transaction. Then one transaction freezes the offer with those rows. The
+transaction freezes only a Turn that still has no offer.
+
+- The authority returns rows in the ContextPack row shape: `id`, `root`,
+  `source`, `request`, `hop`, `status`, optional `conclusion`,
+  `outcomeSummary`, and optional `reply`, the reply text that the user saw for
+  that Turn (#1318). Rows in another shape are refused, as is a `reply` that
+  is not a string.
+- `historyRowFromTurn` builds one row from a `bot-turn:<id>` projection value
+  and the caller's `reply`, so the authority does not derive `outcomeSummary`
+  itself. `contextTurns` checks rows in this shape and returns them as
+  `ContextTurn[]`. The K8 entry exports both and the `ContextTurn` type
+  (#1356).
+- A row's `request` and `reply` become the lines of its turn in `history`, and
+  the handoff budgets bound them as for stored Turns (see
+  [Group chat and Main Bot](#group-chat-and-main-bot)).
+- The rows replace the stored Turns in that ContextPack. The current Turn
+  always comes from this ledger.
+- The collaboration state does not store the rows. The Turn keeps their hash
+  in `historyDigest`, which covers `reply`. K4 keeps the frozen instruction
+  of the offer, as for every offer.
+- Cards, questions and rejected actions stay Host state. Room seats read room
+  messages, so they read no history.
+- A read that throws or returns another shape leaves the Turn queued. The
+  timer reads again after about one second.
+- A read still open after `historyTimeoutMs` (default 10 seconds) counts as
+  failed, so a stalled authority cannot hold the Host queue. The Host does
+  not abort the read. Reads run one after another, so a pass waits at most
+  `historyTimeoutMs` for each Turn that reads.
+
+With the `roomHistory` option, the room messages of a seat ContextPack come
+from an external authority too (#883). Before a seat Turn freezes its offer,
+the Host calls `roomHistory({ roomId, botId, turnId })` outside the ledger
+transaction, in the same phase as `history`.
+
+- The authority returns the messages that this seat's Bot can see, oldest
+  first, as `{ id, from, text, late }` rows. The authority selects them for
+  that Bot, so K8 applies no `visibleFrom` of its own. Rows in another shape
+  are refused.
+- The rows replace `room.messages` in that ContextPack, in the same message
+  window. The state does not store them. The seat Turn keeps their hash in
+  `historyDigest`.
+- K8 still writes `room.messages`. Round counts, mention seats and the seat
+  request text read it.
+- A read that throws or returns another shape leaves the seat queued, and the
+  timer reads again. A read still open after `historyTimeoutMs` or at the
+  seat deadline counts as failed.
+  The seat deadline still applies, so a seat whose read never succeeds is
+  released as `busy` and its Turn expires.
+- Each accepted seat post also publishes the projection
+  `room-message:<roomId>:<messageId>` with `{ roomId, id, from, text, late }`,
+  the row that `room.messages` stores. The message id is the seat id, so a
+  replay has the same id and body; the uploader delivers it at least once, and
+  the Host deduplicates by id. A `pass` and a refused post publish no
+  `room-message:` projection; their seats have `room-seat:` projections.
+  Without the option, no `room-message:` projection exists.
+- The next seat of a room is not read while that room has an undelivered
+  `room-message:` projection. K4 drops a projection only after the Host
+  uploader's `deliver` resolved, so the Host's `deliver` must resolve only
+  after its write can be read back from the authority. The held seat waits
+  like a failed read, and its deadline still applies: a projection that never
+  delivers releases each later seat of its room as `busy` at its deadline.
+- Room input that the Host gives K8 (`roomInput`, or `receive` for a group
+  message) is not projected. The Host writes it to its authority first, then
+  calls K8, so the next seat reads it.
+- The ledger does not store the mode. Each time a Host turns the option on, it
+  first writes the posts made while it was off to its authority, deduplicated
+  by id. Turn the option on before the first retention: retention moves the
+  room messages of archived roots out of `snapshot().team.rooms` (see
+  Retention). After a retention, the backfill also reads the archived rows of
+  namespace `roomMessages`, which the owner switch export carries in its
+  `archived` section.
+
+The team comes from this ledger, unless the `team: 'external'` option is set.
+
+## External team authority
+
+With `team: 'external'`, an external authority owns the Bots (#739 Q4c). The
+constructor creates no Main Bot. The authority sends team snapshots with
+`applyTeam({ revision, bots })`. Each Bot has `id`, `name`, `role`,
+`persona`, `model` and `mainBot`. The Host maps `model` to its own execution
+template.
+
+- The team revision is the authority's revision. It is not the collaboration
+  commit revision. It must be a safe integer of 1 or more, and each new
+  snapshot must have a higher revision.
+- A newer snapshot archives each Bot that it does not list, as `delete_bot`
+  does. A new Bot gets its first persona projection. A changed name, role,
+  persona or model queues the same projection as `update_bot`. A change of the
+  Main Bot flag only sets the flag.
+- An archived Bot cannot come back. A snapshot that lists one is refused, and
+  nothing changes.
+- The command id is the team revision. The same revision with the same Bots
+  replays, in any Bot order. The same revision with other Bots is an
+  `identity_conflict`. The replay check comes first, so an exact retry of an
+  applied older snapshot gets its first result.
+- A revision that is not newer and was not applied before refuses with
+  `stale_team`. The refusal is a commit, so it adds 1 to the collaboration
+  revision.
+- The snapshot covers the Bots only. `setMainBot`, `create_bot`, `update_bot`
+  and `delete_bot` refuse with `external_team`, and the Main Bot schema does
+  not offer those three actions. Team notes and persona retries stay local.
+  Rooms stay local too, unless the external rooms mode below is on.
+- The ledger stores the mode. A ledger with a local team cannot open in
+  external mode, and an external ledger cannot open without the option.
+
+A snapshot Bot can carry `participation: 'suspended'` (#1319). The Bot stays in
+the team, its rooms and its routines, but takes no new K8 work. `participation`
+is `'suspended'` or absent; any other value refuses the whole snapshot as
+`Invalid team snapshot Bot`, and nothing changes. A suspended Bot:
+
+- leaves the `delegate.to` and `room_call` member lists of every schema frozen
+  after the snapshot, and gets no room seat, even when a message names it;
+- ends its open work as an archived Bot's does: a Turn that has not frozen
+  concludes `cancelled`, a frozen intent that has not started is cancelled, and
+  work that started runs on with its outcome kept as audit only. An open
+  delegation to it resolves `refused` with reason `target_suspended`; a verdict
+  for a delegation that it started gets no reply Turn
+  (`undelivered: 'initiator_suspended'`);
+- refuses `input`, an owner `receive`, `answer` of its question and `decide` of
+  its card with `TeamModeError` code `bot_suspended`
+  (`bot_suspended: Bot <id> is not participating`), and the commit writes
+  nothing. `setAutonomy`, `persona_ready` and push routes stay available.
+
+A later snapshot without the field restores the Bot as it was: its profile
+revision, `readyRevision`, autonomy, room memberships and routines are kept.
+Work cancelled or refused while it was suspended, and routine slots that it
+missed, do not come back. Archive stays for a deleted Bot: a suspended Bot that
+a snapshot no longer lists is archived.
+
+With `persona: 'external'` as well, the Host owns the persona projection of
+each Bot (#879). The Host projects the Agent home with its own daemon hook, so
+there is one projection writer and one revision for each agentRef.
+
+- Each snapshot Bot carries the Host's `profileRevision`, a decimal string.
+  K8 uses it as the Bot revision and as the agentRef `profileRevision` of its
+  execution. K8 queues no projection and counts no revision of its own.
+- The revision never goes back. A changed name, role, persona or model needs a
+  newer revision. A snapshot that breaks either rule is refused, and nothing
+  changes. Without the option, a snapshot with `profileRevision` is refused.
+- `personaReady(botId, revision)` reports that the Host applied this revision.
+  The current revision readies the Bot, an older one changes nothing, and a
+  newer one refuses. A Bot's Turns freeze their offers only when it is ready,
+  as before. After a newer revision, the Bot keeps its last ready revision, so
+  it stays a delegate target while its Turns wait. The Host reports
+  `personaReady` only after the snapshot that introduces that revision
+  resolves: an earlier report is refused, not stored.
+- `retryPersona` refuses with `external_persona`.
+- The ledger stores this mode too, so a restart cannot change it. The mode is
+  fixed once stored, with no migration. The option needs `team: 'external'`.
+
+With `rooms: 'external'` as well, the team snapshot also owns the rooms
+(#1321). Each snapshot carries `rooms`, the authority's whole room list, and
+`applyTeam({ revision, bots, rooms })` writes it after the Bots. Without the
+mode, a snapshot with `rooms` is refused; with it, a snapshot without `rooms`
+is refused, and nothing changes.
+
+- A room has `id`, `name`, `members`, and optionally `admin`, `mode`,
+  `announcement` and `memberMentions`. The id matches
+  `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` and is not an `Object.prototype` key.
+  The rules are those of `create_room`, with one difference: a room can have
+  no member. Its members are Bots of the same snapshot, 0 to 12 and distinct,
+  and its admin is a member. `mode` is `mention` or omitted, `memberMentions`
+  is `execute`, `ignore` or omitted. A snapshot holds at most
+  `TEAM_ROOM_LIMIT` (64) rooms, and room order is not content.
+- A new room starts with no visible history for its members. A listed room
+  takes the snapshot's fields as a whole: an omitted admin, announcement or
+  `memberMentions` is cleared, and `memberMentions` returns to `execute`. A
+  member that stays keeps its visibility, a new member sees messages from now
+  on, and a member that left and came back starts again from now.
+- A room that the snapshot no longer lists is archived for good: it shows
+  `archived: true`, with no member, no visibility and no admin. At the next
+  pass its seats are removed as for a member that left: a seat that has not
+  started is cancelled, a seat that started runs on and its speech is kept as
+  audit only, and the round closes once every seat is released. `roomInput`,
+  a room `receive` and a `room_call` round in it throw `Room is archived`, so
+  the Host stops giving K8 its inbound messages first. A snapshot that lists
+  an archived room is refused, and nothing changes.
+- `createRoom`, `updateRoom` and `setMemberMentions` refuse with
+  `external_rooms`. The Main Bot schema offers neither `create_room` nor
+  `update_room`, and an outcome that has one is refused with `external_rooms`.
+- A suspended Bot (#1319) can be a room member, under the suspension rules
+  above.
+- The ledger stores this mode too, so a restart cannot change it. The mode is
+  fixed once stored, with no migration. The option needs `team: 'external'`.
+
+With `history` and `team: 'external'` together, the device ledger holds
+neither the history nor the team authority.
+
+## Group chat and Main Bot
+
+The supplied Agent template is the initial Main Bot. A team can have multiple
+Main Bots. `setMainBot(botId, value)` is an owner API. The Host must authenticate
+its owner APIs before calling them, unless it passes a verified principal
+([IM channel input](#im-channel-input)). `input(key, request, botId)` selects a Bot.
+The default is the initial Main Bot. Ordinary turns keep the K8a actions.
+
+Give the Host the real server home projection API. Install
+`createBotPersonaProjection()` as the daemon's `agentHome.projection` consumer.
+It validates the opaque profile digest. It writes persona text to the Bot's
+own `AGENTS.md` with the SDK `writeHomeFile`, under the SDK writer lease. New
+profiles and updates wait for an exact `applied` or `idempotent` readback.
+The readback must match device,
+AgentRef, request id, and digest. New execution input then uses that revision.
+Already frozen executions keep their old input. A pending projection does not
+permit dispatch. All management actions participate in the K4 outcome commit.
+
+Main Bot schemas offer six actions: `create_bot`, `update_bot`, `delete_bot`,
+`create_room`, `update_room`, and `team_note`. The Host checks the current role
+again when applying each action. Creation offers three local Bot slots and one
+local room slot. A room can use those Bot slots in the same outcome. Model ids
+come from `BotOptions.models`. The default model id is `default`. Each model
+has a Host-owned execution template. A Bot update cannot move its device.
+The Host can replace the templates at run time with `setModels(models)`, for
+example after a device key changed (#1357). Construction and `setModels` apply
+each template by model name to every unarchived Bot, a suspended one too. The
+Bot keeps its device and its profile; its agentRef follows its profile
+revision. No profile revision, readiness or persona projection changes. A Turn
+that froze before keeps the execution it froze with, also while it waits in
+the K4 FIFO. A template outside `readOnlyToolsets` refuses the call, which then
+changes nothing. A Bot whose model has no template keeps its stored template,
+and each of its Turns, a sealed routine Turn too, blocks with
+`Unavailable model: <name>` before it freezes (`blocked:<turnId>`). It freezes
+once a later `setModels` or restart provides the template. No write entry
+refuses a missing template of an existing Bot: a snapshot or `update_bot` that
+names such a model stores the profile and keeps the stored template. A new Bot
+still needs a template, since its device comes from it. A sealed routine's
+template is the sealed copy and is not re-projected.
+Profiles cap the active team at 24 Bots. Team notes cap at 20 entries of 300
+characters. Every team Bot receives these notes. Other Bots' private turns and
+persona text do not enter its ContextPack. No cross-home memory read occurs.
+`delete_bot` archives the profile and cancels unstarted work. Running results
+become audit only. Delegated work for the archived Bot is also cancelled when
+it runs (see Cross-Bot delegation). It does not delete the Agent home.
+
+Profile deliveries share the Host serial consumer. The consumer waits for known
+old intents to settle. Device terminal readback can precede writer cleanup.
+A projection can therefore stay pending after it hits that lease. The Host
+reads every prior delivery before retry. It stores a new delivery id before
+sending the same revision and digest. Delay starts at one second and caps at
+60 seconds. Recovery reuses stored ids. Old duplicate controls cannot replace
+a newer revision. Each revision remains gated on an exact accepted readback.
+
+Use `roomInput(key, roomId, text, mentions, principal)` for a user message. `mentions` is
+an ordered Bot id list or the structured value `all`. The default is empty.
+The optional `principal` is the verified sender ([IM channel input](#im-channel-input)).
+The Host never scans text for names or `[PASS]`. Rooms support mention mode.
+An admin identity grants a larger budget. It does not create an implicit seat.
+A room has no admin mode, so the outcome fragment offers only `mention`. `updateRoom` is an authenticated owner API
+for membership, admin, name, and announcement changes.
+
+`createRoom(roomId, fields)` is an authenticated owner API that creates a room
+with a Host room id and no model run (#1321). The id follows the snapshot room
+id rule ([External team authority](#external-team-authority)), and the fields
+follow `create_room`: 1 to 12 distinct active members, an admin that is a
+member, and mention mode only. The command id comes from the room id. The same
+id with the same name, members, admin and announcement replays the first
+result, and other fields are an `identity_conflict` (`Room identity conflict`).
+An id that already has a room, also one that a Main Bot outcome created, throws
+`Room already exists`. A new room starts with no visible history for its
+members. Later membership changes follow `updateRoom`. A local room cannot be
+deleted. In the external rooms mode, `createRoom` refuses with
+`external_rooms`.
+
+`setMemberMentions(roomId, value, principal)` is an owner API for the
+`memberMentions` setting of a room (#1230). The value is `execute` or `ignore`;
+the default is `execute`. With `execute`, a structured mention from any verified
+human opens a seat. With `ignore`, a structured mention from a human who is not
+the owner opens no seat: the message stays room background, with no device work
+and no BYOK key. The owner's own mention still opens seats. Only the owner
+changes the setting, and only inbound messages that arrive after it see the new
+value; an open root and an established seat keep their admission
+([R6](../../docs/host-im-adapter.md#r6-structured-mentions)).
+
+A room turn is a fresh member Agent execution. It uses `bot-turn-outcome.v1`
+with required `speech`, plus optional `room_call`. It has no messageEgress.
+`{ speech: { kind: 'post', text: 'Evidence' } }` writes shared history.
+`{ speech: { kind: 'pass' } }` is an explicit pass. Empty or blank speech,
+missing outcome, and execution failure are visible seat failures. A textual
+mention in a post cannot create a seat. Main Bot room seats have the same speech-only authority as other members.
+Management actions are available only outside room seats. Only structured `room_call.members` can add seats after a Bot speaks.
+
+Seats run in reservation order within a round. Each seat enters the same K4
+FIFO as that Bot's own turns. The waiting grace is 240 seconds. First observed claim starts a separate
+240-second running grace. This persisted deadline does not reset on later
+scans or recovery. The K4 fallback
+waiting bound stays at 300 seconds. Room admission cancels waiting work first.
+If the member is still waiting at grace, the seat becomes `busy`. If it has
+started, the round can proceed while its writer stays held in K4. A later post
+uses its seat id and enters history once. Removed waiting seats are invalid.
+Removed running members can produce audit evidence, but cannot post or call.
+Already completed post, pass, and failure states remain unchanged.
+
+A round permits initial seats + 4, plus 4 when it has an admin. Each member
+gets at most two seats; the round admin gets at most four. A reservation spends
+budget even if it fails, passes, or times out. Batch room calls are atomic.
+A late room_call after a round closes can open a new round. At most three such
+rounds share one user root. At most ten late posts share that root. A new user
+message starts a new root. ContextPack selects up to the most recent 100
+eligible messages. The 32 KiB budget counts the UTF-8 bytes of the frozen
+Request plus the serialized ContextPack. `historyWindow.currentRequestBytes`
+records the exact Request size, including the room request wrapper. The Host
+drops oldest whole rows until that budget fits. `historyWindow.notice` reports
+omitted messages and refusals.
+History overflow does not block a seat. The frozen Request section keeps the
+complete accepted request. Only a Request that alone exceeds 32 KiB blocks
+the turn. The seat reason and blocked projection report its byte count, the
+limit, and a request to shorten the input.
+For room_call seats, the visible caller post is the current request and its
+author id is retained. A pass inherits the earlier visible trigger. This
+request is preserved even if it has left the recent message window.
+The ledger retains its full audit history. No Summary is generated. Authority
+enums and required control metadata are not silently truncated. If non-history
+metadata plus the accepted Request exceeds the budget after history is removed,
+the notice reports that separate condition. That condition does not block.
+A Bot Turn outside a room carries its history in `history`, the
+`@byok-sdk/protocol` `buildHandoffPack` result (#1446). A row becomes a turn:
+`lines` is `{ speaker: source, text: request }`, then
+`{ speaker: 'bot', text: reply }` when the row has a reply, and `meta` is
+`{ id, root, hop, status, conclusion?, outcomeSummary }`. `history.recent`
+holds the newest whole turns, `history.earlier` holds excerpts of the turns
+before them, and `history.omittedTurns` counts the rest. The `handoff` option
+sets `recentBytes`, `earlyBytes` and `totalBytes`, by default 40 KiB, 6 KiB and
+46 KiB (`DEFAULT_HANDOFF_BUDGETS`), and construction refuses a value that
+`buildHandoffPack` refuses. A snapshot view from `contextPack` has the
+candidate as the newest turn of `recent`, which may be cut; an empty `recent`
+with turns in the input means the candidate did not fit, and the last turn of
+`earlier` is not the candidate. `contextMaxBytes` covers the Request and the
+ContextPack without `history`. `contextTurnLimit` selects no history; it still
+bounds refusals, cards, questions and the room messages that retention keeps.
+A room seat keeps `room.messages`, as above.
+
+Cards and questions each retain at most 12 items. Pending work takes priority.
+The Host removes old refusals, settled items, old messages, then pending items.
+`historyWindow.turnLimit` names the message or item count limit. Both room and
+private context also report `omittedMessages`, `omittedCards`,
+`omittedQuestions`, `omittedPendingCards`, `omittedPendingQuestions`, and
+`omittedRejections`, and a room seat reports `omittedTurns`. Zero counts remain
+explicit. `historyWindow.notice` also reports turns that `history` omits. Full
+outcomes stay in the ledger. Context includes action names and the current
+routine definition.
+
+Rejected feedback is private to its Bot. The next frozen input reserves it.
+An execution that fails before it starts releases that reservation.
+A turn that cannot pass Request or schema admission has status `blocked` and
+`blockedReason`. It creates no intent. `cancelTurn` can cancel it before admission.
+Other schema composition errors propagate as Host defects.
+
+Unmentioned messages are stored as background. They do not create a seat, but
+a later selected member can see eligible background messages. Each member has
+a persisted offset into `room.messages` in `visibleFrom`. New members see only
+messages appended after joining. Retained members keep their offset; retention
+lowers it by the messages that it moves from before it, so the member sees the
+same kept messages. Leaving and
+rejoining resets it. Both owner edits and Main Bot room edits use this rule.
+A pre-join root request is also excluded from a new member's Request section.
+A delayed post appended after joining is visible. Already frozen offers keep
+their selected window. A room without an earlier offset starts at the next
+user input; its older history is not disclosed.
+
+A room Turn never gets `memory_save` (#1446): other users' and Bots' text
+reaches it, and what a Turn saves comes back in every later Turn of that Bot.
+`syncTurn` freezes a `room_slot` Turn with a lower `payload.agentMemory`:
+`read-write` becomes `read`, `read-write-if-admitted` becomes
+`read-if-admitted`, and a template without the field freezes as
+`read-if-admitted`. `none`, `read` and `read-if-admitted` stay. The mode only
+goes down. Every other source keeps the template value, a sealed routine Turn
+too, and the frozen execution stores the mode that the offer carries, so replay
+does not change. `read-if-admitted` needs a device that advertises
+`agent-memory-selection` and `agent-memory-read-if-admitted`; a daemon with an
+Agent home advertises both.
+
+Read-only here means no `memory_save` and no memory-writing guidance. The SDK
+does not make memory files read-only ([protocol](../../docs/protocol.md)
+§2.2): a Bot whose toolset can write files can still change `MEMORY.md` from a
+room Turn. A Host that needs to stop that narrows the toolset or the file scope
+of the Bot's template.
+
+`src/group-chat.test.ts` uses a real embedded SDK, daemon, HTTP transport,
+SQLite reopen, persona writes, and submit_result helper. `src/rooms.test.ts`
+checks budgets, authority, atomic refusal, and context limits as state rules.
+`roomInput` and all other mutations use the same serial Host consumer. Do not
+call K4 mutation APIs directly. Upload projections with `core.flushProjections`
+or read `snapshot().team` for seats, profile delivery state and the room
+messages that retention has not moved.
+
+### Room seat projections
+
+K8 publishes how each seat of a room round ended, and when a round root has
+ended, in every mode, with or without `roomHistory` (#1393). The state does
+not store them; each is published once, in the transaction that makes it
+true.
+
+- `room-seat:<roomId>:<seatId>` with `{ roomId, root, roundId, seatId, botId,
+  status, late, reason?, triggerMessageId? }`, when the seat becomes terminal: `post`, `pass`,
+  `failed`, `busy`, `removed` or `blocked`. `late` is not terminal; a late
+  seat is published when its Turn ends. `reason` is the conclusion or block
+  reason that the seat stores. A seat with no admitted Turn, such as a
+  waiting seat whose Bot left the room, is published too, though it has no
+  `bot-turn:` projection. Only a seat that a `room_call` opened has
+  `triggerMessageId`, the message the seat answers: the caller's post (its
+  seat id), or, when the caller passed, the message the caller answered (its
+  own `triggerMessageId`, else the root). A Host tells a mentioned seat from a
+  `room_call` seat by this field and does not derive it from the seat id. A
+  seat opened before the release that added the field is not backfilled.
+- `room-root:<roomId>:<root>` with `{ roomId, root, seats }`, when every seat
+  of every round of the root is terminal, the seats that a `room_call` added
+  included. `seats` lists their ids in reservation order; each has its
+  `room-seat:` projection in the same or an earlier transaction. A root that
+  opens no seat is published in its `room_input` or `receive` transaction,
+  with `seats: []`. The root is the id that `retain` acknowledges.
+- A Host must handle both prefixes before it upgrades to the release that
+  adds them: a Host that refuses an unknown projection prefix fails its flush
+  on the first one.
+
+## Persona delivery failures
+
+A stale or conflicting persona completion stays in the owner ledger. It emits
+an owner projection with the Bot id, revision, reason, and recoverable status.
+Waiting turns expose `profileFailure`. They remain queued and cannot execute
+with an unconfirmed persona. The authenticated owner can call
+`retryPersona(botId)` after resolving the device-side problem. This creates
+the same desired persona at the next profile revision. It retains the failed
+operation for audit. An exact accepted readback still gates dispatch. Retry
+also survives a Host restart. It does not bypass schema or persona admission.
+A stale device may need profile-state reconciliation before retry can succeed.
+Transient delivery errors remain pending and use the existing automatic retry.
+
+The supplied `createBotPersonaProjection` consumer writes `AGENTS.md` with
+the SDK `writeHomeFile` (#738). It runs on Windows, Linux and macOS. After a
+process crash, `AGENTS.md` has its old or its new persona. On POSIX, an
+`applied` readback means that the file and its directory are flushed. On
+Windows, it means that the file only is flushed. There, an OS crash or a power
+loss after the readback can bring back the old persona while the SDK record
+keeps the new revision. This Host does not deliver an acknowledged revision
+again, so the old file stays until the next persona update writes it. A process
+crash can leave an `AGENTS.md.<pid>-<n>.tmp` file in the home. The next
+`writeHomeFile` call for `AGENTS.md` removes it when that process has ended.
+The Host failure and retry API does not change these limits.
+
+
+## Deferred Main Bot routine target
+
+Main Bot `create_routine.target` for another Bot is not implemented. Routine
+creation remains self-only in this example. Aimpact did not approve that
+extension for this PR. A later K8b work order must add it. Cross-Bot delegation
+also stays outside this history-window change.
+
+## Cross-Bot delegation
+
+This section covers slices X1–X6 and X2M of the
+[approved plan](../../docs/adr/ADR-041-k8b-cross-bot.md).
+See the [acceptance matrix](VALIDATION.md) for evidence and open rows.
+A Bot can delegate requests to other Bots of the same team. The `to` enum
+lists this Bot first, then each active team Bot after its first persona
+readback. It lists Bot ids only. A room seat has no `delegate` fragment.
+
+One outcome can hold two cross-Bot items. The Host refuses an item with
+a delegation verdict and a reason: `room_seat`,
+`target_archived`, `hop_limit`, or `budget_exhausted`.
+A refusal also enters the initiator's `rejectedActions`.
+An accepted item creates a `bot_request` Turn for the target. Its id is
+`H(taskId, 'delegate', index)`. Its hop is the initiator's hop plus one, at
+most four. B's ContextPack holds B's own history and a `delegation` block.
+B's reply cap is `BOT_REPLY_MAX_BYTES` (8 192 UTF-8 bytes).
+
+Each Turn stores `authority`: `owner` for user input and answers, `bot` for a
+`bot_request`. Continuations, replies, action results, and routine Turns
+inherit it. Management needs a Main Bot and `owner` authority, both in the
+schema and at apply time.
+
+`consumeMessage` checks the exact task, device, AgentRef, and destination
+binding in one ledger transaction. It stores an accepted delegated reply by
+task id. That record is the only reply body authority. At the chain end, the
+verdict is `answered` when the record exists. Otherwise the delegation is
+`reply_pending`. The Host timer reads `tasks.agentMessage` with a backoff from
+1 to 60 seconds. It does not wait for a K4 scan. No message gives `failed`
+(`no_reply`). Held gives `reply_held`; `abandonDelegation` then sets
+`abandoned`. After `uncertainAfterMs` (default 30 minutes) without a result,
+the delegation is `uncertain`.
+
+Other chain ends map to verdicts as follows. `failed` gives `failed`.
+`declined` gives `failed` with `busy` or the decline code. `expired` gives
+`expired`. A Host cancel with reason `expired` gives `expired`
+(`claim_raced_deadline`). A user cancel gives `cancelled` (`user_cancelled`).
+
+`cancelDelegation(id)` works while the delegation is queued, `waiting_device`,
+running, or `reply_pending`. `cancelTurn` on a chain Turn calls it. One transaction
+freezes `cancel = { requestedAt, targetTurnId, delivered }` on the current
+chain Turn. That Turn then accepts no first message and applies no outcome.
+Without a K4 intent, the transaction closes the Turn and sets `cancelled`.
+It does not call `core.cancel`. With an intent, the Host calls `core.cancel`
+after the commit and then sets `delivered`. Each `process` pass delivers an
+undelivered cancel to its frozen target, so a restart completes it. When
+`core.cancel` fails, `cancelDelegation` rejects, but the cancel stays
+committed and the timer delivers it. A repeat gives `cancel_pending` until the
+verdict and `already_settled` with the verdict after it; neither writes or calls
+`core.cancel` ([idempotent owner cancels](#idempotent-owner-cancels-1405)).
+
+A message accepted before the cancel stays. The verdict is then `cancelled`
+with that reply marked `partial`. A message after the cancel is refused
+(`delegation_cancelled`). A cancel with no terminal after `cancelGraceMs`
+(default 60 seconds) shows `uncertain`. A claimed chain Turn with no terminal
+after `uncertainAfterMs` also shows `uncertain`. The Host never resubmits and
+never starts a new generation. A later terminal gives the normal verdict.
+
+A Main Bot cancels through the `cancel_delegation` outcome fragment. Only a
+Main Bot Turn with `authority = owner` outside a room seat gets it. Its
+`delegationId` enum lists open delegations: no verdict, no cancel yet, and
+status `queued`, `waiting_device`, `running`, or `reply_pending`. The list is
+newest first and has at most 24 ids. The ContextPack `openDelegations` block shows each listed
+id with its Bots, status, and the first 80 code points of the request. It
+also counts the omitted delegations and shows a notice. The owner cancels
+those with `cancelDelegation`. Apply runs after the management actions and
+before the routine actions. It checks room seat, owner authority, and the
+Main Bot role again. Then it runs the same arbitration transaction. The cancel fact records
+`reason: 'main_bot_cancelled'`, and the verdict keeps that reason. A resolved
+delegation gives the rejected action `already_resolved` and no second
+verdict. The Main Bot sees it in its next ContextPack.
+
+`abandonDelegation(id)` ends a `reply_held` or `uncertain` delegation with
+`abandoned`. When the attempt can still run, it also writes a K4 cancel. A
+terminal after the verdict goes to `audit` only.
+
+When the target Bot is archived, the next `process` pass cancels its open
+delegations. It uses the same arbitration transaction, with the cancel reason
+`target_archived`. This applies in every open state: queued, `waiting_device`, running,
+`reply_pending`, `reply_held`, and `uncertain`. A Turn without a K4 intent
+closes at once. A queued intent settles as `cancelled`. A submitted attempt
+gets `tasks.cancel` and an attempt readback. A claimed attempt gets
+`tasks.cancel`, and the Host waits for its terminal. The verdict is `refused`
+(`target_archived`). A reply accepted before the archive does not go to the
+initiator. The Host writes an `audit` note for it. A cancel with no terminal
+follows the `uncertain` rules above. Archived Bots leave the `to` enum and the
+roster at the next schema build. A delegation cancelled by the archive leaves
+the `cancel_delegation` enum.
+
+When the initiator is archived, the target's work continues. The verdict is
+still written, but the Host creates no `bot_reply` Turn and releases the free
+reply slots. The delegation row and its projection show
+`undelivered: 'initiator_archived'`.
+
+Every verdict reaches the initiator once, in a `bot_reply` Turn. The accepted
+items of one outcome form a batch. The first report waits until each accepted
+item has a verdict or is `uncertain`. It holds every verdict of the batch so
+far, refusals included. Its id is `H('bot_reply', taskId)` for two accepted
+items and `H('bot_reply', delegationId)` for one. When every accepted item is
+`uncertain`, there is no batch Turn. A verdict after the first report, or
+after that state, reports in its own Turn `H('bot_reply', delegationId)`.
+When an outcome has no accepted item, one refusal report Turn
+`H('bot_reply', taskId)` holds all its refusals. That
+report has no `delegate` fragment. Status changes publish
+`delegation:<id>:<revision>` projections with `id`, `revision`, `root`,
+`fromBotId`, `toBotId`, `request`, `status`, and `verdict`, `reason`,
+`replyTurnId` and `undelivered` once set. `root` is the delegation's root, so a
+Host can place a cross-Bot delegation under the conversation of its root
+(#1356).
+
+The root Bot budget is 12 units. An outcome with `n` accepted items reserves
+`n + max(n, 1)` units: one B unit and one A reply slot for each item.
+Admission counts every open reservation on the root. When the units are not
+free, the Host refuses accepted items from the last index
+(`budget_exhausted`) and checks again. After each report, the batch releases
+its free slots above the number of unreported items. A refusal report
+reserves one slot when one is free. Otherwise
+it is delivery only: it does not start a model, and it enters the next
+ContextPack. A unit is spent at the first observed claim and released when it
+can no longer be needed. `spent + reserved <= 12` holds after each transaction.
+
+A `bot_request` or `bot_reply` instruction puts request text and reply bodies
+once, as raw UTF-8 in length-framed blocks. Team notes, rooms, and routines
+are trimmed oldest first, and background has priority: `history` gets only the
+bytes left after it, up to `handoff.totalBytes`. A larger
+`instructionMaxBytes` can therefore leave less history, because more background
+stays. `instructionMaxBytes` (default 65 536) bounds the whole instruction.
+Construction refuses a value below
+`minimumInstructionBytes(SYSTEM_PROMPT)`. The minimum includes the
+`openDelegations` block of a Main Bot reply Turn.
+
+A Main Bot with 24 Bots, 8 routines, and a room exceeds the outcome schema cap
+of 16 384 bytes. The Host blocks such a Turn with a visible reason. It does
+not cut an enum. Without the room, 24 open delegations in the
+`cancel_delegation` enum still fit (15 949 bytes).
+
+### Topology switch (§4.1)
+
+L is the old owner when a device moves from L to H (#957). L keeps one owner
+record per device in its ledger, as §4.1 records the mode per device: one L
+Host can own Bots on two devices (see "Second-device placement"). A device with
+no record is `{ mode: 'L', revision: 0 }`. `topology(deviceId)` reads it.
+The product runs the switch with these calls, each on the revision it expects.
+A stale revision throws `CommitConflict` with `stale_revision`, and each step
+except the export raises the revision:
+
+1. `freezeForSwitch(deviceId, revision)` writes `{ mode: 'L', switching: 'H' }`
+   and returns the record read back from the ledger.
+2. `drainForSwitch(deviceId, { cancel })` returns the device's open work:
+   - open K4 intents whose execution names the device;
+   - Turns of its Bots with no conclusion and no intent;
+   - open input batches;
+   - Agent home writes that were sent and have no terminal readback. A write
+     is marked sent in the transaction before the send, so a crash or a
+     failed send still counts it.
+
+   With `cancel`, it cancels the intents, Turns and batches first, then runs a
+   pass. A tried intent concludes only from its SDK terminal, so it stays
+   listed until the reconciler reads one. The drain waits for nothing: no
+   timeout counts as stop evidence.
+3. `exportForSwitch(devices, exportedAt?)` seals the whole domain into a
+   switch export once every device in `devices` is frozen at its revision and
+   drained (see "Owner switch on L" below).
+4. After the new owner imported and verified the export,
+   `commitSwitch(deviceId, revision, receipt)` writes `{ mode: 'H' }` for every
+   device of the export in one transaction, when `receipt` is the export's
+   digest and `deviceId` at `revision` is one of its devices. It refuses while
+   the same transaction finds open work. `abortSwitch(deviceId, revision)`
+   instead writes `{ mode: 'L' }`, so L owns the device again and its held
+   Turns run.
+
+While the device is frozen, each entry that can create execution for it throws
+`DeviceSwitchingError` (`code: 'device_switching'`) and writes nothing:
+
+- `input`, and `receive` owner input, for a Bot on the device;
+- `roomInput`, and `receive` room input or bot background, when any Bot member
+  of the room is on the device;
+- `answer`, when the question's Bot is on the device, and `decide` (either
+  decision), when the card's Bot is on the device, since each adds a Turn for
+  that Bot;
+- `enqueueHostIntent` on the device.
+
+The check runs after the replay lookup (the new `CommandPorts.admit` port), so
+an exact replay of a command or Host intent that L accepted before the freeze
+still returns its first result.
+
+The Bots each command reaches are a pure rule, `commandBots(state, command)` from
+`./rules/commands` (#975). L refuses a command when one of those Bots' devices
+refuses work. H passes the same rule to its `CommandPorts.admit`, so both Hosts
+refuse the same commands during a freeze. A frozen domain then starts no new
+Turn and no new card connector call.
+
+After the commit these entries throw `DeviceModeError` (`code:
+'device_not_bound'`, `reason: 'mode'`, as H's refusal of a device in the other
+mode), for good.
+
+Other refusals and holds:
+
+- **Routine slot:** a slot of a routine whose Bot is on the device throws from
+  the routine hook. K4 then records neither the slot nor a Turn, and the SDK
+  delivers the wake again later, so a slot is never dropped. It runs after an
+  abort. From the export on every slot refuses, also after the commit, and the
+  new owner schedules the routine's wakes on its own SDK.
+- **Sync:** any other path that adds a Turn for a Bot on the device is held.
+  This covers a Bot outcome that delegates, a room round, and a batch that
+  seals.
+- **Agent home:** a home write for the device's Bots is not sent, so one Agent
+  home never has two writers. A sent write is still read back. A write that
+  was never sent is not read back and arms no timer, so after a commit nothing
+  polls it.
+- **K4 submit:** L gives K4 `admitSubmit`, which reads the same record. K4 then
+  sends nothing to the device, in the transaction that begins a submit and in
+  the readback right before the SDK call. That holds for a queued intent from
+  before the freeze, a `backoff` intent (it keeps its generation), the K4 timer
+  drain and an intent added through `bot.core` directly. A held intent is sent
+  after an abort; the drain with `cancel` settles it.
+
+Commands that add no execution still run, since the drain needs some of them:
+cancels, team and routine lifecycle changes, `consumeMessage` and retention.
+
+Each check reads the record in the transaction that would write the work. The
+constructor reads every record first and refuses a malformed one, so a restart
+admits nothing before it knows the freeze.
+
+Once a device is in mode H, every step on this ledger refuses. A domain moves
+back to L by an import into a new L tenant (below).
+
+### Owner switch on L (#975)
+
+`src/switch.ts` reads an L ledger into the switch format and writes the format
+into an L tenant. One function, `switchContent`, serves both the old owner's
+export and the new owner's read-back, so one function states what an L ledger
+holds. The whole coordination domain moves together.
+
+**Old owner (L → H).** `exportForSwitch(devices, exportedAt?)` runs in one
+synchronous step: it dumps the ledger (K4 `dumpForSwitch`), checks it, seals it
+(`sealSwitchExport`) and records the export mark. It refuses:
+
+- a device that is not switching at its revision, or still has open work;
+- a live Bot on a device it does not name, and every other state the format
+  refuses (`SwitchExportError`);
+- Agent memory state, which binds the tenant inside its digests;
+- a pending projection: upload them with `core.flushProjections` first;
+- a pending submit or Host job, which K4 would run while the export waits;
+- a stored copy that differs from the value it is derived from, with
+  `reference`: an intent's `agent` (K4 `agentKey`), task id (K4 `taskId`) and
+  frozen input of each generation, K4 `applied` (the current task of each
+  succeeded intent), each occurrence's wake key (K4 `parseRoutineWakeKey`), its
+  slot, intent id and conclusion, a routine's next wake key, and the
+  `attempts` of intents and occurrences;
+- a K4 or K8 record with a field the format does not name, which would be
+  dropped.
+
+From the mark on, also after a restart, this Host writes nothing to the
+ledger. Each K8 write refuses with `SwitchExportedError` (`code:
+'switch_exported'`) after the write runs, so a new command on a frozen or
+H-owned device still gets its device refusal. A refusal the write raises first
+also comes before the export's: a replayed command id (also on a frozen
+device), an id conflict, `stale_revision` and `RetentionRefused`. Each refusal
+writes nothing. That holds for the root entries a product calls directly too: `commitInLedger`, `retainInLedger`,
+`callCardsInLedger` (before the connector runs) and `syncTurnInLedger`. The
+passes and the timer run nothing, the K4 hooks and the routine lifecycle and
+update entries refuse, and the compact veto (`botCompactVeto`) refuses every
+intent with `switch_exported`. The mark stays after the commit, so the old
+ledger keeps the exported state.
+
+Do not compact an exported ledger. `ledger.compact` with no acknowledged
+intent still deletes expired tombstones, which the veto does not see. Before
+the commit that makes the commit refuse, so the switch is aborted and exported
+again; after the commit it does no harm.
+
+`commitSwitch` checks the receipt against the mark, then seals the ledger
+again under the export's header and refuses a different digest. That check
+covers the K4 core, which writes on its own timers: a routine that is pacing a
+schedule retry, or that switches to a pending version, can change between the
+export and the commit. The commit then refuses, and the switch is aborted and
+exported again. The commit moves every device of the export at once, so a
+domain is never split between the owners. An abort of a device of the export
+ends the export, and the new owner discards its import; after the commit no
+device of it aborts.
+
+**New owner (H → L).** On a new, empty ledger tenant (a switch back to L opens
+a new tenant), and with no `BotCollaboration` on it:
+
+1. `importForSwitch(ledger, document)` verifies the H export and writes it
+   with each device owned by H and an import record, in one transaction (K4
+   `loadForSwitch`). Before that transaction commits, K4 reads the tenant's
+   rows back, and they must seal to the document's digest under its header;
+   otherwise it throws `SwitchExportError` with `manifest` and writes nothing.
+   So an import is either verified or not there. It returns the receipt
+   `{ digest, devices }` that the old owner commits away on.
+2. After the old owner committed, `commitImport(ledger, digest)` gives L each
+   device of the import and deletes the import record.
+3. `discardImport(ledger)` deletes an import that is not to be committed (K4
+   `discard`). It first marks the import as being discarded, so a commit
+   refuses it from then on.
+
+A `BotCollaboration` refuses to open a ledger with an import record, and the
+root entries (`commitInLedger`, `retainInLedger`, `callCardsInLedger`,
+`syncTurnInLedger`) refuse it the same way before they run. So no work runs on
+an import before its commit, and a committed tenant has no record to discard. The import writes each derived value from the format: `agent` for the
+new tenant, the task ids and inputs of every generation, `applied`, slots, wake
+keys, intent ids, `attempts` and the Host intent handlers. A concluded intent
+gets K4's cursors of a new row (`phase: 'settled'`, `notBefore: 0`). Routines
+and occurrences go in the order of their ordinals, which the format makes their
+positions.
+
+**Ordering.** The receipt is the export's digest, and nothing between the two
+Hosts proves that the target imported it: there is no authentication between
+them. The product runs the steps in order and keeps the document:
+
+- The old owner commits away only after the target reported its import
+  verified.
+- The export document is kept until the target committed toward its owner.
+- If an import is lost after the old owner committed away, the kept document
+  is imported into a new tenant.
+- Only one import of a digest is committed; every other one is discarded. The
+  receipt names no tenant, so one document can be imported into two tenants.
+- From the export on the old owner refuses all work, so two owners never run
+  the domain at the same time.
+
+Not moved: the source SDK's wakes, that is the `schedule` and `cancel-wake`
+rows and the scan wake. The new owner's `recover()` schedules each routine's
+next wake on its own SDK. K4 `ignoredWakes` does not move either. It is an
+optional audit of wake deliveries that the source SDK made and K4 ignored, at
+most `IGNORED_WAKE_AUDIT_LIMIT` rows, and no rule reads it. A target starts
+without it, as a new ledger does, and an export is not refused for it.
+
+### Owner switch export format (#975)
+
+The `./migration` entry (`src/migration.ts`) is the one form in which a whole
+coordination domain moves between owners: an L ledger tenant or an H scope.
+Neither Host's storage is the format. The old owner builds a `SwitchContent`
+once every device of the domain is frozen and drained, and
+`sealSwitchExport` checks it, orders each section by its identity and adds a
+manifest. The manifest has the count and the `hash(canonical(section))` of
+each list section, and one digest over them and the header (source, domain,
+frozen device revisions, export time). The collaboration digest is the hash
+of its JSON text, because the insertion order of its maps is state: K8 reads
+Turns in that order for context and retention, so a target must keep it. The new owner runs `verifySwitchExport` on
+the document before it writes anything, and again on its own rows read back
+into this form, so the digest it records in its receipt is the source's. The
+digest covers the header, and `domain` is the source's tenant or scope id (a
+switch back to L opens a new tenant). So the read-back copies the document's
+header as it is and rebuilds only the sections from the target's rows. Devices
+are in JS string order of their id, and each section in JS string order of
+`canonical(identity)`, so a read-back sorts that way in JS or reseals; a
+database `ORDER BY` may give `unsorted`.
+
+A record holds what a target needs to rebuild the row, with values the source
+stores, never a default. Routines and occurrences carry their ordinal, which is
+their position in their section, exactly 0 to n - 1: what moves is their order,
+which is all K4 stores, and H stores the position in its column. An intent
+carries K4 `sequence` or H `ordinal` as it is, gaps included, and its frozen
+input (a sealed one stays sealed). H stores only part of this
+today: the K4-only fields get H columns in the H slice that imports them.
+Every object has an exact set of keys.
+
+A value that a Host derives from others is not in a record, and the target
+derives its own. The format never sees the source's stored copies, so each
+Host's export builder checks them against these rules and refuses to build an
+export where one differs:
+- an intent's FIFO key, K4 `agentKey(domain, execution)`, from the target's
+  own tenant or scope and the device and Agent of the frozen input;
+- the execution input of each earlier generation (`input` with that
+  generation's task id), and K4 `intent.execution` (`input` without
+  `taskId`), which hold while K4 runs without its memory option, as K8 does;
+- K4 `applied`: the current task id exactly when the intent `succeeded`;
+- a K4 occurrence's wake key and slot (K4 `routineWakeKey`). Each occurrence
+  has exactly one slot on both Hosts, so the format has no slot section;
+- an occurrence's intent id (K4 `occurrenceIntentKey`), and K4 `attempts`,
+  which `switchAttempts` derives for both Hosts.
+
+An intent carries the K4 execution of each earlier generation (submission,
+start, attempt, terminal and message receipt), because K4 compacts an intent
+only with the execution of every generation. A message for an earlier task is
+answered from its execution: by its receipt, or else `stale_generation`.
+Nothing relies on a replay after the switch getting `accepted`: the target's
+SDK passes an Agent message to the Host only when its own stores hold the
+device's task and offer binding, which this export does not carry.
+
+The format refuses, with `SwitchExportError` and a `reason`:
+- the source's owner records (L `topology`, and L `hostIntents`, whose handler
+  each intent carries);
+- a K4 message receipt, of the current generation or an earlier one, that is
+  not the K8 accepted reply of the same task id, or a reply with no receipt
+  (`receipt_mismatch`);
+- a record that names one the export does not hold (`reference`): an
+  occurrence intent (K4's `occurrence:<sha-256>` key) or Host job outbox row
+  without its occurrence, an occurrence without its routine, an occurrence key
+  that is not K4's hash of its routine slot and trigger, or a task id that is
+  not `hash([key, generation])`;
+- state that K4 cannot produce (`invalid`): a retry policy outside K4's
+  `validateRetry` bounds, on an intent or a routine definition; a generation at
+  or past `maxAttempts`; a `reserved` intent past generation 0 or with
+  anything from a submission; an earlier generation without its terminal and
+  attempt, or that was not begun; an occurrence that does not match its
+  routine's run kind (a Host job routine's occurrence has a job, is never
+  promoted, since L runs K4 with `hostJobExecution: 'fail'` and H concludes a
+  job result with an execution `failed`, and has a pending job exactly while it
+  is open; a hook routine's has no job); a routine
+  or occurrence ordinal that is not its position; and two occurrences of one
+  slot (`duplicate`);
+- an execution routine (`execution_routine`): a K8 domain holds only Turn and
+  Host intents (#954), L refuses execution routines and H refuses them at
+  create, and K8 Bot routines are occurrence hooks;
+- a live Bot on a device the export does not move;
+- open work: an open Turn or input batch, an intent with no conclusion, or a
+  card call in flight;
+- a pending Agent home write that is `sent` or has a `retryAt`, because it may
+  have reached the device. An unsent one moves and is sent by the new owner;
+- a pending projection (`projection_pending`): H's receiver deduplicates by
+  `(scope, id)`, and L does not record whether it was sent (H raises `tries`
+  before the send), so the source flushes its projections first;
+- rows out of identity order, a repeated identity or ordinal, a key outside the
+  format, malformed fields, a value that is not JSON by K4's `validateJson`
+  (`NaN`, `undefined`, a class instance, checked before the seal clones the
+  content), and a manifest that does not match the content.
+
+A channel delivery moves under its id,
+`hash([taskId, messageId, routeKey, nonce?])`, which names no Host domain, so
+the target's readback or resend of a `sending` or `unknown` delivery uses the
+source's idempotency key. Whether a platform honors that key is its adapter's
+concern (`docs/host-im-adapter.md`); the switch does not change it.
+
+This entry has no I/O. L's export, import and commit are in "Owner switch on L";
+H's are in the hosted example README, "Owner switch export (#975)" and "Owner switch
+import (#975)".
+
+### Second-device placement and device wait
+
+One embedded server and one Host ledger can serve Bots on two enrolled
+devices. Supply `BotOptions.models` with Host-owned templates for each device:
+
+```ts
+const models = {
+  local: localExecution,
+  remote: { ...remoteExecution, deviceId: enrolledSecondDeviceId },
+};
+```
+
+A `create_bot` action selects `model: 'remote'`. The Host copies that
+execution template's device into the Bot profile. A model update keeps the
+Bot's device. This is creation placement, not home migration. A changed
+`remote` template, passed to `setModels` or at a restart, is re-projected onto
+each Bot of that model on its own device; it does not move a Bot either.
+Install `createBotPersonaProjection()` on both daemons. Wait for exact persona
+readback before dispatch. Device B needs SDK daemon and runtime code, with
+its own credential store and Agent homes. It needs no collaboration Host.
+
+Supply `server.machines.list` for wait display. A delivered, unclaimed offer
+shows `waiting_device` only when that device's presence has expired. Persona
+and FIFO waits remain queued. Missing or failed discovery, including the
+one-second I/O bound, supplies no new offline fact. Presence does not control
+dispatch or verdicts. K4 keeps the original five-minute deadline. Reconnect
+can claim the same frozen task. Expiry cancels and reads the attempt before
+reporting `expired` once to A. A claim race still needs terminal evidence.
+
+See [Second device and relay contract](SECOND-DEVICE.md). Its two-process
+Topology L relay is a contract only. The synthetic two-daemon test proves
+the embedded-server path. Hosted `submitAgentExecution`, two physical
+computers, two Host processes, and paid Pi behavior remain outside that proof.
+
+## Input coalescing
+
+This section covers slice I1 of the Octop plan for issue #551.
+Input coalescing is an optional Host policy. It runs before K4 enqueue.
+K4, the SDK, and the wire do not change.
+
+`BotOptions.coalesce` turns it on. Without it, `input` makes the same state
+change as before: one Turn, one K4 intent, and one execution for each input.
+A field that you do not give takes its default. Construction refuses a value
+that is not an integer or is out of range.
+
+| Field | Default | Range |
+| --- | --- | --- |
+| `windowMs` | 10 000 | 1 000 to 60 000 |
+| `maxItems` | 8 | 2 to 16 |
+| `maxBytes` | 8 192 | 1 024 to `contextMaxBytes / 4` |
+
+A Bot is busy when it has a Turn that is not concluded and not blocked.
+An input to an idle Bot seals at once as a one-input batch. Its Turn id,
+Request, intent key, and frozen instruction are the same as without the policy.
+An input to a busy Bot opens a batch or joins the open batch of that Bot.
+A Bot has at most one open batch. Inputs join one batch only when the Bot,
+conversation, sender principal id, authority, Bot revision, and Bot model are
+the same. In this example, each Bot has one 1:1 conversation, so the Bot id
+also identifies the conversation. Room input never coalesces.
+
+A sealed batch becomes one `user` Turn. Its id is the id of the first input.
+`input` returns this id for each member. The K4 intent key is this Turn id, so
+task identity, FIFO order, generation, and cancel readback do not change. The
+batch Turn is the budget root. Continuation and delegation budgets count once
+for the whole batch, not once for each input. Neither the batch nor its Turn
+changes after the seal. The Host never changes an enqueued intent.
+
+A one-input batch keeps the raw text as its Request. A batch with more inputs
+has one notice line, then each input in arrival order. Each input is framed
+once as raw UTF-8, with the frame of Cross-Bot replies. The metadata line holds
+`inputId` and `receivedAt`. The Host renders the merged Request before each
+join. If it is larger than `maxBytes`, the Host seals the batch and opens a new
+batch for the input. So a merged Request always fits the ContextPack budget.
+A long single input stays alone and unframed. An input over the ContextPack
+budget blocks with a visible reason, as before.
+
+| Seal reason | Condition |
+| --- | --- |
+| `idle` | The Bot is idle. |
+| `window` | `windowMs` passed after the first input. Later inputs do not extend it. |
+| `items` | The batch has `maxItems` inputs. |
+| `bytes` | The next input makes the merged Request larger than `maxBytes`. |
+| `boundary` | Another new Turn of this Bot arrives. |
+| `key_changed` | The sender, authority, or Bot configuration changed. |
+| `cancel` | `cancelTurn` names the batch or a member input. |
+| `policy_off` | The Host restarted without `coalesce`. |
+| `archived` | The Bot is archived. |
+
+Every other new Turn of the Bot seals its open batch first: `answer`,
+`action_result`, `routine`, `room_slot`, `bot_request`, `bot_reply`, and
+`continuation`. So the queue keeps arrival order. A replayed Turn does not
+seal. The seal check runs at the start of each Host sync and before each new
+input. `recover()` runs a sync first, so a due batch seals after a restart.
+
+`cancelTurn` takes a batch id or a member input id. It cancels the whole batch.
+A replay of `input` with the same key and text returns the batch Turn id and
+does not join again. A replay with a changed text throws
+`Input identity conflict`. Each input has a durable record in
+`snapshot().inputs` with its `batchId`. `snapshot().inputBatches` holds the
+batches. The `bot-turn:<id>` projection carries `inputIds` in arrival order.
+Show the one reply once, and mark each member message from `inputIds`.
+
+From the second input, a reply can wait up to `windowMs` plus the running
+execution. A batch Turn freezes its ContextPack at enqueue, as every waiting
+Turn does. The Host does not read message text for meaning, so a later input
+such as "never mind" does not withdraw an earlier input. The model reads all
+inputs in order and answers them together.
+
+This example does not yet arm a timer at the window end, or publish
+`input-batch` projections (slice I2). Until then, a batch of a busy Bot seals
+at the next Host call or when the Bot becomes idle.
+
+## User input priority (#1229)
+
+The K4 FIFO stays one queue per `(tenant, deviceId, agentId)`, ordered by
+the ledger's `sequence` (`docs/host-execution-core.md` §3). The reference Host
+adds one explicit rule on top of it. A **user-source** intent goes ahead of
+the queued, never-submitted `routine` and `bot_request` intents of the same
+Agent FIFO. "User-source" is the K4 `source: 'user'`: an owner input, and
+an `answer` Turn. The rule runs in the same ledger transaction that enqueues
+the user intent, so it is durable and survives a restart.
+
+- Only intents with `phase: 'queued'` and `attempts: 0` move. A submitted or
+  in-flight execution keeps its `sequence`, its `taskId` and its generation,
+  and a cancel is not issued to make room.
+- The user intents and the autonomous intents keep their own arrival order.
+  A self continuation, an `action_result` or a Bot reply keeps its position.
+- `setBotAutonomy` and the observe mode never reorder anything.
+- A standalone K4 reader sees a plain ledger: the order is just `sequence`
+  values. No memory state and no second queue.
+
+The Host also reserves **one slot per device** for user work. The limit is
+`BotOptions.deviceConcurrency` (default 8, the SDK daemon's
+`maxConcurrentTasks` default). An intent occupies a slot once it is submitted
+or has attempt evidence. Autonomous work may fill `limit - 1` slots;
+user-source work may fill all of them. A limit of 1 has no spare slot, so the
+reservation is off there. A refused begin stays queued and is retried when a
+slot frees; a submitted execution is never cancelled.
+
+```ts
+const bot = new BotCollaboration(server, ledger, { ...options, deviceConcurrency: 8 });
+```
+
+The rule has no effect on the SDK wire, the protocol or the K4 FIFO contract.
+It changes only the `sequence` of intents that never reached the SDK.
+
+`coalesce` is a policy before enqueue, so an open batch has no intent yet.
+A batch seals when its Bot is idle (`idle`) or at its other seal reasons. A
+queued `bot_request` keeps the Bot busy, so with coalescing on, an open batch
+waits behind that work and its Turn joins the FIFO after the seal. Without
+coalescing, the user input becomes the next submitted intent. A Host that
+needs the strict order with coalescing must seal its batch sooner or leave
+coalescing off. This is the remaining interaction of #1229 item 1.
+
+## Inbound disposition (#1229)
+
+Every inbound human message gets one deterministic destination, derived from
+the rows the Host already writes. There is no second disposition table:
+`inboundDispositions()` reads the inbound, input-batch and Turn rows.
+
+| Destination | Meaning |
+| --- | --- |
+| `filtered(code)` | Refused before a Turn: `unverified_sender` or `not_owner`. The audit row stays. |
+| `coalesced(turnId)` | In the Turn `turnId`, including a merged input whose batch is still open. |
+| `answered(turnId)` | The Turn succeeded. |
+| `failed(turnId)` | The Turn failed, expired or was superseded. |
+| `cancelled(turnId)` | The owner cancelled the Turn or its batch. |
+
+A 1:1 input names the batch Turn that answers it. A room input names its round
+id; the round's seat Turns decide the destination. A recorded message whose
+Turn was retained away reads `failed`, never nothing, so the Host UI cannot
+show a message with no destination.
+
+```ts
+const rows = bot.inboundDispositions(); // oldest first, from the ledger
+```
+
+Each transition is published once as
+`inbound:<id>:<destination>:<turnId>` (or `inbound:<id>:filtered:<code>`).
+The id names the destination, so a projection value never changes. The rows
+are Host UI history: never in a ContextPack and never on the wire.
+
+`echo`, a direct bot message (`bot_audit`) and a group bot message
+(`bot_background`) keep their delivery, audit and round rows; this projection
+covers every inbound human message.
+
+## IM channel input
+
+This section covers slices M2 and M3 of the Octop plan for issue #552.
+The rules are in the [Host IM adapter guide](../../docs/host-im-adapter.md).
+A channel adapter takes the sender from authenticated platform data and gives
+a `Principal` with an `id` and the `kind` `human` or `bot`. Give principal ids
+a namespace that no Bot id uses, for example `im:<platform user id>`. Room
+history shows both kinds of id in `from`. The adapter maps the platform chat
+to a Bot id (`direct`) or a room id (`group`). It maps mention entities to Bot
+ids.
+
+`receive(message)` classifies one `InboundMessage` with `classifyInbound`, in
+the order of the guide's §3. The first match wins.
+
+| Sender and conversation | Result |
+| --- | --- |
+| No verified principal | `unverified_sender`. Audit only. |
+| Own bot account, listed in `channel.self` | `echo`. Exact delivery reconciliation only. No Turn or seat. |
+| Bot, 1:1 | `bot_audit`. Audit only. No Turn. |
+| Bot, group | `bot_background`. A room message without a seat, also with mention entities. |
+| Owner, 1:1 | `owner_input`. `input` with the principal. |
+| Other human, 1:1 | `not_owner`. Audit only. |
+| Human, group | `room_input`. `roomInput` with the principal. Mention entities select seats. |
+
+The input key is `inboundKey(message)`, the hash of channel, conversation id,
+and platform message id. A redelivered event returns the same id. The Host
+never scans text for mentions.
+
+`BotOptions.owner` is the owner principal id. The default is `owner`. Only the
+human principal with this id passes the owner check. These owner APIs take an
+optional last `principal`: `input`, `answer`, `decide`, `cancelTurn`,
+`cancelDelegation`, and `abandonDelegation`. The check runs first. Without a
+principal argument, the call acts as the owner, so the Host must authenticate
+the caller. A given `undefined`, `null`, or malformed principal is refused with
+`unverified_sender`. Any other principal that is not the owner is refused with
+`not_owner`. Each refusal writes an audit row before the call rejects. For an
+IM action, pass the principal that the adapter verified. Accept an approval
+only from a verified button callback, never from a text command.
+
+`roomInput` takes the same optional `principal`, with the same
+`unverified_sender` rule. Any verified human can post. The room message
+records the principal id in `from`, and a seat request records it in
+`requestFrom`. Without a principal, `from` is `user`. A bot principal's
+mentions select no seat. The delivery owner APIs below use the same principal rule.
+
+### Delivery outbox
+
+Set `BotOptions.channel` to enable the Host outbox:
+
+```ts
+channel: {
+  port: channelPort,
+  self: { slack: ['im:our-bot-account'] },
+  sendTimeoutMs: 15_000,
+}
+```
+
+`ChannelPort` sends final text and can read back a delivery id. Its `send`
+result is `accepted` with a platform message id, or an explicit `rejected`
+result with a code, retryability and optional `retryAfterMs`. The port owns
+platform authentication and keeps bot tokens in the Host credential broker.
+The Host never puts the port or a channel secret in a Bot toolset.
+
+Add a `replyRoute` to an authenticated `InboundMessage`. Its channel must
+match the message, and its `inboundId` must equal `platformMessageId`.
+The Host saves it with input admission, before it can process a reply.
+An input batch uses its newest member's route. The route reference in a
+Delivery is the Host's `inboundKey`; the port receives the original platform
+inbound id and credential. Reply tokens stay in Host-only ledger state.
+Do not publish or log the raw ledger or `snapshot()` as an IM view.
+
+Push is off by default. These owner APIs operate on a direct Bot conversation
+or a group room:
+
+```ts
+const routeId = await bot.enablePushRoute(
+  { kind: 'direct', id: 'main' }, 'slack', 'platform-conversation-id', principal,
+);
+await bot.revokePushRoute(routeId, principal);
+const newDeliveryId = await bot.resendDelivery(unknownDeliveryId, principal);
+```
+
+Enabling a replacement revokes the old push route of that conversation.
+A push target is a non-secret platform target, never a reply credential.
+Only the owner can enable, revoke or resend. As with the other owner APIs,
+an omitted principal means that the Host already authenticated the owner.
+A manual resend requires a usable reply route or an active push route. It
+creates a new id and preserves the old unknown row. It can show a duplicate
+message if the original send arrived.
+
+`consumeMessage` records first acceptance and its pending Delivery in the
+same SQLite transaction. Exact redelivery creates no second row. Applied
+room posts, confirmation summaries and questions also create deliveries in
+their acceptance transaction. Drafts and typed activity create no delivery.
+Routine output uses only its own conversation's opted-in push route.
+Without a route, the Host keeps the content in its UI and audits
+`no_push_route` or `reply_route_expired`.
+
+Each process pass calls `flushDeliveries`. It commits `sending` and an
+attempt increment before calling the port. The default business deadline is
+15 seconds. A timeout, exception or lost connection gives `unknown` and no
+automatic resend. An explicit retryable rejection waits for the larger of
+Retry-After and exponential backoff. At most three sends run. A required
+wait above 60 seconds is final rejection; it is never shortened.
+
+Call `recover()` before serving work after restart. It maps persisted
+`sending` to `unknown`. A port's optional readback can confirm `accepted`,
+prove `absent`, or return `unsupported`. Only proven absence permits a
+bounded retry. Readback must complete within the adapter's own I/O budget.
+Unknown rows have no automatic retry timer. A Host drain can check readback;
+an authenticated echo can reconcile them without a drain.
+
+An echo must come from a verified bot principal listed in `channel.self`
+for that channel. Match its conversation and either `deliveryId` from native
+platform data or an already-known `platformMessageId`. Never take an echo id
+from message text. A different bot, human, channel or conversation cannot
+confirm a delivery. Echoes can arrive while `send` is pending; they do not
+wait behind the send operation.
+
+Reply tokens are removed at expiry. They are also removed after the root
+has no open Turn or seat and no pending/sending delivery on that route.
+Metadata and delivery audit remain. All delivery state is Host state; it
+does not change K4, K7, the SDK message disposition or wire messages.
+
+The ledger is a single-owner reference. Use one Host instance per tenant.
+The reusable fake-channel test factory is `channelContract` in
+`src/channel-contract.ts`. Its harness lets downstream adapters run the same
+Host delivery cases with controlled platform results. A real platform adapter
+still needs the downstream acceptance in M4.

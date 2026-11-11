@@ -356,7 +356,7 @@ Cloudflare: local workerd fires a stored alarm after a restart with no request. 
 
 ## Evidence
 
-Results are given per row and never merged into one PASS. `VALIDATION.md` of `examples/bot-collaboration` is not changed
+Results are given per row and never merged into one PASS. `VALIDATION.md` of `packages/bot-collaboration` is not changed
 here; its two rows stay OPEN.
 
 Each row's result is recorded in its PR, with the commit and the CI run.
@@ -368,7 +368,7 @@ Each row's result is recorded in its PR, with the commit and the CI run.
 | Two device processes, one Host | `two-devices.test.ts`, synthetic runtime, one computer | two physical computers (macOS and Windows), each with its own OS user and network path |
 | Real runtime delegation and reply | none: no paid runtime call is approved | one A -> B -> A chain with real runtimes, each call approved by the maintainer, recorded apart from the synthetic results |
 
-### For `examples/bot-collaboration/VALIDATION.md`
+### For `packages/bot-collaboration/VALIDATION.md`
 
 Proposed text for lane K8 or the coordinator to apply. The status stays OPEN:
 

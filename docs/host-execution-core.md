@@ -101,7 +101,7 @@ Never use the SDK database or an Agent home for Host storage.
 Use one FIFO per `(tenant, deviceId, agentId)` for user, routine and Bot triggers.
 A profile revision does not create another queue. Default order is committed enqueue order.
 Any priority rule must be explicit. Do not rely on daemon queuing for product work.
-Input coalescing is an explicit Host policy before enqueue ([example](../examples/bot-collaboration/README.md#input-coalescing)).
+Input coalescing is an explicit Host policy before enqueue ([example](../packages/bot-collaboration/README.md#input-coalescing)).
 The core permits at most one writer execution in flight per Agent.
 Other Agents can progress independently. SDK Agent-home admission remains the final authority.
 A device terminal does not prove native session cleanup or home release.
@@ -512,7 +512,7 @@ real mailbox and filesystem path. They do not establish macOS or Windows platfor
 
 ## K8b: Cross-Bot delegation
 
-The [collaboration example](../examples/bot-collaboration/README.md#cross-bot-delegation)
+The [collaboration example](../packages/bot-collaboration/README.md#cross-bot-delegation)
 adds same-team Bot delegation above K4. Keep one collaboration Host per ledger
 tenant. User, routine and Bot work share each device/Agent FIFO. The Host
 owns Bot placement, authority, budgets, verdicts and report membership.
@@ -556,9 +556,9 @@ original wait deadline and reads the attempt. A claim racing that cancel
 needs terminal evidence. A lost claimed device follows the existing uncertain
 rules. No replacement execution starts from uncertain state alone.
 
-The [second-device contract](../examples/bot-collaboration/SECOND-DEVICE.md)
+The [second-device contract](../packages/bot-collaboration/SECOND-DEVICE.md)
 defines the unimplemented two-process relay. The
-[acceptance matrix](../examples/bot-collaboration/VALIDATION.md) separates real
+[acceptance matrix](../packages/bot-collaboration/VALIDATION.md) separates real
 embedded SDK evidence from synthetic runtime and downstream gaps. Hosted
 `submitAgentExecution`, two Topology L Host processes and paid Pi acceptance
 remain open. Product PRD Q19 does not waive the cross-device §14.2 rows.
@@ -567,7 +567,7 @@ remain open. Product PRD Q19 does not waive the cross-device §14.2 rows.
 
 The reference Host adds two policies over the same K4 state. They change no
 wire field, protocol type or K4 FIFO rule. The [collaboration
-example](../examples/bot-collaboration/README.md#bot-autonomy-observe-and-auto-1229)
+example](../packages/bot-collaboration/README.md#bot-autonomy-observe-and-auto-1229)
 owns their text and acceptance.
 
 **Autonomy.** A Bot profile carries `autonomy: observe | auto`, and a new Bot
@@ -593,7 +593,7 @@ second disposition: the inbound row, the input batch and the Turn decide it.
 A recorded message with no live Turn and no open batch reads `failed`, never
 silence. Each transition is a projection id that names the destination, so a
 projection value never changes. The [collaboration
-example](../examples/bot-collaboration/README.md#inbound-disposition-1229)
+example](../packages/bot-collaboration/README.md#inbound-disposition-1229)
 owns the row shape and acceptance.
 
 ## Required reply ingestion

@@ -1,11 +1,8 @@
 import { canonical, type Json, type RoutineCommands } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { botOutcomePorts } from '@byok-sdk/example-bot-collaboration/adapter-steps';
-import { admitUserInput } from '@byok-sdk/example-bot-collaboration/coalesce';
-import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { commitCommand, type CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { writeSnapshotBot } from '@byok-sdk/example-bot-collaboration/team';
-import { seedCollaboration, VECTOR_NOW, type CommitSubject, type SeedTeam } from '@byok-sdk/example-bot-collaboration/test-support';
+import { admitUserInput, botOutcomePorts, type CollaborationState, type CommandPorts, stateOf, writeSnapshotBot } from '@byok-sdk/bot-collaboration/host-kit';
+import { commitCommand } from '@byok-sdk/bot-collaboration/rules';
+import { type CommitSubject, seedCollaboration, type SeedTeam, VECTOR_NOW } from '@byok-sdk/bot-collaboration/testing';
 import type { HostConfig } from './store';
 
 /** The Host config of every test scope: the snapshot Bot template of the K8 vector subject (K8 commit-contract.test.ts). */

@@ -2782,9 +2782,9 @@ command name never reaches admission or a runtime `start()`. A server accepts
 only `command`, `args` and `approveTools` (`toolset-registry.ts:180`).
 `readOnlyToolsets` is the Host's list and is enforced where the Host composes
 offers: `ownReadOnlyToolsets` validates the ids
-(`examples/bot-collaboration/src/toolset-policy.ts:4`) and `admitBotToolsets`
+(`packages/bot-collaboration/src/toolset-policy.ts:4`) and `admitBotToolsets`
 refuses an execution whose `requiredToolsets` names a toolset the list does not
-hold (`examples/bot-collaboration/src/rules/team.ts:14`).
+hold (`packages/bot-collaboration/src/rules/team.ts:14`).
 
 One declaration per product toolset is enough. A toolset carrying
 `approveTools` runs on every runtime since 0.35.0: the daemon projects the
@@ -4516,7 +4516,7 @@ storage, Windows persona persistence or two-process relay.
 A dream is a background writer task that checks and tidies an Agent's memory
 against the turns a Host holds. [ADR-049](adr/ADR-049-host-owned-bot-dreaming.md)
 records the decision, and the
-[K8 README](../examples/bot-collaboration/README.md#dreaming-1475) holds the
+[K8 README](../packages/bot-collaboration/README.md#dreaming-1475) holds the
 operating details.
 
 Dreaming belongs to the Host layer. The SDK schedules nothing, stores no history

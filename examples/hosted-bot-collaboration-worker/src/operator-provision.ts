@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { tenantId } from '@byok-sdk/cloud';
 import type { CoreStores } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import type { Principal } from '@byok-sdk/example-bot-collaboration/channel';
+import type { Principal } from '@byok-sdk/bot-collaboration/host-kit';
 import type { HostConfig } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 import { sha256Hex, writeHostScope } from './host-scopes';
 

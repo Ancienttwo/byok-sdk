@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import type { CommandRecord } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
+import { type CollaborationState, stateOf } from '@byok-sdk/bot-collaboration/host-kit';
+import type { CommandRecord } from '@byok-sdk/bot-collaboration/rules';
+import { seedCollaboration } from '@byok-sdk/bot-collaboration/testing';
 import { assemble, FRAME_MAX_BYTES, split } from './layout';
 
 /** A state with each mapped map and list, optional fields in a late order, and ids that JavaScript orders itself. */

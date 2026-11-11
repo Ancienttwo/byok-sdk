@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FrozenInput } from '@byok-sdk/server/execution-core';
-import { ROOM_GRACE_MS, roomVectors, seedCollaboration, seedRoom, SYNC_OPTIONS, VECTOR_NOW, type RoomSubject,
-  type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
+import { ROOM_GRACE_MS } from '@byok-sdk/bot-collaboration/host-kit';
+import { type RoomSubject, roomVectors, seedCollaboration, seedRoom, SYNC_OPTIONS, type SyncIntentRecord, VECTOR_NOW } from '@byok-sdk/bot-collaboration/testing';
 import { storedKey } from './layout';
 import { vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';

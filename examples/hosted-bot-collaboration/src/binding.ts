@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
-import type { SyncRefusal } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { DeviceSwitchingError } from '@byok-sdk/example-bot-collaboration/migration';
+import { DeviceSwitchingError } from '@byok-sdk/bot-collaboration/host-kit';
+import type { SyncRefusal } from '@byok-sdk/bot-collaboration/rules';
 import { storedKey } from './layout';
 
 /**

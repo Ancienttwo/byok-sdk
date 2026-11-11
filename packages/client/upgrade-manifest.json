@@ -404,7 +404,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
-      "after": "K8 0.0.1 src-sha256=708b24f55f86244f",
+      "after": "K8 0.0.0 src-sha256=ef4b685c00aff257",
       "entry": "example-bot-collaboration-autonomy"
     },
     {

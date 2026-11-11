@@ -1,8 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import type { RoutineCommands } from '@byok-sdk/server/execution-core';
-import type { Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import type { CommitRequest, CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
+import type { Command, CommitRequest, CommitResult } from '@byok-sdk/bot-collaboration/host-kit';
 import { TEST_HOST } from './memory-subject.test-support';
 import { HostedCollaborationStore } from './store';
 

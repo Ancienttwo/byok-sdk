@@ -156,7 +156,7 @@ Match an echo by an exact platform message id, or by a delivery id that the plat
 Before `send` returns, and after a timeout, only a delivery id that the platform returns can match.
 Bots work together only through `delegate` ([ADR-038](architecture/adr-2026-10-13-bot-platform.md) decision 13).
 That path deduplicates by `H(taskId, 'delegate', index)`. Its hop limit is four.
-Each root has a Bot budget of 12 units ([Cross-Bot delegation](../examples/bot-collaboration/README.md#cross-bot-delegation)).
+Each root has a Bot budget of 12 units ([Cross-Bot delegation](../packages/bot-collaboration/README.md#cross-bot-delegation)).
 
 ### R6. Structured mentions
 
@@ -210,7 +210,7 @@ Use `H(channel, conversationId, platformMessageId)` as the input key.
 A redelivered platform event then maps to the same input.
 Some platforms make a message id unique only within one chat.
 Room context rules do not change. A message without a mention is background.
-A new member sees only later messages ([group chat](../examples/bot-collaboration/README.md#group-chat-and-main-bot)).
+A new member sees only later messages ([group chat](../packages/bot-collaboration/README.md#group-chat-and-main-bot)).
 Button callbacks for cards, questions and cancellation follow the R2 owner check.
 
 ## 4. Delivery state machine
@@ -266,7 +266,7 @@ So a timeout gives `unknown`, not a resend.
 
 ## 6. Acceptance scope
 
-The [Bot collaboration example](../examples/bot-collaboration/README.md#im-channel-input) implements the inbound classification of §3 and the M3 delivery outbox.
+The [Bot collaboration example](../packages/bot-collaboration/README.md#im-channel-input) implements the inbound classification of §3 and the M3 delivery outbox.
 Its owner checks include push opt-in, revocation and manual resend.
 It persists delivery rows with accepted content, commits sending before I/O, and maps sending to unknown at recovery.
 Its fake-channel contract covers reply/push routing, rejection retry limits, uncertainty, readback, echoes and final-only delivery.

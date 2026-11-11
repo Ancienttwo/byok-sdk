@@ -1,7 +1,6 @@
 import type { Pool } from 'pg';
 import { WAKE_HORIZON_MS } from '@byok-sdk/server/execution-core';
-import { ROUTINE_LATE_AFTER_MS } from '@byok-sdk/example-bot-collaboration/routines';
-import { DeviceSwitchingError } from '@byok-sdk/example-bot-collaboration/migration';
+import { DeviceSwitchingError, ROUTINE_LATE_AFTER_MS } from '@byok-sdk/bot-collaboration/host-kit';
 import { DeviceBindingError } from './binding';
 import { STORE_VERSION } from './ddl';
 import { inSchema } from './transaction';

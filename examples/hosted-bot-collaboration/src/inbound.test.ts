@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { hash } from '@byok-sdk/server/execution-core';
-import { inboundKey, type Delivery, type InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { projectInboundDispositions } from '../../bot-collaboration/src/inbound';
-import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
+import { type CollaborationState, type Delivery, inboundKey, type InboundMessage } from '@byok-sdk/bot-collaboration/host-kit';
+import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/bot-collaboration/testing';
+import { projectInboundDispositions } from '../../../packages/bot-collaboration/src/inbound';
 import { storedKey } from './layout';
 import { TEST_HOST, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';

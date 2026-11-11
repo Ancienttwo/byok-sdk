@@ -2,9 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FrozenInput } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { homeVectors, seedCollaboration, SYNC_OPTIONS, VECTOR_NOW, type HomeCalls, type HomeSubject,
-  type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
+import type { CollaborationState } from '@byok-sdk/bot-collaboration/host-kit';
+import { type HomeCalls, type HomeSubject, homeVectors, seedCollaboration, SYNC_OPTIONS, type SyncIntentRecord, VECTOR_NOW } from '@byok-sdk/bot-collaboration/testing';
 import { storedKey } from './layout';
 import { vectorClock } from './memory-subject.test-support';
 import { openHostedCloud, SKIP_HOSTED_CLOUD, type HostedCloud } from './hosted-cloud.test-support';

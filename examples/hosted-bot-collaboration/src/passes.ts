@@ -8,7 +8,7 @@ import { HostedReplyChecker, type HostedReplyPort, type ReplyCheckerOptions } fr
 import { HostedRoutineScheduler, type SchedulerOptions } from './scheduler';
 import { HostedOutboxSender, type CardConnector, type HostedHomePort, type ProjectionPort, type SendFailure, type SenderOptions } from './sender';
 import type { HostedCollaborationStore, HostedSyncOptions, SyncResult } from './store';
-import type { ChannelPort } from '@byok-sdk/example-bot-collaboration/channel';
+import type { ChannelPort } from '@byok-sdk/bot-collaboration/host-kit';
 
 /** Pass options that the deployment tunes. Each is the pass's own option type without the fields that `HostedPasses` wires. */
 export interface HostedPassTimings {

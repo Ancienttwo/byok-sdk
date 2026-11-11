@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { DEVICE_NOT_BOUND } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
+import type { CollaborationState } from '@byok-sdk/bot-collaboration/host-kit';
+import { DEVICE_NOT_BOUND } from '@byok-sdk/bot-collaboration/rules';
+import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/bot-collaboration/testing';
 import { storedKey } from './layout';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedCollaborationStore } from './store';

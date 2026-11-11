@@ -8,7 +8,7 @@
   "dependencies": {
     "@byok-sdk/cloud": "workspace:*",
     "@byok-sdk/cloud-dataplane": "workspace:*",
-    "@byok-sdk/example-bot-collaboration": "workspace:*",
+    "@byok-sdk/bot-collaboration": "workspace:*",
     "@byok-sdk/example-host-execution-core": "workspace:*",
     "@byok-sdk/server": "workspace:*",
     "pg": "^8.22.0"

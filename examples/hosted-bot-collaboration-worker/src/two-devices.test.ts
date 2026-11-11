@@ -33,7 +33,7 @@ import type { ZeroHitSession } from '../../hosted-bot-collaboration/src/zero-hit
 import { runDeviceRunner, runnerCommand, runnerOptions } from './device-runner.js';
 import { hash, taskId, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
+import { seedCollaboration } from '@byok-sdk/bot-collaboration/testing';
 import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
 import { openSubstrate, RUN, startDevice, startWorker, until, type DeviceProcess, type Substrate, type WorkerInstance } from './worker.test-support';
 
