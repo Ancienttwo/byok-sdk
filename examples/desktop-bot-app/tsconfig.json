@@ -4,8 +4,7 @@
     "lib": ["ES2022", "DOM"],
     "module": "Preserve",
     "moduleResolution": "Bundler",
-    "rewriteRelativeImportExtensions": true,
-    "erasableSyntaxOnly": true
+    "rewriteRelativeImportExtensions": true
   },
   "include": ["brand.config.ts", "src"]
 }
