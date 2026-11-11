@@ -1,11 +1,12 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ProviderStatus } from '@byok-sdk/keys';
-import { applyModelRouteChange, createModelRouteDraft, modelRouteContext, type ModelRouteChange } from '@byok-sdk/keys/model-route';
+import { applyModelRouteChange, createModelRouteDraft, modelRouteContext, modelRouteSubmission, type ModelRouteChange } from '@byok-sdk/keys/model-route';
 import { describe, expect, it, vi } from 'vitest';
 import type { CustodyChange } from '../../custody/protocol.ts';
+import { BridgeCallError } from '../bridge.ts';
 import { Receipt } from './keys-section.tsx';
-import { submitModelRoute } from './submit.ts';
+import { storedProfile, submitModelRoute, submitReplaceSecret } from './submit.ts';
 
 const context = modelRouteContext();
 const changes: ModelRouteChange[] = [
@@ -23,21 +24,42 @@ describe('keys form submission', () => {
       expect(request).toMatchObject({ op: 'configure', secret: 'test-provider-key', configuration: { profile_ref: 'zai-main', model: 'glm-4.7' } });
       return { profile_ref: 'zai-main', display_name: 'GLM main', provider_kind: 'zai', model: 'glm-4.7', secret_configured: true, profile_revision: 'r1' } as ProviderStatus;
     });
-    const result = await submitModelRoute(draft, context, submit);
+    const result = await submitModelRoute(draft, context, null, submit);
     expect(submit).toHaveBeenCalledOnce();
     expect(result.draft.secret).toBe('none');
-    if (!('receipt' in result.outcome)) throw new Error(result.outcome.error);
+    if (!('receipt' in result.outcome)) throw new Error(result.outcome.refusal.message);
     const html = renderToStaticMarkup(createElement(Receipt, { status: result.outcome.receipt }));
     expect(html).toContain('Saved GLM main');
     expect(html).not.toContain('test-provider-key');
   });
 
-  it('shows a refusal as reported, clears the key and does not resubmit', async () => {
-    const submit = vi.fn(async () => { throw new Error('Keys catalog refused: profile zai-main collides'); });
-    const result = await submitModelRoute(draft, context, submit);
+  it('shows a refusal by its code and message, clears the key and does not resubmit', async () => {
+    const submit = vi.fn(async () => { throw new BridgeCallError('method_failed', 'Keys catalog refused: profile zai-main collides'); });
+    const result = await submitModelRoute(draft, context, null, submit);
     expect(submit).toHaveBeenCalledOnce();
-    expect(result.outcome).toEqual({ error: 'Keys catalog refused: profile zai-main collides' });
+    expect(result.outcome).toEqual({ refusal: { code: 'method_failed', message: 'Keys catalog refused: profile zai-main collides' } });
     expect(result.draft.secret).toBe('none');
     expect(result.draft.profile_ref).toBe('zai-main');
+  });
+
+  it('edits a listed profile without sending its kept key or changing the default', async () => {
+    const created = modelRouteSubmission(draft, context);
+    if (!created.ok) throw new Error('the fixture draft is valid');
+    const listed = { ...created.profile, enabled: false, secret_configured: true } as unknown as ProviderStatus;
+    const editContext = modelRouteContext({ stored: storedProfile(listed) });
+    const edit = applyModelRouteChange(createModelRouteDraft(editContext), { field: 'display_name', value: 'GLM renamed' }, editContext);
+    expect(edit.secret).toBe('keep');
+    const submit = vi.fn(async (_change: CustodyChange) => ({ ...listed, display_name: 'GLM renamed', profile_revision: 'r2' }) as ProviderStatus);
+    await submitModelRoute(edit, editContext, listed, submit);
+    const change = submit.mock.calls[0]![0];
+    expect(change).toMatchObject({ op: 'configure', configuration: { profile_ref: 'zai-main', display_name: 'GLM renamed', enabled: false } });
+    expect(change).not.toHaveProperty('secret');
+  });
+
+  it('replaces a stored key through keys.submit and shows only the receipt', async () => {
+    const submit = vi.fn(async (_change: CustodyChange) => ({ profile_ref: 'zai-main', secret_configured: true }) as ProviderStatus);
+    const outcome = await submitReplaceSecret('zai-main', 'new-provider-key', submit);
+    expect(submit).toHaveBeenCalledWith({ op: 'replace_secret', profileRef: 'zai-main', secret: 'new-provider-key' });
+    expect(outcome).toEqual({ receipt: { profile_ref: 'zai-main', secret_configured: true } });
   });
 });
