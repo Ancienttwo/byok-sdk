@@ -238,7 +238,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 125565,
+      "budgetBytes": 125649,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -594,7 +594,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Hermes session runtime; loaded only when starting an execution",
-      "budgetBytes": 23910,
+      "budgetBytes": 23988,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -643,7 +643,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 564085,
+      "budgetBytes": 564163,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

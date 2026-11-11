@@ -44,7 +44,7 @@ import {
   OPERATIONAL_HEALTH_FILENAME,
 } from '../daemon/operational-health';
 import { acquireDaemonOwner } from '../util/daemon-owner';
-import { ensureSecureDir } from '../util/secure-dir';
+import { ensureSecureDir, isModeNot0700 } from '../util/secure-dir';
 import { sameContent, sameFile } from '../util/file-state';
 
 /**
@@ -583,7 +583,7 @@ async function inspectQuarantine(storeDir: string): Promise<DiagnosticsSnapshot[
   }
 }
 
-function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>, deviceReason: string | undefined): DiagnosticCheck[] {
+function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>, deviceReason: string | undefined, storeDirMode: string | undefined): DiagnosticCheck[] {
   return [
     {
       id: 'config',
@@ -614,7 +614,9 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>, deviceReason: 
     {
       id: 'control',
       status: snapshot.control.status === 'online' ? 'pass' : 'warn',
-      summary: snapshot.control.status === 'online' ? 'online' : controlOfflineSummary(snapshot.health),
+      summary: snapshot.control.status === 'online'
+        ? 'online'
+        : storeDirMode === undefined ? controlOfflineSummary(snapshot.health) : `${controlOfflineSummary(snapshot.health)}; ${storeDirMode}`,
     },
     lifecycleCheck(snapshot.lifecycle),
     clockSkewCheck(snapshot.clockSkew),
@@ -864,6 +866,12 @@ export async function collectDoctorDiagnostics(
     resume: runtime.resume,
   }));
 
+  // A daemon that could not set an owned store root to 0700 records nothing (its health file lives there), and an earlier run's lifecycle record says nothing about this start, so the current mode is the evidence.
+  const storeDirMode = control.status === 'offline'
+    && await isModeNot0700(resolvedStoreDir, 'store-root').catch(() => false)
+    ? `secure_dir_mode ${resolvedStoreDir}: the daemon requires the store directory to be 0700 and refuses to start when the filesystem or a sandbox/MAC policy will not allow setting it; move storeDir to a filesystem that honours chmod, or allow chmod / set it to 0700`
+    : undefined;
+
   const lifecycle: DiagnosticsSnapshot['lifecycle'] = liveLifecycle !== undefined
     ? { status: 'known', source: 'live', lifecycle: liveLifecycle }
     : lastAudited !== undefined
@@ -911,7 +919,7 @@ export async function collectDoctorDiagnostics(
     },
   };
   return {
-    snapshot: { ...withoutChecks, checks: checksFor(withoutChecks, deviceInspection.reason) },
+    snapshot: { ...withoutChecks, checks: checksFor(withoutChecks, deviceInspection.reason, storeDirMode) },
     runtimeEnvironment: liveRuntimeEnvironment === undefined
       ? { status: 'unknown', reason: runtimeEnvironmentUnknown }
       : { status: 'known', runtimes: liveRuntimeEnvironment.runtimes },
