@@ -1,4 +1,4 @@
-# ADR-046：SDK 不内置 Bot 产品形态，Agent 是 SDK 的单位
+# ADR-046：核心包不内置 Bot 产品形态，Agent 是核心包的单位
 
 > **来源**：owner 2026-11-03 批准。依据是 owner 与 advisor 对两种 Bot 形态的讨论：多 Bot，以及单 Bot + Channel。PR：[#1354](https://github.com/Ancienttwo/byok-sdk/pull/1354)。
 > **关联**：[ADR-038](../architecture/adr-2026-10-13-bot-platform.md)（Bot 平台与协作）、[ADR-039](ADR-039-bot-mode-product-prd.md)（Bot 模式产品方案）、[ADR-041](ADR-041-k8b-cross-bot.md)（K8b 跨 Bot）。
@@ -20,7 +20,7 @@
 
 ## 2. 决定
 
-**D1. SDK 不内置产品形态。** 多 Bot 和单 Bot + Channel 都由 Host 用同一组原语组合出来。
+**D1. 核心包不内置产品形态。** 多 Bot 和单 Bot + Channel 都由 Host 用同一组原语组合出来。
 
 **D2. SDK 的单位是 Agent，即 agentRef 加它的 home。**
 
@@ -58,8 +58,8 @@
 
 - **SDK 内置两种模式，让下游选。** 第二套参考实现没有消费者，细节只能靠猜，维护面和测试矩阵还会翻倍。
 - **在 K8 里加模式开关。** 理由见 D5。
-- **把「一个 Bot 对一个 Agent」写进发布的包，例如让 K4 按 Bot 排队。** 这样会挡住 1:N，而现有下游也不需要这样做。
+- **把「一个 Bot 对一个 Agent」写进核心包，例如让 K4 按 Bot 排队。** 这样会挡住 1:N，而现有下游也不需要这样做。
 
 ## 修订记录
 
-- **2026-11-11（owner 决定，[#1837](https://github.com/Ancienttwo/byok-sdk/issues/1837)，PR：[#1850](https://github.com/Ancienttwo/byok-sdk/pull/1850)）**：D4 原文是「发布的包里不放 Bot、群、团队的状态和规则」，后果一节据此写了「按 D4 拒绝」。D4 保护的不变量是 D1，核心原语不固化一种形态，而「发布的包」比这个不变量宽。结果是 K8 只能由下游逐文件复制，AiphaBee 的副本约 7,000 行，每次 SDK 升级都要重新复制。D4 改为「核心包不认识 Bot 的状态」，允许 K8 作为独立的包发布，后果一节删去「按 D4 拒绝」。
+- **2026-11-11（owner 决定，[#1837](https://github.com/Ancienttwo/byok-sdk/issues/1837)，PR：[#1850](https://github.com/Ancienttwo/byok-sdk/pull/1850)）**：D4 原文是「发布的包里不放 Bot、群、团队的状态和规则」，后果一节据此写了「按 D4 拒绝」。D4 保护的不变量是 D1，核心原语不固化一种形态，而「发布的包」比这个不变量宽。结果是 K8 只能由下游逐文件复制，AiphaBee 的副本约 7,000 行，每次 SDK 升级都要重新复制。D4 改为「核心包不认识 Bot 的状态」，允许 K8 作为独立的包发布，后果一节删去「按 D4 拒绝」。标题、D1 和 §4 的「写进发布的包」同步改为「核心包」。
