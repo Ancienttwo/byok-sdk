@@ -5,7 +5,9 @@ import path from 'node:path';
 export const PRIVATE_SOCKET_FALLBACK_ROOT = '/tmp';
 export const UNIX_SOCKET_PATH_SOFT_LIMIT = 100;
 export const PRIVATE_SOCKET_FALLBACK_PREFIXES = { control: 'byok', storeMutex: 'byok-store-mutex' } as const;
-const FALLBACK_LEAF = new RegExp(`^(${Object.values(PRIVATE_SOCKET_FALLBACK_PREFIXES).join('|')})-[0-9a-f]{16}$`);
+// The uid keeps users on one host out of each other's fallback directories; only this user's are recognized for reclaim.
+const FALLBACK_UID = String(process.getuid?.() ?? 'unknown');
+const FALLBACK_LEAF = new RegExp(`^(${Object.values(PRIVATE_SOCKET_FALLBACK_PREFIXES).join('|')})-${FALLBACK_UID}-[0-9a-f]{16}$`);
 
 type PrivateDirectoryRefusalCode = 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner' | 'private_dir_mode';
 
@@ -60,7 +62,7 @@ export function privateSocketEndpoint(
 ): string {
   if (!/^[0-9a-f]{16}$/.test(identity16)) throw new TypeError('private socket identity must be 16 lowercase hexadecimal digits');
   if (Buffer.byteLength(natural, 'utf8') <= UNIX_SOCKET_PATH_SOFT_LIMIT) return natural;
-  return path.join(PRIVATE_SOCKET_FALLBACK_ROOT, `${PRIVATE_SOCKET_FALLBACK_PREFIXES[kind]}-${identity16}`, 'sock');
+  return path.join(PRIVATE_SOCKET_FALLBACK_ROOT, `${PRIVATE_SOCKET_FALLBACK_PREFIXES[kind]}-${FALLBACK_UID}-${identity16}`, 'sock');
 }
 
 export async function ensureOwnedPrivateDirectory(dir: string): Promise<void> {

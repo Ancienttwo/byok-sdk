@@ -277,6 +277,12 @@ These declines are non-retryable, and their `reason` is `<rule>: <message>`. Cla
 
 **Breaking (cloud).** Enqueueing an offer whose `harnessId` the device did not advertise now throws `ByokCloudError` with code `agent_capability_missing` instead of `coordination_input_invalid`; the message is unchanged. A Host that branches on `coordination_input_invalid` for this refusal must branch on `agent_capability_missing`.
 
+## Socket fallback directories carry the uid
+
+No Host code change is required (#1759). A store whose `<storeDir>/control.sock` or `<storeDir>/mutex.sock` is longer than 100 UTF-8 bytes binds in a fallback directory under `/tmp`. Its name now carries the process uid: `/tmp/byok-<uid>-<hash>/sock` for the control socket and `/tmp/byok-store-mutex-<uid>-<hash>/sock` for the store mutex. Stores whose natural paths fit, and Windows named pipes, keep their addresses.
+
+Stop the daemon of the previous version before you upgrade such a store. A new CLI or doctor derives the new control address and cannot reach an old daemon, so it reports `daemon offline`. A new daemon started while the old one runs still refuses to start with `DaemonOwnerActiveError`: the old daemon's `daemon-owner.json` lease and the path-mutation gate do not depend on the fallback name. An empty old `/tmp/byok-<hash>` or `/tmp/byok-store-mutex-<hash>` directory left by a crashed daemon is no longer reclaimed; remove it by hand if no byok process uses it.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
