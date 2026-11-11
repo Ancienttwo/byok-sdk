@@ -107,6 +107,8 @@ describe('buildPiProviderProjection', () => {
         },
       },
     });
+    expect(() => buildPiProviderProjection({ ...profile, pi_model: { ...profile.pi_model!, api: 'openai-completions' } }, 'pi-rpc'))
+      .toThrow(expect.objectContaining({ code: 'PROVIDER_PROFILE_INVALID' }));
   });
 
   /** Pi's Anthropic SDK requests `${baseUrl}/v1/messages`; the keys client requests `modelApiUrl(base_url, 'messages')`. */

@@ -2,6 +2,7 @@ import type { ModelProviderProfile } from './provider-profile';
 import { isAbsolute } from 'node:path';
 import { ByokKeysError } from './errors';
 import { modelApiUrl } from './http';
+import { piApiOf } from './pi-api';
 import { PiModelConfigSchema } from './pi-model-config';
 
 /**
@@ -56,16 +57,20 @@ export function piProjectionProviderId(profile: ModelProviderProfile): string {
  * or base URL.
  */
 export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): object {
-  const { thinkingLevel: _, api, providerId: _providerId, ...modelSettings } = requirePiModelConfig(profile);
+  const { thinkingLevel: _, api: declaredApi, providerId: _providerId, ...modelSettings } = requirePiModelConfig(profile);
+  const api = piApiOf(profile.adapter, declaredApi);
+  if (api === undefined) {
+    throw new ByokKeysError(
+      'PROVIDER_PROFILE_INVALID',
+      `${profile.profile_ref} Anthropic profiles project anthropic-messages and declare no Pi api`,
+    );
+  }
   const projectedProviderId = piProjectionProviderId(profile);
   return {
     providers: {
       [projectedProviderId]: {
         baseUrl: profile.adapter === 'anthropic' ? piAnthropicBaseUrl(profile) : profile.base_url,
-        api:
-          profile.adapter === 'anthropic'
-            ? 'anthropic-messages'
-            : (api ?? 'openai-completions'),
+        api,
         apiKey: piApiKey(profile, runtimeEntry),
         ...(profile.auth_mode === 'bearer' ? { authHeader: true } : {}),
         models: [

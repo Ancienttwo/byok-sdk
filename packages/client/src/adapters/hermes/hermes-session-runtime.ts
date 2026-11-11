@@ -41,6 +41,8 @@ export interface HermesSessionHandle extends Session {
   awaitGatewayReady(home: string, root: number, timeoutMs: number, signal: AbortSignal | undefined): Promise<number>;
   ready(sessionId: string): void;
   prompt(text: string): void;
+  /** Whether an owned child exited without the SDK asking it to; still readable after `close()`. */
+  readonly exitedOnItsOwn: boolean;
 }
 const GATEWAY_POLL_MS = 100;
 export function createHermesSession(scratch: ExecutionScratch, root: string, liveHomes: Set<string>, interruptMs: number, dependencies: HermesSessionDependencies): HermesSessionHandle {
@@ -54,6 +56,7 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
     private gateway?: OwnedLineProcess;
     private viewer?: OwnedLineProcess;
     private connection?: AcpConnection;
+    private readonly exits: { readonly exitedOnItsOwn: boolean }[] = [];
     private readonly projection = new HermesProjection();
     private readonly queue = new AsyncQueue<AgentEvent>();
     private failure?: RuntimeExecutionFailure;
@@ -73,12 +76,17 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
       this.liveHomes.add(home);
     }
 
+    get exitedOnItsOwn(): boolean {
+      return this.exits.some((child) => child.exitedOnItsOwn);
+    }
+
     assertOpen(): void {
       if (this.stopping) throw this.failure ?? infrastructure('start', 'hermes session closed during start');
     }
 
     ownGateway(gateway: OwnedLineProcess): void {
       this.gateway = gateway;
+      this.exits.push(gateway);
       // The gateway's stdout is a banner, not a protocol. Drain it.
       gateway.onLine(() => {});
       void gateway.exited.then(() => this.exited('gateway'), (error) => this.fail(error));
@@ -86,6 +94,7 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
 
     ownViewer(viewer: OwnedLineProcess): AcpConnection {
       this.viewer = viewer;
+      this.exits.push(viewer);
       this.connection = new AcpConnection(viewer, {
         notification: (method, params) => {
           if (method !== 'session/update' || params.sessionId !== this.sessionRef) return;

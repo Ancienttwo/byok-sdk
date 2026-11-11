@@ -49,10 +49,13 @@ const compat = z.object({
 
 export type PiCompatKey = keyof z.infer<typeof compat>;
 
+/** The leading `openai-completions` compat keys, the ones the frozen prepared model wire carries. */
+const PREPARED_WIRE_COMPAT_KEYS: readonly PiCompatKey[] = ['supportsStore', 'supportsDeveloperRole',
+  'supportsReasoningEffort', 'supportsUsageInStreaming', 'maxTokensField', 'thinkingFormat', 'zaiToolStream'];
+
 /** The subset of Pi's per-API compat schema this package carries, for each Pi wire API. */
 export const PI_COMPAT_KEYS_BY_API: Readonly<Record<PiModelApi, readonly PiCompatKey[]>> = {
-  'openai-completions': ['supportsStore', 'supportsDeveloperRole', 'supportsReasoningEffort', 'supportsUsageInStreaming',
-    'maxTokensField', 'thinkingFormat', 'zaiToolStream', 'supportsLongCacheRetention', 'supportsStrictMode',
+  'openai-completions': [...PREPARED_WIRE_COMPAT_KEYS, 'supportsLongCacheRetention', 'supportsStrictMode',
     'requiresReasoningContentOnAssistantMessages', 'sendSessionAffinityHeaders'],
   'openai-responses': ['supportsDeveloperRole', 'supportsLongCacheRetention', 'supportsStrictMode'],
   'anthropic-messages': ['supportsLongCacheRetention', 'forceAdaptiveThinking', 'sendSessionAffinityHeaders',
@@ -74,8 +77,7 @@ export const PI_ANTHROPIC_PROFILE_COMPAT_KEYS: readonly PiCompatKey[] = [
  * The compat keys the frozen prepared model wire carries. The prepared runtime
  * entry refuses a profile that declares any other compat key.
  */
-export const PI_PREPARED_COMPAT_KEYS: readonly string[] = ['supportsStore', 'supportsDeveloperRole',
-  'supportsReasoningEffort', 'supportsUsageInStreaming', 'maxTokensField', 'thinkingFormat', 'zaiToolStream'];
+export const PI_PREPARED_COMPAT_KEYS: readonly string[] = PREPARED_WIRE_COMPAT_KEYS;
 
 /** Pi's `ModelInputLimitsSchema`, closed. */
 const inputLimits = z.object({

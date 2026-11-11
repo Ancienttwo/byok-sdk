@@ -12,11 +12,11 @@ import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../.
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
 import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invocation';
-import { oarStartFailure } from '../oar-start-failure';
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits';
 import { haltGate, raceDeadline, RetainedRecordBudget, RetryableOnce } from '../session-kit';
 import type { ResolvedBin } from '../codex/resolve-bin';
 import { agentPersona } from '../agent-persona';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure';
 import { OPENCODE_RUNTIME_CAPABILITIES } from './opencode-capabilities';
 import { OPENCODE_VERSION_POLICY, opencodeVersionToken } from './opencode-version';
 import { resolveOpenCodeBin } from './resolve-bin';
@@ -110,7 +110,7 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     } catch (error) {
       try { await session.close(); }
       catch (disposal) { throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal }); }
-      throw oarStartFailure(error, { classes: await import('#byok-acp-runtime'), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'opencode' });
+      throw runtimeStartFailure(error, { classify: oarStartClassifier(await import('#byok-acp-runtime')), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'opencode' });
     }
   }
 }

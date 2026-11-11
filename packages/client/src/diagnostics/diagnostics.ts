@@ -583,7 +583,15 @@ async function inspectQuarantine(storeDir: string): Promise<DiagnosticsSnapshot[
   }
 }
 
-function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>, deviceReason: string | undefined, storeDirMode: string | undefined): DiagnosticCheck[] {
+/** Audit-log records that exist but could not be read: "no record" and "unreadable" must not look alike. */
+interface UnreadableRecords { lifecycle: boolean; environment: boolean }
+
+function checksFor(
+  snapshot: Omit<DiagnosticsSnapshot, 'checks'>,
+  deviceReason: string | undefined,
+  storeDirMode: string | undefined,
+  unreadable: UnreadableRecords,
+): DiagnosticCheck[] {
   return [
     {
       id: 'config',
@@ -608,8 +616,8 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>, deviceReason: 
     },
     {
       id: 'environment',
-      status: snapshot.environment.status === 'unknown' || snapshot.environment.status.source === 'unavailable' ? 'warn' : 'pass',
-      summary: snapshot.environment.status === 'unknown' ? 'unknown' : snapshot.environment.status.source,
+      status: unreadable.environment ? 'fail' : snapshot.environment.status === 'unknown' || snapshot.environment.status.source === 'unavailable' ? 'warn' : 'pass',
+      summary: unreadable.environment ? 'unknown (audit log unreadable)' : snapshot.environment.status === 'unknown' ? 'unknown' : snapshot.environment.status.source,
     },
     {
       id: 'control',
@@ -618,7 +626,9 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>, deviceReason: 
         ? 'online'
         : storeDirMode === undefined ? controlOfflineSummary(snapshot.health) : `${controlOfflineSummary(snapshot.health)}; ${storeDirMode}`,
     },
-    lifecycleCheck(snapshot.lifecycle),
+    unreadable.lifecycle
+      ? { id: 'lifecycle', status: 'fail', summary: 'unknown (audit log unreadable)' }
+      : lifecycleCheck(snapshot.lifecycle),
     clockSkewCheck(snapshot.clockSkew),
     {
       id: 'health',
@@ -792,8 +802,8 @@ export async function collectDoctorDiagnostics(
     inspectJournal(resolvedStoreDir),
     inspectQuarantine(resolvedStoreDir),
     connectControl({ storeDir: resolvedStoreDir, productId: config.productId }),
-    readLastLifecycleRecord(resolvedStoreDir).catch(() => undefined),
-    readLastEnvironmentRecord(resolvedStoreDir).catch(() => undefined),
+    readLastLifecycleRecord(resolvedStoreDir).catch(() => 'unreadable' as const),
+    readLastEnvironmentRecord(resolvedStoreDir).catch(() => 'unreadable' as const),
     inspectServiceLogs(serviceLogDir(resolvedStoreDir)),
   ]);
 
@@ -849,7 +859,7 @@ export async function collectDoctorDiagnostics(
     runtimeEnvironmentUnknown = 'daemon-offline';
     observations = await probeRuntimes(options.adapters ?? buildRuntimeAdapters(config, resolvePiByokLauncher(config)), { timeoutMs: options.runtimeProbeTimeoutMs });
     runtimeSource = 'local-shell';
-    environment = lastEnvironment ?? { status: 'unknown' };
+    environment = lastEnvironment === 'unreadable' || lastEnvironment === undefined ? { status: 'unknown' } : lastEnvironment;
   }
   const runtimes: DiagnosticsSnapshot['runtimes'] = observations.map(runtime => ({
     idHash: stableIdentifierHash(runtime.id),
@@ -874,7 +884,7 @@ export async function collectDoctorDiagnostics(
 
   const lifecycle: DiagnosticsSnapshot['lifecycle'] = liveLifecycle !== undefined
     ? { status: 'known', source: 'live', lifecycle: liveLifecycle }
-    : lastAudited !== undefined
+    : lastAudited !== undefined && lastAudited !== 'unreadable'
       ? { status: 'known', source: 'audit', lifecycle: lastAudited.lifecycle }
       : { status: 'unknown' };
 
@@ -919,7 +929,10 @@ export async function collectDoctorDiagnostics(
     },
   };
   return {
-    snapshot: { ...withoutChecks, checks: checksFor(withoutChecks, deviceInspection.reason, storeDirMode) },
+    snapshot: { ...withoutChecks, checks: checksFor(withoutChecks, deviceInspection.reason, storeDirMode, {
+      lifecycle: liveLifecycle === undefined && lastAudited === 'unreadable',
+      environment: control.status === 'offline' && lastEnvironment === 'unreadable',
+    }) },
     runtimeEnvironment: liveRuntimeEnvironment === undefined
       ? { status: 'unknown', reason: runtimeEnvironmentUnknown }
       : { status: 'known', runtimes: liveRuntimeEnvironment.runtimes },

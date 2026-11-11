@@ -523,6 +523,47 @@ Agent-home wipe. The command checks service/daemon state; a running service
 blocks unpair. `--force` bypasses some uncertain-state checks, so it is not a
 routine reset step. Resolve unknown state before retrying.
 
+### Clearing an enrollment without running the daemon
+
+A Host that bundles `@byok-sdk/client` without the `byok-agent` bin (for example
+in an uninstaller) clears an enrollment in process, once per `storeDir`:
+
+```ts
+import { createDaemonWithAdapters, readDeviceEnrollmentStatus } from '@byok-sdk/client';
+
+const daemon = createDaemonWithAdapters({
+  productId,
+  productName,
+  serverUrl,
+  storeDir,
+  ...(nativeAssetRoot === undefined ? {} : { nativeAssetRoot }),
+  localAgentRelease,
+}, []);
+await daemon.unpair();
+const status = await readDeviceEnrollmentStatus({
+  productId,
+  storeDir,
+  ...(nativeAssetRoot === undefined ? {} : { nativeAssetRoot }),
+});
+if (status.state !== 'unpaired') throw new Error('enrollment still present');
+```
+
+- Constructing the daemon with no adapters starts nothing: `start()` is never
+  called and nothing connects to the server.
+- `unpair()` is the same `Daemon.unpair()` the CLI and a running daemon use. It
+  clears the device enrollment and the member custody entries and reads back each
+  deletion. It throws if a live daemon owns the store or any deletion does not
+  stick.
+- Unpair before deleting the data directory. `unpair()` takes the daemon owner
+  lease, which recreates `storeDir` if it is already gone.
+- On Windows, pass `nativeAssetRoot`; the native credential backend loads from it.
+- A Host that sets `deviceCredentials` (for example `macosKeychainPath`) passes the
+  same `deviceCredentials` to both `createDaemonWithAdapters` and
+  `readDeviceEnrollmentStatus`.
+- `byok-agent unpair --yes --config <file>` runs the same `Daemon.unpair()` and
+  adds the control-socket shutdown and service-status checks. The in-process
+  route has neither, so the Host keeps its own "daemon not running" guard.
+
 ## Uninstall
 
 `byok-agent uninstall --config device.json` removes the OS service registration,

@@ -20,7 +20,8 @@ import {
   type PiModelCatalogTable,
   type PiThinkingLevel,
 } from './model-route';
-import { ModelProviderProfileSchema } from './provider-profile';
+import { buildPiProviderProjection } from './pi-provider-projection';
+import { ModelProviderProfileSchema, type ModelProviderProfile } from './provider-profile';
 
 const GROQ_URL = MODEL_PROVIDER_VENDORS.groq.base_url;
 
@@ -62,6 +63,12 @@ function persisted(draft: ModelRouteDraft, context: ModelRouteContext) {
   if (!submission.ok) throw new Error(JSON.stringify(submission.errors));
   const at = '2026-10-26T00:00:00.000Z';
   return { profile: ModelProviderProfileSchema.parse({ ...submission.profile, enabled: true, created_at: at, updated_at: at }), secret: submission.secret };
+}
+
+/** The Pi api the launcher projects for a stored profile. */
+function launcherApi(profile: ModelProviderProfile): unknown {
+  const { providers } = buildPiProviderProjection(profile, 'pi-rpc') as { providers: Record<string, { api: unknown }> };
+  return Object.values(providers)[0]!.api;
 }
 
 const SYNTHETIC_CONFIG = { contextWindow: 1000, maxTokens: 100, reasoning: true, compat: {} };
@@ -440,8 +447,7 @@ describe('acceptance review fixes', () => {
   function assertDeviceAccepts(draft: ModelRouteDraft, context: ModelRouteContext): void {
     const { profile } = persisted(draft, context);
     expect(profile.model).toBe(draft.model);
-    const projected = profile.adapter === 'anthropic' ? 'anthropic-messages' : profile.pi_model?.api ?? 'openai-completions';
-    if (draft.model_api !== null) expect(projected).toBe(draft.model_api);
+    if (draft.model_api !== null) expect(launcherApi(profile)).toBe(draft.model_api);
   }
 
   it('1: offers a Host entry as unrepresentable when its config projects another api', () => {
@@ -611,6 +617,7 @@ describe('Host entries are offered only when a profile can hold them', () => {
       expect(draft.model_source, entry.model).toBe('host');
       const { profile } = persisted(draft, context);
       expect(profile.model, entry.model).toBe(entry.model);
+      expect(launcherApi(profile), entry.model).toBe(entry.api);
     }
   });
 
