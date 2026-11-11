@@ -188,7 +188,7 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
           // close() rejects the pending prompt on purpose; that is not a turn failure.
           if (this.stopping) return;
           this.fail(error instanceof AcpRpcError && error.details === 'admitted_turn_failed'
-            ? new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'hermes turn failed' })
+            ? new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: 'hermes turn failed' })
             : error);
         },
       ).finally(() => {
@@ -247,7 +247,7 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
     }
 
     private exited(which: string): void {
-      if (!this.stopping) this.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable',
+      if (!this.stopping) this.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable',
         reason: `hermes ${which} exited`, failure: { class: 'runtime_exited' } }));
     }
 

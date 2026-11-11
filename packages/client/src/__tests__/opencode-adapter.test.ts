@@ -78,7 +78,7 @@ for (const version of ['1.18.35', 'opencode v2.0.26']) {
       const wrong = path.join(box.cwd, 'elsewhere');
       box.env.FAKE_ACP_LISTED_CWD = wrong;
       await expect(box.start('hello', first.sessionRef)).rejects.toMatchObject({
-        name: 'RuntimeExecutionFailure', phase: 'start', category: 'authority', retry: 'non-retryable',
+        name: 'RuntimeExecutionFailure', phase: 'start', retry: 'non-retryable',
       });
       expect(box.facts().filter(fact => fact.kind === 'open' && fact.method === 'session/resume')).toHaveLength(1);
       expect(box.facts().filter(fact => fact.kind === 'prompt')).toHaveLength(2);
@@ -281,7 +281,7 @@ it.each([
   const session = await box.start('opencode-limit');
   const admitted = session.sessionRef;
   await expect((async () => { for await (const event of session.events) events.push(event as AgentEvent); })()).rejects.toMatchObject({
-    message: 'Rate limit exceeded', phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'rate_limited' },
+    message: 'Rate limit exceeded', phase: 'run', retry: 'non-retryable', failure: { class: 'rate_limited' },
   });
   expect(events).toEqual([]);
   expect(session.sessionRef).toBe(admitted);
@@ -299,7 +299,7 @@ it.each([
   const box = setup('1.18.35');
   const session = await box.start(prompt);
   await expect((async () => { for await (const _event of session.events); })()).rejects.toMatchObject({
-    message, phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: failureClass },
+    message, phase: 'run', retry: 'non-retryable', failure: { class: failureClass },
   });
   expect(box.facts().filter(fact => fact.kind === 'prompt')).toHaveLength(1);
   expect(box.facts().some(fact => fact.kind === 'open' && fact.method === 'session/resume')).toBe(false);
@@ -309,13 +309,13 @@ it.each([
 it('classifies OpenCode process exits during start and a turn', async () => {
   const opening = setup('1.18.35', { FAKE_ACP_INITIALIZE: 'exit' });
   await expect(opening.start('hello')).rejects.toMatchObject({
-    phase: 'start', category: 'infrastructure', retry: 'retryable', failure: { class: 'runtime_exited' },
+    phase: 'start', retry: 'retryable', failure: { class: 'runtime_exited' },
   });
   vi.unstubAllEnvs();
   const running = setup();
   const session = await running.start('exit');
   await expect(collect(session)).rejects.toMatchObject({
-    phase: 'run', category: 'infrastructure', retry: 'non-retryable', failure: { class: 'runtime_exited' },
+    phase: 'run', retry: 'non-retryable', failure: { class: 'runtime_exited' },
   });
 });
 
@@ -325,14 +325,14 @@ it('validates the shared session limits', () => {
 });
 
 it('normalizes startup failures to start while retaining native classification', async () => {
-  for (const { env, category, failure } of [
-    { env: { FAKE_ACP_INITIALIZE: 'error' }, category: 'infrastructure', failure: 'unknown' },
-    { env: { FAKE_ACP_INITIALIZE: 'auth' }, category: 'authority', failure: 'auth' },
-    { env: { FAKE_ACP_MODEL_READBACK: 'fixture/wrong' }, category: 'authority', failure: 'unknown' },
+  for (const { env, failure } of [
+    { env: { FAKE_ACP_INITIALIZE: 'error' }, failure: 'unknown' },
+    { env: { FAKE_ACP_INITIALIZE: 'auth' }, failure: 'auth' },
+    { env: { FAKE_ACP_MODEL_READBACK: 'fixture/wrong' }, failure: 'unknown' },
   ]) {
     const box = setup('1.18.35', env as Record<string, string>);
     const error = await box.start('hello').then(() => undefined, error => error);
-    expect(error).toMatchObject({ phase: 'start', category, failure: { class: failure } });
+    expect(error).toMatchObject({ phase: 'start', failure: { class: failure } });
     expect(projectRuntimeBoundaryFailure(error, 'start')).toMatchObject({ contractViolation: false, failure: { class: failure } });
   }
 });
@@ -342,7 +342,7 @@ it('settles an opening budget kill before disposing the native session', async (
   const adapter = new OpenCodeAdapter({ models, maxRetainedBytes: 1, resolveBin: () => ({ command: fake, source: 'env' }) });
   const error = await startPreparedOperation(adapter, { instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env })
     .then(() => undefined, error => error);
-  expect(error).toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start', category: 'infrastructure',
+  expect(error).toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start',
     message: 'opencode retained record byte budget exceeded' });
   expect(box.facts().some(fact => fact.kind === 'prompt' || fact.kind === 'close')).toBe(false);
   const started = box.facts().find(fact => fact.kind === 'start')!;

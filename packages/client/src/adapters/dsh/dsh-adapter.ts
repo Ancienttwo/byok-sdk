@@ -102,9 +102,9 @@ export interface DshAdapterOptions {
 }
 
 const authority = (reason: string) =>
-  new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+  new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
 const infrastructure = (reason: string, failure?: TaskFailure) =>
-  new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason, failure });
+  new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason, failure });
 
 /** `dsh --profile acp --help` exits 0 when the acp profile resolves; it also writes that profile into a new root. */
 function probeAcpProfile(command: string, root: string, env: Record<string, string>): Promise<boolean> {
@@ -357,7 +357,6 @@ class DshSession implements Session {
       if (turn.kind === 'failed') {
         this.fail(new RuntimeExecutionFailure({
           phase: 'run',
-          category: 'semantic',
           retry: turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
           reason: turn.reason,
           failure: { class: turn.failure },

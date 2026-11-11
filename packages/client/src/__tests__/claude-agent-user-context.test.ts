@@ -135,7 +135,7 @@ describe('claudeAgentUserContextSettings', () => {
     let failure: unknown;
     try { claudeAgentUserContextSettings(manifest, env, platform, () => '/Users/u', same); } catch (error) { failure = error; }
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     const reason = (failure as Error).message;
     expect(reason).not.toMatch(/agents|Users|cfg|[A-Z]:\\/);
   });

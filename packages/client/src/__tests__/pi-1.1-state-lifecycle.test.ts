@@ -40,7 +40,7 @@ describe('Pi 1.1 settlement control', () => {
     expect(types.at(-1)).toBe('usage');
     expect(types).not.toContain('turn_end');
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ category: 'semantic', retry: 'non-retryable', message: 'pi run aborted before completion' });
+    expect(failure).toMatchObject({ retry: 'non-retryable', message: 'pi run aborted before completion' });
   });
   it('acknowledges requested interruption after native aborted settlement', async () => {
     const session = await start('fake normal completion');

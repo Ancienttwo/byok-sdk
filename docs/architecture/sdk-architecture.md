@@ -556,7 +556,7 @@ Library exports 分成六组：
 | 组 | 主要 public API |
 | --- | --- |
 | daemon | `createDaemon`、`createDaemonWithAdapters`、`Daemon*`、credential-blind `readDeviceEnrollmentStatus` / `readDeviceEnrollmentIdentity` / `DeviceEnrollment*`、按 operation allowlist 限定的 `createStoredDeviceProofSigner`（不外泄私钥）、`BlobClient`；`AuthManager`、secret-bearing local record/store、`StoredDeviceProofSigner` 均为 package-internal |
-| adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`RuntimeExecutionFailure` 及其 closed phase/category/retry types、`RuntimeDisposalFailure` 及 stage、`PolicyUnsupportedError` |
+| adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`RuntimeExecutionFailure` 及其 closed phase/retry types、`RuntimeDisposalFailure` 及 stage、`PolicyUnsupportedError` |
 | bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter`、`HermesAdapter` 与 `GrokAdapter`（后两者是 custom harness，Host 显式加入）与 options |
 | observability | `DaemonObserver`、event/task projection types |
 | OS integration | service lifecycle factories/generators、`ensureSecureDir`、Windows DACL error |
@@ -571,8 +571,7 @@ session，也不得读取 credential value；旧 direct `start()` contract 不�
 
 post-admission failure 也只有一条 authority seam：prepared operation 的
 `start()` 或已发布 `Session.events` 以 frozen `RuntimeExecutionFailure` 终止，
-并显式携带 `phase: start|run`、`category:
-semantic|infrastructure|authority` 与 `retry: retryable|non-retryable`。
+并显式携带 `phase: start|run` 与 `retry: retryable|non-retryable`。
 provider adapter 负责把 native terminal frame、session identity、spawn/exit/
 transport 事实翻译到这组 closed vocabulary；`TaskRunner` 只做 exhaustive
 wire projection，不读 message、stderr 或 `AgentEvent.error` 猜 retryability。
@@ -875,7 +874,7 @@ sequenceDiagram
       TR-->>Cloud: task.complete
       Cloud->>Store: Running to Complete
     else typed runtime execution failure
-      AD-->>TR: RuntimeExecutionFailure phase/category/retry
+      AD-->>TR: RuntimeExecutionFailure phase/retry
       TR->>J: record terminal bytes as pending
       TR-->>Cloud: task.fail
       Cloud->>Store: non-terminal to Failed

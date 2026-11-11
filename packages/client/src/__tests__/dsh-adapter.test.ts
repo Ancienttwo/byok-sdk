@@ -236,7 +236,7 @@ describe('DshAdapter sessions', () => {
   it('fails closed on tool arguments that are not a JSON object', async () => {
     const { open } = await setup();
     const error = await turn(await open({ instruction: 'bad-input' })).catch((caught: unknown) => caught);
-    expect(error).toMatchObject({ category: 'authority', retry: 'non-retryable', message: expect.stringMatching(/not a JSON object/) });
+    expect(error).toMatchObject({ retry: 'non-retryable', message: expect.stringMatching(/not a JSON object/) });
   });
 
   it('stops dsh before it reports turn_end, drops what follows and refuses a follow-up', async () => {
@@ -257,7 +257,7 @@ describe('DshAdapter sessions', () => {
     const events = turn(session);
     await session.interrupt();
     await events;
-    await expect(session.steer('late')).rejects.toMatchObject({ category: 'infrastructure', message: 'runtime exited' });
+    await expect(session.steer('late')).rejects.toMatchObject({ message: 'runtime exited' });
   });
 
   it('fails a turn dsh rejects as a non-retryable semantic failure with its native class', async () => {
@@ -265,20 +265,20 @@ describe('DshAdapter sessions', () => {
     const session = await open({ instruction: 'fail' });
     const error = await turn(session).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(error).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'auth' } });
+    expect(error).toMatchObject({ phase: 'run', retry: 'non-retryable', failure: { class: 'auth' } });
     expect((error as Error).message).toMatch(/invalid api key/);
   });
 
   it('retries a native rate limit', async () => {
     const { open } = await setup();
     const error = await turn(await open({ instruction: 'rate-limit' })).catch((caught: unknown) => caught);
-    expect(error).toMatchObject({ phase: 'run', category: 'semantic', retry: 'retryable', failure: { class: 'rate_limited' } });
+    expect(error).toMatchObject({ phase: 'run', retry: 'retryable', failure: { class: 'rate_limited' } });
   });
 
   it('fails the session when dsh exits during a turn', async () => {
     const { open } = await setup();
     const error = await turn(await open({ instruction: 'exit' })).catch((caught: unknown) => caught);
-    expect(error).toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
+    expect(error).toMatchObject({ failure: { class: 'runtime_exited' } });
   });
 
   it('interrupts with the native cancel and ends the turn', async () => {
@@ -296,7 +296,7 @@ describe('DshAdapter sessions', () => {
     const { open, facts } = await setup();
     const session = await open({ instruction: 'hang' });
     await expect.poll(async () => (await facts()).some((fact) => fact.method === 'prompt')).toBe(true);
-    await expect(session.interrupt()).rejects.toMatchObject({ category: 'infrastructure', message: 'dsh interrupt refused: Process table ps: timeout after 5000 ms' });
+    await expect(session.interrupt()).rejects.toMatchObject({ message: 'dsh interrupt refused: Process table ps: timeout after 5000 ms' });
     expect((await facts()).some((fact) => fact.method === 'cancel')).toBe(false);
     await expect.poll(async () => (await facts()).some((fact) => fact.method === 'dispose')).toBe(true);
   });
@@ -328,23 +328,23 @@ describe('DshAdapter sessions', () => {
 
   it('fails a resume of an unknown session or another workspace as a non-retryable authority failure', async () => {
     const { open, workspaceDir } = await setup();
-    await expect(open({ instruction: 'x', sessionRef: 'unknown-session' })).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    await expect(open({ instruction: 'x', sessionRef: 'unknown-session' })).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable' });
     const first = await open();
     await turn(first);
     const sessionRef = first.sessionRef;
     await first.close();
-    await expect(open({ instruction: 'x', sessionRef }, { workspaceDir: await tempDir('bdo-') })).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', message: expect.stringContaining(workspaceDir) });
+    await expect(open({ instruction: 'x', sessionRef }, { workspaceDir: await tempDir('bdo-') })).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', message: expect.stringContaining(workspaceDir) });
   });
 
   it('refuses a dsh without steer as a non-retryable authority failure', async () => {
     const { open } = await setup({}, { FAKE_DSH_NO_STEER: '1' });
-    await expect(open()).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+    await expect(open()).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
   });
 
   it('fails closed when a request does not run the configured route', async () => {
     const { open } = await setup({}, { FAKE_DSH_ROUTE: 'deepseek-official/deepseek-v4-flash' });
     const error = await turn(await open()).catch((caught: unknown) => caught);
-    expect(error).toMatchObject({ category: 'authority', retry: 'non-retryable', message: expect.stringMatching(/provider route and model/) });
+    expect(error).toMatchObject({ retry: 'non-retryable', message: expect.stringMatching(/provider route and model/) });
   });
 
   it('passes the configured sandbox mode', async () => {

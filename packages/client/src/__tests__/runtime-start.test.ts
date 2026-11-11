@@ -30,7 +30,7 @@ it('closes, then refuses a session that lacks the progressStartsMessage its desc
     descriptor('session'), new AbortController().signal, 1_000).catch(e => e);
   expect(close).toHaveBeenCalledTimes(1);
   expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-  expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+  expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable' });
   expect(error.message).toMatch(/^runtime_session_incomplete: /);
 });
 

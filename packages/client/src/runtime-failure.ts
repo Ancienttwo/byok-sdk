@@ -4,9 +4,6 @@ import { RUNTIME_FAILURE_CLASSES, RUNTIME_QUOTA_SCOPES } from '@byok-sdk/protoco
 /** Closed lifecycle phases for failures after an offer has been admitted. */
 export type RuntimeFailurePhase = 'start' | 'run';
 
-/** Closed semantic axis. Retryability is explicit and is never inferred from this field. */
-export type RuntimeFailureCategory = 'semantic' | 'infrastructure' | 'authority';
-
 /** The adapter's explicit retry judgment consumed by TaskRunner. */
 export type RuntimeRetryDisposition = 'retryable' | 'non-retryable';
 
@@ -21,7 +18,6 @@ export interface RuntimeDisposalFailureInput {
 
 export interface RuntimeExecutionFailureInput {
   phase: RuntimeFailurePhase;
-  category: RuntimeFailureCategory;
   retry: RuntimeRetryDisposition;
   /** Stable operator-facing reason. Provider diagnostics may be included, but are never parsed by TaskRunner. */
   reason: string;
@@ -84,14 +80,12 @@ export function isRuntimeDisposalFailure(value: unknown): value is RuntimeDispos
  */
 export class RuntimeExecutionFailure extends Error {
   readonly phase: RuntimeFailurePhase;
-  readonly category: RuntimeFailureCategory;
   readonly retry: RuntimeRetryDisposition;
   readonly failure: TaskFailure;
 
   constructor(input: RuntimeExecutionFailureInput, options?: ErrorOptions) {
     const failure = input.failure ?? UNKNOWN_FAILURE;
     if (!isRuntimeFailurePhase(input.phase)
-      || !isRuntimeFailureCategory(input.category)
       || !isRuntimeRetryDisposition(input.retry)
       || typeof input.reason !== 'string'
       || input.reason.length === 0
@@ -101,7 +95,6 @@ export class RuntimeExecutionFailure extends Error {
     super(input.reason, options);
     this.name = 'RuntimeExecutionFailure';
     this.phase = input.phase;
-    this.category = input.category;
     this.retry = input.retry;
     this.failure = Object.freeze({ ...failure });
     Object.defineProperty(this, RUNTIME_EXECUTION_FAILURE_BRAND, { value: true });
@@ -133,10 +126,6 @@ function isRuntimeFailurePhase(value: unknown): value is RuntimeFailurePhase {
   return value === 'start' || value === 'run';
 }
 
-function isRuntimeFailureCategory(value: unknown): value is RuntimeFailureCategory {
-  return value === 'semantic' || value === 'infrastructure' || value === 'authority';
-}
-
 function isRuntimeRetryDisposition(value: unknown): value is RuntimeRetryDisposition {
   return value === 'retryable' || value === 'non-retryable';
 }
@@ -146,14 +135,12 @@ export function isRuntimeExecutionFailure(value: unknown): value is RuntimeExecu
   const candidate = value as {
     readonly [RUNTIME_EXECUTION_FAILURE_BRAND]?: unknown;
     readonly phase?: unknown;
-    readonly category?: unknown;
     readonly retry?: unknown;
     readonly failure?: unknown;
     readonly message?: unknown;
   };
   return candidate[RUNTIME_EXECUTION_FAILURE_BRAND] === true
     && isRuntimeFailurePhase(candidate.phase)
-    && isRuntimeFailureCategory(candidate.category)
     && isRuntimeRetryDisposition(candidate.retry)
     && isTaskFailure(candidate.failure)
     && typeof candidate.message === 'string'

@@ -207,7 +207,7 @@ describe('GrokAdapter sessions', () => {
     expect(facts(resources.log).find(fact => fact.kind === 'open')).toMatchObject({ method: 'session/resume', params: { sessionId: 'fake-grok-session' } });
     const missing = await startPreparedOperation(adapter(), { instruction: 'again', sessionRef: 'gone' }, await ctx()).catch(error => error);
     expect(missing).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(missing).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(missing).toMatchObject({ phase: 'start', retry: 'non-retryable' });
   });
 
   it('selects the adapter model and fails closed on a refused model or login', async () => {
@@ -216,9 +216,9 @@ describe('GrokAdapter sessions', () => {
     await turn(s);
     expect(facts(resources.log).find(fact => fact.kind === 'model')?.params).toMatchObject({ sessionId: 'fake-grok-session', modelId: 'grok-fixture' });
     const refusedModel = await startPreparedOperation(adapter({ model: 'no-such-model' }), { instruction: 'x' }, await ctx()).catch(error => error);
-    expect(refusedModel).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(refusedModel).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     const refusedLogin = await startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_AUTH: 'refuse' })).catch(error => error);
-    expect(refusedLogin).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(refusedLogin).toMatchObject({ phase: 'start', retry: 'non-retryable' });
   });
 
   it('rejects steer with the typed error and a follow-up that names a selection', async () => {
@@ -270,7 +270,7 @@ describe('GrokAdapter sessions', () => {
     const resources = await ctx();
     const s = await open(adapter(), { instruction: 'hold' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
-    await expect(s.interrupt()).rejects.toMatchObject({ category: 'infrastructure', message: 'grok interrupt refused: Process table ps: timeout after 5000 ms' });
+    await expect(s.interrupt()).rejects.toMatchObject({ message: 'grok interrupt refused: Process table ps: timeout after 5000 ms' });
     expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(false);
   });
 
@@ -279,14 +279,14 @@ describe('GrokAdapter sessions', () => {
     const s = await open(adapter({ interruptTimeoutMs: 200 }), { instruction: 'hold-silent' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
     await expect(s.interrupt()).rejects.toThrow('grok interrupt timed out');
-    expect(await failureOf(s)).toMatchObject({ category: 'infrastructure' });
+    expect(await failureOf(s)).toMatchObject({ phase: 'run', retry: 'non-retryable' });
   });
 
   it('maps prompt errors to semantic failures, retryable only when rate limited', async () => {
     const failed = await failureOf(await open(adapter(), { instruction: 'fail' }, await ctx()));
-    expect(failed).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'Internal error' });
+    expect(failed).toMatchObject({ phase: 'run', retry: 'non-retryable', message: 'Internal error' });
     const limited = await failureOf(await open(adapter(), { instruction: 'rate-limited' }, await ctx()));
-    expect(limited).toMatchObject({ phase: 'run', category: 'semantic', retry: 'retryable' });
+    expect(limited).toMatchObject({ phase: 'run', retry: 'retryable' });
   });
 
   it('passes the vendored OAR failure class through, with the reason unchanged (#869)', async () => {
@@ -312,7 +312,7 @@ describe('GrokAdapter sessions', () => {
 
   it('marks an agent exit during the open runtime_exited, and an open it did not end unknown (#869)', async () => {
     await expect(startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'exit' }))).rejects.toMatchObject({
-      phase: 'start', category: 'infrastructure', failure: { class: 'runtime_exited' },
+      phase: 'start', failure: { class: 'runtime_exited' },
     });
     // The kernel kills the agent itself after the refused initialize.
     await expect(startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'error' }))).rejects.toMatchObject({
@@ -323,7 +323,7 @@ describe('GrokAdapter sessions', () => {
   it('sends unknown for a class OAR took from error text, keeping the retry it derives (#869)', async () => {
     const failed = await failureOf(await open(adapter(), { instruction: 'fail-text:429 rate limit' }, await ctx()));
     expect(failed).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failed).toMatchObject({ phase: 'run', category: 'semantic', retry: 'retryable', message: 'Internal error: 429 rate limit' });
+    expect(failed).toMatchObject({ phase: 'run', retry: 'retryable', message: 'Internal error: 429 rate limit' });
     expect((failed as RuntimeExecutionFailure).failure).toEqual({ class: 'unknown' });
   });
 
@@ -333,7 +333,7 @@ describe('GrokAdapter sessions', () => {
     const failure = await open(adapter({ maxRetainedBytes: 64 * 1024 }), { instruction: 'huge' }, resources)
       .then(failureOf, (error) => error);
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ category: 'infrastructure', message: 'grok retained record byte budget exceeded' });
+    expect(failure).toMatchObject({ message: 'grok retained record byte budget exceeded' });
     await Promise.all(sessions.map(s => s.close()));
     const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
     if (process.platform !== 'win32') await vi.waitFor(() => expect(() => process.kill(started!.pid, 0)).toThrow());
@@ -346,7 +346,7 @@ describe('GrokAdapter sessions', () => {
     vi.spyOn(GrokProjection.prototype, 'consume').mockImplementation(() => { throw new Error('projection failed'); });
     // The cancel request is the next record: the failing consumer sees it.
     await s.interrupt().catch(() => {});
-    expect(await failureOf(s)).toMatchObject({ category: 'infrastructure', message: 'projection failed' });
+    expect(await failureOf(s)).toMatchObject({ message: 'projection failed' });
     await s.close();
     const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
     if (process.platform !== 'win32') await vi.waitFor(() => expect(() => process.kill(started!.pid, 0)).toThrow());
@@ -354,7 +354,7 @@ describe('GrokAdapter sessions', () => {
 
   it('fails as infrastructure when the agent exits on its own', async () => {
     const failure = await failureOf(await open(adapter(), { instruction: 'exit' }, await ctx()));
-    expect(failure).toMatchObject({ category: 'infrastructure', message: 'grok agent exited' });
+    expect(failure).toMatchObject({ message: 'grok agent exited' });
   });
 
   it('reports a failed terminal reap from close, even after the agent failed, and retries it', async () => {
@@ -444,7 +444,7 @@ describe('GrokAdapter agentUserMcpServers (#935)', () => {
       const resources = await agentCtx({ FAKE_ACP_INSPECT: inspect });
       const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), { instruction: 'hello' }, resources).catch(e => e);
       expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-      expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', message: reason, failure: { class: 'unknown' } });
+      expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', message: reason, failure: { class: 'unknown' } });
       expect(kinds(resources.log)).toEqual(['inspect']);
     }
   });
@@ -534,14 +534,14 @@ describe('AgyAdapter', () => {
   it('refuses an MCP entry carrying env as a non-retryable authority failure', async () => {
     const home = await agyVersion('1.5.1');
     const failure = await open(agy(home), { instruction: 'hello' }, { ...await agyCtx(), mcpServers: { host: { command: 'server', env: { TOKEN: 'x' } } } }).catch(error => error);
-    expect(failure).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     expect(String(failure.message)).toContain('it attaches no entry with env or headers');
   });
 
   it('resumes only on a listed saved cwd', async () => {
     const home = await agyVersion('1.5.1');
     const unlisted = await open(agy(home), { instruction: 'again', sessionRef: 'fake-grok-session' }, await agyCtx()).catch(error => error);
-    expect(unlisted).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(unlisted).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     const resources = await agyCtx();
     const s = await open(agy(home), { instruction: 'again', sessionRef: 'fake-grok-session' }, { ...resources, env: { ...resources.env, FAKE_ACP_LISTED_CWD: resources.workspaceDir } });
     expect(s.sessionRef).toBe('fake-grok-session');
@@ -567,13 +567,13 @@ describe('AgyAdapter', () => {
   it('fails a task without a key as authority, and one whose proxy cannot start as retryable, before agy runs', async () => {
     const home = await agyVersion('1.5.1');
     const resources = await ctx();
-    expect(await open(agy(home), { instruction: 'hello' }, resources).catch(error => error)).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(await open(agy(home), { instruction: 'hello' }, resources).catch(error => error)).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     const refused = await agyCtx();
     const listen = vi.spyOn(Server.prototype, 'listen').mockImplementationOnce(function (this: Server) {
       process.nextTick(() => this.emit('error', new Error('no port')));
       return this;
     });
-    expect(await open(agy(home), { instruction: 'hello' }, refused).catch(error => error)).toMatchObject({ phase: 'start', category: 'infrastructure', retry: 'retryable' });
+    expect(await open(agy(home), { instruction: 'hello' }, refused).catch(error => error)).toMatchObject({ phase: 'start', retry: 'retryable' });
     listen.mockRestore();
     expect(existsSync(resources.log) || existsSync(refused.log)).toBe(false);
   });
@@ -590,7 +590,7 @@ describe('AgyAdapter', () => {
     const observe = vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
     const resources = await agyCtx();
     const s = await open(agy(home), { instruction: 'hello' }, resources);
-    expect(await failureOf(s)).toMatchObject({ category: 'infrastructure', message: 'Process table ps: timeout after 5000 ms' });
+    expect(await failureOf(s)).toMatchObject({ message: 'Process table ps: timeout after 5000 ms' });
     expect(facts(resources.log).some(fact => fact.kind === 'close')).toBe(true);
     const start = facts(resources.log).find(fact => fact.kind === 'start')!;
     expect(() => process.kill(start.pid, 0)).toThrow();
@@ -636,7 +636,7 @@ describe('AgyAdapter', () => {
     expect(facts(read.log).find(fact => fact.kind === 'permission')?.answer).toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
     const write = await agyCtx();
     const failure = await failureOf(await open(agy(home), { instruction: `agy-ask:edit:${path.join(agentHome, 'MEMORY.md')}` }, reader(write)));
-    expect(failure).toMatchObject({ category: 'semantic', retry: 'non-retryable', message: expect.stringContaining('refused write') });
+    expect(failure).toMatchObject({ retry: 'non-retryable', message: expect.stringContaining('refused write') });
     expect(facts(write.log).find(fact => fact.kind === 'permission')?.answer).toEqual({ outcome: { outcome: 'selected', optionId: 'deny' } });
   });
 
@@ -652,6 +652,6 @@ describe('AgyAdapter', () => {
   it('refuses a steer after the turn ends as an infrastructure failure', async () => {
     const s = await open(agy(await agyVersion('1.5.1')), { instruction: 'hello' }, await agyCtx());
     await turn(s);
-    await expect(s.steer('late')).rejects.toMatchObject({ category: 'infrastructure', message: 'runtime exited' });
+    await expect(s.steer('late')).rejects.toMatchObject({ message: 'runtime exited' });
   });
 });

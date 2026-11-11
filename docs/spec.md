@@ -1840,19 +1840,19 @@ misconfiguration. A production counter is no longer on that list.
 
 After claim, every expected adapter failure crosses one of two boundaries as a
 `RuntimeExecutionFailure`: `start` before a `Session` is published, or `run`
-from the published Session's event iterator. The failure carries two
-independent closed axes: `category` is `semantic`, `infrastructure`, or
-`authority`; `retry` is explicitly `retryable` or `non-retryable` and is never
-derived from category or reason text.
+from the published Session's event iterator. Its `retry` is explicitly
+`retryable` or `non-retryable` and is never derived from reason text. It has
+no other classification axis: `retry` is the only retry authority and
+`failure` (below) the only failure class (#1758).
 
-OAR start error classification for Grok, agy, Codex, dsh and OpenCode is owned by `packages/client/src/adapters/oar-start-failure.ts`. An archived resume target is an authority failure and non-retryable; a target in use is an infrastructure failure and retryable.
+OAR start error classification for Grok, agy, Codex, dsh and OpenCode is owned by `packages/client/src/adapters/oar-start-failure.ts`. An archived resume target is non-retryable; a target in use is retryable.
 
-- Vendor-native terminal task failure is semantic and non-retryable unless the
-  provider supplies structured retry authority.
+- Vendor-native terminal task failure is non-retryable unless the provider
+  supplies structured retry authority.
 - Spawn, transport, or child-process disappearance before native terminal
-  evidence is infrastructure and retryable.
+  evidence is retryable.
 - Session identity mismatch, malformed authoritative frames, or sealed
-  operation-manifest drift is authority and non-retryable.
+  operation-manifest drift is non-retryable.
 - A bare throw, wrong-phase typed failure, or Session iterator that ends
   without `turn_end` or a typed failure is an adapter-contract violation. It
   produces one stable non-retryable failure; TaskRunner does not inspect the

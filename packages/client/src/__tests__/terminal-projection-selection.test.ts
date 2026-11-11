@@ -264,7 +264,7 @@ describe('submit_result: stage, ack and turn_end', () => {
     const { adapter, runner, sent, hostStorageRoot } = await harness();
     await offerResult(runner, 'failed-task');
     await runner.submitAgentResult({ contextToken: resultToken(adapter), outcome: { verdict: 'pass', score: 3 } });
-    adapter.sessions[0]!.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'retryable', reason: 'runtime exited' }));
+    adapter.sessions[0]!.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'retryable', reason: 'runtime exited' }));
     expect((await waitForTerminal(sent, 'failed-task')).type).toBe('task.fail');
     noDocumentAnywhere(sent);
     // The staged record stays as local audit evidence only.

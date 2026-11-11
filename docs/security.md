@@ -168,8 +168,8 @@ alter an already admitted operation, and the public interface has no direct
 `start()` fallback.
 
 Post-admission retryability has one typed authority. Expected start/run
-failures must be a frozen `RuntimeExecutionFailure` with closed phase,
-category, and explicit retry disposition. TaskRunner never classifies a
+failures must be a frozen `RuntimeExecutionFailure` with a closed phase and
+an explicit retry disposition. TaskRunner never classifies a
 provider error by regex, substring, exit prose, or an `AgentEvent.error`.
 Unknown throws, wrong-phase failures, and clean iterator completion without
 `turn_end` fail closed as a stable, non-retryable adapter-contract violation;

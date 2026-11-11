@@ -313,6 +313,10 @@ Upgrade only when it returns 0. If it does not, stay on the previous version and
 
 A rotation leaves a version 1 row in place when its sender is no longer a current member of the scope, so the count can stay above 0. If version 1 rows remain after the rotation, stay on the previous version and open an issue: the SDK has no automatic way to re-wrap them.
 
+## Runtime failures have no category
+
+`RuntimeExecutionFailure` and `RuntimeExecutionFailureInput` no longer have a `category` field, and `RuntimeFailureCategory` is no longer exported from `@byok-sdk/client` or `@byok-sdk/client/adapters` (#1758). Nothing read it: `retry` is the only retry authority and `failure` the only failure class, and the wire projection (`reason`, `retryable`, `failure`) is unchanged. A Host or runtime adapter that constructs a `RuntimeExecutionFailure` deletes the `category` key from the input object; TypeScript reports it as an unknown property until then. Code that names `RuntimeFailureCategory` or reads `.category` deletes that reference.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
