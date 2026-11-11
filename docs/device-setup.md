@@ -667,6 +667,8 @@ IPv4); a key check reports it as `unreachable`. The SDK's Pi hosts set a
 Host's own process, and the Host owns that process's network defaults: call
 `net.setDefaultAutoSelectFamilyAttemptTimeout(3000)` from `node:net` at process
 start, or start Node with `--network-family-autoselection-attempt-timeout=3000`.
+A Bun-compiled Host accepts the same call, but it has no effect on Bun's own
+`fetch`, which resolves and connects natively without `node:net`.
 
 ## Directory ownership
 

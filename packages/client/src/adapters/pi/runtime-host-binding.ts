@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import net from 'node:net';
 
 /**
- * #1730: Node's 250 ms per-family attempt aborts a working but slow IPv4
- * connect after an unreachable IPv6 one. The Pi host owns its process, so
+ * #1730: Node's 250 ms per-address attempt timeout aborts a working but slow
+ * IPv4 connect after an unreachable IPv6 one. The Pi host owns its process, so
  * its entry sets the process-wide `net` default that global fetch uses; the
  * explicit call replaces any `--network-family-autoselection-attempt-timeout`.
  */
