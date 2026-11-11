@@ -162,13 +162,16 @@ describe('Daemon.whenTaskSettled', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const { d } = await started(new StubRuntimeAdapter());
-      let settlement: Promise<DaemonTaskSettlement> | undefined;
+      // The rejection is observed where the wait starts: the offered listener runs before the append fails.
+      let outcome: Promise<unknown> | undefined;
       d.subscribe((event) => {
-        if (event.kind === 'offered' && event.taskId === 'task-append-failed') settlement = d.whenTaskSettled('task-append-failed');
+        if (event.kind === 'offered' && event.taskId === 'task-append-failed') {
+          outcome = d.whenTaskSettled('task-append-failed').then(() => 'settled', (error: unknown) => error);
+        }
       });
       offer('task-append-failed');
-      await vi.waitFor(() => expect(settlement).toBeDefined());
-      await expect(settlement).rejects.toThrow('disk I/O error');
+      await vi.waitFor(() => expect(outcome).toBeDefined());
+      await expect(outcome).resolves.toMatchObject({ message: 'disk I/O error' });
       expect(append).toHaveBeenCalled();
     } finally {
       vi.restoreAllMocks();
