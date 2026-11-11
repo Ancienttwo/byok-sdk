@@ -210,7 +210,7 @@ it('records the root of the input itself when the input also seals an earlier du
   const policy = coalescePolicy({ windowMs: 1000 }, 64_000);
   let now = 0;
   const run = (commandId: string, key: string) => commitCommand(state, { scope: 's', commandId,
-    command: { kind: 'input', botId: 'main', key, request: key, sender: 'owner' } }, { scope: 's', recordCallbacks: true },
+    command: { kind: 'input', botId: 'main', key, request: key, sender: 'owner' } }, { scope: 's', recordCallbacks: true, archived: () => undefined, admitted: () => {} },
   { ...ports(state, () => {}), now: () => now, admitInput: fields => admitUserInput(state, fields, policy, now) });
   const first = run('c1', 'k1');
   now = 5000;

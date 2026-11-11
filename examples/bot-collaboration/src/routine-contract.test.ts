@@ -28,6 +28,7 @@ async function ledgerSubject(): Promise<RoutineSubject> {
     now: () => clock,
     at: now => { clock = now; },
     change: edit => { fixture.ledger.transaction(s => { edit(stateOf(s.application)); }); },
+    retire: turnId => { fixture.ledger.transaction((_, rows) => rows.retire('turn', turnId)); },
     addRoutine: async (owner, schedule) => {
       const definition = createDefinition(Object.values(ledger().routines), owner, taskId(`seed:${owner}`, 0), 0,
         { localId: 'new_routine_1', schedule, prompt: 'Daily report' }, 'bot');

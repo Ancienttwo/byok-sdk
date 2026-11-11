@@ -271,6 +271,18 @@ A Bot reply is now visible only when its Turn's outcome committed: iff the Turn'
 - A Turn that runs past its reply route token answers through the conversation's active push route, with a new delivery id, or not at all: its reply delivery is rejected `reply_route_expired`, or no delivery is queued when the token had already expired at acceptance. Before, a reply sent mid-Turn usually still had its token.
 - Operator step for vendoring Hosts: a Host that shows or uploads replies from `replies` must skip a reply unless `core.intent(turnId)` has `conclusion === 'succeeded'` and `taskId` equal to the reply's task id. For example, AiphaBee adds this check to its `k8RootUploads`. Until a Host adds it, its own upload still shows a reply before the outcome commits; K8's channel no longer does. A Host with a channel takes K8's delivery state as the authority, because the conclusion check alone passes a message that K4 accepted after a `succeeded` conclusion (see VENDOR.md). See [Reply visibility](../../examples/bot-collaboration/src/VENDOR.md#reply-visibility).
 
+## K4 transaction rows and required command store capabilities
+
+`OutcomeTransaction` and `OccurrenceTransaction` gain `rows: ApplicationRows`, the application row port of the same commit (#1756), as `MessageTransaction` already has. The port closes when the transaction ends. A Host whose `applyOutcome` or occurrence hook only reads the transaction needs no change; code that builds a transaction object itself, such as a test double, adds `rows`.
+
+K8 `CommandStore.archived` and `admitted` are required. A vendoring Host that calls `commitCommand` passes both: `archived` reads a command record that retention moved, and `admitted` hands the added ids to `refuseRetired` before the commit. The local Host's K4 outcome, message and occurrence callbacks commit through `commitInRows` (`commit.ts`) and the hosted routine fire through `commitInStore` (`retention.ts`), so these commits now refuse a retired Turn, input or round id with `RetiredIdentityError` and write nothing. What a Host sees for each refusal:
+
+- L outcome: the Turn's outcome fails with `IntentOutcomeError` code `outcome_failed`.
+- L message: the message handler throws.
+- L occurrence and H routine fire: the slot records no occurrence and stays due. H retries it every `backoffMs` and reports `pass.failed`, and the routine does not advance past that slot.
+
+None of these is reachable in normal flow: new Turn, input and round ids are fresh, so the refusal guards only against corrupt state. No persisted format changes.
+
 ## Offer selection rules
 
 `@byok-sdk/protocol` exports `offerSelectionViolation(payload)` and the types `OfferSelectionRule` and `OfferSelectionViolation` (#1674). The offer selection rules have one definition, which the Host offer schemas and the daemon both run. A `HostOfferPlainPayloadSchema` or `HostOfferSealedPayloadSchema` issue carries `params.rule`, and the daemon declines the same offer with `task.decline.code` equal to that rule:

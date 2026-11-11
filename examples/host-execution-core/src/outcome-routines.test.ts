@@ -96,3 +96,9 @@ it('leaves the ledger unchanged when the Host catches a refused command, and com
   await host.core.lifecycle('guarded', 'active');
   expect(routine('guarded')).toMatchObject({ lifecycle: 'active', next: { dedupKey: `guarded:1:${at}` } });
 });
+
+it('gives the outcome handler the application rows of the outcome commit', async () => {
+  await open();
+  await outcome('rows', tx => tx.rows.put('outcomes', tx.intent.key, tx.intent.taskId));
+  expect(host.ledger.transaction((_, rows) => rows.get('outcomes', 'rows'))).toBe(host.core.intent('rows')!.taskId);
+});
