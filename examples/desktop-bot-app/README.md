@@ -131,7 +131,7 @@ starts), the login item, and exports the diagnostics bundle to a file the Host n
 
 ## White label
 
-`brand.config.ts` is the only white-label entry: the product name and id, the external
+`brand.config.ts` is the main white-label entry (FORKING.md lists the rest): the product name and id, the external
 link origins, the base instruction, the role presets and the model catalog.
 [FORKING.md](FORKING.md) covers a downstream fork: what to copy, what to rebrand, the
 roster and history authority seam, SDK upgrades and the update feed.

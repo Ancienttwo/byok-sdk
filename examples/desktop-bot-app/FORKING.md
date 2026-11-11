@@ -16,7 +16,7 @@ K8 is a dependency, not code you copy: you take its fixes by bumping the version
 
 - `@byok-sdk/bot-collaboration`: `BotCollaboration`, `teamSnapshot` and `TeamModeError`, `createBotPersonaProjection`, `botCompactVeto`, and the message types.
 - `./host-kit`: Host adapter types and `historyRowFromTurn`, `RetentionRefused`.
-- `./testing`: the synthetic adapter, for tests only.
+- `./testing`: tests only. The synthetic `ResultStubAdapter` and the in-memory `InMemoryDeviceCredentials`.
 - `./rules`: the app does not import it.
 
 Import only from these entries: a deep import into the package's files is not part of its contract.
@@ -39,7 +39,15 @@ The renderer reads only the theme tokens in `src/renderer/theme/tokens.css`, so 
 
 ## 3. Your SaaS as the roster and history authority
 
-K8 runs in `team: 'external'` mode with an external history. In this app, the authority for both is the local Host store (`src/host/store/store.ts`, SQLite under `<hostStorageRoot>/host/`). `src/host/k8/conversation.ts` is the only code that talks to both sides. To make your SaaS the authority, replace the `HostStore` methods it calls with calls to your API, and keep `Conversation` unchanged. The invariants it relies on:
+K8 runs in `team: 'external'` mode with an external history. In this app, the authority for both is the local Host store (`src/host/store/store.ts`, SQLite under `<hostStorageRoot>/host/`). `src/host/k8/conversation.ts` is the only code that talks to both sides.
+
+The seam is synchronous today. `HostStore` runs on `node:sqlite` `DatabaseSync`, and `Conversation` calls every store method without `await`: `recordInput` and `bindInput`, `recordClear` inside the synchronous `clear()`, `saveBot` with its `admit` check running inside the store transaction, `roster`, `raiseRevision`, `history`, `retainableRoots` and `markRetained`. A Promise-returning replacement would typecheck, and its rejections would go unhandled, which breaks store-first and fail-closed. So a remote authority changes `Conversation` too:
+
+- Every store call is awaited, and `clear()` becomes async, along with `ConversationService.clear` behind `k8.clear`.
+- `saveBot`'s `admit` check (K8's `teamSnapshot` and the catalog check) runs on the candidate roster before the authority commits it, because the commit is no longer a local transaction that the check can abort.
+- The keyed-command semantics below move into your API: the same action id returns the first result, other arguments conflict.
+
+The invariants `Conversation` relies on:
 
 - **Store first, then K8.** Every user command is written to the authority before K8 sees it, keyed by the renderer's action id. A retry with the same id returns the first result, and the same id with other arguments is a conflict (`StoreConflictError`). At the next open, `unboundInputs()` and K8 `inputRoot` finish a send that the authority holds but K8 may not.
 - **Roster revision.** `roster()` returns the Bots with a revision that only grows. On K8 `stale_team`, `raiseRevision(above)` moves the authority above K8's revision, and the roster is sent again. A candidate roster passes K8's own snapshot check (`teamSnapshot`) before the authority commits it.
