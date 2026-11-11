@@ -1453,6 +1453,68 @@ built-in runtime name does not inherit them.
   runtime environment unchanged. `PiAdapter` keeps its directory selectors,
   `BYOK_PI_*` names and provider credentials out.
 
+## Host-provided skills by runtime (#1846)
+
+A Host can load a skill it authored into a task only where the adapter has an
+explicit option for it. That is one runtime and one lane today. The rows below
+were read from each adapter's constructor options and launch arguments on
+`main`, not from documentation.
+
+| Runtime | Host-provided skills today | Where it comes from |
+| --- | --- | --- |
+| Pi, ordinary RPC lane | yes | `PiAdapterOptions.agentSkillPaths`, absolute files or directories, passed to Pi as `additionalSkillPaths` by the RPC host |
+| Pi, prepared and durable lanes | no | The lanes reject explicit resource paths before spawning |
+| Claude | no | `ClaudeAdapterOptions` has no skill option and the launch adds no skill flag; the user's own skills still load |
+| Codex | no | `CodexAdapterOptions` has no skill option; `features.plugins=false` removes plugin skills only, and `$HOME/.agents/skills` still loads |
+| dsh | no option | The adapter sets `DSH_HOME` to the Host-named `runtimes.dsh.home` and `DSH_AGENTS_HOME` to an empty `byok-agents-home` directory in it; the SDK projects no skill into either |
+| agy | no option | agy reads skills from `<home>/.gemini/config/skills/` below the Host-named `runtimes.agy.home`, and `ensureAgyHome` writes only its own `.gemini/antigravity-cli/settings.json` there |
+| Grok | no | `GrokAdapterOptions` has no skill option |
+| Hermes | no | Hermes reads skills from the per-execution `HERMES_HOME` the SDK creates fresh below `HermesAdapterOptions.home`; no option lets a Host seed it |
+| OpenCode | no | `OpenCodeAdapterOptions` has no skill option, and the adapter provides no home |
+
+Each `no` is a missing adapter option, not a runtime limitation. The positive
+controls of the [runtime contract suite](runtime-contract.md) show that a skill
+placed in the directory the SDK already uses does reach the model: one in
+`DSH_AGENTS_HOME` for dsh (`dsh.contract.ts`), `<HERMES_HOME>/skills/` for
+Hermes (`hermes.contract.ts`) and `<home>/.gemini/config/skills/` for agy
+(`agy.contract.ts`).
+
+A Host may still write files itself into a directory it names, such as
+`runtimes.dsh.home` or `runtimes.agy.home`. That is the Host's own file, not an
+SDK seam. The positive controls show that those runtimes read that layout at
+the qualified version; they are a test writing the SDK's own root, not a
+contract that a task receives a Host's file, and the layout can change with
+the runtime's version. The rows above state what an adapter option declares
+and the SDK guarantees. The only Host-skill seam this line left a place for is
+a `DaemonConfig` field for `PiAdapterOptions.agentSkillPaths`, and it stays
+unopened until a product needs it (#1846).
+
+`PiAdapterOptions.agentSkillPaths` is an adapter option, not a
+`DaemonConfig` field: `runtime-adapters.test.ts` classifies it and
+`agentExtensionPaths` as `embedded-only`, so a Host that wants them builds the
+`PiAdapter` and passes it to `createDaemonWithAdapters`. The paths are frozen
+at adapter construction and apply to Agent RPC operations including resume;
+they must exist and be readable, and Pi owns skill parsing and its advisory
+diagnostics (see [Pi explicitly authorized resources](#pi-explicitly-authorized-resources)).
+The prepared and durable lanes reject them before spawning, and a memory-reader
+operation passes none (`packages/client/src/adapters/pi/pi-adapter.ts:697`).
+
+For Claude and Codex the absence is narrower than for the rest: the user's own
+skills keep loading even under `agentUserContext: 'excluded'`, because Claude
+reads them from its config directory ([`agentUserContext`](#agentusercontext))
+and Codex reads `$HOME/.agents/skills` outside `CODEX_HOME`
+([Codex `agentUserContext`](#agentusercontext-codex)). A Host-provided skill
+would sit beside the user's rather than replace it.
+
+The one SDK-owned skill store is not a runtime option. `installSkillPacks`,
+`listInstalledSkillPacks` and `projectSkillPack`
+(`packages/client/src/daemon/skill-pack-installer.ts`, exported from
+`@byok-sdk/client`) install verified packs into a content-addressed store and
+copy one pack into a directory the Host names. The Host then points the
+runtime's own configuration at that directory, because the SDK never writes
+into a vendor CLI's skill directory (see
+[Skill pack delivery](spec.md#skill-pack-delivery)).
+
 ## References and ownership
 
 - Source contract: `packages/client/src/types.ts`.
