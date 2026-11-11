@@ -157,6 +157,8 @@ No Host configuration change is required (#1632). OpenCode now advertises `mcpTo
 
 Hosts that vendor K8 must also copy `src/adapter-steps.ts` in Layer 2 (#1664). The local and hosted adapters use it for terminal routing, synchronous Host intent handling and Bot outcome port assembly. The hosted example now exports K8's `IntentOutcomeError` class; use that shared class for `instanceof` checks.
 
+Layer 3 no longer needs a module of your own for K4 test data (#1845). Copy `src/k4-fixtures.test-support.ts` with the vectors and drop whatever you resolved `@byok-sdk/example-host-execution-core/test-support` to: the `policy` constant and the `template(deviceId, agentId)` function are K8's own copy now, and the vectors read them from there. Nothing else in the layer changed, and the returned template is the same value, so a ledger and a daemon fixture behave as before.
+
 H vendors also receive one outbox projection row per stored inbound destination from sync; an unchanged destination reuses its projection row (#1664 PR-3b).
 
 ## Doctor names a refused control endpoint

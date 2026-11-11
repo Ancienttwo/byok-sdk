@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { HostLedger } from '@byok-sdk/server/execution-core';
-import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { template } from './k4-fixtures.test-support';
 import { createByokServer } from '@byok-sdk/server';
 import { BotCollaboration } from './host';
 import { addTurn, stateOf } from './model';

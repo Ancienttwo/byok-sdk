@@ -20,7 +20,7 @@ import { advanceRoomsAndTurns } from './rooms';
 import { intentRows, settleDelegations } from './delegation';
 import { syncTurn } from './rules/sync';
 import { checkReply, replyCheckDue, type Conclusion, type ReplyCheck } from './rules/delegation';
-import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { template } from './k4-fixtures.test-support';
 import { writeSnapshotBot } from './team';
 import { botOutcomePorts } from './adapter-steps';
 

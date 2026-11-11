@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, taskId, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
-import { template as k4template } from '@byok-sdk/example-host-execution-core/test-support';
+import { template as baseTemplate } from './k4-fixtures.test-support';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';
 import { RetentionRefused } from './retention';
@@ -11,7 +11,7 @@ import { migrateWouldDo, retainInLedger } from './commit';
 import { stateOf } from './model';
 
 // #798: the Host retention API on a real K4 ledger.
-const base = k4template('device');
+const base = baseTemplate('device');
 const template: ExecutionTemplate = { ...base, agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'k8' },
   payload: { ...base.payload, messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 } } };
 const server = {
