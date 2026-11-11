@@ -34,7 +34,7 @@ SDK 的 runtime 驱动有两种来源：Codex、Grok、OpenCode、Antigravity、
 
 ### D3. 改动的五类不变量和减少改动的路
 
-fork 上的改动都归在下面五类不变量之下：
+#1851 把 0.94.0 上的 22 处改动归成下面五类不变量；每处改动保护的具体不变量以 `PROVENANCE.md` 的「Maintained deltas」为准，不属于这五类的（例如 Grok 的 persona 注入路由）在那里单独写明：
 
 1. 进程由调用方持有：spawn 由 SDK 注入，进程树归 SDK 的 process-tree authority。
 2. 环境变量只用显式传入的，不合并宿主环境。
