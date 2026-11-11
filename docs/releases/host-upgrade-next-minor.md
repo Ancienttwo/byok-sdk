@@ -278,7 +278,7 @@ A Bot reply is now visible only when its Turn's outcome committed: iff the Turn'
 | Rule (`params.rule` and decline `code`) | Schema path |
 | --- | --- |
 | `agent_memory_selection_invalid` | `['agentMemory']` (reader with a read-write `agentMemory`), then `['agentMemoryCommit']` (reader with `agentMemoryCommit`) |
-| `native_sessions_selection_invalid` | the first `nativeSessions` field combination it breaks: `['session']`, `['agentMemory']`, `['terminalProjection']`, then `['agentMemoryCommit']`, `['homeAccess']`, `['preparation']`, `['requiredToolsets']`, `['messageEgress']`, `['harnessId']` |
+| `native_sessions_selection_invalid` | the first `nativeSessions` field combination it breaks, in the order of the [Offer selection rules table](../protocol.md#32-declined-vs-failed-m1-gap-5) |
 | `runtime_selection_mismatch` | `['runtime']` |
 | `harness_selection_conflict` | `['harnessId']` |
 
