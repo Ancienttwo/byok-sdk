@@ -1,4 +1,4 @@
-import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration';
+import type { CollaborationState, Turn } from '@byok-sdk/bot-collaboration/host-kit';
 import type { BotRow, TranscriptEntry, TurnRecord } from '../store/types.ts';
 
 /**

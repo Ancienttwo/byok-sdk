@@ -5,7 +5,7 @@
  * domain gives another meets here, so no domain imports another.
  */
 import type { Daemon, DaemonConfig } from '@byok-sdk/client';
-import type { AgentMessageInput, BotCollaboration } from '@byok-sdk/example-bot-collaboration';
+import type { AgentMessageInput, BotCollaboration } from '@byok-sdk/bot-collaboration';
 import type { ByokServer, DueWake } from '@byok-sdk/server';
 import { joinHandlers, type MethodHandlers, type MethodTable } from '../bridge/domain.ts';
 import { MAIN_METHODS, type HostMethods, type MainMethod } from '../bridge/protocol.ts';
