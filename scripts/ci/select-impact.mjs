@@ -833,6 +833,7 @@ export function selectImpact(paths, context = {}) {
     const relative = match[3];
     if (!workspaceGraph[dir]) requireMapping(path);
     if (/^(?:README|AGENTS|CLAUDE)\.md$/.test(relative)) continue;
+    if (path === 'examples/desktop-bot-app/FORKING.md') continue;
     if (/^(?:tsconfig(?:\.[a-z-]+)?\.json|vitest\.config\.[cm]?ts)$/.test(relative)) { dirs.add(dir); continue; }
     if (dir === 'packages/client' && /^native\/agent-memory-fs\/.+\.(?:go|mod|sum)$/.test(relative)) {
       dirs.add(dir); families.add('npm-release-pack'); continue;
