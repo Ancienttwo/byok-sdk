@@ -34,7 +34,7 @@ export interface OutcomeTransaction {
   readonly terminal: Terminal;
   /** Business state participates in the same SQLite commit. Do not do external I/O here. */
   application: Record<string, Json>;
-  /** The application rows of the same commit. The port closes when the handler returns. */
+  /** The application rows of the same commit. The port closes when the transaction ends. */
   rows: ApplicationRows;
   publish(id: string, value: Json): void;
   routines: RoutineCommands;
@@ -42,7 +42,7 @@ export interface OutcomeTransaction {
 export interface OccurrenceTransaction {
   /** Business state participates in the occurrence commit. No external I/O and no core or ledger calls. */
   application: Record<string, Json>;
-  /** The application rows of the same commit. The port closes when the hook returns. */
+  /** The application rows of the same commit. The port closes when the transaction ends. */
   rows: ApplicationRows;
   publish(id: string, value: Json): void;
 }
