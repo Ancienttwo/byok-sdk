@@ -109,6 +109,7 @@ export type {
   TaskArchiveStoreResult,
   TaskArchiveWork,
 } from './task-archive';
+export { taskArchiveInput } from './task-archive';
 export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type {
   TaskRedactionCodec,

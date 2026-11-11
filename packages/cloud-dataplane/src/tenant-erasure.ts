@@ -59,6 +59,7 @@ export const TENANT_ERASURE_TABLES = [
   'e2ee_member_key',
   'agent_message_admission',
   'task',
+  'task_agentless_retired',
   'device_presence',
   'device_assertion_replay',
   'device_stream',

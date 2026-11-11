@@ -244,7 +244,7 @@ export async function handleAgentMessagePublish(
   // #1045: the task's frozen sealing allows one form of its message. A sealed
   // message is refused first, as every sealed report of a task that does not
   // seal its category is.
-  const sealing = attempt?.deviceId === deviceId && attempt.agentRef !== undefined
+  const sealing = attempt?.deviceId === deviceId
     ? await frozenOfferSealing(stores, deviceId, taskId, attempt.agentRef)
     : undefined;
   const sealsMessages = sealing !== 'redacted' && sealing?.categories.includes('agent-message') === true;
@@ -256,7 +256,7 @@ export async function handleAgentMessagePublish(
   if (attempt === undefined || attempt.deviceId !== deviceId) return refuse('task_not_found_for_device');
   if (binding === undefined) return refuse('agent_message_offer_binding_missing');
   if (isTaskRedactionTombstone(binding.body)) return refuse('agent_message_binding_mismatch');
-  if (attempt.agentRef === undefined || !sameAgentRef(attempt.agentRef, payload.agentRef)) {
+  if (!sameAgentRef(attempt.agentRef, payload.agentRef)) {
     return refuse('agent_message_attempt_mismatch');
   }
 
@@ -494,7 +494,7 @@ async function frozenOfferSealing(
   stores: TenantStores,
   deviceId: string,
   taskId: string,
-  agentRef: AgentRef | undefined,
+  agentRef: AgentRef,
 ): Promise<Pick<TaskSealing, 'categories'> | 'redacted' | undefined> {
   const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, agentRef, hashOfferBytes);
   const offer = await stores.receipts.get(`task-offer:${messageId}`);
@@ -514,7 +514,7 @@ async function sealedOutputRefusal(
   stores: TenantStores,
   deviceId: string,
   taskId: string,
-  agentRef: AgentRef | undefined,
+  agentRef: AgentRef,
   envelope: Envelope,
 ): Promise<Refused | undefined> {
   if (!SEALED_OUTPUT_TYPES.includes(envelope.type)) return undefined;
@@ -777,7 +777,6 @@ async function applyInboundGate(
   // just like a different id or profile revision; accepting it would let an
   // unrelated session write a terminal for the durable Agent attempt.
   if (
-    attempt?.agentRef !== undefined &&
     agentRefEchoRequired(envelope) &&
     !sameAgentRef(attempt.agentRef, inboundAgentRef(envelope))
   ) {
@@ -824,7 +823,7 @@ async function applyInboundGate(
 
   let lifecycleRefusal: Refused | undefined;
   try {
-    lifecycleRefusal = await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt?.agentRef);
+    lifecycleRefusal = await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt.agentRef);
   } catch (caught) {
     if (isCloudError(caught, 'activity_batch_too_large')) return refuse('activity_batch_too_large');
     if (isCloudError(caught, 'activity_task_settled') || isCloudError(caught, 'approval_timeline_settled')) return refuse('task_settled_by_cloud');
@@ -832,7 +831,7 @@ async function applyInboundGate(
     throw caught;
   }
   if (lifecycleRefusal !== undefined) return lifecycleRefusal;
-  return completeInboundEnvelope(stores, deviceId, envelope.id, attempt?.agentRef);
+  return completeInboundEnvelope(stores, deviceId, envelope.id, attempt.agentRef);
 }
 
 const TERMINAL_TASK_STATUSES: readonly string[] = ['complete', 'failed', 'cancelled'];
@@ -862,7 +861,7 @@ async function applyLifecycle(
   taskId: string,
   envelope: Envelope,
   activityBounds: ActivityBounds,
-  persistedAgentRef: AgentRef | undefined,
+  persistedAgentRef: AgentRef,
 ): Promise<Refused | undefined> {
   switch (envelope.type) {
     case 'task.claim': {
@@ -892,7 +891,7 @@ async function applyLifecycle(
       await stores.tasks.recordStatus({
         taskId,
         status: 'running',
-        ...(persistedAgentRef === undefined ? {} : { agentRef: persistedAgentRef }),
+        agentRef: persistedAgentRef,
       });
       return;
     case 'task.decline':
@@ -1032,7 +1031,8 @@ async function recordTerminal(
   if (winner === undefined) return refuse('terminal_receipt_not_canonical');
   await stores.agentMessageDraft.delete(taskId);
   const attempt = await stores.tasks.get(taskId);
-  if (attempt?.cancellation !== undefined) {
+  if (attempt === undefined) return;
+  if (attempt.cancellation !== undefined) {
     // A cancellation tombstone is the effective product authority even when
     // the immutable terminal receipt contains the original completion/failure.
     // Persist the cancelled status through the store CAS: if cancellation lands
@@ -1041,14 +1041,14 @@ async function recordTerminal(
     await stores.tasks.recordStatus({
       taskId,
       status: 'cancelled',
-      ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+      agentRef: attempt.agentRef,
     });
     return;
   }
   const recordedAttempt = await stores.tasks.recordStatus({
     taskId,
     status: winner.status,
-    ...(attempt?.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+    agentRef: attempt.agentRef,
     ...(winner.cause === undefined ? {} : { terminalCause: winner.cause }),
   });
   // The attempt mutation is the ordering CAS. Cancellation may have landed
@@ -1059,7 +1059,7 @@ async function recordTerminal(
       await stores.tasks.recordStatus({
         taskId,
         status: 'cancelled',
-        ...(recordedAttempt.agentRef === undefined ? {} : { agentRef: recordedAttempt.agentRef }),
+        agentRef: recordedAttempt.agentRef,
       });
     }
     return;

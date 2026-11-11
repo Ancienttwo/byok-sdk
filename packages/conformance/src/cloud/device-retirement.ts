@@ -22,6 +22,8 @@ import {
   type CloudCompositionHandle,
 } from './harness';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const TENANT = tenantId('tenant-retirement-conformance');
 const MACHINE = 'b'.repeat(64);
 const CODE_TTL_MS = 10 * 60 * 1000;
@@ -56,14 +58,14 @@ async function seedDevice(
 ): Promise<Readonly<Record<(typeof UNFINISHED)[number] | 'complete', TaskAttempt>>> {
   const { stores, mailbox } = handle;
   const id = (suffix: string) => `${deviceId}-${suffix}`;
-  await stores.tasks.open(TENANT, { taskId: id('offered'), deviceId });
+  await stores.tasks.reserveAgentOffer(TENANT, { taskId: id('offered'), deviceId, agentRef: AGENT_REF });
   await mailbox.append(TENANT, { deviceId, messageId: id('offer'), body: envelope(id('offered')) });
   for (const suffix of ['claimed', 'running', 'cancel-requested', 'complete']) {
-    await stores.tasks.open(TENANT, { taskId: id(suffix), deviceId });
+    await stores.tasks.reserveAgentOffer(TENANT, { taskId: id(suffix), deviceId, agentRef: AGENT_REF });
     await stores.tasks.claim(TENANT, { taskId: id(suffix), deviceId });
   }
-  await stores.tasks.recordStatus(TENANT, { taskId: id('running'), status: 'running' });
-  await stores.tasks.recordStatus(TENANT, { taskId: id('complete'), status: 'complete' });
+  await stores.tasks.recordStatus(TENANT, { taskId: id('running'), status: 'running', agentRef: AGENT_REF });
+  await stores.tasks.recordStatus(TENANT, { taskId: id('complete'), status: 'complete', agentRef: AGENT_REF });
   await stores.cancellations.request(TENANT, {
     taskId: id('cancel-requested'),
     proposedMessageId: id('cancel'),
@@ -115,7 +117,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         await stores.devices.register(TENANT, registration('retired'));
         await stores.devices.register(TENANT, registration('kept'));
         const before = await seedDevice(handle, 'retired');
-        const kept = await stores.tasks.open(TENANT, { taskId: 'kept-offered', deviceId: 'kept' });
+        const { attempt: kept } = await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'kept-offered', deviceId: 'kept', agentRef: AGENT_REF });
         const keptRow = await mailbox.append(TENANT, { deviceId: 'kept', messageId: 'kept-offer', body: envelope('kept-offered') });
         const pendingBefore = (await mailbox.inspect(TENANT, 'retired')).pending;
         expect(pendingBefore).toHaveLength(2);
@@ -260,7 +262,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         await mailbox.limit(TENANT, 1_000_000n);
         await stores.devices.register(TENANT, registration('busy'));
         for (const taskId of ['busy-a', 'busy-b']) {
-          await stores.tasks.open(TENANT, { taskId, deviceId: 'busy' });
+          await stores.tasks.reserveAgentOffer(TENANT, { taskId, deviceId: 'busy', agentRef: AGENT_REF });
           await stores.tasks.claim(TENANT, { taskId, deviceId: 'busy' });
         }
         // Hold task a inside its own cancellation, the way any in-flight task mutation would.
@@ -306,7 +308,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         const { stores, mailbox } = handle;
         await mailbox.limit(TENANT, 1_000_000n);
         await stores.devices.register(TENANT, registration('late'));
-        await stores.tasks.open(TENANT, { taskId: 'late-task', deviceId: 'late' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'late-task', deviceId: 'late', agentRef: AGENT_REF });
         await stores.tasks.claim(TENANT, { taskId: 'late-task', deviceId: 'late' });
         await mailbox.append(TENANT, { deviceId: 'late', messageId: 'late-offer', body: envelope('late-task') });
 
@@ -335,7 +337,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         const { stores, mailbox } = handle;
         await mailbox.limit(TENANT, 1_000_000n);
         await stores.devices.register(TENANT, registration('racing'));
-        await stores.tasks.open(TENANT, { taskId: 'racing-old', deviceId: 'racing' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'racing-old', deviceId: 'racing', agentRef: AGENT_REF });
         await mailbox.append(TENANT, { deviceId: 'racing', messageId: 'racing-old', body: envelope('racing-old') });
 
         const release = await handle.holdMailboxExpiry();
@@ -350,7 +352,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
           await registering;
         }
         // Everything from here on is addressed to the registration that just resolved.
-        await stores.tasks.open(TENANT, { taskId: 'racing-fresh', deviceId: 'racing' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'racing-fresh', deviceId: 'racing', agentRef: AGENT_REF });
         const fresh = await mailbox.append(TENANT, { deviceId: 'racing', messageId: 'racing-fresh', body: envelope('racing-fresh') });
         const floor = (await mailbox.inspect(TENANT, 'racing')).recoverableFrom;
         if (settledEarly) await release();
@@ -426,8 +428,8 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
       await withCloudComposition(factory, async (handle) => {
         const { stores, mailbox } = handle;
         await mailbox.limit(TENANT, 1_000_000n);
-        await stores.tasks.open(TENANT, { taskId: 'abandoned', deviceId: 'device-a' });
-        await stores.tasks.open(TENANT, { taskId: 'neighbour', deviceId: 'device-a' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'abandoned', deviceId: 'device-a', agentRef: AGENT_REF });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'neighbour', deviceId: 'device-a', agentRef: AGENT_REF });
         const own = await mailbox.append(TENANT, { deviceId: 'device-a', messageId: 'own', body: envelope('abandoned') });
         const neighbour = await mailbox.append(TENANT, { deviceId: 'device-a', messageId: 'neighbour', body: envelope('neighbour') });
         // Names the task only inside a nested value: not the task's row.
@@ -459,8 +461,8 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         const { stores, mailbox } = handle;
         await mailbox.limit(TENANT, 1_000_000n);
         await stores.devices.register(TENANT, registration('live'));
-        await stores.tasks.open(TENANT, { taskId: 'live-abandoned', deviceId: 'live' });
-        await stores.tasks.open(TENANT, { taskId: 'live-neighbour', deviceId: 'live' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'live-abandoned', deviceId: 'live', agentRef: AGENT_REF });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'live-neighbour', deviceId: 'live', agentRef: AGENT_REF });
         await mailbox.append(TENANT, { deviceId: 'live', messageId: 'live-own', body: envelope('live-abandoned') });
         await mailbox.append(TENANT, { deviceId: 'live', messageId: 'live-next', body: envelope('live-neighbour') });
         const before = await mailbox.inspect(TENANT, 'live');
@@ -481,9 +483,9 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
       await withCloudComposition(factory, async (handle) => {
         const { stores, mailbox } = handle;
         await mailbox.limit(TENANT, 1_000_000n);
-        await stores.tasks.open(TENANT, { taskId: 'done', deviceId: 'device-b' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'done', deviceId: 'device-b', agentRef: AGENT_REF });
         await stores.tasks.claim(TENANT, { taskId: 'done', deviceId: 'device-b' });
-        const done = await stores.tasks.recordStatus(TENANT, { taskId: 'done', status: 'complete' });
+        const done = await stores.tasks.recordStatus(TENANT, { taskId: 'done', status: 'complete', agentRef: AGENT_REF });
         const row = await mailbox.append(TENANT, { deviceId: 'device-b', messageId: 'late', body: envelope('done', 'steer') });
 
         await expect(stores.cancellations.abandon(TENANT, { taskId: 'done', cause: 'operator' })).resolves.toEqual(done);
@@ -495,7 +497,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
     it('keeps a cancellation tombstone and expires its undelivered cancellation row', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores, mailbox } = handle;
-        await stores.tasks.open(TENANT, { taskId: 'stopping', deviceId: 'device-c' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'stopping', deviceId: 'device-c', agentRef: AGENT_REF });
         await stores.tasks.claim(TENANT, { taskId: 'stopping', deviceId: 'device-c' });
         const requested = await stores.cancellations.request(TENANT, {
           taskId: 'stopping',
@@ -555,9 +557,9 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         const { stores, mailbox } = handle;
         await mailbox.limit(TENANT, 1_000_000n);
         await stores.devices.register(TENANT, registration('archived-revoke'));
-        await stores.tasks.open(TENANT, { taskId: 'revoke-offered', deviceId: 'archived-revoke' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'revoke-offered', deviceId: 'archived-revoke', agentRef: AGENT_REF });
         await mailbox.append(TENANT, { deviceId: 'archived-revoke', messageId: 'revoke-offer', body: envelope('revoke-offered') });
-        await stores.tasks.open(TENANT, { taskId: 'revoke-claimed', deviceId: 'archived-revoke' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'revoke-claimed', deviceId: 'archived-revoke', agentRef: AGENT_REF });
         await stores.tasks.claim(TENANT, { taskId: 'revoke-claimed', deviceId: 'archived-revoke' });
 
         await stores.devices.revoke(TENANT, 'archived-revoke');
@@ -576,7 +578,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         const { stores, mailbox } = handle;
         await mailbox.limit(TENANT, 1_000_000n);
         await stores.devices.register(TENANT, { ...registration('archived-first'), machineId: MACHINE });
-        await stores.tasks.open(TENANT, { taskId: 'supersede-offered', deviceId: 'archived-first' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'supersede-offered', deviceId: 'archived-first', agentRef: AGENT_REF });
         await mailbox.append(TENANT, { deviceId: 'archived-first', messageId: 'supersede-offer', body: envelope('supersede-offered') });
 
         await stores.devices.register(TENANT, { ...registration('archived-second'), machineId: MACHINE });
@@ -592,10 +594,10 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
       await withCloudComposition(factory, async (handle) => {
         const { stores, mailbox } = handle;
         await mailbox.limit(TENANT, 1_000_000n);
-        await stores.tasks.open(TENANT, { taskId: 'abandon-gone', deviceId: 'never-registered' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'abandon-gone', deviceId: 'never-registered', agentRef: AGENT_REF });
         await mailbox.append(TENANT, { deviceId: 'never-registered', messageId: 'abandon-gone-offer', body: envelope('abandon-gone') });
         await stores.devices.register(TENANT, registration('archived-live'));
-        await stores.tasks.open(TENANT, { taskId: 'abandon-live', deviceId: 'archived-live' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'abandon-live', deviceId: 'archived-live', agentRef: AGENT_REF });
         await mailbox.append(TENANT, { deviceId: 'archived-live', messageId: 'abandon-live-offer', body: envelope('abandon-live') });
 
         await stores.cancellations.abandon(TENANT, { taskId: 'abandon-gone', cause: 'operator' });

@@ -43,19 +43,19 @@ if (POSTGRES_URL === undefined) {
           deviceId: 'agent-home-device',
           capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'terminal-projection-selection'],
         });
-        await expect(tasks.open(TENANT, {
+        await expect(tasks.reserveAgentOffer(TENANT, {
           taskId: 'agent-home-invalid-backslash',
           deviceId: 'agent-home-device',
           agentRef: { agentId: 'invalid\\agent', profileRevision: 'profile-r7' },
         })).rejects.toThrow(/task_agent_ref_bounded/);
         await expect(tasks.get(TENANT, 'agent-home-invalid-backslash')).resolves.toBeUndefined();
-        await expect(tasks.open(TENANT, {
+        await expect(tasks.reserveAgentOffer(TENANT, {
           taskId: 'agent-home-invalid-windows-name',
           deviceId: 'agent-home-device',
           agentRef: { agentId: 'CON', profileRevision: 'profile-r7' },
         })).rejects.toThrow(/task_agent_ref_bounded/);
         await expect(tasks.get(TENANT, 'agent-home-invalid-windows-name')).resolves.toBeUndefined();
-        await expect(tasks.open(TENANT, {
+        await expect(tasks.reserveAgentOffer(TENANT, {
           taskId: 'agent-home-invalid-windows-char',
           deviceId: 'agent-home-device',
           agentRef: { agentId: 'invalid?agent', profileRevision: 'profile-r7' },
@@ -85,16 +85,7 @@ if (POSTGRES_URL === undefined) {
           status: 'offered',
           agentRef: AGENT_REF,
         });
-        await tasks.recordStatus(TENANT, {
-          taskId: 'agent-home-concurrent-reservation',
-          status: 'failed',
-          terminalCause: 'must not omit identity',
-        });
-        await expect(tasks.get(TENANT, 'agent-home-concurrent-reservation')).resolves.toMatchObject({
-          status: 'offered',
-          agentRef: AGENT_REF,
-        });
-        await tasks.open(TENANT, {
+        await tasks.reserveAgentOffer(TENANT, {
           taskId: 'agent-home-task',
           deviceId: 'agent-home-device',
           agentRef: AGENT_REF,

@@ -47,29 +47,6 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     this.#state = state;
   }
 
-  async open(
-    tenant: TenantId,
-    input: { readonly taskId: string; readonly deviceId: string; readonly agentRef?: AgentRef },
-  ): Promise<TaskAttempt> {
-    const key = tenantKey(tenant, input.taskId);
-    return this.#state.mutate(key, () => {
-      const existing = this.#state.attempts.get(key);
-      if (existing !== undefined) return existing;
-      const now = this.#now();
-      const attempt: TaskAttempt = {
-        tenantId: tenant,
-        taskId: input.taskId,
-        deviceId: input.deviceId,
-        ...(input.agentRef === undefined ? {} : { agentRef: { ...input.agentRef } }),
-        status: 'offered',
-        offeredAt: now,
-        updatedAt: now,
-      };
-      this.#state.attempts.set(key, attempt);
-      return attempt;
-    });
-  }
-
   async reserveAgentOffer(
     tenant: TenantId,
     input: { readonly taskId: string; readonly deviceId: string; readonly agentRef: AgentRef },
@@ -282,7 +259,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     input: {
       readonly taskId: string;
       readonly status: TaskAttemptStatus;
-      readonly agentRef?: AgentRef;
+      readonly agentRef: AgentRef;
       readonly terminalCause?: string;
     },
   ): Promise<TaskAttempt | undefined> {
@@ -290,10 +267,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     return this.#state.mutate(key, () => {
       const existing = this.#state.attempts.get(key);
       if (existing === undefined) return undefined;
-      if (
-        (existing.agentRef === undefined) !== (input.agentRef === undefined) ||
-        (existing.agentRef !== undefined && !sameAgentRef(existing.agentRef, input.agentRef))
-      ) return existing;
+      if (!sameAgentRef(existing.agentRef, input.agentRef)) return existing;
       if (existing.cancellation !== undefined) {
         if (input.status !== 'cancelled' || existing.status === 'cancelled') return existing;
       } else if (

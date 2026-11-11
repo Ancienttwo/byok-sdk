@@ -2,6 +2,8 @@ import { contentHash, tenantId } from '@byok-sdk/core';
 import { describe, expect, it } from 'vitest';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const TENANT = tenantId('tenant-cancellation-conformance');
 
 function body(label: string) {
@@ -16,7 +18,7 @@ export function runTaskCancellationConformance(factory: CloudCompositionFactory)
   describe('task cancellation port', () => {
     it('cancels unclaimed work immediately and marks claimed work requested', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
-        await stores.tasks.open(TENANT, { taskId: 'unclaimed', deviceId: 'device-1' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'unclaimed', deviceId: 'device-1', agentRef: AGENT_REF });
         const unclaimed = await stores.cancellations.request(TENANT, {
           taskId: 'unclaimed',
           proposedMessageId: 'cancel-unclaimed',
@@ -28,7 +30,7 @@ export function runTaskCancellationConformance(factory: CloudCompositionFactory)
           cancellation: { reason: 'stop' },
         });
 
-        await stores.tasks.open(TENANT, { taskId: 'claimed', deviceId: 'device-1' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'claimed', deviceId: 'device-1', agentRef: AGENT_REF });
         await stores.tasks.claim(TENANT, { taskId: 'claimed', deviceId: 'device-1' });
         const claimed = await stores.cancellations.request(TENANT, {
           taskId: 'claimed',
@@ -41,7 +43,7 @@ export function runTaskCancellationConformance(factory: CloudCompositionFactory)
 
     it('is idempotent and retains the first tombstone and delivery', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
-        await stores.tasks.open(TENANT, { taskId: 'repeat', deviceId: 'device-repeat' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'repeat', deviceId: 'device-repeat', agentRef: AGENT_REF });
         const first = await stores.cancellations.request(TENANT, {
           taskId: 'repeat',
           proposedMessageId: 'cancel-first',
@@ -61,7 +63,7 @@ export function runTaskCancellationConformance(factory: CloudCompositionFactory)
     it('settles a repeat cancel of claimed work once its delivery row is retired', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores } = handle;
-        await stores.tasks.open(TENANT, { taskId: 'retired', deviceId: 'device-retired' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'retired', deviceId: 'device-retired', agentRef: AGENT_REF });
         await stores.tasks.claim(TENANT, { taskId: 'retired', deviceId: 'device-retired' });
         const first = await stores.cancellations.request(TENANT, {
           taskId: 'retired',
@@ -93,7 +95,7 @@ export function runTaskCancellationConformance(factory: CloudCompositionFactory)
 
     it('commits neither side when materialization fails and writes nothing for an unknown task', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
-        await stores.tasks.open(TENANT, { taskId: 'rollback', deviceId: 'device-rollback' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'rollback', deviceId: 'device-rollback', agentRef: AGENT_REF });
         await expect(
           stores.cancellations.request(TENANT, {
             taskId: 'rollback',

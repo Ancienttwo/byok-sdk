@@ -39,6 +39,8 @@
 --   deploy/sql/0035_task_output_closure.sql (task trigger that closes the activity log and approval timeline at the task's output close; approval_timeline_tail.terminal_at and its closed-row check; no new table or key)
 --   deploy/sql/0036_task_events_wake.sql (content-free task events wake triggers on task, activity_log_head and approval_timeline_tail; no new table or key)
 --   deploy/sql/0037_agent_memory_projection_sealed.sql (sealed member on the memory projection head, contentMac and padded length on its receipt, one-form checks; no new table or key)
+--   deploy/sql/0038_task_agent_ref_required.sql (tenant-first task_agentless_retired: the task-id fence for tasks retired without an Agent identity; a whole task row plus retired_at)
+--   deploy/sql/0039_task_agent_ref_not_null.sql (task.agent_id and task.agent_profile_revision become NOT NULL; no new table or key)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -928,6 +930,38 @@ BEGIN
     RAISE EXCEPTION
       'control-plane invariants ran without 0012_agent_home_contract.sql: missing column(s): %',
       missing_columns;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.4a Every task carries its Agent identity; retired ids stay fenced
+-- ---------------------------------------------------------------------------
+--
+-- 0039 makes the 0012 pair NOT NULL. 0038's fence table is tenant-first: its
+-- primary key is the task's own (tenant_id, task_id).
+DO $$
+DECLARE
+  nullable_columns text;
+  fence_key text[];
+BEGIN
+  SELECT string_agg(a.attname, ', ' ORDER BY a.attname) INTO nullable_columns
+    FROM pg_attribute a
+   WHERE a.attrelid = 'task'::regclass
+     AND a.attname IN ('agent_id', 'agent_profile_revision')
+     AND NOT a.attnotnull;
+  IF nullable_columns IS NOT NULL THEN
+    RAISE EXCEPTION 'control-plane invariants ran without 0039_task_agent_ref_not_null.sql: task.% still nullable', nullable_columns;
+  END IF;
+
+  SELECT array_agg(a.attname::text ORDER BY key_columns.ordinality) INTO fence_key
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+   WHERE n.nspname = current_schema() AND t.relname = 'task_agentless_retired' AND c.contype = 'p';
+  IF fence_key IS DISTINCT FROM ARRAY['tenant_id', 'task_id']::text[] THEN
+    RAISE EXCEPTION 'control-plane invariants ran without 0038_task_agent_ref_required.sql: task_agentless_retired primary key must be (tenant_id, task_id), found %', fence_key;
   END IF;
 END $$;
 

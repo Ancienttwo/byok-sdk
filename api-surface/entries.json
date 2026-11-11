@@ -1035,7 +1035,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 799210,
+      "budgetBytes": 799783,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

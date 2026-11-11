@@ -127,7 +127,11 @@ try {
     path.join(smokeDir, 'migrate-smoke.mjs'),
     `import assert from 'node:assert/strict';\n` +
       `import { DEVICE_ASSERTION_SCHEMA_ID, TASK_ASSERTION_SCHEMA_ID } from '@byok-sdk/core';\n` +
-      `import { createByokPool, migrate, migrationsDir, PostgresDeviceAssertionReplayAuthority } from '@byok-sdk/cloud-dataplane';\n` +
+      `import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';\n` +
+      `import os from 'node:os';\n` +
+      `import path from 'node:path';\n` +
+      `import { createWebCrypto } from '@byok-sdk/cloud';\n` +
+      `import { createByokPool, migrate, migrationsDir, PostgresDeviceAssertionReplayAuthority, retireAgentlessTasks } from '@byok-sdk/cloud-dataplane';\n` +
       `const expected = ${JSON.stringify(expected)};\n` +
       `const baseline = ${JSON.stringify(baselineExpected)};\n` +
       `const baselineChecksums = ${JSON.stringify(baselineFixture.migrations)};\n` +
@@ -198,16 +202,45 @@ try {
       `\n` +
       `  await upgradePool.query("INSERT INTO device_stream (tenant_id, device_id, next_seq, acked_seq, acked_at) VALUES ('tenant-upgrade', 'device-upgrade', 3, 1, '2026-08-20T00:00:00.000Z')");\n` +
       `  await upgradePool.query("INSERT INTO outbox (tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at) VALUES ('tenant-upgrade', 'device-upgrade', 2, 'message-upgrade', '{\\\"kind\\\":\\\"fixture\\\"}', repeat('a', 64), 18, 'pending', '2026-08-20T00:01:00.000Z')");\n` +
-      `  await upgradePool.query("INSERT INTO task (tenant_id, task_id, device_id, owner_device_id, status, updated_at) VALUES ('tenant-upgrade', 'task-upgrade', 'device-upgrade', 'device-upgrade', 'Running', '2026-08-20T00:02:00.000Z')");\n` +
+      `  await upgradePool.query("INSERT INTO task (tenant_id, task_id, device_id, owner_device_id, status, updated_at) VALUES ('tenant-upgrade', 'task-upgrade', 'device-upgrade', 'device-upgrade', 'running', '2026-08-20T00:02:00.000Z')");\n` +
       `  await upgradePool.query("INSERT INTO attested_record (tenant_id, kind, subject_id, rev, content_hash, byte_size, body_kind, body_inline, written_at) VALUES ('tenant-upgrade', 'profile', 'profile-upgrade', 4, repeat('b', 64), 16, 'inline', '{\\\"provider\\\":\\\"fixture\\\"}', '2026-08-20T00:03:00.000Z')");\n` +
       `  await upgradePool.query("INSERT INTO storage_entitlement (tenant_id, version, hard_limit_bytes, max_object_bytes, max_inline_bytes, mailbox_limit_bytes, retention_policy_id) VALUES ('tenant-upgrade', 3, 1048576, 524288, 65536, 262144, 'retention-upgrade')");\n` +
       `  await upgradePool.query("INSERT INTO storage_usage (tenant_id, committed_object_bytes, committed_inline_bytes, mailbox_bytes, object_count, updated_at) VALUES ('tenant-upgrade', 1024, 128, 18, 2, '2026-08-20T00:04:00.000Z')");\n` +
       `  const before = await readSeedRows(upgradePool);\n` +
       `\n` +
-      `  const upgraded = await migrate(upgradePool, directory);\n` +
-      `  assert.deepEqual([...upgraded.applied], expected.slice(baseline.length), 'candidate must apply only migrations newer than v0.4.2');\n` +
+      // The v0.4.2 task row has no Agent identity (#1780), so the upgrade
+      // follows the operator path in docs/releases/host-upgrade-next-minor.md:
+      // migrate to 0038, settle, retireAgentlessTasks, migrate 0039.
+      `  const notNullStep = expected.at(-1);\n` +
+      `  assert.equal(notNullStep, '0039_task_agent_ref_not_null.sql', 'the Agent-identity NOT NULL step must stay the last migration this proof splits at');\n` +
+      `  const toFence = mkdtempSync(path.join(os.tmpdir(), 'byok-to-0038-'));\n` +
+      `  for (const name of readdirSync(directory)) if (name.endsWith('.sql') && name !== notNullStep) copyFileSync(path.join(directory, name), path.join(toFence, name));\n` +
+      `  const upgraded = await migrate(upgradePool, toFence);\n` +
+      `  rmSync(toFence, { recursive: true, force: true });\n` +
+      `  assert.deepEqual([...upgraded.applied], expected.slice(baseline.length, -1), 'candidate must apply only migrations newer than v0.4.2, up to 0038');\n` +
       `  assert.deepEqual([...upgraded.alreadyApplied], baseline, 'candidate must retain the v0.4.2 ledger');\n` +
       `  assert.deepEqual(await readSeedRows(upgradePool), before, 'candidate migration changed existing stream/mailbox/task/truth/quota rows');\n` +
+      `  const retire = () => retireAgentlessTasks(upgradePool, { clock: { now: () => new Date() }, crypto: createWebCrypto() });\n` +
+      `  await assert.rejects(retire(), /{"tenant-upgrade":{"task_not_terminal":1}}/, 'a live task without an Agent identity must stop the command before any change');\n` +
+      `  await assert.rejects(migrate(upgradePool, directory), /0039_task_agent_ref_not_null: 1 task\\(s\\) have no Agent identity/, '0039 must refuse while the row remains');\n` +
+      `  assert.deepEqual(await readSeedRows(upgradePool), before, 'refusals must change nothing');\n` +
+      // Settling happens on v0.41.0 (abandonTask with cause 'operator'). The
+      // proof installs only the candidate, so this is that build's abandon
+      // UPDATE verbatim: v0.41.0 packages/cloud-dataplane/src/stores/
+      // task-retirement.ts:81-87, UNFINISHED = TASK_ATTEMPT_UNFINISHED_STATUSES
+      // (packages/cloud/src/stores/ports.ts:293-298). Its second half, expiring
+      // the task's pending rows on unregistered devices (:88-), has nothing to
+      // do here: the seeded outbox row names no task.
+      `  await upgradePool.query("UPDATE task SET status = 'cancelled', terminal_cause = 'operator', terminal_at = COALESCE(terminal_at, '2026-08-21T00:00:00.000Z'), archive_after = COALESCE(archive_after, terminal_at, '2026-08-21T00:00:00.000Z'), updated_at = '2026-08-21T00:00:00.000Z' WHERE tenant_id = 'tenant-upgrade' AND task_id = 'task-upgrade' AND status = ANY(ARRAY['offered', 'claimed', 'running', 'cancel_requested'])");\n` +
+      `  const settled = (await readSeedRows(upgradePool)).task;\n` +
+      `  assert.deepEqual(settled.map((row) => row.status), ['cancelled']);\n` +
+      `  assert.deepEqual(await retire(), { retired: { 'tenant-upgrade': 1 } }, 'the settled task must be retired and counted');\n` +
+      `  assert.deepEqual(await retire(), { retired: {} }, 'a rerun retires nothing');\n` +
+      `  const retiredRows = await upgradePool.query("SELECT tenant_id, task_id, device_id, owner_device_id, status, updated_at FROM task_agentless_retired WHERE tenant_id = 'tenant-upgrade'");\n` +
+      `  assert.deepEqual(retiredRows.rows, settled, 'the retired fence must keep the whole task row');\n` +
+      `  assert.deepEqual(await readSeedRows(upgradePool), { ...before, task: [] }, 'retirement must move only the task row');\n` +
+      `  const notNull = await migrate(upgradePool, directory);\n` +
+      `  assert.deepEqual([...notNull.applied], [notNullStep]);\n` +
       // v0.4.2 seeded the retired counter with a non-zero value; the candidate
       // drops the column (0025, #387) instead of leaving a second mailbox
       // authority behind, on the upgraded schema and the empty install alike.
@@ -236,7 +269,7 @@ try {
       `  assert.deepEqual([...final.alreadyApplied], expected);\n` +
       `  const publicTables = await controlPool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name");\n` +
       `  assert.deepEqual(publicTables.rows, [], 'role-isolated migrations must leave public empty');\n` +
-      `  console.log('[pg-migrate-smoke] role-isolated empty install applied ' + expected.length + ' migration(s); tag-bound v0.4.2 fixture preserved stream/mailbox/task/truth/quota rows, applied ' + upgraded.applied.join(', ') + ', and admitted exactly one of 64 concurrent replay consumes per schema for the same JTI');\n` +
+      `  console.log('[pg-migrate-smoke] role-isolated empty install applied ' + expected.length + ' migration(s); tag-bound v0.4.2 fixture preserved stream/mailbox/truth/quota rows, applied ' + [...upgraded.applied, ...notNull.applied].join(', ') + ', retired its settled agentless task into task_agentless_retired, and admitted exactly one of 64 concurrent replay consumes per schema for the same JTI');\n` +
       `} finally {\n` +
       `  await Promise.allSettled([emptyPool?.end(), upgradePool?.end()]);\n` +
       `  try {\n` +

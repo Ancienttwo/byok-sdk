@@ -14,6 +14,8 @@ import { isSqliteAvailable } from '../sqlite-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { SqliteActivityStore } from '../stores/sqlite/activity';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const TENANT = tenantId('sqlite-activity-restart');
 const TASK = 'task';
@@ -136,10 +138,10 @@ describeSqlite('SQLite durable activity log across restarts (#1113)', () => {
     const stores = open();
     let cursor!: ActivityCursor;
     try {
-      await stores.cloud.tasks.open(TENANT, { taskId: TASK, deviceId: 'device' });
+      await stores.cloud.tasks.reserveAgentOffer(TENANT, { taskId: TASK, deviceId: 'device', agentRef: AGENT_REF });
       cursor = (await stores.cloud.activity.append(TENANT, batch(1))).cursor;
       await stores.cloud.activity.append(TENANT, batch(2));
-      await stores.cloud.tasks.recordStatus(TENANT, { taskId: TASK, status: 'complete' });
+      await stores.cloud.tasks.recordStatus(TENANT, { taskId: TASK, status: 'complete', agentRef: AGENT_REF });
       await expect(stores.cloud.taskArchive.archive(TENANT, {
         taskId: TASK, receiptKeys: [TERMINAL_KEY], terminalReceiptKey: TERMINAL_KEY, releaseObjectReferences: [],
         archivedAt: clock.now().toISOString(), codec,
@@ -191,7 +193,7 @@ describeSqlite('SQLite durable activity log across restarts (#1113)', () => {
       await stores.cloud.devices.register(TENANT, {
         deviceId: 'device', productId: 'product', deviceName: 'fixture', devicePublicKey: 'test-key', proofKeyId: 'proof-key', proofKeyEpoch: 1,
       });
-      await woken(() => stores.cloud.tasks.open(TENANT, { taskId: TASK, deviceId: 'device' }));
+      await woken(() => stores.cloud.tasks.reserveAgentOffer(TENANT, { taskId: TASK, deviceId: 'device', agentRef: AGENT_REF }));
       await woken(() => stores.cloud.activity.append(TENANT, batch(1)));
       await woken(() => stores.cloud.approvals.append(TENANT, {
         taskId: TASK, sourceEnvelopeId: 'request', event: { type: 'approval_requested', summary: 'Allow', approvalId: 'approval' },

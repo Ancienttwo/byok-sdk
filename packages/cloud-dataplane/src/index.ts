@@ -88,6 +88,8 @@ export type {
   TenantErasureResult,
   TenantErasureStatus,
 } from './tenant-erasure';
+export { retireAgentlessTasks } from './retire-agentless-tasks';
+export type { RetireAgentlessTasksOptions, RetireAgentlessTasksResult } from './retire-agentless-tasks';
 
 // Resident Node session listener; deliberately excluded from ./runtime.
 export { createPostgresMailboxWake, MailboxWakeProbeMissedError } from './mailbox-wake';

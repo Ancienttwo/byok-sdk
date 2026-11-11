@@ -37,12 +37,12 @@ type DeclaredFields<T> = { [K in keyof T]-?: {} extends Pick<T, K> ? false : tru
  */
 const fields = {
   get: {
-    taskId: true, state: true, deviceId: false, sessionRef: false, agentRef: false,
+    taskId: true, state: true, deviceId: false, sessionRef: false, agentRef: true,
     createdAt: true, updatedAt: true, result: false, pendingApprovalId: false,
     claimedRuntime: false, claimedHarnessId: false, claimedRuntimeCapabilities: false,
   },
   attempt: {
-    tenantId: true, taskId: true, deviceId: true, agentRef: false, ownerDeviceId: false,
+    tenantId: true, taskId: true, deviceId: true, agentRef: true, ownerDeviceId: false,
     status: true, claimedRuntime: false, claimedHarnessId: false, claimedRuntimeCapabilities: false,
     terminalCause: false, cancellation: false, offeredAt: false, claimedAt: false,
     firstOutputAt: false, terminalAt: false, archivedAt: false, updatedAt: true,

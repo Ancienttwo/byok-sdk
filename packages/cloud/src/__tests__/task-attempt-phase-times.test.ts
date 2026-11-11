@@ -15,7 +15,7 @@ describe('task attempt phase instants (#980)', () => {
     const clock = createMutableClock(new Date('2026-10-27T00:00:00.000Z'));
     const state = new InMemoryTaskAttemptState(clock);
     state.attempts.set(tenantKey(TENANT_A, 'old'), {
-      tenantId: TENANT_A, taskId: 'old', deviceId: 'device-1', status: 'offered', updatedAt: '2026-01-01T00:00:00.000Z',
+      tenantId: TENANT_A, taskId: 'old', deviceId: 'device-1', agentRef: TEST_AGENT_REF, status: 'offered', updatedAt: '2026-01-01T00:00:00.000Z',
     });
     const store = new InMemoryTaskAttemptStore(clock, state);
     const old = await store.get(TENANT_A, 'old');

@@ -17,6 +17,8 @@ import { PostgresTaskAttemptStore } from '../stores/task-attempts';
 import { PostgresTaskCancellationStore } from '../stores/task-cancellations';
 import { createDataplaneScope, createObjectStorageScope, POSTGRES_URL, SKIP_DATAPLANE, type DataplaneScope } from './support/dataplane';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const TENANT = tenantId('wake-租戶');
 const DEVICE = 'device-裝置';
@@ -145,7 +147,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres post-commit mailbox wake', () => {
     const { scope, core, wake } = await fixture();
     const tasks = new PostgresTaskAttemptStore(scope.pool, clock);
     const cancel = new PostgresTaskCancellationStore(scope.pool, clock);
-    await tasks.open(TENANT, { taskId: 'task-wake', deviceId: DEVICE });
+    await tasks.reserveAgentOffer(TENANT, { taskId: 'task-wake', deviceId: DEVICE, agentRef: AGENT_REF });
     const sub = subscribe(wake);
     const started = performance.now();
     const cancellation = sub.next(5_000);
@@ -277,7 +279,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres task events wake (#1113 A4)', () => {
       await waiting;
       expect(performance.now() - started).toBeLessThan(1_000);
     };
-    await woken(() => tasks.open(TENANT, { taskId: 'task-wake', deviceId: DEVICE }));
+    await woken(() => tasks.reserveAgentOffer(TENANT, { taskId: 'task-wake', deviceId: DEVICE, agentRef: AGENT_REF }));
     await woken(() => tasks.claim(TENANT, { taskId: 'task-wake', deviceId: DEVICE }));
     await woken(() => activity.append(TENANT, {
       taskId: 'task-wake', sourceEnvelopeId: 'progress', batchSeq: 1, events: [{ type: 'progress', text: 'one' }], dropped: 0, ttlMs: 600_000,
@@ -285,7 +287,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres task events wake (#1113 A4)', () => {
     await woken(() => approvals.append(TENANT, {
       taskId: 'task-wake', sourceEnvelopeId: 'request', event: { type: 'approval_requested', summary: 'Allow', approvalId: 'approval' },
     }));
-    await woken(() => tasks.recordStatus(TENANT, { taskId: 'task-wake', status: 'complete' }));
+    await woken(() => tasks.recordStatus(TENANT, { taskId: 'task-wake', status: 'complete', agentRef: AGENT_REF }));
     const started = performance.now();
     await otherTenant.next(200);
     expect(performance.now() - started).toBeGreaterThanOrEqual(190);
@@ -303,8 +305,8 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres task events wake (#1113 A4)', () => {
     const client = await writer.connect();
     try {
       const insert = (taskId: string) => client.query(
-        "INSERT INTO task (tenant_id, task_id, device_id, status, updated_at) VALUES ($1, $2, $3, 'offered', $4)",
-        [TENANT, taskId, DEVICE, clock.now().toISOString()],
+        "INSERT INTO task (tenant_id, task_id, device_id, agent_id, agent_profile_revision, status, updated_at) VALUES ($1, $2, $3, $4, $5, 'offered', $6)",
+        [TENANT, taskId, DEVICE, AGENT_REF.agentId, AGENT_REF.profileRevision, clock.now().toISOString()],
       );
       await client.query('BEGIN'); await insert('rolled-back'); await client.query('ROLLBACK');
       await client.query('BEGIN'); await insert('committed'); await client.query('COMMIT');
