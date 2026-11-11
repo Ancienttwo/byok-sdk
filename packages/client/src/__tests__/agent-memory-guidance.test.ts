@@ -310,9 +310,9 @@ describe('Agent memory at task start', () => {
     expect(adapter.startCalls).toHaveLength(0);
   });
 
-  it('sends the unknown class for a sealed task, whose sealing hides its memory state', async () => {
+  it('sends the unknown class for a task that seals its output, whose sealing hides its memory state', async () => {
     // Only the class choice is under test: a task the runner knows as sealed, sending in plaintext.
-    const sealed = { isSealed: () => true, sealsOutput: () => false, sealsMessages: () => false, sealsInput: () => false, sealsOutbound: () => false };
+    const sealed = { isSealed: () => true, sealsOutput: () => true, sealsMessages: () => false, sealsInput: () => false, sealsOutbound: () => false };
     const { adapter, offer, failureOf, prepareHome } = await createMemoryRunner('auto', true, true, sealed as unknown as TaskRunnerDeps['sealedTasks']);
     const home = await prepareHome('agent-sealed');
     await fs.writeFile(path.join(home, 'MEMORY.md'), 'x'.repeat(8193));

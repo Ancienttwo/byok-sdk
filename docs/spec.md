@@ -3090,8 +3090,9 @@ for `MEMORY.md`; `agent_memory_snapshot_over_file_limit`,
 `agent_memory_snapshot_over_byte_limit` and `agent_memory_snapshot_refused`
 (any other non-retryable refusal) for the start copy of a task with
 `agentMemoryCommit`. A missing file, a changed home identity and an I/O failure
-stay `unknown`. A sealed task sends `unknown` for every one of them: its
-sealing hides the reason, or the memory state the class would show. A
+stay `unknown`. A task that seals its output sends `unknown` for every one of
+them: its reason is sealed, and the class would show the memory state that the
+reason hides (sealing `memory-projection` requires `task-output`). A
 `MEMORY.md` that is already not a regular file when the offer arrives is
 declined before claim with reason text and no code; the class appears only when
 the file changes after that check. A write task cannot repair a file that is

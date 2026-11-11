@@ -528,16 +528,16 @@ observability-vs-control rule above.
 reported when the limit resets. Adapters classify from structured runtime
 fields only and never parse `reason`, which stays display text. `unknown`
 means the runtime gave no structured evidence; a failure the daemon makes
-itself is `unknown`, except an Agent-memory start refusal: a plaintext task
-that the Agent home's memory refuses before its runtime starts carries one of
+itself is `unknown`, except an Agent-memory start refusal: a task that does not
+seal its output and that the Agent home's memory refuses before its runtime starts carries one of
 `AGENT_MEMORY_START_REFUSALS` (`agent_memory_resident_over_limit`,
 `agent_memory_resident_multiple_links`, `agent_memory_resident_not_regular_file`,
 `agent_memory_resident_not_utf8`, `agent_memory_snapshot_over_file_limit`,
 `agent_memory_snapshot_over_byte_limit`, `agent_memory_snapshot_refused`;
 #1843). These are new values of the open class, so a 0.41.0 receiver reads them
-as `unknown` with `reportedClass`, and adapters never send them. A sealed task
-sends `unknown` instead, because the class would show in plaintext a memory
-state its sealing hides. The field was gated on the server's
+as `unknown` with `reportedClass`, and adapters never send them. A task that
+seals its output sends `unknown` instead, because the class would show in
+plaintext the memory state its sealed reason hides. The field was gated on the server's
 `runtime-failure-class` flag; v6 retired the flag and the field is baseline
 (#1573). `failure` stays plaintext on a sealed `task.fail`. The reference
 server and the hosted cloud project the field as `TaskResult.failure` and
@@ -1054,7 +1054,7 @@ runtime starts. A `MEMORY.md` with more than one hard link fails it the same way
 with `agent_memory_resident_unreadable: multiple links`, because another link can
 name a file outside the home. Both carry `task.fail.failure.class`
 (`agent_memory_resident_over_limit`, `agent_memory_resident_multiple_links`)
-on a task that is not sealed. A daemon that does not admit the memory MCP cannot
+on a task that does not seal its output. A daemon that does not admit the memory MCP cannot
 write memory, so its fresh task keeps the reading guidance, carries no data and
 does not fail on the size. The hosted cloud
 `readTaskResult` projects the field verbatim.

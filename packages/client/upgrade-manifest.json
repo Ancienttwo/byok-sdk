@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "bb7d0ed20282f0d5a7d651d154f695a9725cc1854d2f34bb3434e4842a8067f1"
+    "snapshotSha256": "d080d12af837ce50c4b84779c0a67e0d393783f47aa20dbc23d2a8eccd189060"
   },
   "configFields": {
     "status": "tracked",
@@ -260,6 +260,23 @@
         "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
         "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema"
       ]
+    },
+    {
+      "id": "agent-memory-start-refusal-classes",
+      "impact": "breaking",
+      "summary": "A claimed task that the Agent home's memory refuses before its runtime starts now carries a typed task.fail.failure.class from AGENT_MEMORY_START_REFUSALS (resident MEMORY.md over the limit, with more than one link, not a regular file or not UTF-8; a commit-on-success start copy over the snapshot file or byte limit, or refused otherwise). The reason text is unchanged. A task that seals its output sends unknown. TaskFailureReading gains a member, so an exhaustive switch over its class stops compiling until it handles the new classes. AgentMemorySnapshotLimitError takes the bound it hit as its new first constructor argument and exposes it as limit.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-start-refusal-classes",
+      "items": [
+        "export:@byok-sdk/client#AgentMemorySnapshotLimitError",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_START_REFUSALS",
+        "export:@byok-sdk/protocol#AgentMemoryStartRefusal",
+        "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+        "export:@byok-sdk/protocol#TaskFailSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailureReading",
+        "export:@byok-sdk/protocol#TaskFailureSchema",
+        "export:@byok-sdk/protocol/constants#AGENT_MEMORY_START_REFUSALS",
+        "export:@byok-sdk/protocol/constants#AgentMemoryStartRefusal"
+      ]
     }
   ],
   "changes": [
@@ -283,6 +300,11 @@
       "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
       "after": "K8 0.0.1 src-sha256=c329c3d65446c4f0",
       "entry": "example-bot-collaboration-autonomy"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemorySnapshotLimitError",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
     },
     {
       "item": "export:@byok-sdk/client#AgyAdapter",
@@ -690,9 +712,19 @@
       "entry": "opencode-go-keys-store"
     },
     {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_START_REFUSALS",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
       "item": "export:@byok-sdk/protocol#AgentHomeProjectionPayloadSchema",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryStartRefusal",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
     },
     {
       "item": "export:@byok-sdk/protocol#E2eeScopeKeyPackageSchema",
@@ -760,6 +792,26 @@
       "entry": "offer-selection-rules"
     },
     {
+      "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailSealedPayload",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureReading",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureSchema",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
@@ -778,6 +830,16 @@
       "item": "export:@byok-sdk/protocol#offerSelectionViolation",
       "change": "added",
       "entry": "offer-selection-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_START_REFUSALS",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AgentMemoryStartRefusal",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
     },
     {
       "item": "export:@byok-sdk/server#TaskSnapshot",

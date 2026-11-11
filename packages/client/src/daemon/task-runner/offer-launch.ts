@@ -437,12 +437,13 @@ function failBeforeStart(
 }
 
 /**
- * The plaintext class of an Agent-memory start refusal (#1843). A sealed task
- * keeps `unknown`: the class would show in plaintext a memory state that its
- * sealed reason or memory projection hides.
+ * The plaintext class of an Agent-memory start refusal (#1843). A task that
+ * seals its output keeps `unknown`: its reason is sealed, and the class would
+ * show in plaintext the memory state that reason hides. Sealing
+ * `memory-projection` requires `task-output`, so that case is covered too.
  */
 function agentMemoryStartFailure(this: TaskRunner, taskId: string, refusal: AgentMemoryStartRefusal | undefined): TaskFailure {
-  if (refusal === undefined || this['deps'].sealedTasks?.isSealed(taskId) === true) return DAEMON_TASK_FAILURE;
+  if (refusal === undefined || this['deps'].sealedTasks?.sealsOutput(taskId) === true) return DAEMON_TASK_FAILURE;
   return { class: refusal };
 }
 
