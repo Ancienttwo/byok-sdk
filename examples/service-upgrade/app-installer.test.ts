@@ -1,11 +1,11 @@
 // app-installer.ts against the built SDK, on the paths that end before the OS
 // service manager is asked anything: the smoke covers the rest on each platform.
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdtemp, readdir, rm, writeFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeServicePayloadManifest } from '@byok-sdk/client/packaging';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 
 const installer = path.join(path.dirname(fileURLToPath(import.meta.url)), 'app-installer.ts');
@@ -22,9 +22,10 @@ function app(...args: string[]): { status: number | null; output: Record<string,
 async function payload(id: string, files: Record<string, string>, listed = files): Promise<string> {
   const dir = path.join(root, `payload-${id}`);
   await mkdir(dir, { recursive: true });
+  // The manifest signs `listed`; `files` then lands on disk, so a test can make the two differ.
+  for (const [name, content] of Object.entries(listed)) await writeFile(path.join(dir, name), content);
+  await writeServicePayloadManifest(dir, { id });
   for (const [name, content] of Object.entries(files)) await writeFile(path.join(dir, name), content);
-  const digests = Object.fromEntries(Object.entries(listed).map(([name, content]) => [name, createHash('sha256').update(content).digest('hex')]));
-  await writeFile(path.join(dir, 'byok-payload.json'), JSON.stringify({ format: 'byok-service-payload', version: 1, id, files: digests }));
   return dir;
 }
 

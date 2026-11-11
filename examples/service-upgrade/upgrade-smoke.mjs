@@ -12,6 +12,7 @@
 //     → health check fails → v2 and its store snapshot restored → running
 //   rollback → v1 and the v2 upgrade's snapshot → running
 //   uninstall → no service, no versions; the store stays
+//   clear the enrollment (app: clearDeviceEnrollment; cli: byok-agent unpair, not on Windows)
 //
 // On Windows the cli run keeps its store on an 8.3 short-name path and the app
 // run on a path longer than 260 characters (#1030).
@@ -22,14 +23,14 @@
 // (`loginctl enable-linger`); a missing one fails the run.
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { promises as fs, mkdtempSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { sdkNativeAssetTargets } from '@byok-sdk/client';
-import { byokSdkPackaging } from '@byok-sdk/client/packaging';
+import { byokSdkPackaging, writeServicePayloadManifest } from '@byok-sdk/client/packaging';
 import { createByokServer, listenLoopback } from '@byok-sdk/server';
 import { writeKoffiAssetRoot } from '../../scripts/testing/sdk-koffi-asset-root.mjs';
 
@@ -62,13 +63,11 @@ async function ok(args, options) {
 
 async function writePayload(owner, id, files) {
   const dir = path.join(work, 'payloads', `${owner}-${id}`);
-  const digests = {};
   for (const [name, content] of Object.entries(files)) {
     await fs.mkdir(path.dirname(path.join(dir, name)), { recursive: true });
     await fs.writeFile(path.join(dir, name), content);
-    digests[name] = createHash('sha256').update(content).digest('hex');
   }
-  await fs.writeFile(path.join(dir, 'byok-payload.json'), JSON.stringify({ format: 'byok-service-payload', version: 1, id, files: digests }));
+  await writeServicePayloadManifest(dir, { id });
   return dir;
 }
 
@@ -279,13 +278,22 @@ async function lifecycle(variant, cmd, server, payloads) {
   log(`${owner}: rolled back to v1`);
 
   await ok(cmd.uninstall());
-  // macOS and Linux keep the enrollment in the user's keychain or Secret Service; leave none behind.
-  // On Windows `byok-agent unpair` checks only a WinSW service, so neither run unpairs there.
-  if (!isWindows) {
+  // Leave no enrollment in this user's keychain, Secret Service or Credential Manager. The app run clears it
+  // with clearDeviceEnrollment, as an App's uninstaller does. The cli run's WinSW service enrolled as
+  // LocalSystem, out of this user's reach, and `byok-agent unpair` checks only a WinSW service, so the cli
+  // run unpairs outside Windows only.
+  if (owner === 'app' || !isWindows) {
     // The manager unloads the service before its daemon has released the store.
     await until(async () => (/^live status: daemon not reachable/mu.test((await run([agentCli, 'status', '--config', variant.config])).stdout) ? true : undefined),
       `${variant.name} exit`);
-    await ok([agentCli, 'unpair', '--yes', '--config', variant.config]);
+    if (owner === 'app') {
+      // Read back in the installer's process: koffi loaded here would lock the asset root against the final cleanup.
+      const status = await ok([installer, 'clear-enrollment', '--config', variant.config, '--install-root', variant.installRoot]);
+      assert.deepEqual(JSON.parse(status), { state: 'unpaired' });
+      log(`${owner}: enrollment cleared`);
+    } else {
+      await ok([agentCli, 'unpair', '--yes', '--config', variant.config]);
+    }
   }
   const left = await fs.readdir(variant.installRoot);
   assert.deepEqual(left, [], `install root after uninstall: ${left.join(', ')}`);
