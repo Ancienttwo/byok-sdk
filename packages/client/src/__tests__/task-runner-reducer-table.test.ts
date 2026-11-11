@@ -27,6 +27,7 @@ const EVENT_TYPES: readonly ReducerEventType[] = [
   'runtime.started',
   'runtime.activation_failed',
   'runtime.start_failed',
+  'runtime.prestart_failed',
   'runtime.run_failed',
   'turn.ended',
   'stream.ended',

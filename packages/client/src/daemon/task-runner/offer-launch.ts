@@ -24,7 +24,7 @@ import { prependAgentMemoryModeGuidance } from '../memory-guidance';
 import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
 import { AGENT_MEMORY_RECOVERY, agentMemoryCommitFailureRetryable } from '../agent-memory-commit';
 import { settleAgentMemoryCommitCopy } from './agent-memory';
-import type { PreparedExecutionObservation, ActiveTask, OfferPhaseContext } from './support';
+import type { PreparedExecutionObservation, ActiveTask, ClaimedAgentFailureContext, OfferPhaseContext } from './support';
 import { isKnownRuntimeId, offeredInstruction, errorMessage, outboundErrorMessage, pendingCancelBeforeActive } from './support';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
@@ -376,7 +376,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
       : await this['resolveInstruction'](offeredInstructionValue, blobAbort.signal);
   } catch (err) {
     const reason = `failed to resolve instruction blob: ${errorMessage(err)}`;
-    await this['failClaimedAgent'](taskId, reason, true, {
+    await failBeforeStart.call(this, taskId, reason, true, {
       binding: agentBinding,
       runtimeId: pick.descriptor.id,
     });
@@ -391,7 +391,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
       });
       resolvedInstruction = `${NATIVE_SESSIONS_GUIDANCE}\n\n${rendered.jsonLine}\n\n${resolvedInstruction}`;
     } catch (error) {
-      await this['failClaimedAgent'](taskId, error instanceof NativeSessionsUnavailableError
+      await failBeforeStart.call(this, taskId, error instanceof NativeSessionsUnavailableError
         ? error.message : 'native_sessions_unavailable: session_unreadable', false, { binding: agentBinding, runtimeId: pick.descriptor.id });
       return;
     }
@@ -407,7 +407,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
       taskMcpServers = await this['withAgentMemoryMcp'](taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, helper, 'complete', scratch);
     } catch {
       const reason = 'agent_memory_unavailable: the sealed Agent memory helper could not be bound for launch';
-      await this['failClaimedAgent'](taskId, reason, false, {
+      await failBeforeStart.call(this, taskId, reason, false, {
         binding: agentBinding,
         runtimeId: pick.descriptor.id,
       });
@@ -415,6 +415,23 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
     }
   }
   return { resolvedInstruction, taskMcpServers };
+}
+
+/**
+ * Fails a claimed task before its runtime starts (#1760). The reducer records
+ * the failed terminal and the finished id first, so a redelivered offer is
+ * declined as already handled; the legacy adapter then sends the same
+ * `task.fail` it always did.
+ */
+function failBeforeStart(
+  this: TaskRunner,
+  taskId: string,
+  reason: string,
+  retryable: boolean,
+  context: ClaimedAgentFailureContext,
+): Promise<boolean> {
+  hostFor(this).dispatchSync({ type: 'runtime.prestart_failed', taskId, atMs: Date.now(), reason, retryable });
+  return this['failClaimedAgent'](taskId, reason, retryable, context);
 }
 
 export interface OfferStartInput
@@ -491,7 +508,7 @@ async function startAndActivateRuntime(
       memoryGrant = await resolveFileScopeGrant({ fileScope: { mode: 'memory' },
         home: { path: agentBinding.resolution.canonicalHome, identity: agentBinding.lease.homeIdentity }, attempt: { homeAccess: 'writer' } });
     } catch {
-      await this['failClaimedAgent'](taskId, 'native_sessions_unavailable: memory_scope', false, { binding: agentBinding, runtimeId: pick.descriptor.id });
+      await failBeforeStart.call(this, taskId, 'native_sessions_unavailable: memory_scope', false, { binding: agentBinding, runtimeId: pick.descriptor.id });
       return;
     }
   }
@@ -531,7 +548,7 @@ async function startAndActivateRuntime(
       const reason = guard === undefined
         ? 'file_scope_unavailable: the local file scope could not be resolved'
         : `${guard.code}: ${guard.message}`;
-      await this['failClaimedAgent'](taskId, reason, false, {
+      await failBeforeStart.call(this, taskId, reason, false, {
         binding: agentBinding, runtimeId: pick.descriptor.id,
       });
       return;
@@ -541,8 +558,8 @@ async function startAndActivateRuntime(
   // joined a reader's group took no base lease, so nothing has settled it yet.
   // It goes first: the read below must see the restored file.
   const commitStore = this['deps'].agentMemoryCommit;
-  const failCommitCopy = (error: unknown, recovery = ''): Promise<boolean> => this['failClaimedAgent'](
-    taskId, `agent_memory_commit_unavailable: ${outboundErrorMessage(error)}${recovery}`, agentMemoryCommitFailureRetryable(error),
+  const failCommitCopy = (error: unknown, recovery = ''): Promise<boolean> => failBeforeStart.call(
+    this, taskId, `agent_memory_commit_unavailable: ${outboundErrorMessage(error)}${recovery}`, agentMemoryCommitFailureRetryable(error),
     { binding: agentBinding, runtimeId: pick.descriptor.id },
   );
   if (!readerAttempt && commitStore !== undefined) {
@@ -566,7 +583,7 @@ async function startAndActivateRuntime(
     const reason = residentMemory.kind === 'over-limit'
       ? `agent_memory_resident_over_limit: ${residentMemory.byteCount}/${RESIDENT_MEMORY_MAX_BYTES}${AGENT_MEMORY_RECOVERY}`
       : `agent_memory_resident_unreadable: ${residentMemory.reason}`;
-    await this['failClaimedAgent'](taskId, reason, false, { binding: agentBinding, runtimeId: pick.descriptor.id });
+    await failBeforeStart.call(this, taskId, reason, false, { binding: agentBinding, runtimeId: pick.descriptor.id });
     return;
   }
   const residentMemoryRead = residentMemory?.kind === 'read' ? residentMemory : undefined;
@@ -588,7 +605,7 @@ async function startAndActivateRuntime(
   if (toolAuthorization.fileScope !== undefined && fileScopeGrant !== undefined && toolAuthorizationGate === undefined) {
     // A configured scope with no auto gate would reach the adapter as an
     // unscoped launch. Refuse the claimed task instead of dropping it.
-    await this['failClaimedAgent'](taskId, 'file_scope_unavailable: a scoped task requires the auto tool-authorization gate', false, {
+    await failBeforeStart.call(this, taskId, 'file_scope_unavailable: a scoped task requires the auto tool-authorization gate', false, {
       binding: agentBinding, runtimeId: pick.descriptor.id,
     });
     return;
