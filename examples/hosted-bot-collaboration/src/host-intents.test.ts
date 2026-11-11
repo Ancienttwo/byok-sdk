@@ -351,6 +351,35 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
     });
   });
 
+  it('#1320: cancels an untried Host intent at once, leaves a tried one to the reconciler, and refuses what is not a Host intent', async () => {
+    const store = hostStore({ research: () => {} }), scope = await scoped(store);
+    const cancel = (key: string) => store.cancelHostIntent(scope, key, Date.now);
+    await expect(cancel('missing')).rejects.toMatchObject({ name: 'HostIntentError', key: 'missing', code: 'unknown_intent' });
+    await direct(scope, { key: 'direct' });
+    await expect(cancel('direct')).rejects.toMatchObject({ code: 'unknown_intent' });
+    await expect(cancel('t1')).rejects.toMatchObject({ key: 't1', code: 'not_host_intent' });
+    await store.enqueueHostIntent(scope, input(), 'research', Date.now);
+    await expect(cancel(KEY)).resolves.toEqual({ key: KEY, result: 'cancelled', conclusion: 'cancelled' });
+    await expect(cancel(KEY)).resolves.toEqual({ key: KEY, result: 'already_settled', conclusion: 'cancelled' });
+    await store.enqueueHostIntent(scope, input({ key: 'tried' }), 'research', Date.now);
+    // The `direct` row heads the Main Bot FIFO; once it settles, the tried intent reaches the SDK.
+    await inSchema(opened!.pool, opened!.store.schema, client => client.query(`UPDATE intent SET conclusion = 'failed' WHERE key = $1`, [storedKey('direct')]));
+    expect(await submit()).toMatchObject({ tried: 1 });
+    await expect(cancel('tried')).resolves.toEqual({ key: 'tried', result: 'cancel_pending' });
+    expect(await row(scope, 'tried')).toMatchObject({ conclusion: null, submission: 'delivered' });
+  });
+
+  it('#1229: keeps the last device slot for user-source work, as L\'s admitDeviceSlot', async () => {
+    const store = hostStore({ research: () => {} }), scope = await scoped(store);
+    for (const [key, source] of [['bot-a', 'bot'], ['bot-b', 'bot'], ['user-c', 'user']] as const) {
+      await store.enqueueHostIntent(scope, input({ key, source, execution: template('device', key) }), 'research', Date.now);
+    }
+    const run = () => new HostedSubmitter(opened!.pool, opened!.store.schema, { port: () => port, deviceConcurrency: 2 }).run();
+    expect(await run()).toEqual({ tried: 2, failed: [] });
+    expect(await run()).toEqual({ tried: 0, failed: [] });
+    expect((await rows(scope)).map(found => [found.key, found.submission])).toEqual([['bot-a', 'delivered'], ['bot-b', 'reserved'], ['user-c', 'delivered']]);
+  });
+
   it('compaction removes a settled Host intent with its handler, and its key can never freeze again', async () => {
     const store = hostStore({ research: () => {} }), scope = await scoped(store);
     await store.enqueueHostIntent(scope, input(), 'research', Date.now);

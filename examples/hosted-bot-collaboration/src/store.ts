@@ -18,7 +18,8 @@ import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } 
 import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefusal, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION } from './ddl';
-import { delegationCancelAnswer, turnCancelAnswer, type DelegationCancelResult, type TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
+import { delegationCancelAnswer, hostIntentCancelAnswer, turnCancelAnswer, type DelegationCancelResult, type IntentCancelResult,
+  type TurnCancelResult } from '@byok-sdk/example-bot-collaboration/rules/delegation';
 import { cancelIntent, commandIntentFacts, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { syncDreamSlice } from './dreams';
 import { HostedStoreVersionError, inSchema, lockScope, SCHEMA } from './transaction';
@@ -1708,6 +1709,28 @@ export class HostedCollaborationStore {
 
   private transaction<T>(work: (client: PoolClient) => Promise<T>, readOnly: boolean): Promise<T> {
     return inSchema(this.pool, this.schema, work, readOnly);
+  }
+
+  /**
+   * Host API (#1320): cancels a Host intent with L's `cancelHostIntent` answers (K8 `hostIntentCancelAnswer`), in one
+   * transaction under the scope lock. A settled intent returns `already_settled` and writes nothing. An untried intent
+   * concludes `cancelled` (`cancelIntent`): no handler runs, and its FIFO moves on. A tried intent keeps the cancel reason
+   * and returns `cancel_pending`: the reconciler sends the SDK cancel and settles it at its terminal. Refuses with
+   * `HostIntentError`: `not_host_intent` for a Bot Turn key, `unknown_intent` for a key with no Host intent row.
+   */
+  cancelHostIntent(scope: string, key: string, clock: () => number): Promise<IntentCancelResult<Conclusion>> {
+    const scopeKey = storedKey(scope), stored = storedKey(key);
+    return this.change(scope, undefined, async (state, _publish, client) => {
+      const read = async () => (await client.query<{ handler: string | null; conclusion: Conclusion | null }>(
+        'SELECT handler, conclusion FROM intent WHERE scope = $1 AND key = $2', [scopeKey, stored])).rows[0];
+      const row = await read(), now = clock();
+      const settled = hostIntentCancelAnswer(key, Object.hasOwn(state.turns, key),
+        row && row.handler !== null ? (row.conclusion ? { conclusion: row.conclusion } : {}) : undefined);
+      if (settled) return { value: { key, ...settled }, outbox: [], now };
+      if (!await cancelIntent(client, scope, key, now)) return { value: { key, result: 'cancel_pending' }, outbox: [], now };
+      await switchDueVersions(client, scopeKey, now);
+      return { value: { key, result: 'cancelled', conclusion: (await read())!.conclusion! }, outbox: [], now };
+    });
   }
 }
 
