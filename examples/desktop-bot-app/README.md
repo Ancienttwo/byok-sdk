@@ -105,6 +105,11 @@ login item is the OS's own setting: main answers `settings.loginItem` and
 `settings.setLoginItem` from it, and Linux has none (`supported: false`). The tray icons
 in `assets/tray/` are drawn for this app; macOS uses the `Template` images.
 
+The Settings section (`src/renderer/settings/`) shows the device, runtimes, clock skew
+and the SDK doctor as the Host projects them, and runs the doctor on open and on
+Refresh only. It edits the dreaming switch and model order (applied when the Host next
+starts), the login item, and exports the diagnostics bundle to a file the Host names.
+
 ## Security baseline
 
 - Windows run with `contextIsolation`, `sandbox` and no `nodeIntegration`. Navigation,
