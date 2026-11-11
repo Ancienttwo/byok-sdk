@@ -527,6 +527,20 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect((await takeTurn(session)).filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'reply-2:next' }]);
   });
 
+  it('interrupt() withdraws a follow-up held during a Claude-own turn: the instruction is never written', async () => {
+    const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_OWN_TURN: '1' });
+    const receipt = path.join(ctx.workspaceDir, 'user.log');
+    ctx.env.FAKE_CLAUDE_USER_RECEIPT = receipt;
+    const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
+    openSessions.push(session);
+    await takeTurn(session);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await session.followUp({ instruction: 'next' });
+    await session.interrupt();
+    await new Promise(resolve => setTimeout(resolve, 500));
+    expect((await fs.readFile(receipt, 'utf8')).split('\n')).not.toContain('next');
+  });
+
   it('followUp() fails closed on a blob-ref instruction, same as start()', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();

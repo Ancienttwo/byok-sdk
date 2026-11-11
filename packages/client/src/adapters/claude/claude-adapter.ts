@@ -759,7 +759,7 @@ class ClaudeSession implements Session {
     try {
       this.native?.beginTurn();
       let prompted = await this.stream.raw.prompt(task.instruction);
-      if (prompted.response.body.code === 'busy') prompted = await this.stream.raw.queue(task.instruction);
+      if (prompted.response.body.code === 'busy') prompted = await this.stream.queue(task.instruction);
       if (prompted.response.body.kind === 'accepted') return;
       refusal = prompted.response.body;
     } catch (cause) {

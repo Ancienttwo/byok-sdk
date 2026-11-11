@@ -283,7 +283,8 @@ type ClaudeVendorSession = Awaited<ReturnType<typeof vendorStreamJsonSession>>;
 type ClaudeBridgeSession = {
   readonly id: AdapterSession['id'];
   prompt(...args: FirstInput<AdapterSession['prompt']>): Promise<ClaudeBridge.ClaudeControl>;
-  queue(...args: FirstInput<AdapterSession['queue']>): Promise<ClaudeBridge.ClaudeControl>;
+  queue(input: Parameters<AdapterSession['queue']>[0], options: { inputId: string }): Promise<ClaudeBridge.ClaudeControl>;
+  withdraw?(...args: Parameters<NonNullable<AdapterSession['withdraw']>>): Promise<ClaudeBridge.ClaudeControl>;
   abort(...args: Parameters<AdapterSession['abort']>): Promise<ClaudeBridge.ClaudeControl>;
   records(): readonly ClaudeBridge.ClaudeRecord[];
   dispose: AdapterSession['dispose'];

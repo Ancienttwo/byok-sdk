@@ -115,6 +115,7 @@
 //   FAKE_CLAUDE_OWN_TURN=1             -> after turn 1, Claude runs a turn of
 //                                          its own: init at once, result 300ms
 //                                          later.
+//   FAKE_CLAUDE_USER_RECEIPT=<path>     -> append each user message's text.
 //   FAKE_CLAUDE_INTERRUPT_ERROR=1       -> answer an interrupt with an error
 //                                          control_response and no result.
 //   FAKE_CLAUDE_UNKNOWN_TOP_LEVEL=1     -> before the normal turn, emit one
@@ -538,6 +539,7 @@ function runProbeOrTurnFlow() {
     }
     if (msg.type !== 'user') return; // only real input shape this fixture accepts, per --input-format stream-json
     const text = msg.message?.content?.[0]?.text ?? '';
+    if (process.env.FAKE_CLAUDE_USER_RECEIPT) appendFileSync(process.env.FAKE_CLAUDE_USER_RECEIPT, `${text}\n`);
     void runTurn(text).catch((error) => {
       process.stderr.write(`fake claude MCP flow failed: ${error instanceof Error ? error.message : String(error)}\n`);
       process.exit(1);

@@ -16,7 +16,9 @@ export interface RawClaudeSession {
   readonly id: string;
   prompt(input: string): Promise<ClaudeControl>;
   /** Input for after the turn Claude runs on its own; OAR holds it and sends it when that turn ends. */
-  queue(input: string): Promise<ClaudeControl>;
+  queue(input: string, options: { inputId: string }): Promise<ClaudeControl>;
+  /** Takes a held input back before OAR sends it; `not_queued` once it was sent. The stream-json session always has it. */
+  withdraw?(inputId: string): Promise<ClaudeControl>;
   abort(): Promise<ClaudeControl>;
   records(): readonly ClaudeRecord[];
   dispose(): Promise<void>;

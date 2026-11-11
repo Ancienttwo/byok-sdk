@@ -6,7 +6,7 @@ import type { McpStdioServerConfig } from '../../types.js';
 import type { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import {
   claudeProjectionProfile, initialClaudeProjection, resumedClaudeProjection, sessionCredentialRedactor, streamJsonSession,
-  type ClaudeRecord, type RawClaudeSession,
+  type ClaudeControl, type ClaudeRecord, type RawClaudeSession,
 } from '../../runtime/claude-session-runtime.js';
 import { claudeRecordFrame, parseClaudeContextWindow, type ClaudeStreamMessage } from './projection.js';
 
@@ -48,6 +48,9 @@ export class ClaudeStreamSession {
   readonly sessionRef: Promise<string>;
   hooksApplied: boolean | undefined;
   #raw: RawClaudeSession | undefined;
+  #withdraw!: NonNullable<RawClaudeSession['withdraw']>;
+  /** Input ids of the follow-ups OAR holds for after a Claude-own turn; an interrupt withdraws them first. */
+  #held = new Set<string>();
   #fatal: Error | undefined;
   #controls = new Map<string, PendingControl>();
   #ended = false;
@@ -95,6 +98,18 @@ export class ClaudeStreamSession {
       // Before a native interrupt: tools it orphans stay killable at disposal.
       beforeInterrupt: () => this.child.observeDescendants(),
     }, DEFAULT_MAX_RETAINED_BYTES);
+    // Without withdraw a cancelled task's held follow-up would still reach Claude.
+    if (this.#raw.withdraw === undefined) throw new Error('claude stream-json session has no withdraw');
+    this.#withdraw = this.#raw.withdraw.bind(this.#raw);
+  }
+
+  /** Input for after the turn Claude runs on its own, held by OAR under an input id the interrupt can withdraw. */
+  async queue(input: string): Promise<ClaudeControl> {
+    const inputId = randomUUID();
+    this.#held.add(inputId);
+    const queued = await this.raw.queue(input, { inputId });
+    if (queued.response.body.kind !== 'accepted') this.#held.delete(inputId);
+    return queued;
   }
 
   get raw(): RawClaudeSession {
@@ -136,6 +151,10 @@ export class ClaudeStreamSession {
 
   /** OAR records the interrupt and its acknowledgement; the ACK and the turn's `result` share the deadline. */
   async interruptAndSettle(timeoutMs: number): Promise<boolean> {
+    // A held follow-up belongs to the task being cancelled: OAR would send it when the interrupted turn ends.
+    const held = [...this.#held];
+    this.#held.clear();
+    for (const inputId of held) await this.#withdraw(inputId).catch(() => undefined);
     const seen = this.#results;
     let release!: () => void;
     const result = new Promise<void>(resolve => { release = resolve; });
