@@ -1,5 +1,5 @@
 import { startControlServer, AnotherControlServerRunningError } from '../control-server.js';
-import { type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError } from '../daemon-lifecycle.js';
+import { type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError, DaemonNotOpenError } from '../daemon-lifecycle.js';
 import { InsecureServerUrlError } from '../url.js';
 import { DeviceRecordRePairRequiredError } from '../store.js';
 import { DeviceStoreBindingMismatchError } from '../daemon-errors.js';
@@ -75,6 +75,51 @@ export function setLifecycle(daemonScope: DaemonScope, next: DaemonLifecycle): v
   if (JSON.stringify(next) === JSON.stringify(daemonState.lifecycle)) return;
   daemonState.lifecycle = next;
   observer.noteLifecycle(next);
+}
+
+/**
+ * Settles on the first lifecycle that decides it: `running/open` resolves,
+ * `halted`, `crashed` and `stopped` reject, `connecting` and
+ * `awaiting-enrollment` wait. The observer emits synchronously from
+ * {@link setLifecycle}, so no change between the read and the subscription is lost.
+ */
+export function whenOpen(daemonScope: DaemonScope, options: { readonly signal: AbortSignal }): Promise<void> {
+  const { daemonState, observer } = daemonScope;
+  const { signal } = options;
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const decide = (lifecycle: DaemonLifecycle): boolean => {
+      switch (lifecycle.phase) {
+        case 'running':
+          if (lifecycle.connection !== 'open') return false;
+          resolve();
+          return true;
+        case 'awaiting-enrollment':
+          return false;
+        case 'halted':
+          reject(new DaemonHaltError(lifecycle.reason));
+          return true;
+        case 'crashed':
+        case 'stopped':
+          reject(new DaemonNotOpenError(lifecycle.phase));
+          return true;
+      }
+    };
+    if (decide(daemonState.lifecycle)) return;
+    const onAbort = (): void => {
+      unsubscribe();
+      reject(signal.reason);
+    };
+    const unsubscribe = observer.subscribe((event) => {
+      if (event.kind !== 'lifecycle' || !decide(event.lifecycle)) return;
+      unsubscribe();
+      signal.removeEventListener('abort', onAbort);
+    });
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 export function halted(daemonScope: DaemonScope, reason: DaemonHaltReason): void {

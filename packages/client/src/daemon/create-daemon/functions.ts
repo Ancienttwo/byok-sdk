@@ -1,7 +1,7 @@
 import { initializeInputPreparation, runInputPreparation, initializeOwnedHostedStorage, provenAgentMemoryBackend } from './services.js';
 import { memberClient, startDeviceMember } from './member.js';
-import { checkServerUrl, pair, pairUnderLease, unpair, unpairUnderLease } from './pairing.js';
-import { runLifecycleMutation, replaceControlServer, setLifecycle, halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown } from './lifecycle.js';
+import { checkServerUrl, pair, pairEmbedded, pairUnderLease, unpair, unpairUnderLease } from './pairing.js';
+import { runLifecycleMutation, replaceControlServer, setLifecycle, halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown, whenOpen } from './lifecycle.js';
 import { runStartUnderLease } from './start.js';
 import { taskContextCapabilityAvailable, applyCapabilityDeclaration, setHelloCapability, startPresenceProducer, waitForHostTaskContext, runPresenceDiscovery } from './presence.js';
 import { runShutdownSequence, performControlShutdown } from './shutdown.js';
@@ -13,8 +13,8 @@ import type { DaemonScope } from './scope.js';
 const daemonFunctions = {
   initializeInputPreparation, runInputPreparation, initializeOwnedHostedStorage,
   provenAgentMemoryBackend, memberClient, startDeviceMember, checkServerUrl, pair,
-  pairUnderLease, unpair, unpairUnderLease, runLifecycleMutation, replaceControlServer, setLifecycle,
-  halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown,
+  pairEmbedded, pairUnderLease, unpair, unpairUnderLease, runLifecycleMutation, replaceControlServer, setLifecycle,
+  halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown, whenOpen,
   runStartUnderLease, taskContextCapabilityAvailable, applyCapabilityDeclaration, setHelloCapability,
   startPresenceProducer, waitForHostTaskContext, runPresenceDiscovery, runShutdownSequence,
   performControlShutdown, approve, reject, subscribe, tasks, reloadMcpToolsets,
@@ -46,6 +46,7 @@ export function bindDaemonFunctions(scope: () => DaemonScope): DaemonFunctions {
     startDeviceMember: (...args) => startDeviceMember(scope(), ...args),
     checkServerUrl: (...args) => checkServerUrl(scope(), ...args),
     pair: (...args) => pair(scope(), ...args),
+    pairEmbedded: (...args) => pairEmbedded(scope(), ...args),
     pairUnderLease: (...args) => pairUnderLease(scope(), ...args),
     unpair: (...args) => unpair(scope(), ...args),
     unpairUnderLease: (...args) => unpairUnderLease(scope(), ...args),
@@ -59,6 +60,7 @@ export function bindDaemonFunctions(scope: () => DaemonScope): DaemonFunctions {
     startUnderLease: (...args) => startUnderLease(scope(), ...args),
     stop: (...args) => stop(scope(), ...args),
     requestShutdown: (...args) => requestShutdown(scope(), ...args),
+    whenOpen: (...args) => whenOpen(scope(), ...args),
     runStartUnderLease: (...args) => runStartUnderLease(scope(), ...args),
     taskContextCapabilityAvailable: (...args) => taskContextCapabilityAvailable(scope(), ...args),
     applyCapabilityDeclaration: (...args) => applyCapabilityDeclaration(scope(), ...args),
