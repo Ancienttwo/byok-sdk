@@ -2378,6 +2378,12 @@ jobs:
             process.env.DBUS_SESSION_BUS_ADDRESS = bus;
             console.log('D0 libsecret: round trip ok, no-bus fails closed');
           })().catch(error => { console.error(error); process.exit(1); });
+      # #1811: the one Host bundle that dev runs under Node (a package runs it as
+      # a SEA), started through the bridge as main starts it, with a throwaway HOME.
+      - name: Bundle the Host (build:host) and start it through the bridge (hello, running, shutdown)
+        run: |
+          bun run --filter @byok-sdk/example-desktop-bot-app build:host
+          HOME="$RUNNER_TEMP/host-home" node examples/desktop-bot-app/scripts/package/host-smoke.mjs node examples/desktop-bot-app/dist/host/host.cjs
       # Report only: Electron from node_modules (chrome-sandbox not setuid). A deb
       # install makes chrome-sandbox setuid; the packaged-app answer waits for #1811.
       - name: D0 Linux - AppArmor and the Electron sandbox (report)
