@@ -285,6 +285,7 @@ test('a platform family is selected only by a path it owns', () => {
     'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
     'linux-systemd-smoke': 'templates/service/systemd/smoke-test.mjs',
     'service-upgrade-smoke': 'examples/service-upgrade/upgrade-smoke.mjs',
+    desktop: 'examples/desktop-bot-app/src/main/index.ts',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
     'credential-isolation-audit': 'packages/keys/src/index.ts',
     'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
@@ -423,6 +424,7 @@ const registeredJobInputs = {
     'packages/client/dist/native/agent-memory-fs/win32-x64.exe': 'build output that the Windows junction smoke runs',
   },
   'hermes-real-windows': { $installer: 'the verified vendored Hermes installer' },
+  desktop: { 'packages/keys/dist/index.js': 'keys build output that the #1803 D0 Secret Service probe imports' },
   'packageability-smoke': {
     'packages/client/scripts/build-agent-memory-helper.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
     'packages/client/scripts/check-agent-memory-helper-build.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
@@ -648,7 +650,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 22);
+  assert.equal(knownFamilies.length, 23);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {

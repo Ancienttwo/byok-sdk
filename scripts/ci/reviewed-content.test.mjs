@@ -1101,4 +1101,18 @@ test('new graph-registered private workspaces and matching lock rows are admitte
   f.lock.workspaces[unknown] = { name: manifest.name, version: manifest.version, dependencies: manifest.dependencies };
   f.lock.packages[manifest.name] = [`${manifest.name}@workspace:${unknown}`]; f.write('bun.lock', f.lock);
   assert.throws(() => selectImpact(['bun.lock'], f), /graph-registered/);
+  // #1804: the desktop example's exact additions, and the new lock rows they declare.
+  delete f.lock.workspaces[unknown]; delete f.lock.packages[manifest.name];
+  const desktop = 'examples/desktop-bot-app';
+  // The fixture base declares none of the shared tool specs, so only the two additions stay.
+  const { devDependencies: { electron, '@electron/fuses': fuses }, ...shape } = JSON.parse(readFileSync(new URL(`../../${desktop}/package.json`, import.meta.url), 'utf8'));
+  const app = { ...shape, devDependencies: { electron, '@electron/fuses': fuses } };
+  f.write(`${desktop}/package.json`, app);
+  f.lock.workspaces[desktop] = { name: app.name, version: app.version, devDependencies: app.devDependencies };
+  f.lock.packages[app.name] = [`${app.name}@workspace:${desktop}`];
+  f.lock.packages.electron = ['electron@45.3.0', '', {}, 'sha512-x'];
+  f.write('bun.lock', f.lock);
+  assert.ok(selectImpact([`${desktop}/package.json`, 'bun.lock'], f).dirs.includes(desktop));
+  f.write(`${desktop}/package.json`, { ...app, devDependencies: { ...app.devDependencies, electron: '45.3.1' } });
+  assert.throws(() => selectImpact([`${desktop}/package.json`], f), /reuse a base dependency spec \(electron\)/);
 });
