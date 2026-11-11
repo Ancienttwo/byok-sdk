@@ -41,6 +41,10 @@ to stderr only.
   the method: the Host's, or main's for a `main` domain method.
 - The Host pushes `{ "event": "state" }` lines (no id) after every change: `starting`,
   `running` with its active work count, or `stopped` with a reason.
+- Main turns those pushes, and its own `restarting`/`failed` view, into a bare hint on
+  `byok:state-changed`, at most one per 50 ms burst, sent only to its own window's main
+  frame on `app://renderer`. The hint carries nothing; the renderer subscribes with
+  `window.byok.onStateChanged(listener)` and pulls the state with `status`.
 - Domains add methods without editing the bridge. A domain declares its methods
   (`<domain>.<verb>`) and its renderer allowlist in `src/bridge/domains/<domain>.ts`, and
   its Host handlers in `src/host/<domain>/domain.ts`. `protocol.ts` composes the method
