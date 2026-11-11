@@ -169,24 +169,44 @@ set allowlist means exactly the listed ids, so keep `pi`, `claude` and `codex`
 in it if the daemon uses them. Listing `dsh` or `agy` without its `runtimes`
 entry is a config error.
 
+A top-level `runtimeEnvironment.pass` reaches every built-in runtime child, so
+naming `ACME_DSH_KEY` and `GEMINI_API_KEY` there would hand each key to every
+other runtime. Scope a key by construction instead: one `createRuntimeAdapters`
+call per key, each with its own one-id `runtimeAllowlist` and
+`runtimeEnvironment`, and pass the joined adapters to `createDaemonWithAdapters`.
+
 ```ts
-const runtimes = {
-  runtimeAllowlist: ['pi', 'claude', 'codex', 'dsh', 'agy'],
-  runtimes: {
-    dsh: {
-      home: '/var/lib/acme/dsh',
-      model: { provider: 'deepseek', model: '<model id>', keyEnv: 'ACME_DSH_KEY' },
+import { createRuntimeAdapters } from '@byok-sdk/client/adapters';
+
+const adapters = [
+  // pi, claude and codex get the login-shell snapshot only.
+  ...createRuntimeAdapters({ runtimeAllowlist: ['pi', 'claude', 'codex'] }),
+  ...createRuntimeAdapters({
+    runtimeAllowlist: ['dsh'],
+    runtimes: {
+      dsh: {
+        home: '/var/lib/acme/dsh',
+        model: { provider: 'deepseek', model: '<model id>', keyEnv: 'ACME_DSH_KEY' },
+      },
     },
-    agy: { home: '/var/lib/acme/agy' },
-  },
-  runtimeEnvironment: { pass: ['ACME_DSH_KEY', 'GEMINI_API_KEY'] },
-};
+    runtimeEnvironment: { pass: ['ACME_DSH_KEY'] },
+  }),
+  ...createRuntimeAdapters({
+    runtimeAllowlist: ['agy'],
+    runtimes: { agy: { home: '/var/lib/acme/agy' } },
+    runtimeEnvironment: { pass: ['GEMINI_API_KEY'] },
+  }),
+];
 ```
 
-Pass these fields to `createDaemon`, or to `createRuntimeAdapters` for a Host
-that decorates adapters. `createDaemonWithAdapters` rejects `runtimes` and
-`runtimeEnvironment`, so a Host that uses it configures each adapter directly.
-The full shapes are in the
+Constructing `DshAdapter` and `AgyAdapter` directly, each with its own
+`runtimeEnvironment` option, scopes the same way.
+
+`createDaemon` takes the same `runtimeAllowlist`, `runtimes` and
+`runtimeEnvironment` fields, but its single `runtimeEnvironment` applies to
+every runtime, so use it for dsh and agy only when no key needs scoping.
+`createDaemonWithAdapters` rejects `runtimes` and `runtimeEnvironment`, so a
+Host that uses it configures each adapter directly. The full shapes are in the
 [daemon config schema](../../packages/client/daemon-config.schema.json).
 
 A Host dispatches to either one by `harnessId`, not `runtime`, and neither
