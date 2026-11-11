@@ -4,6 +4,8 @@ import { BRIDGE_VERSION, BridgeError, decodeMessage, encodeMessage, type BridgeM
 
 /** What a Host implements behind the bridge. Params are validated here, at the Host boundary. */
 export interface BridgeHandlers {
+  /** Called once, after main's hello passed; the Host starts its work only then. */
+  greeted(): void;
   status(): BridgeMethods['status']['result'] | Promise<BridgeMethods['status']['result']>;
   /** Stops the Host; the bridge replies, then stops reading. */
   shutdown(): Promise<void>;
@@ -37,8 +39,9 @@ export function serveBridge(handlers: BridgeHandlers, io: { input: Readable; out
           if (params?.bridgeVersion !== BRIDGE_VERSION) {
             throw new BridgeError('bridge_version_mismatch', `Shell bridge version ${String(params?.bridgeVersion)} differs from Host version ${BRIDGE_VERSION}`);
           }
-          greeted = true;
           reply({ id, result: { bridgeVersion: BRIDGE_VERSION } });
+          if (!greeted) handlers.greeted();
+          greeted = true;
           return;
         }
         if (!greeted) throw new BridgeError('hello_required', 'The first bridge call must be hello');

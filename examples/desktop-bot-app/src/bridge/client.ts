@@ -1,7 +1,7 @@
 import type { ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 import { createInterface } from 'node:readline';
-import { BRIDGE_VERSION, BridgeError, decodeMessage, encodeMessage, type BridgeMethod, type BridgeMethods } from './protocol.ts';
+import { BRIDGE_VERSION, BridgeError, decodeHostMessage, encodeMessage, type BridgeMethod, type BridgeMethods, type HostState } from './protocol.ts';
 
 /** A Host child spawned with piped stdin and stdout; stderr is the Host's diagnostics. */
 export type HostChild = ChildProcessByStdio<Writable, Readable, null>;
@@ -15,9 +15,11 @@ export class BridgeClient {
   readonly exited: Promise<number | null>;
   #nextId = 1;
   #closed: BridgeError | undefined;
+  readonly #onState: (state: HostState) => void;
 
-  private constructor(child: HostChild) {
+  private constructor(child: HostChild, onState: (state: HostState) => void) {
     this.#child = child;
+    this.#onState = onState;
     this.exited = new Promise(resolve => child.once('exit', code => resolve(code)));
     void this.exited.then(code => this.#fail(new BridgeError('host_exited', `Host exited with code ${code}`)));
     // A Host that cannot spawn (no `node`) never exits, and a dead Host's stdin raises EPIPE: both close the bridge.
@@ -26,7 +28,8 @@ export class BridgeClient {
     child.stdin.on('error', broken);
     createInterface({ input: child.stdout }).on('line', line => {
       try {
-        const message = decodeMessage(line);
+        const message = decodeHostMessage(line);
+        if (!('id' in message)) { this.#onState(message.state); return; }
         const pending = this.#pending.get(message.id);
         if (!pending) throw new BridgeError('invalid_message', `Bridge reply ${message.id} has no request`);
         this.#pending.delete(message.id);
@@ -40,9 +43,12 @@ export class BridgeClient {
     });
   }
 
-  /** Says hello before any other call. A Host on another bridge version is killed and the connect rejects. */
-  static async connect(child: HostChild): Promise<BridgeClient> {
-    const client = new BridgeClient(child);
+  /**
+   * Says hello before any other call. A Host on another bridge version is
+   * killed and the connect rejects. `onState` receives every Host state push.
+   */
+  static async connect(child: HostChild, onState: (state: HostState) => void = () => {}): Promise<BridgeClient> {
+    const client = new BridgeClient(child, onState);
     try {
       const { bridgeVersion } = await client.call('hello', { bridgeVersion: BRIDGE_VERSION });
       if (bridgeVersion !== BRIDGE_VERSION) {

@@ -47,7 +47,11 @@ export const workspaceGraph = {
   },
   "examples/desktop-bot-app": {
     "name": "@byok-sdk/example-desktop-bot-app",
-    "dependencies": []
+    "dependencies": [
+      "@byok-sdk/client",
+      "@byok-sdk/keys",
+      "@byok-sdk/server"
+    ]
   },
   "examples/host-execution-core": {
     "name": "@byok-sdk/example-host-execution-core",
