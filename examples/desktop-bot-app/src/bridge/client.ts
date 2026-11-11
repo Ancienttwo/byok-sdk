@@ -22,7 +22,7 @@ export class BridgeClient {
     void this.exited.then(code => this.#fail(new BridgeError('host_exited', `Host exited with code ${code}`)));
     // A Host that cannot spawn (no `node`) never exits, and a dead Host's stdin raises EPIPE: both close the bridge.
     const broken = (error: Error) => this.#fail(new BridgeError('host_exited', `Host pipe failed: ${error.message}`));
-    child.once('error', broken);
+    child.on('error', broken);
     child.stdin.on('error', broken);
     createInterface({ input: child.stdout }).on('line', line => {
       try {
