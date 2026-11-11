@@ -1,7 +1,8 @@
 /**
  * The Host child: serves the bridge on stdio around the composed server and
- * daemon. Main runs it under Node in dev; the packaged SEA Host arrives with
- * #1811. stdout carries only bridge lines, so diagnostics go to stderr.
+ * daemon. Its bundle (scripts/package/bundle-host.mjs) runs under Node in dev
+ * and as the packaged SEA. stdout carries only bridge lines, so diagnostics go
+ * to stderr.
  */
 import type { Readable, Writable } from 'node:stream';
 import { bundledSdkHelperHost, resolveHostLayout, runSdkReservedHelperCommand } from '@byok-sdk/client';

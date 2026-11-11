@@ -37,11 +37,16 @@ export type MethodHandlers<M extends MethodTable<M>> = {
   readonly [K in keyof M]: (params: unknown) => M[K]['result'] | Promise<M[K]['result']>;
 };
 
+/** The intersection of a tuple of handler maps: what {@link joinHandlers} returns. */
+export type Joined<T extends readonly object[]> = T extends readonly [infer Head, ...infer Rest extends readonly object[]] ? Head & Joined<Rest> : unknown;
+
 /**
  * Joins handler maps. A method two maps answer refuses the composition: no
- * handler silently replaces another, the core `status` included.
+ * handler silently replaces another, the core `status` included. The result
+ * keeps every map's type, so assigning it to a complete handler type checks at
+ * compile time that no method lacks a handler.
  */
-export function joinHandlers(...maps: readonly object[]): Record<string, (params: unknown) => unknown> {
+export function joinHandlers<T extends readonly object[]>(...maps: T): Joined<T> {
   const joined: Record<string, (params: unknown) => unknown> = {};
   for (const map of maps) {
     for (const [name, handler] of Object.entries(map)) {
@@ -49,5 +54,5 @@ export function joinHandlers(...maps: readonly object[]): Record<string, (params
       joined[name] = handler as (params: unknown) => unknown;
     }
   }
-  return joined;
+  return joined as Joined<T>;
 }
