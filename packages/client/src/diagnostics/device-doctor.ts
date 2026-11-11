@@ -173,7 +173,7 @@ export async function resetDeviceCursor(config: DaemonConfig, input: ResetDevice
     const owner = await acquireDaemonOwner(storeDir, 'doctor');
     try {
       const store = new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials: config.deviceCredentials }));
-      const record = await store.load().catch(() => undefined);
+      const record = await store.load();
       if (record === undefined) throw new DeviceCursorResetError('unpaired');
       const cursors = new CursorStore(storeDir);
       await cursors.save(config.serverUrl, record.deviceId, 0);
