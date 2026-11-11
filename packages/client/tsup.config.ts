@@ -8,7 +8,6 @@ if (typeof manifest.version !== 'string') throw new Error('packages/client/packa
 export default defineConfig({
   entry: [
     'src/index.ts',
-    'src/adapters/hermes/hermes-session-runtime.ts',
     'src/adapters/index.ts',
     'src/agent-memory/index.ts',
     'src/assertion-client/index.ts',
@@ -68,7 +67,7 @@ export default defineConfig({
   // non-win32 install (where the addon may be absent) never has it inlined,
   // and so the win32 branch loads the host's own prebuilt addon.
   external: [
-    'koffi', '#byok-hermes-session', '#byok-acp-runtime', '#byok-pi-runtime-host', '#byok-pi-todo-runtime',
+    'koffi', '#byok-acp-runtime', '#byok-pi-runtime-host', '#byok-pi-todo-runtime',
     /^typebox(?:\/|$)/,
     'undici',
   ],

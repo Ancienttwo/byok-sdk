@@ -4106,7 +4106,6 @@ authorization decision.
 | Codex | The `server` and `tool` fields of the native `mcpToolCall` item, for every server Codex runs, task toolset servers and SDK helpers included. | Other item types; an `mcpToolCall` without a non-empty `server` and `tool`. |
 | Pi (ordinary, prepared, durable) | The exact registered name `mcp__<server>__<tool>` of a tool in the daemon's observation of the task toolsets. | Built-in tools, SDK helpers (registered bare), names outside the observation. |
 | Grok | None. ACP `tool_call` defines no MCP server field, and no live Grok frame for an MCP call is recorded yet. | All calls, until live ACP evidence shows an authoritative field. |
-| Hermes | None. The ACP `tool_call` title is the Hermes registry name, often followed by `: <preview>`. | All calls. |
 
 Additive-minor, like §11.6: an optional field on two existing variants, no
 `PROTOCOL_VERSION` bump.

@@ -208,5 +208,3 @@ export type {
   PiProviderLauncherOptions,
 } from './pi-provider-launcher-core.js';
 
-export { HERMES_PROVIDER_KEY_ENV, hermesProviderModel, parseHermesProviderLauncherRequest, runHermesProviderLauncher } from './hermes-provider-launcher.js';
-export type { HermesProviderLauncherRequest } from './hermes-provider-launcher.js';

@@ -8,7 +8,6 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
-import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { createDaemon, createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { createRuntimeAdapters } from '../adapters/runtime-adapters';
@@ -59,7 +58,6 @@ const ADAPTERS: Array<[string, AdapterFactory]> = [
   ['codex', async (runtimeEnvironment) => new CodexAdapter(runtimeEnvironment === undefined ? {} : { runtimeEnvironment })],
   ['grok', async (runtimeEnvironment) => new GrokAdapter(runtimeEnvironment === undefined ? {} : { runtimeEnvironment })],
   ['pi', async (runtimeEnvironment) => new PiAdapter(runtimeEnvironment === undefined ? {} : { runtimeEnvironment })],
-  ['hermes', async (runtimeEnvironment) => new HermesAdapter({ home: await tmpDir('byok-env-hermes-'), ...(runtimeEnvironment === undefined ? {} : { runtimeEnvironment }) })],
 ];
 
 describe.each(ADAPTERS)('%s adapter constructed directly', (_id, create) => {

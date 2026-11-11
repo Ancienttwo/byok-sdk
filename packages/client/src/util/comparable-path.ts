@@ -4,7 +4,7 @@ import path from 'node:path';
 /**
  * Real path of the nearest existing ancestor plus the rest, case-folded on
  * darwin and win32, so a symlink or a case variant cannot hide a user's
- * runtime home (`~/.hermes`, `~/.dsh`) behind an SDK root option, even below
+ * runtime home (`~/.dsh`) behind an SDK root option, even below
  * a directory not yet created. For comparison only, never for opening.
  */
 export function comparablePath(value: string): string {

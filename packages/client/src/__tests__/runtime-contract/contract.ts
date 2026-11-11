@@ -56,7 +56,7 @@ export const ISOLATION_SOURCE_CASES: Readonly<Record<RuntimeIsolationSource, Con
   userHookContext: 'isolation.userHookContext',
 });
 
-export type ContractRuntime = 'pi' | 'claude' | 'codex' | 'grok' | 'hermes' | 'dsh' | 'agy' | 'opencode1' | 'opencode2';
+export type ContractRuntime = 'pi' | 'claude' | 'codex' | 'grok' | 'dsh' | 'agy' | 'opencode1' | 'opencode2';
 export type ContractMode = 'qualified' | 'latest';
 
 /** The run mode. The suite's own vitest config refuses to start without it, so this never defaults. */
@@ -281,7 +281,7 @@ export function expectDetectedVersion(
   const qualified = identifies(result.version!, target.qualifiedVersion);
   // #1103: every bundled adapter reports the effective policy verdict. A
   // qualified token is an allow; an unqualified one is a warn exactly where the
-  // adapter has the legacy advisory (Codex/Grok/Hermes), and an allow for
+  // adapter has the legacy advisory (Codex/Grok), and an allow for
   // Claude/Pi whose default policy admits everything. A Host block never
   // applies to these fixture adapters.
   expect(result.versionVerdict, 'detect() must report the effective version policy verdict').toBeDefined();

@@ -2,9 +2,9 @@ import { promises as fs } from 'node:fs';
 
 /**
  * Windows can refuse a recursive delete while a process that has just exited
- * still holds a handle or image mapping. This suite spawns a compiled
- * `hermes.exe` fixture; Windows releases its image section asynchronously
- * after exit, so an `fs.rm` issued immediately after `session.close()` can
+ * still holds a handle or image mapping. A compiled fixture executable's
+ * image section is released asynchronously after exit, so an `fs.rm` issued
+ * immediately after the process ends can
  * lose that race and fail with `EPERM` (or `EBUSY`) after every assertion
  * already passed (#1208). `force: true` only suppresses ENOENT — it never
  * retries.

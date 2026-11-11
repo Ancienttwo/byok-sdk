@@ -10,7 +10,6 @@ import type { RuntimeFailurePhase } from '../runtime-failure';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { oarStartClassifier, runtimeStartFailure } from '../adapters/runtime-start-failure';
-import { AcpRpcError, hermesStartClass } from '../adapters/hermes/acp-connection';
 import { SessionNotFoundError } from '../../vendor/oar/45488e7/contracts/session-not-found-error';
 import { SessionUnavailableError } from '../../vendor/oar/45488e7/contracts/session-unavailable-error';
 import { UnsupportedOptionError } from '../../vendor/oar/45488e7/contracts/errors';
@@ -135,10 +134,5 @@ describe('runtime start failures', () => {
   });
   it('uses the runtime name for non-error throws and unknown for a live process', () => {
     expect(runtimeStartFailure(null, { classify, exitedOnItsOwn: false, runtime: 'grok' })).toMatchObject({ message: 'grok open failed', failure: { class: 'unknown' }, cause: null });
-  });
-  it('classifies a Hermes ACP error as non-retryable and an untyped Hermes error by its exit', () => {
-    const rpc = new AcpRpcError('session/new', -32603, 'Internal error');
-    expect(runtimeStartFailure(rpc, { classify: hermesStartClass, exitedOnItsOwn: true, runtime: 'hermes' })).toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'unknown' }, cause: rpc });
-    expect(runtimeStartFailure(new Error('not writable'), { classify: hermesStartClass, exitedOnItsOwn: true, runtime: 'hermes' })).toMatchObject({ retry: 'retryable', failure: { class: 'runtime_exited' } });
   });
 });
