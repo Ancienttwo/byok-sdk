@@ -361,6 +361,17 @@
         "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
         "export:@byok-sdk/client#clearDeviceEnrollment"
       ]
+    },
+    {
+      "id": "pi-152-closure",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "The official Pi closure is pinned to exactly 1.5.2 (upstream commit b4afdddf); the closureDigest changes, so a preparation compiled for 1.5.0 declines with preparation_runtime_identity_mismatch until it is prepared again. keys: PI_MODEL_CATALOG_PI_AI_VERSION is 1.5.2, and 12 entries pi-ai 1.5.2 dropped return not_in_catalog. pi-durable 1.5.2 keeps its document and SQLite schema versions, so replicas written by either release open in the other.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-152-closure",
+      "items": [
+        "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+        "store:pi-durable"
+      ]
     }
   ],
   "changes": [
@@ -938,6 +949,11 @@
       "entry": "model-route-host-entry-default-thinking-level"
     },
     {
+      "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+      "change": "changed",
+      "entry": "pi-152-closure"
+    },
+    {
       "item": "export:@byok-sdk/protocol#AGENT_MEMORY_START_REFUSALS",
       "change": "added",
       "entry": "agent-memory-start-refusal-classes"
@@ -1095,6 +1111,13 @@
       "before": "ddl-sha256=a59cf523fe7a89d1",
       "after": "ddl-sha256=7c5c4e5f67ea8b36",
       "entry": "opencode-go-keys-store"
+    },
+    {
+      "item": "store:pi-durable",
+      "change": "changed",
+      "before": "@earendil-works/pi-durable@1.5.0",
+      "after": "@earendil-works/pi-durable@1.5.2",
+      "entry": "pi-152-closure"
     },
     {
       "item": "store:server-sqlite",

@@ -154,7 +154,7 @@ behavior, not a bug.
 
 `pi` (`@earendil-works/pi-coding-agent`) already ships a **built-in**
 `zai` provider — no extension, no `models.json`, no code change anywhere in
-this SDK is needed. The pinned pi release (1.5.0, `piRuntimePin` in
+this SDK is needed. The pinned pi release (1.5.2, `piRuntimePin` in
 `@byok-sdk/client`) defines it as:
 
 ```
@@ -164,7 +164,7 @@ provider: "zai", api: "openai-completions", baseUrl: "https://api.z.ai/api/codin
 The separate `zai-coding-cn` provider uses `ZAI_CODING_CN_API_KEY` for the
 mainland-China endpoint.
 
-### Exact model IDs (from the pinned pi 1.5.0 bundled registry)
+### Exact model IDs (from the pinned pi 1.5.2 bundled registry)
 
 ```
 zai/glm-4.7            (204.8K context, 131K max output)
