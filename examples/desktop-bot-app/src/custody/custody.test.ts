@@ -120,13 +120,15 @@ describe('custody child', () => {
 
   it('answers a bad profileRef with invalid_params and never asks the Host to reload', async () => {
     const reloads: string[] = [];
+    let spawned = 0;
     const submit = keysMainHandlers({
-      spawnHostCommand: () => custodyChild(new InMemorySecretStore(), []),
+      spawnHostCommand: () => { spawned += 1; return custodyChild(new InMemorySecretStore(), []); },
       callHost: async method => { reloads.push(method); return null; },
     })['keys.submit'];
     await expect(submit({ op: 'replace_secret', profileRef: '../writer', secret: SECRET })).rejects.toMatchObject({ code: 'invalid_params' });
-    // A list is not a change: keys.submit refuses it before any custody child starts.
+    // A list is not a change: keys.submit refuses it before spawning a custody child.
     await expect(submit({ op: 'list' } as never)).rejects.toMatchObject({ code: 'invalid_params' });
+    expect(spawned).toBe(1);
     expect(reloads).toEqual([]);
   });
 

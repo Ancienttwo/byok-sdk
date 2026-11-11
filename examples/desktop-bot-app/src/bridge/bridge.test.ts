@@ -138,14 +138,21 @@ describe('desktop bridge', () => {
   });
 
   it('delivers a refused call to the renderer as an error with the refusing handler\'s code', async () => {
-    const route = createRendererRouter<TestMethods, never>({ allowed: ['test.echo', 'test.boom'], main: {}, host: async method => {
-      throw method === 'test.echo' ? new BridgeError('invalid_params', 'test.echo needs a text') : new Error('boom');
+    const route = createRendererRouter<TestMethods, never>({ allowed: ['test.echo', 'test.boom', 'test.reset'], main: {}, host: async (method, params) => {
+      if (method === 'test.reset') return null;
+      if (method === 'test.boom') throw params;
+      if ((params as { text?: unknown }).text === undefined) throw new BridgeError('invalid_params', 'test.echo needs a text');
+      return params;
     } });
     // Main's IPC handler and the preload, without Electron: every call crosses as a BridgeOutcome.
-    const ipc: BridgeIpc = { invoke: (method, params) => settleCall(() => route(method, params)), onStateChanged: () => () => {} };
+    const coded = (error: unknown): error is BridgeError => error instanceof BridgeError;
+    const ipc: BridgeIpc = { invoke: (method, params) => settleCall(() => route(method, params), coded), onStateChanged: () => () => {} };
     const bridge = rendererBridge(ipc) as unknown as { call(method: string, params: unknown): Promise<unknown> };
+    expect(await bridge.call('test.echo', { text: 'hi' })).toEqual({ text: 'hi' });
     await expect(bridge.call('test.echo', {})).rejects.toMatchObject({ name: 'BridgeCallError', code: 'invalid_params', message: 'test.echo needs a text' });
-    await expect(bridge.call('test.boom', undefined)).rejects.toMatchObject({ code: 'method_failed', message: 'boom' });
+    // Only the app's own codes cross: a Node error's code, or a thrown non-error, is method_failed.
+    await expect(bridge.call('test.boom', Object.assign(new Error('no such file'), { code: 'ENOENT' }))).rejects.toMatchObject({ code: 'method_failed', message: 'no such file' });
+    await expect(bridge.call('test.boom', null)).rejects.toMatchObject({ code: 'method_failed', message: 'null' });
   });
 
   it('turns a burst of Host state changes into one renderer hint, after which status reads the new state', async () => {

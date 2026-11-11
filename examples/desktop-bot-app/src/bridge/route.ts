@@ -24,14 +24,18 @@ export function createRendererRouter<M extends MethodTable<M>, Main extends keyo
 }
 
 /**
- * Settles one routed call as a {@link BridgeOutcome}. A refusal keeps the code its error carries (a `BridgeError`, a
- * custody or keys error); an error without one is `method_failed`.
+ * Settles one routed call as a {@link BridgeOutcome}. A refusal keeps its code only when `coded` recognizes the error as
+ * one of the app's own (main passes `BridgeError` and `CustodyError`); anything else, a Node or Electron error with its
+ * own `code` or a thrown non-error included, is `method_failed` with its message.
  */
-export async function settleCall(call: () => Promise<unknown>): Promise<BridgeOutcome> {
+export async function settleCall(
+  call: () => Promise<unknown>,
+  coded: (error: unknown) => error is { readonly code: string; readonly message: string },
+): Promise<BridgeOutcome> {
   try {
     return { ok: true, value: await call() };
   } catch (error) {
-    const { code, message } = error as { code?: unknown; message?: unknown };
-    return { ok: false, code: typeof code === 'string' ? code : 'method_failed', message: typeof message === 'string' ? message : String(error) };
+    if (coded(error)) return { ok: false, code: error.code, message: error.message };
+    return { ok: false, code: 'method_failed', message: error instanceof Error ? error.message : String(error) };
   }
 }
