@@ -452,3 +452,6 @@ Before upgrading a Windows Host, check every configured root for a link in its e
 ## Host model-route entries can declare a default thinking level
 
 `ModelRouteHostEntry` accepts an optional `default_thinking_level` (#1856), additive. A Host that keeps its own default-level rule for a Host entry can move it onto the entry; the level must be one its `config` supports, or `modelRouteContext` throws. Entries without the field behave as before.
+## In-memory device credential backend (#1844)
+
+`@byok-sdk/client/testing` exports `InMemoryDeviceCredentialBackend`, a `DeviceCredentialBackend` held in memory. A Host that hand-rolls a memory backend for its tests deletes it and injects this one as `deviceCredentials`, so a test that builds a daemon never writes an enrollment to the Keychain or Credential Manager. No runtime Host change is required.

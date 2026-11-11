@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as client from '@byok-sdk/client';
 import * as runtimeAdapters from '@byok-sdk/client/adapters';
 import { createTestKeychain } from '../../../scripts/testing/macos-keychain.mjs';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { createDeviceSession, deviceConfig, localMemberApproval, sealedCore, type DeviceEvent } from './device-session.js';
 import * as deviceMemberModule from '../../../packages/client/src/daemon/device-member';
 import { DeviceMemberRecords } from '../../../packages/client/src/daemon/device-member-custody';
@@ -803,7 +803,7 @@ describe.skipIf(!RUN)('two device processes against one Worker H Host (#794 D3)'
         expect(config.machineId).toBeUndefined();
         expect(config.deviceCredentials).toBeUndefined();
         return keychain ? createDeviceSession({ ...config, deviceCredentials: { macosKeychainPath: keychain.path } }, runtime, send)
-          : createDeviceSession(config, runtime, send, { deviceCredentials: new InMemoryDeviceCredentialStore() });
+          : createDeviceSession(config, runtime, send, { deviceCredentials: new InMemoryDeviceCredentialBackend() });
       });
     // Attach failure handling before polling so a startup failure cannot become an unhandled rejection.
     let failure: unknown;

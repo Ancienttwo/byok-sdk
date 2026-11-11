@@ -4,7 +4,7 @@ import path from 'node:path';
 import { serve } from '@hono/node-server';
 import { createByokServer, type CreateByokServerOptions, type DueWake } from '@byok-sdk/server';
 import { createDaemonWithAdapters, type AgentEgressPolicy } from '@byok-sdk/client';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 import {
   HostExecutionCore,
@@ -66,7 +66,7 @@ export async function openHost(options: HostOptions & {
   const address = http.address();
   if (!address || typeof address === 'string') throw new Error('Missing HTTP address');
   const adapter = options.adapter ?? new BotStubAdapter();
-  const credentials = new InMemoryDeviceCredentialStore();
+  const credentials = new InMemoryDeviceCredentialBackend();
   const config = { productId, productName: 'Host Core', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: `http://127.0.0.1:${address.port}`, storeDir: path.join(root, 'sdk'),
     agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },

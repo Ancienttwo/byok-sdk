@@ -1,4 +1,4 @@
-import { InMemoryDeviceCredentialStore } from '../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -59,7 +59,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     adapter = new BotStubAdapter();
     daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' },productName: 'Example Bot',productId: 'clarification-test',serverUrl: listening.url,
       storeDir: path.join(root,'sdk'),agentHome: { hostStorageRoot: path.join(root,'homes') },agentEgress: { policy },
-    },[adapter],{ deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
+    },[adapter],{ deviceCredentials: new InMemoryDeviceCredentialBackend(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
     const pair = await byok.pairing.createPairingCode({ productId: 'clarification-test' }); deviceId = (await daemon.pair(pair.code)).deviceId;
     await daemon.start(); await waitForReady(daemon);
     store = new SqliteClarificationStore(db,'tenant-a'); host = new ClarificationHost(byok,store,() => now);
@@ -275,7 +275,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-example-stub' },productName: 'Example Bot',productId: 'clarification-test',serverUrl: fixtureUrl,
       storeDir: path.join(root,'second-sdk'),...(mode !== 'capability' ? { agentHome: { hostStorageRoot: path.join(root,'second-homes') },agentEgress: { policy } } : {}),
     };
-    daemon = createDaemonWithAdapters(config,[adapter],{ deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
+    daemon = createDaemonWithAdapters(config,[adapter],{ deviceCredentials: new InMemoryDeviceCredentialBackend(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
     const code = await byok.pairing.createPairingCode({ productId: 'clarification-test' }); deviceId = (await daemon.pair(code.code)).deviceId;
     await daemon.start(); await waitForReady(daemon);
     start();

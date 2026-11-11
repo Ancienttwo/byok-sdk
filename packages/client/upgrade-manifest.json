@@ -281,6 +281,16 @@
         "export:@byok-sdk/client#EmbeddedPairingError",
         "export:@byok-sdk/client#EmbeddedPairingServer"
       ]
+    },
+    {
+      "id": "testing-in-memory-device-credential-backend",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/testing exports InMemoryDeviceCredentialBackend, a DeviceCredentialBackend held in memory for a Host's tests. A Host that hand-rolls a memory backend injects this one as deviceCredentials; no runtime Host change is required. The host-execution-core example's tests import it instead of the repo's removed scripts/testing helper.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#in-memory-device-credential-backend-1844",
+      "items": [
+        "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+        "example:host-execution-core"
+      ]
     }
   ],
   "changes": [
@@ -302,8 +312,15 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
-      "after": "K8 0.0.1 src-sha256=c329c3d65446c4f0",
+      "after": "K8 0.0.1 src-sha256=541fd2a5376a664e",
       "entry": "example-bot-collaboration-autonomy"
+    },
+    {
+      "item": "example:host-execution-core",
+      "change": "changed",
+      "before": "K4 0.0.1 src-sha256=29b76c2746aa7b33",
+      "after": "K4 0.0.1 src-sha256=a62de5b4c4495e5e",
+      "entry": "testing-in-memory-device-credential-backend"
     },
     {
       "item": "export:@byok-sdk/client#AgyAdapter",
@@ -604,6 +621,11 @@
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",
       "change": "changed",
       "entry": "agent-memory-helper-protocol-4"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+      "change": "added",
+      "entry": "testing-in-memory-device-credential-backend"
     },
     {
       "item": "export:@byok-sdk/cloud#ByokCloud",

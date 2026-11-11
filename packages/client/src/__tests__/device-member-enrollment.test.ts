@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectControlClient } from '../daemon/control-client';
 import { parseEnrollmentPairParams, type ControlStatusResult } from '../daemon/control-protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
-import { InMemoryDeviceCredentialStore, testDeviceMemberCustody } from './fixtures/credential-backend';
+import { InMemoryDeviceCredentialBackend, testDeviceMemberCustody } from './fixtures/credential-backend';
 import { E2eeWebClient } from './fixtures/e2ee-web-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -104,7 +104,7 @@ describe('E2EE member enrollment (E2d-1)', () => {
   it('refuses an E2EE pairing with an injected credential backend', async () => {
     const { server, daemon } = await setup();
     const client = await E2eeWebClient.create(server.e2ee);
-    await expect(daemon({ deviceCredentials: new InMemoryDeviceCredentialStore() })
+    await expect(daemon({ deviceCredentials: new InMemoryDeviceCredentialBackend() })
       .pair('pair-code', { verificationSecret: client.verificationSecret })).rejects.toThrow(/OS credential custody/);
     expect(server.pairRequests).toHaveLength(0);
   });

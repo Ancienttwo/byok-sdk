@@ -638,8 +638,8 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const distEntry = new URL('../../dist/index.js', import.meta.url).href;
     const childSource = `
       const { createDaemonWithAdapters } = await import(process.argv[1]);
-      const { InMemoryDeviceCredentialStore } = await import(process.argv[3]);
-      const credentials = new InMemoryDeviceCredentialStore();
+      const { InMemoryDeviceCredentialBackend } = await import(process.argv[3]);
+      const credentials = new InMemoryDeviceCredentialBackend();
       await credentials.replace(await new Promise(resolve => process.once('message', resolve)));
       const config = JSON.parse(Buffer.from(process.argv[2], 'base64url').toString('utf8'));
       const adapter = {
@@ -661,7 +661,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     `;
     const child = spawn(
       process.execPath,
-      ['-e', childSource, distEntry, Buffer.from(JSON.stringify(config)).toString('base64url'), new URL('../../../../scripts/testing/device-credentials.mjs', import.meta.url).href],
+      ['-e', childSource, distEntry, Buffer.from(JSON.stringify(config)).toString('base64url'), new URL('../../dist/testing/index.js', import.meta.url).href],
       { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] },
     );
     const enrollment = await testDeviceCredentials(config.productId).read();

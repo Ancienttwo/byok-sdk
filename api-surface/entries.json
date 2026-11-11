@@ -452,7 +452,7 @@
   "@byok-sdk/client/testing": {
     "kind": "exports",
     "policy": {
-      "purpose": "Runtime adapter test doubles; no daemon",
+      "purpose": "Runtime adapter and device credential test doubles; no daemon",
       "budgetBytes": 493454,
       "zod": false,
       "codegen": false,
