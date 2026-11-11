@@ -5,6 +5,7 @@
 - **Fixed (client; #1774)** — A task runner reducer dispatch that rejects now fails the task's open terminal receipt through `TaskRunnerHost.dispatchOrReject` instead of being dropped; with no open receipt (not yet begun or already settled) the rejection is logged. An event that `JSON.stringify` cannot serialize now fails the task through the event pump instead of counting as 0 bytes toward `maxTaskOutputBytes`.
 
 - **Fixed (client; #1774)** — The journal's storage measurement (`measureUsage`) returns 0 only for a missing file or directory (an absent WAL/SHM or quarantine). Any other stat or readdir error now rejects the measurement, which the retention sweeper already records as `measurement_failed`, instead of reading as a small healthy journal.
+- **Changed (client, keys; #1774)** — Redundant best-effort `chmod` calls are removed: the scratch `sdkDir` and Pi session directory are already created 0700, and the audit log no longer re-asserts the store root's mode on every append (`ensureSecureStoreRoot` enforces it at startup). The skill-pack audit directory now goes through `ensureSecureDir`, so a directory whose mode cannot be set to 0700 is refused instead of used.
 
 - **Fixed (client; #1760)** — Redelivered offers for tasks that failed after claim but before the runtime started (instruction blob, native sessions, Agent memory, resident MEMORY.md or file scope failures) no longer claim and fail the task again. These failures now retain the task in the bounded finished collection; the first `task.claim` and `task.fail` are unchanged.
 

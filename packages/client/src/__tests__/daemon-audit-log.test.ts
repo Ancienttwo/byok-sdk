@@ -230,19 +230,6 @@ describe('daemon/audit-log: appendAuditRecord / readAuditRecords', () => {
 });
 
 describe('daemon/audit-log: 0600 file, 0700 storeDir', () => {
-  it('a pre-existing storeDir with a permissive mode gets locked down to 0700 on append', async () => {
-    const parent = await tmpDir('byok-audit-storedir-mode-parent-');
-    const storeDir = path.join(parent, 'permissive-store');
-    await fs.mkdir(storeDir, { mode: 0o755 });
-    const before = await fs.stat(storeDir);
-    expect(before.mode & 0o777).toBe(0o755);
-
-    await appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
-
-    const after = await fs.stat(storeDir);
-    expect(after.mode & 0o777).toBe(0o700);
-  });
-
   it('the file stays 0600 across repeated appends, even if something else loosened it in between', async () => {
     const storeDir = await tmpDir('byok-audit-mode-persist-');
     await appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });

@@ -329,7 +329,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
       const needsMcpConfig = Object.keys(taskMcpServers).length > 0;
       const sdkDir = startInput.scratch.sdkDir;
       if (needsMcpConfig || userContextSettings) {
-        await fs.chmod(sdkDir, 0o700).catch(() => {});
         throwIfCancelled();
       }
       // Under `agentUserContext: 'excluded'` an Agent task gets exactly the

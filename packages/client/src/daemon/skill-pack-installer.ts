@@ -58,6 +58,7 @@ import type { AuthManager } from './auth-manager';
 import { authedFetch } from './http-client';
 import { toHttpBase } from './url';
 import { atomicWriteFile } from '../util/atomic-write';
+import { ensureSecureDir } from '../util/secure-dir';
 
 /**
  * The hosted capability this pipeline gates on. A plain string, not an import
@@ -354,7 +355,7 @@ async function checkedFile(root: string, relative: string, create: boolean): Pro
 async function appendAuditLine(dataDir: string, record: Record<string, unknown>): Promise<void> {
   const filePath = await checkedFile(dataDir, `${SKILL_PACKS_DIRNAME}/${SKILL_PACK_AUDIT_FILENAME}`, true);
   const root = path.dirname(filePath);
-  await fs.chmod(root, DIR_MODE).catch(() => {});
+  await ensureSecureDir(root);
   const handle = await fs.open(filePath, 'a', FILE_MODE);
   try {
     // chmod BEFORE the append, for the same reason `daemon/audit-log.ts` does it:

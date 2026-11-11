@@ -30,8 +30,8 @@ import { parseRuntimeObservations } from '../runtime-detection';
  * Permissions: the file is tightened to 0600 BEFORE any new content is
  * written, on every append (`open()`'s `mode` only governs creation, so a
  * pre-existing permissive file is chmod'd first; the tightening also takes
- * effect when the append that follows it fails). `storeDir` gets the same
- * defensive re-`chmod` to 0700 on every append.
+ * effect when the append that follows it fails). The store root's mode is
+ * enforced once at startup by `ensureSecureStoreRoot`, not per append.
  *
  * Bounded: past `MAX_AUDIT_LOG_BYTES` the file is atomically rewritten to its
  * most recent `AUDIT_LOG_TRIM_TARGET_LINES` lines, keeping one lifecycle
@@ -112,10 +112,6 @@ export async function appendAuditRecord(storeDir: string, record: DaemonRecord):
 /** The already-serialized line is immutable while filesystem work is queued. */
 async function appendAuditLine(storeDir: string, line: string): Promise<void> {
   await fs.mkdir(storeDir, { recursive: true, mode: AUDIT_STORE_DIR_MODE });
-  // `mkdir`'s own `mode` only applies at CREATION time. Re-assert on every
-  // append, best-effort: a failure here (e.g. a storeDir owned by a
-  // different user) must never block the append itself.
-  await fs.chmod(storeDir, AUDIT_STORE_DIR_MODE).catch(() => {});
 
   const filePath = auditLogPath(storeDir);
   const handle = await fs.open(filePath, 'a', AUDIT_LOG_MODE);
