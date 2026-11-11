@@ -2436,8 +2436,10 @@ jobs:
       - name: Package smoke (resources/host, fuses, signature, packaged Host, Pi + memory + R2, sizes)
         shell: bash
         run: |
-          # Linux keeps the Host's stores under a throwaway HOME; the Secret Service session is the D0 one above.
-          if [ "$RUNNER_OS" = Linux ]; then export HOME="$RUNNER_TEMP/package-home"; fi
+          # Linux: the Secret Service session is the D0 one above, and it still holds the device credential that
+          # the Host bundle step paired; the SDK halts a Host whose credential has no store (store_not_bound),
+          # so the packaged Host uses that step's throwaway HOME and resumes the same device.
+          if [ "$RUNNER_OS" = Linux ]; then export HOME="$RUNNER_TEMP/host-home"; fi
           # #1811, until #1839: on Windows the product Host stops with "DeviceCredentialStoreUnavailableError:
           # Windows Credential Manager requires the koffi optional dependency", because compose.ts does not pass
           # nativeAssetRoot yet. The Desktop adoption of #1839 removes this flag in the same change.
