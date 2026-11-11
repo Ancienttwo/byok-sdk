@@ -24,9 +24,9 @@
 - **分批**：只开一条 batch 分支，名为 `batch/main-<n>`，收进所有 review 已通过的 PR。CHANGELOG、README 预算表和 upgrade-manifest 在 batch 上统一处理一次（脚本重新生成），CI 只跑一次。
 - **合并**：batch 用 squash 合进 main，正文逐行列出 PR 和对应的 `Refs`。合完后把原 PR 关掉，留言「merged via batch #N」。
 - **失败**：batch 挂了，只移出出问题的 PR，其余照合。
-- **节奏**：新 PR 每 30–60 分钟攒成一批。
+- **节奏**：一个 PR 的必需 CI 全绿、review 按 tier 拿到 PASS，就立刻合，单独合或攒成小批都行。什么时候合由总控和策划定，不问 owner（2026-11-12 总控与策划的联合作法）。
 - **不变的门**：review 门、tier、closing-ref 检查和 AI trailer 检查都不变。
-- 合并管家 seat 负责 rebase 和生成文件，不改产品代码。冲突超出 CHANGELOG、README、`api-surface/entries.json`、`packages/client/upgrade-manifest.json` 这几个文件，或者会改动 golden `.d.ts` 时，PR 退回 writer。
+- 合并管家 seat 负责 rebase 和生成文件，不改产品代码。golden `.d.ts`、`api-surface`、CHANGELOG、upgrade-manifest、README 预算表这些生成物的漂移，由管家在合并时重新生成，不因此退回 PR；只有产品代码冲突才退回 writer。
 - issue 的修复合进 main 后，随即留言关闭，不再等发版（owner 同日裁定）。
 
 ## 4. 在途 PR
