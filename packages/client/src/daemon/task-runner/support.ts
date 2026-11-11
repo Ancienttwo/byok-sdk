@@ -1,5 +1,4 @@
 // Types and helpers shared by `TaskRunner` (../task-runner.ts) and the member
-import { outboundErrorMessage } from '../outbound-error.js';
 import type { ToolAuthorizationPolicy } from '../../tool-authorization.js';
 import type { RuntimeTaskInput } from '../../types.js';
 // modules in this directory.
@@ -11,6 +10,7 @@ import type { RuntimeTaskInput } from '../../types.js';
 // A body reads private state as `this['name']`, which TypeScript type-checks
 // like the dot form, and calls other members through the runner so that a
 // stub, a test spy or a fixture override still sees every call.
+import { outboundErrorMessage } from '../outbound-error.js';
 import type { ResultReplyFailure } from '../result-reply-failure.js';
 import { AgentMessageDraftPublisher } from '../agent-message-draft.js';
 import type { ExecutionScratch } from '../retention/scratch.js';

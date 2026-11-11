@@ -37,8 +37,9 @@ const ManifestSchema = z.object({
   }).strict()).max(AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES),
 }).strict();
 type Manifest = z.infer<typeof ManifestSchema>;
-/** Compile-time proof that what `readStartRecord` writes is what the schema reads back. */
-export type StartRecordIsManifest = StartRecordManifest extends z.input<typeof ManifestSchema> ? true : never;
+type Assert<T extends true> = T;
+/** Fails to compile when what `readStartRecord` writes is no longer what the schema reads back. */
+export type StartRecordIsManifest = Assert<StartRecordManifest extends z.input<typeof ManifestSchema> ? true : false>;
 
 export type AgentMemoryCommitHome = Pick<AgentHomeLease, 'canonicalHome' | 'homeIdentity'>;
 

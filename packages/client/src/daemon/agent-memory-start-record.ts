@@ -16,8 +16,8 @@ import { outboundErrorMessage } from './outbound-error.js';
 export interface StartRecordManifest {
   readonly version: 1;
   readonly taskId: string;
-  readonly files: readonly { readonly path: string; readonly revision: string; readonly byteCount: number }[];
-  readonly entries: readonly { readonly path: string; readonly kind: AgentMemoryWalkEntryKind }[];
+  readonly files: { readonly path: string; readonly revision: string; readonly byteCount: number }[];
+  readonly entries: { readonly path: string; readonly kind: AgentMemoryWalkEntryKind }[];
 }
 
 /** A refused snapshot stays refused until someone changes the home; an I/O failure may clear. */

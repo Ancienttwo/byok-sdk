@@ -5,7 +5,7 @@ import { readResidentMemory } from '../resident-memory.js';
 import { agentMemoryHomeBinding, isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory.js';
 import type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem.js';
 import {
-  agentMemoryCommitFailureRetryable, copyStartFailure, readStartRecord, residentMemoryStartFailure,
+  agentMemoryCopyRefusal, copyStartFailure, readStartRecord, residentMemoryStartFailure,
 } from '../daemon/agent-memory-start-record.js';
 
 /** A task id of a typical length: the start record carries one, so its size bound depends on it. */
@@ -25,6 +25,12 @@ export type AgentMemoryHomeCheck =
  * missing (every lease creates one), a changed home identity, an I/O error, or
  * no secure memory backend on this platform. On macOS and Windows pass the
  * helper's filesystem for this home as `commit.filesystem`; the caller closes it.
+ *
+ * The verdict is about the home, and the device applies each half to one kind
+ * of task: resident refusals to a task that carries `MEMORY.md` into its
+ * prompt, start-record refusals to a task with `agentMemoryCommit`. The repair
+ * task (`agentMemory:"none"`, no commit) is never refused, so this verdict does
+ * not gate it.
  *
  * The check holds no home lease and has no task id, so it is advisory: a home
  * within a task id's length of the start-record bound can pass and still be refused.
@@ -47,8 +53,8 @@ export async function checkAgentMemoryHome(
     await readStartRecord(agentMemoryHomeBinding({ canonicalHome, homeIdentity: { dev, ino }, ...(filesystem === undefined ? {} : { filesystem }) }), PLACEHOLDER_TASK_ID);
     return { ok: true };
   } catch (error) {
-    if (agentMemoryCommitFailureRetryable(error)) throw error;
-    const { reason, refusal } = copyStartFailure(error);
-    return { ok: false, code: refusal!, reason };
+    const code = agentMemoryCopyRefusal(error);
+    if (code === undefined) throw error;
+    return { ok: false, code, reason: copyStartFailure(error).reason };
   }
 }
