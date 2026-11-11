@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "1a6a7ba01e469cebbadb88c50fad72f2238447333f33a9865694310fb060d9de"
+    "snapshotSha256": "1235e5d6fde7f191f7d9db913154e65f73c10c6feb2c78a5a9fa9f88ac22bb6e"
   },
   "configFields": {
     "status": "tracked",
@@ -290,9 +290,9 @@
       "items": [
         "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
         "example:host-execution-core"
-        ]
-      },
-      {
+      ]
+    },
+    {
       "id": "resolve-sdk-hosting",
       "impact": "additive",
       "summary": "resolveSdkHosting({ assetRoot, helperHost }) resolves a packaged Host's SDK hosting values from the copySdkPackagingAssets directory for process.platform and process.arch: daemon spreads into DaemonConfig and adapters into RuntimeAdaptersConfig. A missing required asset throws the new SdkHostingAssetsMissingError (code sdk_hosting_assets_missing, sorted relative missing paths); an unsupported target throws. sdkPackagingAssetLayout and sdkDistributionManifest keep the same values; only their declaration text changed (the agent-memory-fs directory now has one definition). The four existing configuration fields are unchanged (#1839).",
