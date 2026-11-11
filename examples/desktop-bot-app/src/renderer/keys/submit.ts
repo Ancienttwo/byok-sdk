@@ -20,12 +20,15 @@ export function refusalOf(error: unknown): Refusal {
   return { message: error instanceof Error ? error.message : String(error) };
 }
 
-/** A listed status as model-route's stored profile: the device's public state, which never holds the key. */
+/**
+ * A listed status as model-route's stored profile: the device's public state, which never holds the key. A key behind
+ * an unfinished credential change may not be used, so such a profile offers only a new key, never `keep`.
+ */
 export function storedProfile(status: ProviderStatus): ModelRouteStoredProfile {
   const { profile_ref, display_name, provider_kind, adapter, auth_mode, base_url, model, capabilities, pi_model } = status;
   return {
     profile: { profile_ref, display_name, provider_kind, adapter, auth_mode, base_url, model, capabilities: [...capabilities], ...(pi_model === undefined ? {} : { pi_model }) },
-    secret_configured: status.secret_configured,
+    secret_configured: status.secret_configured && !status.configuration_pending,
   };
 }
 
@@ -52,9 +55,12 @@ async function submitOnce(change: CustodyChange, submit: KeysSubmit): Promise<Su
   }
 }
 
-/** Submits the draft. The key leaves the returned draft whatever the outcome, so it never outlives the submission in the renderer. */
+/**
+ * Submits the draft. A typed key leaves the returned draft whatever the outcome, so it never outlives the submission
+ * in the renderer; `keep` and `none` carry no key and stay.
+ */
 export async function submitModelRoute(draft: ModelRouteDraft, context: ModelRouteContext, stored: ProviderStatus | null, submit: KeysSubmit): Promise<{ draft: ModelRouteDraft; outcome: SubmitOutcome }> {
-  const cleared = applyModelRouteChange(draft, { field: 'secret', value: 'none' }, context);
+  const cleared = typeof draft.secret === 'object' ? applyModelRouteChange(draft, { field: 'secret', value: 'none' }, context) : draft;
   const submission = modelRouteSubmission(draft, context);
   if (!submission.ok) return { draft: cleared, outcome: { refusal: { message: 'The form has errors; fix the marked fields.' } } };
   return { draft: cleared, outcome: await submitOnce(custodyRequest(submission, stored), submit) };
