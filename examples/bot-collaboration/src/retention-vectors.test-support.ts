@@ -6,6 +6,7 @@ import { RetiredIdentityError, type Command } from './rules/commands';
 import { roomContext, type RoomMessage } from './rules/rooms';
 import { RetentionRefused, type RetentionInput, type RetentionLimits, type RetentionResult } from './retention';
 import type { CommitSubject } from './commit-vectors.test-support';
+import type { WouldDo, WouldDoAction } from './rules/autonomy';
 
 /**
  * #798 retention vectors. Each store runs the same cases: the memory rules and the K8 L ledger now, the H adapter in D2.
@@ -30,7 +31,9 @@ function settledRoot(state: CollaborationState, id: string): void {
   state.cards[`${id}:c`] = { id: `${id}:c`, turnId: id, action: { action: 'send_message', summary: 'Send', draft: { text: 'hi' } },
     state: 'expired', expiresAt: 0, decisionReported: true };
   state.rejected.push({ botId: 'main', taskId: `${id}:task`, action: 'delegate', reason: 'hop_limit', consumedBy: id });
+  (state.wouldDo ??= {})[`${id}:w`] = wouldDo(`${id}:w`, id, 'create_routine');
 }
+const wouldDo = (id: string, turnId: string, action: WouldDoAction): WouldDo => ({ id, botId: 'main', turnId, taskId: `${turnId}:task`, action, index: 0, at: 0, detail: null });
 /** Removes the seed's open rows, so only the cases' roots decide. */
 function clearSeed(state: CollaborationState): void {
   delete state.turns.t1; delete state.budgets.t1; delete state.schemas.t1; delete state.questions.q1; delete state.cards.c1;
@@ -79,6 +82,8 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       expect(state.turns.r1).toBeUndefined(); expect(state.budgets.r1).toBeUndefined();
       expect(state.questions['r1:q']).toBeUndefined(); expect(state.cards['r1:c']).toBeUndefined();
       expect(state.rejected.map(row => row.consumedBy)).toEqual(['r2']);
+      expect(Object.keys(state.wouldDo ?? {})).toEqual(['r2:w']);
+      expect(await subject.archived('wouldDo', 'r1:w')).toMatchObject({ turnId: 'r1' });
       expect(state.turns.r2).toBeDefined();
       expect(await retain(subject, ['r1'])).toMatchObject({ archivedRoots: 0, alreadyArchivedRoots: 1 });
     });
@@ -155,6 +160,7 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
         state.channel = { inbounds: {}, pushRoutes: {}, deliveries: { s: { id: 's', taskId: 'seat:task', turnId: 'seat', messageId: 'speech:seat', body: 'b',
           conversation: { kind: 'direct', id: 'main' }, channel: 'fake', route: { kind: 'push', pushRouteId: 'p' }, state: 'pending', attempts: 0 } } };
         settledRoot(state, 'r3');
+        state.wouldDo!['seat:w'] = wouldDo('seat:w', 'seat', 'room_call');
       });
       await refused(subject, () => retain(subject, ['r1']), error => expect((error as Error).message).toBe('Retention refused: A delivery of the root is not settled'));
       await subject.change(state => { state.channel!.deliveries.s!.state = 'accepted'; });
@@ -162,6 +168,7 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
       const state = await subject.state();
       expect(state.turns.seat).toBeUndefined();
       expect(state.channel!.deliveries.s).toBeUndefined();
+      expect(Object.keys(state.wouldDo ?? {}).sort()).toEqual(['r2:w', 'r3:w']);
     });
 
     it('moves the room messages of archived roots outside the window, and keeps what each member sees', async () => {

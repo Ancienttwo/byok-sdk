@@ -194,7 +194,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
       await legacy.pool.query(`ALTER TABLE ${table} DROP CONSTRAINT entity_kind_check`);
       await legacy.pool.query(`ALTER TABLE ${table} ADD CONSTRAINT entity_kind_check CHECK (kind IN ('turn'))`);
       await legacy.store.migrate();
-      const wouldDo = { w1: { id: 'w1', botId: 'main', taskId: 'x', action: 'create_routine' as const, index: 0, at: 1, detail: null } };
+      const wouldDo = { w1: { id: 'w1', botId: 'main', turnId: 't1', taskId: 'x', action: 'create_routine' as const, index: 0, at: 1, detail: null } };
       await legacy.store.seed('would-do', state => { seedCollaboration(state); state.wouldDo = wouldDo; });
       expect((await legacy.store.read('would-do')).wouldDo).toEqual(wouldDo);
       // A frame that an L import on older code wrote holds the rows inline: migrate moves them into entity rows once.

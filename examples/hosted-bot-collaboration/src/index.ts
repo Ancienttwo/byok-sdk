@@ -1,5 +1,5 @@
 export { CallbackCommandError, HOST_JOB_EXECUTION_UNSUPPORTED, HostedCollaborationStore, InboundCommandError, type DueReplyCheck, type HostConfig,
-  type DeviceWork, type HostIntent, type HostedStoreOptions, type HostedSyncOptions, type InboundIdentity, type Publish, type ReplyFence, type StorePorts, type SyncResult } from './store';
+  type DeviceWork, type HostIntent, type HostedStoreOptions, type MigrateResult, type HostedSyncOptions, type InboundIdentity, type Publish, type ReplyFence, type StorePorts, type SyncResult } from './store';
 export { HostedStoreVersionError } from './transaction';
 export { DDL, STORE_VERSION } from './ddl';
 export type { IntentCompaction, IntentCompactionInput } from './compaction';

@@ -213,6 +213,25 @@ example when the daemon stops before its outcome commits.
   upload deduplicates by task id, and only the task that concluded the intent
   can pass the check above.
 
+## Would-do rows
+
+Each would-do row names the Turn whose outcome proposed it, in `turnId`
+(#1756). Retention moves the row with that Turn's root into the `wouldDo`
+application rows, so `wouldDoRecords` lists only the rows of roots that are
+still in the state. A Host that keeps the would-do feed longer copies the rows
+before it acknowledges the root.
+
+A ledger written by an earlier copy has rows without `turnId`. Run
+`migrateWouldDo(ledger)` from `commit.ts` once per ledger, before the new copy
+serves. It fills `turnId` from the K4 task id of each live Turn intent, over
+every generation, and moves each row whose intent K4 already compacted, or
+whose Turn left the state, to the `wouldDo` application rows. It returns
+`{ backfilled, archived }`. `archived` counts rows that leave the feed early;
+they are history of settled Turns, so no Turn reads them. A second run returns
+zeros. A switch export or import refuses a would-do row without `turnId`, so
+migrate the source before a switch. For example, AiphaBee runs it on each
+device ledger in its runtime update.
+
 ## K4
 
 K8 imports K4 from the published `@byok-sdk/server` package (#1106): the root

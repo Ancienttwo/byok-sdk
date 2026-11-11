@@ -17,8 +17,8 @@ export type { CheckedOffer, ConfirmableSpec, MainAction, OutcomeOffer, TurnActio
 export type { Card, CollaborationState, Delegation, InputBatch, ReplyEntry, SealReason, Turn, UserInput } from './model';
 export { BOT_DREAM, BOT_ROUTINE, botRoutines } from './routines';
 export { DEFAULT_DREAM_MAX_DURATION_MS, DREAM_WAIT_MS, type DreamBot, type DreamingOptions, type DreamRecord, type DreamSkip, type DreamState, type OpenDream } from './dream';
-export { CommitConflict, commitInLedger, retainInLedger, revisionOf } from './commit';
-export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent } from './commit';
+export { CommitConflict, commitInLedger, migrateWouldDo, retainInLedger, revisionOf } from './commit';
+export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent, WouldDoMigration } from './commit';
 export type { BotRoutine, BotRoutineInput } from './routines';
 export type { BotProfile, Room, Round, Seat, TeamState } from './team-model';
 export { DEFAULT_MEMBER_MENTIONS, ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES, memberMentions, type MemberMentions, type RoomMessage } from './rooms';

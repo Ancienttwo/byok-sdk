@@ -197,6 +197,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     expect(await count(`SELECT count(*)::text AS n FROM ${table('outbox')} WHERE scope = $1 AND kind = 'projection' AND key LIKE '"would-do:%'`)).toBe('1');
     expect((await opened!.pool.query<{ frame: string }>(`SELECT frame::text FROM ${table('scope')} WHERE scope = $1`, [storedKey(scope)])).rows[0]!.frame)
       .toContain('"wouldDo":{}');
+    // #1756: migrate gives a row written before turnId its Turn from the intent's task id, and archives and counts a row
+    // whose intent is gone. A second run finds nothing.
+    const entity = table('entity'), { rows: [stored] } = await opened!.pool.query<{ key: string; body: Record<string, unknown> }>(
+      `SELECT key, body FROM ${entity} WHERE scope = $1 AND kind = 'would_do'`, [storedKey(scope)]);
+    const { turnId, ...old } = stored!.body;
+    expect(turnId).toBe('q1');
+    await opened!.pool.query(`UPDATE ${entity} SET body = $2::json WHERE scope = $1 AND kind = 'would_do'`, [storedKey(scope), JSON.stringify(old)]);
+    await opened!.pool.query(`INSERT INTO ${entity} (scope, kind, key, ordinal, body) VALUES ($1, 'would_do', '"gone"', 99, $2::json)`,
+      [storedKey(scope), JSON.stringify({ ...old, id: 'gone', taskId: 'compacted' })]);
+    expect(await store().migrate()).toEqual({ wouldDoBackfilled: 1, wouldDoArchived: 1 });
+    expect(Object.values((await store().read(scope)).wouldDo ?? {})).toEqual([{ ...old, turnId: 'q1' }]);
+    expect(await count(`SELECT count(*)::text AS n FROM ${table('archived_row')} WHERE scope = $1 AND namespace = 'wouldDo' AND id = '"gone"'`)).toBe('1');
+    expect(await store().migrate()).toEqual({ wouldDoBackfilled: 0, wouldDoArchived: 0 });
   });
 
   it('reports a scope where the pass recorded a first claim with no conclusion, and not a claim recorded before (#793 D2f-5)', async () => {

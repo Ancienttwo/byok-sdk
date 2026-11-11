@@ -444,7 +444,8 @@ function checkCollaboration(content: SwitchContent): void {
     throw new SwitchExportError('owner_record', 'Switch export carries an L switch record (switchExport or switchImport)');
   }
   ensure(keys(state, COLLABORATION_KEYS, COLLABORATION_OPTIONAL) && state.version === 3 && object(state.team) && object(state.team.bots)
-    && Array.isArray(state.team.homeOperations) && object(state.turns) && optional(state.inputBatches, object) && optional(state.cardCalls, object),
+    && Array.isArray(state.team.homeOperations) && object(state.turns) && optional(state.inputBatches, object) && optional(state.cardCalls, object)
+    && optional(state.wouldDo, object),
   'collaboration state');
   for (const bot of Object.values(state.team.bots)) ensure(object(bot) && object(bot.execution) && text(bot.execution.deviceId), 'bot');
   for (const turn of Object.values(state.turns)) {
@@ -453,6 +454,8 @@ function checkCollaboration(content: SwitchContent): void {
     if (turn.source === 'routine') ensure(typeof turn.id === 'string' && isOccurrenceIntentKey(turn.id), `routine Turn ${String(turn.id)} names no occurrence`);
   }
   for (const batch of Object.values(state.inputBatches ?? {})) ensure(object(batch), 'input batch');
+  // A row without its Turn is the shape before #1756: migrate the source first (`migrateWouldDo`, H `migrate()`).
+  for (const row of Object.values(state.wouldDo ?? {})) ensure(object(row) && text(row.turnId), 'would-do row without turnId');
   for (const op of state.team.homeOperations) ensure(object(op), 'home operation');
   const devices = new Set(content.devices.map(device => device.deviceId));
   for (const bot of Object.values(state.team.bots)) {

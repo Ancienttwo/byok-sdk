@@ -62,7 +62,7 @@ it('records a room_call in observe while the accepted speech stays, and creates 
   const state: AutonomyState = {};
   const rows: string[] = [];
   const gate: AutonomyGate = { autonomy: 'observe', record: (action, index, detail) => {
-    const row = recordWouldDo(state, { botId: 'a', taskId: 'task', action, index, at: 1000, detail });
+    const row = recordWouldDo(state, { botId: 'a', turnId: 'turn', taskId: 'task', action, index, at: 1000, detail });
     if (row) rows.push(row.id);
   } };
   const accepted: string[] = [];

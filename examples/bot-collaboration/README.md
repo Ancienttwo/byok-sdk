@@ -296,7 +296,9 @@ applying the same outcome twice records one row. The row holds the frozen
 action itself, never a model summary. Rows live in
 `snapshot().wouldDo` and are published once as `would-do:<id>`, so a
 Host UI reads either the ledger or that projection. They are Host UI
-history: never in a ContextPack and never on the wire.
+history: never in a ContextPack and never on the wire. Each row names its
+Turn in `turnId`, and retention moves it with that Turn's root (#1756), so
+`wouldDoRecords` lists only the rows of roots still in the state.
 
 The default of a new Bot is `observe`. A Bot profile without the field
 (an older ledger) reads as `observe` too. Only the owner principal
