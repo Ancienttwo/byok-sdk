@@ -33,7 +33,8 @@ function holdPower(state: SupervisedHostState): void {
 
 /** Our own window's main frame, on our own origin: the only frame that may call the bridge or get its hints. */
 function isOwnRenderer(frame: WebFrameMain | null | undefined): frame is WebFrameMain {
-  const url = frame ? new URL(frame.url) : undefined;
+  // A main frame that has not committed its first navigation has an empty url: not ours yet.
+  const url = frame && URL.canParse(frame.url) ? new URL(frame.url) : undefined;
   return !!window && frame === window.webContents.mainFrame && url?.protocol === `${SCHEME}:` && url.host === RENDERER_HOST;
 }
 
