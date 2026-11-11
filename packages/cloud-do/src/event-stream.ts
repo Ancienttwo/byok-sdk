@@ -1,5 +1,5 @@
-import { CloudDoError, safeCloudError } from './errors';
-import type { CloudState } from './cloud-state';
+import { CloudDoError, safeCloudError } from './errors.js';
+import type { CloudState } from './cloud-state.js';
 
 /** A doorbell is advisory. Every delivery reads the durable SQL cursor again. */
 export class CloudEventDoorbell {

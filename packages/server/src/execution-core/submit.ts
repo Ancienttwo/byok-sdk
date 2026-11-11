@@ -1,6 +1,6 @@
 import type { AgentExecutionInput } from '@byok-sdk/cloud';
-import type { ByokServer } from '../index';
-import { canonical, isSealed, type FrozenExecutionInput, type SealedAgentExecutionInput } from './model';
+import type { ByokServer } from '../index.js';
+import { canonical, isSealed, type FrozenExecutionInput, type SealedAgentExecutionInput } from './model.js';
 
 /**
  * The SDK calls that one frozen submit uses. L binds them to its `ByokServer`; H binds them to its cloud tenant.

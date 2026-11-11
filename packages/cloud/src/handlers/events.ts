@@ -29,7 +29,7 @@ import { MAILBOX_READ_AHEAD_MAX_SEQS } from '@byok-sdk/protocol';
 import type { Context } from 'hono';
 import { isCoreConflictError } from '@byok-sdk/core';
 import { decodeEnvelope, type Envelope, type EventsPollResponse } from '@byok-sdk/protocol';
-import { admitDeviceRequest, type DeviceRouteDeps } from './shared';
+import { admitDeviceRequest, type DeviceRouteDeps } from './shared.js';
 
 /**
  * Server flags this cloud build advertises on every long-poll response and
@@ -44,7 +44,7 @@ import { admitDeviceRequest, type DeviceRouteDeps } from './shared';
 export const CLOUD_PROTOCOL_CAPABILITIES: string[] = [];
 
 export interface EventsRouteDeps extends DeviceRouteDeps {
-  readonly activityBounds: import('../coordination').ActivityBounds;
+  readonly activityBounds: import('../coordination.js').ActivityBounds;
   /** How long an empty poll is held open, ms. */
   readonly longPollHoldMs: number;
   /** Max rows per response. */

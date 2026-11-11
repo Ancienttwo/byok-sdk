@@ -10,7 +10,7 @@ import {
   readWin32Credential,
   writeWin32Credential,
   type Win32CredentialBindings,
-} from './win32-credential-api';
+} from './win32-credential-api.js';
 
 /** Secret fields inside the internal complete enrollment authority. */
 export interface DeviceCredentials {

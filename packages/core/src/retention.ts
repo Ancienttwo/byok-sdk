@@ -1,5 +1,5 @@
-import { ByokCoreError } from './errors';
-import { assertCanonicalTimestamp } from './time';
+import { ByokCoreError } from './errors.js';
+import { assertCanonicalTimestamp } from './time.js';
 
 export interface CollectExpiredInput {
   readonly now: string;

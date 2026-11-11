@@ -9,8 +9,8 @@
  * and the serialized grant, so the gate itself refuses the six file tools
  * unless the child's scope extension registered the SDK scoped tools.
  */
-import { createPiSubagentGateExtension } from '../adapters/pi/subagent-gate';
-import { readToolAuthorizationGateEnv } from '../tool-authorization-ipc';
+import { createPiSubagentGateExtension } from '../adapters/pi/subagent-gate.js';
+import { readToolAuthorizationGateEnv } from '../tool-authorization-ipc.js';
 
 const gate = readToolAuthorizationGateEnv();
 if (gate === undefined) throw new Error('tool_authorization_unavailable: a Pi subagent child has no tool authorization gate');

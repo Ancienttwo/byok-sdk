@@ -1,7 +1,7 @@
-import { CollectExpiredFailure } from '../retention';
-import { InMemoryStorageLedger, type ReservationRecord } from './storage-ledger';
-import { assertCollectExpiredInput, type CollectExpiredResult } from '../retention';
-import type { QuotaCollectExpiredInput } from '../quota';
+import { CollectExpiredFailure } from '../retention.js';
+import { InMemoryStorageLedger, type ReservationRecord } from './storage-ledger.js';
+import { assertCollectExpiredInput, type CollectExpiredResult } from '../retention.js';
+import type { QuotaCollectExpiredInput } from '../quota.js';
 /**
  * In-memory {@link QuotaStore} reference (§12.7.6-12.7.7).
  *
@@ -19,8 +19,8 @@ import type { QuotaCollectExpiredInput } from '../quota';
  * identical: finalizing an already-committed hash releases the reservation and
  * adds nothing.
  */
-import { ByokCoreError, CoreConflictError } from '../errors';
-import type { ObjectStore } from '../blob';
+import { ByokCoreError, CoreConflictError } from '../errors.js';
+import type { ObjectStore } from '../blob.js';
 import type {
   StorageFinalizeInput,
   StorageFinalizeResult,
@@ -32,10 +32,10 @@ import type {
   TenantStorageEntitlement,
   TenantStorageEntitlementInput,
   TenantStorageUsage,
-} from '../quota';
-import type { Clock } from '../stores';
-import { tenantKey, type TenantId } from '../tenant';
-import { assertCanonicalTimestamp } from '../time';
+} from '../quota.js';
+import type { Clock } from '../stores.js';
+import { tenantKey, type TenantId } from '../tenant.js';
+import { assertCanonicalTimestamp } from '../time.js';
 
 /** Warning threshold from §12.7.8: 80% of the hard limit. */
 const WARNING_NUMERATOR = 80n;

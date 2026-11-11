@@ -1,11 +1,11 @@
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner';
-import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
-import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log';
-import { sanitizeServiceName, type ServiceDefinition } from './service-types';
-import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit';
+import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log.js';
+import { sanitizeServiceName, type ServiceDefinition } from './service-types.js';
+import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit.js';
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface SystemdDeps {

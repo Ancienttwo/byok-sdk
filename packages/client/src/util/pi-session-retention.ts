@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import type { PathMutationGate } from './path-mutation-gate';
-import type { RuntimeSessionLease } from '../types';
+import type { PathMutationGate } from './path-mutation-gate.js';
+import type { RuntimeSessionLease } from '../types.js';
 
 /**
  * Only a native mutable setup callback can select an unknown session directory.
@@ -9,13 +9,13 @@ import type { RuntimeSessionLease } from '../types';
  * takes it first, before any directory/session gate. Known turns never hold it.
  */
 export async function acquirePiSessionRebinding(waitMs = 0): Promise<PathMutationGate> {
-  const { acquirePathMutationGate } = await import('./path-mutation-gate');
+  const { acquirePathMutationGate } = await import('./path-mutation-gate.js');
   return acquirePathMutationGate({ scope: 'pi-session-rebinding' }, { waitMs });
 }
 
 /** Short-lived barrier: a fresh runtime has not reported its authoritative id yet. */
 export async function acquirePiSessionDiscovery(sessionDir: string, waitMs = 0): Promise<PathMutationGate> {
-  const { acquirePathMutationGate } = await import('./path-mutation-gate');
+  const { acquirePathMutationGate } = await import('./path-mutation-gate.js');
   return acquirePathMutationGate({ scope: 'pi-session-discovery', targetPath: sessionDir }, { waitMs });
 }
 
@@ -37,7 +37,7 @@ export function acquirePiSessionWriter(sessionFile: string): Promise<PiSessionRe
 async function acquireSessionRole(sessionDir: string, sessionRef: string, role: 'admission' | 'writer'): Promise<PiSessionRetentionLease> {
   // Importing Pi's pure settlement path must not load socket capabilities.
   // Actual acquisition still has exactly one shared path-gate authority.
-  const { acquirePathMutationGate } = await import('./path-mutation-gate');
+  const { acquirePathMutationGate } = await import('./path-mutation-gate.js');
   const digest = createHash('sha256').update(sessionRef).digest('hex');
   const gate = await acquirePathMutationGate({ scope: `pi-session-${role}:${digest}`, targetPath: sessionDir });
   let released = false;

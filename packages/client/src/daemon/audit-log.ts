@@ -1,14 +1,14 @@
-import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type RetentionClassId, type RetentionTrigger } from './retention/registry';
+import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type RetentionClassId, type RetentionTrigger } from './retention/registry.js';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { TASK_STATES, type TaskState, OUTBOUND_REFUSAL_REASONS, type OutboundRefusalReason } from '@byok-sdk/protocol';
-import { parseDaemonLifecycle, type DaemonLifecycle } from './daemon-lifecycle';
-import { isDaemonRecordKind, type DaemonRecord } from './daemon-record';
-import type { ServiceEnvironmentStatus, ServiceEnvironmentRecord } from '../login-shell-environment';
-import { parseEnvironmentRecord } from './daemon-record';
-export { parseEnvironmentRecord } from './daemon-record';
-import { atomicWriteFile } from '../util/atomic-write';
-import { parseRuntimeObservations } from '../runtime-detection';
+import { parseDaemonLifecycle, type DaemonLifecycle } from './daemon-lifecycle.js';
+import { isDaemonRecordKind, type DaemonRecord } from './daemon-record.js';
+import type { ServiceEnvironmentStatus, ServiceEnvironmentRecord } from '../login-shell-environment.js';
+import { parseEnvironmentRecord } from './daemon-record.js';
+export { parseEnvironmentRecord } from './daemon-record.js';
+import { atomicWriteFile } from '../util/atomic-write.js';
+import { parseRuntimeObservations } from '../runtime-detection.js';
 
 /**
  * `audit.jsonl`: the durable record of what a running `byok-agent start`

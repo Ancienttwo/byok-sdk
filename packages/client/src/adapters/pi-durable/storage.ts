@@ -1,5 +1,5 @@
 import type { Storage } from '@earendil-works/pi-durable';
-import { inspectReplicaDatabase } from './replica';
+import { inspectReplicaDatabase } from './replica.js';
 
 /** Construction only: backends return pi's native Storage without translating its methods. */
 export type DurableStorageFactory<Location> = (location: Location) => Promise<Storage>;

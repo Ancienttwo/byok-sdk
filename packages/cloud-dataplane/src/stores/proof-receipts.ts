@@ -7,7 +7,7 @@ import type {
 } from '@byok-sdk/cloud';
 import { assertCanonicalTimestamp, assertCollectExpiredInput, type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import type { ByokPool } from '../pool';
+import type { ByokPool } from '../pool.js';
 
 interface ProofReceiptRow {
   readonly tenant_id: string;

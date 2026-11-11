@@ -1,6 +1,6 @@
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
-import { durableShell } from './shell';
-import { buildAllowlistedEnv } from '../../runtime/environment';
+import { durableShell } from './shell.js';
+import { buildAllowlistedEnv } from '../../runtime/environment.js';
 
 /** Per-call enforcement: even a tool-provided inheritEnv:true cannot expose provider env. */
 export function durableToolEnvironment(cwd: string, ambient: NodeJS.ProcessEnv, shellOwnership?: { own(pid:number):Promise<void>; released(pid:number):void }): NodeExecutionEnv {

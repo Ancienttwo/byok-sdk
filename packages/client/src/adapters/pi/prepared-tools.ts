@@ -5,16 +5,16 @@ import {
   preparedToolSurfaceObservationDigest,
   type InputPreparationToolV1,
   type PreparedToolBindingServerDigestInputV1,
-} from '../../input-preparation';
-import type { McpToolsetServerObservation } from '../../mcp/observation';
-import { McpAuthorityError } from '../../mcp/authority-error';
-import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection';
-import { buildToolExecutorsFromObservation, InputPreparationCompileError } from './input-preparation';
-import { createPiMcpTools, type McpToolCallHost, type PiMcpToolDefinition } from './mcp-tools';
-import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../../agent-memory/prepared-agent-memory';
-import { preparedResultProjection } from '../../agent-memory/prepared-agent-result';
-import { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from '../../sdk-reserved-mcp';
-import { preparedAgentMemoryTools } from '../../agent-memory/prepared-capability';
+} from '../../input-preparation.js';
+import type { McpToolsetServerObservation } from '../../mcp/observation.js';
+import { McpAuthorityError } from '../../mcp/authority-error.js';
+import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection.js';
+import { buildToolExecutorsFromObservation, InputPreparationCompileError } from './input-preparation.js';
+import { createPiMcpTools, type McpToolCallHost, type PiMcpToolDefinition } from './mcp-tools.js';
+import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../../agent-memory/prepared-agent-memory.js';
+import { preparedResultProjection } from '../../agent-memory/prepared-agent-result.js';
+import { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from '../../sdk-reserved-mcp.js';
+import { preparedAgentMemoryTools } from '../../agent-memory/prepared-capability.js';
 
 /**
  * The ONE place a prepared Pi session's authorized tool closure is assembled.

@@ -1,5 +1,5 @@
 import type { HostOfferPlainPayload, HostOfferSealedPayload } from '@byok-sdk/protocol';
-import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl, EnqueuedOffer } from '../cloud';
+import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl, EnqueuedOffer } from '../cloud.js';
 import { contentHash, type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import {
   AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY,
@@ -21,13 +21,13 @@ import {
   type SessionSelection,
   type TaskOfferPayload,
 } from '@byok-sdk/protocol';
-import { ByokCloudError, DeviceRetiredError, TaskOfferAppendRefusedError } from '../errors';
-import { taskOfferMessageId, uuidFromSha256 } from '../offer-identity';
-import { firstSealedPayload } from '../sealed-comparison';
-import { retainSealedCiphertext, sealedCiphertextCommitted, sealedCiphertextRef } from '../sealed-ciphertext';
-import type { AgentEgressRecord, TaskAttemptStatus } from '../stores/ports';
-import { sameTaskBody } from '../task-redaction';
-import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../tenant-stores';
+import { ByokCloudError, DeviceRetiredError, TaskOfferAppendRefusedError } from '../errors.js';
+import { taskOfferMessageId, uuidFromSha256 } from '../offer-identity.js';
+import { firstSealedPayload } from '../sealed-comparison.js';
+import { retainSealedCiphertext, sealedCiphertextCommitted, sealedCiphertextRef } from '../sealed-ciphertext.js';
+import type { AgentEgressRecord, TaskAttemptStatus } from '../stores/ports.js';
+import { sameTaskBody } from '../task-redaction.js';
+import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../tenant-stores.js';
 
 /**
  * Attempt statuses past which there is nothing left to approve or refuse. A

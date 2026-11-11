@@ -1,16 +1,16 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { ByokServer } from '../index';
-import type { ByokServerEvent, CreateByokServerOptions } from '../types';
-import type { DueWake } from '../wakes/types';
-import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
-import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger';
+import type { ByokServer } from '../index.js';
+import type { ByokServerEvent, CreateByokServerOptions } from '../types.js';
+import type { DueWake } from '../wakes/types.js';
+import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory.js';
+import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger.js';
 import { canonical, frozenInput, hash, isSealed, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
-  type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type SealedAgentExecutionInput, type Terminal } from './model';
-import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
+  type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type SealedAgentExecutionInput, type Terminal } from './model.js';
+import { nextIntervalOccurrence, type NextOccurrence } from './schedule.js';
 import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, occurrenceRun, promote, recordOccurrence, routineCommands, scheduleNext,
-  switchVersion, versionSwitchDue, WAKE_HORIZON_MS, type RoutineCommands } from './routines';
-import { cancelWake, enqueue, fifoHeads, queuedExpiry, settle } from './transitions';
-import { frozenDelivered, SealedDispatchUnavailableError, submitFrozen, type FrozenSubmitPort } from './submit';
+  switchVersion, versionSwitchDue, WAKE_HORIZON_MS, type RoutineCommands } from './routines.js';
+import { cancelWake, enqueue, fifoHeads, queuedExpiry, settle } from './transitions.js';
+import { frozenDelivered, SealedDispatchUnavailableError, submitFrozen, type FrozenSubmitPort } from './submit.js';
 
 export type ExecutionServer = {
   /** `submitSealed` is the sealed lane (#654). Without it, the core fails a sealed intent before any submit. */

@@ -1,11 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { acquirePathMutationGate } from '../../util/path-mutation-gate';
+import { acquirePathMutationGate } from '../../util/path-mutation-gate.js';
 import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { RuntimeDisposalFailure } from '../../runtime-failure';
-import { atomicWriteFile } from '../../util/atomic-write';
-import { ensureOwnedPrivateDirectory } from '../../util/private-unix-socket';
-import { createPrivateTempDir, ensureSecureDir, SecureDirModeError } from '../../util/secure-dir';
+import { RuntimeDisposalFailure } from '../../runtime-failure.js';
+import { atomicWriteFile } from '../../util/atomic-write.js';
+import { ensureOwnedPrivateDirectory } from '../../util/private-unix-socket.js';
+import { createPrivateTempDir, ensureSecureDir, SecureDirModeError } from '../../util/secure-dir.js';
 
 export class ScratchRootPathError extends Error {
   constructor(reason: string) {

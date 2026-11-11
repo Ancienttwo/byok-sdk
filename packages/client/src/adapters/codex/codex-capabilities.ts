@@ -1,4 +1,4 @@
-import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types';
+import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types.js';
 
 /**
  * Best-case Codex capabilities under its adapter options. The descriptor

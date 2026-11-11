@@ -14,7 +14,7 @@ import {
   type TruthRecordKind,
 } from '@byok-sdk/core';
 import type { Context } from 'hono';
-import type { DeviceProofAuthDeps } from '../auth/device-proof';
+import type { DeviceProofAuthDeps } from '../auth/device-proof.js';
 import {
   TRUTH_MANIFEST_MAX_LIMIT,
   TruthRecordKeySchema,
@@ -27,14 +27,14 @@ import {
   type TruthCommitter,
   type TruthObjectDownloads,
   type TruthRecordMetadata,
-} from '../truth/contract';
-import { isTruthCommitError } from '../truth/errors';
-import { authenticateProofRequest, readProofRequestBody } from './device-proof-request';
+} from '../truth/contract.js';
+import { isTruthCommitError } from '../truth/errors.js';
+import { authenticateProofRequest, readProofRequestBody } from './device-proof-request.js';
 
 // Re-exported from core (single source of truth for the wire header); still
 // part of this module's public surface for callers importing it from cloud.
 export { DEVICE_PROOF_HEADER };
-export { MAX_DEVICE_PROOF_HEADER_BYTES } from './device-proof-request';
+export { MAX_DEVICE_PROOF_HEADER_BYTES } from './device-proof-request.js';
 export const DEFAULT_MAX_TRUTH_REQUEST_BYTES = 2 * 1024 * 1024;
 
 const EMPTY_BODY = new Uint8Array();

@@ -1,45 +1,45 @@
-import { renderNativeSessions, NativeSessionsUnavailableError } from '../native-sessions/renderer';
-import { nativeSessionsIO } from '../native-sessions/io';
-import { NATIVE_SESSIONS_GUIDANCE } from '../memory-guidance';
-import { requestApproval as requestTaskApproval } from './approvals';
-import type { ApprovalKind } from '../approvals';
+import { renderNativeSessions, NativeSessionsUnavailableError } from '../native-sessions/renderer.js';
+import { nativeSessionsIO } from '../native-sessions/io.js';
+import { NATIVE_SESSIONS_GUIDANCE } from '../memory-guidance.js';
+import { requestApproval as requestTaskApproval } from './approvals.js';
+import type { ApprovalKind } from '../approvals.js';
 // `handleOffer` stages from the runtime launch to a started session: seal the
 // manifest, claim, and start (see ./support.ts for how a member module runs).
-import { observePreparedMemory, type PreparedAgentMemoryState } from '../../agent-memory/prepared-agent-memory';
-import { InputPreparationRequestError } from '../input-preparation-service';
-import { DURABLE_REPLICA_DIRNAME } from '../../adapters/pi-durable/replica';
-import { terminalIdentity } from '../terminal-identity';
-import { abortedStartOf, startOwnedRuntime } from '../runtime-start';
-import type { DeclaredSessionMembers } from '../session-contract';
+import { observePreparedMemory, type PreparedAgentMemoryState } from '../../agent-memory/prepared-agent-memory.js';
+import { InputPreparationRequestError } from '../input-preparation-service.js';
+import { DURABLE_REPLICA_DIRNAME } from '../../adapters/pi-durable/replica.js';
+import { terminalIdentity } from '../terminal-identity.js';
+import { abortedStartOf, startOwnedRuntime } from '../runtime-start.js';
+import type { DeclaredSessionMembers } from '../session-contract.js';
 import path from 'node:path';
 import { RESIDENT_MEMORY_MAX_BYTES, createEnvelope } from '@byok-sdk/protocol';
-import { readResidentMemory } from '../../agent-home-readers';
-import { sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types';
-import { admitPreparedOffer, type PreparedOfferServerProjection } from '../prepared-offer-admission';
-import type { InputPreparationStore } from '../input-preparation-store';
-import { inputPreparationDigest } from '../../input-preparation';
-import { isRuntimeStartupDisposalFailure, projectRuntimeBoundaryFailure } from '../../runtime-failure';
-import { toRuntimeInfoCapabilities } from '../runtime-capabilities';
-import { prependAgentMemoryModeGuidance } from '../memory-guidance';
-import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
-import { AGENT_MEMORY_RECOVERY, agentMemoryCommitFailureRetryable } from '../agent-memory-commit';
-import { settleAgentMemoryCommitCopy } from './agent-memory';
-import type { PreparedExecutionObservation, ActiveTask, ClaimedAgentFailureContext, OfferPhaseContext } from './support';
-import { isKnownRuntimeId, offeredInstruction, errorMessage, outboundErrorMessage, pendingCancelBeforeActive } from './support';
-import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
-import type { AcceptedOfferPayload } from './support';
-import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
-import { activateOffer, type OfferActivationInput } from './offer-activation';
+import { readResidentMemory } from '../../agent-home-readers.js';
+import { sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types.js';
+import { admitPreparedOffer, type PreparedOfferServerProjection } from '../prepared-offer-admission.js';
+import type { InputPreparationStore } from '../input-preparation-store.js';
+import { inputPreparationDigest } from '../../input-preparation.js';
+import { isRuntimeStartupDisposalFailure, projectRuntimeBoundaryFailure } from '../../runtime-failure.js';
+import { toRuntimeInfoCapabilities } from '../runtime-capabilities.js';
+import { prependAgentMemoryModeGuidance } from '../memory-guidance.js';
+import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory.js';
+import { AGENT_MEMORY_RECOVERY, agentMemoryCommitFailureRetryable } from '../agent-memory-commit.js';
+import { settleAgentMemoryCommitCopy } from './agent-memory.js';
+import type { PreparedExecutionObservation, ActiveTask, ClaimedAgentFailureContext, OfferPhaseContext } from './support.js';
+import { isKnownRuntimeId, offeredInstruction, errorMessage, outboundErrorMessage, pendingCancelBeforeActive } from './support.js';
+import type { TaskRunner, TaskRunnerDeps } from '../task-runner.js';
+import type { AcceptedOfferPayload } from './support.js';
+import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer.js';
+import { activateOffer, type OfferActivationInput } from './offer-activation.js';
 import {
   createAutoToolAuthorizationGate, toolAuthorizationMode,
   type ToolAuthorizationHomeAccess, type ToolAuthorizationLane, type ToolAuthorizationPolicy,
-} from '../../tool-authorization';
-import { fileScopeAdmission } from './file-scope-admission';
-import { FileScopeGuardError, fileScopePolicyDigest, resolveFileScopeGrant, type FileScopeAudit, type FileScopeGrant } from '../../file-scope-guard';
-import { bindFileScopeGate } from '../../file-scope-gate-binding';
-import { mcpEventIdentities } from '../../mcp/event-identity';
-import { DEFAULT_APPROVAL_TIMEOUT_MS } from './state';
-import { hostFor } from './host';
+} from '../../tool-authorization.js';
+import { fileScopeAdmission } from './file-scope-admission.js';
+import { FileScopeGuardError, fileScopePolicyDigest, resolveFileScopeGrant, type FileScopeAudit, type FileScopeGrant } from '../../file-scope-guard.js';
+import { bindFileScopeGate } from '../../file-scope-gate-binding.js';
+import { mcpEventIdentities } from '../../mcp/event-identity.js';
+import { DEFAULT_APPROVAL_TIMEOUT_MS } from './state.js';
+import { hostFor } from './host.js';
 
 export interface OfferManifestInput
   extends Pick<OfferRequest, 'agentRef' | 'agentMemory' | 'preparation' | 'preparedMemorySelected' | 'readerAttempt' | 'sessionRef'>,

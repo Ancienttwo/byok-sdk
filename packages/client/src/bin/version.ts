@@ -1,4 +1,4 @@
-import { OFFICIAL_LOCAL_AGENT_RELEASE } from './official-release';
+import { OFFICIAL_LOCAL_AGENT_RELEASE } from './official-release.js';
 
 /** Zero-state command: one constant projection, no config, store, runtime, or network dependency. */
 export function runVersionCommand(log: (line: string) => void = console.log): void {

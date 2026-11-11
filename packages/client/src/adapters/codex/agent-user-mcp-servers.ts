@@ -1,5 +1,5 @@
-import { RuntimeExecutionFailure } from '../../runtime-failure';
-import type { CodexOpenStepRequest } from '../../runtime/codex-session-runtime';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
+import type { CodexOpenStepRequest } from '../../runtime/codex-session-runtime.js';
 
 type JsonRecord = Record<string, unknown>;
 

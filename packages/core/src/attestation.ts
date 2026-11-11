@@ -26,8 +26,8 @@
  * authority (§12.6.2 layer 5). Branding happens after that lookup, not here.
  */
 import { z } from 'zod';
-import { CONTENT_HASH_PATTERN } from './blob';
-import { ByokCoreError } from './errors';
+import { CONTENT_HASH_PATTERN } from './blob.js';
+import { ByokCoreError } from './errors.js';
 
 /** Envelope schema id, self-consistent with the domain prefix below. */
 export const DEVICE_PROOF_SCHEMA_ID = 'byok-device-proof-v1';

@@ -17,7 +17,7 @@ import {
 } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { PoolClient } from 'pg';
-import type { ByokPool } from '../pool';
+import type { ByokPool } from '../pool.js';
 
 interface TailRow {
   readonly tenant_id: string;

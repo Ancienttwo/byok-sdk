@@ -3,9 +3,9 @@ import {
   AgentRefSchema, AgentMessageEgressRequirementSchema, AgentMessageServerContextSchema, AgentMessagePublishPayloadSchema,
   type AgentRef, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload,
 } from '@byok-sdk/protocol';
-import type { TenantStores } from './tenant-stores';
-import { agentMessageWithinLimit, parseAgentMessageDisposition } from './agent-message-disposition';
-import { assertTaskContentPresent } from './task-redaction';
+import type { TenantStores } from './tenant-stores.js';
+import { agentMessageWithinLimit, parseAgentMessageDisposition } from './agent-message-disposition.js';
+import { assertTaskContentPresent } from './task-redaction.js';
 
 /**
  * SDK transmission evidence; payload remains untrusted and never authors a Host

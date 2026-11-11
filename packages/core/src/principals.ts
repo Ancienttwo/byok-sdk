@@ -14,7 +14,7 @@
  * Putting them on the principal would create permanently-empty fields on every
  * principal minted by a non-proof path.
  */
-import type { TenantId } from './tenant';
+import type { TenantId } from './tenant.js';
 
 /** Principal kinds. A composition may not invent a third without a contract change. */
 export const PRINCIPAL_KINDS = ['device', 'control-plane'] as const;

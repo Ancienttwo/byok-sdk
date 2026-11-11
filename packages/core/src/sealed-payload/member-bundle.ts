@@ -15,10 +15,10 @@
  */
 import { z } from 'zod';
 
-import { canonicalizeJsonBytes } from '../attestation';
-import type { WebCryptoKey } from '../webcrypto';
-import { safeParseTotal } from '../total-parse';
-import { deriveMemberId, MEMBER_ID_PATTERN } from './member-chain';
+import { canonicalizeJsonBytes } from '../attestation.js';
+import type { WebCryptoKey } from '../webcrypto.js';
+import { safeParseTotal } from '../total-parse.js';
+import { deriveMemberId, MEMBER_ID_PATTERN } from './member-chain.js';
 import {
   P256PublicJwkSchema,
   base64UrlBytes,
@@ -30,7 +30,7 @@ import {
   utf8,
   type Bytes,
   type P256PublicJwk,
-} from './primitives';
+} from './primitives.js';
 
 export const MEMBER_KEY_BUNDLE_VERSION = 1;
 

@@ -6,8 +6,8 @@ import type {
   InputPreparationOptionsV1,
   InputPreparationResidualKeyV1,
   InputPreparationToolV1,
-} from '../../input-preparation';
-import { admitHostAssistantContent } from './host-history-admission';
+} from '../../input-preparation.js';
+import { admitHostAssistantContent } from './host-history-admission.js';
 
 /**
  * The SDK-owned prepared request compiler (A1', approved 2026-09-25).

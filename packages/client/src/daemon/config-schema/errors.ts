@@ -1,7 +1,7 @@
-import { DaemonConfigFieldRemovedError } from '../daemon-errors';
-import { removedDaemonConfigField, validateDaemonConfig, type DaemonConfigIssue } from './validate';
-import { versionPolicyConfigIssues } from '../../daemon-config-version-policy';
-import { DaemonConfigInvalidError } from '../../daemon-config-invalid-error';
+import { DaemonConfigFieldRemovedError } from '../daemon-errors.js';
+import { removedDaemonConfigField, validateDaemonConfig, type DaemonConfigIssue } from './validate.js';
+import { versionPolicyConfigIssues } from '../../daemon-config-version-policy.js';
+import { DaemonConfigInvalidError } from '../../daemon-config-invalid-error.js';
 
 /** The typed error for a removed field `path` (config or overrides). */
 export function removedFieldError(path: string): DaemonConfigFieldRemovedError {

@@ -34,7 +34,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { acquirePathMutationGate } from '../util/path-mutation-gate';
+import { acquirePathMutationGate } from '../util/path-mutation-gate.js';
 import {
   CONTENT_HASH_PATTERN,
   SKILL_PACK_ENTRY_PATH,
@@ -54,11 +54,11 @@ import {
   type SkillPackManifest,
 } from '@byok-sdk/core';
 import { BYOK_SKILL_PACKS_PATH, byokSkillPackFilePath } from '@byok-sdk/protocol';
-import type { AuthManager } from './auth-manager';
-import { authedFetch } from './http-client';
-import { toHttpBase } from './url';
-import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureDir } from '../util/secure-dir';
+import type { AuthManager } from './auth-manager.js';
+import { authedFetch } from './http-client.js';
+import { toHttpBase } from './url.js';
+import { atomicWriteFile } from '../util/atomic-write.js';
+import { ensureSecureDir } from '../util/secure-dir.js';
 
 /**
  * The hosted capability this pipeline gates on. A plain string, not an import

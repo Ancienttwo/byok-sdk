@@ -3,16 +3,16 @@ import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-a
 import {
   projectMcpTools,
   type McpToolProjection,
-} from '../../mcp/projection';
-import { createPiMcpTools, type PiMcpToolNaming } from './mcp-tools';
+} from '../../mcp/projection.js';
+import { createPiMcpTools, type PiMcpToolNaming } from './mcp-tools.js';
 import {
   McpServerPool,
   parseTaskScopedMcpConfig,
   type TaskScopedMcpConfig,
-} from './mcp-server-pool';
-import { BYOK_PI_MCP_CONFIG_PATH } from './mcp-config';
-import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
-import { compareCodeUnits } from '../../util/compare-code-units';
+} from './mcp-server-pool.js';
+import { BYOK_PI_MCP_CONFIG_PATH } from './mcp-config.js';
+import { isReservedMcpServerName } from '../../sdk-reserved-mcp.js';
+import { compareCodeUnits } from '../../util/compare-code-units.js';
 
 /**
  * The SDK's own Pi MCP extension, built on the shared core (`../../mcp/`).

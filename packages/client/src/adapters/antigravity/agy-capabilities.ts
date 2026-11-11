@@ -1,4 +1,4 @@
-import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types';
+import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types.js';
 
 /**
  * What the agy adapter can do: the one authority for its descriptor, the wire

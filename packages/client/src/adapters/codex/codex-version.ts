@@ -1,4 +1,4 @@
-import type { RuntimeVersionPolicy } from '../../types';
+import type { RuntimeVersionPolicy } from '../../types.js';
 
 /**
  * Codex CLI version policy, as in OAR: the version is read, never gated by

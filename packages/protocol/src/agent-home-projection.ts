@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AgentEgressContentHashSchema } from './agent-egress';
+import { AgentEgressContentHashSchema } from './agent-egress.js';
 
 /** Maximum UTF-8 encoded JSON bytes carried by one projection payload. */
 export const AGENT_HOME_PROJECTION_MAX_BYTES = 64 * 1024;

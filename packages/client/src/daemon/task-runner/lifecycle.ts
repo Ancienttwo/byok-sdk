@@ -1,16 +1,16 @@
 // `TaskRunner` members for shutdown, teardown, limits, cancel and steer
 // (see ./support.ts for how a member module runs).
 import { createEnvelope } from '@byok-sdk/protocol';
-import { SteerUnsupportedError } from '../../types';
-import { RuntimeDisposalFailure, isRuntimeDisposalFailure } from '../../runtime-failure';
-import { DAEMON_TASK_FAILURE } from '../task-failure';
-import { MAX_TIMER_DELAY_MS } from '../../util/timer-delay';
-import type { ActiveTask } from './support';
-import { raceSettleFirst, taskFinalizing } from './support';
-import type { TaskRunner } from '../task-runner';
-import { DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS, MAX_DURATION_EXCEEDED_REASON_PREFIX } from './state';
-import { hostFor } from './host';
-import { beginTerminal, drainApprovals, retryTerminalFinalization, terminalEffectsHost } from './finish';
+import { SteerUnsupportedError } from '../../types.js';
+import { RuntimeDisposalFailure, isRuntimeDisposalFailure } from '../../runtime-failure.js';
+import { DAEMON_TASK_FAILURE } from '../task-failure.js';
+import { MAX_TIMER_DELAY_MS } from '../../util/timer-delay.js';
+import type { ActiveTask } from './support.js';
+import { raceSettleFirst, taskFinalizing } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
+import { DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS, MAX_DURATION_EXCEEDED_REASON_PREFIX } from './state.js';
+import { hostFor } from './host.js';
+import { beginTerminal, drainApprovals, retryTerminalFinalization, terminalEffectsHost } from './finish.js';
 
 export function stopAcceptingOffers(this: TaskRunner): void {
   // #1099 S6: SH1 owns the shutdown gate and its three side effects

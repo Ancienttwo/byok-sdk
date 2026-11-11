@@ -79,7 +79,7 @@ import {
   secureSqliteFilePermissions,
   SqliteSchemaError,
   type SqliteSchemaErrorCode,
-} from '../../sqlite-support';
+} from '../../sqlite-support.js';
 
 const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
@@ -90,22 +90,22 @@ const TASK_PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'term
 /** Host retention instants (#1120): when a terminal task may be archived, when it was, and when its board item went. */
 const TASK_ARCHIVE_COLUMNS = ['archive_after', 'archived_at', 'archive_settled_at'] as const;
 
-import { SqliteWakeStore, WAKE_SCHEMA } from './wakes';
-import { APPROVAL_TIMELINE_SCHEMA, APPROVAL_TIMELINE_V7_REBUILD, SqliteApprovalTimelineStore } from './approval-timeline';
-import { ACTIVITY_LOG_PROJECTIONS, ACTIVITY_LOG_SCHEMA, SqliteActivityStore } from './activity';
-import { OUTPUT_CLOSURE_BACKFILL, OUTPUT_CLOSURE_TRIGGER, OUTPUT_CLOSURE_TRIGGER_NAME } from './output-closure';
-import type { WakeStore } from '../../wakes/store';
-import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
+import { SqliteWakeStore, WAKE_SCHEMA } from './wakes.js';
+import { APPROVAL_TIMELINE_SCHEMA, APPROVAL_TIMELINE_V7_REBUILD, SqliteApprovalTimelineStore } from './approval-timeline.js';
+import { ACTIVITY_LOG_PROJECTIONS, ACTIVITY_LOG_SCHEMA, SqliteActivityStore } from './activity.js';
+import { OUTPUT_CLOSURE_BACKFILL, OUTPUT_CLOSURE_TRIGGER, OUTPUT_CLOSURE_TRIGGER_NAME } from './output-closure.js';
+import type { WakeStore } from '../../wakes/store.js';
+import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types.js';
 
-import { SqliteTaskArchiveStore } from './task-archive';
-import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory';
-import { abandonTask, closeMailboxStream, expirePendingMailbox, reopenMailboxStream } from './task-retirement';
+import { SqliteTaskArchiveStore } from './task-archive.js';
+import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory.js';
+import { abandonTask, closeMailboxStream, expirePendingMailbox, reopenMailboxStream } from './task-retirement.js';
 import {
   PROOF_REQUEST_RECEIPT_PROJECTION,
   PROOF_REQUEST_RECEIPT_SCHEMA,
   SqliteProofReceiptRetentionAuthority,
   SqliteProofRequestReceiptStore,
-} from './proof-receipts';
+} from './proof-receipts.js';
 
 const RECEIPT_SCHEMA = `
 CREATE TABLE request_receipt (

@@ -21,10 +21,10 @@ import {
   type BoardStatusUpdateInput,
   type BoardStore,
   type BoardUnclaimInput,
-} from '../board';
-import { ByokCoreError, CoreConflictError } from '../errors';
-import type { Clock } from '../stores';
-import { tenantKey, type TenantId } from '../tenant';
+} from '../board.js';
+import { ByokCoreError, CoreConflictError } from '../errors.js';
+import type { Clock } from '../stores.js';
+import { tenantKey, type TenantId } from '../tenant.js';
 
 const DEFAULT_LIST_LIMIT = 50;
 

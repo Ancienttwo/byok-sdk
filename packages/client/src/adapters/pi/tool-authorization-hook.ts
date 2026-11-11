@@ -1,6 +1,6 @@
 import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
-import { formatToolAuthorizationDenial } from '../../tool-authorization';
-import { requestToolAuthorization, type ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc';
+import { formatToolAuthorizationDenial } from '../../tool-authorization.js';
+import { requestToolAuthorization, type ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc.js';
 
 /** pi-subagents' hidden workflow-child approval tool; it starts nothing itself. */
 const PI_SUBAGENT_LAUNCH_TOOL = 'subagent_launch';

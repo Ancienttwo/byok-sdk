@@ -1,9 +1,9 @@
-import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types';
-import type { RuntimeVersionChange } from '../runtime-detection';
-import type { ControlStatusResult } from '../daemon/control-protocol';
-import type { OperationalHealthFileInspection } from '../daemon/operational-health';
-import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import type { ServiceEnvironmentRecord, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
+import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types.js';
+import type { RuntimeVersionChange } from '../runtime-detection.js';
+import type { ControlStatusResult } from '../daemon/control-protocol.js';
+import type { OperationalHealthFileInspection } from '../daemon/operational-health.js';
+import type { DaemonLifecycle } from '../daemon/daemon-lifecycle.js';
+import type { ServiceEnvironmentRecord, ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
 
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 

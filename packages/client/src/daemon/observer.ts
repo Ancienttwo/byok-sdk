@@ -1,5 +1,5 @@
-import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
-import type { ToolAuthorizationDecision, ToolFileAccess, ToolReminder } from '../tool-authorization';
+import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry.js';
+import type { ToolAuthorizationDecision, ToolFileAccess, ToolReminder } from '../tool-authorization.js';
 import {
   partitionAgentEvents,
   TASK_TRANSITIONS,
@@ -9,10 +9,10 @@ import {
   type OfferAdmissionTimings,
   type TaskState,
 } from '@byok-sdk/protocol';
-import type { DaemonLifecycle } from './daemon-lifecycle';
-import type { ExecutionRecord } from './execution-record';
-import type { RuntimeObservation } from '../runtime-detection';
-import type { ServiceEnvironmentStatus } from '../login-shell-environment';
+import type { DaemonLifecycle } from './daemon-lifecycle.js';
+import type { ExecutionRecord } from './execution-record.js';
+import type { RuntimeObservation } from '../runtime-detection.js';
+import type { ServiceEnvironmentStatus } from '../login-shell-environment.js';
 
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a
@@ -47,7 +47,7 @@ import type { ServiceEnvironmentStatus } from '../login-shell-environment';
 /** Every local event kind this daemon can emit — see {@link DaemonEvent}. */
 export type DaemonEventKind = DaemonEvent['kind'];
 
-import type { OutboundRejection } from './outbound-settlement';
+import type { OutboundRejection } from './outbound-settlement.js';
 
 export type DaemonEvent =
   | ({ kind: 'outbound-rejected'; ts: string } & OutboundRejection & (

@@ -1,5 +1,5 @@
-import { isReservedMcpServerName, SDK_RESERVED_MCP_TOOL_NAMES } from '../../sdk-reserved-mcp';
-import { RuntimeExecutionFailure } from '../../runtime-failure';
+import { isReservedMcpServerName, SDK_RESERVED_MCP_TOOL_NAMES } from '../../sdk-reserved-mcp.js';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 
 type JsonRecord = Record<string, unknown>;
 

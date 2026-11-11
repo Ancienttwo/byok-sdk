@@ -1,11 +1,11 @@
 import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
-import { ByokCloudError } from '../../errors';
+import { ByokCloudError } from '../../errors.js';
 import {
   activityEntryBytes, activitySourceHash, activityTailKey, createActivityEntry, validateActivityAppend,
   ACTIVITY_TERMINAL_TTL_MS, DEFAULT_ACTIVITY_CAPACITY, MAX_ACTIVITY_BYTES,
   type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail,
-} from '../../activity';
-import { TaskChangeMap, type TaskChanged } from './task-change-map';
+} from '../../activity.js';
+import { TaskChangeMap, type TaskChanged } from './task-change-map.js';
 
 interface TaskLog { tail: ActivityTail; ttlMs: number; fences: Map<string, string>; removed: boolean }
 const LOGS = new WeakMap<InMemoryActivityStore, Map<string, TaskLog>>();

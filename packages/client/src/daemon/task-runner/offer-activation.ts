@@ -1,19 +1,19 @@
-import { PI_MEMORY_LANE } from '../../adapters/pi/memory-lane-contract';
+import { PI_MEMORY_LANE } from '../../adapters/pi/memory-lane-contract.js';
 // `handleOffer` stage: hand the started session to an active task
 // (see ./support.ts for how a member module runs).
-import { AgentMessageDraftPublisher } from '../agent-message-draft';
+import { AgentMessageDraftPublisher } from '../agent-message-draft.js';
 import { createEnvelope } from '@byok-sdk/protocol';
-import type { Session } from '../../types';
-import { ExecutionRecordAccumulator } from '../execution-record';
-import type { DeclaredSessionMembers } from '../session-contract';
-import { ProgressBatcher } from '../progress-batcher';
-import type { ActiveTask, OfferPhaseContext } from './support';
-import { outboundErrorMessage, pendingCancelBeforeActive } from './support';
-import type { TaskRunner } from '../task-runner';
-import type { AcceptedOfferPayload } from './support';
-import type { OfferHeld, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
-import { hostFor } from './host';
-import { beginTerminal, drainApprovals } from './finish';
+import type { Session } from '../../types.js';
+import { ExecutionRecordAccumulator } from '../execution-record.js';
+import type { DeclaredSessionMembers } from '../session-contract.js';
+import { ProgressBatcher } from '../progress-batcher.js';
+import type { ActiveTask, OfferPhaseContext } from './support.js';
+import { outboundErrorMessage, pendingCancelBeforeActive } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
+import type { AcceptedOfferPayload } from './support.js';
+import type { OfferHeld, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer.js';
+import { hostFor } from './host.js';
+import { beginTerminal, drainApprovals } from './finish.js';
 
 export interface OfferActivationInput
   extends Pick<OfferRequest, 'readerAttempt'>,

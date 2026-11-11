@@ -1,7 +1,7 @@
-import type { ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane } from './tool-authorization';
-import type { FileScopeGrant } from './file-scope-guard';
-import type { ScopedFileDenial } from './file-scope-tools';
-import { SCOPED_FILE_TOOL_NAMES } from './file-scope-types';
+import type { ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane } from './tool-authorization.js';
+import type { FileScopeGrant } from './file-scope-guard.js';
+import type { ScopedFileDenial } from './file-scope-tools.js';
+import { SCOPED_FILE_TOOL_NAMES } from './file-scope-types.js';
 
 /**
  * The internal companion of one per-task auto gate. The daemon resolves the

@@ -1,5 +1,5 @@
 import { byok } from '../../../package.json';
-import type { RuntimeVersionPolicy } from '../../types';
+import type { RuntimeVersionPolicy } from '../../types.js';
 
 /**
  * The Pi runtime version this client bundles (#1103). The manifest's

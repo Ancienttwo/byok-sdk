@@ -1,4 +1,4 @@
-import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl } from '../cloud';
+import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl } from '../cloud.js';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import {
   TaskSteerSealedPayloadSchema,
@@ -6,13 +6,13 @@ import {
   requiredReceiverCapabilities,
   type TaskSteerSealedPayload,
 } from '@byok-sdk/protocol';
-import { ByokCloudError } from '../errors';
-import { uuidFromSha256 } from '../offer-identity';
-import { releaseSealedCiphertext, sealedCiphertextRef } from '../sealed-ciphertext';
-import { sameSealedProjection } from '../sealed-comparison';
-import { SteerRejectedError } from '../steer-control';
-import { tenantStoresFor, type CloudRootStores } from '../tenant-stores';
-import { isTerminalAttemptStatus, refuseSealedFields, type EnqueuePaths } from './enqueue';
+import { ByokCloudError } from '../errors.js';
+import { uuidFromSha256 } from '../offer-identity.js';
+import { releaseSealedCiphertext, sealedCiphertextRef } from '../sealed-ciphertext.js';
+import { sameSealedProjection } from '../sealed-comparison.js';
+import { SteerRejectedError } from '../steer-control.js';
+import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
+import { isTerminalAttemptStatus, refuseSealedFields, type EnqueuePaths } from './enqueue.js';
 
 interface Dependencies {
   root: CloudRootStores;

@@ -21,7 +21,7 @@
  * edge. Re-exported so this module's public surface is unchanged.
  */
 import { NONCE_SIGNING_DOMAIN } from '@byok-sdk/core';
-import type { CloudCrypto } from '../crypto/port';
+import type { CloudCrypto } from '../crypto/port.js';
 
 export { NONCE_SIGNING_DOMAIN } from '@byok-sdk/core';
 

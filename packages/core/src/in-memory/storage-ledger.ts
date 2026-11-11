@@ -1,8 +1,8 @@
-import { ByokCoreError } from '../errors';
-import type { Clock } from '../stores';
-import type { ContentHash } from '../blob';
-import type { StorageReservation, TenantStorageUsage } from '../quota';
-import type { TenantId } from '../tenant';
+import { ByokCoreError } from '../errors.js';
+import type { Clock } from '../stores.js';
+import type { ContentHash } from '../blob.js';
+import type { StorageReservation, TenantStorageUsage } from '../quota.js';
+import type { TenantId } from '../tenant.js';
 
 export interface ReservationRecord {
   readonly reservation: StorageReservation;

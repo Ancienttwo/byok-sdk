@@ -6,9 +6,9 @@ import type {
   TaskCancellationMutation,
   TaskCancellationRequest,
   TaskCancellationStore,
-} from '../ports';
-import { InMemoryTaskAttemptState } from './task-attempts';
-import { abandonTask } from './task-retirement';
+} from '../ports.js';
+import { InMemoryTaskAttemptState } from './task-attempts.js';
+import { abandonTask } from './task-retirement.js';
 
 const COLLECTED = new Error('Cancellation delivery was collected.');
 

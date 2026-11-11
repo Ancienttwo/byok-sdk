@@ -4,8 +4,8 @@ import {
   MAX_ACTIVITY_BYTES, type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail, type ActivityTailEntry,
 } from '@byok-sdk/cloud';
 import type { PoolClient } from 'pg';
-import type { ByokPool } from '../pool';
-import { assertByokPool } from '../pool-brand';
+import type { ByokPool } from '../pool.js';
+import { assertByokPool } from '../pool-brand.js';
 
 interface Head {
   tenant_id: string; task_id: string; generation: string;

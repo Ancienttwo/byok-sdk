@@ -1,4 +1,4 @@
-import { captureLoginShellSnapshot, loginShellSnapshot, type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus } from '../login-shell-environment';
+import { captureLoginShellSnapshot, loginShellSnapshot, type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus } from '../login-shell-environment.js';
 
 /**
  * Issue #392: `byok-agent start --service` runs under a service manager's

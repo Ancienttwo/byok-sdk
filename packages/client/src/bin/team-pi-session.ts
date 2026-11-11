@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
-import { parseTaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment.js';
+import { parseTaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool.js';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { PiRpcClient, type PiRpcMessage } from '../adapters/pi/rpc-client';
-import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
-import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
-import { PI_TEAM_OPERATOR_TOKEN, type PiTeamOperatorInvocation } from './team-pi-operator-entry';
-import { codexTeamNotification } from './team-codex-relay';
+import { PiRpcClient, type PiRpcMessage } from '../adapters/pi/rpc-client.js';
+import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin.js';
+import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding.js';
+import { PI_TEAM_OPERATOR_TOKEN, type PiTeamOperatorInvocation } from './team-pi-operator-entry.js';
+import { codexTeamNotification } from './team-codex-relay.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const DIALOGS = new Set(['confirm', 'select', 'input', 'editor']);

@@ -1,5 +1,5 @@
-import { CollectExpiredFailure } from '../retention';
-import { assertCollectExpiredInput, type CollectExpiredResult } from '../retention';
+import { CollectExpiredFailure } from '../retention.js';
+import { assertCollectExpiredInput, type CollectExpiredResult } from '../retention.js';
 /**
  * In-memory {@link MailboxStore} reference (§12.7.3).
  *
@@ -13,7 +13,7 @@ import { assertCollectExpiredInput, type CollectExpiredResult } from '../retenti
  * yielding, so no append on another device of the same tenant can interleave
  * with the check.
  */
-import { ByokCoreError, CoreConflictError } from '../errors';
+import { ByokCoreError, CoreConflictError } from '../errors.js';
 import type {
   MailboxAdvanceCursorInput,
   MailboxAppendInput,
@@ -29,13 +29,13 @@ import type {
   MailboxStore,
   MailboxStreamCloseCause,
   MailboxUsage,
-} from '../mailbox';
-import { MailboxStreamClosedError } from '../mailbox';
-import type { QuotaStore } from '../quota';
-import type { Clock } from '../stores';
-import { tenantKey, type TenantId } from '../tenant';
-import { registerArchiveAccess } from './archive-access';
-import { assertCanonicalTimestamp } from '../time';
+} from '../mailbox.js';
+import { MailboxStreamClosedError } from '../mailbox.js';
+import type { QuotaStore } from '../quota.js';
+import type { Clock } from '../stores.js';
+import { tenantKey, type TenantId } from '../tenant.js';
+import { registerArchiveAccess } from './archive-access.js';
+import { assertCanonicalTimestamp } from '../time.js';
 
 const DEFAULT_READ_LIMIT = 50;
 

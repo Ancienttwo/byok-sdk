@@ -17,14 +17,14 @@
  * omission: "move this to another tenant" is the one operation that would make
  * every cross-tenant assertion in the conformance suite unfalsifiable.
  */
-import type { PresenceStore } from './presence';
-import type { BoardStore } from './board';
-import type { MailboxStore } from './mailbox';
-import type { ObjectStore } from './blob';
-import type { QuotaStore } from './quota';
-import type { SkillPackStore } from './skill-pack';
-import type { TenantId } from './tenant';
-import type { TruthStore } from './truth';
+import type { PresenceStore } from './presence.js';
+import type { BoardStore } from './board.js';
+import type { MailboxStore } from './mailbox.js';
+import type { ObjectStore } from './blob.js';
+import type { QuotaStore } from './quota.js';
+import type { SkillPackStore } from './skill-pack.js';
+import type { TenantId } from './tenant.js';
+import type { TruthStore } from './truth.js';
 
 /**
  * Injected time.

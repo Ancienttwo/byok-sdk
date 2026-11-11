@@ -10,10 +10,10 @@ import {
   type AgentMessagePublishPayload,
   type AgentMessagePublishSealedPayload,
 } from '@byok-sdk/protocol';
-import type { AgentRef } from '../agent-home';
-import { atomicWriteFile } from '../util/atomic-write';
-import { DurableJsonlFile } from '../util/durable-jsonl';
-import { ensureSecureDir } from '../util/secure-dir';
+import type { AgentRef } from '../agent-home.js';
+import { atomicWriteFile } from '../util/atomic-write.js';
+import { DurableJsonlFile } from '../util/durable-jsonl.js';
+import { ensureSecureDir } from '../util/secure-dir.js';
 
 export const AGENT_MESSAGE_DIRECTORY = path.join('.byok', 'messages');
 export const AGENT_MESSAGE_OUTBOX_FILENAME = 'outbox-v1.jsonl';

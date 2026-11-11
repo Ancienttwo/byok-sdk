@@ -1,4 +1,4 @@
-import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../provider-credential-environment';
+import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../provider-credential-environment.js';
 
 /** The Pi directory selectors. The Pi launch sets them; MCP servers never inherit them. */
 export const CONTROLLED_PI_DIRECTORY_ENV_NAMES = Object.freeze([

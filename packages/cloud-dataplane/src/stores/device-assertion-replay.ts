@@ -4,7 +4,7 @@ import type {
   DeviceAssertionReplayConsumeInput,
 } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import type { ByokPool } from '../pool';
+import type { ByokPool } from '../pool.js';
 
 /** Durable atomic replay authority for hosted device-assertion exchange. */
 export class PostgresDeviceAssertionReplayAuthority implements DeviceAssertionReplayAuthority {

@@ -1,17 +1,17 @@
 // `TaskRunner` members for Agent message egress and the submitted result
 // (see ./support.ts for how a member module runs).
 import { createEnvelope, type AgentMessageContentType, type AgentMessageDispositionPayload, validateResultOutcome } from '@byok-sdk/protocol';
-import type { AgentRef } from '../../agent-home';
-import type { AgentResultDescribeParams, AgentResultDescribeResult, AgentResultSubmitParams, AgentResultSubmitResult } from '../control-protocol';
-import { AgentMessageOutbox, type AgentMessageOutboxRecord } from '../agent-message-outbox';
-import { AGENT_RESULT_TOOL_NAME, AGENT_RESULT_TOOL_DESCRIPTION } from '../../sdk-reserved-mcp';
-import { AgentResultStore } from '../agent-result-store';
-import { DAEMON_TASK_FAILURE } from '../task-failure';
-import type { TaskRunner } from '../task-runner';
-import { hostFor } from './host';
-import { beginTerminal } from './finish';
-import { agentMessageSealing, pendingCancelBeforeActive, taskMessageSendAttempted } from './support';
-import { successfulCompletionPlan } from './event-pump';
+import type { AgentRef } from '../../agent-home.js';
+import type { AgentResultDescribeParams, AgentResultDescribeResult, AgentResultSubmitParams, AgentResultSubmitResult } from '../control-protocol.js';
+import { AgentMessageOutbox, type AgentMessageOutboxRecord } from '../agent-message-outbox.js';
+import { AGENT_RESULT_TOOL_NAME, AGENT_RESULT_TOOL_DESCRIPTION } from '../../sdk-reserved-mcp.js';
+import { AgentResultStore } from '../agent-result-store.js';
+import { DAEMON_TASK_FAILURE } from '../task-failure.js';
+import type { TaskRunner } from '../task-runner.js';
+import { hostFor } from './host.js';
+import { beginTerminal } from './finish.js';
+import { agentMessageSealing, pendingCancelBeforeActive, taskMessageSendAttempted } from './support.js';
+import { successfulCompletionPlan } from './event-pump.js';
 
 export async function publishAgentMessage(this: TaskRunner, input: {
   readonly contextToken: string;

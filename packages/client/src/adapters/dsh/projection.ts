@@ -1,7 +1,7 @@
-import { BufferedToolUse } from '../buffered-tool-use';
+import { BufferedToolUse } from '../buffered-tool-use.js';
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
-import { RuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
-import type { DshRecord } from '../../runtime/dsh-session-runtime';
+import { RuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
+import type { DshRecord } from '../../runtime/dsh-session-runtime.js';
 
 type Usage = Extract<AgentEvent, { type: 'usage' }>;
 type Tokens = { input?: unknown; output?: unknown; reasoning?: unknown; cacheRead?: unknown };

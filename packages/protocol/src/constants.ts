@@ -1,8 +1,8 @@
 /** Schema-free protocol values. Import this entry when runtime schemas are unnecessary. */
-export * from './version';
-export * from './task-state';
-export * from './capability-constants';
-export * from './failure-reason';
+export * from './version.js';
+export * from './task-state.js';
+export * from './capability-constants.js';
+export * from './failure-reason.js';
 
 /** Maximum raw UTF-8 content bytes in one local Host Agent-memory export; no truncation. */
 export const AGENT_MEMORY_MAX_SNAPSHOT_BYTES = 1024 * 1024;

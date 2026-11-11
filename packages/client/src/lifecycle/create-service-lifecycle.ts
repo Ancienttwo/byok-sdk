@@ -1,9 +1,9 @@
-import { createLaunchdLifecycle, type LaunchdDeps } from './launchd';
-import { createSystemdLifecycle, type SystemdDeps } from './systemd';
-import { createWindowsUserLifecycle, type WindowsUserDeps } from './windows-user';
-import { createWinswLifecycle, type WinswDeps } from './winsw';
-import type { ManagedServiceLifecycle } from './managed-lifecycle';
-import type { ServiceDefinition, ServiceLifecycle } from './service-types';
+import { createLaunchdLifecycle, type LaunchdDeps } from './launchd.js';
+import { createSystemdLifecycle, type SystemdDeps } from './systemd.js';
+import { createWindowsUserLifecycle, type WindowsUserDeps } from './windows-user.js';
+import { createWinswLifecycle, type WinswDeps } from './winsw.js';
+import type { ManagedServiceLifecycle } from './managed-lifecycle.js';
+import type { ServiceDefinition, ServiceLifecycle } from './service-types.js';
 
 export class UnsupportedServicePlatformError extends Error {
   constructor(platform: string) {

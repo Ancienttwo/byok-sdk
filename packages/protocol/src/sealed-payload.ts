@@ -21,13 +21,13 @@
  */
 import { z } from 'zod';
 
-import { AGENT_MESSAGE_MAX_BYTES } from './agent-egress';
-import { BlobRefSchema, CONTENT_HASH_RE } from './blob';
+import { AGENT_MESSAGE_MAX_BYTES } from './agent-egress.js';
+import { BlobRefSchema, CONTENT_HASH_RE } from './blob.js';
 
-import { SEALED_SPLIT_TABLE, isSealableMessageType, sealedMovedFields, type SealedSplitEntry } from './sealed-split-table';
+import { SEALED_SPLIT_TABLE, isSealableMessageType, sealedMovedFields, type SealedSplitEntry } from './sealed-split-table.js';
 
-export { SEALED_SPLIT_TABLE, isSealableMessageType, isSealedPayload, sealedMovedFields } from './sealed-split-table';
-export type { SealableMessageType, SealedDigestRule, SealedSplitEntry } from './sealed-split-table';
+export { SEALED_SPLIT_TABLE, isSealableMessageType, isSealedPayload, sealedMovedFields } from './sealed-split-table.js';
+export type { SealableMessageType, SealedDigestRule, SealedSplitEntry } from './sealed-split-table.js';
 
 export const SEALED_PAYLOAD_VERSION = 1;
 /** The only suite v1 admits. A new suite is a new constant and a new capability, never a parser branch. */

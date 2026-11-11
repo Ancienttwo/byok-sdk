@@ -3,15 +3,15 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { AgentMessageEgressRequirement, TerminalProjectionSelection } from '@byok-sdk/protocol';
-import type { McpStdioServerConfig } from '../../types';
-import type { AgentRef } from '../../agent-home';
-import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
-import type { AgentMemoryMcpContext, SdkReservedMcpContext } from '../../sdk-reserved-helper-context';
-import { atomicWriteFile } from '../../util/atomic-write';
-import type { ExecutionScratch } from '../retention/scratch';
-import type { AgentResultContext } from './support';
-import { freshHostToolsetContextToken } from './support';
-import type { TaskRunner } from '../task-runner';
+import type { McpStdioServerConfig } from '../../types.js';
+import type { AgentRef } from '../../agent-home.js';
+import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../../sdk-reserved-mcp.js';
+import type { AgentMemoryMcpContext, SdkReservedMcpContext } from '../../sdk-reserved-helper-context.js';
+import { atomicWriteFile } from '../../util/atomic-write.js';
+import type { ExecutionScratch } from '../retention/scratch.js';
+import type { AgentResultContext } from './support.js';
+import { freshHostToolsetContextToken } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
 
 /**
  * One server's context, in the Execution's SDK directory: private to this user

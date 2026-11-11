@@ -14,7 +14,7 @@ import {
   type Transport,
 } from '@modelcontextprotocol/client';
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker';
-import { McpAuthorityError } from './authority-error';
+import { McpAuthorityError } from './authority-error.js';
 
 export { McpAuthorityError };
 

@@ -2,28 +2,28 @@ import os from 'node:os';
 import path from 'node:path';
 import { promises as fs, type Dirent } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { runCommand, type CommandRunner } from './command-runner';
-import { configurationPendingError, withConfigurationLock } from './custody';
-import { ByokKeysError } from './errors';
-import { PI_PREPARED_COMPAT_KEYS } from './pi-model-config';
-import { SqliteProviderProfileStore } from './sqlite-profile-store';
+import { runCommand, type CommandRunner } from './command-runner.js';
+import { configurationPendingError, withConfigurationLock } from './custody.js';
+import { ByokKeysError } from './errors.js';
+import { PI_PREPARED_COMPAT_KEYS } from './pi-model-config.js';
+import { SqliteProviderProfileStore } from './sqlite-profile-store.js';
 import {
   PI_LAUNCHER_RUNTIME_ENTRIES, PI_PROJECTED_KEY_ENV, assertPiLaunchArgs, buildPiPreparedArgs, buildPiProviderArgs,
   buildPiProviderProjection, piProjectionProviderId, type PiLauncherRuntimeEntry,
-} from './pi-provider-projection';
-import type { ProviderProfileStore } from './profile-store';
+} from './pi-provider-projection.js';
+import type { ProviderProfileStore } from './profile-store.js';
 import {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
   type ModelProviderProfile,
   type ProviderProfileRef,
-} from './provider-profile';
+} from './provider-profile.js';
 import {
   assertExactProviderProfileBinding,
   exactProviderProfileBinding,
   type ExactProviderProfileBinding,
-} from './provider-profile-binding';
-import { type SecretStore, modelProviderSecretName } from './secret-store';
+} from './provider-profile-binding.js';
+import { type SecretStore, modelProviderSecretName } from './secret-store.js';
 
 export interface PiProviderLauncherOptions {
   piBin: string;

@@ -27,10 +27,10 @@ import {
   E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX,
   E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
 } from '@byok-sdk/protocol';
-import type { AuthManager } from './auth-manager';
-import type { DeviceProofSigner } from './device-proof-signer';
-import { authedFetch } from './http-client';
-import { toHttpBase } from './url';
+import type { AuthManager } from './auth-manager.js';
+import type { DeviceProofSigner } from './device-proof-signer.js';
+import { authedFetch } from './http-client.js';
+import { toHttpBase } from './url.js';
 
 /**
  * The longest member chain this device reads, 64 full pages. A Host that

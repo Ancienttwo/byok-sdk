@@ -1,7 +1,7 @@
-import { resolveInterruptTimeoutMs } from '../session-limits';
-import { ownHermesLauncher, prepareHermesCustody, hermesCustodyArgs, type HermesByokLauncher, type PreparedHermesCustody } from './hermes-custody';
-import type { RuntimeTaskInput } from '../../types';
-export type { HermesByokLauncher } from './hermes-custody';
+import { resolveInterruptTimeoutMs } from '../session-limits.js';
+import { ownHermesLauncher, prepareHermesCustody, hermesCustodyArgs, type HermesByokLauncher, type PreparedHermesCustody } from './hermes-custody.js';
+import type { RuntimeTaskInput } from '../../types.js';
+export type { HermesByokLauncher } from './hermes-custody.js';
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -19,26 +19,26 @@ import {
   type RuntimeVersionPolicy,
   type RuntimeOperationStartInput,
   type Session,
-} from '../../types';
-import type { ExecutionScratch } from '../../daemon/retention/scratch';
-import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, buildRuntimeEnvironment, sdkLaneReport, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
-import { classifyDetectError } from '../detect-outcome';
-import { runtimeStartFailure } from '../runtime-start-failure';
-import type { ResolvedBin } from '../codex/resolve-bin';
-import { AcpConnection, AcpMethodNotFound, AcpRpcError, hermesStartClass } from './acp-connection';
-import { identifyHermesGateway, servesHermesHome, type HermesGatewayIdentity, type IdentifyHermesGatewayOptions } from './gateway-identity';
-import { mayStopForeignHermesGateway, ownsHermesGatewayPid } from './gateway-ownership';
+} from '../../types.js';
+import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
+import { assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, buildRuntimeEnvironment, sdkLaneReport, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { classifyDetectError } from '../detect-outcome.js';
+import { runtimeStartFailure } from '../runtime-start-failure.js';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
+import { AcpConnection, AcpMethodNotFound, AcpRpcError, hermesStartClass } from './acp-connection.js';
+import { identifyHermesGateway, servesHermesHome, type HermesGatewayIdentity, type IdentifyHermesGatewayOptions } from './gateway-identity.js';
+import { mayStopForeignHermesGateway, ownsHermesGatewayPid } from './gateway-ownership.js';
 import {
   assertHermesModelSelection, createHermesProfile, ensureHermesRoot, removeHermesProfile, sweepStaleHermesProfiles,
-} from './hermes-home';
-import { HERMES_RUNTIME_CAPABILITIES } from './hermes-capabilities';
-import { HERMES_VERSION_POLICY, hermesVersionLine, hermesVersionToken } from './hermes-version';
-import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
-import { resolveHermesBin } from './resolve-bin';
-import { comparablePath } from '../../util/comparable-path';
-import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
+} from './hermes-home.js';
+import { HERMES_RUNTIME_CAPABILITIES } from './hermes-capabilities.js';
+import { HERMES_VERSION_POLICY, hermesVersionLine, hermesVersionToken } from './hermes-version.js';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
+import { resolveHermesBin } from './resolve-bin.js';
+import { comparablePath } from '../../util/comparable-path.js';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
 
 const VERSION_TIMEOUT_MS = 5_000;
 const OPEN_REQUEST_TIMEOUT_MS = 60_000;

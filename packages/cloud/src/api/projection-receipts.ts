@@ -1,4 +1,4 @@
-import type { ByokCloud, ByokCloudOptions, AgentHomeProjectionStatusInput, InputPreparationStatusInput } from '../cloud';
+import type { ByokCloud, ByokCloudOptions, AgentHomeProjectionStatusInput, InputPreparationStatusInput } from '../cloud.js';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import {
   AGENT_HOME_PROJECTION_CAPABILITY,
@@ -9,10 +9,10 @@ import {
   type InputPreparationCompletionRequest,
   type InputPreparationReadback,
 } from '@byok-sdk/protocol';
-import { readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion } from '../agent-home-projections';
-import { readInputPreparationStatus, recordInputPreparationCompletion } from '../input-preparations';
-import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../tenant-stores';
-import type { EnqueuePaths } from './enqueue';
+import { readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion } from '../agent-home-projections.js';
+import { readInputPreparationStatus, recordInputPreparationCompletion } from '../input-preparations.js';
+import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../tenant-stores.js';
+import type { EnqueuePaths } from './enqueue.js';
 
 interface Dependencies {
   root: CloudRootStores;

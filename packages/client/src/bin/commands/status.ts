@@ -1,15 +1,15 @@
-import { type DaemonConfig } from '../../index';
-import { DeviceStore } from '../../daemon/store';
-import { createDeviceCredentialStore } from '../../daemon/device-credential-provider';
-import type { ControlStatusResult } from '../../daemon/control-protocol';
-import { auditLogPath, readAuditRecords, readLastEnvironmentRecord, parseEnvironmentRecord } from '../../daemon/audit-log';
-import { attachRuntimeExecutables, attachRuntimeVersionChanges, attachRuntimeVersionVerdicts, parseRuntimeObservations } from '../../runtime-detection';
-import { connectControlClient } from '../../daemon/control-client';
-import { resolveStoreDir } from '../config';
-import { serviceLogDir } from '../../daemon/host-layout';
-import { inspectServiceLogs } from '../../lifecycle/service-log';
-import { formatLiveStatusLines, formatStatusLines, type StatusView } from '../../diagnostics/format';
-import { deriveTasksFromRecords, lastLifecycle, tallyTaskStates } from '../../diagnostics/tasks-view';
+import { type DaemonConfig } from '../../index.js';
+import { DeviceStore } from '../../daemon/store.js';
+import { createDeviceCredentialStore } from '../../daemon/device-credential-provider.js';
+import type { ControlStatusResult } from '../../daemon/control-protocol.js';
+import { auditLogPath, readAuditRecords, readLastEnvironmentRecord, parseEnvironmentRecord } from '../../daemon/audit-log.js';
+import { attachRuntimeExecutables, attachRuntimeVersionChanges, attachRuntimeVersionVerdicts, parseRuntimeObservations } from '../../runtime-detection.js';
+import { connectControlClient } from '../../daemon/control-client.js';
+import { resolveStoreDir } from '../config.js';
+import { serviceLogDir } from '../../daemon/host-layout.js';
+import { inspectServiceLogs } from '../../lifecycle/service-log.js';
+import { formatLiveStatusLines, formatStatusLines, type StatusView } from '../../diagnostics/format.js';
+import { deriveTasksFromRecords, lastLifecycle, tallyTaskStates } from '../../diagnostics/tasks-view.js';
 
 export interface StatusDeps {
   log?: (line: string) => void;

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { PassThrough, Writable } from 'node:stream';
-import { classifyJsonRpcMessage, isUsableRequestId, SeenRequestIds } from './dispatch';
-import { MCP_SERVER_MAX_PENDING_BYTES } from './framing';
-import { MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS, McpServerToolError, serveMcpOverStdio, type McpServerHandle, type McpServerOptions } from './index';
+import { classifyJsonRpcMessage, isUsableRequestId, SeenRequestIds } from './dispatch.js';
+import { MCP_SERVER_MAX_PENDING_BYTES } from './framing.js';
+import { MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS, McpServerToolError, serveMcpOverStdio, type McpServerHandle, type McpServerOptions } from './index.js';
 
 /** Maximum accepted HTTP request body, in UTF-8 bytes. */
 export const MCP_HTTP_MAX_BODY_BYTES = 4 * 1_048_576;

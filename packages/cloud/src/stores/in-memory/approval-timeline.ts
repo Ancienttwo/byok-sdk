@@ -1,6 +1,6 @@
 import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import { ByokCloudError } from '../../errors';
+import { ByokCloudError } from '../../errors.js';
 import {
   ApprovalObservationSchema,
   DEFAULT_APPROVAL_TIMELINE_CAPACITY,
@@ -16,8 +16,8 @@ import {
   type ApprovalTimelineResolvePendingResult,
   type ApprovalTimelineStore,
   type ApprovalTimelineTail,
-} from '../../approval-timeline';
-import { TaskChangeMap, type TaskChanged } from './task-change-map';
+} from '../../approval-timeline.js';
+import { TaskChangeMap, type TaskChanged } from './task-change-map.js';
 
 const TAILS = new WeakMap<InMemoryApprovalTimelineStore, Map<string, ApprovalTimelineTail>>();
 

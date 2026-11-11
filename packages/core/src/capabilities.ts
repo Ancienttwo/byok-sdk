@@ -12,7 +12,7 @@
  * new capability never requires a core release.
  */
 import { z } from 'zod';
-import { ByokCoreError } from './errors';
+import { ByokCoreError } from './errors.js';
 
 export const CAPABILITY_DECLARATION_SCHEMA_ID = 'byok-capabilities-v1';
 

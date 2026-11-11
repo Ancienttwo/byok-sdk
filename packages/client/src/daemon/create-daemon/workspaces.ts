@@ -1,12 +1,12 @@
-import { OperationalHealthTracker } from '../operational-health';
-import { OwnedProcessLedger } from '../owned-process-ledger';
-import { CursorStore } from '../cursor-store';
-import { AgentHomeManager, AgentHomeLeaseManager, stableAgentHomeOwnerId, type AgentHomeLeaseManagerOptions } from '../../agent-home';
-import { AgentSessionHandoffStore } from '../agent-session-handoff-store';
-import { resolveContentReadPolicies } from './support';
-import { AgentEgressController } from '../agent-egress-controller';
-import type { DaemonInputs } from './scope';
-import type { DaemonStoreScope } from './stores';
+import { OperationalHealthTracker } from '../operational-health.js';
+import { OwnedProcessLedger } from '../owned-process-ledger.js';
+import { CursorStore } from '../cursor-store.js';
+import { AgentHomeManager, AgentHomeLeaseManager, stableAgentHomeOwnerId, type AgentHomeLeaseManagerOptions } from '../../agent-home.js';
+import { AgentSessionHandoffStore } from '../agent-session-handoff-store.js';
+import { resolveContentReadPolicies } from './support.js';
+import { AgentEgressController } from '../agent-egress-controller.js';
+import type { DaemonInputs } from './scope.js';
+import type { DaemonStoreScope } from './stores.js';
 
 /**
  * The third stage of `buildDaemonWithAdapters` (#926): builds the local

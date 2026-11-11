@@ -3,11 +3,11 @@ import { Harness, createRegistry, defineExtension, hook, ToolTask, LiveDoc, ROOT
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import type { ToolCall } from '@earendil-works/pi-ai';
 import type { Models } from '@earendil-works/pi-ai/models';
-import { durableToolEnvironment } from './environment';
-import { DurableViewProjection, type DurableEvent } from './events';
-import { durableToolDenial } from './guard';
-import { acquireReplicaLock, resetReplica, type DurableReplicaBinding } from './replica';
-import { openLocalDurableStorage, type DurableStorageFactory } from './storage';
+import { durableToolEnvironment } from './environment.js';
+import { DurableViewProjection, type DurableEvent } from './events.js';
+import { durableToolDenial } from './guard.js';
+import { acquireReplicaLock, resetReplica, type DurableReplicaBinding } from './replica.js';
+import { openLocalDurableStorage, type DurableStorageFactory } from './storage.js';
 
 export interface DurableEngineInput {
   file: string; replicaRoot: string; binding: DurableReplicaBinding;

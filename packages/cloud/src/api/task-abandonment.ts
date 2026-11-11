@@ -1,8 +1,8 @@
-import type { ByokCloud } from '../cloud';
+import type { ByokCloud } from '../cloud.js';
 import type { ControlPlanePrincipal, TenantId } from '@byok-sdk/core';
-import { ByokCloudError } from '../errors';
-import { isTaskAbandonCause, TASK_ABANDON_CAUSES } from '../stores/ports';
-import { tenantStoresFor, type CloudRootStores } from '../tenant-stores';
+import { ByokCloudError } from '../errors.js';
+import { isTaskAbandonCause, TASK_ABANDON_CAUSES } from '../stores/ports.js';
+import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
 
 interface Dependencies {
   root: CloudRootStores;

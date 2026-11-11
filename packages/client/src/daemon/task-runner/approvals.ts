@@ -8,18 +8,18 @@
 // mailbox that orders claim/start/cancel also orders approvals (#1218).
 import { randomUUID } from 'node:crypto';
 import { createEnvelope } from '@byok-sdk/protocol';
-import type { ApprovalDecision, ApprovalKind, ApprovalOrigin } from '../approvals';
-import { DAEMON_TASK_FAILURE } from '../task-failure';
-import type { ActiveTask } from './support';
-import type { TaskRunner } from '../task-runner';
+import type { ApprovalDecision, ApprovalKind, ApprovalOrigin } from '../approvals.js';
+import { DAEMON_TASK_FAILURE } from '../task-failure.js';
+import type { ActiveTask } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
 import {
   DEFAULT_APPROVAL_TIMEOUT_MS,
   MAX_PENDING_APPROVALS_PER_TASK,
   type ApprovalOrigin as ReducerApprovalOrigin,
-} from './state';
-import { hostFor, type HostApprovalRequest, type TaskRunnerHost } from './host';
-import { taskTearingDown } from './support';
-import { beginTerminal, drainApprovals } from './finish';
+} from './state.js';
+import { hostFor, type HostApprovalRequest, type TaskRunnerHost } from './host.js';
+import { taskTearingDown } from './support.js';
+import { beginTerminal, drainApprovals } from './finish.js';
 
 const WITHDRAWN = 'approval request was withdrawn by its requester';
 const NOT_ACTIVE = 'task is not currently active on this device';

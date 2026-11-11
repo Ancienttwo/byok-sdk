@@ -1,4 +1,4 @@
-import type { RuntimeVersionPolicy } from '../../types';
+import type { RuntimeVersionPolicy } from '../../types.js';
 
 /**
  * Antigravity CLI version policy, as for Grok: the CLI updates itself on a

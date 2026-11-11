@@ -6,11 +6,11 @@ import {
   type AgentMemoryProjectionCommitResponse,
   type AgentMemoryProjectionPlainMutation,
 } from '@byok-sdk/protocol';
-import { base64UrlDecode } from '../crypto/web-crypto';
-import type { AgentMemoryProjectionSubmission } from '../api/agent-memory';
-import { isCloudError } from '../errors';
-import { admitDeviceRequest, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
-import type { TenantStores } from '../tenant-stores';
+import { base64UrlDecode } from '../crypto/web-crypto.js';
+import type { AgentMemoryProjectionSubmission } from '../api/agent-memory.js';
+import { isCloudError } from '../errors.js';
+import { admitDeviceRequest, readBoundedJsonBody, type DeviceRouteDeps } from './shared.js';
+import type { TenantStores } from '../tenant-stores.js';
 
 /**
  * The protocol's 512 KiB redacted ceiling encodes to about 700 KiB of

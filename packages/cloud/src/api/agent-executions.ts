@@ -1,4 +1,4 @@
-import type { ByokCloud, ByokCloudOptions, EnqueuedOffer } from '../cloud';
+import type { ByokCloud, ByokCloudOptions, EnqueuedOffer } from '../cloud.js';
 import { type TenantId } from '@byok-sdk/core';
 import { createEnvelope } from '@byok-sdk/protocol';
 import {
@@ -6,8 +6,8 @@ import {
   SealedAgentExecutionInputSchema,
   type AgentExecutionInput,
   type SealedAgentExecutionInput,
-} from '../agent-execution';
-import { refuseSealedFields, type EnqueuePaths } from './enqueue';
+} from '../agent-execution.js';
+import { refuseSealedFields, type EnqueuePaths } from './enqueue.js';
 
 interface Dependencies {
   options: ByokCloudOptions;

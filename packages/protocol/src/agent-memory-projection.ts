@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { AgentEgressContentHashSchema, AgentEgressPolicyRevisionSchema } from './agent-egress';
-import { AgentRefSchema, RuntimeIdSchema } from './messages';
-import { SealedMemoryProjectionSchema } from './sealed-payload';
+import { AgentEgressContentHashSchema, AgentEgressPolicyRevisionSchema } from './agent-egress.js';
+import { AgentRefSchema, RuntimeIdSchema } from './messages.js';
+import { SealedMemoryProjectionSchema } from './sealed-payload.js';
 
 /** One hosted projection is bounded before it enters the redaction or storage seam. */
 export const AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES = 512 * 1024;

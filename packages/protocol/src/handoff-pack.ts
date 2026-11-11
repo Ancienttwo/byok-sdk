@@ -7,7 +7,7 @@
  * bounds what the pack adds to a prompt. A text's size leaves out its two
  * quotes.
  */
-import { truncateUtf8 } from './failure-reason';
+import { truncateUtf8 } from './failure-reason.js';
 
 /** Maximum bytes of a line in `earlier`, truncation marker included. */
 export const HANDOFF_EXCERPT_LINE_MAX_BYTES = 512;

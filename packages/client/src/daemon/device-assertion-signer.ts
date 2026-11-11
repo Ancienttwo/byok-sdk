@@ -13,8 +13,8 @@ import {
   type TaskAssertionClaims,
   type TaskAssertionEnvelopeV1,
 } from '@byok-sdk/core';
-import { importPrivateKeyPem } from './device-keys';
-import type { DeviceRecord } from './store';
+import { importPrivateKeyPem } from './device-keys.js';
+import type { DeviceRecord } from './store.js';
 
 /**
  * Mints device assertions (plan `device-assertion-broker`) and task assertions

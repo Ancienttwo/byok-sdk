@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
-import type { ResolvedBin } from '../codex/resolve-bin';
-import { findRuntimeCommandOnPath, runtimeInvocationHost } from '../runtime-invocation';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
+import { findRuntimeCommandOnPath, runtimeInvocationHost } from '../runtime-invocation.js';
 
 /** Explicit override, then the runtime PATH, then the official installer directory. Never installs. */
 export function resolveOpenCodeBin(env: Readonly<Record<string, string | undefined>>, platform = process.platform): ResolvedBin {

@@ -27,12 +27,12 @@ import type {
   TaskRedactionTaskResult,
 } from '@byok-sdk/cloud';
 import type { Pool, PoolClient } from 'pg';
-import type { ByokPool } from '../pool';
-import { assertByokPool } from '../pool-brand';
-import { settleDeletedObject } from './core/object-gc';
-import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer';
-import { R2ObjectMaintenanceStore, type R2ObjectMaintenance } from './r2-blobs';
-import type { PostgresObjectStorageOptions } from './index';
+import type { ByokPool } from '../pool.js';
+import { assertByokPool } from '../pool-brand.js';
+import { settleDeletedObject } from './core/object-gc.js';
+import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer.js';
+import { R2ObjectMaintenanceStore, type R2ObjectMaintenance } from './r2-blobs.js';
+import type { PostgresObjectStorageOptions } from './index.js';
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed', 'cancelled']);
 /** Tables whose rows exist only while a task runs. Each is keyed by `(tenant_id, task_id)`. */

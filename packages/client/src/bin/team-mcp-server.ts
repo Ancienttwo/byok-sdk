@@ -1,10 +1,10 @@
-import { TEAM_POST_TOOL_NAME as POST_TOOL, TEAM_READ_TOOL_NAME as READ_TOOL, TEAM_ACK_TOOL_NAME as ACK_TOOL } from '../sdk-reserved-mcp';
+import { TEAM_POST_TOOL_NAME as POST_TOOL, TEAM_READ_TOOL_NAME as READ_TOOL, TEAM_ACK_TOOL_NAME as ACK_TOOL } from '../sdk-reserved-mcp.js';
 import {
   McpServerToolError,
   serveMcpOverStdio,
   type McpServerToolCall,
   type McpServerToolDefinition,
-} from '../mcp-server';
+} from '../mcp-server/index.js';
 
 export const TEAM_POST_TOOL_NAME = POST_TOOL;
 export const TEAM_READ_TOOL_NAME = READ_TOOL;

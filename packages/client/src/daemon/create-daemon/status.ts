@@ -1,9 +1,9 @@
-import type { ControlStorageStatus, ControlStatusResult, ControlActiveTask } from '../control-protocol';
+import type { ControlStorageStatus, ControlStatusResult, ControlActiveTask } from '../control-protocol.js';
 import { TASK_TRANSITIONS } from '@byok-sdk/protocol';
-import type { AgentHomeExecutionStatus } from '../../agent-home';
-import type { OutboundStatus } from '../outbound-settlement';
-import type { DaemonStatus } from '../create-daemon';
-import type { DaemonScope } from './scope';
+import type { AgentHomeExecutionStatus } from '../../agent-home.js';
+import type { OutboundStatus } from '../outbound-settlement.js';
+import type { DaemonStatus } from '../create-daemon.js';
+import type { DaemonScope } from './scope.js';
 
 /** The daemon status and the control-socket status (#926). */
 

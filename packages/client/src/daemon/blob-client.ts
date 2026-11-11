@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { BYOK_BLOBS_PATH, byokBlobFinalizePath, byokBlobUrlPath } from '@byok-sdk/protocol';
 import type { BlobRef } from '@byok-sdk/protocol';
-import type { AuthManager } from './auth-manager';
-import { BlobHttpError } from './blob-http-error';
-import { authedFetch } from './http-client';
-import { toHttpBase } from './url';
+import type { AuthManager } from './auth-manager.js';
+import { BlobHttpError } from './blob-http-error.js';
+import { authedFetch } from './http-client.js';
+import { toHttpBase } from './url.js';
 
 export type BlobRequestAbortReason = 'deadline' | 'cancelled';
 

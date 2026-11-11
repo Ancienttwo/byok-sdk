@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { PROTOCOL_VERSION } from './version';
-import { CONTENT_HASH_RE } from './blob';
+import { PROTOCOL_VERSION } from './version.js';
+import { CONTENT_HASH_RE } from './blob.js';
 import {
   AgentRefSchema,
   ConfiguredToolsetsSchema,
@@ -10,21 +10,21 @@ import {
   RuntimeUnavailableListSchema,
   RuntimeVersionPolicyProjectionSchema,
   AgentHomeProjectionAgentRefSchema,
-} from './messages';
+} from './messages.js';
 import {
   InputPreparationProfileIdSchema,
   InputPreparationPolicyRevisionSchema,
   InputPreparationReceiptSummarySchema,
   InputPreparationRejectionReasonSchema,
-} from './input-preparation';
+} from './input-preparation.js';
 import {
   AgentHomeProjectionHashSchema,
   AgentHomeProjectionOutcomeSchema,
-} from './agent-home-projection';
+} from './agent-home-projection.js';
 import {
   AgentMemoryProjectionMutationSchema,
   AgentMemoryProjectionReceiptSchema,
-} from './agent-memory-projection';
+} from './agent-memory-projection.js';
 
 /**
  * HTTP-side request/response shapes for the reference server's auth and blob

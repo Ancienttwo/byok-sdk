@@ -24,8 +24,8 @@
  * Zod-free and free of node builtins.
  */
 import { Validator, type OutputUnit } from '@cfworker/json-schema';
-import { canonicalizePlainJson, type BoundedPlainJsonCheck } from './plain-json';
-import { BOT_TURN_OUTCOME_CONTRACT, botTurnOutcomeRuleIssues } from './bot-turn-outcome-contract';
+import { canonicalizePlainJson, type BoundedPlainJsonCheck } from './plain-json.js';
+import { BOT_TURN_OUTCOME_CONTRACT, botTurnOutcomeRuleIssues } from './bot-turn-outcome-contract.js';
 
 /** Maximum canonical JSON UTF-8 size of a result-document schema. */
 export const RESULT_SCHEMA_MAX_BYTES = 16_384;

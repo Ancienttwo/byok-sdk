@@ -1,15 +1,15 @@
-import type { ByokCloud, ByokCloudOptions } from '../cloud';
-import { readTaskAgentMessageDraft } from '../agent-message-draft';
-import { readTaskAgentMessage } from '../task-agent-message';
-import { taskOfferMessageId } from '../offer-identity';
+import type { ByokCloud, ByokCloudOptions } from '../cloud.js';
+import { readTaskAgentMessageDraft } from '../agent-message-draft.js';
+import { readTaskAgentMessage } from '../task-agent-message.js';
+import { taskOfferMessageId } from '../offer-identity.js';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import { AgentMessagePublishPayloadSchema, TaskOfferPayloadSchema, type AgentRef } from '@byok-sdk/protocol';
-import { ByokCloudError } from '../errors';
-import { readAgentMessageDisposition, terminalReceiptKey } from '../inbound';
-import { projectTerminalResult, readDeviceTerminalReceipt } from '../terminal-result';
-import { assertTaskContentPresent } from '../task-redaction';
-import { isTaskAbandonCause } from '../stores/ports';
-import { tenantStoresFor, type CloudRootStores } from '../tenant-stores';
+import { ByokCloudError } from '../errors.js';
+import { readAgentMessageDisposition, terminalReceiptKey } from '../inbound.js';
+import { projectTerminalResult, readDeviceTerminalReceipt } from '../terminal-result.js';
+import { assertTaskContentPresent } from '../task-redaction.js';
+import { isTaskAbandonCause } from '../stores/ports.js';
+import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
 
 interface Dependencies {
   root: CloudRootStores;

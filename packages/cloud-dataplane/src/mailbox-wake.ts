@@ -1,5 +1,5 @@
 import { createInProcessMailboxWake, type MailboxWake } from '@byok-sdk/cloud';
-import { createPostgresWake, type PostgresWakeOptions } from './postgres-wake';
+import { createPostgresWake, type PostgresWakeOptions } from './postgres-wake.js';
 
 export type PostgresMailboxWakeOptions = PostgresWakeOptions;
 

@@ -1,9 +1,9 @@
-import type { McpEventIdentities } from '../../mcp/event-identity';
-import { PREPARED_GATE_REFUSAL_CODES } from './prepared-prompt-frame';
+import type { McpEventIdentities } from '../../mcp/event-identity.js';
+import { PREPARED_GATE_REFUSAL_CODES } from './prepared-prompt-frame.js';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { RuntimeExecutionFailure } from '../../runtime-failure';
-import type { PiRpcMessage } from './rpc-client';
-import { servedModelName } from '../served-model';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
+import type { PiRpcMessage } from './rpc-client.js';
+import { servedModelName } from '../served-model.js';
 
 function requireToolCallId(msg: PiRpcMessage): string {
   if (typeof msg.toolCallId === 'string' && msg.toolCallId.trim().length > 0) return msg.toolCallId;

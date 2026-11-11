@@ -1,5 +1,5 @@
 import { isCoreConflictError } from '@byok-sdk/core';
-import type { TenantBoundBoard } from './tenant-stores';
+import type { TenantBoundBoard } from './tenant-stores.js';
 
 /**
  * One-way projection from an already accepted terminal fact into coordination.

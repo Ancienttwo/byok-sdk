@@ -20,35 +20,35 @@ export {
   tenantKey,
   TENANT_ID_MAX_LENGTH,
   TENANT_KEY_SEPARATOR,
-} from './tenant';
-export type { TenantId } from './tenant';
+} from './tenant.js';
+export type { TenantId } from './tenant.js';
 
 export {
   PRINCIPAL_KINDS,
   isDevicePrincipal,
   isControlPlanePrincipal,
   principalTenant,
-} from './principals';
+} from './principals.js';
 export type {
   ControlPlanePrincipal,
   DevicePrincipal,
   Principal,
   PrincipalKind,
-} from './principals';
+} from './principals.js';
 
 // Errors (single taxonomy)
-export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCoreConflictError } from './errors';
-export type { CoreErrorCode } from './errors';
+export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCoreConflictError } from './errors.js';
+export type { CoreErrorCode } from './errors.js';
 
 // Canonical instants (the format every caller-supplied timestamp must be in)
 export {
   CANONICAL_TIMESTAMP_PATTERN,
   assertCanonicalTimestamp,
   isCanonicalTimestamp,
-} from './time';
+} from './time.js';
 
 // Mailbox (§12.7.3)
-export { MAILBOX_MESSAGE_STATES, MAILBOX_STREAM_CLOSE_CAUSES, MailboxStreamClosedError } from './mailbox';
+export { MAILBOX_MESSAGE_STATES, MAILBOX_STREAM_CLOSE_CAUSES, MailboxStreamClosedError } from './mailbox.js';
 export type {
   MailboxAdmission,
   MailboxAdvanceCursorInput,
@@ -67,10 +67,10 @@ export type {
   MailboxStreamCloseCause,
   MailboxStore,
   MailboxUsage,
-} from './mailbox';
+} from './mailbox.js';
 
 // Board coordination (§12.3)
-export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './board';
+export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './board.js';
 export type {
   BoardAssignee,
   BoardClaimInput,
@@ -82,10 +82,10 @@ export type {
   BoardStatusUpdateInput,
   BoardStore,
   BoardUnclaimInput,
-} from './board';
+} from './board.js';
 
 // Truth records (§12.3, §12.6.4)
-export { TRUTH_RECORD_KINDS } from './truth';
+export { TRUTH_RECORD_KINDS } from './truth.js';
 export type {
   SnapshotWriteInput,
   TerminalWriteInput,
@@ -96,10 +96,10 @@ export type {
   TruthRecordKind,
   TruthRecordSelector,
   TruthStore,
-} from './truth';
+} from './truth.js';
 
 // Presence (§12.3)
-export { freezePresenceRuntimeFact, PRESENCE_LEVELS } from './presence';
+export { freezePresenceRuntimeFact, PRESENCE_LEVELS } from './presence.js';
 export type {
   PresenceHint,
   PresenceHintInput,
@@ -110,7 +110,7 @@ export type {
   TenantReadinessDevice,
   TenantReadinessPresence,
   TenantReadiness,
-} from './presence';
+} from './presence.js';
 
 // Content addressing + object manifest (§12.7.4, §12.7.8)
 export {
@@ -123,7 +123,7 @@ export {
   isLegalObjectTransition,
   objectKeyPrefix,
   tenantObjectKey,
-} from './blob';
+} from './blob.js';
 export type {
   ContentHash,
   ObjectCommitInput,
@@ -135,7 +135,7 @@ export type {
   ObjectReferenceInput,
   ObjectState,
   ObjectStore,
-} from './blob';
+} from './blob.js';
 
 // Storage entitlement / usage / reservation (§12.7.6-12.7.7)
 export {
@@ -144,7 +144,7 @@ export {
   STORAGE_RESERVATION_STATES,
   STORAGE_WRITE_KINDS,
   STORAGE_WRITE_POSTURES,
-} from './quota';
+} from './quota.js';
 export type {
   QuotaStore,
   StorageErrorCode,
@@ -159,7 +159,7 @@ export type {
   TenantStorageEntitlement,
   TenantStorageEntitlementInput,
   TenantStorageUsage,
-} from './quota';
+} from './quota.js';
 
 // Capability declaration (ADR-010)
 export {
@@ -169,8 +169,8 @@ export {
   assertCapability,
   hasCapability,
   parseCapabilityDeclaration,
-} from './capabilities';
-export type { CapabilityDeclaration } from './capabilities';
+} from './capabilities.js';
+export type { CapabilityDeclaration } from './capabilities.js';
 
 // Skill packs (plan `skill-pack-delivery-channel`): the declarative content
 // channel a deployment declares as `skills.pack` (ADR-010) and a paired device
@@ -199,7 +199,7 @@ export {
   parseSkillFrontmatter,
   parseSkillPackManifest,
   skillPackContentHashInput,
-} from './skill-pack';
+} from './skill-pack.js';
 export type {
   ObservedSkillPackFile,
   SkillFrontmatter,
@@ -211,11 +211,11 @@ export type {
   SkillPackPublishInput,
   SkillPackRejection,
   SkillPackStore,
-} from './skill-pack';
+} from './skill-pack.js';
 
 // Composition contract
-export { CORE_STORE_NAMES } from './stores';
-export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores';
+export { CORE_STORE_NAMES } from './stores.js';
+export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores.js';
 
 // The port method inventory (I7). Contract data, shipped rather than test-only,
 // so `@byok-sdk/conformance` can assert compositions against the same table
@@ -225,7 +225,7 @@ export {
   CORE_NON_COMPOSITION_PORT_NAMES,
   CORE_PORT_INTERFACES,
   CORE_PORT_METHODS,
-} from './ports-contract';
+} from './ports-contract.js';
 
 // Device proof (§12.6.3, sprint §S6.2)
 export {
@@ -242,7 +242,7 @@ export {
   deviceProofCanonicalJson,
   deviceProofSigningInput,
   parseDeviceProofEnvelope,
-} from './attestation';
+} from './attestation.js';
 export type {
   DeviceProofAlgorithm,
   DeviceProofEnvelopeV1,
@@ -252,7 +252,7 @@ export type {
   JsonObject,
   JsonPrimitive,
   JsonValue,
-} from './attestation';
+} from './attestation.js';
 
 // Device assertion (plan device-assertion-broker): the short-lived,
 // audience-scoped envelope a paired device mints for a sibling local process,
@@ -275,7 +275,7 @@ export {
   deviceAssertionSigningInput,
   parseDeviceAssertionEnvelope,
   verifyDeviceAssertion,
-} from './device-assertion';
+} from './device-assertion.js';
 // Task-scoped assertion (`byok-task-assertion-v1`, contract §8.1): a SEPARATE
 // envelope sharing the device lane's validators and replay authority, never a
 // device assertion with extra claims. The two verifiers each accept only their
@@ -295,7 +295,7 @@ export {
   taskAssertionCanonicalJson,
   taskAssertionSigningInput,
   verifyTaskAssertion,
-} from './device-assertion';
+} from './device-assertion.js';
 export type {
   AuthenticateDeviceAssertionDeps,
   AuthenticatedAssertion,
@@ -316,7 +316,7 @@ export type {
   TaskAssertionAgentRef,
   TaskAssertionClaims,
   TaskAssertionEnvelopeV1,
-} from './device-assertion';
+} from './device-assertion.js';
 // Sealed provider provisioning (plan web-sealed-provisioning): request
 // schema, canonical AAD/claim bytes, padding, and one-shot HPKE seal/open.
 // No reusable encryption context is exported.
@@ -349,7 +349,7 @@ export {
   providerSecretAadBytes,
   sealProviderProvisioningRequest,
   sealingKeyClaimCanonicalBytes,
-} from './sealed-provider-secret';
+} from './sealed-provider-secret.js';
 export type {
   ProviderProvisioningConfigV1,
   ProviderProvisioningExpectedProfile,
@@ -362,15 +362,15 @@ export type {
   SealingKeyClaimV1,
   SealingPublicJwk,
   WebCryptoKey,
-} from './sealed-provider-secret';
+} from './sealed-provider-secret.js';
 
 // Host-approved Agent memory intent identity digest
-export { AGENT_MEMORY_INTENT_DIGEST_VERSION, agentMemoryIntentOperationDigest } from './agent-memory-intent';
-export type { AgentMemoryIntentDigestInput } from './agent-memory-intent';
+export { AGENT_MEMORY_INTENT_DIGEST_VERSION, agentMemoryIntentOperationDigest } from './agent-memory-intent.js';
+export type { AgentMemoryIntentDigestInput } from './agent-memory-intent.js';
 
 // Nonce signing domain (§6.2) — the one authority the daemon, the hosted
 // surface, and the reference server all sign/verify against.
-export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
+export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing.js';
 
 // In-memory reference implementation
 export {
@@ -386,17 +386,17 @@ export {
   createInMemoryCoreStores,
   createInMemoryCoreCompositionWithClock,
   createMutableClock,
-} from './in-memory/index';
-export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index';
+} from './in-memory/index.js';
+export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index.js';
 
-export { assertCollectExpiredInput, CollectExpiredFailure } from './retention';
-export type { CollectExpiredInput, CollectExpiredCounts, CollectExpiredResult } from './retention';
-export type { QuotaCollectExpiredInput } from './quota';
-export type { ObjectCollectExpiredInput } from './blob';
+export { assertCollectExpiredInput, CollectExpiredFailure } from './retention.js';
+export type { CollectExpiredInput, CollectExpiredCounts, CollectExpiredResult } from './retention.js';
+export type { QuotaCollectExpiredInput } from './quota.js';
+export type { ObjectCollectExpiredInput } from './blob.js';
 
 // Store compatibility precheck result (#1102)
-export type { LocalStoreId, StoreCompatibility, StoreCompatibilityVerdict } from './store-compatibility';
+export type { LocalStoreId, StoreCompatibility, StoreCompatibilityVerdict } from './store-compatibility.js';
 
-export { InMemoryStorageLedger } from './in-memory/storage-ledger';
-export type { InMemoryObjectBytes } from './in-memory/blob';
+export { InMemoryStorageLedger } from './in-memory/storage-ledger.js';
+export type { InMemoryObjectBytes } from './in-memory/blob.js';
 

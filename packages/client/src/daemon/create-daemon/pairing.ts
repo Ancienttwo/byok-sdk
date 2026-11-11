@@ -1,12 +1,12 @@
-import { assertServerUrlAllowed, formatServerUrl } from '../url';
-import { type DeviceEnrollment, type DeviceRecord, DeviceRecordRePairRequiredError } from '../store';
-import { DeviceStoreBindingMismatchError } from '../daemon-errors';
-import { checkVerificationSecret, enrollDeviceMember } from '../device-member';
-import { acquireDaemonOwner } from '../../util/daemon-owner';
-import { AgentEgressController } from '../agent-egress-controller';
-import { PairedWithoutMemberError } from './support';
-import type { DaemonScope } from './scope';
-import { runAuthOperation } from './lifecycle';
+import { assertServerUrlAllowed, formatServerUrl } from '../url.js';
+import { type DeviceEnrollment, type DeviceRecord, DeviceRecordRePairRequiredError } from '../store.js';
+import { DeviceStoreBindingMismatchError } from '../daemon-errors.js';
+import { checkVerificationSecret, enrollDeviceMember } from '../device-member.js';
+import { acquireDaemonOwner } from '../../util/daemon-owner.js';
+import { AgentEgressController } from '../agent-egress-controller.js';
+import { PairedWithoutMemberError } from './support.js';
+import type { DaemonScope } from './scope.js';
+import { runAuthOperation } from './lifecycle.js';
 
 /** Pairing and unpairing the device, each under the daemon owner lease (#926). */
 

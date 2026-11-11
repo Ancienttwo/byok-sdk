@@ -1,6 +1,6 @@
-import type { ModelProviderAdapter } from './provider-profile';
-import { piApiOf } from './pi-api';
-import { PI_MODEL_CATALOG } from './pi-model-catalog.generated';
+import type { ModelProviderAdapter } from './provider-profile.js';
+import { piApiOf } from './pi-api.js';
+import { PI_MODEL_CATALOG } from './pi-model-catalog.generated.js';
 import {
   PI_COMPAT_KEYS_BY_API,
   PI_MODEL_APIS,
@@ -11,9 +11,9 @@ import {
   type PiModelApi,
   type PiModelConfig,
   type PiThinkingLevel,
-} from './pi-model-config';
+} from './pi-model-config.js';
 
-export { PI_MODEL_CATALOG_PI_AI_VERSION } from './pi-model-catalog.generated';
+export { PI_MODEL_CATALOG_PI_AI_VERSION } from './pi-model-catalog.generated.js';
 
 /** The input modalities a Pi catalog entry declares; a profile states `image` as the `image-input` capability. */
 export type PiCatalogModelInput = 'text' | 'image';

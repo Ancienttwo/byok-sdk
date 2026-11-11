@@ -22,7 +22,7 @@ import type {
   PairingCodeInfo,
   PairingCodeIssueInput,
   PairingCodeStore,
-} from '../ports';
+} from '../ports.js';
 
 interface PairingCodeRecord {
   readonly claims: PairingCodeClaims;

@@ -16,12 +16,12 @@
  */
 import type { Clock, CoreStores, TenantId } from '@byok-sdk/core';
 import type { AgentRef } from '@byok-sdk/protocol';
-import type { CloudCrypto } from './crypto/port';
-import { terminalReceiptKey } from './inbound';
-import { taskOfferMessageId } from './offer-identity';
-import { SEALED_TASK_REFERENCE_KIND } from './sealed-ciphertext';
-import { taskRedactionCodec, type TaskRedactionCodec } from './task-redaction';
-import type { CloudStores } from './stores/ports';
+import type { CloudCrypto } from './crypto/port.js';
+import { terminalReceiptKey } from './inbound.js';
+import { taskOfferMessageId } from './offer-identity.js';
+import { SEALED_TASK_REFERENCE_KIND } from './sealed-ciphertext.js';
+import { taskRedactionCodec, type TaskRedactionCodec } from './task-redaction.js';
+import type { CloudStores } from './stores/ports.js';
 
 /** One unit of archive work, listed by {@link TaskArchiveStore.listWork}. */
 export interface TaskArchiveWork {

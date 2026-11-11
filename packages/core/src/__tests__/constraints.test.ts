@@ -119,30 +119,30 @@ describe('dependency isolation', () => {
 
 describe('public API surface', () => {
   const ALLOWED_INDEX_MODULES = [
-    './tenant',
-    './principals',
-    './errors',
-    './time',
-    './mailbox',
-    './board',
-    './truth',
-    './presence',
-    './blob',
-    './quota',
-    './attestation',
-    './device-assertion',
-    './pairing',
-    './capabilities',
-    './skill-pack',
-    './stores',
-    './ports-contract',
-    './sealed-provider-secret',
-    './agent-memory-intent',
-    './retention',
-    './store-compatibility',
-    './in-memory/index',
-    './in-memory/storage-ledger',
-    './in-memory/blob',
+    './tenant.js',
+    './principals.js',
+    './errors.js',
+    './time.js',
+    './mailbox.js',
+    './board.js',
+    './truth.js',
+    './presence.js',
+    './blob.js',
+    './quota.js',
+    './attestation.js',
+    './device-assertion.js',
+    './pairing.js',
+    './capabilities.js',
+    './skill-pack.js',
+    './stores.js',
+    './ports-contract.js',
+    './sealed-provider-secret.js',
+    './agent-memory-intent.js',
+    './retention.js',
+    './store-compatibility.js',
+    './in-memory/index.js',
+    './in-memory/storage-ledger.js',
+    './in-memory/blob.js',
   ];
 
   it('re-exports only contract, schema, error, and in-memory reference modules', () => {
@@ -628,7 +628,7 @@ describe('device assertion', () => {
     // A second canonicalizer would be a second byte authority; the whole
     // envelope design rests on there being exactly one.
     const code = stripComments(read('device-assertion.ts'));
-    expect(code).toMatch(/from '\.\/attestation'/);
+    expect(code).toMatch(/from '\.\/attestation\.js'/);
     expect(code).not.toContain('function canonicalizeValue');
   });
 });
@@ -636,7 +636,7 @@ describe('device assertion', () => {
 describe('sealed provider secret', () => {
   it('reuses the one canonicalizer rather than growing a second one', () => {
     const code = stripComments(read('sealed-provider-secret.ts'));
-    expect(code).toMatch(/from '\.\/attestation'/);
+    expect(code).toMatch(/from '\.\/attestation\.js'/);
     expect(code).not.toContain('function canonicalizeValue');
   });
 

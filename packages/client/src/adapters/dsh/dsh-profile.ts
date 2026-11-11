@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { DshModelSelection, DshSandboxMode } from './dsh-adapter';
+import type { DshModelSelection, DshSandboxMode } from './dsh-adapter.js';
 
 const SANDBOX_MODES: readonly DshSandboxMode[] = ['danger-full-access', 'workspace-write', 'read-only'];
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;

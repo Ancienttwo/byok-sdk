@@ -22,12 +22,12 @@
  */
 import { z } from 'zod';
 
-import { canonicalizeJsonBytes } from '../attestation';
-import { CONTENT_HASH_PATTERN } from '../blob';
-import { safeParseTotal } from '../total-parse';
-import { webCryptoSubtle, type WebCryptoKey } from '../webcrypto';
-import type { MemberKeyBundleV1 } from './member-bundle';
-import { MemberKeyBundleV1Schema } from './member-bundle';
+import { canonicalizeJsonBytes } from '../attestation.js';
+import { CONTENT_HASH_PATTERN } from '../blob.js';
+import { safeParseTotal } from '../total-parse.js';
+import { webCryptoSubtle, type WebCryptoKey } from '../webcrypto.js';
+import type { MemberKeyBundleV1 } from './member-bundle.js';
+import { MemberKeyBundleV1Schema } from './member-bundle.js';
 import {
   base64UrlBytes,
   concat,
@@ -39,7 +39,7 @@ import {
   randomBytes,
   utf8,
   type Bytes,
-} from './primitives';
+} from './primitives.js';
 
 export const PAIRING_VERIFICATION_SECRET_BYTES = 16;
 export const PAIRING_VERIFICATION_TEXT_LENGTH = 26;

@@ -4,16 +4,16 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createConnection } from 'node:net';
 import path from 'node:path';
 import type { StoreCompatibilityVerdict } from '@byok-sdk/core';
-import { connectControlClient } from '../daemon/control-client';
-import { controlEndpointPath, controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
-import { daemonLifecycleHealth, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { acquireDaemonOwner, DaemonOwnerActiveError, DaemonOwnerReclaimingError, type DaemonOwnerLease } from '../util/daemon-owner';
-import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
-import { acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
-import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle';
-import type { ManagedServiceLifecycle } from './managed-lifecycle';
-import { serviceStateDir } from './service-unit';
-import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types';
+import { connectControlClient } from '../daemon/control-client.js';
+import { controlEndpointPath, controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol.js';
+import { daemonLifecycleHealth, type DaemonLifecycle } from '../daemon/daemon-lifecycle.js';
+import { acquireDaemonOwner, DaemonOwnerActiveError, DaemonOwnerReclaimingError, type DaemonOwnerLease } from '../util/daemon-owner.js';
+import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger.js';
+import { acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate.js';
+import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
+import type { ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { serviceStateDir } from './service-unit.js';
+import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types.js';
 
 /** The manifest every payload directory carries at its root. */
 export const SERVICE_PAYLOAD_MANIFEST = 'byok-payload.json';

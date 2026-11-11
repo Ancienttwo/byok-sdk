@@ -1,6 +1,6 @@
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { DEFAULT_ACTIVITY_TTL_MS, type AgentMessageDraftStore, type AgentMessageDraftApplyInput, type AgentMessageDraftApplyResult, type AgentMessageDraftRow } from '@byok-sdk/cloud';
-import type { ByokPool } from '../pool';
+import type { ByokPool } from '../pool.js';
 
 type DraftRow = {
   task_id: string; device_id: string; agent_ref: AgentMessageDraftRow['agentRef']; revision: string;

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated';
+import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated.js';
 
 type Env = Readonly<Record<string, string | undefined>>;
 

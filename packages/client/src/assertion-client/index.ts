@@ -46,20 +46,20 @@
  */
 
 /** Asks a running daemon for one short-lived task assertion bound to the caller's context file. */
-export { requestTaskAssertion } from '../daemon/assertion-client';
+export { requestTaskAssertion } from '../daemon/assertion-client.js';
 /** Asks a running daemon for one short-lived device assertion scoped to an allowlisted audience. */
-export { requestDeviceAssertion } from '../daemon/assertion-client';
+export { requestDeviceAssertion } from '../daemon/assertion-client.js';
 
 /** Everything `requestTaskAssertion` needs: the context file path from this process's final argv element, the exact audience, and an optional round-trip bound. */
-export type { RequestTaskAssertionOptions } from '../daemon/assertion-client';
+export type { RequestTaskAssertionOptions } from '../daemon/assertion-client.js';
 /** The daemon's nine refusal codes plus `unavailable` and `bad_response`, kept as an open string union so a newer daemon's code surfaces verbatim. */
-export type { RequestTaskAssertionErrorCode } from '../daemon/assertion-client';
+export type { RequestTaskAssertionErrorCode } from '../daemon/assertion-client.js';
 /** Typed result: a parsed `TaskAssertionEnvelopeV1` with its expiry, or a refusal code and reason. Never throws for an expected outcome. */
-export type { RequestTaskAssertionResult } from '../daemon/assertion-client';
+export type { RequestTaskAssertionResult } from '../daemon/assertion-client.js';
 
 /** Everything `requestDeviceAssertion` needs: the daemon's `productId`/`storeDir`, the exact audience, and an optional round-trip bound. */
-export type { RequestDeviceAssertionOptions } from '../daemon/assertion-client';
+export type { RequestDeviceAssertionOptions } from '../daemon/assertion-client.js';
 /** The daemon's six refusal codes plus `unavailable` and `bad_response`, kept as an open string union for the same reason. */
-export type { RequestDeviceAssertionErrorCode } from '../daemon/assertion-client';
+export type { RequestDeviceAssertionErrorCode } from '../daemon/assertion-client.js';
 /** Typed result: a parsed `DeviceAssertionEnvelopeV1` with its expiry, or a refusal code and reason. Never throws for an expected outcome. */
-export type { RequestDeviceAssertionResult } from '../daemon/assertion-client';
+export type { RequestDeviceAssertionResult } from '../daemon/assertion-client.js';

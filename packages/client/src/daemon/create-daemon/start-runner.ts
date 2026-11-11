@@ -1,14 +1,14 @@
-import type { TaskRunnerDeps } from '../task-runner';
+import type { TaskRunnerDeps } from '../task-runner.js';
 import { randomUUID } from 'node:crypto';
-import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host';
-import { preflightAgentResultMcp } from '../agent-result-mcp-preflight';
-import { resolveAgentMessageMcpBin } from '../resolve-agent-message-mcp-bin';
-import { preflightAgentMessageMcp } from '../agent-message-mcp-preflight';
-import { agentMemoryCommitStore } from './services';
-import type { DaemonScope } from './scope';
-import type { StartRun } from './start-run';
-import type { StartLanes } from './start-lanes';
-import type { StartTerminals } from './start-terminals';
+import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host.js';
+import { preflightAgentResultMcp } from '../agent-result-mcp-preflight.js';
+import { resolveAgentMessageMcpBin } from '../resolve-agent-message-mcp-bin.js';
+import { preflightAgentMessageMcp } from '../agent-message-mcp-preflight.js';
+import { agentMemoryCommitStore } from './services.js';
+import type { DaemonScope } from './scope.js';
+import type { StartRun } from './start-run.js';
+import type { StartLanes } from './start-lanes.js';
+import type { StartTerminals } from './start-terminals.js';
 
 /**
  * The fourth stage of `runStartUnderLease` (#926), synchronous: builds the

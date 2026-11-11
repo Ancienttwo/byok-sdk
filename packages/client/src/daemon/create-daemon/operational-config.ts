@@ -1,12 +1,12 @@
-import type { DaemonConfig } from '../create-daemon';
-import { validateInputPreparationLimits } from '../../input-preparation';
+import type { DaemonConfig } from '../create-daemon.js';
+import { validateInputPreparationLimits } from '../../input-preparation.js';
 import {
   DEFAULT_PRESENCE_HEARTBEAT_INTERVAL_MS,
   DEFAULT_PRESENCE_TTL_MS,
   DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
   assertPresenceHeartbeatCadence,
-} from '../presence-publisher';
-import { resolveDeviceAssertionAudiences, resolveDeviceAssertionTtlMs } from './support';
+} from '../presence-publisher.js';
+import { resolveDeviceAssertionAudiences, resolveDeviceAssertionTtlMs } from './support.js';
 
 /** Pure operational bounds shared by construction and the side-effect-free config check. */
 export function resolveDaemonOperationalConfig(config: Pick<DaemonConfig, 'presence' | 'deviceAssertion' | 'inputPreparation'>) {

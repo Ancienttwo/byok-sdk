@@ -1,10 +1,10 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner';
-import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
-import { SERVICE_REDIRECT_LIMITS } from './service-log';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types';
-import { SERVICE_UNIT_MARKER } from './service-unit';
+import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { SERVICE_REDIRECT_LIMITS } from './service-log.js';
+import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';
+import { SERVICE_UNIT_MARKER } from './service-unit.js';
 
 /**
  * Genuine-failure text that must NEVER be reclassified as "service already

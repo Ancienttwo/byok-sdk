@@ -1,10 +1,10 @@
-import type { McpEventIdentities } from '../../mcp/event-identity';
-import { parseClaudeContextWindow } from './control-channel';
+import type { McpEventIdentities } from '../../mcp/event-identity.js';
+import { parseClaudeContextWindow } from './control-channel.js';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { MessageDraftDelta } from '../../types';
-import { RuntimeExecutionFailure } from '../../runtime-failure';
+import type { MessageDraftDelta } from '../../types.js';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 
 /**
  * A raw parsed line from `claude --output-format stream-json`. Shapes vary

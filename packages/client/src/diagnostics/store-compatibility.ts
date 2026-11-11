@@ -2,11 +2,11 @@ import { copyFileSync, mkdtempSync, readdirSync, rmSync, statSync, type Stats } 
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import type { StoreCompatibility } from '@byok-sdk/core';
-import { JournalCorruptError, JournalUnavailableError } from '../daemon/journal/journal';
-import { JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
-import { loadSqliteModule } from '../util/sqlite-support';
-import { DURABLE_REPLICA_DIRNAME, durableReplicaFiles, isReplicaWriterLock } from '../adapters/pi-durable/replica';
-import { openExistingLocalDurableStorage } from '../adapters/pi-durable/storage';
+import { JournalCorruptError, JournalUnavailableError } from '../daemon/journal/journal.js';
+import { JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal.js';
+import { loadSqliteModule } from '../util/sqlite-support.js';
+import { DURABLE_REPLICA_DIRNAME, durableReplicaFiles, isReplicaWriterLock } from '../adapters/pi-durable/replica.js';
+import { openExistingLocalDurableStorage } from '../adapters/pi-durable/storage.js';
 
 /** A SQLite store is its main file plus a WAL or a hot rollback journal. `-shm` is rebuilt from the WAL. */
 const SQLITE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;

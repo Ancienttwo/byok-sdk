@@ -1,6 +1,6 @@
-import { runtimeVersionPolicyIssues } from './runtime-version-policy';
-import { DAEMON_CONFIG_RUNTIME_IDS } from './daemon-config-runtime-ids.generated';
-import type { DaemonConfigIssue } from './daemon/config-schema/validate';
+import { runtimeVersionPolicyIssues } from './runtime-version-policy.js';
+import { DAEMON_CONFIG_RUNTIME_IDS } from './daemon-config-runtime-ids.generated.js';
+import type { DaemonConfigIssue } from './daemon/config-schema/validate.js';
 
 /**
  * Semantic checks the generated JSON schema cannot express (#1103): a

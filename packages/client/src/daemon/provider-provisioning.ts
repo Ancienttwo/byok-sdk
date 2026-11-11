@@ -1,4 +1,4 @@
-import { snapshotPlainData } from '../util/plain-data';
+import { snapshotPlainData } from '../util/plain-data.js';
 import {
   ProviderProvisioningReadbackSchema,
   type ProviderProvisioningAvailablePayload,

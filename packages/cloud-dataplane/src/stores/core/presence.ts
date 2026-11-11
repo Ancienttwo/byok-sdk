@@ -30,7 +30,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import type { ByokPool } from '../../pool';
+import type { ByokPool } from '../../pool.js';
 
 const PRESENCE_COLUMNS =
   'tenant_id, device_id, level, detail, configured_toolsets, client_version, protocol_versions, runtimes, observed_at, expires_at';

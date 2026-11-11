@@ -4,7 +4,7 @@ import type {
   RuntimeVersionPolicy,
   RuntimeVersionSpec,
   RuntimeVersionVerdict,
-} from './types';
+} from './types.js';
 
 export type RuntimeVersionPolicyIssueReason =
   | 'invalid_policy'

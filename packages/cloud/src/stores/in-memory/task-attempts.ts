@@ -17,7 +17,7 @@
  */
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
-import { assertTaskAttemptListLimit } from '../../coordination';
+import { assertTaskAttemptListLimit } from '../../coordination.js';
 import {
   TASK_ATTEMPT_ACTIVE_STATUSES,
   TASK_ATTEMPT_STATUSES,
@@ -29,8 +29,8 @@ import {
   type TaskAttemptPage,
   type TaskAttemptStatus,
   type TaskAttemptStore,
-} from '../ports';
-import { TaskChangeMap, type TaskChanged } from './task-change-map';
+} from '../ports.js';
+import { TaskChangeMap, type TaskChanged } from './task-change-map.js';
 
 function sameAgentRef(left: AgentRef | undefined, right: AgentRef | undefined): boolean {
   return left?.agentId === right?.agentId && left?.profileRevision === right?.profileRevision;

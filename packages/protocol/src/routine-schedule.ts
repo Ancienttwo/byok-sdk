@@ -1,4 +1,4 @@
-import { ProtocolError } from './errors';
+import { ProtocolError } from './errors.js';
 
 /** ISO 8601 order, Monday first. */
 export const ROUTINE_DAYS_OF_WEEK = Object.freeze(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const);

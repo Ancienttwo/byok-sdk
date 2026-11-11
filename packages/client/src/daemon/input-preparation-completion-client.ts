@@ -6,9 +6,9 @@ import {
   type InputPreparationCompletionRequest,
   type InputPreparationReadback,
 } from '@byok-sdk/protocol';
-import type { AuthManager } from './auth-manager';
-import { authedFetch } from './http-client';
-import { toHttpBase } from './url';
+import type { AuthManager } from './auth-manager.js';
+import { authedFetch } from './http-client.js';
+import { toHttpBase } from './url.js';
 
 export class InputPreparationCompletionError extends Error {
   constructor(message: string, options?: ErrorOptions) {

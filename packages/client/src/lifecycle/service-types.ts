@@ -1,6 +1,6 @@
-import { SERVICE_FLAG } from './service-environment';
-import type { ServiceLogReport } from './service-log';
-import type { ServiceRepairResult, ServiceUnitInspection } from './service-unit';
+import { SERVICE_FLAG } from './service-environment.js';
+import type { ServiceLogReport } from './service-log.js';
+import type { ServiceRepairResult, ServiceUnitInspection } from './service-unit.js';
 
 /**
  * What the stable launcher executes (#1097). The unit never names it: on

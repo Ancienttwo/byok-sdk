@@ -1,4 +1,4 @@
-import { TreeCleanup } from './tree-cleanup';
+import { TreeCleanup } from './tree-cleanup.js';
 /** Runtime release evidence survives every partial pass. */
 export const RuntimeCleanup = { create: (target: string): Promise<TreeCleanup | undefined> => TreeCleanup.create(target, true) };
 export type RuntimeCleanup = TreeCleanup;

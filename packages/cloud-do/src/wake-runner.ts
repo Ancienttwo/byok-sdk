@@ -1,10 +1,10 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Conversation, Harness } from '@earendil-works/pi-durable';
-import { admissionIdentity, composeCloudInput, inboxInput, type AdmissionIdentity, type InboxRow, type RunHistory } from './cloud-state';
-import { CloudDoError, safeCloudError, type CloudDoErrorCode } from './errors';
-import { PLATFORM_PROFILES, platformCredentialReader } from './platform-credentials';
-import type { CloudOperationGuard } from './input-guard';
-import { raceLease, type ExecutionLease, type RunOutcome, type SessionRuntime } from './session-runtime';
+import { admissionIdentity, composeCloudInput, inboxInput, type AdmissionIdentity, type InboxRow, type RunHistory } from './cloud-state.js';
+import { CloudDoError, safeCloudError, type CloudDoErrorCode } from './errors.js';
+import { PLATFORM_PROFILES, platformCredentialReader } from './platform-credentials.js';
+import type { CloudOperationGuard } from './input-guard.js';
+import { raceLease, type ExecutionLease, type RunOutcome, type SessionRuntime } from './session-runtime.js';
 
 export type CloudWakeAdmission = { accepted: true; reservation: 'held' | 'none' }
   | { accepted: false; code: CloudDoErrorCode };

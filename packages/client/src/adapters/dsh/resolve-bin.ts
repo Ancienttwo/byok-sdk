@@ -1,4 +1,4 @@
-import type { ResolvedBin } from '../codex/resolve-bin';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
 
 /**
  * Resolve the DeepSeek Harness CLI (`npm install -g @deepseek-ai/dsh`). It is
