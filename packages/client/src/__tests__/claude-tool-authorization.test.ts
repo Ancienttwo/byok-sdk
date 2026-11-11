@@ -304,6 +304,29 @@ describe('Claude runtime requests on the OAR stream-json session', () => {
     expect(claude.written).toMatchObject([{ type: 'control_response', response: { request_id: 'hook-1' } }]);
   });
 
+  it('writes nothing after a fatal bridge failure, neither a late verdict nor a new one', async () => {
+    const claude = memoryClaude();
+    const stream = new ClaudeStreamSession(claude.child as never);
+    let allow!: () => void;
+    const pending: ToolAuthorizationGate = { timeoutMs: 1_000, authorize: () => new Promise(resolve => { allow = () => resolve({ decision: 'allow' }); }) };
+    // Only the stream latch, not a closed bridge, stands between a verdict and stdin here.
+    const gate = new ClaudeToolAuthorizationBridge(pending, error => stream.fail(error));
+    await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: (message, respond) => { gate.receive(message, respond); } });
+    const callbackId = (gate.hooks.PreToolUse as Array<{ hookCallbackIds: string[] }>)[0]!.hookCallbackIds[0];
+    const hook = (id: string, callback = callbackId) => claude.send({ type: 'control_request', request_id: id, request: { subtype: 'hook_callback', callback_id: callback, input: {
+      hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: id, tool_input: { command: 'ls' }, cwd: '/tmp',
+    } } });
+    hook('hook-1');
+    hook('forged', 'unregistered');
+    allow();
+    hook('hook-2');
+    await new Promise(resolve => setImmediate(resolve));
+    expect(claude.written).toEqual([]);
+    expect(await stream.mcpStatus()).toBeUndefined();
+    expect(claude.written).toEqual([]);
+    gate.close();
+  });
+
   it('leaves a request it does not know unanswered and unallowed', async () => {
     const { claude, stream } = await open();
     claude.send({ type: 'control_request', request_id: 'odd-1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' } } });

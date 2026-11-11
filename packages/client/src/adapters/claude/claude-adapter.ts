@@ -285,6 +285,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // Generate only task-scoped host/reserved MCP config outside the operation workspace.
     let stream: ClaudeStreamSession | undefined;
     let gate: ClaudeToolAuthorizationBridge | undefined;
+    let native: ClaudeNativeInteractionBridge | undefined;
+    // A halted or failed process answers nothing more: both bridges end with it.
+    const closeBridges = () => { native?.close(); gate?.close(); };
     let cancellation: RuntimeExecutionFailure | undefined;
     let rejectCancellation!: (failure: RuntimeExecutionFailure) => void;
     const cancelled = new Promise<never>((_, reject) => { rejectCancellation = reject; });
@@ -292,6 +295,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     void cancelled.catch(() => {});
     const onAbort = () => {
       cancellation ??= cancellationFailure();
+      closeBridges();
       stream?.halt(cancellation);
       rejectCancellation(cancellation);
     };
@@ -299,6 +303,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       if (signal?.aborted && !cancellation) onAbort();
       if (cancellation) {
         // Also covers an abort inside spawnFn, before the stream was assigned.
+        closeBridges();
         stream?.halt(cancellation);
         throw cancellation;
       }
@@ -394,11 +399,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
       throwIfCancelled();
       const mcpIdentity = createClaudeMcpIdentityResolver(() => stream?.mcpStatus() ?? Promise.resolve(undefined), new Map(Object.entries(taskMcpServers)));
       gate = startInput.toolAuthorization === undefined ? undefined
-        : new ClaudeToolAuthorizationBridge(startInput.toolAuthorization, error => stream?.fail(error), mcpIdentity.resolve);
-      const native = this.nativeOptions === undefined ? undefined : new ClaudeNativeInteractionBridge({
+        : new ClaudeToolAuthorizationBridge(startInput.toolAuthorization, error => { closeBridges(); stream?.fail(error); }, mcpIdentity.resolve);
+      native = this.nativeOptions === undefined ? undefined : new ClaudeNativeInteractionBridge({
         ...this.nativeOptions,
         // The adapter, never the host callback, owns fatal process termination.
-        onFatal: error => stream?.fail(error),
+        onFatal: error => { closeBridges(); stream?.fail(error); },
       }, resumeSessionId);
       const spawnLineProcess = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'claude' });
       const env = { ...startInput.env, ...startInput.scratch.env } as Record<string, string>;
@@ -747,11 +752,14 @@ class ClaudeSession implements Session {
     // A prompt on the SAME persistent process: claude keeps a
     // `--input-format stream-json` process alive across sequential turns,
     // reusing the identical `session_id`, until stdin closes or the
-    // process is killed. OAR refuses it while a turn is still running.
+    // process is killed. OAR refuses a prompt as busy while Claude runs a
+    // turn of its own (a background task wake); OAR then holds it and
+    // sends it when that turn ends.
     let refusal: unknown;
     try {
       this.native?.beginTurn();
-      const prompted = await this.stream.raw.prompt(task.instruction);
+      let prompted = await this.stream.raw.prompt(task.instruction);
+      if (prompted.response.body.code === 'busy') prompted = await this.stream.raw.queue(task.instruction);
       if (prompted.response.body.kind === 'accepted') return;
       refusal = prompted.response.body;
     } catch (cause) {

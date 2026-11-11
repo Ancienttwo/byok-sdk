@@ -15,6 +15,8 @@ export interface ClaudeControl {
 export interface RawClaudeSession {
   readonly id: string;
   prompt(input: string): Promise<ClaudeControl>;
+  /** Input for after the turn Claude runs on its own; OAR holds it and sends it when that turn ends. */
+  queue(input: string): Promise<ClaudeControl>;
   abort(): Promise<ClaudeControl>;
   records(): readonly ClaudeRecord[];
   dispose(): Promise<void>;
@@ -61,4 +63,6 @@ export declare function streamJsonSession(
   credentials: ClaudeCredentialRedactor,
   profile: ClaudeSessionProfile,
   hooks?: ClaudeSessionHooks,
+  /** Retained-record budget: past it the oldest frame payloads are elided; the session keeps running. */
+  retainedBytes?: number,
 ): Promise<RawClaudeSession>;

@@ -283,6 +283,7 @@ type ClaudeVendorSession = Awaited<ReturnType<typeof vendorStreamJsonSession>>;
 type ClaudeBridgeSession = {
   readonly id: AdapterSession['id'];
   prompt(...args: FirstInput<AdapterSession['prompt']>): Promise<ClaudeBridge.ClaudeControl>;
+  queue(...args: FirstInput<AdapterSession['queue']>): Promise<ClaudeBridge.ClaudeControl>;
   abort(...args: Parameters<AdapterSession['abort']>): Promise<ClaudeBridge.ClaudeControl>;
   records(): readonly ClaudeBridge.ClaudeRecord[];
   dispose: AdapterSession['dispose'];
@@ -301,3 +302,4 @@ export type CheckClaudeProfileValue = Assert<Assignable<typeof vendorClaudeProfi
 export type CheckClaudeStateValue = Assert<Assignable<VendorClaudeState, ClaudeBridge.ClaudeProjectionState>>;
 export type CheckClaudeProfile = Assert<Assignable<Pick<ClaudeBridge.ClaudeSessionProfile, ClaudeSharedProfileKeys>, Pick<ClaudeVendorProfile, ClaudeSharedProfileKeys>>>;
 export type CheckClaudeHooks = Assert<Assignable<ClaudeBridge.ClaudeSessionHooks, Partial<Mutable<StreamJsonSessionHooks>>>>;
+export type CheckClaudeRetention = Assert<Equal<ClaudeBridgeArgs[5], ClaudeVendorArgs[5]>>;

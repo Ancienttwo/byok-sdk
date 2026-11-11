@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
+import { DEFAULT_MAX_RETAINED_BYTES } from '../session-limits.js';
 import type { McpStdioServerConfig } from '../../types.js';
 import type { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import {
@@ -88,10 +89,12 @@ export class ClaudeStreamSession {
       disposing: () => this.#end(),
     }, {
       onRecord: record => this.#record(record, options.onFrame),
-      onAppRequest: (request, respond) => options.onAppRequest(request.native as ClaudeStreamMessage, respond),
+      // After a halt no reply reaches Claude, whatever a bridge still decides.
+      onAppRequest: (request, respond) => options.onAppRequest(request.native as ClaudeStreamMessage,
+        reply => this.#fatal === undefined ? respond(reply) : Promise.reject(this.#fatal)),
       // Before a native interrupt: tools it orphans stay killable at disposal.
       beforeInterrupt: () => this.child.observeDescendants(),
-    });
+    }, DEFAULT_MAX_RETAINED_BYTES);
   }
 
   get raw(): RawClaudeSession {
@@ -144,7 +147,8 @@ export class ClaudeStreamSession {
           if (control.response.body.kind !== 'accepted') return false;
           if (this.#results === seen) await result;
           return this.#results > seen;
-        }),
+        // An interrupt that could not be written did not reach Claude: the owner terminates.
+        }, () => false),
         new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs); }),
       ]);
     } finally {
@@ -197,7 +201,7 @@ export class ClaudeStreamSession {
 
   /** One private control request on stdin, consumed from stdout before the fold. Undefined when timed out, unwritable or closed. */
   #control(request: Record<string, unknown>, deadline: number): Promise<Record<string, unknown> | undefined> {
-    if (this.#ended) return Promise.resolve(undefined);
+    if (this.#ended || this.#fatal !== undefined) return Promise.resolve(undefined);
     const id = randomUUID();
     return new Promise(resolve => {
       const timer = setTimeout(() => settle(undefined), deadline);

@@ -12,6 +12,8 @@ import {
   type ClaudeStreamMessage,
 } from '../adapters/claude/projection';
 import { RuntimeExecutionFailure } from '../runtime-failure';
+import { ClaudeStreamSession } from '../adapters/claude/stream-session';
+import { memoryClaude } from './fixtures/memory-claude';
 
 async function tmpWorkspace(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-events-test-'));
@@ -556,6 +558,32 @@ describe('Claude context window reserved for S4', () => {
       'api-model': { contextWindow: 200000 },
       'group/claude[1m]': { contextWindow: 1000000 },
     }, 'group/claude[1m]')).toBe(1000000);
+  });
+  it('the session reads the window of the root init model, not a subagent init model', async () => {
+    const claude = memoryClaude();
+    const stream = new ClaudeStreamSession(claude.child as never);
+    await stream.open({ env: {}, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
+    claude.send({ type: 'system', subtype: 'init', model: 'root-model', session_id: 'session-1' });
+    claude.send({ type: 'system', subtype: 'init', model: 'child-model', session_id: 'session-1', parent_tool_use_id: 'toolu_task' });
+    claude.send({ type: 'result', subtype: 'success', is_error: false, usage: {},
+      modelUsage: { 'child-model': { contextWindow: 200000 }, 'root-model': { contextWindow: 1000000 } } });
+    expect(stream.contextWindow).toBe(1000000);
+    expect(await stream.sessionRef).toBe('session-1');
+  });
+  it('elides old frame payloads past the retention budget while the session runs and every frame is read whole', async () => {
+    const claude = memoryClaude();
+    const stream = new ClaudeStreamSession(claude.child as never);
+    const read: number[] = [];
+    await stream.open({ env: {}, mcpServers: {}, onFrame: frame => { read.push(JSON.stringify(frame).length); }, onExit: () => {}, onAppRequest: () => {} });
+    expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
+    const text = 'x'.repeat(7 * 1024 * 1024);
+    for (const id of ['a', 'b', 'c']) claude.send({ type: 'assistant', message: { id, role: 'assistant', content: [{ type: 'text', text }] } });
+    const frames = stream.raw.records().filter(record => record.kind === 'frame') as unknown as Array<{ body: { native: unknown; elided?: true } }>;
+    expect(frames[0]!.body).toMatchObject({ native: null, elided: true });
+    expect(frames.at(-1)!.body.native).not.toBeNull();
+    expect(read.every(length => length > text.length)).toBe(true);
+    expect((await stream.raw.prompt('busy')).response.body).toMatchObject({ kind: 'rejected', code: 'busy' });
   });
   it('traverses values and leaves inconsistent or invalid windows unknown', () => {
     expect(

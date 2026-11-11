@@ -1,4 +1,3 @@
-// BYOK change: Modified from OAR ac7fde4 to mark a failure class taken from error text (Apache-2.0).
 import type { UtcInstant } from "../../contracts/account-usage.js";
 import type { FailedTurn, FailureClass } from "../../contracts/session.js";
 import { anthropicLimitText, failureFromStatus } from "../../shared/failure-class.js";
@@ -112,8 +111,5 @@ export function claudeFailure(reason: string, facts: ClaudeFailureFacts): Failed
     return failed("unknown");
   }
   // A 400 with no category of its own: Anthropic's spend limit says so only in words.
-  // BYOK change: that class came from a text rule, so it is marked `fromText`.
-  const spendLimit = status === 400 ? anthropicLimitText(reason) : null;
-  if (spendLimit !== null) { return { ...failed(spendLimit), fromText: true }; }
-  return failed(status === 400 ? "invalid_request" : failureFromStatus(status));
+  return failed(status === 400 ? anthropicLimitText(reason) ?? "invalid_request" : failureFromStatus(status));
 }
