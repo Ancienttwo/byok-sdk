@@ -2319,8 +2319,9 @@ export declare const E2eeMemberChainEntrySchema: z.ZodObject<{
     sig: z.ZodString;
 }, z.core.$strict>;
 export type E2eeMemberChainEntry = z.infer<typeof E2eeMemberChainEntrySchema>;
-/** One scope key wrapped to one member's KEM key of `recipientKemEpoch` (§7.4, §77a). A put takes version 2 only. */
+/** One scope key wrapped to one member's KEM key of `recipientKemEpoch` (§7.4, §77a). */
 export declare const E2eeScopeKeyPackageV2Schema: z.ZodObject<{
+    v: z.ZodLiteral<2>;
     tenantId: z.ZodString;
     scopeId: z.ZodString;
     epoch: z.ZodNumber;
@@ -2330,34 +2331,22 @@ export declare const E2eeScopeKeyPackageV2Schema: z.ZodObject<{
     enc: z.ZodString;
     ciphertext: z.ZodString;
     sig: z.ZodString;
-    v: z.ZodLiteral<2>;
     recipientKemEpoch: z.ZodNumber;
 }, z.core.$strict>;
-/** A stored package as a read returns it: version 1 from before `e2ee.member.kem-epoch`, version 2 after. */
-export declare const E2eeScopeKeyPackageSchema: z.ZodUnion<readonly [z.ZodObject<{
-    v: z.ZodLiteral<1>;
-    tenantId: z.ZodString;
-    scopeId: z.ZodString;
-    epoch: z.ZodNumber;
-    keyId: z.ZodString;
-    recipient: z.ZodString;
-    sender: z.ZodString;
-    enc: z.ZodString;
-    ciphertext: z.ZodString;
-    sig: z.ZodString;
-}, z.core.$strict>, z.ZodObject<{
-    tenantId: z.ZodString;
-    scopeId: z.ZodString;
-    epoch: z.ZodNumber;
-    keyId: z.ZodString;
-    recipient: z.ZodString;
-    sender: z.ZodString;
-    enc: z.ZodString;
-    ciphertext: z.ZodString;
-    sig: z.ZodString;
+/** A stored package as a read returns it. Version 2 is the only version (#1789). */
+export declare const E2eeScopeKeyPackageSchema: z.ZodObject<{
     v: z.ZodLiteral<2>;
+    tenantId: z.ZodString;
+    scopeId: z.ZodString;
+    epoch: z.ZodNumber;
+    keyId: z.ZodString;
+    recipient: z.ZodString;
+    sender: z.ZodString;
+    enc: z.ZodString;
+    ciphertext: z.ZodString;
+    sig: z.ZodString;
     recipientKemEpoch: z.ZodNumber;
-}, z.core.$strict>]>;
+}, z.core.$strict>;
 export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
 /** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */
 export declare const E2eePairingMacSchema: z.ZodString;

@@ -297,6 +297,8 @@ Stop the daemon of the previous version before you upgrade such a store. A new C
 
 `openScopeKeyPackage` refuses a version 1 scope key package with `key_package_invalid` (#1789). Every package must name the recipient's KEM epoch as `recipientKemEpoch`, and the recipient opens it only with that KEM key. `ScopeKeyPackageV1` is no longer exported, and `ScopeKeyPackage` is `ScopeKeyPackageV2`. SDK writers have sealed only version 2 since 0.30.2, and a 0.30.2 or later Host refuses a version 1 put. A device no longer re-wraps a version 1 package during a KEM rotation, because core cannot open it.
 
+The Host read shape narrows too: `E2eeScopeKeyPackageSchema` in `@byok-sdk/protocol` is now the version 2 shape. The put path is unchanged; it already took version 2 only. A Host read that meets one stored version 1 row fails the whole read (every package of that scope or page) with `e2ee_member_state_unreadable`, not only that package.
+
 Only a Host that served `e2ee.member` on 0.30.0 or 0.30.1, or stored packages sealed by 0.29.0 core, can hold a version 1 row. Before upgrading, run this count on every Host store:
 
 - Postgres: `SELECT count(*) FROM e2ee_scope_key_package WHERE (package::jsonb)->>'v' = '1'`
