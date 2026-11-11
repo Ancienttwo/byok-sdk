@@ -11,7 +11,7 @@ import { AGENT_MEMORY_MAX_FILE_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEM
 import { AGENT_HOME_DIRECTORY, AgentHomeManager } from '../agent-home';
 import { AGENT_MEMORY_RECOVERY } from '../daemon/agent-memory-commit';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
-import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
+import { AgentMemorySnapshotLimitError, isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import { resolveAgentMemoryMcpBin } from '../daemon/resolve-agent-memory-mcp-bin';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
@@ -192,7 +192,7 @@ describe('Agent memory guidance', () => {
 
 // #614 follow-ups: the guidance follows `agentMemoryMcp`, and a reader gets no write tool.
 // `withHelperBin: false` under `auto` leaves out the memory MCP helper, which is admission `unavailable`.
-async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mcpToolsets = true, withHelperBin = true, sealedTasks?: TaskRunnerDeps['sealedTasks']) {
+async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mcpToolsets = true, withHelperBin = true, sealedTasks?: TaskRunnerDeps['sealedTasks'], copy: () => Promise<void> = async () => {}) {
   const hostStorageRoot = await makeRoot();
   const storeDir = await makeRoot();
   const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets });
@@ -202,7 +202,7 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-memory-admission',
-    agentMemoryCommit: { copy: async () => {}, refusal: async () => undefined, settle: async () => {} },
+    agentMemoryCommit: { copy, refusal: async () => undefined, settle: async () => {} },
     ...(sealedTasks === undefined ? {} : { sealedTasks }),
     send: (envelope) => { sent.push(envelope); },
     blobClient: {
@@ -318,6 +318,16 @@ describe('Agent memory at task start', () => {
     await fs.writeFile(path.join(home, 'MEMORY.md'), 'x'.repeat(8193));
     await offer('sealed-refused', { agentId: 'agent-sealed' });
     expect(failureOf('sealed-refused')?.payload).toMatchObject({ retryable: false, failure: { class: 'unknown' } });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('sends the unknown class when the commit copy of a sealed-output task is refused', async () => {
+    const sealed = { isSealed: () => true, sealsOutput: () => true, sealsMessages: () => false, sealsInput: () => false, sealsOutbound: () => false };
+    const copy = async () => { throw new AgentMemorySnapshotLimitError('files', 'too many files'); };
+    const { adapter, offer, failureOf, prepareHome } = await createMemoryRunner('auto', true, true, sealed as unknown as TaskRunnerDeps['sealedTasks'], copy);
+    await prepareHome('agent-sealed-copy');
+    await offer('sealed-copy-refused', { agentId: 'agent-sealed-copy', agentMemoryCommit: 'on-success' });
+    expect(failureOf('sealed-copy-refused')?.payload).toMatchObject({ retryable: false, failure: { class: 'unknown' } });
     expect(adapter.startCalls).toHaveLength(0);
   });
 });
