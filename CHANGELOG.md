@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (cloud-dataplane tests; #1815)** — The mailbox-wake and task-events-wake suites mint a fresh tenant and device id per test instead of reusing shared constants, and the raw task-events channel test counts only its own two hashes (the committed one exactly once, the rolled-back one never). `byok_mailbox_wake` and `byok_task_events_wake` are database-wide, so a sibling test file running in another schema could reach this file's listener and fail the exact-count assertion. No product behavior changes.
+
 - **Fixed (client; #1774)** — A task runner reducer dispatch that rejects now fails the task's open terminal receipt through `TaskRunnerHost.dispatchOrReject` instead of being dropped; with no open receipt (not yet begun or already settled) the rejection is logged. An event that `JSON.stringify` cannot serialize now fails the task through the event pump instead of counting as 0 bytes toward `maxTaskOutputBytes`.
 
 - **Fixed (client; #1774)** — The journal's storage measurement (`measureUsage`) returns 0 only for a missing file or directory (an absent WAL/SHM or quarantine). Any other stat or readdir error now rejects the measurement, which the retention sweeper already records as `measurement_failed`, instead of reading as a small healthy journal.
