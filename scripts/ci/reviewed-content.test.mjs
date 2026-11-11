@@ -1073,7 +1073,7 @@ test('root CI composition admits only the exact helper and prefix, retaining the
 
 test('new graph-registered private workspaces and matching lock rows are admitted; unregistered additions fail', t => {
   const f = fixture(t);
-  for (const id of ['protocol', 'server']) {
+  for (const id of ['protocol', 'server', 'keys']) {
     const manifest = { name: `@byok-sdk/${id}`, version: '0.28.0' };
     f.write(`packages/${id}/package.json`, manifest); f.lock.workspaces[`packages/${id}`] = manifest;
   }
@@ -1108,11 +1108,18 @@ test('new graph-registered private workspaces and matching lock rows are admitte
   const { devDependencies: { electron, '@electron/fuses': fuses }, ...shape } = JSON.parse(readFileSync(new URL(`../../${desktop}/package.json`, import.meta.url), 'utf8'));
   const app = { ...shape, devDependencies: { electron, '@electron/fuses': fuses } };
   f.write(`${desktop}/package.json`, app);
-  f.lock.workspaces[desktop] = { name: app.name, version: app.version, devDependencies: app.devDependencies };
+  f.lock.workspaces[desktop] = { name: app.name, version: app.version, dependencies: app.dependencies, devDependencies: app.devDependencies };
   f.lock.packages[app.name] = [`${app.name}@workspace:${desktop}`];
   f.lock.packages.electron = ['electron@45.3.0', '', {}, 'sha512-x'];
   f.write('bun.lock', f.lock);
   assert.ok(selectImpact([`${desktop}/package.json`, 'bun.lock'], f).dirs.includes(desktop));
   f.write(`${desktop}/package.json`, { ...app, devDependencies: { ...app.devDependencies, electron: '45.3.1' } });
   assert.throws(() => selectImpact([`${desktop}/package.json`], f), /reuse a base dependency spec \(electron\)/);
+  // #1805: the existing desktop example, on base without them, adds exactly its reviewed @byok-sdk workspace edges.
+  const { dependencies: edges, ...edgeless } = app;
+  f.write(`${desktop}/package.json`, edgeless); rebase(f, 'desktop example without workspace edges');
+  f.write(`${desktop}/package.json`, app);
+  assert.ok(selectImpact([`${desktop}/package.json`], f).dirs.includes(desktop));
+  f.write(`${desktop}/package.json`, { ...app, dependencies: { ...edges, '@byok-sdk/protocol': 'workspace:*' } });
+  assert.throws(() => selectImpact([`${desktop}/package.json`], f), /edges differ from reviewed graph/);
 });

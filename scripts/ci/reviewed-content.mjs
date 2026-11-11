@@ -199,6 +199,35 @@ function verifyRegisteredPrivateManifest(manifest, dir, { base, cwd, workspaceGr
   return manifest;
 }
 
+/**
+ * #1805: an existing graph-registered private example may add `@byok-sdk/*`
+ * edges with spec `workspace:*`, and nothing else. The added edges are taken
+ * out of `after`, so the final comparison still refuses any other change, and
+ * the whole new manifest must pass the registered-workspace check.
+ */
+function admitRegisteredPrivateEdges(before, after, path, context) {
+  const dir = path.slice(0, -'/package.json'.length);
+  if (!/^examples\/[^/]+\/package\.json$/.test(path) || !context.workspaceGraph?.[dir]
+    || PRIVATE_HOSTED.some(example => example.dir === dir) || before.private !== true) return [];
+  let added = false;
+  for (const field of DEPENDENCY_FIELDS) {
+    if (!plain(after[field])) continue;
+    for (const [name, spec] of Object.entries(after[field])) {
+      if (before[field]?.[name] !== undefined || !name.startsWith('@byok-sdk/') || spec !== 'workspace:*') continue;
+      delete after[field][name];
+      added = true;
+    }
+    if (before[field] === undefined && Object.keys(after[field]).length === 0) delete after[field];
+  }
+  if (!added) return [];
+  try {
+    verifyRegisteredPrivateManifest(JSON.parse(readFileSync(resolve(context.cwd, path), 'utf8')), dir, context);
+  } catch (error) {
+    throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields (${error.message})`);
+  }
+  return [dir];
+}
+
 /** Returns the admitted workspace records too: their dependencies declare the lock rows they add. */
 function admitRegisteredPrivateLock(before, after, context) {
   const added = [], records = [];
@@ -529,6 +558,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     }
     delete before.version; delete after.version;
   }
+  // After every dedicated admission, so an edge a branch above already reviewed is not taken here.
+  qualify.push(...admitRegisteredPrivateEdges(before, after, path, { base, cwd, workspaceGraph }));
   if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields`);
   return { dirs: qualify };
 }
