@@ -12,7 +12,7 @@ import { submitModelRoute, type SubmitOutcome } from './submit.ts';
 const ERROR_COPY: Readonly<Record<ModelRouteErrorCode, string>> = {
   required: 'Required.',
   invalid_value: 'This value is not valid.',
-  invalid_url: 'Enter a valid https URL.',
+  invalid_url: 'Use an https URL (http only for localhost) with no user name, password, query or fragment, and no private-network address.',
   not_a_choice: 'Pick one of the listed values.',
   adapter_auth_mismatch: 'This adapter does not accept that auth mode.',
   vendor_adapter_mismatch: 'This provider does not use that adapter.',
@@ -58,7 +58,8 @@ function ModelInput({ view, draft, onChange }: { view: ModelRouteFieldView; draf
       {choices.length > 0 && (
         <select value={picked ? key(picked.value, picked.api) : ''} onChange={event => {
           const choice = choices.find(entry => key(entry.value, entry.api) === event.target.value);
-          if (choice) onChange({ field: 'model', value: choice.value, api: choice.api });
+          // "Other model…" clears the pick: an id typed below that the list does not hold makes the route manual.
+          onChange(choice ? { field: 'model', value: choice.value, api: choice.api } : { field: 'model', value: '' });
         }}>
           <option value="">Other model…</option>
           {choices.map(choice => (
@@ -172,17 +173,20 @@ export function KeysSection() {
     <div className="keys">
       <form key={formKey} className="keys-form" onSubmit={event => { event.preventDefault(); if (view.valid && !busy) void submit(); }}>
         <h1>Add a model provider</h1>
-        {view.fields.filter(field => field.visible).map(field => {
-          const body = (
-            <>
-              {LABELS[field.field]}{field.required ? ' *' : ''}
-              <FieldInput view={field} draft={draft} onChange={onChange} />
-              <FieldError view={field} />
-            </>
-          );
-          // The capability checkboxes carry their own labels, which a label may not contain.
-          return field.field === 'capabilities' ? <fieldset key={field.field}>{body}</fieldset> : <label key={field.field}>{body}</label>;
-        })}
+        {/* Disabled while a submission is in flight: its result replaces the draft. */}
+        <fieldset className="keys-fields" disabled={busy}>
+          {view.fields.filter(field => field.visible).map(field => {
+            const body = (
+              <>
+                {LABELS[field.field]}{field.required ? ' *' : ''}
+                <FieldInput view={field} draft={draft} onChange={onChange} />
+                <FieldError view={field} />
+              </>
+            );
+            // The capability checkboxes carry their own labels, which a label may not contain.
+            return field.field === 'capabilities' ? <fieldset key={field.field}>{body}</fieldset> : <label key={field.field}>{body}</label>;
+          })}
+        </fieldset>
         <button type="submit" disabled={busy || !view.valid}>Save</button>
       </form>
       {outcome && ('receipt' in outcome ? <Receipt status={outcome.receipt} /> : <p className="keys-error" role="alert">{outcome.error}</p>)}

@@ -10,3 +10,4 @@
 .keys-receipt { border: 1px solid var(--color-accent); border-radius: var(--radius); padding: var(--space-2) var(--space-3); }
 .keys-receipt dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: 0; }
 .keys-receipt dd { margin: 0; }
+.keys-form .keys-fields { display: flex; flex-direction: column; gap: var(--space-2); border: 0; margin: 0; padding: 0; }
