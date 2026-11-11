@@ -7,8 +7,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { HostProcess, type SupervisedHostState } from '../main/host-process.ts';
 import { coalesceStateHints } from '../main/state-hint.ts';
 import { BridgeClient, type HostChild } from './client.ts';
-import { BRIDGE_VERSION, BridgeError, encodeMessage } from './protocol.ts';
-import { createRendererRouter } from './route.ts';
+import { rendererBridge } from '../renderer/bridge.ts';
+import { BRIDGE_VERSION, BridgeError, encodeMessage, type BridgeIpc } from './protocol.ts';
+import { CustodyError } from '../custody/protocol.ts';
+import { createRendererRouter, isAppRefusal, settleCall } from './route.ts';
 import { serveBridge } from './server.ts';
 
 /** A domain as a `src/bridge/domains/` module declares one; `test.reset` is not on the renderer allowlist. */
@@ -134,6 +136,23 @@ describe('desktop bridge', () => {
     expect(() => route('test.reset', undefined)).toThrow('bridge_method_refused');
     expect(host).not.toHaveBeenCalled();
     expect(await route('test.echo', { text: 'hi' })).toEqual({ method: 'test.echo', params: { text: 'hi' } });
+  });
+
+  it('delivers a refused call to the renderer as an error with the refusing handler\'s code', async () => {
+    const route = createRendererRouter<TestMethods, never>({ allowed: ['test.echo', 'test.boom'], main: {}, host: async (method, params) => {
+      if (method === 'test.boom') throw params;
+      if ((params as { text?: unknown }).text === undefined) throw new BridgeError('invalid_params', 'test.echo needs a text');
+      return params;
+    } });
+    // Main's IPC handler and the preload, without Electron: every call crosses as a BridgeOutcome.
+    const ipc: BridgeIpc = { invoke: (method, params) => settleCall(() => route(method, params), isAppRefusal), onStateChanged: () => () => {} };
+    const bridge = rendererBridge(ipc) as unknown as { call(method: string, params: unknown): Promise<unknown> };
+    expect(await bridge.call('test.echo', { text: 'hi' })).toEqual({ text: 'hi' });
+    await expect(bridge.call('test.echo', {})).rejects.toMatchObject({ name: 'BridgeCallError', code: 'invalid_params', message: 'test.echo needs a text' });
+    await expect(bridge.call('test.boom', new CustodyError('keys_store_refused', 'store refused'))).rejects.toMatchObject({ code: 'keys_store_refused' });
+    // Only the app's own codes cross: a Node error's code, or a thrown non-error, is method_failed.
+    await expect(bridge.call('test.boom', Object.assign(new Error('no such file'), { code: 'ENOENT' }))).rejects.toMatchObject({ code: 'method_failed', message: 'no such file' });
+    await expect(bridge.call('test.boom', null)).rejects.toMatchObject({ code: 'method_failed', message: 'null' });
   });
 
   it('turns a burst of Host state changes into one renderer hint, after which status reads the new state', async () => {

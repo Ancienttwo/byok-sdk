@@ -1,0 +1,16 @@
+.keys { display: flex; flex-direction: column; gap: var(--space-3); max-width: 640px; }
+.keys-form { display: flex; flex-direction: column; gap: var(--space-2); }
+.keys-form label, .keys-form fieldset { display: flex; flex-direction: column; gap: var(--space-1); }
+.keys-form fieldset { border: 1px solid var(--color-border); border-radius: var(--radius); }
+.keys-form input, .keys-form select, .keys-form textarea { width: 100%; box-sizing: border-box; font: inherit; }
+.keys-checks { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.keys-checks label { flex-direction: row; align-items: center; }
+.keys-checks input { width: auto; }
+.keys-field-error, .keys-error { color: var(--color-danger); }
+.keys-receipt { border: 1px solid var(--color-accent); border-radius: var(--radius); padding: var(--space-2) var(--space-3); }
+.keys-receipt dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: 0; }
+.keys-receipt dd { margin: 0; }
+.keys-form .keys-fields { display: flex; flex-direction: column; gap: var(--space-2); border: 0; margin: 0; padding: 0; }
+.keys-stored ul { list-style: none; margin: 0 0 var(--space-2); padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.keys-stored li button { width: 100%; text-align: left; font: inherit; }
+.keys-stored li button[aria-current="true"] { outline: 2px solid var(--color-accent); }

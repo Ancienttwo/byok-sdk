@@ -16,7 +16,7 @@ import { policy } from './k4-fixtures.test-support.js';
 
 /**
  * #1325: a running L Host for the routine and delivery vectors, built only from published packages, so a Host that
- * vendors K8 runs them too. It is the `externalCore` branch of K4's `openHost`: the caller drives its own core on the
+ * installs the package runs them too. It is the `externalCore` branch of K4's `openHost`: the caller drives its own core on the
  * returned ledger, so the fixture creates none. The daemon admits only the `policyRevision` of the vectors' `template`,
  * so both come from `./k4-fixtures.test-support` (#1845).
  */

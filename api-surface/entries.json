@@ -1,9 +1,464 @@
 {
+  "@byok-sdk/bot-collaboration": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
+      "budgetBytes": 2722876,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": true
+      }
+    },
+    "facts": {
+      "target": "packages/bot-collaboration/dist/index.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/bot-collaboration/dist/index.d.ts"
+      ],
+      "bareImports": [
+        "@byok-sdk/client",
+        "@byok-sdk/core",
+        "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/system-tool",
+        "@byok-sdk/protocol",
+        "@byok-sdk/protocol/agent-memory",
+        "@byok-sdk/protocol/constants",
+        "@byok-sdk/server/execution-core",
+        "@byok-sdk/server/execution-core/canonical",
+        "@cfworker/json-schema",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/client/validators/cf-worker",
+        "async_hooks",
+        "crypto",
+        "fs",
+        "node:child_process",
+        "node:crypto",
+        "node:fs",
+        "node:fs/promises",
+        "node:http",
+        "node:https",
+        "node:module",
+        "node:net",
+        "node:os",
+        "node:path",
+        "node:stream",
+        "node:url",
+        "node:util",
+        "node:zlib",
+        "path",
+        "zod"
+      ],
+      "lazyImports": [
+        "#byok-acp-runtime",
+        "#byok-pi-runtime-host",
+        "@earendil-works/chord/context",
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite/node",
+        "koffi",
+        "node:http"
+      ],
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "eventsource",
+        "eventsource-parser",
+        "pkce-challenge",
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "async_hooks",
+          "crypto",
+          "fs",
+          "node:child_process",
+          "node:crypto",
+          "node:fs",
+          "node:fs/promises",
+          "node:http",
+          "node:https",
+          "node:module",
+          "node:net",
+          "node:os",
+          "node:path",
+          "node:stream",
+          "node:url",
+          "node:util",
+          "node:zlib",
+          "path"
+        ],
+        "thirdParty": [
+          "node:crypto"
+        ]
+      },
+      "codegen": [
+        {
+          "file": "@modelcontextprotocol/client/dist/ajvProvider-BIwGVY6G.mjs",
+          "line": 2594,
+          "rule": "Function constructor"
+        },
+        {
+          "file": "zod/v4/core/compile.js",
+          "line": 180,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 33,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 228,
+          "rule": "Function reference"
+        }
+      ]
+    }
+  },
+  "@byok-sdk/bot-collaboration/host-kit": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "K8 modules a Host adapter composes; Worker-loadable, no @byok-sdk/client",
+      "budgetBytes": 606664,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/bot-collaboration/dist/host-kit.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/bot-collaboration/dist/host-kit.d.ts"
+      ],
+      "bareImports": [
+        "@byok-sdk/core",
+        "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/protocol",
+        "@byok-sdk/protocol/agent-memory",
+        "@byok-sdk/protocol/constants",
+        "@byok-sdk/server/execution-core",
+        "@byok-sdk/server/execution-core/canonical",
+        "@cfworker/json-schema",
+        "async_hooks",
+        "crypto",
+        "fs",
+        "path",
+        "zod"
+      ],
+      "lazyImports": [],
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "async_hooks",
+          "crypto",
+          "fs",
+          "path"
+        ],
+        "thirdParty": []
+      },
+      "codegen": [
+        {
+          "file": "zod/v4/core/compile.js",
+          "line": 180,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 33,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 228,
+          "rule": "Function reference"
+        }
+      ]
+    }
+  },
+  "@byok-sdk/bot-collaboration/package.json": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Package metadata",
+      "budgetBytes": 2086,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": false,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/bot-collaboration/package.json",
+      "conditions": [],
+      "types": [],
+      "bareImports": [],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
+  "@byok-sdk/bot-collaboration/rules": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "K8 pure rules; Worker-safe, no node:sqlite",
+      "budgetBytes": 243777,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/bot-collaboration/dist/rules/index.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/bot-collaboration/dist/rules/index.d.ts"
+      ],
+      "bareImports": [
+        "@byok-sdk/protocol",
+        "@byok-sdk/server/execution-core/canonical",
+        "@cfworker/json-schema",
+        "crypto",
+        "zod"
+      ],
+      "lazyImports": [],
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "crypto"
+        ],
+        "thirdParty": []
+      },
+      "codegen": [
+        {
+          "file": "zod/v4/core/compile.js",
+          "line": 180,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 33,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 228,
+          "rule": "Function reference"
+        }
+      ]
+    }
+  },
+  "@byok-sdk/bot-collaboration/testing": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "K8 shared vectors and L test Host",
+      "budgetBytes": 3179616,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": true
+      }
+    },
+    "facts": {
+      "target": "packages/bot-collaboration/dist/testing.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/bot-collaboration/dist/testing.d.ts"
+      ],
+      "bareImports": [
+        "@byok-sdk/client",
+        "@byok-sdk/cloud",
+        "@byok-sdk/core",
+        "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/system-tool",
+        "@byok-sdk/protocol",
+        "@byok-sdk/protocol/agent-memory",
+        "@byok-sdk/protocol/constants",
+        "@byok-sdk/server",
+        "@byok-sdk/server/execution-core",
+        "@byok-sdk/server/execution-core/canonical",
+        "@cfworker/json-schema",
+        "@hono/node-server",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/client/validators/cf-worker",
+        "async_hooks",
+        "child_process",
+        "crypto",
+        "fs",
+        "fs/promises",
+        "hono",
+        "http",
+        "node:child_process",
+        "node:crypto",
+        "node:fs",
+        "node:fs/promises",
+        "node:http",
+        "node:https",
+        "node:module",
+        "node:net",
+        "node:os",
+        "node:path",
+        "node:stream",
+        "node:url",
+        "node:util",
+        "node:zlib",
+        "os",
+        "path",
+        "readline",
+        "vitest",
+        "zod"
+      ],
+      "lazyImports": [
+        "#byok-acp-runtime",
+        "#byok-pi-runtime-host",
+        "@earendil-works/chord/context",
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable/storage/sqlite/node",
+        "koffi",
+        "node:http"
+      ],
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "@hono/node-server",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "chai",
+        "eventsource",
+        "eventsource-parser",
+        "expect-type",
+        "hono",
+        "pkce-challenge",
+        "tinybench",
+        "vite",
+        "vitest",
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "async_hooks",
+          "child_process",
+          "crypto",
+          "fs",
+          "fs/promises",
+          "http",
+          "node:child_process",
+          "node:crypto",
+          "node:fs",
+          "node:fs/promises",
+          "node:http",
+          "node:https",
+          "node:module",
+          "node:net",
+          "node:os",
+          "node:path",
+          "node:stream",
+          "node:url",
+          "node:util",
+          "node:zlib",
+          "os",
+          "path",
+          "readline"
+        ],
+        "thirdParty": [
+          "node:crypto",
+          "node:http",
+          "node:http2",
+          "node:stream"
+        ]
+      },
+      "codegen": [
+        {
+          "file": "@modelcontextprotocol/client/dist/ajvProvider-BIwGVY6G.mjs",
+          "line": 2594,
+          "rule": "Function constructor"
+        },
+        {
+          "file": "vite/dist/node/module-runner.js",
+          "line": 824,
+          "rule": "opaque import()"
+        },
+        {
+          "file": "vitest/dist/chunks/index.CZzC1gGg.js",
+          "line": 1475,
+          "rule": "Function reference"
+        },
+        {
+          "file": "vitest/dist/chunks/index.CZzC1gGg.js",
+          "line": 1488,
+          "rule": "Function reference"
+        },
+        {
+          "file": "vitest/dist/chunks/index.CZzC1gGg.js",
+          "line": 2565,
+          "rule": "Function reference"
+        },
+        {
+          "file": "vitest/dist/chunks/rawSnapshot.DqSiqIEx.js",
+          "line": 85,
+          "rule": "Function constructor"
+        },
+        {
+          "file": "zod/v4/core/compile.js",
+          "line": 180,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 33,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 228,
+          "rule": "Function reference"
+        }
+      ]
+    }
+  },
   "@byok-sdk/client": {
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2397829,
+      "budgetBytes": 2396731,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2130,7 +2585,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2389146,
+      "budgetBytes": 2388048,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

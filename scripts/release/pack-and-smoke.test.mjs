@@ -104,7 +104,7 @@ test('release graph requires keys to carry the release train version', (t) => {
 
   const aligned = runGraph(releaseVersion);
   assert.equal(aligned.status, 0, aligned.stderr);
-  assert.match(aligned.stdout, /\[release-graph\] OK: published set is exactly 9 packages at /);
+  assert.match(aligned.stdout, /\[release-graph\] OK: published set is exactly 10 packages at /);
 
   const split = runGraph('0.13.1');
   assert.equal(split.status, 1);

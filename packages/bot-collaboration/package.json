@@ -1,20 +1,52 @@
 {
   "name": "@byok-sdk/bot-collaboration",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.41.0",
+  "description": "K8 Bot collaboration for BYOK Hosts: the local Host, the modules a Host composes, the pure rules and shared test vectors, on the K4 execution core.",
   "type": "module",
-  "description": "K8 Bot collaboration on the K4 Host execution core",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./host-kit": { "types": "./dist/host-kit.d.ts", "import": "./dist/host-kit.js" },
-    "./rules": { "types": "./dist/rules/index.d.ts", "import": "./dist/rules/index.js" },
-    "./testing": { "types": "./dist/testing.d.ts", "import": "./dist/testing.js" },
-    "./package.json": "./package.json"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ancienttwo/byok-sdk.git",
+    "directory": "packages/bot-collaboration"
+  },
+  "bugs": {
+    "url": "https://github.com/Ancienttwo/byok-sdk/issues"
+  },
+  "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
+  "engines": {
+    "node": ">=24.22.1"
   },
   "sideEffects": false,
-  "engines": { "node": ">=24.15.0" },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./host-kit": {
+      "types": "./dist/host-kit.d.ts",
+      "import": "./dist/host-kit.js"
+    },
+    "./rules": {
+      "types": "./dist/rules/index.d.ts",
+      "import": "./dist/rules/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -26,7 +58,25 @@
     "@byok-sdk/protocol": "workspace:*",
     "@byok-sdk/server": "workspace:*"
   },
-  "peerDependencies": { "@hono/node-server": "^2.1.3", "vitest": "^5.1.0" },
-  "peerDependenciesMeta": { "@hono/node-server": { "optional": true }, "vitest": { "optional": true } },
-  "devDependencies": { "@byok-sdk/cloud": "workspace:*", "@byok-sdk/core": "workspace:*", "@byok-sdk/example-host-execution-core": "workspace:*", "@hono/node-server": "^2.1.3", "@types/node": "^24", "typescript": "^7.0.2", "vitest": "^5.1.0" }
+  "peerDependencies": {
+    "@hono/node-server": "^2.1.3",
+    "vitest": "^5.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@hono/node-server": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@byok-sdk/cloud": "workspace:*",
+    "@byok-sdk/core": "workspace:*",
+    "@byok-sdk/example-host-execution-core": "workspace:*",
+    "@hono/node-server": "^2.1.3",
+    "@types/node": "^24",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
 }

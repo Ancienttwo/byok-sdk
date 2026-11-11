@@ -1,4 +1,4 @@
-/** One import scanner for the #606 §5.5 rules boundary and the vendor manifest (#886). */
+/** The import scanner for the #606 §5.5 rules boundary. */
 export interface ImportRow { from: string; names?: string[] }
 
 /** Drops comments, so a scan sees code and not prose about code. */

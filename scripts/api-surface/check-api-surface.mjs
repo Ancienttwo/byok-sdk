@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { checkEntryClosure } from './entry-closure.mjs';
 
 const PACKAGES = [
+  'bot-collaboration',
   'client',
   'cloud',
   'cloud-dataplane',

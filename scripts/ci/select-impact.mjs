@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { verifyReviewedContent, changedApiOwners } from './reviewed-content.mjs';
+import { verifyReviewedContent, changedApiOwners, publicManifests } from './reviewed-content.mjs';
 import { documentationChecks } from './documentation-checks.mjs';
 import { resolveScriptChecks, scriptTestInputs } from './script-test-inputs.mjs';
 
@@ -577,10 +577,6 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
-    // #1845 S2: K8 moved from examples/bot-collaboration; a deleted old path selects the package at its new home.
-    if (path.startsWith('examples/bot-collaboration/') && !existsSync(resolve(context.cwd ?? process.cwd(), path))) {
-      dirs.add('packages/bot-collaboration'); continue;
-    }
     if (path === 'package.json' || path === 'bun.lock' || /^(?:packages|examples)\/[^/]+\/package\.json$/.test(path)) {
       // A reviewed dependency move also runs the suites of the workspaces that declare it.
       const impact = verifyReviewedContent(path, context);
@@ -757,6 +753,10 @@ export function selectImpact(paths, context = {}) {
       || path === 'templates/service/README.md'
       || /^examples\/byok-mcp-server\/docs\/[a-z0-9-]+\.md$/.test(path)) continue;
 
+    // A published package's LICENSE ships in its tarball; the release pack checks it equals the root LICENSE.
+    if (/^packages\/[^/]+\/LICENSE$/.test(path) && publicManifests.includes(path.replace(/LICENSE$/, 'package.json'))) {
+      families.add('npm-release-pack'); continue;
+    }
     if (path === 'scripts/ci/run-windows-bot-tests.mjs') {
       families.add('adapter-lifecycle-smoke'); continue;
     }

@@ -37,6 +37,7 @@ const packages = [
   '@byok-sdk/cloud-dataplane',
   '@byok-sdk/cloud-do',
   '@byok-sdk/ui-runtime',
+  '@byok-sdk/bot-collaboration',
   '@byok-sdk/keys',
 ];
 const expectedPackageVersions = Object.fromEntries(

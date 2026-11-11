@@ -194,13 +194,18 @@ Use the old Host's existing `await byok.tasks.offer(candidate.task_id)` to perfo
 
 No Host configuration change is required (#1632). OpenCode now advertises `mcpToolsets: true` and passes an admitted task's Host MCP servers through ACP on session open and resume. A Host may offer configured toolsets to OpenCode using the existing toolset selection. The loopback contract exercised OpenCode 1.19.5 and 2.2.6 on macOS arm64 and Windows x64. OpenCode v2 still refuses Agent `memory-reader` tasks because its session-local appended instruction channel is unqualified.
 
-## Bot collaboration vendoring
+## Bot collaboration is a package
 
-Hosts that vendor K8 must also copy `src/adapter-steps.ts` in Layer 2 (#1664). The local and hosted adapters use it for terminal routing, synchronous Host intent handling and Bot outcome port assembly. The hosted example now exports K8's `IntentOutcomeError` class; use that shared class for `instanceof` checks.
+K8 is published as `@byok-sdk/bot-collaboration` (#1845), on the same version as the other SDK packages. Vendoring K8 is no longer a supported route: delete the copied source, its provenance record and the copy script, and install the package at the SDK version you install. Its runtime dependencies are `@byok-sdk/protocol`, `@byok-sdk/server` and `@byok-sdk/client`. `vitest` and `@hono/node-server` are optional peers, needed only for `./testing`.
 
-Layer 3 no longer needs a module of your own for K4 test data (#1845). Copy `src/k4-fixtures.test-support.ts` with the vectors and drop whatever you resolved `@byok-sdk/example-host-execution-core/test-support` to: the `policy` constant and the `template(deviceId, agentId)` function are K8's own copy now, and the vectors read them from there. Nothing else in the layer changed, and the returned template is the same value, so a ledger and a daemon fixture behave as before.
+Map your imports to the four entries (see the entry table in the [package README](../../packages/bot-collaboration/README.md#entries)):
 
-K8 now lives at `packages/bot-collaboration` (#1845), as the private package `@byok-sdk/bot-collaboration`. A vendoring Host copies from that path and records it with the tag; the file list in `src/VENDOR.md` adds the entry barrels `src/host-kit.ts`, `src/rules/index.ts` and `src/testing.ts`, and three test-only helpers move under `src/__tests__/`. A Host that imported example subpaths maps them to the four entries: `.` for the L Host (`BotCollaboration`, `botCompactVeto`, the persona projection, `teamSnapshot`), `./host-kit` for the L modules it composes, which a Worker can bundle, `./rules` for the remaining pure rules, which load without `node:sqlite`, and `./testing` for the vectors and the L test Host. See the entry table in the package README.
+- `.`: the L Host: `BotCollaboration` and its option types, `botCompactVeto`, `createBotPersonaProjection`, and `teamSnapshot` with its errors. Node only.
+- `./host-kit`: the L modules a Host adapter composes (model, channel, delivery, routines, team, migration, retention, dreaming, adapter steps, commit, switch), including `CollaborationState`, `Turn`, `RetentionRefused`, `IntentOutcomeError` and `migrateWouldDo`. It never loads `@byok-sdk/client`, so a Worker can bundle it.
+- `./rules`: the remaining pure rules. They load only `@byok-sdk/protocol` and `@byok-sdk/server/execution-core/canonical`, so they need no `node:sqlite`.
+- `./testing`: the shared vectors, the L test Host, and the K4 test data `policy` and `template(deviceId, agentId)`.
+
+Names that the copied source exposed but no entry exports are not public; a Host that needs one opens an issue. K8 changes are listed under the regular `Breaking`, `Added` and `Changed` entries of `CHANGELOG.md` from this release on.
 
 H vendors also receive one outbox projection row per stored inbound destination from sync; an unchanged destination reuses its projection row (#1664 PR-3b).
 
@@ -318,7 +323,7 @@ A Bot reply is now visible only when its Turn's outcome committed: iff the Turn'
 - Persisted format: no migration and no schema change. L stores the new state in its ledger JSON. H stores it in the `delivery` entity JSON, which has no CHECK on `state`; H inserts a delivery's `outbox` row only when the delivery is promoted, so a staged or withheld delivery has none. `STORE_VERSION` is unchanged. A reply delivery that is already `pending` before the upgrade is still sent once; every reply accepted after it is staged.
 - Operator step for hosted (H) Hosts: stop every old H process before a new one starts. In a rolling deploy, an old worker's `finish` has no promotion, so a reply that a new worker staged stays staged after its intent concluded `succeeded`, and a new worker's sync then withholds it as `outcome_not_applied`. A mixed deploy can drop such a reply; it never shows a reply early.
 - A Turn that runs past its reply route token answers through the conversation's active push route, with a new delivery id, or not at all: its reply delivery is rejected `reply_route_expired`, or no delivery is queued when the token had already expired at acceptance. Before, a reply sent mid-Turn usually still had its token.
-- Operator step for vendoring Hosts: a Host that shows or uploads replies from `replies` must skip a reply unless `core.intent(turnId)` has `conclusion === 'succeeded'` and `taskId` equal to the reply's task id. For example, AiphaBee adds this check to its `k8RootUploads`. Until a Host adds it, its own upload still shows a reply before the outcome commits; K8's channel no longer does. A Host with a channel takes K8's delivery state as the authority, because the conclusion check alone passes a message that K4 accepted after a `succeeded` conclusion (see VENDOR.md). See [Reply visibility](../../packages/bot-collaboration/src/VENDOR.md#reply-visibility).
+- Operator step for Hosts on K8: a Host that shows or uploads replies from `replies` must skip a reply unless `core.intent(turnId)` has `conclusion === 'succeeded'` and `taskId` equal to the reply's task id. For example, AiphaBee adds this check to its `k8RootUploads`. Until a Host adds it, its own upload still shows a reply before the outcome commits; K8's channel no longer does. A Host with a channel takes K8's delivery state as the authority, because the conclusion check alone passes a message that K4 accepted after a `succeeded` conclusion. See [Reply visibility](../../packages/bot-collaboration/README.md#reply-visibility).
 
 ## K4 transaction rows and required command store capabilities
 
@@ -338,7 +343,7 @@ A would-do row gains a required `turnId`: the Turn whose outcome proposed the ac
 
 Operator step, once per store, before the new code serves:
 
-- Local (L) Host: run `migrateWouldDo(ledger)` on each ledger. A vendoring Host, such as AiphaBee, runs it on each device ledger.
+- Local (L) Host: run `migrateWouldDo(ledger)` on each ledger. A Host such as AiphaBee runs it on each device ledger.
 - Hosted (H) Host: run `HostedCollaborationStore.migrate()` on each schema. It now returns `{ wouldDoBackfilled, wouldDoArchived }`.
 
 The migration fills `turnId` from the K4 task id `taskId(turnId, generation)` of each live Turn intent: L checks every generation of the intent, H joins `intent` and `intent_execution`. A row whose intent was already compacted, or whose Turn already left the state, cannot be linked to a Turn. It moves to the `wouldDo` archived rows and is counted in `archived` (L) or `wouldDoArchived` (H). Those rows are settled history, never read by a Turn; the count is how many rows leave the would-do feed early. Record it. A second run returns zeros.
