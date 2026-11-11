@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "e3bae2b266eba2295c7db08c52d0a270d0c7e771d9851ed0d4aafa8a2095e1e4"
+    "snapshotSha256": "0e328723ecce13148e319f54c693c57e658258d29541d2de3f6d6c0582ab47b3"
   },
   "configFields": {
     "status": "tracked",
@@ -283,6 +283,17 @@
       ]
     },
     {
+      "id": "daemon-when-task-settled",
+      "impact": "additive",
+      "summary": "Daemon.whenTaskSettled(taskId, { signal }) resolves DaemonTaskSettlement (terminal, delivery, disposal) once the terminal's first outbound settlement was published locally and the runtime owner reported its first disposal outcome; disposal is failed exactly when runtime-disposal-failed was emitted and none when the daemon holds no runtime for the task, including every task settled before a restart. A task with no journal row and no in-memory record rejects with the new DaemonTaskUnknownError (daemon_task_unknown). The Daemon member is required, so a Host test double typed as Daemon adds it (#1838).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#per-task-settlement-awaitable",
+      "items": [
+        "export:@byok-sdk/client#DaemonTaskSettlement",
+        "export:@byok-sdk/client#DaemonTaskTerminal",
+        "export:@byok-sdk/client#DaemonTaskUnknownError"
+      ]
+    },
+    {
       "id": "testing-in-memory-device-credential-backend",
       "impact": "additive",
       "summary": "@byok-sdk/client/testing exports InMemoryDeviceCredentialBackend, a DeviceCredentialBackend held in memory for a Host's tests. A Host that hand-rolls a memory backend injects this one as deviceCredentials; no runtime Host change is required. The host-execution-core example's tests import it instead of the repo's removed scripts/testing helper.",
@@ -422,6 +433,21 @@
       "item": "export:@byok-sdk/client#DaemonOverrides",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonTaskSettlement",
+      "change": "added",
+      "entry": "daemon-when-task-settled"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonTaskTerminal",
+      "change": "added",
+      "entry": "daemon-when-task-settled"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonTaskUnknownError",
+      "change": "added",
+      "entry": "daemon-when-task-settled"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
