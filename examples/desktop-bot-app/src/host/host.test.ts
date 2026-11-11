@@ -5,11 +5,12 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { DatabaseSync } from 'node:sqlite';
 import { PassThrough } from 'node:stream';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { inspectProviderProfileStore, parseModelProviderProfile, SqliteProviderProfileStore } from '@byok-sdk/keys';
+import { createByokServer } from '@byok-sdk/server';
 import { BRIDGE_VERSION, encodeMessage, type HostState } from '../bridge/protocol.ts';
-import { composeHost, type HostCompositionOptions } from './compose.ts';
+import { composeHost, lateServerConsumers, type HostCompositionOptions } from './compose.ts';
 import { precheckHostStores } from './precheck.ts';
 import { superviseHost } from './supervise.ts';
 
@@ -72,6 +73,18 @@ describe('desktop Host composition', () => {
     await makeRoot();
     const config = { ...options(), sdkHosting: { assetRoot: root, helperHost: { mode: 'self-executable' as const } } };
     await expect(composeHost(config)).rejects.toMatchObject({ name: 'HostStoppedError', message: expect.stringMatching(/^SDK hosting assets missing under /) });
+  });
+
+  it('holds a wake that is due before the consumers bind, and delivers it once they do', async () => {
+    const late = lateServerConsumers();
+    const server = createByokServer({ productId: 'byok-desktop-test', storage: { kind: 'memory' }, wake: late.wake, agentMessage: late.agentMessage });
+    await server.wakes.schedule({ dedupKey: 'due', availableAt: Date.now() });
+    await vi.waitFor(async () => expect((await server.wakes.pending())[0]?.state).toBe('delivering'));
+    const consume = vi.fn(async () => {});
+    late.bind({ consume, consumeMessage: async () => { throw new Error('no message expected'); } });
+    await vi.waitFor(async () => expect(await server.wakes.pending()).toEqual([]));
+    expect(consume).toHaveBeenCalledWith(expect.objectContaining({ dedupKey: 'due', delivery: 1 }), expect.any(AbortSignal));
+    await server.close();
   });
 
   it('migrates a 0.41.0 keys store before any store opens', async () => {

@@ -8,8 +8,9 @@ const BUSY_REREAD_MS = 1500;
 
 /**
  * Reads the conversation view, and again on every Host state hint (the Host pushes one when the view changed) and,
- * while some Bot is busy, after {@link BUSY_REREAD_MS}. A failed read shows its error over the last view; the next
- * hint or `reload` reads again.
+ * while some Bot is busy, after {@link BUSY_REREAD_MS}. One read runs at a time: a hint during a read asks for one
+ * more read after it, so a stream of hints still shows each finished read. A failed read shows its error over the last
+ * view; the next hint or `reload` reads again.
  */
 export function useConversation(botId: string | null): { loaded: Loaded | undefined; reload: () => void } {
   const [loaded, setLoaded] = useState<Loaded>();
@@ -17,23 +18,42 @@ export function useConversation(botId: string | null): { loaded: Loaded | undefi
   const reload = useCallback(() => setGeneration(value => value + 1), []);
   const last = useRef<ConversationSnapshot | undefined>(undefined);
 
-  useEffect(() => window.byok.onStateChanged(reload), [reload]);
   useEffect(() => {
     let stopped = false;
-    let again: ReturnType<typeof setTimeout> | undefined;
-    window.byok.call('k8.view', { botId }).then(snapshot => {
-      if (stopped) return;
-      last.current = snapshot;
-      setLoaded({ snapshot });
-      if (snapshot.busy) again = setTimeout(reload, BUSY_REREAD_MS);
-    }, (error: Error) => {
-      if (!stopped) setLoaded({ ...(last.current ? { snapshot: last.current } : {}), error: error.message });
-    });
+    let reading = false;
+    let again = false;
+    let busyTimer: ReturnType<typeof setTimeout> | undefined;
+    const read = async () => {
+      if (reading) {
+        again = true;
+        return;
+      }
+      reading = true;
+      clearTimeout(busyTimer);
+      try {
+        let snapshot: ConversationSnapshot;
+        do {
+          again = false;
+          snapshot = await window.byok.call('k8.view', { botId });
+          if (stopped) return;
+          last.current = snapshot;
+          setLoaded({ snapshot });
+        } while (again);
+        if (snapshot.busy) busyTimer = setTimeout(() => void read(), BUSY_REREAD_MS);
+      } catch (error) {
+        if (!stopped) setLoaded({ ...(last.current ? { snapshot: last.current } : {}), error: (error as Error).message });
+      } finally {
+        reading = false;
+      }
+    };
+    const unsubscribe = window.byok.onStateChanged(() => void read());
+    void read();
     return () => {
       stopped = true;
-      clearTimeout(again);
+      clearTimeout(busyTimer);
+      unsubscribe();
     };
-  }, [botId, generation, reload]);
+  }, [botId, generation]);
   return { loaded, reload };
 }
 
