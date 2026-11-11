@@ -14,6 +14,11 @@ export function hostEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS
 
 /** Packaged mode: the SEA Host (scripts/package/bundle-host.mjs --format sea) in resources/host/, outside the asar. */
 export function spawnPackagedHost(): HostChild {
+  return spawnPackagedHostCommand([]);
+}
+
+/** The packaged SEA Host re-entered with argv, such as the keys custody command. */
+export function spawnPackagedHostCommand(args: readonly string[]): HostChild {
   const executable = path.join(process.resourcesPath, 'host', process.platform === 'win32' ? 'host.exe' : 'host');
-  return spawn(executable, [], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, env: hostEnvironment() });
+  return spawn(executable, [...args], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true, env: hostEnvironment() });
 }
