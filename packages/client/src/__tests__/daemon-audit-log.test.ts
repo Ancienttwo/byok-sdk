@@ -87,6 +87,13 @@ describe('daemon/audit-log: appendAuditRecord / readAuditRecords', () => {
     expect(await readLastEnvironmentRecord(storeDir)).toEqual({ ts: '2026-01-01T00:00:01.000Z', status: { source: 'login-shell', shell: 'zsh', durationMs: 5 } });
   });
 
+  it.skipIf(process.platform === 'win32')('readLastLifecycleRecord: a missing log is undefined, an unreadable one throws', async () => {
+    const storeDir = await tmpDir('byok-audit-last-unreadable-');
+    expect(await readLastLifecycleRecord(storeDir)).toBeUndefined();
+    await fs.symlink(path.join(storeDir, 'elsewhere'), auditLogPath(storeDir));
+    await expect(readLastLifecycleRecord(storeDir)).rejects.toMatchObject({ code: 'ELOOP' });
+  });
+
   it('round-trips audit-safe runtime disposal evidence', async () => {
     const storeDir = await tmpDir('byok-audit-runtime-disposal-');
     const event: DaemonRecord = {

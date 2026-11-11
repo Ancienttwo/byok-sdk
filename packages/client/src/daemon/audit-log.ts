@@ -379,7 +379,9 @@ export async function readAuditRecords(storeDir: string): Promise<DaemonRecord[]
 
 /**
  * The most recent record `pick` accepts, or `undefined` when there is none,
- * no log, or the log is not a regular file. Opened non-blocking and without
+ * no log (ENOENT), or the log is not a regular file. Any other open error
+ * (EACCES, ELOOP from a planted symlink) throws: an unreadable log is not an
+ * empty one. Opened non-blocking and without
  * following a symlink: `doctor`, `service-status` and the support bundle
  * call this, and must not hang on a FIFO planted at the path.
  */
@@ -387,8 +389,9 @@ async function readLastRecord<T>(storeDir: string, pick: (record: DaemonRecord) 
   let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
     handle = await fs.open(auditLogPath(storeDir), fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0));
-  } catch {
-    return undefined;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
   }
   let raw: string;
   try {
