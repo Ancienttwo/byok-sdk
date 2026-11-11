@@ -2454,7 +2454,7 @@ jobs:
           {
             echo '### Desktop Linux packages and the sandbox'
             sudo apt-get install -y -qq "$PWD/$(ls "$out"/*.deb | head -1)" > /dev/null
-            bin="$(dpkg -L byok-desktop-bots 2>/dev/null | grep -E '/byok-desktop-bots$' | head -1)"
+            bin="$(dpkg -L byok-desktop-bots | grep -E '^/opt/.+/byok-desktop-bots$')"
             echo "deb executable: $bin"
             stat -c 'chrome-sandbox %a %U' "$(dirname "$bin")/chrome-sandbox"
             for target in deb appimage; do
