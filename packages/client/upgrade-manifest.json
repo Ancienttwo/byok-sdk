@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "ee8ec988771db5e6dbf32e12d348e87df103ee20fb3f1b256a5c6305d87db63c"
+    "snapshotSha256": "26901f8b00dce3516ec5beff611b9e8bbb2015ef25702dbe726317131e97aa20"
   },
   "configFields": {
     "status": "tracked",
@@ -141,8 +141,8 @@
     },
     {
       "id": "offer-selection-rules",
-      "impact": "additive",
-      "summary": "@byok-sdk/protocol exports offerSelectionViolation, OfferSelectionRule and OfferSelectionViolation. TaskDeclineCode and the plaintext and sealed task.decline code enums gain agent_memory_selection_invalid, runtime_selection_mismatch and harness_selection_conflict, which the daemon now sends on its offer selection declines; an older Host reads them as unknown with reportedCode. A Host offer schema issue carries params.rule, and a payload that breaks several rules reports only the first.",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol exports offerSelectionViolation, OfferSelectionRule and OfferSelectionViolation. TaskDeclineCode and the plaintext and sealed task.decline code enums gain agent_memory_selection_invalid, runtime_selection_mismatch and harness_selection_conflict, which the daemon now sends on its offer selection declines; an older Host reads them as unknown with reportedCode. A Host offer schema issue carries params.rule, and a payload that breaks several rules reports only the first. Breaking: @byok-sdk/cloud now refuses an offer whose custom harness the device did not advertise with agent_capability_missing instead of coordination_input_invalid (same message); a Host that branches on coordination_input_invalid for that refusal must branch on agent_capability_missing.",
       "migration": "docs/releases/host-upgrade-next-minor.md#offer-selection-rules",
       "items": [
         "export:@byok-sdk/protocol#OfferSelectionRule",
@@ -386,6 +386,11 @@
     },
     {
       "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+      "change": "changed",
+      "entry": "offer-selection-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
       "change": "changed",
       "entry": "offer-selection-rules"
     },
