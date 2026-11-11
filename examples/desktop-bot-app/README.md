@@ -37,7 +37,8 @@ to stderr only.
   kills a Host that answers with another version. There is no negotiation.
 - Main forwards a renderer call only from the main frame of its own window on
   `app://renderer`, and only for methods in `RENDERER_METHODS`. `hello` and
-  `shutdown` are main's alone. Params are validated once, in the Host.
+  `shutdown` are main's alone. Params are validated once, by the handler that answers
+  the method: the Host's, or main's for a `main` domain method.
 - The Host pushes `{ "event": "state" }` lines (no id) after every change: `starting`,
   `running` with its active work count, or `stopped` with a reason.
 - Domains add methods without editing the bridge. A domain declares its methods
@@ -47,7 +48,10 @@ to stderr only.
   domain lists as `main` is answered by main (`src/main/domains.ts`) and never reaches
   the Host. Handlers validate their own params and refuse them with `invalid_params`;
   that error, or a failing handler (`method_failed`), answers only the one call. Domain
-  methods exist only while the Host runs; before that they are `unknown_method`.
+  methods exist only while the Host runs; before that, and once shutdown begins, they are
+  `unknown_method`. Shutdown waits for domain calls in flight before the domains close.
+  Methods are named `<domain>.<verb>` by type, and a method two handlers answer refuses
+  the composition.
 - On quit, main sends `shutdown`. The app exits 0 only when the Host acknowledged it
   and exited 0; a Host still running after 10 s is killed and the app exits 1.
 

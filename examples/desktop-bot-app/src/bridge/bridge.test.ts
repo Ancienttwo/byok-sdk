@@ -14,6 +14,7 @@ import { serveBridge } from './server.ts';
 interface TestMethods {
   'test.echo': { params: { text: string }; result: { text: string } };
   'test.reset': { params: undefined; result: null };
+  'test.boom': { params: undefined; result: null };
 }
 
 // Dev mode: the Host child runs under plain Node, as main spawns it.
@@ -91,7 +92,7 @@ describe('desktop bridge', () => {
     expect((await exited)[1]).toBe('SIGTERM');
   });
 
-  it('answers a domain method through the Host bridge, and a refused param answers only that call', async () => {
+  it('answers a domain method through the Host bridge; a refused param or a failing handler answers only that call', async () => {
     const input = new PassThrough();
     const output = new PassThrough();
     const replies = createInterface({ input: output })[Symbol.asyncIterator]();
@@ -106,6 +107,7 @@ describe('desktop bridge', () => {
           return { text };
         },
         'test.reset': () => null,
+        'test.boom': () => { throw new Error('boom'); },
       },
     }, { input, output });
 
@@ -115,6 +117,8 @@ describe('desktop bridge', () => {
     expect(await next()).toEqual({ id: 2, result: { text: 'hi' } });
     input.write(encodeMessage({ id: 3, method: 'test.echo', params: {} }));
     expect(await next()).toEqual({ id: 3, error: { code: 'invalid_params', message: 'test.echo needs a text' } });
+    input.write(encodeMessage({ id: 6, method: 'test.boom' }));
+    expect(await next()).toEqual({ id: 6, error: { code: 'method_failed', message: 'boom' } });
     input.write(encodeMessage({ id: 4, method: 'test.other' }));
     expect(await next()).toMatchObject({ id: 4, error: { code: 'unknown_method' } });
     input.write(encodeMessage({ id: 5, method: 'shutdown' }));

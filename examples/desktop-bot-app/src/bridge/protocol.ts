@@ -5,6 +5,7 @@
  * there is no negotiation. Main sends requests; the Host sends replies and
  * `state` pushes, which carry no id.
  */
+import type { Prefixed } from './domain.ts';
 import { ACTIVITY_DOMAIN, type ActivityMethods } from './domains/activity.ts';
 import { K8_DOMAIN, type K8Methods } from './domains/k8.ts';
 import { KEYS_DOMAIN, type KeysMethods } from './domains/keys.ts';
@@ -36,9 +37,11 @@ export interface CoreMethods {
 
 /**
  * Every bridge method with its params and result: the core methods and each
- * domain's (`src/bridge/domains/`). A name two modules declare fails to compile.
+ * domain's (`src/bridge/domains/`). A domain method not named `<domain>.<verb>`
+ * fails to compile, so no two modules can declare one name.
  */
-export interface BridgeMethods extends CoreMethods, K8Methods, ActivityMethods, SettingsMethods, KeysMethods {}
+export interface BridgeMethods extends CoreMethods, Prefixed<K8Methods, 'k8'>, Prefixed<ActivityMethods, 'activity'>,
+  Prefixed<SettingsMethods, 'settings'>, Prefixed<KeysMethods, 'keys'> {}
 export type BridgeMethod = keyof BridgeMethods;
 
 const DOMAINS = [K8_DOMAIN, ACTIVITY_DOMAIN, SETTINGS_DOMAIN, KEYS_DOMAIN] as const;
@@ -47,7 +50,7 @@ const DOMAINS = [K8_DOMAIN, ACTIVITY_DOMAIN, SETTINGS_DOMAIN, KEYS_DOMAIN] as co
 export const RENDERER_METHODS = ['status', ...DOMAINS.flatMap(domain => domain.renderer), ...DOMAINS.flatMap(domain => domain.main)] as const satisfies readonly BridgeMethod[];
 export type RendererMethod = 'status' | (typeof DOMAINS)[number]['renderer'][number] | MainMethod;
 
-/** The renderer methods main answers without the Host. */
+/** The renderer methods main answers without the Host; the Host refuses a handler for one. */
 export const MAIN_METHODS: readonly MainMethod[] = DOMAINS.flatMap(domain => domain.main);
 export type MainMethod = (typeof DOMAINS)[number]['main'][number];
 

@@ -12,6 +12,13 @@ export interface MethodSpec { readonly params: unknown; readonly result: unknown
 export type MethodTable<M> = { readonly [K in keyof M]: MethodSpec };
 
 /**
+ * `M` itself when every method is named `<prefix>.<verb>`, `never` otherwise,
+ * so an interface extending it fails to compile. Distinct prefixes keep two
+ * domains, and the core methods, from declaring the same name.
+ */
+export type Prefixed<M, P extends string> = keyof M extends `${P}.${string}` ? M : never;
+
+/**
  * The renderer allowlist of one domain. `renderer` methods are forwarded to the
  * Host; `main` methods are answered by main and never reach the Host. A method
  * in neither list is reachable only from main's own code.
@@ -29,3 +36,18 @@ export interface BridgeDomain<M extends MethodTable<M>> {
 export type MethodHandlers<M extends MethodTable<M>> = {
   readonly [K in keyof M]: (params: unknown) => M[K]['result'] | Promise<M[K]['result']>;
 };
+
+/**
+ * Joins handler maps. A method two maps answer refuses the composition: no
+ * handler silently replaces another, the core `status` included.
+ */
+export function joinHandlers(...maps: readonly object[]): Record<string, (params: unknown) => unknown> {
+  const joined: Record<string, (params: unknown) => unknown> = {};
+  for (const map of maps) {
+    for (const [name, handler] of Object.entries(map)) {
+      if (Object.hasOwn(joined, name)) throw new Error(`Bridge method ${name} has two handlers`);
+      joined[name] = handler as (params: unknown) => unknown;
+    }
+  }
+  return joined;
+}

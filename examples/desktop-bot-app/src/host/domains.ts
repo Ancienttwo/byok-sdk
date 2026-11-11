@@ -6,8 +6,8 @@
  */
 import type { Daemon, DaemonConfig } from '@byok-sdk/client';
 import type { ByokServer } from '@byok-sdk/server';
-import type { MethodHandlers, MethodTable } from '../bridge/domain.ts';
-import type { HostMethods } from '../bridge/protocol.ts';
+import { joinHandlers, type MethodHandlers, type MethodTable } from '../bridge/domain.ts';
+import { MAIN_METHODS, type HostMethods, type MainMethod } from '../bridge/protocol.ts';
 import { createActivityDomain } from './activity/domain.ts';
 import { createK8Domain } from './k8/domain.ts';
 import { createKeysDomain } from './keys/domain.ts';
@@ -22,9 +22,10 @@ export interface HostContext {
   readonly hostStorageRoot: string;
 }
 
-/** One domain on the Host: its handlers, and what it closes before the daemon stops. */
+/** One domain on the Host: a handler for each of its methods that main does not answer, and what it closes before the daemon stops. */
 export interface HostDomain<M extends MethodTable<M>> {
-  readonly handlers: MethodHandlers<M>;
+  readonly handlers: MethodHandlers<Omit<M, MainMethod>>;
+  /** Runs after every domain call in flight has settled; no new call reaches the domain once shutdown began. */
   close?(): Promise<void>;
 }
 
@@ -34,27 +35,44 @@ export interface ComposedDomains {
   close(): Promise<void>;
 }
 
-/** Creates every domain in order; a domain that fails to start closes the ones before it, then the failure propagates. */
+/** Closes every domain, last created first; then throws the first failure, or all of them. */
+async function closeAll(domains: readonly { close?(): Promise<void> }[]): Promise<void> {
+  const failures: unknown[] = [];
+  for (const domain of [...domains].reverse()) {
+    try {
+      await domain.close?.();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, 'Bridge domains failed to close');
+}
+
+/**
+ * Creates every domain in order. A domain that fails to start closes the ones
+ * before it, then the failure propagates. A method two domains answer, or a
+ * Host handler for a method main answers, refuses the composition.
+ */
 export async function composeDomains(context: HostContext): Promise<ComposedDomains> {
   const opened: { close?(): Promise<void> }[] = [];
-  const close = async () => {
-    for (const domain of opened.reverse()) await domain.close?.();
-  };
   const open = async <M extends MethodTable<M>>(create: (context: HostContext) => Promise<HostDomain<M>>) => {
     const domain = await create(context);
     opened.push(domain);
     return domain.handlers;
   };
   try {
-    const handlers = {
-      ...await open(createK8Domain),
-      ...await open(createActivityDomain),
-      ...await open(createSettingsDomain),
-      ...await open(createKeysDomain),
-    };
-    return { handlers, close };
+    const handlers = joinHandlers(
+      await open(createK8Domain),
+      await open(createActivityDomain),
+      await open(createSettingsDomain),
+      await open(createKeysDomain),
+    );
+    const misplaced = MAIN_METHODS.find(name => Object.hasOwn(handlers, name));
+    if (misplaced) throw new Error(`Bridge method ${misplaced} is answered by main, not the Host`);
+    return { handlers: handlers as ComposedDomains['handlers'], close: () => closeAll(opened) };
   } catch (error) {
-    await close();
+    await closeAll(opened);
     throw error;
   }
 }
