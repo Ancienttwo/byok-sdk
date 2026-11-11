@@ -135,8 +135,9 @@ export interface ModelRouteContext {
 
 /**
  * A context over the pinned Pi catalog. A policy that lists one vendor, api
- * and model in two Host entries, or a Host entry whose model id a profile
- * cannot hold, is a Host programming error and throws.
+ * and model in two Host entries, a Host entry whose model id a profile cannot
+ * hold, or one whose `default_thinking_level` its config does not support, is
+ * a Host programming error and throws.
  */
 export function modelRouteContext(input: {
   readonly stored?: ModelRouteStoredProfile | null;

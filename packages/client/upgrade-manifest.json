@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "bb7d0ed20282f0d5a7d651d154f695a9725cc1854d2f34bb3434e4842a8067f1"
+    "snapshotSha256": "53bd9c0597b6e798595c3f91acc8be364154671cce27676609f69185a883d03e"
   },
   "configFields": {
     "status": "tracked",
@@ -259,6 +259,15 @@
         "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
         "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
         "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema"
+      ]
+    },
+    {
+      "id": "model-route-host-entry-default-thinking-level",
+      "impact": "additive",
+      "summary": "ModelRouteHostEntry accepts an optional default_thinking_level that a draft takes when the entry is selected. modelRouteContext throws when the level is not one the entry's config supports; an entry without the field behaves as before.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-model-route-entries-can-declare-a-default-thinking-level",
+      "items": [
+        "export:@byok-sdk/keys/model-route#ModelRouteHostEntry"
       ]
     }
   ],
@@ -688,6 +697,11 @@
       "item": "export:@byok-sdk/keys/model-route#MODEL_PROVIDER_VENDORS",
       "change": "changed",
       "entry": "opencode-go-keys-store"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteHostEntry",
+      "change": "changed",
+      "entry": "model-route-host-entry-default-thinking-level"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentHomeProjectionPayloadSchema",
