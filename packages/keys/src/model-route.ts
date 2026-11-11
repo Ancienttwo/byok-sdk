@@ -1,7 +1,9 @@
 import { PI_MODEL_CATALOG } from './pi-model-catalog.generated';
 import type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog';
+import { piApiOf } from './pi-api';
 import {
   PI_MODEL_APIS,
+  PI_OPENAI_COMPATIBLE_APIS,
   PiModelConfigSchema,
   piSupportedThinkingLevels,
   type PiModelApi,
@@ -261,7 +263,7 @@ export function createModelRouteDraft(context: ModelRouteContext): ModelRouteDra
     thinking_level: thinkingLevel,
     secret: stored.secret_configured && profile.auth_mode !== 'none' ? 'keep' : 'none',
   };
-  const api: PiModelApi = profile.adapter === 'anthropic' ? 'anthropic-messages' : storedPi?.api ?? 'openai-completions';
+  const api = piApiOf(profile.adapter, storedPi?.api);
   const choice = modelChoices(draft, context).find((entry) => entry.value === profile.model && entry.api === api);
   // A catalog or Host selection submits the entry's own capabilities, so a stored
   // profile whose capabilities differ stays manual and keeps them.
@@ -610,10 +612,9 @@ function hostListing(entry: ModelRouteHostEntry, vendor: ModelProviderVendor): P
     }
   }
   if (config !== undefined && Object.hasOwn(config, 'thinkingLevel')) paths.add('thinkingLevel');
-  const projected = adapter === 'anthropic'
-    ? (config?.api === undefined ? 'anthropic-messages' : undefined)
-    : config?.api ?? 'openai-completions';
-  if (projected !== entry.api) paths.add('api');
+  // A declared api outside the schema's set is already an `api` parse issue.
+  const declared = PI_OPENAI_COMPATIBLE_APIS.find((api) => api === config?.api);
+  if (piApiOf(adapter, declared) !== entry.api) paths.add('api');
   if (!parsed.success || paths.size > 0) {
     return { model: entry.model, api: entry.api, status: 'unrepresentable', unrepresentable: [...paths].sort() };
   }

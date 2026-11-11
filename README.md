@@ -499,10 +499,10 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1542 B |
 | `@byok-sdk/core/sealed-payload` | Sealed payload v1 byte rules | `zod` | allowed | 161025 B |
 | `@byok-sdk/core/system-tool` | Trusted system tools for Node hosts | — | forbidden | 1968 B |
-| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 244562 B |
-| `@byok-sdk/keys/model-route` | Headless Pi model route: choices, linkage, field errors and submission | `zod` | allowed | 307348 B |
+| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 244565 B |
+| `@byok-sdk/keys/model-route` | Headless Pi model route: choices, linkage, field errors and submission | `zod` | allowed | 307435 B |
 | `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1607 B |
-| `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 280428 B |
+| `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 280489 B |
 | `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 149348 B |
 | `@byok-sdk/protocol/agent-memory` | Agent memory Host contract; schema-free | — | forbidden | 1418 B |
 | `@byok-sdk/protocol/constants` | Schema-free protocol values | — | forbidden | 8574 B |
@@ -520,7 +520,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `bin:byok-agent-team-mcp` | Agent team MCP helper | — | forbidden | 46091 B |
 | `bin:byok-pi-durable` | Pi durable launcher; host loads lazily | — | forbidden | 405 B |
 | `bin:byok-pi-prepared` | Pi prepared launcher; host loads lazily | — | forbidden | 470 B |
-| `bin:byok-pi-provider-launcher` | Provider credential custody launcher | `zod` | allowed | 181070 B |
+| `bin:byok-pi-provider-launcher` | Provider credential custody launcher | `zod` | allowed | 181073 B |
 | `bin:byok-pi-rpc` | Pi RPC launcher; host loads lazily | — | forbidden | 450 B |
 
 <!-- END generated: api-surface/entries.json -->

@@ -34,6 +34,7 @@ describe('@byok-sdk/keys/model-route entry boundary', () => {
     expect(closure.modules).toEqual([
       'errors.ts',
       'model-route.ts',
+      'pi-api.ts',
       'pi-model-catalog.generated.ts',
       'pi-model-config.ts',
       'pi-runtime-defaults.generated.ts',

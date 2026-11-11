@@ -7,6 +7,7 @@ import {
   type ModelProviderVendorId,
 } from './provider-catalog';
 import { normalizeProviderUrl } from './url';
+import { piApiOf } from './pi-api';
 import {
   PI_ANTHROPIC_PROFILE_COMPAT_KEYS,
   PI_COMPAT_KEYS_BY_API,
@@ -191,16 +192,15 @@ export function providerProfileRouteIssues(
         : 'OpenAI-compatible providers support bearer or no authentication',
     });
   }
-  if (route.adapter === 'anthropic' && route.pi_model?.api !== undefined) {
+  if (piApiOf(route.adapter, route.pi_model?.api) === undefined) {
     issues.push({
       path: ['pi_model', 'api'],
       message: 'Anthropic profiles project anthropic-messages and declare no Pi api',
     });
   }
   if (route.pi_model !== undefined && route.pi_model.api === undefined) {
-    const [admitted, api] = route.adapter === 'anthropic'
-      ? [PI_ANTHROPIC_PROFILE_COMPAT_KEYS, 'anthropic-messages']
-      : [PI_COMPAT_KEYS_BY_API['openai-completions'], 'openai-completions'];
+    const api = piApiOf(route.adapter);
+    const admitted = api === 'anthropic-messages' ? PI_ANTHROPIC_PROFILE_COMPAT_KEYS : PI_COMPAT_KEYS_BY_API[api];
     for (const issue of piCompatIssues(route.pi_model.compat, admitted, api)) {
       issues.push({ path: ['pi_model', ...issue.path], message: issue.message });
     }
@@ -225,6 +225,7 @@ export function providerProfileRouteIssues(
  */
 export const ModelProviderProfileSchema = z
   .object({
+    // Field order is persisted format: the Truth store refuses a record not in this canonical order.
     adapter: z.enum(MODEL_PROVIDER_ADAPTERS),
     auth_mode: z.enum(PROVIDER_AUTH_MODES),
     base_url: providerBaseUrl,
