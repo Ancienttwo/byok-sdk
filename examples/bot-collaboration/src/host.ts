@@ -12,12 +12,13 @@ import { json, stateOf, type CollaborationState, type Turn, type Verdict } from 
 import { contextTurns, DEFAULT_HANDOFF_BUDGETS, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
-import { delegationCancelAnswer, turnCancelAnswer, type CancelOutcome, type DelegationCancelResult, type TurnCancelResult } from './rules/delegation';
-import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, replyCheckDue, reportCardDecisions,
-  commandBots, type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
+import { delegationCancelAnswer, hostIntentCancelAnswer, HostIntentError, turnCancelAnswer, type DelegationCancelResult, type IntentCancelResult,
+  type TurnCancelResult } from './rules/delegation';
+import { checkReply, collaborationDue, CONNECTOR_OUTCOME_UNKNOWN, replyCheckDue, reportCardDecisions,
+  commandBots, type Command, type CommandPorts, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
 import { hostMessageDisposition, type MessageDisposition } from './rules/message';
-import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, writeLedger, type CommitResult } from './commit';
+import { callCardsInLedger, CommitConflict, commitInLedger, commitInRows, retainInLedger, syncTurnInLedger, writeLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_DREAM, BOT_ROUTINE, botRoutines, endable, owned, routineCalendar, routineTurn,
   ownerRoutineUpdate, updateDefinition, type BotRoutineInput } from './routines';
@@ -166,21 +167,8 @@ export interface BotOptions {
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
 /** Synchronous. A throw rolls the message transaction back, and a thenable or another result throws. */
 export type HostIntentMessageHandler = (input: AgentMessageInput, transaction: MessageTransaction) => MessageDisposition;
-/**
- * A refused intent key. `cancelHostIntent` (#1320): `unknown_intent` as in `IntentOutcomeError`, or `not_host_intent` for a Bot
- * Turn. `failStuckIntent` (#1405): `unknown_intent` for a key with no K4 intent, `already_settled`, or `not_stuck` for an intent
- * whose terminal K8 did not refuse.
- */
-export class HostIntentError extends Error {
-  constructor(readonly key: string, readonly code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck', message: string) {
-    super(message); this.name = 'HostIntentError';
-  }
-}
-/**
- * `cancelled`: the intent was not submitted and settled as `cancelled`. `cancel_pending`: the SDK cancel went out, and K4
- * settles the intent at its terminal. `already_settled`: no cancel was sent; `conclusion` is the earlier one.
- */
-export interface HostIntentCancelResult { key: string; result: CancelOutcome; conclusion?: Conclusion }
+/** The cancel answer of a Host intent (K8 `IntentCancelResult`). */
+export type HostIntentCancelResult = IntentCancelResult<Conclusion>;
 function hostIntent(state: CollaborationState, key: string): { handler: string } | undefined {
   return state.hostIntents && Object.hasOwn(state.hostIntents, key) ? state.hostIntents[key] : undefined;
 }
@@ -355,7 +343,7 @@ export class BotCollaboration {
         // the new owner schedules the routine's wakes on its own SDK.
         admitBot(state, (run.input as BotRoutineInput).owner);
         refuseExported(state);
-        this.commitCallback(state, run.occurrenceKey, { kind: 'occurrence', key: run.occurrenceKey },
+        this.commitCallback(state, tx.rows, run.occurrenceKey, { kind: 'occurrence', key: run.occurrenceKey },
           { publish: tx.publish, occurrence: () => routineTurn(state, run) });
       }, [BOT_DREAM]: (run, tx) => {
         const state = stateOf(tx.application);
@@ -551,7 +539,7 @@ export class BotCollaboration {
     }
   }
   private commitBotOutcome(state: CollaborationState, key: string, taskId: string, document: unknown, tx: OutcomeTransaction): void {
-    this.commitCallback(state, taskId, { kind: 'outcome', turnId: key, taskId, document: document as Json }, {
+    this.commitCallback(state, tx.rows, taskId, { kind: 'outcome', turnId: key, taskId, document: document as Json }, {
       publish: tx.publish,
       ...this.deliverPort(state, taskId),
       outcome: {
@@ -614,12 +602,11 @@ export class BotCollaboration {
     return this.exclusive(async () => {
       this.ownerOnly(by, 'cancelHostIntent', key);
       const snapshot = this.ledger.snapshot(), state = stateOf(snapshot.application), intent = snapshot.intents[hash(key)];
-      if (Object.hasOwn(state.turns, key)) throw new HostIntentError(key, 'not_host_intent', 'The key is a Bot Turn: use cancelTurn');
-      if (!hostIntent(state, key) || !intent) throw new HostIntentError(key, 'unknown_intent', 'No Host intent has this key');
-      if (intent.conclusion) return { key, result: 'already_settled', conclusion: intent.conclusion };
+      const settled = hostIntentCancelAnswer(key, Object.hasOwn(state.turns, key), hostIntent(state, key) && intent);
+      if (settled) return { key, ...settled };
       await this.core.cancel(key);
       await this.process();
-      if (intent.phase === 'inflight') return { key, result: 'cancel_pending' };
+      if (intent!.phase === 'inflight') return { key, result: 'cancel_pending' };
       return { key, result: 'cancelled', conclusion: this.core.intent(key)!.conclusion! };
     });
   }
@@ -676,10 +663,9 @@ export class BotCollaboration {
   }
   /** A keyless owner command (#739 6a). Its id is new at each call, because the store keeps no record of it. */
   private commitKeyless(command: KeylessCommand): CommitResult { return this.commitOwner(randomUUID(), command); }
-  private commitCallback(state: CollaborationState, commandId: string, command: Command, ports: Omit<CommandPorts, 'now'>,
-    archived?: CommandStore['archived']): CommitResult {
-    return commitCommand(state, { scope: this.ledger.tenant, commandId, command },
-      { scope: this.ledger.tenant, recordCallbacks: false, ...(archived ? { archived } : {}) }, { now: this.now, ...ports });
+  private commitCallback(state: CollaborationState, rows: ApplicationRows, commandId: string, command: Command,
+    ports: Omit<CommandPorts, 'now'>): CommitResult {
+    return commitInRows(state, this.ledger.tenant, { scope: this.ledger.tenant, commandId, command }, rows, { now: this.now, ...ports });
   }
 
   /**
@@ -699,12 +685,10 @@ export class BotCollaboration {
     const name = hostIntent(state, tx.intent.key)?.handler, handler = name === undefined ? undefined : this.hostIntentMessageHandlers.get(name);
     let disposition;
     try {
-      ({ disposition } = this.commitCallback(state, `${input.taskId}:${input.payload.messageId}`,
+      ({ disposition } = this.commitCallback(state, tx.rows, `${input.taskId}:${input.payload.messageId}`,
         { kind: 'message', turnId: tx.intent.key, message: { taskId: input.taskId, payload: input.payload } },
         { publish: tx.publish, ...this.deliverPort(state, input.taskId),
-          ...(handler ? { hostMessage: () => hostMessageDisposition(handler(input, tx)) } : {}) },
-        // A refused message keeps a command record, and retention can move it into K4 rows (#798).
-        id => tx.rows.get('commands', id) as CommandRecord | undefined));
+          ...(handler ? { hostMessage: () => hostMessageDisposition(handler(input, tx)) } : {}) }));
     } catch (cause) {
       // Other content for the id of a refused message: the same refusal that K4 gives for an accepted one.
       if (cause instanceof CommitConflict && cause.code === 'identity_conflict') return { outcome: 'refused', reasonCode: 'message_conflict' };

@@ -62,6 +62,7 @@ async function hostedSubject(): Promise<RoutineSubject> {
     now: () => clock,
     at: now => { clock = now; },
     change: edit => store().seed(scope, edit),
+    retire: async turnId => { await query(`INSERT INTO ${table('retired_identity')} (scope, kind, identity) VALUES ($1, 'row', $2)`, [storedKey(scope), hash(['turn', turnId])]); },
     addRoutine: (owner, schedule) => inSchema(opened!.pool, store().schema, async client => {
       await lockScope(client, storedKey(scope));
       const slice = await loadSlice(client, storedKey(scope)), commands = hostedRoutineCommands(slice, clock);

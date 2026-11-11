@@ -211,7 +211,7 @@ it('S10-F1 retries a runtime-selected failure without replacing its reason or re
   const pump = (h.runner as unknown as { tasks: Map<string, { eventPump: Promise<void> }> }).tasks.get(TASK)!.eventPump;
   const outcome = pump.then(() => undefined, error => error);
   try {
-    h.adapter.sessions[0]!.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'retryable', reason: 'original runtime failure' }));
+    h.adapter.sessions[0]!.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'retryable', reason: 'original runtime failure' }));
     expect(await outcome).toMatchObject({ message: 'runtime revoke failed' });
     expect(terminals(h.sent)).toHaveLength(0);
     await cancel(h.runner, 'later cancellation');

@@ -90,7 +90,7 @@ describe('mapPiMessageToAgentEvent', () => {
       throw new Error('expected RuntimeExecutionFailure');
     } catch (error) {
       expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-      expect(error).toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
+      expect(error).toMatchObject({ phase: 'run', retry: 'non-retryable' });
     }
   });
 
@@ -103,7 +103,7 @@ describe('mapPiMessageToAgentEvent', () => {
       throw new Error('expected RuntimeExecutionFailure');
     } catch (error) {
       expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-      expect(error).toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
+      expect(error).toMatchObject({ phase: 'run', retry: 'non-retryable' });
     }
   });
 

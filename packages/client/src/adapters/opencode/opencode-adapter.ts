@@ -35,8 +35,8 @@ export interface OpenCodeAdapterOptions {
   interruptTimeoutMs?: number;
 }
 
-const authority = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
-const infrastructure = (reason: string) => new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason });
+const authority = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
+const infrastructure = (reason: string) => new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason });
 
 /** Native OpenCode ACP, addressed through harnessId `opencode`; never touches user configuration or login storage. */
 export class OpenCodeAdapter implements RuntimeAdapter {
@@ -180,7 +180,7 @@ class OpenCodeSession implements Session {
       void child.exited.then(() => {
         // OAR reaps a refused opening before rejecting it; that requested cleanup is not an execution exit.
         if (this.child === child && !this.ending && child.exitedOnItsOwn) this.halt(new RuntimeExecutionFailure({
-          phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason: 'opencode acp exited', failure: { class: 'runtime_exited' },
+          phase: 'run', retry: 'non-retryable', reason: 'opencode acp exited', failure: { class: 'runtime_exited' },
         }));
       }, error => { if (this.child === child) this.halt(error); });
       // ACP consumes exit notifications; owned disposal separately owns retryable
@@ -246,7 +246,7 @@ class OpenCodeSession implements Session {
       if (this.closing) return;
       if (this.failure) throw this.failure;
       if (outcome.kind === 'failed') {
-        const failure = (cause?: unknown) => new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: outcome.reason ?? 'opencode turn failed',
+        const failure = (cause?: unknown) => new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: outcome.reason ?? 'opencode turn failed',
           failure: { class: outcome.fromText ? 'unknown' : runtimeFailureClassOf(outcome.failure) } }, { cause });
         if (!this.cancelled && !outcome.fromText && outcome.failure === 'rate_limited' && !this.projection?.output && index === 0 && this.options.models.length > 1) {
           // Resume the admitted native identity and apply the next model through ACP; never create a replacement session.

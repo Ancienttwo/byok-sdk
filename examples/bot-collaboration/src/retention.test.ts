@@ -2,12 +2,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
+import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, taskId, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template as k4template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';
 import { RetentionRefused } from './retention';
-import { retainInLedger } from './commit';
+import { migrateWouldDo, retainInLedger } from './commit';
 import { stateOf } from './model';
 
 // #798: the Host retention API on a real K4 ledger.
@@ -103,4 +103,20 @@ it('L: refuses a Turn that still has its K4 intent and is not reported, and a ro
     (s.occurrences as Record<string, { conclusion?: string }>)[occurrenceKey]!.conclusion = 'succeeded';
   });
   expect(retain(['a', routineTurn])).toMatchObject({ archivedRoots: 2 });
+});
+
+it('L: migrateWouldDo gives each row the Turn of its task id over every generation, and archives and counts a row with no live Turn (#1756)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'k8-would-do-')); roots.push(root);
+  const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant'); closers.push(() => ledger.close());
+  const row = (id: string, task: string) => ({ id, botId: 'main', taskId: task, action: 'delegate', index: 0, at: 0, detail: null });
+  ledger.transaction(s => {
+    const state = stateOf(s.application);
+    state.turns.a = { id: 'a', root: 'a', botId: 'main', source: 'user', request: 'a', hop: 0, status: 'succeeded', conclusion: 'succeeded', authority: 'owner' };
+    (s.intents as Record<string, unknown>)[hash('a')] = { id: hash('a'), key: 'a', generation: 1 };
+    state.wouldDo = { w0: row('w0', taskId('a', 0)), w1: row('w1', taskId('a', 1)), gone: row('gone', taskId('b', 0)) } as never;
+  });
+  expect(migrateWouldDo(ledger)).toEqual({ backfilled: 2, archived: 1 });
+  expect(Object.values(stateOf(ledger.snapshot().application).wouldDo ?? {}).map(r => [r.id, r.turnId])).toEqual([['w0', 'a'], ['w1', 'a']]);
+  expect(ledger.transaction((_, rows) => rows.get('wouldDo', 'gone'))).toEqual(row('gone', taskId('b', 0)));
+  expect(migrateWouldDo(ledger)).toEqual({ backfilled: 0, archived: 0 });
 });

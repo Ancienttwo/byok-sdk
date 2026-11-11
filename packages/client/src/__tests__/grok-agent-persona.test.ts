@@ -61,7 +61,7 @@ it.each(['symlink', 'directory', 'oversize'])('refuses unsafe canonical persona 
   if (kind === 'symlink') { await fs.writeFile(path.join(fixture.root, 'outside'), 'not persona'); await fs.symlink(path.join(fixture.root, 'outside'), persona); }
   else if (kind === 'directory') await fs.mkdir(persona);
   else await fs.writeFile(persona, Buffer.alloc(65537, 120));
-  await expect(openTracked(fixture.adapter, { instruction: 'hello' }, fixture.resources)).rejects.toMatchObject({ category: 'authority', retry: 'non-retryable' });
+  await expect(openTracked(fixture.adapter, { instruction: 'hello' }, fixture.resources)).rejects.toMatchObject({ retry: 'non-retryable' });
   await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
@@ -69,7 +69,7 @@ it('refuses persona-bearing Agent resume explicitly, without opening a replaceme
   const fixture = await setup();
   await fs.writeFile(path.join(fixture.home, 'AGENTS.md'), 'persona');
   await expect(openTracked(fixture.adapter, { instruction: 'hello', sessionRef: 'fake-grok-session' }, fixture.resources)).rejects.toMatchObject({
-    category: 'authority', retry: 'non-retryable', message: expect.stringContaining('persona resume is not qualified'),
+    retry: 'non-retryable', message: expect.stringContaining('persona resume is not qualified'),
   });
   await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
 });
@@ -83,7 +83,7 @@ it.each(['missing', 'empty'])('keeps Agent resume without persona unchanged (%s)
 
 it('rejects writer cwd inconsistent with its sealed canonical home', async () => {
   const fixture = await setup();
-  await expect(openTracked(fixture.adapter, { instruction: 'hello' }, { ...fixture.resources, workspaceDir: fixture.root })).rejects.toMatchObject({ category: 'authority', retry: 'non-retryable' });
+  await expect(openTracked(fixture.adapter, { instruction: 'hello' }, { ...fixture.resources, workspaceDir: fixture.root })).rejects.toMatchObject({ retry: 'non-retryable' });
   await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
@@ -92,7 +92,7 @@ it('refuses a resumed reader cwd outside the home run directories before spawnin
   const outside = path.join(fixture.home, 'notes');
   await fs.mkdir(outside, { recursive: true });
   await expect(openTracked(fixture.adapter, { instruction: 'hello', sessionRef: 'fake-grok-session' }, { ...fixture.resources, workspaceDir: outside }))
-    .rejects.toMatchObject({ category: 'authority', retry: 'non-retryable' });
+    .rejects.toMatchObject({ retry: 'non-retryable' });
   await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
@@ -107,7 +107,7 @@ it.each([
   const cwd = cwdOf(fixture.home);
   await fs.mkdir(path.resolve(cwd), { recursive: true });
   await expect(openTracked(fixture.adapter, { instruction: 'hello', ...(resumed ? { sessionRef: 'fake-grok-session' } : {}) }, { ...fixture.resources, workspaceDir: cwd }))
-    .rejects.toMatchObject({ category: 'authority', retry: 'non-retryable' });
+    .rejects.toMatchObject({ retry: 'non-retryable' });
   await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 

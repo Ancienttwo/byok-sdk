@@ -445,7 +445,7 @@ describe('HermesAdapter session', { timeout: 30_000 }, () => {
     vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
     const { open, entries } = await setup({ FAKE_HERMES_HANG: '1' });
     const session = await open();
-    await expect(session.interrupt()).rejects.toMatchObject({ category: 'infrastructure', message: 'hermes interrupt refused: Process table ps: timeout after 5000 ms' });
+    await expect(session.interrupt()).rejects.toMatchObject({ message: 'hermes interrupt refused: Process table ps: timeout after 5000 ms' });
     expect((await entries()).some((entry) => entry.method === 'session/cancel')).toBe(false);
   });
 
@@ -479,7 +479,7 @@ describe('HermesAdapter session', { timeout: 30_000 }, () => {
     const session = await open();
     const failure = await turn(session).then(() => undefined, (error: unknown) => error);
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'hermes turn failed' });
+    expect(failure).toMatchObject({ phase: 'run', retry: 'non-retryable', message: 'hermes turn failed' });
   });
 
   it('reports unknown for a failed turn and runtime_exited for a gateway exit (#869)', async () => {
@@ -489,7 +489,7 @@ describe('HermesAdapter session', { timeout: 30_000 }, () => {
     const exited = await setup({ FAKE_HERMES_KILL_GATEWAY_ON_PROMPT: '1' });
     const session = await exited.open();
     const exit = await turn(session).then(() => undefined, (error: unknown) => error);
-    expect(exit).toMatchObject({ category: 'infrastructure', message: 'hermes gateway exited', failure: { class: 'runtime_exited' } });
+    expect(exit).toMatchObject({ message: 'hermes gateway exited', failure: { class: 'runtime_exited' } });
     await session.close();
   });
 
@@ -555,14 +555,14 @@ describe('HermesAdapter session', { timeout: 30_000 }, () => {
     const { open } = await setup({ FAKE_HERMES_GATEWAY_EXIT_BEFORE_READY: '1' });
     const failure = await open().then(() => undefined, (error: unknown) => error);
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', message: 'hermes gateway exited', failure: { class: 'runtime_exited' } });
+    expect(failure).toMatchObject({ phase: 'start', message: 'hermes gateway exited', failure: { class: 'runtime_exited' } });
   });
 
   it('keeps the runtime_exited class when the ACP viewer exits before it answers initialize (#869)', async () => {
     const { open } = await setup({ FAKE_HERMES_VIEWER_EXIT_ON_INITIALIZE: '1' });
     const failure = await open().then(() => undefined, (error: unknown) => error);
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', message: 'hermes acp viewer exited', failure: { class: 'runtime_exited' } });
+    expect(failure).toMatchObject({ phase: 'start', message: 'hermes acp viewer exited', failure: { class: 'runtime_exited' } });
   });
 
   it('keeps an ownership start failure unknown (#869)', async () => {
@@ -596,7 +596,7 @@ describe('HermesAdapter session', { timeout: 30_000 }, () => {
     const session = await open();
     const failure = await turn(session).then(() => undefined, (error: unknown) => error);
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'run', category: 'infrastructure', message: 'hermes gateway exited' });
+    expect(failure).toMatchObject({ phase: 'run', message: 'hermes gateway exited' });
     await session.close();
     for (const entry of await entries()) if (entry.method === undefined) expect(alive(entry.pid)).toBe(false);
     expect(await fs.readdir(path.join(root, 'profiles'))).toEqual([]);

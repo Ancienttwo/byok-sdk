@@ -358,14 +358,12 @@ export class CodexAdapter implements RuntimeAdapter {
 const authority = (reason: string) =>
   new RuntimeExecutionFailure({
     phase: 'start',
-    category: 'authority',
     retry: 'non-retryable',
     reason,
   });
 const infrastructure = (reason: string, failure?: TaskFailure) =>
   new RuntimeExecutionFailure({
     phase: 'run',
-    category: 'infrastructure',
     retry: 'non-retryable',
     reason,
     failure,
@@ -374,7 +372,6 @@ const infrastructure = (reason: string, failure?: TaskFailure) =>
 const retryable = (reason: string) =>
   new RuntimeExecutionFailure({
     phase: 'start',
-    category: 'infrastructure',
     retry: 'retryable',
     reason,
   });
@@ -488,7 +485,6 @@ class CodexSession implements Session {
           this.fail(
             new RuntimeExecutionFailure({
               phase: 'run',
-              category: 'semantic',
               retry: 'non-retryable',
               reason,
               failure: { class: classified.fromText ? 'unknown' : classified.failure },

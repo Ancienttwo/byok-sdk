@@ -350,6 +350,31 @@ export class DelegationError extends Error {
   }
 }
 /**
+ * A refused intent key. `cancelHostIntent` (#1320): `unknown_intent` for a key with no Host intent, or `not_host_intent` for a
+ * Bot Turn. `failStuckIntent` (#1405): `unknown_intent` for a key with no K4 intent, `already_settled`, or `not_stuck` for an
+ * intent whose terminal K8 did not refuse.
+ */
+export class HostIntentError extends Error {
+  constructor(readonly key: string, readonly code: 'unknown_intent' | 'not_host_intent' | 'already_settled' | 'not_stuck', message: string) {
+    super(message); this.name = 'HostIntentError';
+  }
+}
+/**
+ * `cancelled`: the intent was not submitted and settled as `cancelled`. `cancel_pending`: the SDK cancel went out, and K4
+ * settles the intent at its terminal. `already_settled`: no cancel was sent; `conclusion` is the earlier one.
+ */
+export interface IntentCancelResult<C extends string> { key: string; result: CancelOutcome; conclusion?: C }
+/**
+ * The answer of a Host intent cancel that sends nothing, or `undefined` when the cancel goes to K4 (#1320). `intent` is the
+ * open or settled intent of a key that has a Host intent record, or `undefined`. Refuses a Bot Turn key and an unknown key.
+ */
+export function hostIntentCancelAnswer<C extends string>(key: string, turn: boolean, intent: { conclusion?: C } | undefined):
+  Omit<IntentCancelResult<C>, 'key'> | undefined {
+  if (turn) throw new HostIntentError(key, 'not_host_intent', 'The key is a Bot Turn: use cancelTurn');
+  if (!intent) throw new HostIntentError(key, 'unknown_intent', 'No Host intent has this key');
+  return intent.conclusion ? { result: 'already_settled', conclusion: intent.conclusion } : undefined;
+}
+/**
  * The answer of a delegation cancel that writes nothing, or `undefined` when the cancel commits. Refuses before any write what
  * `arbitrateCancel` would refuse, with a code.
  */

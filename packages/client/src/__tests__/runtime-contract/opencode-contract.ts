@@ -315,7 +315,7 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
         expect(resumedRef).toBe(sessionRef);
         expect(events.at(-1)).toBe('turn_end');
         expect(history).toBe(true);
-        expect(refusal, 'resume from another workspace must fail').toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', message: expect.stringContaining('resumes it only there') });
+        expect(refusal, 'resume from another workspace must fail').toMatchObject({ phase: 'start', retry: 'non-retryable', message: expect.stringContaining('resumes it only there') });
       }, 240_000)],
       'opencode.permission': ['a permission request is refused: the shell command does not run and the turn still ends', check(async () => {
         const { events, written, issued, requests, replies } = await refused();

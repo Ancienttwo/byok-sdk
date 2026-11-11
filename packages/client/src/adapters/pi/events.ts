@@ -9,7 +9,6 @@ function requireToolCallId(msg: PiRpcMessage): string {
   if (typeof msg.toolCallId === 'string' && msg.toolCallId.trim().length > 0) return msg.toolCallId;
   throw new RuntimeExecutionFailure({
     phase: 'run',
-    category: 'authority',
     retry: 'non-retryable',
     reason: `pi ${msg.type} frame had no authoritative tool call id`,
   });
@@ -19,7 +18,6 @@ function requireToolResultOutcome(msg: PiRpcMessage): boolean {
   if (typeof msg.isError === 'boolean') return msg.isError;
   throw new RuntimeExecutionFailure({
     phase: 'run',
-    category: 'authority',
     retry: 'non-retryable',
     reason: 'pi tool_execution_end frame had no authoritative isError outcome',
   });
@@ -116,7 +114,7 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage, identities?: McpEven
         && PREPARED_GATE_REFUSAL_CODES.some(code => code === msg.code)
         && typeof msg.sequence === 'number' && Number.isSafeInteger(msg.sequence) && msg.sequence >= 2;
       throw new RuntimeExecutionFailure({
-        phase: 'run', category: 'authority', retry: 'non-retryable',
+        phase: 'run', retry: 'non-retryable',
         reason: valid ? msg.code as string : 'invalid prepared continuation refusal frame',
       });
     }
@@ -156,7 +154,7 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage, identities?: McpEven
 
     case 'agent_settled':
       if (msg.aborted === true) throw new RuntimeExecutionFailure({
-        phase: 'run', category: 'semantic', retry: 'non-retryable',
+        phase: 'run', retry: 'non-retryable',
         reason: 'pi run aborted before completion',
       });
       return { type: 'turn_end' };

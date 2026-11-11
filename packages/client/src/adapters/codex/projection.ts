@@ -31,7 +31,6 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
 const failure = (reason: string) =>
   new RuntimeExecutionFailure({
     phase: 'run',
-    category: 'authority',
     retry: 'non-retryable',
     reason,
   });

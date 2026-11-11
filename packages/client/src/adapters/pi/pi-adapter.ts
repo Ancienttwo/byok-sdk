@@ -540,14 +540,14 @@ export class PiAdapter implements RuntimeAdapter {
           const manifestSelection = startInput.manifest.dispatchSelection;
           if (!sameDispatchSelection(manifestSelection, pinnedSelection)) {
             throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'authority', retry: 'non-retryable',
+              phase: 'start', retry: 'non-retryable',
               reason: 'prepared pi operation received a manifest with different runtime selection',
             });
           }
           const manifestCwd = startInput.manifest.cwd;
           if (manifestCwd === undefined) {
             throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'authority', retry: 'non-retryable',
+              phase: 'start', retry: 'non-retryable',
               reason: 'prepared pi operation received a manifest without a sealed cwd',
             });
           }
@@ -561,7 +561,7 @@ export class PiAdapter implements RuntimeAdapter {
           const startTools = piMcpToolNames(startInput.mcpServers, startInput.mcpToolsetTools);
           if (!startTools.ok || startTools.names !== admittedTools.names) {
             throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'authority', retry: 'non-retryable',
+              phase: 'start', retry: 'non-retryable',
               reason: 'prepared pi operation received different MCP toolset tool authority than it was admitted with',
             });
           }
@@ -607,7 +607,7 @@ export class PiAdapter implements RuntimeAdapter {
           }
           if (typeof startInput.instruction !== 'string') {
             throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'authority', retry: 'non-retryable',
+              phase: 'start', retry: 'non-retryable',
               reason: 'prepared pi operation requires a resolved string instruction',
             });
           }
@@ -715,7 +715,7 @@ export class PiAdapter implements RuntimeAdapter {
             // does not name the manifest's home) must stay non-retryable.
             if (isRuntimeExecutionFailure(cause)) throw cause;
             throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'infrastructure', retry: 'retryable',
+              phase: 'start', retry: 'retryable',
               reason: 'pi task-scoped MCP configuration could not be created',
             }, { cause });
           }
@@ -761,7 +761,7 @@ export class PiAdapter implements RuntimeAdapter {
             await disposePiStartup(undefined, scratch, cause);
             if (cause instanceof RuntimeExecutionFailure) throw cause;
             throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'infrastructure', retry: 'retryable',
+              phase: 'start', retry: 'retryable',
               reason: 'pi runtime process could not be spawned',
             }, { cause });
           }
@@ -805,14 +805,14 @@ export class PiAdapter implements RuntimeAdapter {
             const failure = startupExit(rpc);
             await disposePiStartup(rpc, scratch);
             throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'infrastructure', retry: 'retryable',
+              phase: 'start', retry: 'retryable',
               reason: `pi initial prompt transport failed: ${errorMessage(cause)}`, failure,
             }, { cause });
           }
           if (response.success === false) {
             await disposePiStartup(rpc, scratch);
             throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'semantic', retry: 'non-retryable',
+              phase: 'start', retry: 'non-retryable',
               reason: typeof response.error === 'string' ? response.error : 'pi rejected the initial prompt',
             });
           }
@@ -928,7 +928,7 @@ function splitPreparedSdkServers(
 
 function authorityFailure(reason: string, cause?: unknown): RuntimeExecutionFailure {
   return new RuntimeExecutionFailure(
-    { phase: 'start', category: 'authority', retry: 'non-retryable', reason },
+    { phase: 'start', retry: 'non-retryable', reason },
     ...(cause === undefined ? [] : [{ cause }]),
   );
 }
@@ -1076,7 +1076,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
   } catch (cause) {
     await scratch.release();
     throw new RuntimeExecutionFailure({
-      phase: 'start', category: 'infrastructure', retry: 'retryable',
+      phase: 'start', retry: 'retryable',
       reason: 'pi prepared launch configuration could not be created',
     }, { cause });
   }
@@ -1099,7 +1099,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     await disposePiStartup(undefined, scratch, cause);
     if (cause instanceof RuntimeExecutionFailure) throw cause;
     throw new RuntimeExecutionFailure({
-      phase: 'start', category: 'infrastructure', retry: 'retryable',
+      phase: 'start', retry: 'retryable',
       reason: 'pi prepared runtime process could not be spawned',
     }, { cause });
   }
@@ -1115,7 +1115,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     const failure = startupExit(rpc);
     await disposePiStartup(rpc, scratch);
     throw new RuntimeExecutionFailure({
-      phase: 'start', category: 'infrastructure', retry: 'retryable',
+      phase: 'start', retry: 'retryable',
       reason: `pi prepared request transport failed: ${errorMessage(cause)}`, failure,
     }, { cause });
   }
@@ -1125,7 +1125,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     // this artifact — nothing here retries, and nothing here may re-send a
     // DIFFERENT input under the same accounting.
     throw new RuntimeExecutionFailure({
-      phase: 'start', category: 'semantic', retry: 'non-retryable',
+      phase: 'start', retry: 'non-retryable',
       reason: `pi refused the prepared request (${typeof response.code === 'string' ? response.code : 'prepared_failed'})`
         + `: ${typeof response.error === 'string' ? response.error : 'no reason reported'}`,
     });
@@ -1149,7 +1149,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     const failure = startupExit(rpc);
     await disposePiStartup(rpc, scratch);
     throw new RuntimeExecutionFailure({
-      phase: 'start', category: 'infrastructure', retry: 'retryable',
+      phase: 'start', retry: 'retryable',
       reason: `pi transport ended before confirming the prepared session id: ${errorMessage(cause)}`, failure,
     }, { cause });
   }
@@ -1267,7 +1267,6 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient): Promise<string> 
     if (isRuntimeExecutionFailure(err)) throw err;
     throw new RuntimeExecutionFailure({
       phase: 'start',
-      category: 'infrastructure',
       retry: 'retryable',
       reason: `pi transport ended before yielding an authoritative session id: ${errorMessage(err)}`,
       failure: startupExit(rpc),
@@ -1280,7 +1279,6 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient): Promise<string> 
     const reason = typeof state.error === 'string' ? state.error : 'get_state reported failure';
     throw new RuntimeExecutionFailure({
       phase: 'start',
-      category: 'authority',
       retry: 'non-retryable',
       reason: `pi did not yield an authoritative session id: ${reason}`,
     });
@@ -1293,7 +1291,6 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient): Promise<string> 
 
   throw new RuntimeExecutionFailure({
     phase: 'start',
-    category: 'authority',
     retry: 'non-retryable',
     reason: 'pi get_state reported no authoritative session id',
   });
@@ -1334,7 +1331,6 @@ class PiSession implements Session {
               } catch (cause) {
                 throw new RuntimeExecutionFailure({
                   phase: 'run',
-                  category: 'infrastructure',
                   retry: 'retryable',
                   reason: 'pi runtime event transport failed',
                 }, { cause });
@@ -1343,7 +1339,6 @@ class PiSession implements Session {
               if (done) {
                 throw new RuntimeExecutionFailure({
                   phase: 'run',
-                  category: 'infrastructure',
                   retry: 'retryable',
                   reason: 'pi runtime process ended before agent_settled',
                   failure: { class: rpc.processExited ? 'runtime_exited' : 'unknown' },
@@ -1353,11 +1348,11 @@ class PiSession implements Session {
                 // Native abort is terminal authority before optional statistics.
                 // A failed statistics read must not make an aborted run retryable.
                 const abortFailure = value.aborted === true ? new RuntimeExecutionFailure({
-                  phase: 'run', category: 'semantic', retry: 'non-retryable',
+                  phase: 'run', retry: 'non-retryable',
                   reason: 'pi run aborted before completion',
                 }) : undefined;
                 terminalFailure = abortFailure ?? (providerError === undefined ? undefined : new RuntimeExecutionFailure({
-                  phase: 'run', category: 'semantic', retry: 'non-retryable',
+                  phase: 'run', retry: 'non-retryable',
                   reason: boundFailureReason(providerError),
                 }));
                 // Read after settlement and deliver before turn_end, where the consumer stops.
@@ -1366,7 +1361,7 @@ class PiSession implements Session {
                 try {
                   stats = await Promise.race([rpc.send({ type: 'get_session_stats' }),
                     new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new RuntimeExecutionFailure({
-                      phase: 'run', category: 'infrastructure', retry: 'retryable',
+                      phase: 'run', retry: 'retryable',
                       reason: 'pi get_session_stats response timed out',
                     })), 1000); }),
                   ]);
@@ -1383,7 +1378,6 @@ class PiSession implements Session {
               if (value.type === 'auto_retry_end' && value.success === false) {
                 terminalFailure = new RuntimeExecutionFailure({
                   phase: 'run',
-                  category: 'semantic',
                   retry: 'non-retryable',
                   reason: 'pi exhausted its native retry policy',
                 });

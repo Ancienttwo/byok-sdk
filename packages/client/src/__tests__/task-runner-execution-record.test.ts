@@ -119,7 +119,7 @@ describe('TaskRunner execution record', () => {
   ] as const)('records %s as unknown (evidence_missing) when a declaring Session has no evidence(), with the same terminal', async (terminal, tail, type, retryable) => {
     const { session, records, terminals, finished } = await makeRunner({ declared: true, omitEvidence: true });
     emitAll(session, [use('a'), result('a'), ...tail]);
-    if (terminal === 'failed') session.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'retryable', reason: 'runtime exited' }));
+    if (terminal === 'failed') session.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'retryable', reason: 'runtime exited' }));
     await finished();
     expect(terminals().map(envelope => envelope.type)).toEqual([type]);
     if (retryable !== undefined) expect(terminals()[0]!.payload).toMatchObject({ retryable });
@@ -129,7 +129,7 @@ describe('TaskRunner execution record', () => {
   it('marks a runtime stream that failed before turn_end', async () => {
     const { session, records, terminals, finished } = await makeRunner({ declared: true });
     session.emit(use('a'));
-    session.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'retryable', reason: 'runtime exited' }));
+    session.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'retryable', reason: 'runtime exited' }));
     await finished();
     expect(terminals().map(envelope => [envelope.type, envelope.payload])).toEqual([['task.fail', { agentRef: RECORD_AGENT, reason: 'runtime exited', retryable: true, failure: { class: 'unknown' } }]]);
     expect(records).toEqual([{
@@ -207,7 +207,7 @@ describe('TaskRunner execution record', () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-execution-record-start-'));
     directories.push(directory);
     const adapter = new StubRuntimeAdapter('pi', undefined, undefined, undefined, 'event-stream');
-    adapter.startError = new RuntimeExecutionFailure({ phase: 'start', category: 'infrastructure', retry: 'retryable', reason: 'spawn failed' });
+    adapter.startError = new RuntimeExecutionFailure({ phase: 'start', retry: 'retryable', reason: 'spawn failed' });
     const sent: Envelope[] = [];
     const onExecutionRecord = vi.fn();
     const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
@@ -246,7 +246,7 @@ describe('TaskRunner execution record invariance', () => {
     ['a completed task', session => emitAll(session, [use('a'), result('a'), { type: 'progress', text: 'answer' }, { type: 'turn_end' }])],
     ['a failed task', session => {
       emitAll(session, [use('a'), { type: 'progress', text: 'partial work' }]);
-      session.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'runtime refused' }));
+      session.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: 'runtime refused' }));
     }],
     ['a cancelled task', async (session, runner, sent) => {
       session.emit(use('a'));

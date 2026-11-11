@@ -42,7 +42,7 @@ describe('session kit', () => {
     await accepted;
     waiter.release();
     await expect(oarCancelSettled(Promise.resolve({ response: { body: { kind: 'rejected', code: 'no_active_turn' } } }), Promise.resolve(), 'grok')).resolves.toBeUndefined();
-    await expect(oarCancelSettled(Promise.resolve({ response: { body: { kind: 'rejected', code: 'denied', reason: 'no' } } }), Promise.resolve(), 'grok')).rejects.toMatchObject({ message: 'grok interrupt refused: no', phase: 'run', category: 'infrastructure', retry: 'non-retryable' });
+    await expect(oarCancelSettled(Promise.resolve({ response: { body: { kind: 'rejected', code: 'denied', reason: 'no' } } }), Promise.resolve(), 'grok')).rejects.toMatchObject({ message: 'grok interrupt refused: no', phase: 'run', retry: 'non-retryable' });
   });
 
   it('counts UTF-8 bytes and fails on the record exceeding the budget', () => {

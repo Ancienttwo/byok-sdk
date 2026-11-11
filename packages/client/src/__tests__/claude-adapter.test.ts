@@ -224,7 +224,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       failure = error;
     }
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     expect(failure).toHaveProperty('message', expect.stringMatching(/echoed a different session id than requested/));
   });
 
@@ -246,7 +246,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       failure = error;
     }
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', retry: 'retryable' });
+    expect(failure).toMatchObject({ phase: 'start', retry: 'retryable' });
     expect(failure).toHaveProperty('message', expect.stringMatching(/simulated crash for stderr-capture test/));
   });
 
@@ -435,7 +435,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(lastEvent.type).toBe('error');
     expect(lastEvent.message).toMatch(/missing\/invalid is_error flag/);
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
+    expect(failure).toMatchObject({ phase: 'run', retry: 'non-retryable' });
   }, 5000);
 
   it('followUp() sends a new turn on the SAME persistent process/session, confirmed by an unchanged sessionRef and a second full event cycle', async () => {
@@ -486,13 +486,13 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_FAILURES: JSON.stringify([{ exit: true }]) });
     const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
     openSessions.push(session);
-    await expect(takeTurn(session)).rejects.toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
+    await expect(takeTurn(session)).rejects.toMatchObject({ failure: { class: 'runtime_exited' } });
   });
 
   it('marks claude exiting before system/init on a --resume of a missing session runtime_exited (#869)', async () => {
     const task: RuntimeTaskInput = { ...baseTask, sessionRef: 'some-other-unknown-id' };
     await expect(startAdapter(fakeClaudeAdapter(), task, await makeCtx())).rejects.toMatchObject({
-      phase: 'start', category: 'infrastructure', message: expect.stringMatching(/No conversation found/), failure: { class: 'runtime_exited' },
+      phase: 'start', message: expect.stringMatching(/No conversation found/), failure: { class: 'runtime_exited' },
     });
   });
 
@@ -751,7 +751,7 @@ describe('ClaudeAdapter agentUserContext', () => {
     const scratch = { ...owned, release: async () => { filesAtRelease ??= await fs.readdir(owned.sdkDir); await owned.release(); } };
     const failure = await startAdapter(adapter, baseTask, { ...await shape(ctx), scratch }).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     expect((failure as Error).message).not.toContain(path.basename(ctx.workspaceDir));
     expect(spawned).toEqual([]);
     expect(filesAtRelease).toEqual([]);

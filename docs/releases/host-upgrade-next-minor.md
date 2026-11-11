@@ -231,6 +231,10 @@ No Host change is required (#1732). `CreateServiceLifecycleOptions` gains an opt
 
 The hosted `HostedCommandEntry.cancelTurn` and `cancelDelegation` return `TurnCancelResult` and `DelegationCancelResult` instead of `void` (#1666), as the local Host does. A cancel returns `cancelled` when it committed, `cancel_pending` when an earlier cancel has no terminal yet, and `already_settled` when the target had ended; the last two write nothing and send no second K4 cancel. Cancelling an ended delegation no longer throws: it returns `already_settled` with the `verdict`. A refused delegation cancel throws `DelegationError` with `code` `unknown_delegation` or `not_cancellable` (end a `reply_held` or `uncertain` delegation with `abandonDelegation`). `DelegationError` and both result types are exported from `@byok-sdk/example-hosted-bot-collaboration` and from K8 `rules/delegation`.
 
+## Hosted device slots and Host intent cancel (#1756)
+
+The hosted submitter now applies the local Host's device slot rule: per scope and device, at most `deviceConcurrency` (default 8, a new `HostedSubmitter` option, also in `HostedPassTimings.submitter`) tried rows hold a slot, and a row that is not user-source leaves one slot free. A row with no slot waits at its FIFO head; nothing is cancelled to make room. A Host that relied on submitting more than 7 non-user rows per device at once sets a larger `deviceConcurrency`. `HostedCollaborationStore.cancelHostIntent(scope, key, clock)` is new: check the owner, call it, then sync the scope. It returns `IntentCancelResult` and refuses with `HostIntentError`, both exported from `@byok-sdk/example-hosted-bot-collaboration` and from K8 `rules/delegation`.
+
 ## Bot collaboration switch contract
 
 The owner switch records and errors are defined once, in `@byok-sdk/example-bot-collaboration/migration` (#1667): `SwitchHeader`, `SwitchReceipt`, `SwitchExportMark`, `exportMarkOf`, `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError`. The roots of both packages still export the classes and `SwitchReceipt` (and the hosted root `SwitchExportMark`), but the local `./switch` and `./topology` modules and the hosted `./switch` and `./binding` modules no longer do; a deep import moves to `./migration`. `DeviceSwitchingError` takes `target: 'L' | 'H'`. The messages of `SwitchExportedError`, `SwitchImportedError` and `DeviceSwitchingError` changed and their `code` values did not, so match on `code`. The local `refuseImported` now throws `SwitchImportedError` (`switch_imported`) instead of a plain `Error`.
@@ -270,6 +274,31 @@ A Bot reply is now visible only when its Turn's outcome committed: iff the Turn'
 - Operator step for hosted (H) Hosts: stop every old H process before a new one starts. In a rolling deploy, an old worker's `finish` has no promotion, so a reply that a new worker staged stays staged after its intent concluded `succeeded`, and a new worker's sync then withholds it as `outcome_not_applied`. A mixed deploy can drop such a reply; it never shows a reply early.
 - A Turn that runs past its reply route token answers through the conversation's active push route, with a new delivery id, or not at all: its reply delivery is rejected `reply_route_expired`, or no delivery is queued when the token had already expired at acceptance. Before, a reply sent mid-Turn usually still had its token.
 - Operator step for vendoring Hosts: a Host that shows or uploads replies from `replies` must skip a reply unless `core.intent(turnId)` has `conclusion === 'succeeded'` and `taskId` equal to the reply's task id. For example, AiphaBee adds this check to its `k8RootUploads`. Until a Host adds it, its own upload still shows a reply before the outcome commits; K8's channel no longer does. A Host with a channel takes K8's delivery state as the authority, because the conclusion check alone passes a message that K4 accepted after a `succeeded` conclusion (see VENDOR.md). See [Reply visibility](../../examples/bot-collaboration/src/VENDOR.md#reply-visibility).
+
+## K4 transaction rows and required command store capabilities
+
+`OutcomeTransaction` and `OccurrenceTransaction` gain `rows: ApplicationRows`, the application row port of the same commit (#1756), as `MessageTransaction` already has. The port closes when the transaction ends. A Host whose `applyOutcome` or occurrence hook only reads the transaction needs no change; code that builds a transaction object itself, such as a test double, adds `rows`.
+
+K8 `CommandStore.archived` and `admitted` are required. A vendoring Host that calls `commitCommand` passes both: `archived` reads a command record that retention moved, and `admitted` hands the added ids to `refuseRetired` before the commit. The local Host's K4 outcome, message and occurrence callbacks commit through `commitInRows` (`commit.ts`) and the hosted routine fire through `commitInStore` (`retention.ts`), so these commits now refuse a retired Turn, input or round id with `RetiredIdentityError` and write nothing. What a Host sees for each refusal:
+
+- L outcome: the Turn's outcome fails with `IntentOutcomeError` code `outcome_failed`.
+- L message: the message handler throws.
+- L occurrence and H routine fire: the slot records no occurrence and stays due. H retries it every `backoffMs` and reports `pass.failed`, and the routine does not advance past that slot.
+
+None of these is reachable in normal flow: new Turn, input and round ids are fresh, so the refusal guards only against corrupt state. No persisted format changes.
+
+## Would-do rows name their Turn
+
+A would-do row gains a required `turnId`: the Turn whose outcome proposed the action (#1756). Retention moves each row with that Turn's root, into the `wouldDo` archived rows, so `wouldDoRecords` and the stored `wouldDo` map list only the rows of roots still in the state. The row id and the `would-do:<id>` projection key are unchanged; the projection body gains `turnId`. No DDL changes, and `STORE_VERSION` stays 2.
+
+Operator step, once per store, before the new code serves:
+
+- Local (L) Host: run `migrateWouldDo(ledger)` on each ledger. A vendoring Host, such as AiphaBee, runs it on each device ledger.
+- Hosted (H) Host: run `HostedCollaborationStore.migrate()` on each schema. It now returns `{ wouldDoBackfilled, wouldDoArchived }`.
+
+The migration fills `turnId` from the K4 task id `taskId(turnId, generation)` of each live Turn intent: L checks every generation of the intent, H joins `intent` and `intent_execution`. A row whose intent was already compacted, or whose Turn already left the state, cannot be linked to a Turn. It moves to the `wouldDo` archived rows and is counted in `archived` (L) or `wouldDoArchived` (H). Those rows are settled history, never read by a Turn; the count is how many rows leave the would-do feed early. Record it. A second run returns zeros.
+
+A switch export or import refuses a would-do row without `turnId` (`invalid`), so migrate the source before a switch. A switch in flight across the upgrade holds an export that old code sealed with rows that have no `turnId`, and the new code's verify refuses it: abort the switch (`abortSwitch`), run the migration on the source, then export again. A store that skipped the step refuses every `retain` call and every `wouldDoRecords` read with `A would-do row has no turnId: run migrateWouldDo (local) or HostedCollaborationStore.migrate() (hosted) first`, and changes nothing, until the migration runs.
 
 ## Offer selection rules
 
@@ -312,6 +341,10 @@ Only a Host that served `e2ee.member` on 0.30.0 or 0.30.1, or stored packages se
 Upgrade only when it returns 0. If it does not, stay on the previous version and run a KEM rotation on each member that is the recipient of a version 1 row: the previous version re-wraps, as version 2, each package addressed to that member whose sender is still a current member of the scope policy. Run the count again before upgrading. The SDK ships no migration for these rows.
 
 A rotation leaves a version 1 row in place when its sender is no longer a current member of the scope, so the count can stay above 0. If version 1 rows remain after the rotation, stay on the previous version and open an issue: the SDK has no automatic way to re-wrap them.
+
+## Runtime failures have no category
+
+`RuntimeExecutionFailure` and `RuntimeExecutionFailureInput` no longer have a `category` field, and `RuntimeFailureCategory` is no longer exported from `@byok-sdk/client` or `@byok-sdk/client/adapters` (#1758). Nothing read it: `retry` is the only retry authority and `failure` the only failure class, and the wire projection (`reason`, `retryable`, `failure`) is unchanged. A Host or runtime adapter that constructs a `RuntimeExecutionFailure` deletes the `category` key from the input object; TypeScript reports it as an unknown property until then. Code that names `RuntimeFailureCategory` or reads `.category` deletes that reference. Load runtime adapters and the daemon from the same client version: an older client's `isRuntimeExecutionFailure` refuses a failure without `category` and reports it as an adapter-contract violation.
 
 ## Every task attempt has an Agent identity
 
@@ -375,6 +408,7 @@ A version 9 file cannot be opened by an earlier build.
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
 - [ ] Run the H `unmigrated_dreams` and L `legacy_home` queries on v0.41.0; both must be 0 before the upgrade (#1669).
 - [ ] Run `HostedCollaborationStore.migrate()` on every existing hosted schema, then set `setBotAutonomy(..., 'auto')` for each Bot that must keep acting on its own (#1662).
+- [ ] Run `migrateWouldDo(ledger)` on each L ledger and `HostedCollaborationStore.migrate()` on each H schema; record the archived would-do count (#1756).
 - [ ] Run `hostProjectionDdl(HOST_SCHEMA)` once before serving the new Worker, and watch `send.failed` in the first pass reports (#1663).
 - [ ] On every hosted Postgres store, run the agent-identity count, settle live ones on v0.41.0, migrate to 0038, run `retireAgentlessTasks` and record its count, then migrate to 0039 (#1780).
 - [ ] Pin the Host's direct and resolved SDK dependencies to the release graph.
