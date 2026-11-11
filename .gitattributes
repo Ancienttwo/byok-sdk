@@ -13,3 +13,4 @@ packages/*/package.json text eol=lf
 packages/client/src/util/agent-memory-helper-release-pin.ts text eol=lf
 packages/client/native/agent-memory-fs/*.go text eol=lf
 packages/client/native/agent-memory-fs/go.mod text eol=lf
+CHANGELOG.md merge=union
