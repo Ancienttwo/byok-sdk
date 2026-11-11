@@ -7,15 +7,18 @@
 --
 -- 1. Preflight, under the task table lock: a NULL-identity row that is not
 --    terminal (complete, failed, cancelled) stops the migration before any
---    change and names the count. The operator settles or cancels those tasks
---    with the previous build first (docs/releases/host-upgrade-next-minor.md).
+--    change and names the count. Each migration file is its own transaction,
+--    so 0001-0037 stay applied: the store matches v0.41.0, the build to settle
+--    those tasks with (cancelTask, abandonTask) and to run until this file
+--    succeeds (docs/releases/host-upgrade-next-minor.md).
 --
 -- 2. Every terminal NULL-identity row moves, whole, into
 --    `task_agentless_retired` and leaves `task`. A NOTICE reports the count.
 --    The retired row is the task id's identity fence from now on: the Agent
 --    offer reservation refuses an id stored there, in the same statement that
---    would insert it. The task's receipts, mailbox rows, activity and
---    approval history are not touched. `agent_message_admission` cascades on
+--    would insert it. Nothing else is deleted: whatever the task still holds
+--    (receipt bodies, board item, object references, mailbox rows, activity
+--    and approval history) stays until tenant erasure. `agent_message_admission` cascades on
 --    the task row, but no build ever admitted a message for a task without an
 --    Agent identity, so the cascade has nothing to remove.
 --
@@ -36,7 +39,7 @@ BEGIN
   SELECT count(*) INTO live FROM task
    WHERE agent_id IS NULL AND status NOT IN ('complete', 'failed', 'cancelled');
   IF live > 0 THEN
-    RAISE EXCEPTION '0038_task_agent_ref_required: % task(s) without an Agent identity are not terminal; nothing was changed. Settle or cancel them with the previous build, then rerun.', live;
+    RAISE EXCEPTION '0038_task_agent_ref_required: % task(s) without an Agent identity are not terminal; nothing was changed. Migrations 0001-0037 stay applied: run v0.41.0, settle them with cancelTask, or abandonTask for a task whose device is gone or that stays cancel_requested, then rerun the migrations.', live;
   END IF;
 END;
 $$;

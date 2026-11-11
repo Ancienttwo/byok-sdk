@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { describe, expect, it } from 'vitest';
 import { migrate } from '../migrate';
+import { PostgresTaskArchiveStore } from '../stores/task-archive';
 import { PostgresTaskAttemptStore } from '../stores/task-attempts';
 import { createDataplaneScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
 
@@ -104,14 +105,18 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres 0038 over tasks without an Agent ident
         if (name.endsWith('.sql') && name < '0038') await copyFile(join(DEPLOY_SQL, name), join(directory, name));
       }
       await migrate(scope.pool, directory);
-      await scope.pool.query(`INSERT INTO task (tenant_id, task_id, device_id, agent_id, agent_profile_revision, status, updated_at)
-        VALUES ('tenant', 'legacy-done', 'device', NULL, NULL, 'complete', now()), ('tenant', 'legacy-live', 'device', NULL, NULL, 'running', now()),
-               ('tenant', 'agent', 'device', 'a', '1', 'offered', now())`);
+      await scope.pool.query(`INSERT INTO task (tenant_id, task_id, device_id, agent_id, agent_profile_revision, status, updated_at, archive_after)
+        VALUES ('tenant', 'legacy-done', 'device', NULL, NULL, 'complete', now(), '2026-01-01T00:00:00.000Z'),
+               ('tenant', 'legacy-live', 'device', NULL, NULL, 'running', now(), NULL),
+               ('tenant', 'agent', 'device', 'a', '1', 'offered', now(), NULL)`);
       await expect(tasks.get(tenant, 'legacy-done')).rejects.toMatchObject({ code: 'task_attempt_agent_ref_missing', message: expect.stringContaining('0038') });
+      await expect(new PostgresTaskArchiveStore(scope.pool, createMutableClock()).listWork(tenant, { archiveBefore: '2026-02-01T00:00:00.000Z', limit: 10 }))
+        .rejects.toMatchObject({ code: 'task_attempt_agent_ref_missing' });
       await copyFile(join(DEPLOY_SQL, step), join(directory, step));
 
       await expect(migrate(scope.pool, directory)).rejects.toThrow(/1 task\(s\) without an Agent identity are not terminal/);
       expect((await scope.pool.query(`SELECT count(*)::int AS n FROM task`)).rows).toEqual([{ n: 3 }]);
+      expect((await scope.pool.query(`SELECT to_regclass('task_agentless_retired') AS t`)).rows).toEqual([{ t: null }]);
 
       await scope.pool.query(`UPDATE task SET status = 'cancelled' WHERE task_id = 'legacy-live'`);
       await expect(migrate(scope.pool, directory)).resolves.toMatchObject({ applied: [step] });

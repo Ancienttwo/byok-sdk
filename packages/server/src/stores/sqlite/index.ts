@@ -372,7 +372,7 @@ class SqliteCoordinator {
             createdOutputLogs = steps.some(([from]) => from === '7');
           } else if (version?.value !== SQLITE_SCHEMA_VERSION) {
             throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SCHEMA_UPGRADES.map(([from]) => from).join(' and ')} in place. ` +
+              `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SCHEMA_UPGRADES.map(([from]) => from).join(', ').replace(/, (?=[^,]*$)/, ' and ')} in place. ` +
               'An older file is not adopted: start on a new database. A newer file needs a newer build.');
           }
           for (const projection of [

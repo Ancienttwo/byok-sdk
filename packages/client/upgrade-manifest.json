@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "76d758d21c4aa36ee17eda5a2846d47d4d0327f1d3d00f37cdefeb91b9f5f4b9"
+    "snapshotSha256": "42af568ce9bd4280089e5f7cf6dc68b9116d09ef9deaa1d4a8ed98d7278d9cf5"
   },
   "configFields": {
     "status": "tracked",
@@ -564,7 +564,7 @@
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=37 last=0037_agent_memory_projection_sealed.sql sha256=90707df3bd89ebed",
-      "after": "migrations=38 last=0038_task_agent_ref_required.sql sha256=357bf1205d94ec5e",
+      "after": "migrations=38 last=0038_task_agent_ref_required.sql sha256=e0bc971ecb7ea849",
       "entry": "task-attempt-agent-ref-required"
     },
     {

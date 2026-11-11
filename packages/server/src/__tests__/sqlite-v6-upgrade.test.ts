@@ -290,6 +290,6 @@ describeSqlite('SQLite in-place schema upgrades', () => {
     db.close();
     expect(() => open(file)).toThrow(SqliteSchemaError);
     expect(() => open(file)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '5', requiredVersion: '9' }));
-    expect(() => open(file)).toThrow('upgrades only 6 and 7 and 8 in place');
+    expect(() => open(file)).toThrow('upgrades only 6, 7 and 8 in place');
   });
 });

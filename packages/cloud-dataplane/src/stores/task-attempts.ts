@@ -76,7 +76,9 @@ function admissionRowToRecord(row: AgentMessageAdmissionRow): AgentMessageAdmiss
 }
 
 export function taskRowToAttempt(row: TaskRow): TaskAttempt {
-  // NOT NULL from 0038 on; before it, a legacy row fails closed and names the step.
+  // The one task row mapping (the archive step reads through it too). The
+  // Agent columns are NOT NULL from 0038 on; before it, a legacy row fails
+  // closed and names the step.
   if (row.agent_id === null || row.agent_profile_revision === null) {
     throw new ByokCloudError('task_attempt_agent_ref_missing',
       `Task ${row.task_id} of tenant ${row.tenant_id} has no Agent identity: run deploy/sql/0038_task_agent_ref_required.sql.`);
@@ -85,10 +87,7 @@ export function taskRowToAttempt(row: TaskRow): TaskAttempt {
     tenantId: row.tenant_id as TenantId,
     taskId: row.task_id,
     deviceId: row.device_id,
-    agentRef: {
-      agentId: row.agent_id,
-      profileRevision: row.agent_profile_revision,
-    },
+    agentRef: { agentId: row.agent_id, profileRevision: row.agent_profile_revision },
     // `exactOptionalPropertyTypes` is off here, but an explicit absent key is
     // still what the in-memory reference produces for an unclaimed attempt, and
     // `toEqual` in the suite treats `undefined` and absent alike only for the
@@ -148,7 +147,8 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     const created = inserted.rows[0];
     if (created !== undefined) return { attempt: taskRowToAttempt(created), created: true };
     const existing = await this.get(tenant, input.taskId);
-    // Task rows are never deleted, so a missing row means the id was retired.
+    // The insert declines on a conflicting row or a retired id. With no row
+    // to read back, the id is one 0038 retired.
     if (existing === undefined) {
       throw new ByokCloudError('agent_task_already_exists', `Task ${input.taskId} was retired without an Agent identity and cannot be enqueued again.`);
     }
