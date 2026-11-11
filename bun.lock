@@ -87,6 +87,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@byok-sdk/client": "workspace:*",
+        "@byok-sdk/example-bot-collaboration": "workspace:*",
         "@byok-sdk/keys": "workspace:*",
         "@byok-sdk/server": "workspace:*",
       },
