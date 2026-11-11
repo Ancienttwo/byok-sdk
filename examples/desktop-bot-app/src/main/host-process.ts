@@ -28,8 +28,13 @@ export interface HostProcessOptions {
  * A package runs the same bundle as a SEA.
  */
 export function spawnDevHost(): HostChild {
+  return spawnDevHostCommand([]);
+}
+
+/** The dev Host bundle re-entered with argv, such as the keys custody command. */
+export function spawnDevHostCommand(args: readonly string[]): HostChild {
   const entry = fileURLToPath(new URL('../../host/host.cjs', import.meta.url));
-  return spawn('node', [entry], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
+  return spawn('node', [entry, ...args], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
 }
 
 /**

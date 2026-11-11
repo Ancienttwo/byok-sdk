@@ -7,6 +7,7 @@ import {
 import { createRuntimeAdapters } from '@byok-sdk/client/adapters';
 import { createByokServer, listenLoopback, type LoopbackPortStore } from '@byok-sdk/server';
 import { composeDomains, type ComposedDomains } from './domains.ts';
+import { keysDbPath, piByokLauncher } from './keys/launcher.ts';
 import { precheckHostStores } from './precheck.ts';
 
 export interface HostCompositionOptions {
@@ -103,7 +104,7 @@ async function startPaired(daemon: Daemon, pair: () => Promise<void>): Promise<v
 export async function composeHost(options: HostCompositionOptions): Promise<ComposedHost> {
   const hostDir = path.join(options.hostStorageRoot, 'host');
   const serverDb = path.join(hostDir, 'server.sqlite');
-  await precheckHostStores({ storeDir: options.storeDir, serverDb, keysDb: path.join(hostDir, 'keys.db') });
+  await precheckHostStores({ storeDir: options.storeDir, serverDb, keysDb: keysDbPath(options.hostStorageRoot) });
   await mkdir(hostDir, { recursive: true, mode: 0o700 });
 
   const server = createByokServer({ productId: options.productId, storage: { kind: 'sqlite', path: serverDb } });
@@ -132,8 +133,10 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
     }
   };
   try {
+    const launcher = options.sdkHelperHost ? { piByokLauncher: piByokLauncher(options.sdkHelperHost, options.hostStorageRoot) } : {};
     const adapters = createRuntimeAdapters({
       ...(options.sdkHelperHost ? { sdkHelperHost: options.sdkHelperHost } : {}),
+      ...launcher,
       runtimes: { pi: { runtimeEnvironment: LOGIN_SHELL }, claude: { runtimeEnvironment: LOGIN_SHELL }, codex: { runtimeEnvironment: LOGIN_SHELL } },
     });
     const daemonConfig: DaemonConfig = {
@@ -145,6 +148,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
       agentEgress: {},
       localAgentRelease: { version: options.releaseVersion },
       ...(options.sdkHelperHost ? { sdkHelperHost: options.sdkHelperHost } : {}),
+      ...launcher,
     };
     daemon = createDaemonWithAdapters(daemonConfig, adapters, options.deviceCredentials ? { deviceCredentials: options.deviceCredentials } : {});
     const started = daemon;

@@ -233,8 +233,8 @@ test('reviewed root-level basic fixtures select their workspace while unknown ro
 
 test('shared goal fixture selects its consumers without broadening unknown root support files', () => {
   const plan = selectImpact(['examples/basic/goal-btw.test-support.ts']);
-  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/host-execution-core', 'examples/hosted-bot-collaboration',
-    'examples/hosted-bot-collaboration-worker']);
+  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/desktop-bot-app', 'examples/host-execution-core',
+    'examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker']);
   assert.deepEqual(plan.families, ['adapter-lifecycle-smoke', 'dataplane']);
   assert.throws(() => selectImpact(['examples/basic/other.test-support.ts']));
 });
@@ -1080,6 +1080,9 @@ test('new graph-registered private workspaces and matching lock rows are admitte
     const manifest = { name: `@byok-sdk/${id}`, version: '0.28.0' };
     f.write(`packages/${id}/package.json`, manifest); f.lock.workspaces[`packages/${id}`] = manifest;
   }
+  // #1806: the desktop example's K8 edge needs K8 declared in the base.
+  const k8 = { name: '@byok-sdk/example-bot-collaboration', version: '0.0.1', private: true };
+  f.write('examples/bot-collaboration/package.json', k8); f.lock.workspaces['examples/bot-collaboration'] = k8;
   f.write('bun.lock', f.lock); rebase(f, 'base dependency declarations');
   const dir = 'examples/basic';
   const manifest = { name: '@byok-sdk/example-basic', version: '0.0.1', private: true, type: 'module',
