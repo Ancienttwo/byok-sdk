@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ProviderStatus } from '@byok-sdk/keys';
 import {
   applyModelRouteChange, createModelRouteDraft, modelRouteContext, modelRouteView,
@@ -7,7 +7,7 @@ import {
 } from '@byok-sdk/keys/model-route';
 import { useConversation } from '../conversation/use-conversation.ts';
 import './keys.css';
-import { submitModelRoute, type SubmitOutcome } from './submit.ts';
+import { refusalOf, storedProfile, submitModelRoute, submitReplaceSecret, type Refusal, type SubmitOutcome } from './submit.ts';
 
 const ERROR_COPY: Readonly<Record<ModelRouteErrorCode, string>> = {
   required: 'Required.',
@@ -141,55 +141,148 @@ export function Receipt({ status }: { status: ProviderStatus }) {
   );
 }
 
-/**
- * The keys section: one form per new model route on `@byok-sdk/keys/model-route`, submitted write-only through
- * `keys.submit`, and the K8 model list, which takes the new profile's entry through the Host's view-change hint.
- */
-export function KeysSection() {
-  const context: ModelRouteContext = useMemo(() => modelRouteContext(), []);
+function RefusalNote({ refusal }: { refusal: Refusal }) {
+  return <p className="keys-error" role="alert">{refusal.code === undefined ? '' : `${refusal.code}: `}{refusal.message}</p>;
+}
+
+type Listed = { readonly statuses: readonly ProviderStatus[]; readonly refusal?: undefined } | { readonly statuses?: undefined; readonly refusal: Refusal };
+
+/** The stored profiles from `keys.list`, read when the section opens, after each receipt and on demand; each read is one custody child. */
+function useKeysList(): { listed: Listed | undefined; reload: () => void } {
+  const [listed, setListed] = useState<Listed>();
+  const [generation, setGeneration] = useState(0);
+  const reload = useCallback(() => setGeneration(value => value + 1), []);
+  useEffect(() => {
+    let stopped = false;
+    window.byok.call('keys.list', undefined).then(
+      statuses => { if (!stopped) setListed({ statuses }); },
+      (error: unknown) => { if (!stopped) setListed({ refusal: refusalOf(error) }); },
+    );
+    return () => { stopped = true; };
+  }, [generation]);
+  return { listed, reload };
+}
+
+/** A new model route, or the edit of a stored one. A stored key starts as kept, and a kept key is never sent. */
+function RouteForm({ stored, onOutcome }: { stored: ProviderStatus | null; onOutcome: (outcome: SubmitOutcome) => void }) {
+  const context: ModelRouteContext = useMemo(() => modelRouteContext({ stored: stored === null ? null : storedProfile(stored) }), [stored]);
   const [draft, setDraft] = useState(() => createModelRouteDraft(context));
-  const [formKey, setFormKey] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<SubmitOutcome>();
-  const { loaded } = useConversation(null);
   const view = modelRouteView(draft, context);
   const onChange: Change = change => setDraft(current => applyModelRouteChange(current, change, context));
 
   const submit = async () => {
     setBusy(true);
-    setOutcome(undefined);
-    const result = await submitModelRoute(draft, context, request => window.byok.call('keys.submit', request));
-    setOutcome(result.outcome);
-    if ('receipt' in result.outcome) {
-      setDraft(createModelRouteDraft(context));
-      setFormKey(value => value + 1);
-    } else {
-      setDraft(result.draft);
-    }
+    const result = await submitModelRoute(draft, context, stored, change => window.byok.call('keys.submit', change));
+    setDraft(result.draft);
     setBusy(false);
+    onOutcome(result.outcome);
+  };
+
+  return (
+    <form className="keys-form" onSubmit={event => { event.preventDefault(); if (view.valid && !busy) void submit(); }}>
+      <h1>{stored === null ? 'Add a model provider' : `Edit ${stored.display_name}`}</h1>
+      {/* Disabled while a submission is in flight: its result replaces the draft. */}
+      <fieldset className="keys-fields" disabled={busy}>
+        {view.fields.filter(field => field.visible).map(field => {
+          const body = (
+            <>
+              {LABELS[field.field]}{field.required ? ' *' : ''}
+              <FieldInput view={field} draft={draft} onChange={onChange} />
+              <FieldError view={field} />
+            </>
+          );
+          // The capability checkboxes carry their own labels, which a label may not contain.
+          return field.field === 'capabilities' ? <fieldset key={field.field}>{body}</fieldset> : <label key={field.field}>{body}</label>;
+        })}
+      </fieldset>
+      <button type="submit" disabled={busy || !view.valid}>Save</button>
+    </form>
+  );
+}
+
+/** Replaces the stored key of a profile and changes nothing else; the only way out of an unfinished credential change. */
+function ReplaceKeyForm({ stored, onOutcome }: { stored: ProviderStatus; onOutcome: (outcome: SubmitOutcome) => void }) {
+  const [secret, setSecret] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setBusy(true);
+    const typed = secret;
+    setSecret('');
+    const outcome = await submitReplaceSecret(stored.profile_ref, typed, change => window.byok.call('keys.submit', change));
+    setBusy(false);
+    onOutcome(outcome);
+  };
+  return (
+    <form className="keys-form" onSubmit={event => { event.preventDefault(); if (secret !== '' && !busy) void submit(); }}>
+      <h2>Replace the key of {stored.display_name}</h2>
+      <fieldset className="keys-fields" disabled={busy}>
+        <label>New API key *<input type="password" autoComplete="off" value={secret} onChange={event => setSecret(event.target.value)} /></label>
+      </fieldset>
+      <button type="submit" disabled={busy || secret === ''}>Replace key</button>
+    </form>
+  );
+}
+
+function StoredList({ listed, editing, onEdit, onReload }: {
+  listed: Listed | undefined; editing: string | null; onEdit: (status: ProviderStatus | null) => void; onReload: () => void;
+}) {
+  return (
+    <section className="keys-stored">
+      <h2>Stored providers</h2>
+      {listed === undefined && <p>Loading…</p>}
+      {listed?.refusal && <RefusalNote refusal={listed.refusal} />}
+      {listed?.statuses && (
+        <ul>
+          {listed.statuses.map(status => (
+            <li key={status.profile_ref}>
+              <button type="button" aria-current={status.profile_ref === editing} onClick={() => onEdit(status)}>
+                {status.display_name} ({status.profile_ref}) · {status.provider_kind} {status.model}
+                {' · '}{status.auth_mode === 'none' ? 'no key needed' : status.secret_configured ? 'key stored' : 'no key stored'}
+                {status.configuration_pending && ' · unfinished key change: replace the key'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button type="button" onClick={() => onEdit(null)}>New provider</button>
+      <button type="button" onClick={onReload}>Reload</button>
+    </section>
+  );
+}
+
+/**
+ * The keys section: the stored profiles from `keys.list`, a model-route form that adds one or edits one, and a key
+ * replacement for a stored one, each submitted write-only through `keys.submit`; and the K8 model list, which takes a
+ * saved profile's entry through the Host's view-change hint.
+ */
+export function KeysSection() {
+  const { listed, reload } = useKeysList();
+  const [editing, setEditing] = useState<ProviderStatus | null>(null);
+  const [formKey, setFormKey] = useState(0);
+  const [outcome, setOutcome] = useState<SubmitOutcome>();
+  const { loaded } = useConversation(null);
+
+  const edit = (status: ProviderStatus | null) => {
+    setEditing(status);
+    setOutcome(undefined);
+    setFormKey(value => value + 1);
+  };
+  const onOutcome = (next: SubmitOutcome) => {
+    setOutcome(next);
+    if ('receipt' in next) {
+      setEditing(null);
+      setFormKey(value => value + 1);
+      reload();
+    }
   };
 
   return (
     <div className="keys">
-      <form key={formKey} className="keys-form" onSubmit={event => { event.preventDefault(); if (view.valid && !busy) void submit(); }}>
-        <h1>Add a model provider</h1>
-        {/* Disabled while a submission is in flight: its result replaces the draft. */}
-        <fieldset className="keys-fields" disabled={busy}>
-          {view.fields.filter(field => field.visible).map(field => {
-            const body = (
-              <>
-                {LABELS[field.field]}{field.required ? ' *' : ''}
-                <FieldInput view={field} draft={draft} onChange={onChange} />
-                <FieldError view={field} />
-              </>
-            );
-            // The capability checkboxes carry their own labels, which a label may not contain.
-            return field.field === 'capabilities' ? <fieldset key={field.field}>{body}</fieldset> : <label key={field.field}>{body}</label>;
-          })}
-        </fieldset>
-        <button type="submit" disabled={busy || !view.valid}>Save</button>
-      </form>
-      {outcome && ('receipt' in outcome ? <Receipt status={outcome.receipt} /> : <p className="keys-error" role="alert">{outcome.error}</p>)}
+      <StoredList listed={listed} editing={editing?.profile_ref ?? null} onEdit={edit} onReload={reload} />
+      <RouteForm key={`route-${formKey}`} stored={editing} onOutcome={onOutcome} />
+      {editing !== null && editing.auth_mode !== 'none' && <ReplaceKeyForm key={`key-${formKey}`} stored={editing} onOutcome={onOutcome} />}
+      {outcome && ('receipt' in outcome ? <Receipt status={outcome.receipt} /> : <RefusalNote refusal={outcome.refusal} />)}
       <section className="keys-models">
         <h2>Models Bots can use</h2>
         {loaded?.error !== undefined && <p className="keys-error" role="alert">{loaded.error}</p>}
