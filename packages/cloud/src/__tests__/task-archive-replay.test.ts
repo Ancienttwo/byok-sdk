@@ -79,4 +79,16 @@ describe('replays across the terminal-task archive', () => {
     expect(await send(retried)).toEqual({ outcome: 'rejected', reason: 'recovery_offer_mismatch' });
     expect(await send(claim)).toEqual({ outcome: 'rejected', reason: 'claim_offer_mismatch' });
   });
+
+  it('refuses a recovery report whose harness binding contradicts a live offer that pins a runtime', async () => {
+    const h = createHarness();
+    const { deviceId } = await h.pairDevice(TENANT_A);
+    await grantAgentHome(h, TENANT_A, deviceId);
+    const stores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId },
+      { core: h.core, cloud: h.stores, mailboxWake: h.mailboxWake });
+    const offer = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), runtime: 'pi' } });
+    const report = createEnvelope('task.fail', { reason: 'daemon_interrupted', retryable: false, agentRef: TEST_AGENT_REF, harnessId: 'h1',
+      recovery: { kind: 'daemon_interrupted', offerId: offer.envelope.id } }, { taskId: offer.taskId });
+    expect(await handleInboundEnvelope(stores, deviceId, report)).toEqual({ outcome: 'rejected', reason: 'recovery_offer_mismatch' });
+  });
 });

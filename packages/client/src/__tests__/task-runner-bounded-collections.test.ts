@@ -141,7 +141,7 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     expect(sent.filter((e) => e.type === 'task.complete' && e.task_id === taskId)).toHaveLength(1);
   });
 
-  it.each(['C7 start failure', 'C8 handoff write failure'])(
+  it.each(['C7 start failure', 'C8 handoff write failure', 'C7b instruction blob resolve failure'])(
     '%s keeps redelivery idempotent after startup ownership is released',
     async (failure) => {
       const adapter = new StubRuntimeAdapter();
@@ -149,13 +149,17 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
       const runner = await makeRunner(adapter, sent);
       if (failure === 'C7 start failure') {
         adapter.startError = new Error('spawn failed');
-      } else {
+      } else if (failure === 'C8 handoff write failure') {
         vi.spyOn(AgentSessionHandoffStore.prototype, 'record')
           .mockRejectedValueOnce(new Error('handoff write failed'));
       }
       try {
         const taskId = 'task-pre-active-failure';
-        const payload = { agentRef: freshTestAgentRef(), instruction: 'fail before active', ...FRESH_OFFER };
+        // The blob client rejects every resolve, so a blobRef fails right after the claim.
+        const instruction = failure.startsWith('C7b')
+          ? { blobRef: { blobId: 'b1', contentHash: `sha256:${'0'.repeat(64)}`, size: 10, contentType: 'text/plain' } }
+          : 'fail before active';
+        const payload = { agentRef: freshTestAgentRef(), instruction, ...FRESH_OFFER } as never;
         await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId, seq: 1 }));
         expect(sent.filter((e) => e.type === 'task.fail' && e.task_id === taskId)).toHaveLength(1);
         expect(sent.filter((e) => e.task_id === taskId).map((e) => e.type))

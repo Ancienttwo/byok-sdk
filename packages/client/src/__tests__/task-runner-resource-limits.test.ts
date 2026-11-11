@@ -15,6 +15,7 @@ import {
   MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX,
   ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX,
 } from '../daemon/task-runner/state';
+import { estimateEventBytes } from '../daemon/task-runner/support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
@@ -247,6 +248,27 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
     expect(fail?.payload).toMatchObject({ retryable: false });
     expect((fail?.payload as { reason: string }).reason.startsWith(MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX)).toBe(true);
     expect(session?.interruptCalled).toBe(true);
+  });
+
+  it('fails the task when an event cannot be serialized for the byte count', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent, { maxTaskOutputBytes: 1_000_000 });
+    const unserializable = { type: 'progress', text: 'x', extra: 1n } as never;
+    // The byte count has no size for it, so it is never counted as 0 bytes.
+    expect(() => estimateEventBytes(unserializable)).toThrow(TypeError);
+
+    await runner.handleEnvelope(
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: 'task-unserializable', seq: 1 }),
+    );
+    const session = adapter.sessions[0];
+    session!.emit(unserializable);
+    session!.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+    const fail = sent.find((e) => e.type === 'task.fail' && e.task_id === 'task-unserializable');
+    expect(fail?.payload).toMatchObject({ retryable: false });
+    expect(sent.some((e) => e.type === 'task.complete')).toBe(false);
   });
 
   it('leaves an under-cap task unaffected — no fail, task completes normally', async () => {

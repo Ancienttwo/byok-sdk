@@ -274,11 +274,17 @@ function byteLength(value: string): number {
   return Buffer.byteLength(value, 'utf8');
 }
 
+/** A missing file or directory (absent WAL/SHM, no quarantine yet) measures 0; any other error must surface, not read as a small healthy journal. */
+function absentAsZero(error: unknown): number {
+  if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+  throw error;
+}
+
 function fileBytes(path: string): number {
   try {
     return statSync(path).size;
-  } catch {
-    return 0;
+  } catch (error) {
+    return absentAsZero(error);
   }
 }
 
@@ -287,8 +293,8 @@ function directoryBytes(dir: string): number {
   let entries: import('node:fs').Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' });
-  } catch {
-    return 0;
+  } catch (error) {
+    return absentAsZero(error);
   }
   for (const entry of entries) {
     const full = join(dir, entry.name);

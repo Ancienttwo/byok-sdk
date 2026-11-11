@@ -416,8 +416,8 @@ describe('spillOversizedEvent: the blob locator itself does not fit', () => {
 /**
  * `AgentEvent.input` / `.output` are `z.unknown()`, so an in-process custom
  * `AgentSession` can hand this module a value `JSON.stringify` refuses to
- * encode. `estimateEventBytes` documents that it never throws; this module
- * sits on the same path and must not either.
+ * encode. This module forwards such a payload unchanged; the pump's byte
+ * count (`estimateEventBytes`) then throws and fails the task.
  */
 describe('spillOversizedEvent: payloads JSON.stringify cannot encode', () => {
   it('forwards a BigInt payload unchanged, logs once, and never uploads', async () => {

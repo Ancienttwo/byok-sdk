@@ -344,7 +344,9 @@ environment" below). The shell is read from the account database by uid
 never from the daemon's `process.env`, so
 a variable an embedding Host sets — before or after the capture — is not in it.
 A Host lists the names it wants a runtime to receive in `pass`; they are read
-from the live `process.env` at every build. The strict `allowlist` base takes
+from the live `process.env` at every build. The top-level `pass` reaches every
+built-in runtime, so a key meant for one runtime must be scoped by construction:
+a separate adapter or adapter call with its own `runtimeEnvironment`. The strict `allowlist` base takes
 only the platform baseline plus `allow` from the live environment. A failed
 capture fails closed: the runtimes report `refused:runtime_environment_unavailable:<code>`
 and offers are declined; no other environment is substituted. On Windows,

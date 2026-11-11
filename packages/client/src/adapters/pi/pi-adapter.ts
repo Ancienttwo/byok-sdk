@@ -677,7 +677,6 @@ export class PiAdapter implements RuntimeAdapter {
             // `mcpEnv`, which already has no provider credential names
             // (`projectPiMcpEnvironment`).
             mcpConfigDir = startInput.scratch.sdkDir;
-            await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
             hostConfigPath = path.join(mcpConfigDir, 'rpc-launch.json');
             // The daemon's observation travels WITH the servers: the extension
             // registers exactly the tools named here and discovers nothing of
@@ -1041,7 +1040,6 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
       await input.scratch.release();
     } });
     configDir = input.scratch.sdkDir;
-    await fs.chmod(configDir, 0o700).catch(() => {});
     configPath = path.join(configDir, 'prepared-launch.json');
     const serialized = serializePiHostConfig({
         format: 'byok.pi.prepared-launch',

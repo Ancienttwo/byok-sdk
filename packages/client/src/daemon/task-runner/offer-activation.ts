@@ -198,8 +198,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
         }, { taskId });
       },
     });
-    void host.dispatch({ type: 'runtime.started', taskId, atMs: Date.now() })
-      .catch((error: unknown) => host.rejectTerminal(taskId, error));
+    void host.dispatchOrReject({ type: 'runtime.started', taskId, atMs: Date.now() });
     void drainApprovals.call(this, taskId);
     await receipt;
     return;

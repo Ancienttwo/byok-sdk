@@ -25,8 +25,9 @@ import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposal
 import { assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, buildRuntimeEnvironment, sdkLaneReport, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { classifyDetectError } from '../detect-outcome';
+import { runtimeStartFailure } from '../runtime-start-failure';
 import type { ResolvedBin } from '../codex/resolve-bin';
-import { AcpConnection, AcpMethodNotFound, AcpRpcError } from './acp-connection';
+import { AcpConnection, AcpMethodNotFound, AcpRpcError, hermesStartClass } from './acp-connection';
 import { identifyHermesGateway, servesHermesHome, type HermesGatewayIdentity, type IdentifyHermesGatewayOptions } from './gateway-identity';
 import { mayStopForeignHermesGateway, ownsHermesGatewayPid } from './gateway-ownership';
 import {
@@ -392,13 +393,7 @@ export class HermesAdapter implements RuntimeAdapter {
       } catch (disposal) {
         throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
       }
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: isRuntimeExecutionFailure(error) ? error.category : 'infrastructure',
-        retry: isRuntimeExecutionFailure(error) ? error.retry : error instanceof AcpRpcError ? 'non-retryable' : 'retryable',
-        reason: error instanceof Error ? error.message : 'hermes open failed',
-        failure: isRuntimeExecutionFailure(error) ? error.failure : { class: 'unknown' },
-      });
+      throw runtimeStartFailure(error, { classify: hermesStartClass, exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'hermes' });
     }
   }
 }

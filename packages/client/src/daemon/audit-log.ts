@@ -30,8 +30,8 @@ import { parseRuntimeObservations } from '../runtime-detection';
  * Permissions: the file is tightened to 0600 BEFORE any new content is
  * written, on every append (`open()`'s `mode` only governs creation, so a
  * pre-existing permissive file is chmod'd first; the tightening also takes
- * effect when the append that follows it fails). `storeDir` gets the same
- * defensive re-`chmod` to 0700 on every append.
+ * effect when the append that follows it fails). The store root's mode is
+ * enforced once at startup by `ensureSecureStoreRoot`, not per append.
  *
  * Bounded: past `MAX_AUDIT_LOG_BYTES` the file is atomically rewritten to its
  * most recent `AUDIT_LOG_TRIM_TARGET_LINES` lines, keeping one lifecycle
@@ -112,10 +112,6 @@ export async function appendAuditRecord(storeDir: string, record: DaemonRecord):
 /** The already-serialized line is immutable while filesystem work is queued. */
 async function appendAuditLine(storeDir: string, line: string): Promise<void> {
   await fs.mkdir(storeDir, { recursive: true, mode: AUDIT_STORE_DIR_MODE });
-  // `mkdir`'s own `mode` only applies at CREATION time. Re-assert on every
-  // append, best-effort: a failure here (e.g. a storeDir owned by a
-  // different user) must never block the append itself.
-  await fs.chmod(storeDir, AUDIT_STORE_DIR_MODE).catch(() => {});
 
   const filePath = auditLogPath(storeDir);
   const handle = await fs.open(filePath, 'a', AUDIT_LOG_MODE);
@@ -383,7 +379,9 @@ export async function readAuditRecords(storeDir: string): Promise<DaemonRecord[]
 
 /**
  * The most recent record `pick` accepts, or `undefined` when there is none,
- * no log, or the log is not a regular file. Opened non-blocking and without
+ * no log (ENOENT), or the log is not a regular file. Any other open error
+ * (EACCES, ELOOP from a planted symlink) throws: an unreadable log is not an
+ * empty one. Opened non-blocking and without
  * following a symlink: `doctor`, `service-status` and the support bundle
  * call this, and must not hang on a FIFO planted at the path.
  */
@@ -391,8 +389,9 @@ async function readLastRecord<T>(storeDir: string, pick: (record: DaemonRecord) 
   let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
     handle = await fs.open(auditLogPath(storeDir), fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0));
-  } catch {
-    return undefined;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
   }
   let raw: string;
   try {

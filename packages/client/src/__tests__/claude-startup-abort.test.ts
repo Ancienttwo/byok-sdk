@@ -115,7 +115,6 @@ describe('Claude startup cancellation ownership', () => {
   it('owns a late MCP config write after cancellation without spawning', async () => {
     let completeAllocation!: () => void;
     vi.spyOn(fs, 'writeFile').mockReturnValue(new Promise<void>(resolve => { completeAllocation = resolve; }));
-    const chmod = vi.spyOn(fs, 'chmod').mockResolvedValue(undefined);
     const cleanup = vi.spyOn(fs, 'rm').mockResolvedValue(undefined);
     const controller = new AbortController(); const fake = fixture();
     const op = await operation(fake.spawnFn, controller.signal, true);
@@ -125,7 +124,6 @@ describe('Claude startup cancellation ownership', () => {
     expect(result.error).toBeInstanceOf(RuntimeStartupDisposalFailure);
     await (result.error as RuntimeStartupDisposalFailure).retryDisposal();
     expect(cleanup).toHaveBeenCalledWith('/inert-config', { recursive: true, force: true });
-    expect(chmod).toHaveBeenCalled();
     expect(fake.spawnFn).not.toHaveBeenCalled();
     expect(tree.dispose).not.toHaveBeenCalled();
   });

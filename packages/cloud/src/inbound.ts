@@ -735,9 +735,7 @@ async function applyInboundGate(
     if (offer !== undefined && isTaskRedactionTombstone(offer.body)) {
       if (!(await archivedWithoutRedaction(stores, attempt)) || attempt.ownerDeviceId === undefined) return refuse('claim_offer_mismatch');
     } else if (offer !== undefined) {
-      const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
-      if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return refuse('claim_offer_mismatch');
-      if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return refuse('claim_offer_mismatch');
+      if (offerHarnessBindingConflicts(offer.body, harnessId)) return refuse('claim_offer_mismatch');
     } else if (harnessId !== undefined) return refuse('claim_offer_mismatch');
   }
   let unclaimedInterruption = false;
@@ -766,10 +764,7 @@ async function applyInboundGate(
         }
       }
     } else {
-      const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
-      const harnessId = envelope.payload.harnessId;
-      if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return refuse('recovery_offer_mismatch');
-      if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return refuse('recovery_offer_mismatch');
+      if (offerHarnessBindingConflicts(offer.body, envelope.payload.harnessId)) return refuse('recovery_offer_mismatch');
     }
     // For automatic selection the target device reports its sealed local
     // admission. Inventory is mutable and is not historical claim authority.
@@ -1081,6 +1076,13 @@ async function taskContentRemoved(stores: TenantStores, attempt: TaskAttempt): P
 /** An explicit redaction's audit receipt; the archive writes none. */
 async function taskRedacted(stores: TenantStores, taskId: string): Promise<boolean> {
   return await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined;
+}
+
+/** A claim or recovery report's harness binding contradicts the sealed offer: a different harness, or a harness named for an offer that pins a runtime or dispatch selection. */
+function offerHarnessBindingConflicts(offerBody: string, harnessId: string | undefined): boolean {
+  const sealed = JSON.parse(offerBody) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
+  if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return true;
+  return sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId;
 }
 
 /** The archive (#1120) removed the content, and no explicit redaction did: redaction's refusals take precedence. */

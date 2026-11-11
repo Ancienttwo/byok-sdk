@@ -11,6 +11,7 @@ import {
   type TerminalAgentHomeProjection,
 } from '@byok-sdk/protocol';
 import { atomicWriteFile } from './util/atomic-write';
+import { type ExistingAncestor, resolveExistingAncestor } from './util/existing-ancestor';
 import { ConfiguredPathLinkError, foldNameAliases } from './util/fold-name-aliases';
 import {
   AGENT_HOME_READER_RUN_MAX_RETAINED,
@@ -233,30 +234,14 @@ function assertAbsolutePath(value: unknown, label: string): asserts value is str
   }
 }
 
-interface ExistingAncestor {
-  readonly canonical: string;
-  readonly tail: readonly string[];
-}
-
-async function resolveExistingAncestor(inputPath: string): Promise<ExistingAncestor> {
-  let cursor = path.resolve(inputPath);
-  const tail: string[] = [];
-  for (;;) {
-    try {
-      return { canonical: await fs.realpath(cursor), tail };
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
-      const parent = path.dirname(cursor);
-      if (parent === cursor) throw new AgentHomeResolutionError(`no existing ancestor for ${inputPath}`);
-      tail.unshift(path.basename(cursor));
-      cursor = parent;
-    }
-  }
+async function requireExistingAncestor(inputPath: string): Promise<ExistingAncestor> {
+  const ancestor = await resolveExistingAncestor(inputPath);
+  if (!ancestor) throw new AgentHomeResolutionError(`no existing ancestor for ${inputPath}`);
+  return ancestor;
 }
 
 async function canonicalPath(inputPath: string): Promise<string> {
-  const { canonical, tail } = await resolveExistingAncestor(inputPath);
+  const { canonical, tail } = await requireExistingAncestor(inputPath);
   return path.resolve(canonical, ...tail);
 }
 
@@ -379,7 +364,7 @@ async function mkdirOrAcceptRacedDirectory(directory: string): Promise<void> {
 }
 
 async function materializeDirectory(inputPath: string): Promise<string> {
-  const { canonical, tail } = await resolveExistingAncestor(inputPath);
+  const { canonical, tail } = await requireExistingAncestor(inputPath);
   await syncExistingDirectoryChain(canonical);
   let cursor = canonical;
   for (const component of tail) {
