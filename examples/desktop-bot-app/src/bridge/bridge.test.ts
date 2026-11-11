@@ -7,8 +7,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { HostProcess, type SupervisedHostState } from '../main/host-process.ts';
 import { coalesceStateHints } from '../main/state-hint.ts';
 import { BridgeClient, type HostChild } from './client.ts';
-import { BRIDGE_VERSION, BridgeError, encodeMessage } from './protocol.ts';
-import { createRendererRouter } from './route.ts';
+import { rendererBridge } from '../renderer/bridge.ts';
+import { BRIDGE_VERSION, BridgeError, encodeMessage, type BridgeIpc } from './protocol.ts';
+import { createRendererRouter, settleCall } from './route.ts';
 import { serveBridge } from './server.ts';
 
 /** A domain as a `src/bridge/domains/` module declares one; `test.reset` is not on the renderer allowlist. */
@@ -134,6 +135,17 @@ describe('desktop bridge', () => {
     expect(() => route('test.reset', undefined)).toThrow('bridge_method_refused');
     expect(host).not.toHaveBeenCalled();
     expect(await route('test.echo', { text: 'hi' })).toEqual({ method: 'test.echo', params: { text: 'hi' } });
+  });
+
+  it('delivers a refused call to the renderer as an error with the refusing handler\'s code', async () => {
+    const route = createRendererRouter<TestMethods, never>({ allowed: ['test.echo', 'test.boom'], main: {}, host: async method => {
+      throw method === 'test.echo' ? new BridgeError('invalid_params', 'test.echo needs a text') : new Error('boom');
+    } });
+    // Main's IPC handler and the preload, without Electron: every call crosses as a BridgeOutcome.
+    const ipc: BridgeIpc = { invoke: (method, params) => settleCall(() => route(method, params)), onStateChanged: () => () => {} };
+    const bridge = rendererBridge(ipc) as unknown as { call(method: string, params: unknown): Promise<unknown> };
+    await expect(bridge.call('test.echo', {})).rejects.toMatchObject({ name: 'BridgeCallError', code: 'invalid_params', message: 'test.echo needs a text' });
+    await expect(bridge.call('test.boom', undefined)).rejects.toMatchObject({ code: 'method_failed', message: 'boom' });
   });
 
   it('turns a burst of Host state changes into one renderer hint, after which status reads the new state', async () => {

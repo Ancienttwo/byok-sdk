@@ -22,7 +22,7 @@ not at install). Set `electron_config_cache` to keep the download cache off a sm
 | Process | Code | Loads |
 | --- | --- | --- |
 | Electron main | `src/main/` | Electron and the bridge client only; no SDK code |
-| Preload | `src/preload/index.cts` | Electron only (sandboxed preload); exposes `window.byok.call` |
+| Preload | `src/preload/index.cts` | Electron only (sandboxed preload); exposes the raw IPC as `window.byokIpc` |
 | Renderer | `src/renderer/` | no Node, no SDK code; served from `app://renderer/` |
 | Host child | `src/host/` | the SDK; runs under the `node` on `PATH` in dev, never under Electron |
 
@@ -39,6 +39,13 @@ to stderr only.
   `app://renderer`, and only for methods in `RENDERER_METHODS`. `hello` and
   `shutdown` are main's alone. Params are validated once, by the handler that answers
   the method: the Host's, or main's for a `main` domain method.
+- A refusal reaches the renderer with its code. `ipcRenderer.invoke` and the context
+  bridge both keep only an error's message, so main resolves every call to
+  `{ ok: true, value }` or `{ ok: false, code, message }` (`settleCall`). The renderer root
+  (`src/renderer/bridge.ts`) builds `window.byok`, whose `call` rejects with a
+  `BridgeCallError` carrying that `code`: a `BridgeError` code, or a custody or keys code.
+  An error without a code is `method_failed`. Renderer code branches on `code`, never on
+  the message.
 - The Host pushes `{ "event": "state" }` lines (no id) after every change: `starting`,
   `running` with its active work count, or `stopped` with a reason. It pushes the same
   state again when a domain's views changed (`HostContext.changed`), so each domain's

@@ -2,8 +2,8 @@ import { resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { app, BrowserWindow, ipcMain, net, powerSaveBlocker, protocol, session, shell, type IpcMainInvokeEvent, type WebFrameMain } from 'electron';
 import brand from '../../brand.config.ts';
-import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMethods, type MainMethod } from '../bridge/protocol.ts';
-import { createRendererRouter } from '../bridge/route.ts';
+import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMethods, type BridgeOutcome, type MainMethod } from '../bridge/protocol.ts';
+import { createRendererRouter, settleCall } from '../bridge/route.ts';
 import { createMainHandlers } from './domains.ts';
 import { HostProcess, spawnDevHost, spawnDevHostCommand, type SupervisedHostState } from './host-process.ts';
 import { spawnPackagedHost, spawnPackagedHostCommand } from './packaged-host.ts';
@@ -85,9 +85,9 @@ function serveRenderer(request: Request): Promise<Response> | Response {
 }
 
 /** Only the main frame of our own window, on our own origin, may call the bridge, and only allowlisted methods. */
-function forward(event: IpcMainInvokeEvent, method: unknown, params: unknown): Promise<unknown> {
+function forward(event: IpcMainInvokeEvent, method: unknown, params: unknown): Promise<BridgeOutcome> {
   if (!isOwnRenderer(event.senderFrame)) throw new Error('bridge_sender_refused');
-  return route(method, params);
+  return settleCall(() => route(method, params));
 }
 
 function openExternal(target: string): void {

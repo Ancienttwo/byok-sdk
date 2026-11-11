@@ -1,4 +1,5 @@
 import type { MethodHandlers, MethodTable } from './domain.ts';
+import type { BridgeOutcome } from './protocol.ts';
 
 export interface RendererRoutes<M extends MethodTable<M>, Main extends keyof M & string> {
   /** Every method the renderer may call. */
@@ -20,4 +21,17 @@ export function createRendererRouter<M extends MethodTable<M>, Main extends keyo
     const own = Object.hasOwn(routes.main, method) ? (routes.main as Record<string, (params: unknown) => unknown>)[method] : undefined;
     return own ? Promise.resolve(own(params)) : routes.host(method as keyof M & string, params);
   };
+}
+
+/**
+ * Settles one routed call as a {@link BridgeOutcome}. A refusal keeps the code its error carries (a `BridgeError`, a
+ * custody or keys error); an error without one is `method_failed`.
+ */
+export async function settleCall(call: () => Promise<unknown>): Promise<BridgeOutcome> {
+  try {
+    return { ok: true, value: await call() };
+  } catch (error) {
+    const { code, message } = error as { code?: unknown; message?: unknown };
+    return { ok: false, code: typeof code === 'string' ? code : 'method_failed', message: typeof message === 'string' ? message : String(error) };
+  }
 }

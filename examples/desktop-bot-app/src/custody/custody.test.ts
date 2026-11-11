@@ -5,7 +5,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  InMemorySecretStore, LinuxSecretServiceSecretStore, modelProviderSecretName,
+  InMemorySecretStore, LinuxSecretServiceSecretStore, modelProviderSecretName, SqliteProviderProfileStore,
   type ModelProviderSecretName, type ProviderConfiguration, type SecretStore,
 } from '@byok-sdk/keys';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
@@ -14,7 +14,7 @@ import { catalogEntryFor, ProviderProfiles } from '../host/keys/catalog.ts';
 import { refusalReceipt, runCustody } from './child.ts';
 import { keysMainHandlers } from './main-handlers.ts';
 import { CustodyError } from './protocol.ts';
-import { submitToCustody, type CustodyChild } from './submit.ts';
+import { listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
 
 const SECRET = 'sk-custody-test-secret-0123456789';
 const CONFIGURATION: ProviderConfiguration = {
@@ -37,7 +37,7 @@ function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: s
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const events = new EventEmitter();
-  void runCustody(stdin, keysDb, secrets).then(status => ({ ok: true as const, status }), refusalReceipt).then(receipt => {
+  void runCustody(stdin, keysDb, secrets).then(result => ({ ok: true as const, ...result }), refusalReceipt).then(receipt => {
     const line = `${JSON.stringify(receipt)}\n`;
     receipts.push(line);
     stdout.end(line);
@@ -83,6 +83,24 @@ describe('custody child', () => {
     expect(seen).toEqual(['writer']);
   });
 
+  it('lists every stored profile with the registry\'s own secret and pending state, and no secret', async () => {
+    const secrets = new InMemorySecretStore<ModelProviderSecretName>();
+    expect(await listFromCustody(custodyChild(secrets, []))).toEqual([]);
+    await submitToCustody(custodyChild(secrets, []), { op: 'configure', configuration: CONFIGURATION, secret: SECRET });
+    await submitToCustody(custodyChild(secrets, []), { op: 'configure', configuration: { ...CONFIGURATION, auth_mode: 'none', profile_ref: 'local' } });
+    const receipts: string[] = [];
+    const statuses = await listFromCustody(custodyChild(secrets, receipts));
+    expect(statuses.map(status => [status.profile_ref, status.secret_configured, status.configuration_pending]))
+      .toEqual([['local', false, false], ['writer', true, false]]);
+    expect(receipts.join('')).not.toContain(SECRET);
+
+    // A credential change that never finished: the registry reports it, and the list shows it.
+    const store = new SqliteProviderProfileStore({ path: keysDb });
+    await store.markPending({ profileRef: 'writer', operation: 'configure', requestId: null, requestDigest: null, operationGeneration: null, since: new Date().toISOString() });
+    await store.close();
+    expect((await listFromCustody(custodyChild(secrets, []))).find(status => status.profile_ref === 'writer')?.configuration_pending).toBe(true);
+  });
+
   it('fails closed on Linux without secret-tool and names the missing tool', async () => {
     const missingTool = new LinuxSecretServiceSecretStore<ModelProviderSecretName>({
       platform: 'linux', commandRunner: async () => { throw Object.assign(new Error('spawn secret-tool ENOENT'), { code: 'ENOENT' }); },
@@ -107,6 +125,8 @@ describe('custody child', () => {
       callHost: async method => { reloads.push(method); return null; },
     })['keys.submit'];
     await expect(submit({ op: 'replace_secret', profileRef: '../writer', secret: SECRET })).rejects.toMatchObject({ code: 'invalid_params' });
+    // A list is not a change: keys.submit refuses it before any custody child starts.
+    await expect(submit({ op: 'list' } as never)).rejects.toMatchObject({ code: 'invalid_params' });
     expect(reloads).toEqual([]);
   });
 
