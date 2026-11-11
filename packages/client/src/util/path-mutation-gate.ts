@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, openSync, promises as fs } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import path from 'node:path';
+import { resolveExistingAncestor } from './existing-ancestor';
 import { ensureOwnedPrivateDirectory } from './private-unix-socket';
 
 export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `agy-session:${string}` | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
@@ -95,20 +96,9 @@ function assertAbsolutePath(value: string): void {
 /** Canonicalize through the deepest existing ancestor without creating the target. */
 export async function resolvePathWithoutCreate(input: string): Promise<string> {
   assertAbsolutePath(input);
-  let cursor = path.resolve(input);
-  const missing: string[] = [];
-  for (;;) {
-    try {
-      return path.resolve(await fs.realpath(cursor), ...missing);
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
-      const parent = path.dirname(cursor);
-      if (parent === cursor) throw new Error(`no existing ancestor for ${input}`);
-      missing.unshift(path.basename(cursor));
-      cursor = parent;
-    }
-  }
+  const ancestor = await resolveExistingAncestor(input);
+  if (!ancestor) throw new Error(`no existing ancestor for ${input}`);
+  return path.resolve(ancestor.canonical, ...ancestor.tail);
 }
 
 function gateIdentity(scope: PathMutationGateScope, canonicalTarget: string): string {
