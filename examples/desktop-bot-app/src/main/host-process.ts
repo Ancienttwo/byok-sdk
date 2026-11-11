@@ -23,11 +23,12 @@ export interface HostProcessOptions {
 }
 
 /**
- * Dev mode: the Host child runs under the Node on PATH, never under Electron's
- * own binary (RunAsNode is fused off). The packaged SEA Host arrives with #1811.
+ * Dev mode: the Host bundle (`bun run build:host`, dist/host/) runs under the
+ * Node on PATH, never under Electron's own binary (RunAsNode is fused off).
+ * A package runs the same bundle as a SEA.
  */
 export function spawnDevHost(): HostChild {
-  const entry = fileURLToPath(new URL('../host/supervise.js', import.meta.url));
+  const entry = fileURLToPath(new URL('../../host/host.cjs', import.meta.url));
   return spawn('node', [entry], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
 }
 

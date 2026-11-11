@@ -162,7 +162,9 @@ const REGISTERED_PRIVATE_ADDITIONS = Object.freeze({
   'examples/desktop-bot-app': Object.freeze({
     scripts: Object.freeze({
       build: "tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/renderer/index.html', 'dist/src/renderer/index.html')\"",
-      dev: 'bun run build && electron dist/src/main/index.js',
+      // #1811: the one Host bundle (CommonJS under Node in dev, a SEA when packaged); dev runs it.
+      'build:host': 'node scripts/package/bundle-host.mjs --format cjs',
+      dev: 'bun run build && bun run build:host && electron dist/src/main/index.js',
     }),
     devDependencies: Object.freeze({ electron: '45.3.0', '@electron/fuses': '2.1.3' }),
   }),

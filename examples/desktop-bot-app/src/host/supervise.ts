@@ -97,18 +97,26 @@ export async function superviseHost(
   await close();
 }
 
-if (import.meta.main && !await runSdkReservedHelperCommand()) {
+/** Runs this process as the SDK helper its argv names; otherwise as the Host, exiting 0 once it closed. */
+async function main(exit: (code: number) => void): Promise<void> {
+  if (await runSdkReservedHelperCommand()) return;
   const layout = resolveHostLayout({ productId: brand.productId, productName: brand.productName });
-  // Exit only after stdout has flushed the last bridge line: pipes are asynchronous on macOS.
-  const exit = (code: number) => process.stdout.write('', () => process.exit(code));
-  superviseHost({
+  await superviseHost({
     productId: brand.productId,
     productName: brand.productName,
     releaseVersion: manifest.version,
     storeDir: layout.storeDir,
     hostStorageRoot: layout.hostStorageRoot,
     sdkHelperHost: bundledSdkHelperHost(),
-  }).then(() => exit(0), (error: Error) => {
+  });
+  exit(0);
+}
+
+// No top-level await: the Host also runs as a CommonJS bundle and inside a SEA (scripts/package/bundle-host.mjs).
+if (import.meta.main) {
+  // Exit only after stdout has flushed the last bridge line: pipes are asynchronous on macOS.
+  const exit = (code: number) => process.stdout.write('', () => process.exit(code));
+  main(exit).catch((error: Error) => {
     console.error(`Host stopped: ${error.stack ?? error.message}`);
     exit(1);
   });
