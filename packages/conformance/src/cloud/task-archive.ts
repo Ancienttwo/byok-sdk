@@ -14,6 +14,8 @@ import type { TaskArchiveStoreInput, TaskRedactionCodec } from '@byok-sdk/cloud'
 import { TENANT_A, TENANT_B } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory, type CloudCompositionHandle } from './harness';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const DAY_MS = 86_400_000;
 const TOMBSTONE = '{"byokRedacted":1,"test":';
 
@@ -44,8 +46,8 @@ function archiveInput(taskId: string, archivedAt: string, extraKeys: readonly st
 }
 
 async function terminalTask(handle: CloudCompositionHandle, tenant: TenantId, taskId: string, terminalBody?: string): Promise<void> {
-  await handle.stores.tasks.open(tenant, { taskId, deviceId: 'device-1' });
-  await handle.stores.tasks.recordStatus(tenant, { taskId, status: 'complete' });
+  await handle.stores.tasks.reserveAgentOffer(tenant, { taskId, deviceId: 'device-1', agentRef: AGENT_REF });
+  await handle.stores.tasks.recordStatus(tenant, { taskId, status: 'complete', agentRef: AGENT_REF });
   if (terminalBody !== undefined) await handle.stores.receipts.record(tenant, { key: terminalKey(taskId), body: terminalBody });
 }
 
@@ -61,8 +63,8 @@ export function runTaskArchiveConformance(factory: CloudCompositionFactory): voi
         await terminalTask(handle, TENANT_A, 'archive-old');
         await handle.advanceTime(DAY_MS);
         await terminalTask(handle, TENANT_A, 'archive-newer');
-        await handle.stores.tasks.open(TENANT_A, { taskId: 'archive-running', deviceId: 'device-1' });
-        await handle.stores.tasks.recordStatus(TENANT_A, { taskId: 'archive-running', status: 'claimed' });
+        await handle.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'archive-running', deviceId: 'device-1', agentRef: AGENT_REF });
+        await handle.stores.tasks.recordStatus(TENANT_A, { taskId: 'archive-running', status: 'claimed', agentRef: AGENT_REF });
         await terminalTask(handle, TENANT_B, 'archive-other-tenant');
         const cutoff = later(handle, 1);
 
@@ -101,7 +103,7 @@ export function runTaskArchiveConformance(factory: CloudCompositionFactory): voi
       await withCloudComposition(factory, async (handle) => {
         const { taskArchive, receipts, tasks } = handle.stores;
         await terminalTask(handle, TENANT_A, 'archive-no-terminal');
-        await tasks.open(TENANT_A, { taskId: 'archive-running', deviceId: 'device-1' });
+        await tasks.reserveAgentOffer(TENANT_A, { taskId: 'archive-running', deviceId: 'device-1', agentRef: AGENT_REF });
         const archivedAt = later(handle, 1);
 
         expect(await taskArchive.archive(TENANT_A, archiveInput('archive-missing', archivedAt))).toEqual({ outcome: 'not_found' });

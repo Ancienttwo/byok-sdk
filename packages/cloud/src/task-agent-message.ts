@@ -81,6 +81,6 @@ export async function readTaskAgentMessageBinding(
 async function readMessageAttempt(stores: TenantStores, deviceId: string, taskId: string, agentRef: AgentRef) {
   const attempt = await stores.tasks.get(taskId);
   if (!attempt || attempt.tenantId !== stores.tenant || attempt.taskId !== taskId || attempt.deviceId !== deviceId
-    || !attempt.agentRef || !sameRef(attempt.agentRef, agentRef)) return undefined;
+    || !sameRef(attempt.agentRef, agentRef)) return undefined;
   return attempt;
 }

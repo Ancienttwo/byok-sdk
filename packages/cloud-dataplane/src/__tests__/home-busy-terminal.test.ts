@@ -12,6 +12,8 @@ import { createPostgresCoreStores } from '../stores/core';
 import { createDataplaneScope, createObjectStorageScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
 import { PostgresProofReceiptRetentionAuthority } from '../stores/proof-receipts';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const tenant = tenantId('home-busy-terminal');
 const other = tenantId('home-busy-terminal-other');
@@ -45,8 +47,8 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres home-busy terminal — ${SKIP_REASON}`
         }
         const first = await open(scope.pool);
         const taskId = 'declined-task';
-        await first.stores.tasks.open(tenant, { taskId, deviceId });
-        const payload = { reason: 'display only', retryable: true, ...(code === undefined ? {} : { code }) };
+        await first.stores.tasks.reserveAgentOffer(tenant, { taskId, deviceId, agentRef: AGENT_REF });
+        const payload = { agentRef: AGENT_REF, reason: 'display only', retryable: true, ...(code === undefined ? {} : { code }) };
         const terminal = createEnvelope('task.decline', payload, { taskId });
         expect(await handleInboundEnvelope(first.bound, deviceId, terminal).then(r => r.outcome)).toBe('accepted');
         const beforeRestart = await first.cloud.readDeviceTerminal(tenant, taskId);

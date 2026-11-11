@@ -47,7 +47,7 @@ export class InMemoryTaskArchiveStore implements TaskArchiveStore {
     const work = (attempt: TaskAttempt, phase: TaskArchiveWork['phase']): TaskArchiveWork => ({
       taskId: attempt.taskId,
       deviceId: attempt.deviceId,
-      ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+      agentRef: attempt.agentRef,
       phase,
     });
     const settle = mine

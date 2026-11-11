@@ -49,7 +49,7 @@ export function createTaskReadsApi({ root, controlPlane, options, sameAgentRef }
           stored.type !== 'task.offer') throw invalid();
       const parsed = TaskOfferPayloadSchema.safeParse(stored.payload);
       if (!parsed.success || JSON.stringify(parsed.data) !== JSON.stringify(stored.payload)) throw invalid();
-      if (attempt.agentRef === undefined || !sameAgentRef(parsed.data.agentRef, attempt.agentRef)) throw invalid();
+      if (!sameAgentRef(parsed.data.agentRef, attempt.agentRef)) throw invalid();
       const delivered = await stores.receipts.get(`task-offer-delivered:${messageId}`);
       if (delivered !== undefined && delivered.body !== messageId) throw invalid();
       return { taskId, deviceId: attempt.deviceId, messageId, type: 'task.offer', payload: parsed.data,
@@ -108,7 +108,7 @@ export function createTaskReadsApi({ root, controlPlane, options, sameAgentRef }
         return {
           taskId,
           state: 'cancelled',
-          ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+          agentRef: attempt.agentRef,
           ...(attempt.cancellation.reason === undefined
             ? {}
             : { reason: attempt.cancellation.reason }),
@@ -133,7 +133,7 @@ export function createTaskReadsApi({ root, controlPlane, options, sameAgentRef }
           taskId,
           state: 'cancelled',
           terminalCause: attempt.terminalCause,
-          ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+          agentRef: attempt.agentRef,
           recordedAt: attempt.terminalAt,
         };
       }

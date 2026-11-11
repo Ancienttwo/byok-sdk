@@ -17,6 +17,8 @@ import { agentReliabilityKey } from '../agent-reliability';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
 import { TENANT_A, TENANT_B, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 function devicePrincipal(tenant: TenantId, deviceId: string) {
   return { kind: 'device', tenantId: tenant, productId: 'test-product', deviceId } as const;
 }
@@ -265,8 +267,8 @@ describe('the inbound gate', () => {
       cloud: harness.stores,
       mailboxWake: harness.mailboxWake,
     });
-    await harness.stores.tasks.open(TENANT_A, { taskId: 'task-first-device', deviceId });
-    await harness.stores.tasks.open(TENANT_A, { taskId: 'task-other-device', deviceId: other.deviceId });
+    await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-first-device', deviceId, agentRef: AGENT_REF });
+    await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-other-device', deviceId: other.deviceId, agentRef: AGENT_REF });
     const envelopeId = '10000000-0000-4000-8000-000000000123';
     const first = createEnvelope('task.progress', { seq: 1, events: [] }, {
       id: envelopeId,
@@ -287,8 +289,8 @@ describe('the inbound gate', () => {
       cloud: harness.stores,
       mailboxWake: harness.mailboxWake,
     });
-    await harness.stores.tasks.open(TENANT_A, { taskId: 'task-shared', deviceId });
-    await harness.stores.tasks.open(TENANT_B, { taskId: 'task-shared', deviceId });
+    await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-shared', deviceId, agentRef: AGENT_REF });
+    await harness.stores.tasks.reserveAgentOffer(TENANT_B, { taskId: 'task-shared', deviceId, agentRef: AGENT_REF });
     const envelope = progress('task-shared');
 
     expect(await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome)).toBe('accepted');

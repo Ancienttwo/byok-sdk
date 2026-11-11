@@ -120,6 +120,8 @@ export { PostgresCloudCleanup, createPostgresCloudMaintenance, } from './cleanup
 export type { ObjectStorageReconcileResult, DeadLetterPage, DeadLetterQuery, DeadLetterRef, DeadLetterReplayInput, ObjectUsageRebuildResult, PostgresCloudCleanupOptions, PostgresCloudMaintenanceOptions, } from './cleanup';
 export { TENANT_ERASURE_ERROR_CODES, TENANT_ERASURE_TABLES, PostgresTenantErasure, TenantErasureError, createPostgresTenantErasure, } from './tenant-erasure';
 export type { PostgresTenantErasureCompositionOptions, PostgresTenantErasureOptions, TenantErasureConflict, TenantErasureErrorCode, TenantErasureReadback, TenantErasureResult, TenantErasureStatus, } from './tenant-erasure';
+export { retireAgentlessTasks } from './retire-agentless-tasks';
+export type { RetireAgentlessTasksOptions, RetireAgentlessTasksResult } from './retire-agentless-tasks';
 export { createPostgresMailboxWake, MailboxWakeProbeMissedError } from './mailbox-wake';
 export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake';
 export { createPostgresTaskEventsWake, TaskEventsWakeProbeMissedError } from './task-events-wake';
@@ -349,6 +351,32 @@ export interface PostgresWake {
 }
 /** One resident Node listener, independent of the request pool and the authority it hints about. */
 export declare function createPostgresWake(spec: PostgresWakeChannel, options: PostgresWakeOptions): PostgresWake;
+// ==== @byok-sdk/cloud-dataplane dist/retire-agentless-tasks.d.ts ====
+/**
+ * One-shot operator command between migrations 0038 and 0039 (#1780).
+ *
+ * Builds up to v0.30.2 stored task rows without an Agent identity. Each such
+ * terminal task is archived through the archive step's own store transaction
+ * (bodies become tombstones, object references go), its board item is removed,
+ * and its row moves into `task_agentless_retired`, the fence that keeps its id
+ * used. A task that is not terminal stops the command before any change: settle
+ * it on v0.41.0 first. So does one whose offer or cancel delivery is still
+ * pending, which the archive refuses: the command bypasses the retention window,
+ * so the policy floor that keeps the archive step clear of those rows does not
+ * apply. Safe to run again; a later run finds nothing to retire.
+ */
+import { type CloudCrypto } from '@byok-sdk/cloud';
+import { type Clock } from '@byok-sdk/core';
+import type { ByokPool } from './pool';
+export interface RetireAgentlessTasksOptions {
+    readonly clock: Clock;
+    readonly crypto: Pick<CloudCrypto, 'sha256'>;
+}
+export interface RetireAgentlessTasksResult {
+    /** Tasks moved into `task_agentless_retired` by this run, per tenant. */
+    readonly retired: Readonly<Record<string, number>>;
+}
+export declare function retireAgentlessTasks(pool: ByokPool, options: RetireAgentlessTasksOptions): Promise<RetireAgentlessTasksResult>;
 // ==== @byok-sdk/cloud-dataplane dist/runtime.d.ts ====
 /**
  * The Worker-loadable online surface of `@byok-sdk/cloud-dataplane`.
@@ -1593,11 +1621,6 @@ export declare function taskRowToAttempt(row: TaskRow): TaskAttempt;
 export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     #private;
     constructor(pool: ByokPool, clock: Clock);
-    open(tenant: TenantId, input: {
-        readonly taskId: string;
-        readonly deviceId: string;
-        readonly agentRef?: AgentRef;
-    }): Promise<TaskAttempt>;
     reserveAgentOffer(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
@@ -1647,7 +1670,7 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     recordStatus(tenant: TenantId, input: {
         readonly taskId: string;
         readonly status: TaskAttemptStatus;
-        readonly agentRef?: AgentRef;
+        readonly agentRef: AgentRef;
         readonly terminalCause?: string;
     }): Promise<TaskAttempt | undefined>;
 }
@@ -1772,7 +1795,7 @@ import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { ByokPool } from './pool';
 import { type R2BlobStoreOptions, type R2ObjectMaintenance } from './stores/r2-blobs';
 /** Every tenant-owned table as of 0017, in child-before-parent deletion order. */
-export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_log_entry', 'activity_log_head', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_kem_floor', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
+export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_log_entry', 'activity_log_head', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_kem_floor', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task', 'task_agentless_retired', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
 export declare const TENANT_ERASURE_ERROR_CODES: {
     readonly tenant_erasure_invalid_input: 'tenant_erasure_invalid_input';
     readonly tenant_erasure_schema_drift: 'tenant_erasure_schema_drift';

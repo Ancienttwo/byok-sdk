@@ -121,8 +121,8 @@ async function fixture(pool: ByokPool): Promise<Fixture> {
       // must NOT touch, and reaching them through their own stores would only
       // add setup that the assertion does not depend on.
       await pool.query(
-        `INSERT INTO task (tenant_id, task_id, device_id, status, updated_at)
-         VALUES ($1, $2, $3, 'offered', now())`,
+        `INSERT INTO task (tenant_id, task_id, device_id, agent_id, agent_profile_revision, status, updated_at)
+         VALUES ($1, $2, $3, 'agent-1', 'rev-1', 'offered', now())`,
         [tenant, `${deviceId}-task`, deviceId],
       );
       await pool.query(

@@ -97,7 +97,7 @@ export function toTaskSnapshot(
     state: taskStateOf(attempt.status, attempt.cancellation !== undefined, pending !== undefined),
     deviceId: attempt.deviceId,
     sessionRef,
-    ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+    agentRef: attempt.agentRef,
     createdAt: offer?.recordedAt ?? attempt.updatedAt,
     updatedAt: attempt.updatedAt,
     ...(result === undefined ? {} : { result }),

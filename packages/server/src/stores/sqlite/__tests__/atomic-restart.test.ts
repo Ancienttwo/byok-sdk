@@ -16,6 +16,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createSqliteEmbeddedStores } from '..';
 import { isSqliteAvailable, SqliteSchemaError } from '../../../sqlite-support';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const TENANT = tenantId('tenant-restart');
 
@@ -39,7 +41,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     const clock = createMutableClock();
     const crypto = createWebCrypto();
     let composition = createSqliteEmbeddedStores({ path }, { clock, crypto });
-    await composition.cloud.tasks.open(TENANT, { taskId: 'task-rollback', deviceId: 'device-1' });
+    await composition.cloud.tasks.reserveAgentOffer(TENANT, { taskId: 'task-rollback', deviceId: 'device-1', agentRef: AGENT_REF });
 
     await composition.close();
     const fault = new DatabaseSync(path);
@@ -89,7 +91,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     expect(open).toThrow('Unsupported BYOK SQLite schema version');
     expect(open).toThrow(SqliteSchemaError);
     expect(open).toThrow(expect.objectContaining({
-      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '8',
+      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '9',
     }));
   });
 
@@ -98,7 +100,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     const clock = createMutableClock();
     const crypto = createWebCrypto();
     const first = createSqliteEmbeddedStores({ path }, { clock, crypto });
-    await first.cloud.tasks.open(TENANT, { taskId: 'task-target-fence', deviceId: 'device-target' });
+    await first.cloud.tasks.reserveAgentOffer(TENANT, { taskId: 'task-target-fence', deviceId: 'device-target', agentRef: AGENT_REF });
     await first.close();
 
     const reopened = createSqliteEmbeddedStores({ path }, { clock, crypto });
@@ -122,7 +124,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     const crypto = createWebCrypto();
     const first = createSqliteEmbeddedStores({ path }, { clock, crypto });
 
-    await first.cloud.tasks.open(TENANT, { taskId: 'task-restart', deviceId: 'device-1' });
+    await first.cloud.tasks.reserveAgentOffer(TENANT, { taskId: 'task-restart', deviceId: 'device-1', agentRef: AGENT_REF });
     const cancellation = await first.cloud.cancellations.request(TENANT, {
       taskId: 'task-restart',
       proposedMessageId: 'cancel-restart',

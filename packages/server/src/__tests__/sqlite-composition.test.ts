@@ -11,6 +11,8 @@ import { serverTenantId } from '../stores';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { submitFrozen, type FrozenInput } from '../execution-core';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 
 describeSqlite('createByokServer SQLite composition', () => {
@@ -31,9 +33,10 @@ describeSqlite('createByokServer SQLite composition', () => {
       { path },
       { clock: createMutableClock(), crypto: createWebCrypto() },
     );
-    await seeded.cloud.tasks.open(serverTenantId(productId), {
+    await seeded.cloud.tasks.reserveAgentOffer(serverTenantId(productId), {
       taskId: 'task-before-restart',
       deviceId: 'device-1',
+      agentRef: AGENT_REF,
     });
     await seeded.close();
 

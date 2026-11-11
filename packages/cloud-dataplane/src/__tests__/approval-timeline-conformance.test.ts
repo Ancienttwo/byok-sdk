@@ -97,7 +97,7 @@ describe.skipIf(SKIP_DATAPLANE)('approval admission at the task close (#1113 A3)
       const clock = createMutableClock();
       const tenant = tenantId('tenant-approval-close-race');
       await scope.pool.query(
-        `INSERT INTO task (tenant_id, task_id, device_id, status, updated_at) VALUES ($1, 'task', 'device', 'running', $2)`,
+        `INSERT INTO task (tenant_id, task_id, device_id, agent_id, agent_profile_revision, status, updated_at) VALUES ($1, 'task', 'device', 'agent-1', 'rev-1', 'running', $2)`,
         [tenant, clock.now().toISOString()],
       );
       // The close inserts the closed row and holds it until it commits.
