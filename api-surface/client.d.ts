@@ -1336,6 +1336,7 @@ import type { RuntimeId } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, RuntimeVersionPolicy } from '../types';
 import { type RuntimeEnvironmentPolicy } from '../runtime/environment';
 import type { SdkHelperHostConfig } from '../sdk-reserved-helper-host';
+import type { DaemonConfigIssue } from '../daemon/config-schema/validate';
 import { type PiAdapterOptions, type PiByokLauncherConfig } from './pi/pi-adapter';
 import { type ClaudeAdapterOptions } from './claude/claude-adapter';
 import { type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter';
@@ -1505,12 +1506,26 @@ export declare function createRuntimeAdapters(config: RuntimeAdaptersConfig): Ru
  * {@link createRuntimeAdapters} after its own validation.
  */
 export declare function buildRuntimeAdapters(config: DaemonRuntimeAdaptersConfig, piByokLauncher: PiByokLauncherConfig | undefined): RuntimeAdapter[];
-/** Validates the top-level `runtimeEnvironment` and each `runtimes.<id>.runtimeEnvironment`; throws a `TypeError` for an invalid one. */
+/**
+ * Validates the top-level `runtimeEnvironment` and each
+ * `runtimes.<id>.runtimeEnvironment`; throws a `TypeError` for an invalid one.
+ *
+ * @internal
+ */
 export declare function assertRuntimeEnvironmentPolicies(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): void;
+/**
+ * {@link assertRuntimeEnvironmentPolicies} as config issues, one per invalid
+ * policy at its own path, for `checkDaemonConfig`.
+ *
+ * @internal
+ */
+export declare function runtimeEnvironmentPolicyIssues(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): DaemonConfigIssue[];
 /**
  * The one environment policy of an SDK-built runtime (#1759):
  * `runtimes.<id>.runtimeEnvironment` replaces the top-level policy wholesale,
  * like `versionPolicy` (ADR-044); the two are never merged.
+ *
+ * @internal
  */
 export declare function runtimeEnvironmentFor(id: string, config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): RuntimeEnvironmentPolicy | undefined;
 /** Validates `piByokLauncher` and folds its `sessionDir`; the daemon and its retention build Pi from this one value. */
@@ -5434,11 +5449,11 @@ export interface DaemonConfig {
      */
     runtimes?: DaemonRuntimesConfig;
     /**
-     * The environment every runtime `createDaemon` builds gives its children
-     * (#1095): by default the user's login-shell snapshot, so a variable the
-     * Host sets in `process.env` reaches a runtime only when `pass` names it.
-     * `runtimes.<id>.runtimeEnvironment` replaces this policy for that runtime
-     * (#1759); it is not merged with this `pass`.
+     * The default environment a runtime `createDaemon` builds gives its
+     * children (#1095): by default the user's login-shell snapshot, so a
+     * variable the Host sets in `process.env` reaches a runtime only when `pass`
+     * names it. `runtimes.<id>.runtimeEnvironment` overrides it for that runtime
+     * (#1759): it replaces this policy and is not merged with this `pass`.
      * `createDaemonWithAdapters` refuses this field: each injected adapter
      * takes its own `runtimeEnvironment` option.
      */

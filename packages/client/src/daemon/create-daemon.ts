@@ -281,11 +281,11 @@ export interface DaemonConfig {
    */
   runtimes?: DaemonRuntimesConfig;
   /**
-   * The environment every runtime `createDaemon` builds gives its children
-   * (#1095): by default the user's login-shell snapshot, so a variable the
-   * Host sets in `process.env` reaches a runtime only when `pass` names it.
-   * `runtimes.<id>.runtimeEnvironment` replaces this policy for that runtime
-   * (#1759); it is not merged with this `pass`.
+   * The default environment a runtime `createDaemon` builds gives its
+   * children (#1095): by default the user's login-shell snapshot, so a
+   * variable the Host sets in `process.env` reaches a runtime only when `pass`
+   * names it. `runtimes.<id>.runtimeEnvironment` overrides it for that runtime
+   * (#1759): it replaces this policy and is not merged with this `pass`.
    * `createDaemonWithAdapters` refuses this field: each injected adapter
    * takes its own `runtimeEnvironment` option.
    */

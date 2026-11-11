@@ -220,18 +220,47 @@ export function buildRuntimeAdapters(config: DaemonRuntimeAdaptersConfig, piByok
   return ids.map((id) => buildAdapter(id, config, piByokLauncher));
 }
 
-/** Validates the top-level `runtimeEnvironment` and each `runtimes.<id>.runtimeEnvironment`; throws a `TypeError` for an invalid one. */
+/** Each configured policy with its config path: the top-level `runtimeEnvironment`, then every `runtimes.<id>.runtimeEnvironment`. */
+function configuredRuntimeEnvironments(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): Array<[path: string, value: unknown]> {
+  return [['runtimeEnvironment', config.runtimeEnvironment],
+    ...SDK_BUILT_RUNTIME_IDS.map((id): [string, unknown] => [`runtimes.${id}.runtimeEnvironment`, config.runtimes?.[id]?.runtimeEnvironment])];
+}
+
+/**
+ * Validates the top-level `runtimeEnvironment` and each
+ * `runtimes.<id>.runtimeEnvironment`; throws a `TypeError` for an invalid one.
+ *
+ * @internal
+ */
 export function assertRuntimeEnvironmentPolicies(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): void {
-  assertRuntimeEnvironmentPolicy(config.runtimeEnvironment, 'DaemonConfig.runtimeEnvironment');
-  for (const id of SDK_BUILT_RUNTIME_IDS) {
-    assertRuntimeEnvironmentPolicy(config.runtimes?.[id]?.runtimeEnvironment, `DaemonConfig.runtimes.${id}.runtimeEnvironment`);
+  for (const [path, value] of configuredRuntimeEnvironments(config)) assertRuntimeEnvironmentPolicy(value, `DaemonConfig.${path}`);
+}
+
+/**
+ * {@link assertRuntimeEnvironmentPolicies} as config issues, one per invalid
+ * policy at its own path, for `checkDaemonConfig`.
+ *
+ * @internal
+ */
+export function runtimeEnvironmentPolicyIssues(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): DaemonConfigIssue[] {
+  const issues: DaemonConfigIssue[] = [];
+  for (const [path, value] of configuredRuntimeEnvironments(config)) {
+    try {
+      assertRuntimeEnvironmentPolicy(value, `DaemonConfig.${path}`);
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      issues.push(invalid(path, error.message));
+    }
   }
+  return issues;
 }
 
 /**
  * The one environment policy of an SDK-built runtime (#1759):
  * `runtimes.<id>.runtimeEnvironment` replaces the top-level policy wholesale,
  * like `versionPolicy` (ADR-044); the two are never merged.
+ *
+ * @internal
  */
 export function runtimeEnvironmentFor(id: string, config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): RuntimeEnvironmentPolicy | undefined {
   return config.runtimes?.[id as SdkBuiltRuntimeId]?.runtimeEnvironment ?? config.runtimeEnvironment;

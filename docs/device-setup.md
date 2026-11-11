@@ -162,7 +162,8 @@ A product that bundles Pi sets its Pi asset root (the absolute form of
 source: the SDK gives it to Pi and the pi-host helper process as
 `PI_PACKAGE_DIR`, no other runtime gets it, and a `PI_PACKAGE_DIR` in the
 login shell or the Host environment never reaches Pi. Naming
-`PI_PACKAGE_DIR` in `runtimeEnvironment.pass` is an error.
+`PI_PACKAGE_DIR` in the `pass` of Pi's effective policy (`runtimes.pi.runtimeEnvironment`,
+else `runtimeEnvironment`) is an error.
 
 A Host that keeps one store per tenant places each store outside
 `<hostStorageRoot>/agents/`, which the SDK owns for Agent homes, and leaves the
@@ -179,9 +180,13 @@ the Host sets does not reach an agent.
 - A Host that wants a runtime to receive a variable it sets (before or after
   start) lists the name in `pass`:
   `DaemonConfig.runtimeEnvironment: { pass: ['ACME_TOKEN_FILE'] }` with
-  `createDaemon`, or the same object as each adapter's `runtimeEnvironment`
-  option with `createDaemonWithAdapters`, which rejects the `DaemonConfig`
-  field. Custom adapters implement `runtimeEnvironment()`, normally with
+  `createDaemon` is the default of every runtime it builds, and
+  `DaemonConfig.runtimes.<id>.runtimeEnvironment` is one runtime's own policy
+  (#1759). A runtime's own policy replaces the default for that runtime and is
+  not merged with its `pass`, so a key named only there, such as a dsh model
+  key, reaches that runtime alone. With `createDaemonWithAdapters`, which
+  rejects both `DaemonConfig` fields, pass the policy as each adapter's
+  `runtimeEnvironment` option. Custom adapters implement `runtimeEnvironment()`, normally with
   `buildRuntimeEnvironment(policy)`, which returns `{ env, report }`. A caller
   of `runtimeEnvironment()` reads `.env`.
 - `{ base: 'allowlist', allow: [...] }` is the strict mode: the platform
@@ -961,7 +966,7 @@ Manifest transition: **0.41.0 → 0.41.0**. Versions and entries below come from
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
 | codex-session-store | breaking | The retention class agent-runtime-sessions is replaced by the expiring class codex-session-store: it is removed from PROTECTED_CLASS_IDS, ProtectedClassId and PROTECTED_CLASS_BOUNDS and added to EXPIRING_CLASS_IDS and ExpiringClassId, so replace the literal where the Host reads retention classes and treat the class as expiring. It covers the Codex rollouts that agentUserContext: excluded keeps under <Agent home>/.byok/codex. A rollout is deleted once its last write is older than the new DaemonConfig.storage.retention.ttlMs['codex-session-store'] (default 31 days, or the session-ledger TTL plus one day if longer; an explicit value must be at least that), unless a live session ledger still names its thread or its Agent home is running a task. Rollouts that used to stay until the Host removed the Agent home are now deleted by default; set the TTL higher to keep idle threads longer. Resuming a deleted thread fails closed through the existing non-retryable missing-thread path. [Migration](../docs/host-local-storage-layout.md#retention-bounds) |
-| per-runtime-environment | breaking | DaemonConfig.runtimes.<id> and RuntimeAdaptersRuntimes.<id> (PiRuntimeConfig for pi) gain an optional runtimeEnvironment: the environment policy of that SDK-built runtime, which replaces the top-level runtimeEnvironment for it and is not merged with the top-level pass. A runtime without it keeps the top-level policy, so existing configuration keeps its meaning. DaemonEffectiveRuntime gains runtimeEnvironment. byok-agent config check --json reports each runtime's policy at effective.runtimes[].runtimeEnvironment and drops its top-level runtimeEnvironment key; a script that read that key reads the per-runtime field. [Migration](../docs/releases/host-upgrade-next-minor.md#per-runtime-environment-policy) |
+| per-runtime-environment | additive | DaemonConfig.runtimes.<id> and RuntimeAdaptersRuntimes.<id> (PiRuntimeConfig for pi) gain an optional runtimeEnvironment: the environment policy of that SDK-built runtime, which replaces the top-level runtimeEnvironment for it and is not merged with the top-level pass. A runtime without it keeps the top-level policy, so existing configuration keeps its meaning. DaemonEffectiveRuntime gains an optional runtimeEnvironment, and byok-agent config check --json adds effective.runtimes[].runtimeEnvironment beside its unchanged top-level runtimeEnvironment. No Host change is required. [Migration](../docs/releases/host-upgrade-next-minor.md#per-runtime-environment-policy) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

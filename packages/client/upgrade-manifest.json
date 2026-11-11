@@ -155,8 +155,8 @@
     },
     {
       "id": "per-runtime-environment",
-      "impact": "breaking",
-      "summary": "DaemonConfig.runtimes.<id> and RuntimeAdaptersRuntimes.<id> (PiRuntimeConfig for pi) gain an optional runtimeEnvironment: the environment policy of that SDK-built runtime, which replaces the top-level runtimeEnvironment for it and is not merged with the top-level pass. A runtime without it keeps the top-level policy, so existing configuration keeps its meaning. DaemonEffectiveRuntime gains runtimeEnvironment. byok-agent config check --json reports each runtime's policy at effective.runtimes[].runtimeEnvironment and drops its top-level runtimeEnvironment key; a script that read that key reads the per-runtime field.",
+      "impact": "additive",
+      "summary": "DaemonConfig.runtimes.<id> and RuntimeAdaptersRuntimes.<id> (PiRuntimeConfig for pi) gain an optional runtimeEnvironment: the environment policy of that SDK-built runtime, which replaces the top-level runtimeEnvironment for it and is not merged with the top-level pass. A runtime without it keeps the top-level policy, so existing configuration keeps its meaning. DaemonEffectiveRuntime gains an optional runtimeEnvironment, and byok-agent config check --json adds effective.runtimes[].runtimeEnvironment beside its unchanged top-level runtimeEnvironment. No Host change is required.",
       "migration": "docs/releases/host-upgrade-next-minor.md#per-runtime-environment-policy",
       "items": [
         "config:runtimes",

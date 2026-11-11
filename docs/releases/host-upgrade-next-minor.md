@@ -169,12 +169,12 @@ No Host configuration change is required (#1688). `RuntimeEnvironmentReport` gai
 
 ## Per-runtime environment policy
 
-`runtimes.<id>.runtimeEnvironment` sets the environment policy of one SDK-built runtime (#1759), on `DaemonConfig`, a config file and `createRuntimeAdapters` alike. It replaces the top-level `runtimeEnvironment` for that runtime; it is not merged with the top-level `pass`, so a name the top-level `pass` lists does not reach a runtime that sets its own policy. A runtime without the field keeps the top-level policy, so an existing configuration keeps its meaning. Pi's effective policy must not pass `PI_PACKAGE_DIR`. The Pi prepared, Pi keys-profile and Hermes custody lanes still ignore `pass`. `byok-agent config check` prints each runtime's effective policy under that runtime, and its JSON carries it as `effective.runtimes[].runtimeEnvironment` instead of a top-level `runtimeEnvironment`; `DaemonEffectiveRuntime` gains the same optional field.
+`runtimes.<id>.runtimeEnvironment` sets the environment policy of one SDK-built runtime (#1759), on `DaemonConfig`, a config file and `createRuntimeAdapters` alike. It replaces the top-level `runtimeEnvironment` for that runtime; it is not merged with the top-level `pass`, so a name the top-level `pass` lists does not reach a runtime that sets its own policy. A runtime without the field keeps the top-level policy, so an existing configuration keeps its meaning. Pi's effective policy must not pass `PI_PACKAGE_DIR`. The Pi prepared, Pi keys-profile and Hermes custody lanes still ignore `pass`. `DaemonEffectiveRuntime` gains an optional `runtimeEnvironment`, each runtime's effective policy, and `byok-agent config check` prints it under each runtime; its JSON keeps the top-level `runtimeEnvironment` (the configured default) and adds `effective.runtimes[].runtimeEnvironment`. No Host change is required.
 
 To give a key to one runtime only, name it on that runtime instead of in the top-level `pass`:
 
 ```ts
-const runtimes = {
+const adapterConfig = {
   runtimeAllowlist: ['pi', 'claude', 'codex', 'dsh', 'agy'],
   runtimes: {
     dsh: {

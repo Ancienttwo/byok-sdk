@@ -1147,8 +1147,8 @@ adapters. Offline, or when the daemon does not answer with the exact shape, it
 reports `unknown`. Names an adapter adds to one task's environment when it
 starts that task are not listed. The diagnostics snapshot and the support
 bundle keep only counts per hashed runtime id, and `audit.jsonl` keeps no
-names. `byok-agent config check` starts no login shell, so it prints each
-runtime's effective policy and no names; the same file's static
+names. `byok-agent config check` starts no login shell, so it prints the
+file's `runtimeEnvironment` policy, each runtime's effective policy and no names; the same file's static
 `toolAuthorization` (including `fileScope`) and bundled `runtimes` isolation
 are validated and reported as effective values, so a CLI task selects its
 runtime and `auto`/`all` mode from that file without embedded adapters.

@@ -2230,7 +2230,7 @@
           ]
         }
       ],
-      "description": "The environment every runtime `createDaemon` builds gives its children\n(#1095): by default the user's login-shell snapshot, so a variable the\nHost sets in `process.env` reaches a runtime only when `pass` names it.\n`runtimes.<id>.runtimeEnvironment` replaces this policy for that runtime\n(#1759); it is not merged with this `pass`.\n`createDaemonWithAdapters` refuses this field: each injected adapter\ntakes its own `runtimeEnvironment` option."
+      "description": "The default environment a runtime `createDaemon` builds gives its\nchildren (#1095): by default the user's login-shell snapshot, so a\nvariable the Host sets in `process.env` reaches a runtime only when `pass`\nnames it. `runtimes.<id>.runtimeEnvironment` overrides it for that runtime\n(#1759): it replaces this policy and is not merged with this `pass`.\n`createDaemonWithAdapters` refuses this field: each injected adapter\ntakes its own `runtimeEnvironment` option."
     },
     "piByokLauncher": {
       "type": "object",
