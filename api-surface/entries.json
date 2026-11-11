@@ -121,7 +121,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 532856,
+      "budgetBytes": 533129,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -453,7 +453,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 494082,
+      "budgetBytes": 494313,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -643,7 +643,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 552138,
+      "budgetBytes": 552411,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
