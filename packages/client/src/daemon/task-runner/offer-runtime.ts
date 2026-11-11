@@ -11,7 +11,8 @@ import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../
 import { McpAuthorityError, MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from '../mcp-tools-probe.js';
 import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } from '../../mcp/observation.js';
 import type { PickResult, OfferPhaseContext, OfferRuntimeInput, RuntimeRequirements } from './support.js';
-import { DEFAULT_RUNTIME_PREFERENCE, orderByPreference, unmetRequirements, requirementPhrases, runtimeTaskInput, errorMessage, outboundErrorMessage } from './support.js';
+import { outboundErrorMessage } from '../outbound-error.js';
+import { DEFAULT_RUNTIME_PREFERENCE, orderByPreference, unmetRequirements, requirementPhrases, runtimeTaskInput, errorMessage } from './support.js';
 import type { TaskRunner } from '../task-runner.js';
 
 export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseContext, input: OfferRuntimeInput) {

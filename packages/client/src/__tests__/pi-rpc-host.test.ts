@@ -75,7 +75,7 @@ function evaluate(body: string) {
 
 describe('SDK ordinary Pi RPC entry', () => {
   it('pins the Pi private command parser and preserves literal extension messages (#1642)', async () => {
-    expect(PI_VERSION).toBe('1.5.0');
+    expect(PI_VERSION).toBe('1.5.2');
     const parser = (AgentSession.prototype as unknown as { _throwIfExtensionCommand: unknown })._throwIfExtensionCommand;
     expect(typeof parser).toBe('function');
     const runner = { getCommand: (name: string) => name === 'run' ? { name, invocationName: name, sourceInfo: { path: 'pinned-subagents' } } : undefined };
@@ -200,6 +200,41 @@ describe('SDK ordinary Pi RPC entry', () => {
       expect((await client.send({ type: entry, message: `/${launch.name} proof-child REPLACEMENT_1642` })).success).toBe(false);
       expect(readdirSync(f.root, { recursive: true }).some(file => String(file).endsWith('status.json'))).toBe(false);
     } finally { await client.dispose(); await provider.close(); }
+  }, 30_000);
+
+  it('sends no cache warming request after the run settled (Pi 1.5.1 defaults cacheWarming to idle)', async () => {
+    const f = fixture(), agent = f.env.PI_CODING_AGENT_DIR;
+    mkdirSync(agent);
+    let requests = 0;
+    const server = createServer(async (request, response) => {
+      for await (const _ of request);
+      requests += 1;
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.end('data: ' + JSON.stringify({ id: 'warm', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: 'ok' }, finish_reason: null }] }) + '\n\n' +
+        'data: ' + JSON.stringify({ id: 'warm', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1_000_000, completion_tokens: 1, total_tokens: 1_000_001 } }) + '\n\ndata: [DONE]\n\n');
+    });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('missing loopback address');
+    // A 13 s cache lifetime puts Pi's first refresh 3 s after the request; the
+    // prices make an idle refresh pay for itself, so only the mode can stop it.
+    writeFileSync(join(agent, 'models.json'), JSON.stringify({ providers: { probe: { api: 'openai-completions', baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      apiKey: 'synthetic', models: [{ id: 'probe', name: 'probe', contextWindow: 2_000_000, maxTokens: 32, input: ['text'], reasoning: false,
+        cost: { input: 100, output: 1, cacheRead: 1, cacheWrite: 0 }, promptCache: { short: 13 } }] } } }));
+    let settled = () => {};
+    const done = new Promise<void>(resolve => { settled = resolve; });
+    const client = new PiRpcClient({ command: bun, cwd: f.sealed, env: f.env,
+      args: [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'probe', '--model', 'probe'],
+      onFrame: frame => { if (frame.type === 'agent_settled') settled(); } });
+    try {
+      expect((await client.send({ type: 'prompt', message: 'hello' })).success).toBe(true);
+      await done;
+      await new Promise(resolve => setTimeout(resolve, 4_500));
+      expect(requests).toBe(1);
+    } finally {
+      await client.dispose();
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
   }, 30_000);
 
   it('classifies every slash command registered by pinned pi-subagents, including child-process probes (#1642)', async () => {

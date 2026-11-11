@@ -11,7 +11,6 @@ import { QUALIFIED_AGY_VERSION } from '../adapters/antigravity/agy-version';
 import { resolveAgyBin } from '../adapters/antigravity/resolve-bin';
 import { resolveOpenCodeBin } from '../adapters/opencode/resolve-bin';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
-import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../adapters/runtime-executable';
 import { validateRuntimeDetectResult } from '../runtime-detection';
@@ -27,7 +26,7 @@ afterEach(async () => {
   await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
-/** A short real directory: the Hermes fake gateway socket path has a small length limit. */
+/** A short real directory, so fixture socket paths stay under the platform length limit. */
 async function tempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(windows ? os.tmpdir() : '/tmp', prefix));
   dirs.push(dir);
@@ -81,10 +80,6 @@ const CASES: readonly Case[] = [
       vi.stubEnv('FAKE_ACP_VERSION', QUALIFIED_AGY_VERSION);
       return new AgyAdapter({ home: await tempDir('ba-'), runtimeEnvironment: { ...allowlist, pass: ['FAKE_ACP_*'] } });
     },
-  },
-  {
-    id: 'hermes', envName: 'BYOK_HERMES_BIN', fixture: fixture('fake-hermes.mjs'),
-    create: async () => new HermesAdapter({ home: await tempDir('bh-'), runtimeEnvironment: { ...allowlist, pass: ['FAKE_HERMES_*'] } }),
   },
   {
     id: 'dsh', envName: 'BYOK_DSH_BIN', fixture: fixture('fake-dsh.mjs'),

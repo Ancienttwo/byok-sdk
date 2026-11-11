@@ -416,6 +416,8 @@ export { LocalStorageEmergencyError } from './daemon/retention/pressure.js';
 export type { StoragePressureState } from './daemon/retention/pressure.js';
 export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry.js';
 export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store.js';
+export { clearDeviceEnrollment, DeviceEnrollmentClearError } from './daemon/enrollment-clear.js';
+export type { DeviceEnrollmentClearErrorCode } from './daemon/enrollment-clear.js';
 export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store.js';
 export { AuthResponseInvalidError } from './daemon/auth-manager.js';
 export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store.js';
@@ -583,7 +585,6 @@ export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter.js';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter.js';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter.js';
 
-export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter.js';
 export { AgyAdapter, type AgyAdapterOptions } from './adapters/antigravity/agy-adapter.js';
 export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter.js';
 

@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2374845,
+      "budgetBytes": 2355477,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -49,7 +49,6 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
-        "#byok-hermes-session",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
@@ -121,7 +120,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 535164,
+      "budgetBytes": 510697,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -158,7 +157,6 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
-        "#byok-hermes-session",
         "koffi",
         "node:http"
       ],
@@ -192,7 +190,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 75722,
+      "budgetBytes": 80957,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -379,7 +377,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 4823,
+      "budgetBytes": 4618,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -453,7 +451,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 497630,
+      "budgetBytes": 473076,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -490,7 +488,6 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
-        "#byok-hermes-session",
         "koffi",
         "node:http"
       ],
@@ -590,60 +587,11 @@
       ]
     }
   },
-  "@byok-sdk/client#byok-hermes-session": {
-    "kind": "imports",
-    "policy": {
-      "purpose": "Private Hermes session runtime; loaded only when starting an execution",
-      "budgetBytes": 24073,
-      "zod": false,
-      "codegen": false,
-      "nodeBuiltins": {
-        "workspace": true,
-        "thirdParty": false
-      }
-    },
-    "facts": {
-      "target": "packages/client/dist/adapters/hermes/hermes-session-runtime.js",
-      "conditions": [
-        "default"
-      ],
-      "types": [
-        "packages/client/dist/adapters/hermes/hermes-session-runtime.d.ts"
-      ],
-      "bareImports": [
-        "@byok-sdk/core/system-tool",
-        "fs",
-        "node:child_process",
-        "node:crypto",
-        "node:fs",
-        "node:os",
-        "node:path",
-        "path"
-      ],
-      "lazyImports": [],
-      "thirdParty": [],
-      "unavailableOptional": [],
-      "opaqueImports": [],
-      "nodeBuiltins": {
-        "workspace": [
-          "fs",
-          "node:child_process",
-          "node:crypto",
-          "node:fs",
-          "node:os",
-          "node:path",
-          "path"
-        ],
-        "thirdParty": []
-      },
-      "codegen": []
-    }
-  },
   "@byok-sdk/client#byok-pi-runtime-host": {
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 565422,
+      "budgetBytes": 568410,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -730,11 +678,11 @@
         "eventsource-parser",
         "get-east-asian-width",
         "graceful-fs",
-        "grok-mermaid",
         "highlight.js",
         "hosted-git-info",
         "ignore",
         "isexe",
+        "lovely-mermaid",
         "lru-cache",
         "marked",
         "marked-cjk-friendly",
@@ -812,6 +760,7 @@
           "node:process",
           "node:querystring",
           "node:readline",
+          "node:readline/promises",
           "node:sqlite",
           "node:stream",
           "node:stream/web",
@@ -840,7 +789,7 @@
       "codegen": [
         {
           "file": "@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
-          "line": 18,
+          "line": 20,
           "rule": "opaque import()"
         },
         {
@@ -850,7 +799,7 @@
         },
         {
           "file": "@earendil-works/pi-ai/dist/auth/oauth/load.js",
-          "line": 17,
+          "line": 20,
           "rule": "opaque import()"
         },
         {
@@ -1541,7 +1490,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 245412,
+      "budgetBytes": 242248,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1608,7 +1557,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Headless Pi model route: choices, linkage, field errors and submission",
-      "budgetBytes": 315348,
+      "budgetBytes": 323502,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1688,7 +1637,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Pinned pi-ai catalog lookup for pi_model",
-      "budgetBytes": 287539,
+      "budgetBytes": 295693,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2181,7 +2130,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2342875,
+      "budgetBytes": 2346776,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

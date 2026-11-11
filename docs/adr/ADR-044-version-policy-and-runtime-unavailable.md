@@ -163,7 +163,7 @@ function resolveRuntimeVersionPolicy(
 | Codex | `codex-cli 0.160.0` | `0.160.0` |
 | Grok | `grok 1.0.62 (1474f9cbdd91)` | `1.0.62` |
 | Hermes | `Hermes Agent v0.22.2+2364.g0b10b9f (…) · stable` | `0.22.2+2364.g0b10b9f` |
-| Pi | pin / `pi --version` | `1.5.0` 或安装版本 |
+| Pi | pin / `pi --version` | `1.5.2` 或安装版本 |
 
 匹配规则：
 
@@ -207,7 +207,7 @@ type RuntimeVersionVerdict =
 | Codex | `0.160.0` | `warn` | 空 | 未限定即 advisory |
 | Grok | `1.0.52` | `warn` | 空 | 未限定即 advisory |
 | Hermes | `0.22.2+2364.g0b10b9f` | `warn` | 空 | 未限定即 advisory |
-| Pi | `byok.piRuntimePin`（当前 `1.5.0`） | `allow` | 空 | 无 advisory |
+| Pi | `byok.piRuntimePin`（当前 `1.5.2`） | `allow` | 空 | 无 advisory |
 
 **block 必须由 Host 配置（owner 2026-10-31 批准）。** SDK 的 descriptor 缺省层 `block` 必须为空、`unqualified` 不得为 `block`；`resolveRuntimeVersionPolicy` 对违反者报 `invalid_version_policy`（reason `block_requires_host`）。因此缺省路径永远没有 block，行为与今天逐字相同；只有 Host 层（adapter 构造参数或 `DaemonConfig.runtimes.<id>.versionPolicy`）能引入 block。Host 只加 block 时应基于 adapter 导出的默认策略构造**完整**对象；只含 block 的对象会因缺 `qualifiedVersion`/`unqualified` 被拒。
 

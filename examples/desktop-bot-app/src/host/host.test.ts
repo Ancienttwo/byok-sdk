@@ -6,39 +6,17 @@ import { createInterface } from 'node:readline';
 import { DatabaseSync } from 'node:sqlite';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { DeviceCredentialBackend } from '@byok-sdk/client';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { inspectProviderProfileStore, parseModelProviderProfile, SqliteProviderProfileStore } from '@byok-sdk/keys';
 import { BRIDGE_VERSION, encodeMessage, type HostState } from '../bridge/protocol.ts';
 import { composeHost, type HostCompositionOptions } from './compose.ts';
 import { precheckHostStores } from './precheck.ts';
 import { superviseHost } from './supervise.ts';
 
-type DeviceRecord = Parameters<DeviceCredentialBackend['replace']>[0];
-type FirstPairingAttempt = Parameters<DeviceCredentialBackend['saveFirstPairingAttempt']>[0];
-
-/** Enrollment custody in memory, through the public `DaemonOverrides.deviceCredentials` seam: no OS credential store. */
-class MemoryDeviceCredentials implements DeviceCredentialBackend {
-  #record: DeviceRecord | undefined;
-  #attempt: FirstPairingAttempt | undefined;
-  read = async () => this.#record;
-  readFirstPairingAttempt = async () => this.#attempt;
-  saveFirstPairingAttempt = async (attempt: FirstPairingAttempt) => { this.#attempt = attempt; };
-  replace = async (record: DeviceRecord) => {
-    const renewal = this.#record?.deviceId === record.deviceId && this.#record.devicePublicKey === record.devicePublicKey;
-    if (!renewal) this.#attempt = undefined;
-    this.#record = record;
-  };
-  clear = async () => {
-    const existed = this.#record !== undefined || this.#attempt !== undefined;
-    this.#record = this.#attempt = undefined;
-    return existed;
-  };
-}
-
 let root: string;
 const options = (): HostCompositionOptions => ({
   productId: 'byok-desktop-test', productName: 'BYOK Desktop Test', releaseVersion: '0.0.1',
-  storeDir: path.join(root, 'store'), hostStorageRoot: path.join(root, 'home'), deviceCredentials: new MemoryDeviceCredentials(),
+  storeDir: path.join(root, 'store'), hostStorageRoot: path.join(root, 'home'), deviceCredentials: new InMemoryDeviceCredentialBackend(),
   onChanged: () => {},
 });
 const keysDb = () => path.join(root, 'home', 'host', 'keys.db');
@@ -84,6 +62,16 @@ describe('desktop Host composition', () => {
     const second = await composeHost(config);
     expect(second.daemon.status().deviceId).toBe(deviceId);
     await second.close();
+
+    // A server that no longer lists this device refuses the pairing; nothing re-pairs.
+    await rm(path.join(root, 'home', 'host', 'server.sqlite'));
+    await expect(composeHost(config)).rejects.toMatchObject({ name: 'HostStoppedError', message: 'Pairing with the embedded server refused: device_unknown' });
+  });
+
+  it('stops with the missing paths when the SDK asset root lacks its files', async () => {
+    await makeRoot();
+    const config = { ...options(), sdkHosting: { assetRoot: root, helperHost: { mode: 'self-executable' as const } } };
+    await expect(composeHost(config)).rejects.toMatchObject({ name: 'HostStoppedError', message: expect.stringMatching(/^SDK hosting assets missing under /) });
   });
 
   it('migrates a 0.41.0 keys store before any store opens', async () => {

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { appendFileSync, chmodSync, copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 // #1103: install one runtime CLI for the runtime contract suite and hand its
@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url';
 const root = resolve(import.meta.dirname, '../..');
 const adapters = join(root, 'packages/client/src/adapters');
 
-export const RUNTIMES = Object.freeze(['pi', 'claude', 'codex', 'grok', 'hermes', 'dsh', 'agy', 'opencode1', 'opencode2']);
+export const RUNTIMES = Object.freeze(['pi', 'claude', 'codex', 'grok', 'dsh', 'agy', 'opencode1', 'opencode2']);
 
 /** npm packages of the CLIs the SDK does not bundle. */
 export const NPM_PACKAGES = Object.freeze({
@@ -21,10 +21,6 @@ export const NPM_PACKAGES = Object.freeze({
   dsh: { name: '@deepseek-ai/dsh', bin: 'dsh' },
   opencode1: { name: 'opencode-ai', bin: 'opencode', winBin: 'opencode-ai/bin/opencode.exe' },
   opencode2: { name: '@opencode/cli', bin: 'opencode', winBin: '@opencode/cli/bin/opencode.exe' },
-});
-
-export const HERMES_INSTALLER = Object.freeze({
-  repository: 'https://github.com/NousResearch/hermes-agent',
 });
 
 /**
@@ -58,37 +54,11 @@ export async function qualifiedVersions() {
     claude: await load('claude/claude-version.ts', 'QUALIFIED_CLAUDE_VERSION'),
     codex: await load('codex/codex-version.ts', 'QUALIFIED_CODEX_VERSION'),
     grok: await load('grok/grok-version.ts', 'QUALIFIED_GROK_VERSION'),
-    hermes: await load('hermes/hermes-version.ts', 'QUALIFIED_HERMES_VERSION'),
     dsh: await load('dsh/dsh-version.ts', 'QUALIFIED_DSH_VERSION'),
     agy: await load('antigravity/agy-version.ts', 'QUALIFIED_AGY_VERSION'),
     opencode1: await load('opencode/opencode-version.ts', 'CONTRACT_OPENCODE_V1_VERSION'),
     opencode2: await load('opencode/opencode-version.ts', 'QUALIFIED_OPENCODE_VERSION'),
   };
-}
-
-/** The commit a Hermes build names: `0.22.2+2364.g0b10b9f` → `0b10b9f`. */
-export function hermesBuildCommit(version) {
-  const commit = /\.g([0-9a-f]{7,40})$/.exec(version)?.[1];
-  if (commit === undefined) throw new Error(`Hermes version ${JSON.stringify(version)} names no commit`);
-  return commit;
-}
-
-/** Verify the vendored installer and its relationship to the adapter's qualified build. */
-export function vendoredHermesInstaller(version, file, vendor = join(root, 'scripts/ci/vendor/hermes')) {
-  let manifest;
-  try {
-    manifest = JSON.parse(readFileSync(join(vendor, 'manifest.json'), 'utf8'));
-  } catch (error) {
-    throw new Error(`Hermes installer manifest is unreadable: ${error.message}`);
-  }
-  if (!/^[0-9a-f]{40}$/.test(manifest.commit) || !manifest.commit.startsWith(hermesBuildCommit(version)))
-    throw new Error('Hermes installer manifest commit does not match the qualified build');
-  if (!['install.sh', 'install.ps1'].includes(file) || !/^[0-9a-f]{64}$/.test(manifest.sha256?.[file] ?? ''))
-    throw new Error(`Hermes installer manifest has no checksum for ${file}`);
-  const installer = join(vendor, manifest.commit, file);
-  const actual = createHash('sha256').update(readFileSync(installer)).digest('hex');
-  if (actual !== manifest.sha256[file]) throw new Error(`Hermes installer checksum mismatch: expected ${manifest.sha256[file]}, got ${actual}`);
-  return installer;
 }
 
 /** The GITHUB_ENV lines the suite reads. A qualified run needs no version: the suite reads the same authority. */
@@ -144,31 +114,6 @@ export function installNpm(runtime, mode, version, dir, npmCommand = npm, vendor
   // On Windows the `.bin` entry is a `.cmd` shim, which the adapter cannot execute; use the package's own executable.
   const installed = process.platform === 'win32' && winBin !== undefined ? join(dir, 'node_modules', ...winBin.split('/')) : join(dir, 'node_modules', '.bin', bin);
   return { bin: installed, version: exact };
-}
-
-function installHermes(mode, version, dir) {
-  const home = join(dir, 'home');
-  const agent = join(dir, 'agent');
-  // The installer edits shell profiles and ~/.local/bin; give it a throwaway HOME.
-  const fakeHome = join(dir, 'installer-home');
-  mkdirSync(fakeHome, { recursive: true });
-  let installer;
-  if (mode === 'latest') {
-    installer = join(dir, 'install.sh');
-    const endpoint = 'repos/NousResearch/hermes-agent/contents/scripts/install.sh?ref=main';
-    console.log(`Downloading the latest Hermes installer: https://api.github.com/${endpoint}`);
-    writeFileSync(installer, execFileSync('gh', ['api', '-H', 'Accept: application/vnd.github.raw', endpoint], { stdio: ['ignore', 'pipe', 'inherit'] }));
-  } else {
-    installer = vendoredHermesInstaller(version, 'install.sh');
-    console.log(`Using vendored Hermes installer: ${installer}`);
-  }
-  const commit = mode === 'latest' ? run('git', ['ls-remote', HERMES_INSTALLER.repository, 'HEAD']).split(/\s/)[0] : basename(dirname(installer));
-  execFileSync('bash', [installer, '--commit', commit, '--non-interactive', '--skip-browser', '--skip-computer-use', '--hermes-home', home, '--dir', agent],
-    { stdio: 'inherit', env: { ...process.env, HOME: fakeHome } });
-  const bin = [join(agent, '.hermes', 'bin', 'hermes'), join(home, 'bin', 'hermes'), join(fakeHome, '.local', 'bin', 'hermes')].find(existsSync);
-  if (bin === undefined) throw new Error('Hermes installed no hermes executable');
-  // A latest run names the installed commit; the suite checks the build suffix against it.
-  return { bin, version: run('git', ['-C', agent, 'rev-parse', 'HEAD']) };
 }
 
 /** The updater manifest of one platform, which names the latest release with its url and SHA-512. */
@@ -230,8 +175,7 @@ export async function install(runtime, mode, { dir, githubEnv = process.env.GITH
   if (runtime === 'pi') return [];
   const version = (await qualifiedVersions())[runtime];
   const target = dir ?? join(process.env.RUNNER_TEMP ?? root, 'runtime-contract', runtime);
-  const installed = runtime === 'hermes' ? installHermes(mode, version, target)
-    : runtime === 'agy' ? await installAgy(mode, version, target, download) : installNpm(runtime, mode, version, target);
+  const installed = runtime === 'agy' ? await installAgy(mode, version, target, download) : installNpm(runtime, mode, version, target);
   const lines = contractEnv(runtime, installed.bin, mode === 'latest' ? installed.version : undefined);
   if (githubEnv) appendFileSync(githubEnv, `${lines.join('\n')}\n`);
   console.log(lines.join('\n'));

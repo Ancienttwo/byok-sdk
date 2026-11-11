@@ -4,7 +4,8 @@ import { requiredReceiverCapabilities, type Envelope, type SealedDeclineCode, ty
 import { AgentHomeBusyError, AgentHomeResolutionError, type AgentRef } from '../../agent-home.js';
 import { isReaderRunName, type AgentHomeAccessMode } from '../../agent-home-readers.js';
 import type { OfferPhaseContext } from './support.js';
-import { hostDeclineSender, settledOrWithdrawn, outboundErrorMessage } from './support.js';
+import { outboundErrorMessage } from '../outbound-error.js';
+import { hostDeclineSender, settledOrWithdrawn } from './support.js';
 import type { TaskRunner } from '../task-runner.js';
 import type { AcceptedOfferPayload } from './support.js';
 import type { OfferAdmissionTiming } from './offer-admission-timing.js';

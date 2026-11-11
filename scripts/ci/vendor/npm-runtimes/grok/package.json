@@ -1,6 +1,6 @@
 {
   "private": true,
   "dependencies": {
-    "@xai-official/grok": "1.0.52"
+    "@xai-official/grok": "1.0.77"
   }
 }

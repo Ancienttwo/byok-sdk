@@ -2,6 +2,10 @@
 
 Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Clearing a device enrollment without a daemon
+
+An uninstaller that built a daemon per store only to call `daemon.unpair()` can call `clearDeviceEnrollment({ productId, storeDir, nativeAssetRoot })` instead (#1841); it needs no `productName`, `serverUrl` or `localAgentRelease`. It refuses with `DeviceEnrollmentClearError` `store_owned` while a daemon, doctor or installer holds the store, so call it after the service has stopped, and before deleting the store directory. It clears only the SDK device enrollment of the account it runs as, never Host secrets, and leaves the delivery cursor file. A Host that matched the text of `unpair()`'s credential-deletion error reads `DeviceEnrollmentClearError.code === 'clear_failed'` instead. See [Clearing an enrollment without running the daemon](../device-setup.md#clearing-an-enrollment-without-running-the-daemon).
+
 ## Loopback listener close waits for handlers
 
 `LoopbackListener.close()` now resolves only after every dispatched handler has settled; before, it destroyed connections and resolved while a handler could still run. Requests not yet dispatched get 503. There is no timeout. Shut down in the order `daemon.stop()`, `listener.close()`, `server.close()`, and do not make a request-scoped hook wait on anything the Host releases after `listener.close()`, or `close()` never resolves. See [Embedded path](../device-setup.md#embedded-path).
@@ -15,10 +19,18 @@ No action is required (#1842). `byok-payload.json` keeps `version: 1` and gains 
 
 A task that an Agent home's memory refuses before its runtime starts now carries a typed `task.fail.failure.class` (#1843): `agent_memory_resident_over_limit`, `agent_memory_resident_multiple_links`, `agent_memory_resident_not_regular_file`, `agent_memory_resident_not_utf8`, `agent_memory_snapshot_over_file_limit`, `agent_memory_snapshot_over_byte_limit` or `agent_memory_snapshot_refused`. The list is `AGENT_MEMORY_START_REFUSALS` from `@byok-sdk/protocol/constants`. The reason text is unchanged, so a Host that parses the reason prefix keeps working, but it should branch on `readTaskFailure(failure).class` instead.
 
-A Host on 0.41.0 reads these as `unknown` with `reportedClass` until it upgrades. A missing file, a changed home identity and an I/O failure stay `unknown`. A task that seals its output sends `unknown` for every refusal, so a Host that seals output still needs its own pre-dispatch check until `checkAgentMemoryHome` ships (#1843 slice 2). `TaskFailureReading` gains a member: an exhaustive `switch` over `readTaskFailure(failure).class` stops compiling until it handles the new classes. `agent_memory_resident_not_regular_file` cannot be repaired by a write task: the file has to be replaced outside a task. A `MEMORY.md` that is already not a regular file when the offer arrives is declined before claim with reason text and no class. Code that constructs `AgentMemorySnapshotLimitError` must pass the bound it hit as the new first argument.
+A Host on 0.41.0 reads these as `unknown` with `reportedClass` until it upgrades. A missing file, a changed home identity and an I/O failure stay `unknown`. A task that seals its output sends `unknown` for every refusal, so a Host that seals output takes the verdict before dispatch from `checkAgentMemoryHome` (see [Agent memory home check](#agent-memory-home-check)). `TaskFailureReading` gains a member: an exhaustive `switch` over `readTaskFailure(failure).class` stops compiling until it handles the new classes. `agent_memory_resident_not_regular_file` cannot be repaired by a write task: the file has to be replaced outside a task. A `MEMORY.md` that is already not a regular file when the offer arrives is declined before claim with reason text and no class. Code that constructs `AgentMemorySnapshotLimitError` must pass the bound it hit as the new first argument.
+## Agent memory home check
+
+`checkAgentMemoryHome(home, { commit?: { filesystem? } })` in `@byok-sdk/client/agent-memory` is additive: nothing existing changes. It returns `{ ok: true }` or `{ ok: false, code, reason }` with the class and reason the device would send for the same home. It throws when it cannot decide (missing `MEMORY.md`, a changed home identity, an I/O error, no secure memory filesystem; on macOS and Windows pass the helper's filesystem as `commit.filesystem` and close it yourself), and it is advisory because it holds no lease and has no task id. Its verdict is about the home: the device applies the resident refusals only to a task that carries `MEMORY.md` into its prompt and the snapshot refusals only to a task with `agentMemoryCommit`; the repair task (`agentMemory:"none"`, no commit) is never refused, so do not gate it on the verdict. Unlike the failure class, the check is not hidden on a task that seals its output. A Host that copied the device's limits (AiphaBee's `residentMemoryBreach` and `memoryBreach`) can replace that copy with this call.
+
 ## OAR 0.99.0 driver base (#1863)
 
 A Grok follow-up sent while Grok runs a turn of its own is held until that turn closes; budget the task deadline for that wait. Grok 429s that name a spending limit now fail as `quota` or `billing` (non-retryable) instead of retryable `rate_limited`. A Codex older than OAR needs, or with an unreadable `config.toml`, fails the start as non-retryable `invalid_request`. Confirm that the Host does not retry those classes as transient.
+
+## Grok qualified version 1.0.77
+
+The Grok adapter qualifies Grok 1.0.77 (#1884). A device on another version, 1.0.52 included, now reports `runtime_version_unqualified` with `qualifiedVersion: '1.0.77'`; the default policy stays `warn`, so tasks still run. A Host that pins its own Grok `versionPolicy` is unchanged. Grok's own turns, and the follow-up hold they cause, need 1.0.70 or later.
 
 ## OpenCode start failures
 
@@ -185,11 +197,11 @@ No Host configuration change is required (#1688). When the daemon refuses its co
 
 ## Runtime environment lanes in doctor
 
-No Host configuration change is required (#1688). `RuntimeEnvironmentReport` gains an optional `lanes` list of `RuntimeEnvironmentLaneReport`, also carried by the `runtimes.environment` control method and `byok-agent doctor`. The Pi adapter reports a `pi-prepared` lane unless it is a durable adapter, and a `pi-keys-profile` lane when a BYOK launcher is configured; the Hermes adapter reports a `hermes-custody` lane when a BYOK launcher is configured. An `sdk` lane lists the names its launch removes; the `pi-keys-profile` lane says only that the keys launcher passes its fixed names. A Host that sets `runtimeEnvironment.pass` names such as `PI_OFFLINE` can read there which lanes never give them to the runtime. No lane narrows differently than before. A Host that builds a `RuntimeEnvironmentReport` itself may omit `lanes`.
+No Host configuration change is required (#1688). `RuntimeEnvironmentReport` gains an optional `lanes` list of `RuntimeEnvironmentLaneReport`, also carried by the `runtimes.environment` control method and `byok-agent doctor`. The Pi adapter reports a `pi-prepared` lane unless it is a durable adapter, and a `pi-keys-profile` lane when a BYOK launcher is configured. An `sdk` lane lists the names its launch removes; the `pi-keys-profile` lane says only that the keys launcher passes its fixed names. A Host that sets `runtimeEnvironment.pass` names such as `PI_OFFLINE` can read there which lanes never give them to the runtime. No lane narrows differently than before. A Host that builds a `RuntimeEnvironmentReport` itself may omit `lanes`.
 
 ## Per-runtime environment policy
 
-`runtimes.<id>.runtimeEnvironment` sets the environment policy of one SDK-built runtime (#1759), on `DaemonConfig`, a config file and `createRuntimeAdapters` alike. It replaces the top-level `runtimeEnvironment` for that runtime; it is not merged with the top-level `pass`, so a name the top-level `pass` lists does not reach a runtime that sets its own policy. A runtime without the field keeps the top-level policy, so an existing configuration keeps its meaning. Pi's effective policy must not pass `PI_PACKAGE_DIR`. The Pi prepared, Pi keys-profile and Hermes custody lanes still ignore `pass`. `DaemonEffectiveRuntime` gains an optional `runtimeEnvironment`, each runtime's effective policy, and `byok-agent config check` prints it under each runtime; its JSON keeps the top-level `runtimeEnvironment` (the configured default) and adds `effective.runtimes[].runtimeEnvironment`. No Host change is required.
+`runtimes.<id>.runtimeEnvironment` sets the environment policy of one SDK-built runtime (#1759), on `DaemonConfig`, a config file and `createRuntimeAdapters` alike. It replaces the top-level `runtimeEnvironment` for that runtime; it is not merged with the top-level `pass`, so a name the top-level `pass` lists does not reach a runtime that sets its own policy. A runtime without the field keeps the top-level policy, so an existing configuration keeps its meaning. Pi's effective policy must not pass `PI_PACKAGE_DIR`. The Pi prepared and Pi keys-profile lanes still ignore `pass`. `DaemonEffectiveRuntime` gains an optional `runtimeEnvironment`, each runtime's effective policy, and `byok-agent config check` prints it under each runtime; its JSON keeps the top-level `runtimeEnvironment` (the configured default) and adds `effective.runtimes[].runtimeEnvironment`. No Host change is required.
 
 To give a key to one runtime only, name it on that runtime instead of in the top-level `pass`:
 
@@ -215,7 +227,7 @@ K8 rules now build the Bot autonomy gate themselves (#1665). A Host adapter that
 
 ## Version policy source
 
-The eight built-in adapter option types (`AgyAdapterOptions`, `ClaudeAdapterOptions`, `CodexAdapterOptions`, `DshAdapterOptions`, `GrokAdapterOptions`, `HermesAdapterOptions`, `OpenCodeAdapterOptions`, `PiAdapterOptions`) no longer accept the internal `versionPolicySource` option (#1682). A Host that constructs an adapter directly deletes `versionPolicySource` from the options object. `versionPolicy` itself, `DaemonConfig.runtimes.<id>.versionPolicy` and the version verdicts they produce are unchanged: a Host policy still replaces the descriptor default wholesale.
+The seven built-in adapter option types (`AgyAdapterOptions`, `ClaudeAdapterOptions`, `CodexAdapterOptions`, `DshAdapterOptions`, `GrokAdapterOptions`, `OpenCodeAdapterOptions`, `PiAdapterOptions`) no longer accept the internal `versionPolicySource` option (#1682). A Host that constructs an adapter directly deletes `versionPolicySource` from the options object. `versionPolicy` itself, `DaemonConfig.runtimes.<id>.versionPolicy` and the version verdicts they produce are unchanged: a Host policy still replaces the descriptor default wholesale.
 
 ## Hosted passes
 
@@ -433,6 +445,12 @@ Before this release such a Host got untyped (`any`) SDK imports with
 Bundler resolution see no change. A NodeNext Host may now see type errors in
 code that compiled against `any`; fix them against the real types.
 
+## Pi 1.5.2 closure
+
+The official Pi closure moves from 1.5.0 to 1.5.2 (#1864). Prepare again every preparation compiled for 1.5.0: its runtime identity names the old closureDigest, so it declines with `preparation_runtime_identity_mismatch`. Check stored provider profiles against `piModelConfigFromPinnedCatalog` before the upgrade; 12 OpenRouter and Vercel AI Gateway entries that pi-ai 1.5.2 dropped return `not_in_catalog`. pi-durable replicas keep their document and schema versions, so this release and 0.41.0 open each other's replicas.
+
+No configuration change is needed for the new Pi defaults. Pi 1.5.1 keeps prompt caches warm for up to 30 minutes between runs by default (`cacheWarming: "idle"`). Because a Host cannot see or bound that spend, the session of every SDK Pi RPC host refuses each refresh while it is idle, so it warms only during an active run. Under `agentUserContext: 'inherit'` a device setting of `"off"` still turns warming off; under `excluded` the session's settings are in memory and do not read the device file. A pi-subagents child is disposed when its run ends, and disposal cancels its warmer, so no child warms after its run either. On the native Pi auth route, a task on the built-in `anthropic` provider at `api.anthropic.com` now sends only new messages and continues the server-side thread, falling back to a full request when the server refuses; a keys profile route sends full requests as before. A native launch with no Host model selection still uses the device's Pi settings; only when those name no default model does Pi pick its per-provider default, which is now `claude-opus-5-5` for `anthropic`.
+
 ## Embedded pairing and connection wait
 
 `Daemon` gains two required members, `pairEmbedded(server)` and `whenOpen({ signal })` (#1840). A Host test double typed as `Daemon` must add both.
@@ -440,6 +458,35 @@ code that compiled against `any`; fix them against the real types.
 An embedded Host that pairs its daemon against its own in-process server replaces its `createPairingCode` and `pair` calls with `daemon.pairEmbedded(byokServer)`. It reads the store's enrollment under the daemon owner lease and never starts the daemon. An unpaired store against a server with no devices pairs and returns the new device. A paired store whose device `machines.list()` reports is returned unchanged. Every other state throws `EmbeddedPairingError` and writes nothing: `enrollment_missing` (unpaired store, server already lists devices), `device_unknown` (the server does not list this store's device), `re_pair_required` (the device record has no OS credential entry) or `store_not_bound` (the OS entry holds another storeDir's enrollment). The enrollment record is the one device id authority; a Host that keeps its own copy compares it with the returned `deviceId`. If the server database is lost while the store survives, the refusal is `device_unknown`; if the store is lost while the server keeps devices, it is `enrollment_missing`.
 
 A Host that polls `status().lifecycle` for `running/open` after `start()` calls `await daemon.whenOpen({ signal: AbortSignal.timeout(ms) })` instead. It rejects with `DaemonHaltError` on a halt, `DaemonNotOpenError` (`stopped` or `crashed`) when the run ended otherwise, and with `signal.reason` on abort.
+
+## Hermes runtime adapter removed
+
+The SDK no longer drives Hermes Agent as a runtime (#1854). These exports are
+removed, with no alias and no stub:
+
+- `HermesAdapter`, `HermesAdapterOptions`, `HermesModelSelection` and
+  `HermesByokLauncher` from `@byok-sdk/client` and `@byok-sdk/client/adapters`;
+- `runHermesProviderLauncher`, `parseHermesProviderLauncherRequest`,
+  `hermesProviderModel`, `HERMES_PROVIDER_KEY_ENV` and
+  `HermesProviderLauncherRequest` from `@byok-sdk/keys`;
+- `'hermes'` from `FakeRuntimeAdapterId` in `@byok-sdk/client/testing`.
+
+A Host that constructed `HermesAdapter` deletes that adapter and its imports,
+and retires its Hermes custody launcher process. The Hermes root it passed as
+`HermesAdapterOptions.home` holds only SDK-made profiles and caches; the Host
+may delete that directory. The device then no longer advertises the `hermes`
+harness, so enqueueing an offer with `harnessId: 'hermes'` throws
+`ByokCloudError` with code `agent_capability_missing`, like an offer for any
+harness the device does not advertise. `DaemonConfig` and
+`createRuntimeAdapters` never had a Hermes runtime: a `runtimes.hermes` key is
+reported and ignored as an unknown field, before and after this release.
+Hermes as a byok MCP client (`examples/byok-mcp-server/docs/hermes.md`) is
+unchanged.
+
+The adapter code is archived at the git tag `archive/hermes-runtime-adapter`.
+It comes back when upstream OAR ships a Hermes runtime, or when a product needs
+the Hermes runtime; it is then restored from that tag through the OAR fork
+rules of #1851.
 
 ## Release and verification checklist
 

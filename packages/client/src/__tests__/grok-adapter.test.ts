@@ -86,8 +86,8 @@ describe('GrokAdapter detection', () => {
     expect(await adapter().detect()).toEqual({
       kind: 'available', version: 'grok 1.0.62 (fixture)', authPresent: true,
       executablePath: fixture, executableSource: 'config',
-      advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '1.0.52' },
-      versionVerdict: { state: 'warn', qualifiedVersion: '1.0.52' },
+      advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '1.0.77' },
+      versionVerdict: { state: 'warn', qualifiedVersion: '1.0.77' },
     });
   });
 
@@ -95,11 +95,11 @@ describe('GrokAdapter detection', () => {
     const home = await tempDir();
     vi.stubEnv('XAI_API_KEY', '');
     vi.stubEnv('GROK_HOME', home);
-    vi.stubEnv('FAKE_ACP_VERSION', 'grok 1.0.52 (fixture)');
+    vi.stubEnv('FAKE_ACP_VERSION', 'grok 1.0.77 (fixture)');
     expect(await adapter().detect()).toEqual({
-      kind: 'available', version: 'grok 1.0.52 (fixture)', authPresent: false,
+      kind: 'available', version: 'grok 1.0.77 (fixture)', authPresent: false,
       executablePath: fixture, executableSource: 'config',
-      versionVerdict: { state: 'allow', qualifiedVersion: '1.0.52' },
+      versionVerdict: { state: 'allow', qualifiedVersion: '1.0.77' },
     });
     await fs.writeFile(path.join(home, 'auth.json'), 'not read');
     await fs.chmod(path.join(home, 'auth.json'), 0o000);
@@ -118,7 +118,7 @@ describe('GrokAdapter sessions', () => {
     const a = adapter();
     expect(a.descriptor).toEqual({
       id: 'grok', supportsDispatchSelection: false, requiresMcpToolsetToolObservation: false, platforms: ['darwin', 'linux'],
-      versionPolicy: { qualifiedVersion: '1.0.52', unqualified: 'warn' },
+      versionPolicy: { qualifiedVersion: '1.0.77', unqualified: 'warn' },
       capabilities: {
         steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true, preparedLane: false,
         isolation: { userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: false, sessionPersistence: false },
@@ -273,6 +273,22 @@ describe('GrokAdapter sessions', () => {
     await s.followUp({ instruction: 'hello' });
     expect((await turn(s)).at(-1)).toEqual({ type: 'turn_end' });
     expect(prompts(resources.log)).toEqual(['own-turn', 'hello']);
+  });
+
+  it('takes back a follow-up interrupted in the same tick, while its prompt is still in flight', async () => {
+    const gate = path.join(await tempDir(), 'gate');
+    const resources = await ctx({ FAKE_ACP_OWN_TURN_GATE: gate });
+    const s = await open(adapter(), { instruction: 'own-turn' }, resources);
+    await turn(s);
+    await ownTurnStarted(s);
+    const f = s.followUp({ instruction: 'never-sent' });
+    await s.interrupt();
+    await f;
+    expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(false);
+    expect(await turn(s)).toEqual([{ type: 'turn_end' }]);
+    await fs.writeFile(gate, '');
+    await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'own-ended')).toBe(true));
+    expect(prompts(resources.log)).toEqual(['own-turn']);
   });
 
   it('holds a follow-up behind a Grok turn that OAR reports after the task turn closes', async () => {

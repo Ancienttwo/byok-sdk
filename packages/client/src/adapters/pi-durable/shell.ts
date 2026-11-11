@@ -3,7 +3,7 @@ import { createWriteStream, promises as fs } from 'node:fs';
 import { once } from 'node:events';
 import { finished } from 'node:stream/promises';
 import { StringDecoder } from 'node:string_decoder';
-import type { Context } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
 import { ExecutionError, ok, err, type ShellExecOptions, type ShellExecResult, type Result } from '@earendil-works/pi-durable/env';
 import type { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { disposeOwnedProcessTree } from '../process-tree.js';

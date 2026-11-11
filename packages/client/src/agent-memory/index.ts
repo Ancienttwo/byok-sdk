@@ -18,6 +18,7 @@
  * - `openAgentMemoryFilesystemHelper`— admission of the host's macOS or Windows helper.
  * - `serveAgentMemoryMcpOverStdio`   — the two memory tools over stdio.
  * - `prependAgentMemoryGuidance`     — the prompt half of the path contract.
+ * - `checkAgentMemoryHome`           — the device's pre-start memory verdict for one home.
  *
  * Three things are deliberately absent, and this file is the record of why.
  *
@@ -97,6 +98,11 @@ export type { AgentMemoryMcpDeps } from './mcp-server.js';
 export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance.js';
 /** Prepends that guidance to an Agent instruction, exactly as the daemon's task runner does. */
 export { prependAgentMemoryGuidance } from '../daemon/memory-guidance.js';
+
+/** Whether the device would refuse a task on this Agent home over its memory, with the same code and reason; read-only and advisory. */
+export { checkAgentMemoryHome } from '../daemon/agent-memory-home-check.js';
+/** The verdict of `checkAgentMemoryHome`. */
+export type { AgentMemoryHomeCheck } from '../daemon/agent-memory-home-check.js';
 
 /** The validated Agent identity carried by `AgentMemoryTaskContext`. */
 export type { AgentRef } from '../agent-home.js';

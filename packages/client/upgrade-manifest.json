@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "394a401ed16e1f81ae0dd742c8c487aa7786c2c28d099a09f2257e8e8c3cce3f"
+    "snapshotSha256": "964a5d39ef97014d72c958475d40e0b57ccbb6694e5016a7b6fcd88ad463f105"
   },
   "configFields": {
     "status": "tracked",
@@ -70,7 +70,7 @@
     {
       "id": "adapter-session-limits",
       "impact": "additive",
-      "summary": "agy, dsh and Hermes accept fractional interruptTimeoutMs; session limits are defined once across six adapters.",
+      "summary": "agy and dsh accept fractional interruptTimeoutMs; session limits are defined once across five adapters.",
       "migration": "CHANGELOG.md#unreleased",
       "items": [
         "export:@byok-sdk/client#AgyAdapter",
@@ -78,13 +78,11 @@
         "export:@byok-sdk/client#CodexAdapter",
         "export:@byok-sdk/client#DshAdapter",
         "export:@byok-sdk/client#GrokAdapter",
-        "export:@byok-sdk/client#HermesAdapter",
         "export:@byok-sdk/client/adapters#AgyAdapter",
         "export:@byok-sdk/client/adapters#ClaudeAdapter",
         "export:@byok-sdk/client/adapters#CodexAdapter",
         "export:@byok-sdk/client/adapters#DshAdapter",
-        "export:@byok-sdk/client/adapters#GrokAdapter",
-        "export:@byok-sdk/client/adapters#HermesAdapter"
+        "export:@byok-sdk/client/adapters#GrokAdapter"
       ]
     },
     {
@@ -109,7 +107,7 @@
     {
       "id": "version-policy-source",
       "impact": "breaking",
-      "summary": "The eight built-in adapter option types (Agy, Claude, Codex, Dsh, Grok, Hermes, OpenCode, Pi) drop the internal option that tagged whether versionPolicy came from the adapter option or daemon config. A Host that constructs an adapter directly deletes that tag from the options object (see the migration section for its name); versionPolicy and the version verdicts it produces are unchanged.",
+      "summary": "The seven built-in adapter option types (Agy, Claude, Codex, Dsh, Grok, OpenCode, Pi) drop the internal option that tagged whether versionPolicy came from the adapter option or daemon config. A Host that constructs an adapter directly deletes that tag from the options object (see the migration section for its name); versionPolicy and the version verdicts it produces are unchanged.",
       "migration": "docs/releases/host-upgrade-next-minor.md#version-policy-source",
       "items": [
         "export:@byok-sdk/client#AgyAdapterOptions",
@@ -117,7 +115,6 @@
         "export:@byok-sdk/client#CodexAdapterOptions",
         "export:@byok-sdk/client#DshAdapterOptions",
         "export:@byok-sdk/client#GrokAdapterOptions",
-        "export:@byok-sdk/client#HermesAdapterOptions",
         "export:@byok-sdk/client#OpenCodeAdapterOptions",
         "export:@byok-sdk/client#PiAdapterOptions",
         "export:@byok-sdk/client/adapters#AgyAdapterOptions",
@@ -125,7 +122,6 @@
         "export:@byok-sdk/client/adapters#CodexAdapterOptions",
         "export:@byok-sdk/client/adapters#DshAdapterOptions",
         "export:@byok-sdk/client/adapters#GrokAdapterOptions",
-        "export:@byok-sdk/client/adapters#HermesAdapterOptions",
         "export:@byok-sdk/client/adapters#OpenCodeAdapterOptions",
         "export:@byok-sdk/client/adapters#PiAdapterOptions"
       ]
@@ -283,6 +279,28 @@
       ]
     },
     {
+      "id": "hermes-runtime-adapter-removed",
+      "impact": "breaking",
+      "summary": "The Hermes runtime adapter is archived (tag archive/hermes-runtime-adapter): HermesAdapter and its option, model and launcher types leave @byok-sdk/client and @byok-sdk/client/adapters, the Hermes custody launcher exports leave @byok-sdk/keys, and FakeRuntimeAdapterId drops hermes. A Host that constructed HermesAdapter deletes it, its imports and its custody launcher; the device no longer advertises the hermes harness. No alias or stub remains.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#hermes-runtime-adapter-removed",
+      "items": [
+        "export:@byok-sdk/client#HermesAdapter",
+        "export:@byok-sdk/client#HermesAdapterOptions",
+        "export:@byok-sdk/client#HermesByokLauncher",
+        "export:@byok-sdk/client#HermesModelSelection",
+        "export:@byok-sdk/client/adapters#HermesAdapter",
+        "export:@byok-sdk/client/adapters#HermesAdapterOptions",
+        "export:@byok-sdk/client/adapters#HermesByokLauncher",
+        "export:@byok-sdk/client/adapters#HermesModelSelection",
+        "export:@byok-sdk/client/testing#FakeRuntimeAdapterId",
+        "export:@byok-sdk/keys#HERMES_PROVIDER_KEY_ENV",
+        "export:@byok-sdk/keys#HermesProviderLauncherRequest",
+        "export:@byok-sdk/keys#hermesProviderModel",
+        "export:@byok-sdk/keys#parseHermesProviderLauncherRequest",
+        "export:@byok-sdk/keys#runHermesProviderLauncher"
+      ]
+    },
+    {
       "id": "testing-in-memory-device-credential-backend",
       "impact": "additive",
       "summary": "@byok-sdk/client/testing exports InMemoryDeviceCredentialBackend, a DeviceCredentialBackend held in memory for a Host's tests. A Host that hand-rolls a memory backend injects this one as deviceCredentials; no runtime Host change is required. The host-execution-core example's tests import it instead of the repo's removed scripts/testing helper.",
@@ -309,7 +327,7 @@
     {
       "id": "service-payload-meta",
       "impact": "additive",
-      "summary": "ServicePayloadManifest gains the optional meta, a Host JSON object the SDK does not interpret; version stays 1, so older readers ignore it. ServiceInstallationOptions gains verifyPayload(stagedDir, manifest), the Host's payload policy, run on the staged copy before it becomes versions/<id> and on a matched existing versions/<id>; a throw is payload_invalid with the cause. @byok-sdk/client/packaging exports writeServicePayloadManifest(dir, { id, meta? }), which writes byok-payload.json at build time and returns its bytes. The staged manifest is the exact bytes stage parsed, the same id with different manifest bytes is now version_conflict, and a listed file missing from the payload is payload_invalid instead of a raw ENOENT (#1842).",
+      "summary": "ServicePayloadManifest gains the optional meta, a Host JSON object the SDK does not interpret; version stays 1, so older readers ignore it. ServiceInstallationOptions gains verifyPayload(stagedDir, manifest), the Host's payload policy, run with a frozen copy of the manifest on the staged copy before it becomes versions/<id> and on a matched existing versions/<id>; a throw is payload_invalid with the cause. @byok-sdk/client/packaging exports writeServicePayloadManifest(dir, { id, meta? }), which writes byok-payload.json at build time and returns its bytes. The staged manifest is the exact bytes stage parsed, the same id with different manifest bytes is now version_conflict, and a listed file missing from the payload is payload_invalid instead of a raw ENOENT (#1842).",
       "migration": "docs/releases/host-upgrade-next-minor.md#service-payload-manifest-meta-and-host-verification",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationOptions",
@@ -332,6 +350,38 @@
         "export:@byok-sdk/protocol#TaskFailureSchema",
         "export:@byok-sdk/protocol/constants#AGENT_MEMORY_START_REFUSALS",
         "export:@byok-sdk/protocol/constants#AgentMemoryStartRefusal"
+      ]
+    },
+    {
+      "id": "agent-memory-home-check",
+      "impact": "additive",
+      "summary": "checkAgentMemoryHome(home, { commit?: { filesystem? } }) in @byok-sdk/client/agent-memory returns the AgentMemoryStartRefusal code and the task.fail reason the device would send for an Agent home, read-only, or throws when it cannot decide. It holds no lease and is advisory; the repair task is never refused.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-home-check",
+      "items": [
+        "export:@byok-sdk/client/agent-memory#AgentMemoryHomeCheck",
+        "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome"
+      ]
+    },
+    {
+      "id": "clear-device-enrollment",
+      "impact": "additive",
+      "summary": "clearDeviceEnrollment({ productId, storeDir, nativeAssetRoot?, deviceCredentials? }) clears one store's device enrollment without a daemon or serverUrl, under the store's owner lease: member custody entries, the device credential with a read-back, then device.json, the same clear Daemon.unpair() runs; it leaves the delivery cursor file. It throws the new DeviceEnrollmentClearError with code store_owned (another process holds the lease; nothing is read), store_not_bound (the OS entry holds another store's enrollment; it stays) or clear_failed (the provider or filesystem error is the cause); a device.json that cannot be parsed is refused as clear_failed before anything is deleted and needs a re-pair. Host-visible on an existing path: Daemon.unpair() now throws DeviceEnrollmentClearError clear_failed, with the provider error as cause, when the device credential cannot be deleted, instead of an untyped Error; a Host that matched that error's text reads the code instead (#1841).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#clearing-a-device-enrollment-without-a-daemon",
+      "items": [
+        "export:@byok-sdk/client#DeviceEnrollmentClearError",
+        "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+        "export:@byok-sdk/client#clearDeviceEnrollment"
+      ]
+    },
+    {
+      "id": "pi-152-closure",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "The official Pi closure is pinned to exactly 1.5.2 (upstream commit b4afdddf); the closureDigest changes, so a preparation compiled for 1.5.0 declines with preparation_runtime_identity_mismatch until it is prepared again. keys: PI_MODEL_CATALOG_PI_AI_VERSION is 1.5.2, and 12 entries pi-ai 1.5.2 dropped return not_in_catalog. pi-durable 1.5.2 keeps its document and SQLite schema versions, so replicas written by either release open in the other.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-152-closure",
+      "items": [
+        "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+        "store:pi-durable"
       ]
     }
   ],
@@ -435,6 +485,16 @@
       "entry": "dts-node-next-specifiers"
     },
     {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentClearError",
+      "change": "added",
+      "entry": "clear-device-enrollment"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+      "change": "added",
+      "entry": "clear-device-enrollment"
+    },
+    {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
       "change": "changed",
       "entry": "doctor-control-endpoint-refusal"
@@ -476,13 +536,23 @@
     },
     {
       "item": "export:@byok-sdk/client#HermesAdapter",
-      "change": "changed",
-      "entry": "adapter-session-limits"
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
     },
     {
       "item": "export:@byok-sdk/client#HermesAdapterOptions",
-      "change": "changed",
-      "entry": "version-policy-source"
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#HermesByokLauncher",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#HermesModelSelection",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
     },
     {
       "item": "export:@byok-sdk/client#OpenCodeAdapter",
@@ -565,6 +635,11 @@
       "entry": "service-payload-meta"
     },
     {
+      "item": "export:@byok-sdk/client#clearDeviceEnrollment",
+      "change": "added",
+      "entry": "clear-device-enrollment"
+    },
+    {
       "item": "export:@byok-sdk/client#resolveSdkHosting",
       "change": "added",
       "entry": "resolve-sdk-hosting"
@@ -636,13 +711,23 @@
     },
     {
       "item": "export:@byok-sdk/client/adapters#HermesAdapter",
-      "change": "changed",
-      "entry": "adapter-session-limits"
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
     },
     {
       "item": "export:@byok-sdk/client/adapters#HermesAdapterOptions",
-      "change": "changed",
-      "entry": "version-policy-source"
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#HermesByokLauncher",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#HermesModelSelection",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
     },
     {
       "item": "export:@byok-sdk/client/adapters#OpenCodeAdapter",
@@ -705,6 +790,16 @@
       "entry": "dts-node-next-specifiers"
     },
     {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryHomeCheck",
+      "change": "added",
+      "entry": "agent-memory-home-check"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome",
+      "change": "added",
+      "entry": "agent-memory-home-check"
+    },
+    {
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",
       "change": "changed",
       "entry": "agent-memory-helper-protocol-4"
@@ -713,6 +808,11 @@
       "item": "export:@byok-sdk/client/packaging#writeServicePayloadManifest",
       "change": "added",
       "entry": "service-payload-meta"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterId",
+      "change": "changed",
+      "entry": "hermes-runtime-adapter-removed"
     },
     {
       "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
@@ -825,6 +925,16 @@
       "entry": "scope-key-package-v1-removed"
     },
     {
+      "item": "export:@byok-sdk/keys#HERMES_PROVIDER_KEY_ENV",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/keys#HermesProviderLauncherRequest",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
       "item": "export:@byok-sdk/keys#MODEL_PROVIDER_VENDORS",
       "change": "changed",
       "entry": "opencode-go-keys-store"
@@ -840,6 +950,21 @@
       "entry": "pi-opencode-go-provider-id"
     },
     {
+      "item": "export:@byok-sdk/keys#hermesProviderModel",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/keys#parseHermesProviderLauncherRequest",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
+      "item": "export:@byok-sdk/keys#runHermesProviderLauncher",
+      "change": "removed",
+      "entry": "hermes-runtime-adapter-removed"
+    },
+    {
       "item": "export:@byok-sdk/keys/model-route#MODEL_PROVIDER_VENDORS",
       "change": "changed",
       "entry": "opencode-go-keys-store"
@@ -848,6 +973,11 @@
       "item": "export:@byok-sdk/keys/model-route#ModelRouteHostEntry",
       "change": "changed",
       "entry": "model-route-host-entry-default-thinking-level"
+    },
+    {
+      "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+      "change": "changed",
+      "entry": "pi-152-closure"
     },
     {
       "item": "export:@byok-sdk/protocol#AGENT_MEMORY_START_REFUSALS",
@@ -1007,6 +1137,13 @@
       "before": "ddl-sha256=a59cf523fe7a89d1",
       "after": "ddl-sha256=7c5c4e5f67ea8b36",
       "entry": "opencode-go-keys-store"
+    },
+    {
+      "item": "store:pi-durable",
+      "change": "changed",
+      "before": "@earendil-works/pi-durable@1.5.0",
+      "after": "@earendil-works/pi-durable@1.5.2",
+      "entry": "pi-152-closure"
     },
     {
       "item": "store:server-sqlite",

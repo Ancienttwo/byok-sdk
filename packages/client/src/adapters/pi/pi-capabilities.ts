@@ -39,6 +39,6 @@ export const PI_DURABLE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freez
 
 /** Isolation sources the qualified pi has none of, with evidence; the contract plan marks each `absent`. */
 export const PI_ABSENT_ISOLATION_SOURCES: RuntimeIsolationAbsentSources = Object.freeze({
-  userOutputStyle: '@earendil-works/pi-coding-agent@1.5.0 dist/core/system-prompt.js (fixed preamble, no style field), dist/core/settings-schema.js (no style, personality or prompt setting); themes only color the UI and HTML export (docs/themes.md:3, dist/core/agent-session.js exportToHtml)',
-  userMemory: '@earendil-works/pi-coding-agent@1.5.0 dist/{core,modes,extensions,utils}, dist/main.js, dist/config.js: no native memory source (searched for "memor"); the agent directory loads only SYSTEM.md, APPEND_SYSTEM.md, AGENTS.md, skills/, extensions/, prompts/ and themes/ (dist/core/resource-loader.js:959-980)',
+  userOutputStyle: '@earendil-works/pi-coding-agent@1.5.2 dist/core/system-prompt.js (fixed preamble, no style field), dist/core/settings-schema.js (no style, personality or prompt setting); themes only color the UI and HTML export (docs/themes.md:3, dist/core/agent-session.js exportToHtml)',
+  userMemory: '@earendil-works/pi-coding-agent@1.5.2 dist/{core,modes,extensions,utils}, dist/main.js, dist/config.js: no native memory source (searched for "memor"); the agent directory loads only SYSTEM.md, APPEND_SYSTEM.md, AGENTS.md, skills/, extensions/, prompts/ and themes/ (dist/core/resource-loader.js:959-980)',
 });

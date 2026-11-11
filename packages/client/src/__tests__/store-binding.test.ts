@@ -6,9 +6,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type EmbeddedPairingServer } from '../daemon/create-daemon';
 import { DaemonHaltError } from '../daemon/daemon-lifecycle';
-import { readDeviceEnrollmentIdentity, readDeviceEnrollmentStatus } from '../daemon/store';
+import { DeviceRecordRePairRequiredError, readDeviceEnrollmentIdentity, readDeviceEnrollmentStatus } from '../daemon/store';
 import { DeviceStoreBindingMismatchError } from '../daemon/daemon-errors';
-import { createTestDeviceStore } from './fixtures/device-credentials';
+import { createTestDeviceStore, InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
+import { testDeviceCredentials } from './fixtures/credential-backend';
+import { clearDeviceEnrollment, DeviceEnrollmentClearError } from '../daemon/enrollment-clear';
 import { repairDeviceEnrollmentMetadata } from '../diagnostics/device-doctor';
 import { connectControlClient } from '../daemon/control-client';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
@@ -147,6 +149,74 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
 
     await expect(daemonFor(second).unpair()).rejects.toBeInstanceOf(DeviceStoreBindingMismatchError);
     expect(await readDeviceEnrollmentStatus(first)).toEqual({ state: 'paired', deviceId });
+  });
+
+  describe('clearDeviceEnrollment clears a store without a daemon (#1841)', () => {
+    const clear = (config: DaemonConfig) =>
+      clearDeviceEnrollment({ productId, storeDir: config.storeDir! }, { deviceCredentials: testDeviceCredentials(productId) });
+
+    it('clears a paired store, and a second call succeeds', async () => {
+      const config = await storeConfig();
+      await daemonFor(config).pair('pairing-code');
+
+      await clear(config);
+
+      expect(await testDeviceCredentials(productId).read()).toBeUndefined();
+      expect(await readDeviceEnrollmentStatus(config)).toEqual({ state: 'unpaired' });
+      await clear(config);
+    });
+
+    it('refuses with store_owned while a daemon holds the store and leaves the enrollment', async () => {
+      const config = await storeConfig();
+      const daemon = daemonFor(config);
+      const { deviceId } = await daemon.pair('pairing-code');
+      await daemon.start();
+      await waitForDaemonOpen(daemon);
+
+      const refused: unknown = await clear(config).catch((error: unknown) => error);
+
+      expect(refused).toBeInstanceOf(DeviceEnrollmentClearError);
+      expect(refused).toMatchObject({ code: 'store_owned' });
+      expect(await readDeviceEnrollmentStatus(config)).toEqual({ state: 'paired', deviceId });
+    });
+
+    it('refuses with store_not_bound on another store\'s enrollment and leaves it', async () => {
+      const first = await storeConfig();
+      const { deviceId } = await daemonFor(first).pair('pairing-code');
+
+      const refused: unknown = await clear(await storeConfig()).catch((error: unknown) => error);
+
+      expect(refused).toMatchObject({ code: 'store_not_bound', cause: expect.any(DeviceStoreBindingMismatchError) });
+      expect(await readDeviceEnrollmentStatus(first)).toEqual({ state: 'paired', deviceId });
+    });
+
+    it('refuses a store whose device.json cannot be parsed before deleting anything', async () => {
+      const first = await storeConfig();
+      const { deviceId } = await daemonFor(first).pair('pairing-code');
+      const second = await storeConfig();
+      await fs.writeFile(path.join(second.storeDir!, 'device.json'), 'not json');
+
+      const refused: unknown = await clear(second).catch((error: unknown) => error);
+
+      expect(refused).toMatchObject({ code: 'clear_failed', cause: expect.any(DeviceRecordRePairRequiredError) });
+      expect(await readDeviceEnrollmentStatus(first)).toEqual({ state: 'paired', deviceId });
+    });
+
+    it('Daemon.unpair reports a credential that cannot be deleted as clear_failed and stays paired', async () => {
+      const config = await storeConfig();
+      const credentials = new InMemoryDeviceCredentialBackend();
+      const daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { deviceCredentials: credentials });
+      daemons.push(daemon);
+      const { deviceId } = await daemon.pair('pairing-code');
+      const providerError = new Error('provider refused');
+      vi.spyOn(credentials, 'clear').mockRejectedValueOnce(providerError);
+
+      const failed: unknown = await daemon.unpair().catch((error: unknown) => error);
+
+      expect(failed).toBeInstanceOf(DeviceEnrollmentClearError);
+      expect(failed).toMatchObject({ code: 'clear_failed', cause: providerError });
+      expect((await credentials.read())?.deviceId).toBe(deviceId);
+    });
   });
 
   describe('pairEmbedded reconciles the enrollment with the in-process server (#1840)', () => {

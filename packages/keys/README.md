@@ -178,7 +178,7 @@ must preserve a stable OpenCode session for requests from one Pi session.
 The prepared runtime entry refuses both the provider id and this compat key,
 so this profile does not run on `pi-prepared`. The recorded run used `pi-rpc`.
 
-Pi 1.5.0 uses the declared `opencode-go` identity to replay a streamed
+Pi 1.5.2 uses the declared `opencode-go` identity to replay a streamed
 `reasoning` value as `reasoning_content`, including on an assistant message
 that carries a tool call. A gateway that already returns `reasoning_content`
 keeps that field. The declared identity also makes Pi send
@@ -384,8 +384,11 @@ if (submission.ok) {
   field by field. Pi's run-time branches on its own provider id are not part
   of that promise, because catalog-derived providers use `byok-sdk-<profile_ref>`.
   A manually declared `pi_model.providerId: 'opencode-go'` selects Pi's own
-  OpenCode Go replay and session-header branches. In pi-ai 1.5.0 the other
+  OpenCode Go replay and session-header branches. In pi-ai 1.5.2 the other
   branches are:
+  - Anthropic message threads, on by default only for provider `anthropic`
+    at `api.anthropic.com`. A projected anthropic profile sends full
+    requests, and `pi_model.compat` has no `supportsMessageThreads`.
   - openrouter `anthropic/*` `cacheControlFormat`. No representable entry is
     affected.
   - the xai `reasoning.encrypted_content` include. Only grok-4.3 at `off`
@@ -647,43 +650,3 @@ behind; the clients here take generic `messages` / `max_tokens` / `system`
 parameters instead of building domain prompts.
 
 Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).
-
-### Hermes custody launcher
-
-`runHermesProviderLauncher` runs in a dedicated Host process with an
-account-scoped `SecretStore`, never in the daemon:
-
-```ts
-import { parseHermesProviderLauncherRequest, runHermesProviderLauncher } from '@byok-sdk/keys';
-try {
-  const request = parseHermesProviderLauncherRequest(process.argv.slice(2));
-  await runHermesProviderLauncher(request, {
-    createSecretStore: () => createHostAccountScopedStore(),
-  });
-} catch {
-  // Do not print raw backend errors: a Host store can put sensitive data in them.
-  process.stderr.write('Hermes custody launch rejected\n');
-  process.exitCode = 1;
-}
-```
-
-The closed argv grammar carries the profile database path, exact non-secret
-binding and optional fixed gateway/viewer launch role. Validation emits only
-non-secret model metadata and reads no key. Launch re-reads the exact profile
-under its configuration lock, rejects pending custody changes, obtains the
-profile-specific key, closes SQLite and uses POSIX `process.execve` to replace
-the launcher with Hermes. The original PID remains the gateway identity. On
-Windows, launch starts Hermes as a child with the key in the child environment
-only (never in the launcher's `process.env`). The launcher resolves when
-Hermes exits and sets `process.exitCode` to Hermes's exit code; the adapter
-accepts a gateway below the launcher PID.
-No plaintext is returned to the daemon or written to a profile/config file.
-Only the selected key is injected as `SDK_HERMES_PROVIDER_KEY`; inherited
-provider/loader variables are removed. The Host executable and target Hermes
-binary remain trusted code and must not log credentials.
-
-This slice supports enabled `openai_compatible` + `bearer` profiles without
-`pi_model` overrides. It deliberately refuses unsupported provider semantics;
-it does not translate Pi Responses/compat configuration. POSIX runtimes
-without `process.execve` fail closed. Use absolute executable paths. No built-in OS-store selection is implied: the
-Host supplies its own account scope just as for its Pi custody launcher.

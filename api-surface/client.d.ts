@@ -640,7 +640,7 @@ export declare class DshAdapter implements RuntimeAdapter {
      * checked against the provider.
      */
     detect(): Promise<RuntimeDetectResult>;
-    /** Cheap admission, as Hermes: the version probe only. The acp profile probe belongs to `detect()`. */
+    /** Cheap admission: the version probe only. The acp profile probe belongs to `detect()`. */
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -716,116 +716,6 @@ export declare class GrokAdapter implements RuntimeAdapter {
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
-// ==== @byok-sdk/client dist/adapters/hermes/hermes-adapter.d.ts ====
-import { type HermesByokLauncher } from './hermes-custody.js';
-export type { HermesByokLauncher } from './hermes-custody.js';
-import { spawn as nodeSpawn } from 'node:child_process';
-import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types.js';
-import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
-import type { ResolvedBin } from '../codex/resolve-bin.js';
-/** Provider choice written into each execution profile. Credentials stay in the environment. */
-export interface HermesModelSelection {
-    /** Hermes provider id, for example `openrouter`, `anthropic` or `custom`. */
-    readonly provider: string;
-    readonly model: string;
-    /** Endpoint for an OpenAI-compatible `custom` provider. It must not carry credentials. */
-    readonly baseUrl?: string;
-    /** Name of the environment variable that holds the provider key. The value never enters the file. */
-    readonly keyEnv?: string;
-}
-export interface HermesAdapterOptions {
-    /** Absolute product native asset directory; scoped to this adapter. */
-    nativeAssetRoot?: string;
-    /** The environment Hermes and its MCP servers get (#1095). Default: the login-shell snapshot. A `byokLauncher` narrows it further. */
-    runtimeEnvironment?: RuntimeEnvironmentPolicy;
-    /**
-     * Absolute path of the Hermes root that this SDK owns, for example under the
-     * Host's store directory. Each execution runs in a fresh profile home below
-     * it (`hermes-home.ts`). It must not be the user's Hermes home: `~/.hermes`,
-     * or on Windows Hermes's default `%LOCALAPPDATA%\hermes`. Give each
-     * Host process its own root. The first `detect()` on a new root waits while
-     * Hermes builds its environment there.
-     */
-    home: string;
-    /** Provider and model for every execution. Absent: Hermes picks a provider from the credentials in the environment. */
-    model?: HermesModelSelection;
-    /** Optional separate-process credential custody. Mutually exclusive with model; local Host profile selection never enters dispatchSelection. */
-    byokLauncher?: HermesByokLauncher;
-    resolveBin?: () => ResolvedBin;
-    spawnFn?: typeof nodeSpawn;
-    /** Deadline of the `detect()` ACP probe. Covers a first environment build in a new root. Default 180 s. */
-    probeTimeoutMs?: number;
-    /** Deadline for the owned gateway to report ready. Default 20 s. */
-    gatewayReadyTimeoutMs?: number;
-    /** Deadline for a cancelled turn to settle before the session fails. Default 1 s. */
-    interruptTimeoutMs?: number;
-    /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
-    versionPolicy?: RuntimeVersionPolicy;
-}
-/**
- * Hermes Agent over ACP stdio (`hermes acp`). The `hermes acp` process is a
- * viewer: tools, MCP servers and the model loop run in a Hermes gateway. A
- * viewer that finds no gateway starts a detached one that outlives it, so the
- * adapter starts the gateway itself as an owned process tree, waits until the
- * gateway names that pid as ready, and only then starts the viewer. Both
- * trees are disposed at `close()`.
- */
-export declare class HermesAdapter implements RuntimeAdapter {
-    private readonly root;
-    private readonly options;
-    private readonly environmentPolicy;
-    private readonly effectiveVersionPolicy;
-    private readonly interruptTimeoutMs;
-    /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
-    private readonly liveHomes;
-    get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
-    constructor(options: HermesAdapterOptions);
-    private command;
-    runtimeEnvironment(): Promise<RuntimeEnvironment>;
-    /** The custody launcher's lane is the platform baseline of the runtime environment. */
-    private launchEnvironment;
-    private rootEnvironment;
-    /**
-     * Prepares the SDK root, deletes profiles a dead Host left, runs
-     * `hermes --version`, then one ACP `initialize` in a throwaway profile with
-     * the same config and environment a turn gets. `initialize` does not reach
-     * the gateway. `authPresent` is true when Hermes offers a provider auth
-     * method, which it does only when that provider's credentials resolve. On a
-     * new root the probe waits while Hermes builds its Python environment.
-     */
-    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
-    private probeAcp;
-    /** Cheap admission, as Codex: the version probe only. The ACP probe and root build belong to `detect()`. */
-    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
-    private start;
-}
-// ==== @byok-sdk/client dist/adapters/hermes/hermes-custody.d.ts ====
-import type { ProviderProfileBinding } from '@byok-sdk/protocol';
-import type { RuntimeAdapterPrepareInput } from '../../types.js';
-import type { HermesModelSelection } from './hermes-adapter.js';
-type SelectedProfile = Omit<ProviderProfileBinding, 'requiredCapabilities'> & {
-    readonly requiredCapabilities: readonly ProviderProfileBinding['requiredCapabilities'][number][];
-};
-export interface HermesByokLauncher {
-    /** Dedicated Host executable running keys.runHermesProviderLauncher; not the Hermes executable. */
-    readonly command: string;
-    readonly args?: readonly string[];
-    readonly profileDbPath: string;
-    /** Host local authority, called before claim. Returns exact non-secret binding, never a credential. */
-    readonly selectProfile: (offer: RuntimeAdapterPrepareInput['offer']) => SelectedProfile | Promise<SelectedProfile>;
-}
-export interface PreparedHermesCustody {
-    binding: ProviderProfileBinding;
-    model: HermesModelSelection;
-}
-export declare function ownHermesLauncher(value: HermesByokLauncher): HermesByokLauncher;
-export declare function hermesCustodyArgs(launcher: HermesByokLauncher, binding: ProviderProfileBinding, launch?: {
-    hermesBin: string;
-    home: string;
-    role: 'gateway' | 'viewer';
-}): string[];
-export declare function prepareHermesCustody(launcher: HermesByokLauncher, offer: RuntimeAdapterPrepareInput['offer']): Promise<PreparedHermesCustody>;
-export {};
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types.js';
 export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
@@ -843,8 +733,6 @@ export { CodexAdapter } from './codex/codex-adapter.js';
 export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter.js';
 export { GrokAdapter } from './grok/grok-adapter.js';
 export type { GrokAdapterOptions } from './grok/grok-adapter.js';
-export { HermesAdapter } from './hermes/hermes-adapter.js';
-export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter.js';
 export { AgyAdapter } from './antigravity/agy-adapter.js';
 export type { AgyAdapterOptions } from './antigravity/agy-adapter.js';
 export { DshAdapter } from './dsh/dsh-adapter.js';
@@ -1535,7 +1423,7 @@ export declare function runtimeEnvironmentFor(id: string, config: Pick<RuntimeAd
 /** Validates `piByokLauncher` and folds its `sessionDir`; the daemon and its retention build Pi from this one value. */
 export declare function resolvePiByokLauncher(config: Pick<RuntimeAdaptersConfig, 'piByokLauncher'>): PiByokLauncherConfig | undefined;
 // ==== @byok-sdk/client dist/agent-home-readers.d.ts ====
-import { type AgentMemoryStartRefusal, type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
+import { type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
 /**
  * How one Agent Attempt uses its home. The wire carries only
  * `homeAccess: 'memory-reader'`; an absent value is the writer.
@@ -1565,34 +1453,6 @@ export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
  * read fails; the caller then reports `unmeasured`.
  */
 export declare function digestAgentHomeMemory(home: string): Promise<AgentHomeMemoryDigest | undefined>;
-/**
- * One read of the resident `MEMORY.md`; see {@link readResidentMemory}. An
- * unreadable file names its `refusal` class when the home itself is at fault
- * (#1843); a missing file, a changed home identity or an I/O error has none.
- */
-export type ResidentMemoryRead = {
-    readonly kind: 'read';
-    readonly content: string;
-    readonly revision: string;
-    readonly byteCount: number;
-} | {
-    readonly kind: 'over-limit';
-    readonly byteCount: number;
-} | {
-    readonly kind: 'unreadable';
-    readonly reason: string;
-    readonly refusal?: AgentMemoryStartRefusal;
-};
-/**
- * Reads the resident `MEMORY.md` of a leased home (#1439) with one
- * implementation on every platform, at most the limit plus one byte, as strict
- * UTF-8. The `lstat` covers a platform without `O_NOFOLLOW`. The revision is
- * the one `memory_save` compares. A file problem is a result, never a throw.
- */
-export declare function readResidentMemory(home: string, homeIdentity: Readonly<{
-    dev: bigint;
-    ino: bigint;
-}>): Promise<ResidentMemoryRead>;
 /**
  * Compares the reader's start and terminal digests. `writerOverlapped` is
  * true when a writer Attempt of the same home was active at any time
@@ -2023,6 +1883,7 @@ export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjec
  * - `openAgentMemoryFilesystemHelper`— admission of the host's macOS or Windows helper.
  * - `serveAgentMemoryMcpOverStdio`   — the two memory tools over stdio.
  * - `prependAgentMemoryGuidance`     — the prompt half of the path contract.
+ * - `checkAgentMemoryHome`           — the device's pre-start memory verdict for one home.
  *
  * Three things are deliberately absent, and this file is the record of why.
  *
@@ -2089,6 +1950,10 @@ export type { AgentMemoryMcpDeps } from './mcp-server.js';
 export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance.js';
 /** Prepends that guidance to an Agent instruction, exactly as the daemon's task runner does. */
 export { prependAgentMemoryGuidance } from '../daemon/memory-guidance.js';
+/** Whether the device would refuse a task on this Agent home over its memory, with the same code and reason; read-only and advisory. */
+export { checkAgentMemoryHome } from '../daemon/agent-memory-home-check.js';
+/** The verdict of `checkAgentMemoryHome`. */
+export type { AgentMemoryHomeCheck } from '../daemon/agent-memory-home-check.js';
 /** The validated Agent identity carried by `AgentMemoryTaskContext`. */
 export type { AgentRef } from '../agent-home.js';
 // ==== @byok-sdk/client dist/agent-memory/mcp-server.d.ts ====
@@ -2827,6 +2692,41 @@ export declare function openAgentMemoryFilesystemHelper(input: Readonly<{
     ancestorRoot: string;
     homeIdentity: AgentHomeLease['homeIdentity'];
 }>): Promise<AgentMemoryFilesystem>;
+// ==== @byok-sdk/client dist/daemon/agent-memory-home-check.d.ts ====
+import type { AgentMemoryStartRefusal } from '@byok-sdk/protocol/constants';
+import type { AgentMemoryFilesystem } from './agent-memory-filesystem.js';
+/** The verdict of {@link checkAgentMemoryHome}. `reason` is the `task.fail` reason the device sends for the same home. */
+export type AgentMemoryHomeCheck = {
+    readonly ok: true;
+} | {
+    readonly ok: false;
+    readonly code: AgentMemoryStartRefusal;
+    readonly reason: string;
+};
+/**
+ * Whether the device would refuse a task on this Agent home because of its
+ * memory (#1843), with the code and reason it fails that task with. It runs the
+ * device's own readers, read-only, so the two cannot drift.
+ *
+ * It throws and decides nothing when it cannot read: a `MEMORY.md` that is
+ * missing (every lease creates one), a changed home identity, an I/O error, or
+ * no secure memory backend on this platform. On macOS and Windows pass the
+ * helper's filesystem for this home as `commit.filesystem`; the caller closes it.
+ *
+ * The verdict is about the home, and the device applies each half to one kind
+ * of task: resident refusals to a task that carries `MEMORY.md` into its
+ * prompt, start-record refusals to a task with `agentMemoryCommit`. The repair
+ * task (`agentMemory:"none"`, no commit) is never refused, so this verdict does
+ * not gate it.
+ *
+ * The check holds no home lease and has no task id, so it is advisory: a home
+ * within a task id's length of the start-record bound can pass and still be refused.
+ */
+export declare function checkAgentMemoryHome(home: string, options?: {
+    readonly commit?: {
+        readonly filesystem?: AgentMemoryFilesystem;
+    };
+}): Promise<AgentMemoryHomeCheck>;
 // ==== @byok-sdk/client dist/daemon/agent-memory-intent.d.ts ====
 import { type AgentMemoryIntentAvailablePayload, type AgentMemoryIntentCompletion, type AgentMemoryIntentFileObservation, type AgentMemoryIntentOperation, type AgentMemoryIntentReadback, type AgentMemoryIntentRejectionCode } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentHomeManager } from '../agent-home.js';
@@ -6824,6 +6724,71 @@ export interface HostDeviceProofSigner extends DeviceProofSigner {
  */
 export declare function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSignerOptions): HostDeviceProofSigner;
 export {};
+// ==== @byok-sdk/client dist/daemon/enrollment-clear.d.ts ====
+import { DeviceStore, type DeviceEnrollmentStatusOptions, type DeviceRecord } from './store.js';
+import type { DeviceCredentialBackend } from './device-credential-store.js';
+declare const CLEAR_MESSAGES: {
+    readonly store_owned: 'another process holds this store\'s owner lease (a daemon, doctor or installer); the enrollment is unchanged';
+    readonly store_not_bound: 'the OS credential entry for this productId holds an enrollment this storeDir did not pair; nothing was cleared';
+    readonly clear_failed: 'the device enrollment could not be cleared; see the cause';
+};
+export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
+/**
+ * Why a device enrollment clear refused or failed:
+ * - `store_owned`: another process holds the store's owner lease. It may be a
+ *   running daemon, a doctor or an installer; nothing was read or cleared.
+ * - `store_not_bound`: the OS entry holds an enrollment another storeDir
+ *   paired; nothing was cleared.
+ * - `clear_failed`: `cause` holds the error. A `device.json` that cannot be
+ *   parsed (`DeviceRecordRePairRequiredError`) is refused before anything is
+ *   deleted; the store needs a re-pair. A credential provider failure leaves
+ *   the store paired. A failed `device.json` removal after the credential was
+ *   deleted leaves a valid projection without its credential, which a retry
+ *   clears.
+ */
+export declare class DeviceEnrollmentClearError extends Error {
+    readonly code: DeviceEnrollmentClearErrorCode;
+    constructor(code: DeviceEnrollmentClearErrorCode, options?: ErrorOptions);
+}
+/** One store's enrollment custody: the `device.json` projection, the OS credential and, with the OS provider, the member entries. */
+export interface EnrollmentCustody {
+    readonly store: DeviceStore;
+    readonly memberRecords: {
+        clear(): Promise<void>;
+    } | undefined;
+}
+/**
+ * The one enrollment clear, shared by `Daemon.unpair()` and
+ * {@link clearDeviceEnrollment}; the caller holds the store's owner lease.
+ * `readCurrent` reads the bound enrollment under that lease, so another
+ * store's OS entry is refused before anything is deleted. A `device.json`
+ * that cannot be parsed is refused too, with its
+ * `DeviceRecordRePairRequiredError`: nothing proves the productId-wide OS
+ * entry is this store's, and `remove()` could never delete that file. A valid
+ * projection without its credential (left by a failed metadata removal) is
+ * cleared. The member entries
+ * go first and the credential is read back after deletion: any failure up to
+ * there leaves the device paired. `onCredentialCleared` runs once the
+ * credential is gone, before `device.json` is removed. Returns the cleared
+ * enrollment, or undefined when the store held no readable one.
+ */
+export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, readCurrent: () => Promise<DeviceRecord | undefined>, onCredentialCleared?: () => void): Promise<DeviceRecord | undefined>;
+/**
+ * Clears one store's device enrollment without a daemon: its member
+ * entries, its OS credential (read back after deletion) and `device.json`,
+ * under the store's owner lease. It never reads Host secrets, returns no
+ * secret and makes no network call. Clearing a store that holds no
+ * enrollment succeeds. Unlike `Daemon.unpair()` it leaves the delivery cursor
+ * file, which no later pairing reads because each pairing mints a new device
+ * id. It reads the calling process's OS credential set, so it clears the
+ * enrollment of the account it runs as.
+ */
+export declare function clearDeviceEnrollment(options: DeviceEnrollmentStatusOptions & {
+    readonly storeDir: string;
+}, overrides?: {
+    readonly deviceCredentials?: DeviceCredentialBackend;
+}): Promise<void>;
+export {};
 // ==== @byok-sdk/client dist/daemon/execution-record.d.ts ====
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { RuntimeAdapterDescriptor } from '../types.js';
@@ -8922,6 +8887,20 @@ export declare class DeviceStore {
  * ({@link DeviceStoreBindingMismatchError}).
  */
 export declare function readEnrollmentAuthority(options: DeviceEnrollmentStatusOptions): Promise<EnrollmentAuthorityRead>;
+/** {@link readEnrollmentAuthority} over an already composed store. */
+export declare function readStoreEnrollment(store: DeviceStore): Promise<EnrollmentAuthorityRead>;
+/**
+ * Reads `productId` and `storeDir` exactly once each as plain data
+ * (`../util/plain-data`); other fields of a larger host config are never
+ * read. An accessor, Proxy, non-plain prototype or wrong type is a
+ * `TypeError` with no cause, before any filesystem or credential access.
+ */
+export declare function readEnrollmentOptions(options: unknown): {
+    productId: string;
+    storeDir: string | undefined;
+    deviceCredentials: DeviceCredentialConfig | undefined;
+    nativeAssetRoot: string | undefined;
+};
 /** The public non-secret identity projection of one enrollment record. */
 export declare function enrollmentIdentityOf(record: DeviceMetadata): DeviceEnrollmentIdentity;
 /**
@@ -10002,6 +9981,8 @@ export { LocalStorageEmergencyError } from './daemon/retention/pressure.js';
 export type { StoragePressureState } from './daemon/retention/pressure.js';
 export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry.js';
 export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store.js';
+export { clearDeviceEnrollment, DeviceEnrollmentClearError } from './daemon/enrollment-clear.js';
+export type { DeviceEnrollmentClearErrorCode } from './daemon/enrollment-clear.js';
 export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store.js';
 export { AuthResponseInvalidError } from './daemon/auth-manager.js';
 export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store.js';
@@ -10074,7 +10055,6 @@ export { ClaudeAdapter } from './adapters/claude/claude-adapter.js';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter.js';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter.js';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter.js';
-export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter.js';
 export { AgyAdapter, type AgyAdapterOptions } from './adapters/antigravity/agy-adapter.js';
 export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter.js';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor.js';
@@ -13314,7 +13294,7 @@ import { type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from 
  *
  * {@link buildAllowlistedEnv} is the narrow form over a given environment. It
  * is used by the durable Pi tool shell, the prepared Pi lane on the Pi auth
- * store, and Hermes launcher or custody paths.
+ * store.
  *
  * Every name in every list may be an exact match or a `*`-suffixed prefix
  * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
@@ -13393,7 +13373,7 @@ export interface RuntimeEnvironmentReport {
  * so its lane is reported by name only.
  */
 export type RuntimeEnvironmentLaneReport = {
-    readonly lane: 'pi-prepared' | 'hermes-custody';
+    readonly lane: 'pi-prepared';
     readonly narrowedBy: 'sdk';
     readonly removed: readonly string[];
 } | {
@@ -13401,7 +13381,7 @@ export type RuntimeEnvironmentLaneReport = {
     readonly narrowedBy: 'keys-launcher';
 };
 /** The `sdk` lane that launches with `buildAllowlistedEnv({ ambient: env, allow })`: `removed` is every name of `env` it drops, sorted. */
-export declare function sdkLaneReport(lane: 'pi-prepared' | 'hermes-custody', env: Readonly<Record<string, string>>, allow: readonly string[]): RuntimeEnvironmentLaneReport;
+export declare function sdkLaneReport(lane: 'pi-prepared', env: Readonly<Record<string, string>>, allow: readonly string[]): RuntimeEnvironmentLaneReport;
 /** One build: the environment and its {@link RuntimeEnvironmentReport}. `env` is a fresh object. */
 export interface RuntimeEnvironment {
     readonly env: Record<string, string>;
@@ -13824,7 +13804,7 @@ export declare class InMemoryDeviceCredentialBackend implements DeviceCredential
 import { type RuntimeEnvironment } from '../runtime/environment.js';
 import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types.js';
 /** The built-in adapters a fake can stand in for. */
-export type FakeRuntimeAdapterId = 'agy' | 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';
+export type FakeRuntimeAdapterId = 'agy' | 'claude' | 'codex' | 'dsh' | 'grok' | 'pi';
 /** What the fake does. It never spawns a process. */
 export interface FakeRuntimeAdapterBehavior {
     /** Default: `{ kind: 'available' }`. A function is called on every probe. */

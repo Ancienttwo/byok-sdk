@@ -12,8 +12,8 @@ import { terminalIdentity } from '../terminal-identity.js';
 import { abortedStartOf, startOwnedRuntime } from '../runtime-start.js';
 import type { DeclaredSessionMembers } from '../session-contract.js';
 import path from 'node:path';
-import { RESIDENT_MEMORY_MAX_BYTES, createEnvelope, type AgentMemoryStartRefusal, type TaskFailure } from '@byok-sdk/protocol';
-import { readResidentMemory } from '../../agent-home-readers.js';
+import { createEnvelope, type AgentMemoryStartRefusal, type TaskFailure } from '@byok-sdk/protocol';
+import { readResidentMemory } from '../../resident-memory.js';
 import { sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types.js';
 import { admitPreparedOffer, type PreparedOfferServerProjection } from '../prepared-offer-admission.js';
 import type { InputPreparationStore } from '../input-preparation-store.js';
@@ -22,11 +22,12 @@ import { isRuntimeStartupDisposalFailure, projectRuntimeBoundaryFailure } from '
 import { toRuntimeInfoCapabilities } from '../runtime-capabilities.js';
 import { prependAgentMemoryModeGuidance } from '../memory-guidance.js';
 import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory.js';
-import { AGENT_MEMORY_RECOVERY, agentMemoryCommitFailureRetryable, agentMemoryCopyRefusal } from '../agent-memory-commit.js';
+import { agentMemoryCommitFailureRetryable, agentMemoryCommitUnavailableReason, copyStartFailure, residentMemoryStartFailure } from '../agent-memory-start-record.js';
 import { DAEMON_TASK_FAILURE } from '../task-failure.js';
 import { settleAgentMemoryCommitCopy } from './agent-memory.js';
 import type { PreparedExecutionObservation, ActiveTask, ClaimedAgentFailureContext, OfferPhaseContext } from './support.js';
-import { isKnownRuntimeId, offeredInstruction, errorMessage, outboundErrorMessage, pendingCancelBeforeActive } from './support.js';
+import { outboundErrorMessage } from '../outbound-error.js';
+import { isKnownRuntimeId, offeredInstruction, errorMessage, pendingCancelBeforeActive } from './support.js';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner.js';
 import type { AcceptedOfferPayload } from './support.js';
 import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer.js';
@@ -571,15 +572,14 @@ async function startAndActivateRuntime(
   // joined a reader's group took no base lease, so nothing has settled it yet.
   // It goes first: the read below must see the restored file.
   const commitStore = this['deps'].agentMemoryCommit;
-  const failCommitCopy = (error: unknown, recovery = '', failure?: TaskFailure): Promise<boolean> => failBeforeStart.call(
-    this, taskId, `agent_memory_commit_unavailable: ${outboundErrorMessage(error)}${recovery}`, agentMemoryCommitFailureRetryable(error),
-    { binding: agentBinding, runtimeId: pick.descriptor.id }, failure,
+  const failCommitCopy = (reason: string, retryable: boolean, failure?: TaskFailure): Promise<boolean> => failBeforeStart.call(
+    this, taskId, reason, retryable, { binding: agentBinding, runtimeId: pick.descriptor.id }, failure,
   );
   if (!readerAttempt && commitStore !== undefined) {
     try {
       await commitStore.settle(agentBinding.lease);
     } catch (error) {
-      await failCommitCopy(error);
+      await failCommitCopy(agentMemoryCommitUnavailableReason(error, false), agentMemoryCommitFailureRetryable(error));
       return;
     }
   }
@@ -593,10 +593,7 @@ async function startAndActivateRuntime(
     ? await readResidentMemory(agentBinding.resolution.canonicalHome, agentBinding.lease.homeIdentity)
     : undefined;
   if (injectsResidentMemory && residentMemory !== undefined && residentMemory.kind !== 'read') {
-    const reason = residentMemory.kind === 'over-limit'
-      ? `agent_memory_resident_over_limit: ${residentMemory.byteCount}/${RESIDENT_MEMORY_MAX_BYTES}${AGENT_MEMORY_RECOVERY}`
-      : `agent_memory_resident_unreadable: ${residentMemory.reason}`;
-    const refusal = residentMemory.kind === 'over-limit' ? 'agent_memory_resident_over_limit' : residentMemory.refusal;
+    const { reason, refusal } = residentMemoryStartFailure(residentMemory);
     await failBeforeStart.call(this, taskId, reason, false, { binding: agentBinding, runtimeId: pick.descriptor.id },
       agentMemoryStartFailure.call(this, taskId, refusal));
     return;
@@ -698,8 +695,8 @@ async function startAndActivateRuntime(
     try {
       await commitStore!.copy(agentBinding.lease, taskId);
     } catch (error) {
-      await failCommitCopy(error, agentMemoryCommitFailureRetryable(error) ? '' : AGENT_MEMORY_RECOVERY,
-        agentMemoryStartFailure.call(this, taskId, agentMemoryCopyRefusal(error)));
+      const { reason, refusal } = copyStartFailure(error);
+      await failCommitCopy(reason, agentMemoryCommitFailureRetryable(error), agentMemoryStartFailure.call(this, taskId, refusal));
       return;
     }
   }

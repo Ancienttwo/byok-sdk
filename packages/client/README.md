@@ -178,14 +178,14 @@ SDK resolves installed packages from it, so a CJS bundle beside `node_modules`
 finds them as ESM does (#724). Three bundled third-party modules keep an empty
 `import.meta`:
 - koffi's loader reads `import.meta.dirname`. On Windows the SDK loads koffi
-  for process ownership, for the Hermes gateway pipe and for the device
+  for process ownership and for the device
   credential store. A CJS or SEA product must pass `nativeAssetRoot` (see
   `copySdkNativeAssets` below) to `createDaemon`, to each adapter it constructs,
   and to `readDeviceEnrollmentStatus`, `readDeviceEnrollmentIdentity` and
   `createStoredDeviceProofSigner`. The SDK then loads the addon itself and never
   runs koffi's loader. Without it, koffi's loader runs with an empty
   `import.meta.dirname`. That is not supported. A koffi load failure makes
-  process ownership fail closed, the Hermes gateway identification reject and
+  process ownership fail closed and
   the credential store throw `DeviceCredentialStoreUnavailableError`.
 - Pi's extension loader reads `import.meta.resolve` only without
   `PI_BUNDLED_NODE`, which `runSdkReservedHelperCommand()` sets.
@@ -195,7 +195,7 @@ finds them as ESM does (#724). Three bundled third-party modules keep an empty
 Every other import of an extension resolves from the extension's own
 directory. An extension that does not load still fails the pi task.
 
-Pi 1.5.0, the version this client pins, depends on the exact npm package
+Pi 1.5.2, the version this client pins, depends on the exact npm package
 `undici` 8.12.3, which has the fixes for the undici advisories of 2026-10-15.
 An undici copy claims the process-wide `fetch`
 dispatcher when it first evaluates, and that copy then serves every `fetch` in
@@ -266,7 +266,7 @@ or credential-touching commands, and file writes outside the task workspace.
 `auto` is supported on Claude and the ordinary Pi RPC lane (including native
 pi-subagents children, which load the gate as a required child extension;
 external-cli, external-job and machine subagent runners are refused while it is
-on); an `auto` task for Codex, Grok, Hermes or a prepared/durable Pi
+on); an `auto` task for Codex, Grok or a prepared/durable Pi
 lane is declined before claim. The classifier is lexical and is not an OS
 sandbox or a file-scope boundary.
 
@@ -1052,85 +1052,6 @@ stop or stdin EOF terminates it. Neither pause nor a new dialog recalls already
 admitted work. Runtime/grants remain separate from the native Codex session.
 
 MIT licensed. Node.js 24.22.1 or newer.
-
-### Hermes Agent adapter
-
-`HermesAdapter` drives Hermes Agent (`hermes`, Nous Research) over ACP stdio.
-A Host adds it to its explicit adapter list. The daemon does not build it by
-default:
-
-```ts
-import { HermesAdapter } from '@byok-sdk/client/adapters';
-
-const hermes = new HermesAdapter({
-  home: '/var/lib/example-host/hermes', // SDK-owned Hermes root; never ~/.hermes
-  model: { provider: 'openrouter', model: '<model id>' }, // optional
-});
-```
-
-Offers select it with `harnessId: 'hermes'`. `home` is a root that the SDK
-owns; give each Host process its own root. Each execution gets a fresh Hermes
-profile under it, with Hermes memory and kanban dispatch off, and the adapter
-deletes the profile when the execution ends. The adapter starts the Hermes
-gateway itself and owns its process tree. It never reads or writes the user's
-own Hermes home (`~/.hermes`, or `%LOCALAPPDATA%\hermes` on Windows). Provider
-credentials come from the runtime environment; `model.keyEnv` names the
-variable for a `custom` endpoint. The first `detect()` on a new root waits
-while Hermes builds its Python environment there (up to `probeTimeoutMs`,
-default 180 s). A turn start takes about 20 s, so a Host may raise
-`startupTimeoutMs`. Qualified build and limits:
-[S0 note](../../docs/researches/2026-10-20-519-hermes-acp-s0.md). The adapter
-declares macOS, Linux and Windows; a real Hermes run on `windows-latest`
-qualifies Windows (#608). There the adapter reaches the gateway over Hermes's
-named pipe; give `resolveBin` the `hermes.exe` that Hermes's installer
-publishes. Platform notes:
-[adapter capabilities](../../docs/adapter-capabilities.md#hermes-adapter-custom-harness).
-
-### Hermes with a separate credential-custody launcher
-
-A Host may configure `HermesAdapter.byokLauncher` instead of `model`:
-
-```ts
-const hermes = new HermesAdapter({
-  home: '/var/lib/example-host/hermes',
-  resolveBin: () => ({ command: '/opt/hermes/bin/hermes', source: 'path' }),
-  byokLauncher: {
-    command: '/opt/node/bin/node',
-    args: ['/opt/example-host/hermes-custody.mjs'],
-    profileDbPath: '/var/lib/example-host/providers.sqlite',
-    selectProfile: (offer) => selectExactLocalBinding(offer),
-  },
-});
-```
-
-`selectProfile` is Host-owned local authority and returns an exact non-secret
-profile binding. The dedicated executable uses the keys package's
-`parseHermesProviderLauncherRequest` and `runHermesProviderLauncher` with the
-Host's account-scoped `SecretStore`; see [keys](../keys/README.md#hermes-custody-launcher).
-Admission returns only model metadata. Each gateway/viewer launch revalidates
-the binding and pending-custody state before reading the selected credential.
-The daemon never receives that credential. On POSIX the launcher replaces
-itself with Hermes, preserving the PID required by the gateway identity check.
-On Windows there is no process replacement: the launcher starts Hermes as a
-child with the credential in the child environment only, stays alive until
-Hermes exits and exits with its code. The adapter accepts a gateway below the
-launcher PID on Windows. While the execution runs, the launcher process also
-holds the credential in memory.
-
-This initial mapping accepts enabled OpenAI-compatible bearer profiles without
-`pi_model` overrides and maps them to Hermes `custom`. Other authentication,
-Anthropic and Responses/compat overrides remain unsupported. On POSIX, use a
-Node runtime supporting `process.execve` (the SDK's Node >=24.22.1 floor); a
-Bun-only executable without `process.execve` is rejected, and no child-process
-proxy is used for launch. Use an absolute Hermes executable (on Windows, the
-installer's `hermes.exe`); no PATH lookup is used for launch.
-Custody mode filters inherited environment variables and injects only
-`SDK_HERMES_PROVIDER_KEY`; unlike direct mode it does not forward arbitrary
-provider or loader variables. The Host must still trust its launcher and Hermes
-executable. This adds no Hermes `dispatchSelection` wire authority: that contract
-remains Pi-only. Fake-runtime tests, and a real Hermes run on Windows against a
-fake model endpoint, qualify custody/lifecycle behavior, not live provider
-compatibility or a bundled product's complete distribution.
 
 ### Direct adapter environments
 

@@ -27,7 +27,7 @@ export async function createK8Domain(context: HostContext): Promise<HostDomain<K
     store.close();
     throw error;
   }
-  const service = new ConversationService({ conversation, store, server: context.server, brand });
+  const service = new ConversationService({ conversation, store, server: context.server, brand, changed: context.changed });
   context.consumers.bind({
     consume: async (wake, signal) => {
       await conversation.consume(wake, signal);
@@ -42,7 +42,6 @@ export async function createK8Domain(context: HostContext): Promise<HostDomain<K
   return {
     handlers: {
       'k8.view': params => service.view(params),
-      'k8.changes': params => service.changes(params),
       'k8.saveBot': params => service.saveBot(params),
       'k8.archiveBot': params => service.archiveBot(params),
       'k8.send': params => service.send(params),

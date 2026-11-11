@@ -276,16 +276,19 @@ and makes no network request.
   provider id are outside that promise, because the projected provider id is
   `byok-sdk-<profile_ref>` unless the profile explicitly declares `opencode-go`.
   The declared identity enables Pi's OpenCode Go reasoning replay and session
-  headers. In pi-ai 1.5.0 the other branches are `cacheControlFormat` for
-  openrouter `anthropic/*` models (`api/openai-completions.js:1257`), the
+  headers. In pi-ai 1.5.2 the other branches are Anthropic message threads,
+  on by default only for provider `anthropic` at `api.anthropic.com`
+  (`api/anthropic-messages.js:163`), so a projected anthropic profile sends
+  full requests, `cacheControlFormat` for
+  openrouter `anthropic/*` models (`api/openai-completions.js:1260`), the
   xai `reasoning.encrypted_content` include, which differs only for grok-4.3
-  at `off` (`api/openai-responses.js:302`), cerebras body-less overflow
+  at `off` (`api/openai-responses.js:305`), cerebras body-less overflow
   detection, which differs only for a 400 with an empty body
   (`utils/overflow.js:148`), the Responses tool-call id kept only for `OPENAI_TOOL_CALL_PROVIDERS`
   (`api/openai-responses.js:15`, `api/openai-responses-shared.js:104`), which
   applies only when replaying history from another model or provider id
   (`api/transform-messages.js:87`, `:120`),
-  the error message prefix (`api/openai-responses.js:176`), and openrouter
+  the error message prefix (`api/openai-responses.js:177`), and openrouter
   billed cost, read from the response only (`utils/openrouter-cost.js`). The pinned catalog
   drift test in `@byok-sdk/client` keeps a review list of these branches, so a
   pi-ai upgrade reviews them again.
@@ -1271,7 +1274,7 @@ Runtime version policy is one pure data object on an adapter descriptor
 constructor option and `DaemonConfig.runtimes.<id>.versionPolicy` are complete
 objects that replace one another wholesale through one resolver; fields are
 never merged. The default policy preserves today's behavior exactly: Codex,
-Grok, Hermes, dsh and agy warn on an unqualified version, Claude and Pi do not warn, and
+Grok, dsh and agy warn on an unqualified version, Claude and Pi do not warn, and
 no default policy blocks. Only a Host layer may configure a block; a descriptor
 default that carries one is rejected as `invalid_version_policy`
 (`block_requires_host`). A block is enforced locally before claim and produces
@@ -1881,9 +1884,9 @@ makes itself `unknown`, except an Agent-memory start refusal (below). It keeps `
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
 | agy | the vendored OAR turn outcome; a class OAR took from error text stays `unknown` |
 | dsh | the native `LlmFailure` code, then its HTTP status, through the vendored OAR dsh table; no class comes from error text |
-| Pi, Hermes | no structured field: `unknown` |
+| Pi | no structured field: `unknown` |
 
-Claude, Codex, Grok, OpenCode, Pi (the rpc, prepared and durable lanes), Hermes, dsh and agy report a
+Claude, Codex, Grok, OpenCode, Pi (the rpc, prepared and durable lanes), dsh and agy report a
 runtime process that ends on its own before its terminal, during start or a turn,
 as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
 Pi's durable lane recovers a worker that ends on its own during a run (within its
@@ -2065,12 +2068,12 @@ remain the only device protocol.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
-`@earendil-works/pi-coding-agent@1.5.0` plus chord, pi-agent-core, pi-ai and
-pi-durable to exactly 1.5.0 (upstream commit
-`f9a26365568127461c47a07a37dcb42c140a3ac5`, closureDigest
-`9c94eaec01a9b7054843c0780a553d0c670a03f38d2b7d91fb6702835cbcf4b8`). pi-codemode, pi-mcp,
+`@earendil-works/pi-coding-agent@1.5.2` plus chord, pi-agent-core, pi-ai and
+pi-durable to exactly 1.5.2 (upstream commit
+`b4afdddf44e059c67ccf5097e5317d913521b470`, closureDigest
+`5b49e488317320fd0fbaf2a452b2d6f1455e40a2522c16e3e87b85d43daca603`). pi-codemode, pi-mcp,
 pi-schema, pi-telemetry and pi-tui reach an install only through the
-dependencies of the official packages, which pin them exactly in 1.5.0.
+dependencies of the official packages, which pin them exactly in 1.5.2.
 The SDK reads their installed version and does not gate it. Fork aliases and dual runtimes are
 retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
 resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
@@ -2082,6 +2085,15 @@ host refuses startup if it is unavailable. It is called through a read-only
 registry façade, with no copied parser or session-state mutation. Private
 imports, upstream patches, copied provider serializers or Session core, and
 global monkey-patches remain forbidden.
+
+Every SDK Pi RPC session answers Pi's `cache_warming_decision` with `stop`
+while the session is idle. Pi 1.5.1 defaults `cacheWarming` to `"idle"`,
+which re-sends the last request for up to 30 minutes after a run settled;
+that spend is invisible to the Host, so an SDK session warms its prompt
+cache at most during an active run. Under `agentUserContext: 'inherit'` a
+device `"off"` keeps warming off; under `excluded` the settings are in memory
+and do not read the device file. A pi-subagents child is disposed when its
+run ends, and `AgentSession.dispose()` cancels its warmer.
 
 Upstream RAFT also embeds the Pi SDK and inherits the user's agent directory.
 It does not run the user's installed pi CLI (RAFT mirror commit
@@ -2170,7 +2182,7 @@ The first protocol slice adds only additive optional observability fields:
   an identity, and only when Claude reports the command and args the SDK wrote
   for that server. A runtime name that two reported tools share gets none. A failed
   or late answer (5 s) leaves the field absent; the task continues. No prefix
-  splitting or title guessing is performed. Builtins and Grok and Hermes ACP
+  splitting or title guessing is performed. Builtins and Grok ACP
   titles are not assigned MCP identity. Claude and Pi assign none to SDK
   helpers. Codex projects its native `mcpToolCall` fields for every server it
   runs, so SDK helper calls carry `mcp` there; whether helpers should carry it
@@ -2708,6 +2720,122 @@ correspondent-domain policy, real Gmail REST metadata reads, and a strict
 metadata-only result projection. It remains host glue rather than public SDK
 API; Google verification/security assessment and the subprocess's OS authority
 remain host deployment responsibilities.
+
+## Host extension seams without a plugin API (#1846)
+
+A Host extends a device with declarations the SDK already has. There is no
+plugin runtime, no composition function and no plugin-side lifecycle hook: the
+decision and its reasoning are on #1846, and this section names the seams and
+the one recipe that ties them together. The skill seam per runtime is in the
+[adapter capability document](adapter-capabilities.md#host-provided-skills-by-runtime-1846).
+
+**The seams that exist.** Four, all Host-declared before the daemon starts:
+
+- Runtime adapters: `createDaemonWithAdapters(config, adapters, overrides)`
+  (`packages/client/src/daemon/create-daemon.ts:854`) takes Host-built
+  `RuntimeAdapter` instances, and `createRuntimeAdapters` builds the SDK ones
+  from the same options. The list is fixed at construction, and
+  `injectedAdapterConfigConflicts` refuses `DaemonConfig.codexSandbox`,
+  `DaemonConfig.runtimeEnvironment` and `DaemonConfig.runtimes` on that path,
+  because each of them configures an adapter that `createDaemon` builds.
+- MCP toolsets: `DaemonConfig.mcpToolsets`
+  (`packages/client/src/daemon/create-daemon.ts:357`), a
+  `Record<string, McpToolsetConfig>` of stdio servers.
+- Approvals: the optional `approveTools` on each `McpToolsetConfig` server
+  (`packages/client/src/types.ts:203`).
+- Tool authorization: `DaemonConfig.toolAuthorization`, the
+  `ToolAuthorizationPolicy` of `auto` and `all` with rules (see
+  [Tool authorization](#tool-authorization-auto-and-all-1061)).
+
+The capability set a device advertises is derived from those, never authored.
+`computeCapabilities` (`packages/client/src/daemon/create-daemon/support.ts:169`)
+advertises `toolset-selection` only when some adapter's
+`descriptor.capabilities.mcpToolsets` is `true`.
+`conn.hello.configuredToolsets` and the presence `configuredToolsets` read
+`toolsetRegistry.snapshot().configuredToolsets` when the message is sent
+(`create-daemon/start-connection.ts:40`, `create-daemon/presence.ts:159`), and
+a task that names `requiredToolsets` is admitted only on an adapter whose
+descriptor declares `mcpToolsets`
+(`task-runner/support.ts:406`, `unmetRequirements`). A Host writes
+no capability string of its own.
+
+**One declaration per product toolset.** A Host declares each product toolset
+once, as `{ id, server, mcp, approveTools, readOnly }`, and projects the
+fields:
+
+| Field | Projected to |
+| --- | --- |
+| `id` | the key in `DaemonConfig.mcpToolsets`, and the value a Host puts in an offer's `requiredToolsets` |
+| `server` | the server name key inside `McpToolsetConfig.mcpServers` |
+| `mcp` | that server's `command` and `args` |
+| `approveTools` | that server's `approveTools` |
+| `readOnly` | the Host's own `readOnlyToolsets` list |
+
+`id` must satisfy `ToolsetIdSchema` (`packages/protocol/src/messages.ts:207`).
+`server` is stricter than `id`: it must also be expressible as a runtime MCP
+server name (1-64 of `A-Z a-z 0-9 _ -`, not starting with `-`) and must not be
+an SDK-reserved name (`packages/client/src/daemon/toolset-registry.ts:164`).
+`command` must be an absolute path: `mcp_toolset_command_not_absolute` and
+`mcp_toolset_command_option_like` are raised when the registry is built or
+reloaded (`packages/client/src/daemon/toolset-registry.ts:99`), so a relative
+command name never reaches admission or a runtime `start()`. A server accepts
+only `command`, `args` and `approveTools` (`toolset-registry.ts:180`).
+`readOnlyToolsets` is the Host's list and is enforced where the Host composes
+offers: `ownReadOnlyToolsets` validates the ids
+(`examples/bot-collaboration/src/toolset-policy.ts:4`) and `admitBotToolsets`
+refuses an execution whose `requiredToolsets` names a toolset the list does not
+hold (`examples/bot-collaboration/src/rules/team.ts:14`).
+
+One declaration per product toolset is enough. A toolset carrying
+`approveTools` runs on every runtime since 0.35.0: the daemon projects the
+grant only to a runtime whose descriptor declares `mcpToolApprovals: true`
+(Codex, `packages/client/src/adapters/codex/codex-adapter.ts:139`,
+`task-runner/offer-runtime.ts:239`), and it takes no part in admission or
+runtime selection (#1324). A Host that split a toolset into one id per runtime
+can merge the copies.
+
+**A CLI tool is an MCP stdio toolset.** The wire carries a logical id and
+nothing else, and the daemon starts a toolset server as one stdio child with
+`command` and `args`. A CLI tool therefore reaches a task exactly as an SDK
+connector does: a Host-written stdio MCP server whose `command` is that CLI.
+There is no second shape and no per-runtime CLI option to add. The daemon
+appends one path as the last argument of every host toolset server, so the
+server must accept that argument (see [Task-scoped tool
+authority](#task-scoped-tool-authority-byok-task-assertion-v1)).
+
+**Task category is a Host-side rule.** An offer carries `requiredToolsets` and
+no category: `OFFER_FIELDS` (`packages/protocol/src/messages.ts:447`) lists
+every optional offer field, and both offer branches are `.strict()`
+(`messages.ts:572`), so a category would be a wire addition with no consumer.
+A Host that needs "this task category may use these toolsets" collapses it
+into one local function that sets `requiredToolsets` before it sends the
+offer. The device already declines an id it has no definition for, before
+claim, with `required MCP toolset "<id>" is not configured on this device`
+(`task-runner/mcp-contexts.ts:200`, reached from `admitOfferLimits` in
+`task-runner/offer-admission.ts:177`), so a category label from the same
+sender as `requiredToolsets` adds no integrity the SDK owner could check; the
+SDK keeps a gate only for an invariant it owns (`docs/security.md`).
+
+**"No hot reload" and `reloadMcpToolsets`.** The #1846 boundary is that a
+Host's declarations compose before the daemon starts, with no runtime install
+and no terminal user choosing them. The SDK does move one thing at runtime,
+and it is narrower than that boundary, not an exception to it.
+`Daemon.reloadMcpToolsets`
+(`packages/client/src/daemon/create-daemon/operations.ts:30`) and the control
+socket's `toolsets.reload` (`create-daemon/control-methods.ts:223`), which
+`byok-agent toolsets reload --config <path>` drives
+(`packages/client/src/bin/commands/toolsets.ts`), replace the complete
+device-local registry by expected-revision compare-and-swap
+(`packages/client/src/daemon/toolset-registry.ts:281`). What moves is the data
+behind logical ids: an already-admitted task keeps its sealed projection,
+later offers, presence heartbeats and the next `conn.hello` read the current
+ids, a same-content reload is a no-op at the same `sha256:` revision, and a
+stale or invalid reload leaves the snapshot unchanged. What cannot move is
+every adapter fact the boundary is about: the adapter list, every adapter
+option and therefore `computeCapabilities` are fixed at construction, so a
+reload can neither add a runtime nor make `toolset-selection` appear, and it
+is driven by the operator's own config, never by a terminal user choosing a
+program.
 
 ## Durable Agent homes
 
@@ -3914,20 +4042,6 @@ The ordinary `byok-pi-rpc` host launched under `credentialSource: keys-profile` 
 The durable Pi lane runs in a separate `byok-pi-durable` executable launched through the same credential launcher contract as `byok-pi-prepared`. The credential launcher transfers the provider key over a private, one-shot JSON IPC channel bound to the launch config digest; it MUST NEVER place the key in the durable child's environment, argv, stdio RPC or replica files. The worker consumes it into model/provider memory and disconnects IPC before constructing tools or MCP children. Deleting process.env is not an isolation mechanism. Tool exec MUST force `inheritEnv: false` and an explicit allowlist. Conformance tests require no key in both inherited tool env and the worker's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). The daemon communicates with it over stdio RPC, does not depend on `@byok-sdk/keys`, and never reads, proxies or forwards credentials. Its environment is rebuilt by the same EnvironmentBuilder allowlist with the `BYOK_*` deny. One child exclusively owns one durable storage; because upstream pi-durable provides no cross-process lock, the child MUST acquire an OS exclusive lock (flock or sidecar lockfile) bound to the current leaseId before opening storage, and MUST fail closed if it cannot. The child exists only while its daemon holds the home's single-writer lease; lease release requires the child's disposal receipt or confirmed process-tree death (wait after KILL).
 
 
-### Hermes local credential custody (#608 bounded slice)
-
-A Host may opt Hermes into a dedicated keys launcher with a local exact
-non-secret profile selector. Default direct-environment mode is unchanged.
-The launcher validates the binding and pending-custody state at admission and
-again under the configuration lock before each credential read. Credentials
-stay in the launcher/Hermes process boundary and never return to the daemon.
-POSIX process replacement preserves gateway PID identity; unsupported runtimes
-and Windows are rejected. This initial custom-provider mapping admits enabled
-OpenAI-compatible bearer profiles without Pi-specific model overrides. It does
-not widen the Pi-only wire dispatch-selection contract, qualify live providers,
-or complete Windows/bundled-product support requested in #608.
-
-
 ### Durable Pi lane (experimental, flag-gated)
 
 The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). Without an `auto` tool-authorization policy the lane runs YOLO, as every lane does since ADR-037: the `beforeTool` hook admits calls without Host approval and never requests one; a throwing hook blocks the call. Under `auto` (#1061) the hook asks the task's gate as described in Tool authorization; a file-scoped task also gets the six SDK scoped file tools. Without a file scope the structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
@@ -3942,7 +4056,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.5.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.99.0 source at `packages/client/vendor/oar/ac7fde4/`, from upstream commit `ac7fde4ab2c487bc9bb539b5e8329a4032eb30c9`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.5.2 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.99.0 source at `packages/client/vendor/oar/ac7fde4/`, from upstream commit `ac7fde4ab2c487bc9bb539b5e8329a4032eb30c9`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
@@ -3961,6 +4075,8 @@ Pi 1.3.0 ruling (2026-10-18, requested by the owner: 「查一下OAR最新的版
 Pi 1.4.0 ruling (2026-10-24, requested by the owner: 「你来并行开一个PR，提升 pi依赖到1.4.0 OAR到 0.71.0」/「开始前先查一下有没有API发生变化」): OAR 0.71.0 pins Pi 1.4.0, so all nine official packages are pinned at exactly 1.4.0 (upstream commit `4a080252f06caf63a525d7873c5d94d3c23887e0`, closureDigest `79c414be071768df15f0a107595564b11c67d904c601e7b2ccf1495fc3053fcc`). No symbol or subpath the SDK imports changed. The 1.4.0 changes that touch the SDK: HTML export reads a sixth asset, `vendor/marked-cjk-friendly.min.js`, which the export inventory now lists; pi-ai sends `pi/<version> (<platform>; <runtime>; <arch>)` as `User-Agent` and owns provider attribution, which coding-agent sessions still gate on install telemetry; the A1' compile closure reaches `@earendil-works/pi-telemetry` through pi-ai's request span schema with its no-op context, and call-time purity is unchanged; a resumed session now activates a load-time extension tool the transcript did not declare, while `resetResumedPiTools` still drops pending transcript tools. The owner ruled on three pi-durable 1.4.0 changes (2026-10-24): D2 「接受迁移」: opening a SQLite store migrates it to schema version 2, which a 1.3.0 build cannot open, so a deployment cannot roll back past this release; D3 「关掉 attribution」: the client durable lane passes `identity: { attribution: null }` to `Harness.open`, so it sends no provider attribution headers, as with 1.3.0 (cloud-do rebuilds requests with a fixed header set); D4 「设为 Infinity」: `CLOUD_HARNESS_SETTINGS` and the client durable engine set `restartLimit: Infinity`, so a task that a crash, eviction or reset cut off runs again on the next open and is never parked, as with 1.3.0. The closureDigest change makes a preparation compiled for 1.3.0 decline with `preparation_runtime_identity_mismatch`; prepare it again. The Summary and main-execution C calibrations were measured under an earlier identity and need a fresh ruling; no paid re-probe ran.
 
 Pi 1.5.0 ruling (2026-11-03, requested by the owner, who ruled E1–E7 as recommended in `docs/researches/2026-11-03-pi-1.5.0-upgrade.md`): all ten official packages are pinned at exactly 1.5.0 (upstream commit `f9a26365568127461c47a07a37dcb42c140a3ac5`, closureDigest `9c94eaec01a9b7054843c0780a553d0c670a03f38d2b7d91fb6702835cbcf4b8`); the change is breaking and ships in a MINOR. E1: pi-durable 1.5.0 removed its event stream, so both durable lanes read `Conversation.watch()` and the `pi.live` document; the Host event contract is unchanged. E2: opening a replica migrates `pi.live` to v3, `pi.tool` to v3 and `pi.generation` to v2, which a 0.36.0 build cannot open, so a deployment cannot roll back past this release. E3: a model request in flight when the host stopped is not sent again; with retry off the run ends unanswered with reason `interrupted`, which the client durable lane reports as `runtime_exited` (`durable runtime was interrupted during a model request`) and cloud-do as `CLOUD_EXECUTION_INTERRUPTED`. E4: progress reaches Storage at the upstream default `progress.persistWithinMs` of 1,000 ms; watches see it at once. E5: tool arguments are validated by pi-schema, which coerces them first and words its messages differently; `CloudToolDefinition.parameters` is pi-schema-typed, and pi-ai no longer exports `Type`, so a Host builds schemas with `Type` from `typebox` or with pi-schema. E6: pi-schema joins the provenance record and `PI_RUNTIME_CLOSURE` as an indirect package, like pi-telemetry. E7: rpiv-todo's `tool/types.ts` defines `StringEnum` locally with pi-ai 1.4.0's TypeBox implementation (same schema), recorded in its PROVENANCE and source manifest. The closureDigest change makes a preparation compiled for 1.4.0 decline with `preparation_runtime_identity_mismatch`; prepare it again. The pinned keys catalog follows pi-ai 1.5.0, and 30 entries it admitted before return `not_in_catalog`.
+
+Pi 1.5.2 ruling (2026-11-11, joint decision of the orchestrator and the advisor on [#1864](https://github.com/Ancienttwo/byok-sdk/issues/1864)): all ten official packages are pinned at exactly 1.5.2 (upstream commit `b4afdddf44e059c67ccf5097e5317d913521b470`, closureDigest `5b49e488317320fd0fbaf2a452b2d6f1455e40a2522c16e3e87b85d43daca603`). pi-durable 1.5.2 keeps persisted state compatible in both directions: `storage/sqlite/migrations.js` and `schema.js` are byte-identical to 1.5.0, `documents.js` changes only its `copyJson` import (chord root to `chord/json`), the SQLite row encoding is the same, and the document versions are unchanged (`pi.live` v3). The only new persisted field, `agent.compaction` (per-conversation compaction settings from `configure({ compaction })`), is optional and the SDK never sets it. Chord 1.5.1 moved v1 off the package root; the SDK imports only `chord/context` and `chord/json`. Every SDK Pi RPC session answers `cache_warming_decision` with `stop` while idle (Pi 1.5.1 defaults `cacheWarming` to `"idle"`).
 
 Exactness of the direct pins has three independent checks: bun.lock exact versions and sha512 integrity under frozen install (the root `overrides` also hold the repo's own install of the indirect packages at the pin); the build entry check that each installed direct package is at the pin; release-pack and registry-readback isolated installs, which require the direct pins with the locked integrities and prove the coding agent against its official tarball. The indirect packages are read, not gated: the release gates log their installed version, and input preparation does not read them. The SDK does not attest the Pi executable at launch (ADR-037).
 
@@ -4008,7 +4124,7 @@ retain the existing fail-closed behavior.
 
 Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
 its cumulative `total` remains the provider cost authority. Claude reports
-`result.modelUsage`'s window using the init model identity. Official Pi 1.5.0
+`result.modelUsage`'s window using the init model identity. Official Pi 1.5.2
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
@@ -4099,7 +4215,7 @@ workspace language server and a separate model reviewer with its own tool loop,
 which does not pass through the session tool-authorization hooks. The host
 refuses the command with a failed RPC response carrying
 `pi_host_command_denied`, before Pi can defer the prompt during `agent_settled`
-or run its command handler. The ingress check uses Pi 1.5.0's private
+or run its command handler. The ingress check uses Pi 1.5.2's private
 `_throwIfExtensionCommand` parser with a read-only registry façade; there is no
 SDK copy of its parser. If that method is missing or not a function, the host
 refuses startup with `pi_host_command_boundary_unavailable`. The dependency
@@ -4629,7 +4745,6 @@ it never runs ungated, and no third mode exists. Current coverage:
 | Claude | Supported | SDK `PreToolUse` callback hook registered at `initialize`; the prompt is sent only after the CLI confirms `hooks_applied`. It covers native tools, MCP tools and native subagents and is not skipped by bypass mode, allow rules or `disableAllHooks` (qualified with Claude 2.1.312 against a loopback provider) |
 | Codex | Declined before claim | App-server approvals fire only for sandbox escalations, not before every call |
 | Grok | Declined before claim | Only client-hosted terminal commands pass through the SDK; Grok's own file tools do not |
-| Hermes | Declined before claim | No pre-execution hook |
 | dsh | Declined before claim | No pre-execution hook; the native bridge has no approval channel, so dsh refuses every approval request and returns it to the model as a tool error |
 | agy | Declined before claim | No pre-execution hook; a permission request covers only files outside the workspace |
 

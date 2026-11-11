@@ -394,7 +394,7 @@ describe('daemon tool authorization', () => {
     expect(adapter.sessions[1]!.interruptCalled).toBe(false);
   });
 
-  it.each(['codex', 'grok', 'hermes'])('auto rules do not add missing pre-tool support to %s', async runtimeId => {
+  it.each(['codex', 'grok'])('auto rules do not add missing pre-tool support to %s', async runtimeId => {
     const adapter = new GateCapturingAdapter(NO_AUTO, runtimeId);
     const sent: Envelope[] = [];
     const { runner } = makeRunner(adapter, sent, { toolAuthorization: () => ({ default: 'auto', rules: {

@@ -17,8 +17,8 @@ import {
   AGENT_HOME_READER_RUN_MAX_AGE_MS,
   compareAgentHomeMemory,
   digestAgentHomeMemory,
-  readResidentMemory,
 } from '../agent-home-readers';
+import { readResidentMemory } from '../resident-memory';
 import { selectReaderRuns } from '../agent-home-reader-retention';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
