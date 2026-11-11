@@ -598,8 +598,7 @@ export class TaskRunner {
         this.deleteHostToolsetContexts(taskId);
         // #1099 S4: SH5 records the successful startup disposal. A failed
         // disposal never reaches here, so startup ownership stays retained.
-        void hostFor(this).dispatch({ type: 'startup.disposed', taskId, atMs: Date.now(), ok: true })
-          .catch(() => undefined);
+        void hostFor(this).dispatchOrReject({ type: 'startup.disposed', taskId, atMs: Date.now(), ok: true });
       },
       onDisposalFailure: (taskId, runtimeId, failure) => this.deps.onRuntimeDisposalFailure?.({
         taskId, runtimeId, stage: failure.stage, reason: failure.message,

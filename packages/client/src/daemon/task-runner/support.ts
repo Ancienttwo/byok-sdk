@@ -559,16 +559,12 @@ export function raceSettleFirst(fn: () => Promise<void>, timeoutMs: number): Pro
  * are read/uploaded separately by `sendArtifact` and are NOT counted here
  * (capping that would need a different hook; out of scope for this cap).
  * Good enough to catch a genuinely runaway task without needing an exact
- * wire-byte accountant. Never throws: a shape `JSON.stringify` can't handle
- * (it never should for a well-formed `AgentEvent`) counts as 0 bytes rather
- * than crashing the task loop over an accounting nicety.
+ * wire-byte accountant. An event `JSON.stringify` cannot serialize throws:
+ * it has no measurable size and could never reach the wire, so the pump fails
+ * the task instead of letting it past the cap.
  */
 export function estimateEventBytes(event: AgentEvent): number {
-  try {
-    return Buffer.byteLength(JSON.stringify(event), 'utf8');
-  } catch {
-    return 0;
-  }
+  return Buffer.byteLength(JSON.stringify(event), 'utf8');
 }
 
 export type OpenArtifactResult = { ok: true; handle: FileHandle } | { ok: false; reason: string };

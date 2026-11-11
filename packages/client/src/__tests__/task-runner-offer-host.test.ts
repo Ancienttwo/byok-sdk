@@ -241,4 +241,28 @@ describe('TaskRunnerHost: offer/admission reducer wiring', () => {
     expect(stale.disposition).toBe('dropped');
     expect(host.current('t1')?.phase).toBe('received');
   });
+
+  it('dispatchOrReject routes a rejected dispatch to the open terminal receipt', async () => {
+    const { host } = makeHost();
+    begin(host);
+    receive(host);
+    host.registerHandler('reserve.home', async () => { throw new Error('reserve failed'); });
+    const { receipt } = host.beginTerminalIntent('t1', { kind: 'failed', cause: 'failed', prepare: async () => { throw new Error('unused'); } });
+    await expect(host.dispatchOrReject({ ...event('admission.begin'), taskId: 't1' })).resolves.toBeUndefined();
+    await expect(receipt).rejects.toThrow('reserve failed');
+    host.endOffer('t1');
+  });
+
+  it('dispatchOrReject is a no-op once the terminal receipt has settled', async () => {
+    const { host } = makeHost();
+    begin(host);
+    receive(host);
+    host.registerHandler('reserve.home', async () => { throw new Error('reserve failed'); });
+    const { receipt } = host.beginTerminalIntent('t1', { kind: 'failed', cause: 'failed', prepare: async () => { throw new Error('unused'); } });
+    host.settleTerminal('t1', true);
+    await expect(host.dispatchOrReject({ ...event('admission.begin'), taskId: 't1' })).resolves.toBeUndefined();
+    await expect(receipt).resolves.toBe(true);
+    expect(host.terminalSettled('t1')).toBe(true);
+    host.endOffer('t1');
+  });
 });

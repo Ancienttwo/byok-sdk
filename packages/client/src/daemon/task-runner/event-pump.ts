@@ -268,7 +268,7 @@ async function pumpTurnEnd(this: TaskRunner, active: ActiveTask, event: Extract<
         host.setMessageCompletion(active.taskId, { finalOutput, ...(failureReason === undefined ? {} : { failureReason }), ...(outcome.document === undefined ? {} : { document: outcome.document }) });
         // T1 records the open completion gate (and its token) in the reducer;
         // M1/M2 resolve it when the disposition arrives.
-        void host.dispatch({ type: 'turn.ended', taskId: active.taskId, atMs: Date.now() }).catch(() => undefined);
+        void host.dispatchOrReject({ type: 'turn.ended', taskId: active.taskId, atMs: Date.now() });
         const activated = await this['activateAgentMessage'](outbox, active.taskId, active.session.sessionRef,
           () => this['canPublishAgentMessage'](active), () => taskMessageSendAttempted(this, active.taskId));
         if (!this['canPublishAgentMessage'](active)) return;

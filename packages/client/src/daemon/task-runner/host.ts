@@ -395,6 +395,18 @@ export class TaskRunnerHost {
     reject?.(error);
   }
 
+  /**
+   * Dispatches a task event whose rejection fails that task's terminal
+   * receipt instead of being dropped. Once the task is terminal there is no
+   * open receipt left, and `rejectTerminal`'s own guard makes this a no-op.
+   */
+  dispatchOrReject(event: ReducerEvent & { readonly taskId: string }): Promise<ReduceResult | undefined> {
+    return this.dispatch(event).catch((error: unknown) => {
+      this.rejectTerminal(event.taskId, error);
+      return undefined;
+    });
+  }
+
   private newTerminalReceipt(intent: HostTerminalIntent): Promise<boolean> {
     intent.settled = false;
     intent.finishOk = undefined;
