@@ -304,6 +304,8 @@ test('a platform family is selected only by a path it owns', () => {
   // #1805: renderer stylesheets select the desktop example; other renderer assets stay unmapped.
   assert.ok(selectImpact(['examples/desktop-bot-app/src/renderer/styles/theme.css']).families.includes('desktop'));
   assert.throws(() => selectImpact(['examples/desktop-bot-app/src/renderer/theme.scss']), /mapping/i);
+  // #1811: the packaging scripts select the desktop example.
+  assert.ok(selectImpact(['examples/desktop-bot-app/scripts/package/bundle-host.mjs']).families.includes('desktop'));
   for (const path of ['packages/client/src/bin/sdk-reserved-helper-runners.ts', 'packages/client/src/bin/byok-agent-result-mcp.ts', 'packages/client/src/lifecycle/sdk-reserved-helper-command.ts']) {
     for (const family of ['runtime-contract', 'credential-isolation-audit', 'npm-release-pack']) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
   }
@@ -427,7 +429,10 @@ const registeredJobInputs = {
     'packages/client/dist/native/agent-memory-fs/win32-x64.exe': 'build output that the Windows junction smoke runs',
   },
   'hermes-real-windows': { $installer: 'the verified vendored Hermes installer' },
-  desktop: { 'packages/keys/dist/index.js': 'keys build output that the #1803 D0 Secret Service probe imports' },
+  desktop: {
+    'packages/keys/dist/index.js': 'keys build output that the #1803 D0 Secret Service probe imports',
+    'examples/desktop-bot-app/dist/host/host.cjs': 'the build:host output that the #1811 Host bundle smoke starts',
+  },
   'packageability-smoke': {
     'packages/client/scripts/build-agent-memory-helper.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
     'packages/client/scripts/check-agent-memory-helper-build.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',

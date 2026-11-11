@@ -94,6 +94,8 @@
         "@electron/fuses": "2.1.3",
         "@types/node": "^24",
         "electron": "45.3.0",
+        "esbuild": "0.28.1",
+        "postject": "1.0.0-alpha.6",
         "typescript": "^7.0.2",
         "vitest": "^5.1.0",
       },
