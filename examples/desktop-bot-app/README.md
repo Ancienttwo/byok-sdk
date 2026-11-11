@@ -40,7 +40,9 @@ to stderr only.
   `shutdown` are main's alone. Params are validated once, by the handler that answers
   the method: the Host's, or main's for a `main` domain method.
 - The Host pushes `{ "event": "state" }` lines (no id) after every change: `starting`,
-  `running` with its active work count, or `stopped` with a reason.
+  `running` with its active work count, or `stopped` with a reason. It pushes the same
+  state again when a domain's views changed (`HostContext.changed`), so each domain's
+  view is read again after the hint.
 - Main turns those pushes, and its own `restarting`/`failed` view, into a bare hint on
   `byok:state-changed`, at most one per 50 ms burst, sent only to its own window's main
   frame on `app://renderer`. The hint carries nothing; the renderer subscribes with
@@ -77,10 +79,15 @@ bridge and composes the Host after main's hello (`src/host/compose.ts`):
 - The daemon comes from `createDaemonWithAdapters` with `createRuntimeAdapters`. Each
   runtime takes `runtimes.<id>.runtimeEnvironment` from the login shell, because a
   desktop app starts without it; Pi gets no `PI_PACKAGE_DIR`.
-- Pairing happens once, in process. Whether the device is paired is the daemon's own
-  enrollment authority: when `start()` halts with `unpaired`, the Host mints a code with
-  `server.pairing.createPairingCode()`, calls `daemon.pair(code)` and starts again. Any
-  other halt stops the Host with its reason.
+- The SDK hosting values (helper re-entry, Pi package, native and Agent memory helper
+  assets) come from `resolveSdkHosting` on the directory of the Host executable, where
+  `scripts/package/bundle-host.mjs` writes the SDK assets in dev and in a package. A
+  missing asset stops the Host with the missing paths.
+- Pairing is `daemon.pairEmbedded(server)` before every start: a fresh store pairs
+  against an empty server, a paired store whose device the server lists goes on, and any
+  other state stops the Host with the refusal reason, as does a halt at start.
+- Wakes and Agent messages the server delivers before the conversation opens wait for
+  it; one still waiting when the Host closes is refused and retried on the next run.
 
 A stopped Host keeps answering `status` with its reason and is not restarted. A Host
 that exits unasked is restarted with backoff (1 s, doubling to 30 s; back to 1 s after

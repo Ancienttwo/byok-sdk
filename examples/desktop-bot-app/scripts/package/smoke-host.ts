@@ -18,7 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createByokServer, listenLoopback } from '@byok-sdk/server';
-import { bundledSdkHelperHost, createDaemon, runSdkReservedHelperCommand, sdkPackagingAssetLayout } from '@byok-sdk/client';
+import { bundledSdkHelperHost, createDaemon, resolveSdkHosting, runSdkReservedHelperCommand } from '@byok-sdk/client';
 import { InMemorySecretStore, parseModelProviderProfile, parsePiProviderLauncherOptions, runPiProviderLauncher, SqliteProviderProfileStore } from '@byok-sdk/keys';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 
@@ -85,8 +85,7 @@ async function until<T>(read: () => T | undefined | Promise<T | undefined>, what
 
 async function smoke(): Promise<void> {
   const helperHost = bundledSdkHelperHost();
-  const assets = path.dirname(helperHost.entry ?? helperHost.executable);
-  const native = process.platform === 'darwin' || process.platform === 'win32';
+  const hosting = resolveSdkHosting({ assetRoot: path.dirname(helperHost.entry ?? helperHost.executable), helperHost });
   const root = await realpath(await mkdtemp(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'byok-desk-')));
   const log = { requests: [] as string[], offeredTools: [] as string[][], toolResults: [] as string[] };
   const model = fakeModel(log);
@@ -119,10 +118,8 @@ async function smoke(): Promise<void> {
     localAgentRelease: { version: '0.0.0-desktop-smoke' }, productName: 'BYOK Desktop Smoke', productId: PRODUCT_ID, serverUrl: listener.serverUrl,
     storeDir: path.join(root, 'store'), storage: { scratchRoot: path.join(root, 'scratch') },
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: EGRESS_POLICY },
-    runtimeAllowlist: ['pi'], sdkHelperHost: helperHost,
-    runtimes: { pi: { packageDir: path.join(assets, sdkPackagingAssetLayout.pi), runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR'] } } },
-    ...(process.platform === 'win32' ? { nativeAssetRoot: path.join(assets, sdkPackagingAssetLayout.native) } : {}),
-    ...(native ? { agentMemoryHelperAssetRoot: path.join(assets, sdkPackagingAssetLayout.agentMemoryHelper) } : {}),
+    runtimeAllowlist: ['pi'], ...hosting.daemon,
+    runtimes: { pi: { ...hosting.adapters.runtimes.pi, runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR'] } } },
     piByokLauncher: { command: helperHost.executable, args: [...(helperHost.entry === undefined ? [] : [helperHost.entry]), LAUNCHER_COMMAND],
       profileDbPath, sessionDir: path.join(root, 'sessions') },
   }, { deviceCredentials: new InMemoryDeviceCredentialBackend() });
@@ -130,10 +127,7 @@ async function smoke(): Promise<void> {
     const { code } = await byok.pairing.createPairingCode({ productId: PRODUCT_ID });
     const { deviceId } = await daemon.pair(code);
     await daemon.start();
-    await until(() => {
-      const lifecycle = daemon.status().lifecycle;
-      return lifecycle.phase === 'running' && lifecycle.connection === 'open' ? true : undefined;
-    }, 'daemon connection');
+    await daemon.whenOpen({ signal: AbortSignal.timeout(120_000) });
     const run = async (dispatch: object) => {
       const { taskId } = await byok.executions.submit({
         taskId: randomUUID(), deviceId,

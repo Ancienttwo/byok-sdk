@@ -8,11 +8,7 @@ import type { ConversationBrand, RolePreset } from './catalog.ts';
 import { DraftFollowers, type DraftTarget } from './drafts.ts';
 import { botViews, conversationItems, openTurns, type BotView, type ConversationView } from './view.ts';
 
-/** How long `changes` holds a call with nothing new. Host shutdown waits for a held call, so it stays short. */
-export const CHANGES_HOLD_MS = 1500;
-
 export interface ConversationSnapshot {
-  readonly version: number;
   readonly bots: readonly BotView[];
   readonly roles: readonly RolePreset[];
   readonly models: readonly { readonly id: string; readonly label: string }[];
@@ -33,8 +29,8 @@ const record = (params: unknown, method: string): Record<string, unknown> => {
 
 /**
  * The Host side of the conversation UI: validates the renderer's params once, runs the store-first commands of
- * {@link Conversation} and K8's owner commands, and projects the view model. `version` counts the changes this Host
- * saw (commands, consumed wakes and messages, drafts); the renderer waits on it with `changes`.
+ * {@link Conversation} and K8's owner commands, and projects the view model. Every change the view reads (commands,
+ * consumed wakes and messages, drafts) calls `changed`, the Host's view-change signal, and the renderer reads again.
  */
 export class ConversationService {
   readonly #conversation: Conversation;
@@ -43,10 +39,12 @@ export class ConversationService {
   readonly #brand: ConversationBrand;
   readonly #drafts: DraftFollowers;
   readonly #taskReasons = new Map<string, string>();
-  readonly #waiters = new Set<() => void>();
-  #version = 0;
+  readonly #changed: () => void;
 
-  constructor(options: { conversation: Conversation; store: HostStore; server: Pick<ByokServer, 'tasks'>; brand: ConversationBrand }) {
+  constructor(options: {
+    conversation: Conversation; store: HostStore; server: Pick<ByokServer, 'tasks'>; brand: ConversationBrand; changed: () => void;
+  }) {
+    this.#changed = options.changed;
     this.#conversation = options.conversation;
     this.#store = options.store;
     this.#server = options.server;
@@ -54,37 +52,18 @@ export class ConversationService {
     this.#drafts = new DraftFollowers(options.server, () => this.changed());
   }
 
-  /** Something the view reads changed: wake every held `changes` call. */
+  /** Something the view reads changed. */
   changed(): void {
-    this.#version += 1;
-    for (const wake of this.#waiters) wake();
-    this.#waiters.clear();
+    this.#changed();
   }
 
   close(): void {
     this.#drafts.close();
-    for (const wake of this.#waiters) wake();
-    this.#waiters.clear();
-  }
-
-  /** Resolves with the version once it moved past `after`, or after {@link CHANGES_HOLD_MS} with the current one. */
-  async changes(params: unknown): Promise<{ version: number }> {
-    const after = record(params, 'k8.changes').after;
-    if (!Number.isSafeInteger(after)) throw new BridgeError('invalid_params', 'k8.changes needs { after: integer }');
-    if (this.#version === after) {
-      await new Promise<void>(resolve => {
-        const timer = setTimeout(() => { this.#waiters.delete(wake); resolve(); }, CHANGES_HOLD_MS);
-        const wake = () => { clearTimeout(timer); resolve(); };
-        this.#waiters.add(wake);
-      });
-    }
-    return { version: this.#version };
   }
 
   async view(params: unknown): Promise<ConversationSnapshot> {
     const { botId } = record(params, 'k8.view');
     if (botId !== null && typeof botId !== 'string') throw new BridgeError('invalid_params', 'k8.view needs { botId: string | null }');
-    const version = this.#version;
     const state = this.#conversation.bot.snapshot();
     const bots = botViews(this.#store.bots(), state);
     const selected = bots.find(bot => bot.id === botId);
@@ -107,7 +86,7 @@ export class ConversationService {
       });
     }
     return {
-      version, bots, roles: this.#brand.roles,
+      bots, roles: this.#brand.roles,
       models: Object.entries(this.#brand.models).map(([id, entry]) => ({ id, label: entry.label })),
       ...(conversation ? { conversation } : {}),
       busy: bots.some(bot => bot.state === 'working' || bot.state === 'profile_updating' || bot.state === 'runtime_unavailable'),

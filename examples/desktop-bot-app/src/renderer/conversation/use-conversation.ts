@@ -3,9 +3,13 @@ import type { ConversationSnapshot } from '../../host/conversation/service.ts';
 
 export type Loaded = { readonly snapshot: ConversationSnapshot; readonly error?: undefined } | { readonly snapshot?: ConversationSnapshot; readonly error: string };
 
+/** How soon the view is read again while some Bot is busy: a runtime or profile catching up reaches no Host hint. */
+const BUSY_REREAD_MS = 1500;
+
 /**
- * Reads the conversation view and keeps it current: it waits on `k8.changes` and reads again when the version moved
- * or some Bot is busy. A failed call stops the loop and shows its error; a Host state change or `reload` restarts it.
+ * Reads the conversation view, and again on every Host state hint (the Host pushes one when the view changed) and,
+ * while some Bot is busy, after {@link BUSY_REREAD_MS}. A failed read shows its error over the last view; the next
+ * hint or `reload` reads again.
  */
 export function useConversation(botId: string | null): { loaded: Loaded | undefined; reload: () => void } {
   const [loaded, setLoaded] = useState<Loaded>();
@@ -16,22 +20,20 @@ export function useConversation(botId: string | null): { loaded: Loaded | undefi
   useEffect(() => window.byok.onStateChanged(reload), [reload]);
   useEffect(() => {
     let stopped = false;
-    void (async () => {
-      try {
-        let snapshot = await window.byok.call('k8.view', { botId });
-        while (!stopped) {
-          last.current = snapshot;
-          setLoaded({ snapshot });
-          const { version } = await window.byok.call('k8.changes', { after: snapshot.version });
-          if (stopped) return;
-          if (version !== snapshot.version || snapshot.busy) snapshot = await window.byok.call('k8.view', { botId });
-        }
-      } catch (error) {
-        if (!stopped) setLoaded({ ...(last.current ? { snapshot: last.current } : {}), error: (error as Error).message });
-      }
-    })();
-    return () => { stopped = true; };
-  }, [botId, generation]);
+    let again: ReturnType<typeof setTimeout> | undefined;
+    window.byok.call('k8.view', { botId }).then(snapshot => {
+      if (stopped) return;
+      last.current = snapshot;
+      setLoaded({ snapshot });
+      if (snapshot.busy) again = setTimeout(reload, BUSY_REREAD_MS);
+    }, (error: Error) => {
+      if (!stopped) setLoaded({ ...(last.current ? { snapshot: last.current } : {}), error: error.message });
+    });
+    return () => {
+      stopped = true;
+      clearTimeout(again);
+    };
+  }, [botId, generation, reload]);
   return { loaded, reload };
 }
 

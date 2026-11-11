@@ -34,9 +34,7 @@ afterEach(async () => {
 });
 
 /** The daemon's own ready fact: the server accepted this run's hello. */
-async function ready(daemon: Daemon): Promise<void> {
-  await vi.waitFor(() => expect(daemon.status().lifecycle).toEqual({ phase: 'running', connection: 'open' }), { timeout: 5000 });
-}
+const ready = (daemon: Daemon) => daemon.whenOpen({ signal: AbortSignal.timeout(5000) });
 function newDaemon(fx: Pick<Fixture, 'root' | 'listener' | 'adapter' | 'deviceCredentials'>): Daemon {
   return createDaemonWithAdapters({ productId, productName: 'Desktop K8 Test', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: fx.listener.serverUrl, storeDir: path.join(fx.root, 'sdk'),
@@ -153,7 +151,7 @@ it('keeps a reply out of the transcript when the daemon stops between its accept
 it('shows a failed Turn with the server\'s task reason, and marks a Pi background refusal (R2)', async () => {
   const fx = await open();
   const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
-    brand: { instruction: 'Answer the user.', roles: [], models: { default: { label: 'Default', runtime: 'pi' } } } });
+    brand: { instruction: 'Answer the user.', roles: [], models: { default: { label: 'Default', runtime: 'pi' } } }, changed: () => {} });
   await service.saveBot(WRITER);
   const { turnId } = await service.send({ actionId: 'a1', botId: WRITER.id, text: 'Run it in the background' });
   expect((await service.view({ botId: WRITER.id })).conversation!.cancellable).toEqual([turnId]);
