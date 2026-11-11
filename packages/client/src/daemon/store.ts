@@ -383,8 +383,12 @@ export async function readEnrollmentAuthority(
 ): Promise<EnrollmentAuthorityRead> {
   const { productId, storeDir: configuredStoreDir, deviceCredentials, nativeAssetRoot } = readEnrollmentOptions(options);
   const storeDir = DeviceStore.resolveDir(productId, configuredStoreDir);
+  return readStoreEnrollment(new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials, nativeAssetRoot })));
+}
+
+/** {@link readEnrollmentAuthority} over an already composed store. */
+export async function readStoreEnrollment(store: DeviceStore): Promise<EnrollmentAuthorityRead> {
   try {
-    const store = new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials, nativeAssetRoot }));
     // Inspect the bounded projection even when the OS authority exists. A
     // legacy secret-bearing or otherwise invalid file is an explicit
     // re-pair-required state; steady-state reads must never hide or repair it.
@@ -414,7 +418,7 @@ export async function readEnrollmentAuthority(
  * read. An accessor, Proxy, non-plain prototype or wrong type is a
  * `TypeError` with no cause, before any filesystem or credential access.
  */
-function readEnrollmentOptions(options: unknown): { productId: string; storeDir: string | undefined; deviceCredentials: DeviceCredentialConfig | undefined; nativeAssetRoot: string | undefined } {
+export function readEnrollmentOptions(options: unknown): { productId: string; storeDir: string | undefined; deviceCredentials: DeviceCredentialConfig | undefined; nativeAssetRoot: string | undefined } {
   const invalid = (): TypeError =>
     new TypeError('device enrollment reads require a non-empty productId and optional storeDir and nativeAssetRoot strings, as plain data properties');
   let picked: Record<'productId' | 'storeDir' | 'deviceCredentials' | 'nativeAssetRoot', unknown>;

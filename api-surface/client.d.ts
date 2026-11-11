@@ -6723,6 +6723,71 @@ export interface HostDeviceProofSigner extends DeviceProofSigner {
  */
 export declare function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSignerOptions): HostDeviceProofSigner;
 export {};
+// ==== @byok-sdk/client dist/daemon/enrollment-clear.d.ts ====
+import { DeviceStore, type DeviceEnrollmentStatusOptions, type DeviceRecord } from './store.js';
+import type { DeviceCredentialBackend } from './device-credential-store.js';
+declare const CLEAR_MESSAGES: {
+    readonly store_owned: 'another process holds this store\'s owner lease (a daemon, doctor or installer); the enrollment is unchanged';
+    readonly store_not_bound: 'the OS credential entry for this productId holds an enrollment this storeDir did not pair; nothing was cleared';
+    readonly clear_failed: 'the device enrollment could not be cleared; see the cause';
+};
+export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
+/**
+ * Why a device enrollment clear refused or failed:
+ * - `store_owned`: another process holds the store's owner lease. It may be a
+ *   running daemon, a doctor or an installer; nothing was read or cleared.
+ * - `store_not_bound`: the OS entry holds an enrollment another storeDir
+ *   paired; nothing was cleared.
+ * - `clear_failed`: `cause` holds the error. A `device.json` that cannot be
+ *   parsed (`DeviceRecordRePairRequiredError`) is refused before anything is
+ *   deleted; the store needs a re-pair. A credential provider failure leaves
+ *   the store paired. A failed `device.json` removal after the credential was
+ *   deleted leaves a valid projection without its credential, which a retry
+ *   clears.
+ */
+export declare class DeviceEnrollmentClearError extends Error {
+    readonly code: DeviceEnrollmentClearErrorCode;
+    constructor(code: DeviceEnrollmentClearErrorCode, options?: ErrorOptions);
+}
+/** One store's enrollment custody: the `device.json` projection, the OS credential and, with the OS provider, the member entries. */
+export interface EnrollmentCustody {
+    readonly store: DeviceStore;
+    readonly memberRecords: {
+        clear(): Promise<void>;
+    } | undefined;
+}
+/**
+ * The one enrollment clear, shared by `Daemon.unpair()` and
+ * {@link clearDeviceEnrollment}; the caller holds the store's owner lease.
+ * `readCurrent` reads the bound enrollment under that lease, so another
+ * store's OS entry is refused before anything is deleted. A `device.json`
+ * that cannot be parsed is refused too, with its
+ * `DeviceRecordRePairRequiredError`: nothing proves the productId-wide OS
+ * entry is this store's, and `remove()` could never delete that file. A valid
+ * projection without its credential (left by a failed metadata removal) is
+ * cleared. The member entries
+ * go first and the credential is read back after deletion: any failure up to
+ * there leaves the device paired. `onCredentialCleared` runs once the
+ * credential is gone, before `device.json` is removed. Returns the cleared
+ * enrollment, or undefined when the store held no readable one.
+ */
+export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, readCurrent: () => Promise<DeviceRecord | undefined>, onCredentialCleared?: () => void): Promise<DeviceRecord | undefined>;
+/**
+ * Clears one store's device enrollment without a daemon: its member
+ * entries, its OS credential (read back after deletion) and `device.json`,
+ * under the store's owner lease. It never reads Host secrets, returns no
+ * secret and makes no network call. Clearing a store that holds no
+ * enrollment succeeds. Unlike `Daemon.unpair()` it leaves the delivery cursor
+ * file, which no later pairing reads because each pairing mints a new device
+ * id. It reads the calling process's OS credential set, so it clears the
+ * enrollment of the account it runs as.
+ */
+export declare function clearDeviceEnrollment(options: DeviceEnrollmentStatusOptions & {
+    readonly storeDir: string;
+}, overrides?: {
+    readonly deviceCredentials?: DeviceCredentialBackend;
+}): Promise<void>;
+export {};
 // ==== @byok-sdk/client dist/daemon/execution-record.d.ts ====
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { RuntimeAdapterDescriptor } from '../types.js';
@@ -8821,6 +8886,20 @@ export declare class DeviceStore {
  * ({@link DeviceStoreBindingMismatchError}).
  */
 export declare function readEnrollmentAuthority(options: DeviceEnrollmentStatusOptions): Promise<EnrollmentAuthorityRead>;
+/** {@link readEnrollmentAuthority} over an already composed store. */
+export declare function readStoreEnrollment(store: DeviceStore): Promise<EnrollmentAuthorityRead>;
+/**
+ * Reads `productId` and `storeDir` exactly once each as plain data
+ * (`../util/plain-data`); other fields of a larger host config are never
+ * read. An accessor, Proxy, non-plain prototype or wrong type is a
+ * `TypeError` with no cause, before any filesystem or credential access.
+ */
+export declare function readEnrollmentOptions(options: unknown): {
+    productId: string;
+    storeDir: string | undefined;
+    deviceCredentials: DeviceCredentialConfig | undefined;
+    nativeAssetRoot: string | undefined;
+};
 /** The public non-secret identity projection of one enrollment record. */
 export declare function enrollmentIdentityOf(record: DeviceMetadata): DeviceEnrollmentIdentity;
 /**
@@ -9901,6 +9980,8 @@ export { LocalStorageEmergencyError } from './daemon/retention/pressure.js';
 export type { StoragePressureState } from './daemon/retention/pressure.js';
 export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry.js';
 export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store.js';
+export { clearDeviceEnrollment, DeviceEnrollmentClearError } from './daemon/enrollment-clear.js';
+export type { DeviceEnrollmentClearErrorCode } from './daemon/enrollment-clear.js';
 export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store.js';
 export { AuthResponseInvalidError } from './daemon/auth-manager.js';
 export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store.js';

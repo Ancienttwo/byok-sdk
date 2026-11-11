@@ -2,6 +2,10 @@
 
 Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Clearing a device enrollment without a daemon
+
+An uninstaller that built a daemon per store only to call `daemon.unpair()` can call `clearDeviceEnrollment({ productId, storeDir, nativeAssetRoot })` instead (#1841); it needs no `productName`, `serverUrl` or `localAgentRelease`. It refuses with `DeviceEnrollmentClearError` `store_owned` while a daemon, doctor or installer holds the store, so call it after the service has stopped, and before deleting the store directory. It clears only the SDK device enrollment of the account it runs as, never Host secrets, and leaves the delivery cursor file. A Host that matched the text of `unpair()`'s credential-deletion error reads `DeviceEnrollmentClearError.code === 'clear_failed'` instead. See [Clearing an enrollment without running the daemon](../device-setup.md#clearing-an-enrollment-without-running-the-daemon).
+
 ## Loopback listener close waits for handlers
 
 `LoopbackListener.close()` now resolves only after every dispatched handler has settled; before, it destroyed connections and resolved while a handler could still run. Requests not yet dispatched get 503. There is no timeout. Shut down in the order `daemon.stop()`, `listener.close()`, `server.close()`, and do not make a request-scoped hook wait on anything the Host releases after `listener.close()`, or `close()` never resolves. See [Embedded path](../device-setup.md#embedded-path).
