@@ -4,8 +4,8 @@ import { app, BrowserWindow, ipcMain, net, powerSaveBlocker, protocol, session, 
 import brand from '../../brand.config.ts';
 import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMethods, type MainMethod } from '../bridge/protocol.ts';
 import { createRendererRouter } from '../bridge/route.ts';
-import { MAIN_HANDLERS } from './domains.ts';
-import { HostProcess, spawnDevHost, type SupervisedHostState } from './host-process.ts';
+import { createMainHandlers } from './domains.ts';
+import { HostProcess, spawnDevHost, spawnDevHostCommand, type SupervisedHostState } from './host-process.ts';
 import { coalesceStateHints } from './state-hint.ts';
 
 const SCHEME = 'app';
@@ -57,7 +57,7 @@ const host = new HostProcess({
 
 const route = createRendererRouter<BridgeMethods, MainMethod>({
   allowed: RENDERER_METHODS,
-  main: MAIN_HANDLERS,
+  main: createMainHandlers({ callHost: (method, params) => host.call(method, params), spawnHostCommand: spawnDevHostCommand }),
   host: (method, params) => host.call(method, params as never),
 });
 
