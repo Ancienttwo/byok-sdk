@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "26901f8b00dce3516ec5beff611b9e8bbb2015ef25702dbe726317131e97aa20"
+    "snapshotSha256": "bfe3b2216fe4773485b24084260b8170824e337d84666c90c94d5fe1e44ff6a8"
   },
   "configFields": {
     "status": "tracked",
@@ -152,9 +152,28 @@
         "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
         "export:@byok-sdk/protocol#TaskDeclineSealedPayload"
       ]
+    },
+    {
+      "id": "per-runtime-environment",
+      "impact": "breaking",
+      "summary": "DaemonConfig.runtimes.<id> and RuntimeAdaptersRuntimes.<id> (PiRuntimeConfig for pi) gain an optional runtimeEnvironment: the environment policy of that SDK-built runtime, which replaces the top-level runtimeEnvironment for it and is not merged with the top-level pass. A runtime without it keeps the top-level policy, so existing configuration keeps its meaning. DaemonEffectiveRuntime gains runtimeEnvironment. byok-agent config check --json reports each runtime's policy at effective.runtimes[].runtimeEnvironment and drops its top-level runtimeEnvironment key; a script that read that key reads the per-runtime field.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#per-runtime-environment-policy",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#DaemonEffectiveRuntime",
+        "export:@byok-sdk/client/adapters#PiRuntimeConfig",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=8933bd48c145a3e5",
+      "after": "optional schema-sha256=733c24d0d48a4795",
+      "entry": "per-runtime-environment"
+    },
     {
       "item": "config:storage",
       "change": "changed",
@@ -203,6 +222,11 @@
       "item": "export:@byok-sdk/client#CreateServiceLifecycleOptions",
       "change": "changed",
       "entry": "service-lifecycle-gate-root"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEffectiveRuntime",
+      "change": "changed",
+      "entry": "per-runtime-environment"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
@@ -338,6 +362,16 @@
       "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",
       "change": "changed",
       "entry": "version-policy-source"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiRuntimeConfig",
+      "change": "changed",
+      "entry": "per-runtime-environment"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "per-runtime-environment"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentReport",

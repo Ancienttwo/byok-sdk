@@ -2,7 +2,7 @@ import { checkDaemonConfig, type DaemonConfigCheck } from '../../daemon/config-s
 import type { DaemonEffectiveConfig } from '../../daemon/config-schema/effective';
 import { formatConfigIssue, readConfigFile } from '../config';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../official-release';
-import { assertRuntimeEnvironmentPolicy, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import type { RuntimeEnvironmentPolicy } from '../../runtime/environment';
 
 export interface ConfigCheckOptions {
   /** Fail on warnings (unknown fields) too, for CI. */
@@ -20,26 +20,23 @@ export interface ConfigCheckDeps {
  * daemon would run with. Returns the exit code: 1 on any error, and with
  * `--strict` on any warning; otherwise 0.
  *
- * #1095: every runtime `start` builds takes the file's `runtimeEnvironment`
- * policy, so the check prints that policy. The names it yields come from the
- * user's login shell, which a check never runs: `doctor` reads them from the
- * running daemon.
+ * #1095, #1759: the check prints each built runtime's environment policy
+ * (`runtimes.<id>.runtimeEnvironment`, else the top-level one). The names it
+ * yields come from the user's login shell, which a check never runs: `doctor`
+ * reads them from the running daemon.
  */
 export function runConfigCheckCommand(configPath: string, options: ConfigCheckOptions, deps: ConfigCheckDeps = {}): number {
   const log = deps.log ?? ((line: string) => console.log(line));
   const { $schema: _schema, ...input } = readConfigFile(configPath);
   const check = checkDaemonConfig(input, { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE });
   const ok = check.ok && !(options.strict && check.issues.length > 0);
-  const runtimeEnvironment = check.effective === undefined ? undefined : effectiveRuntimeEnvironmentPolicy(input.runtimeEnvironment);
   if (options.json) {
     log(JSON.stringify({
       ok, strict: options.strict, config: configPath, issues: check.issues,
       ...(check.effective === undefined ? {} : { effective: check.effective }),
-      ...(runtimeEnvironment === undefined ? {} : { runtimeEnvironment }),
     }, null, 2));
   } else {
     for (const line of formatConfigCheck(configPath, check, options.strict, ok)) log(line);
-    if (runtimeEnvironment !== undefined) log(formatRuntimeEnvironmentPolicy(runtimeEnvironment));
   }
   return ok ? 0 : 1;
 }
@@ -55,16 +52,10 @@ export function formatConfigCheck(configPath: string, check: DaemonConfigCheck, 
   return lines;
 }
 
-/** The validated policy with its base spelled out. The check passed, so the adapters built from it accepted it. */
-function effectiveRuntimeEnvironmentPolicy(value: unknown): RuntimeEnvironmentPolicy {
-  const policy = assertRuntimeEnvironmentPolicy(value, 'runtimeEnvironment');
-  return policy.base === 'allowlist' ? policy : { base: 'login-shell', ...policy };
-}
-
 function formatRuntimeEnvironmentPolicy(policy: RuntimeEnvironmentPolicy): string {
   const list = (names: readonly string[] | undefined): string => names === undefined || names.length === 0 ? '(none)' : names.join(',');
   const allow = policy.base === 'allowlist' ? ` allow=${list(policy.allow)}` : '';
-  return `  runtime environment: base=${policy.base ?? 'login-shell'}${allow} pass=${list(policy.pass)} (names: byok-agent doctor, from the running daemon)`;
+  return `      environment: base=${policy.base ?? 'login-shell'}${allow} pass=${list(policy.pass)} (names: byok-agent doctor, from the running daemon)`;
 }
 
 function formatEffectiveConfig(effective: DaemonEffectiveConfig): string[] {
@@ -92,8 +83,9 @@ function formatEffectiveConfig(effective: DaemonEffectiveConfig): string[] {
     '  runtimes:',
     ...effective.runtimes.map((runtime) => {
       const isolation = runtime.isolation === undefined ? '' : ` ${Object.entries(runtime.isolation).map(([key, value]) => `${key}=${value}`).join(' ')}`;
-      return `    ${runtime.id} [${runtime.source}] auto ${runtime.toolAuthorizationAuto ? 'supported' : 'unsupported'}${isolation}`;
-    }),
+      const line = `    ${runtime.id} [${runtime.source}] auto ${runtime.toolAuthorizationAuto ? 'supported' : 'unsupported'}${isolation}`;
+      return runtime.runtimeEnvironment === undefined ? [line] : [line, formatRuntimeEnvironmentPolicy(runtime.runtimeEnvironment)];
+    }).flat(),
     `  tool authorization: ${toolAuthorization.mode} (local tool approval: ${toolAuthorization.localToolApproval})`,
     ...fileScopeLines,
   ];

@@ -772,6 +772,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.pi.versionPolicy.allow` | advanced | array |
 | `runtimes.pi.versionPolicy.warn` | advanced | array |
 | `runtimes.pi.versionPolicy.block` | advanced | array |
+| `runtimes.pi.runtimeEnvironment` | advanced | union |
 | `runtimes.pi.packageDir` | advanced | string |
 | `runtimes.claude` | advanced | object |
 | `runtimes.claude.agentUserContext` | advanced | "excluded" / "inherit" |
@@ -782,6 +783,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.claude.versionPolicy.allow` | advanced | array |
 | `runtimes.claude.versionPolicy.warn` | advanced | array |
 | `runtimes.claude.versionPolicy.block` | advanced | array |
+| `runtimes.claude.runtimeEnvironment` | advanced | union |
 | `runtimes.codex` | advanced | object |
 | `runtimes.codex.agentUserMcpServers` | advanced | "excluded" / "inherit" |
 | `runtimes.codex.agentUserContext` | advanced | "excluded" / "inherit" |
@@ -791,6 +793,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.codex.versionPolicy.allow` | advanced | array |
 | `runtimes.codex.versionPolicy.warn` | advanced | array |
 | `runtimes.codex.versionPolicy.block` | advanced | array |
+| `runtimes.codex.runtimeEnvironment` | advanced | union |
 | `runtimes.grok` | advanced | object |
 | `runtimes.grok.compatInstructions` | advanced | "disabled" / "inherit" |
 | `runtimes.grok.agentUserMcpServers` | advanced | "excluded" / "inherit" |
@@ -800,6 +803,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.grok.versionPolicy.allow` | advanced | array |
 | `runtimes.grok.versionPolicy.warn` | advanced | array |
 | `runtimes.grok.versionPolicy.block` | advanced | array |
+| `runtimes.grok.runtimeEnvironment` | advanced | union |
 | `runtimes.dsh` | advanced | object |
 | `runtimes.dsh.home` | required when parent is set | string |
 | `runtimes.dsh.model` | required when parent is set | object |
@@ -814,6 +818,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.dsh.versionPolicy.allow` | advanced | array |
 | `runtimes.dsh.versionPolicy.warn` | advanced | array |
 | `runtimes.dsh.versionPolicy.block` | advanced | array |
+| `runtimes.dsh.runtimeEnvironment` | advanced | union |
 | `runtimes.opencode` | advanced | object |
 | `runtimes.opencode.models` | required when parent is set | array |
 | `runtimes.opencode.executable` | advanced | string |
@@ -823,6 +828,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.opencode.versionPolicy.allow` | advanced | array |
 | `runtimes.opencode.versionPolicy.warn` | advanced | array |
 | `runtimes.opencode.versionPolicy.block` | advanced | array |
+| `runtimes.opencode.runtimeEnvironment` | advanced | union |
 | `runtimes.agy` | advanced | object |
 | `runtimes.agy.home` | required when parent is set | string |
 | `runtimes.agy.model` | advanced | string |
@@ -832,6 +838,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.agy.versionPolicy.allow` | advanced | array |
 | `runtimes.agy.versionPolicy.warn` | advanced | array |
 | `runtimes.agy.versionPolicy.block` | advanced | array |
+| `runtimes.agy.runtimeEnvironment` | advanced | union |
 | `runtimeEnvironment` | advanced | union |
 | `piByokLauncher` | advanced | object |
 | `piByokLauncher.command` | required when parent is set | string |
@@ -954,6 +961,7 @@ Manifest transition: **0.41.0 → 0.41.0**. Versions and entries below come from
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
 | codex-session-store | breaking | The retention class agent-runtime-sessions is replaced by the expiring class codex-session-store: it is removed from PROTECTED_CLASS_IDS, ProtectedClassId and PROTECTED_CLASS_BOUNDS and added to EXPIRING_CLASS_IDS and ExpiringClassId, so replace the literal where the Host reads retention classes and treat the class as expiring. It covers the Codex rollouts that agentUserContext: excluded keeps under <Agent home>/.byok/codex. A rollout is deleted once its last write is older than the new DaemonConfig.storage.retention.ttlMs['codex-session-store'] (default 31 days, or the session-ledger TTL plus one day if longer; an explicit value must be at least that), unless a live session ledger still names its thread or its Agent home is running a task. Rollouts that used to stay until the Host removed the Agent home are now deleted by default; set the TTL higher to keep idle threads longer. Resuming a deleted thread fails closed through the existing non-retryable missing-thread path. [Migration](../docs/host-local-storage-layout.md#retention-bounds) |
+| per-runtime-environment | breaking | DaemonConfig.runtimes.<id> and RuntimeAdaptersRuntimes.<id> (PiRuntimeConfig for pi) gain an optional runtimeEnvironment: the environment policy of that SDK-built runtime, which replaces the top-level runtimeEnvironment for it and is not merged with the top-level pass. A runtime without it keeps the top-level policy, so existing configuration keeps its meaning. DaemonEffectiveRuntime gains runtimeEnvironment. byok-agent config check --json reports each runtime's policy at effective.runtimes[].runtimeEnvironment and drops its top-level runtimeEnvironment key; a script that read that key reads the per-runtime field. [Migration](../docs/releases/host-upgrade-next-minor.md#per-runtime-environment-policy) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

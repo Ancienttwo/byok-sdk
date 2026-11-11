@@ -26,7 +26,7 @@ import {
   type LocalAgentReleaseIdentity,
 } from '../release-identity';
 import { assertCodexSandboxSetting, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
-import { assertRuntimeEnvironmentPolicy, type RuntimeEnvironmentPolicy } from '../runtime/environment';
+import type { RuntimeEnvironmentPolicy } from '../runtime/environment';
 import { ApprovalRegistry, type LocalToolApprovalPolicy } from './approvals';
 import { AuthManager } from './auth-manager';
 import { resolveMachineId } from './machine-id';
@@ -68,7 +68,7 @@ import {
 } from './provider-provisioning';
 import { exportAgentMemoryHome, type AgentMemoryExportOptions } from './agent-memory-export';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
-import { buildRuntimeAdapters, type DaemonRuntimesConfig } from '../adapters/runtime-adapters';
+import { assertRuntimeEnvironmentPolicies, buildRuntimeAdapters, type DaemonRuntimesConfig } from '../adapters/runtime-adapters';
 import {
   type AgentMemoryHostedProjection,
 } from './agent-memory';
@@ -284,6 +284,8 @@ export interface DaemonConfig {
    * The environment every runtime `createDaemon` builds gives its children
    * (#1095): by default the user's login-shell snapshot, so a variable the
    * Host sets in `process.env` reaches a runtime only when `pass` names it.
+   * `runtimes.<id>.runtimeEnvironment` replaces this policy for that runtime
+   * (#1759); it is not merged with this `pass`.
    * `createDaemonWithAdapters` refuses this field: each injected adapter
    * takes its own `runtimeEnvironment` option.
    */
@@ -1091,6 +1093,6 @@ function buildDaemon(
  */
 export function createDaemon(config: DaemonConfig, overrides: DaemonOverrides = {}): Daemon {
   if (config.codexSandbox !== undefined) assertCodexSandboxSetting(config.codexSandbox, 'DaemonConfig.codexSandbox');
-  assertRuntimeEnvironmentPolicy(config.runtimeEnvironment, 'DaemonConfig.runtimeEnvironment');
+  assertRuntimeEnvironmentPolicies(config);
   return buildDaemon(config, (piByokLauncher) => buildRuntimeAdapters(config, piByokLauncher), 'sdk-built', overrides, undefined);
 }

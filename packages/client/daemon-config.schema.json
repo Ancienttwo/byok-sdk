@@ -930,6 +930,48 @@
               ],
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ],
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
+            },
             "packageDir": {
               "type": "string",
               "description": "`PiAdapterOptions.packageDir`: the absolute Pi asset root of a product\nthat bundles Pi. It is the only source: the SDK sets it as\n`PI_PACKAGE_DIR` for Pi and the pi-host helper process alone, and\nremoves any `PI_PACKAGE_DIR` the login shell or Host environment holds."
@@ -1088,6 +1130,48 @@
                 "unqualified"
               ],
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ],
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
             }
           }
         },
@@ -1243,6 +1327,48 @@
                 "unqualified"
               ],
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ],
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
             }
           }
         },
@@ -1398,6 +1524,48 @@
                 "unqualified"
               ],
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ],
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
             }
           },
           "description": "Applies only when `runtimeAllowlist` lists `grok`."
@@ -1578,6 +1746,48 @@
                 "unqualified"
               ],
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ],
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
             }
           },
           "required": [
@@ -1733,6 +1943,48 @@
                 "qualifiedVersion",
                 "unqualified"
               ]
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ],
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
             }
           },
           "required": [
@@ -1886,6 +2138,48 @@
                 "unqualified"
               ],
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ]
+                }
+              ],
+              "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`."
             }
           },
           "required": [
@@ -1936,7 +2230,7 @@
           ]
         }
       ],
-      "description": "The environment every runtime `createDaemon` builds gives its children\n(#1095): by default the user's login-shell snapshot, so a variable the\nHost sets in `process.env` reaches a runtime only when `pass` names it.\n`createDaemonWithAdapters` refuses this field: each injected adapter\ntakes its own `runtimeEnvironment` option."
+      "description": "The environment every runtime `createDaemon` builds gives its children\n(#1095): by default the user's login-shell snapshot, so a variable the\nHost sets in `process.env` reaches a runtime only when `pass` names it.\n`runtimes.<id>.runtimeEnvironment` replaces this policy for that runtime\n(#1759); it is not merged with this `pass`.\n`createDaemonWithAdapters` refuses this field: each injected adapter\ntakes its own `runtimeEnvironment` option."
     },
     "piByokLauncher": {
       "type": "object",

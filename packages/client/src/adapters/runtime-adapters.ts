@@ -21,6 +21,8 @@ export interface PiRuntimeConfig {
   agentUserContext?: PiAdapterOptions['agentUserContext'];
   /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
+  /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+  runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /**
    * `PiAdapterOptions.packageDir`: the absolute Pi asset root of a product
    * that bundles Pi. It is the only source: the SDK sets it as
@@ -46,6 +48,8 @@ export interface RuntimeAdaptersRuntimes {
     agentSessionPersistence?: ClaudeAdapterOptions['agentSessionPersistence'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
+    /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
   };
   codex?: {
     /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
@@ -54,6 +58,8 @@ export interface RuntimeAdaptersRuntimes {
     agentUserContext?: CodexAdapterOptions['agentUserContext'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
+    /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
   };
   /** Applies only when `runtimeAllowlist` lists `grok`. */
   grok?: {
@@ -63,6 +69,8 @@ export interface RuntimeAdaptersRuntimes {
     agentUserMcpServers?: GrokAdapterOptions['agentUserMcpServers'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
+    /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
   };
   /** Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only. */
   dsh?: {
@@ -74,6 +82,8 @@ export interface RuntimeAdaptersRuntimes {
     sandbox?: DshAdapterOptions['sandbox'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
+    /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
   };
   /** Required when runtimeAllowlist lists opencode. Native user configuration is inherited. */
   opencode?: {
@@ -81,6 +91,8 @@ export interface RuntimeAdaptersRuntimes {
     /** Absolute executable override, resolved before PATH. Never installs or migrates OpenCode. */
     executable?: string;
     versionPolicy?: RuntimeVersionPolicy;
+    /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
   };
   /** Required when `runtimeAllowlist` lists `agy`, and applies only then. */
   agy?: {
@@ -90,6 +102,8 @@ export interface RuntimeAdaptersRuntimes {
     model?: AgyAdapterOptions['model'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
     versionPolicy?: RuntimeVersionPolicy;
+    /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
   };
 }
 
@@ -107,7 +121,7 @@ export interface RuntimeAdaptersConfig {
   /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok`, `dsh` and `agy` are built only when listed. */
   runtimeAllowlist?: string[];
   runtimes?: RuntimeAdaptersRuntimes;
-  /** The environment every built runtime gives its children (#1095); `pass` must not name `PI_PACKAGE_DIR`. */
+  /** The environment a built runtime gives its children (#1095) when `runtimes.<id>.runtimeEnvironment` is unset; Pi's policy must not pass `PI_PACKAGE_DIR`. */
   runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /** Separate-process Pi BYOK credential boundary. */
   piByokLauncher?: PiByokLauncherConfig;
@@ -186,7 +200,7 @@ const SDK_BUILT_RUNTIME_IDS = Object.keys(RUNTIME_OPTION_VALUES) as SdkBuiltRunt
  */
 export function createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAdapter[] {
   if (config.codexSandbox !== undefined) assertCodexSandboxSetting(config.codexSandbox, 'DaemonConfig.codexSandbox');
-  assertRuntimeEnvironmentPolicy(config.runtimeEnvironment, 'DaemonConfig.runtimeEnvironment');
+  assertRuntimeEnvironmentPolicies(config);
   const issues = runtimeAdaptersConfigIssues(config);
   if (issues.length > 0) throw new DaemonConfigInvalidError(issues);
   return buildRuntimeAdapters(config, resolvePiByokLauncher(config));
@@ -206,6 +220,23 @@ export function buildRuntimeAdapters(config: DaemonRuntimeAdaptersConfig, piByok
   return ids.map((id) => buildAdapter(id, config, piByokLauncher));
 }
 
+/** Validates the top-level `runtimeEnvironment` and each `runtimes.<id>.runtimeEnvironment`; throws a `TypeError` for an invalid one. */
+export function assertRuntimeEnvironmentPolicies(config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): void {
+  assertRuntimeEnvironmentPolicy(config.runtimeEnvironment, 'DaemonConfig.runtimeEnvironment');
+  for (const id of SDK_BUILT_RUNTIME_IDS) {
+    assertRuntimeEnvironmentPolicy(config.runtimes?.[id]?.runtimeEnvironment, `DaemonConfig.runtimes.${id}.runtimeEnvironment`);
+  }
+}
+
+/**
+ * The one environment policy of an SDK-built runtime (#1759):
+ * `runtimes.<id>.runtimeEnvironment` replaces the top-level policy wholesale,
+ * like `versionPolicy` (ADR-044); the two are never merged.
+ */
+export function runtimeEnvironmentFor(id: string, config: Pick<RuntimeAdaptersConfig, 'runtimes' | 'runtimeEnvironment'>): RuntimeEnvironmentPolicy | undefined {
+  return config.runtimes?.[id as SdkBuiltRuntimeId]?.runtimeEnvironment ?? config.runtimeEnvironment;
+}
+
 /** Validates `piByokLauncher` and folds its `sessionDir`; the daemon and its retention build Pi from this one value. */
 export function resolvePiByokLauncher(config: Pick<RuntimeAdaptersConfig, 'piByokLauncher'>): PiByokLauncherConfig | undefined {
   validatePiByokLauncherConfig(config.piByokLauncher);
@@ -215,7 +246,8 @@ export function resolvePiByokLauncher(config: Pick<RuntimeAdaptersConfig, 'piByo
 }
 
 function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig, piByokLauncher: PiByokLauncherConfig | undefined): RuntimeAdapter {
-  const environment = config.runtimeEnvironment === undefined ? {} : { runtimeEnvironment: config.runtimeEnvironment };
+  const policy = runtimeEnvironmentFor(id, config);
+  const environment = policy === undefined ? {} : { runtimeEnvironment: policy };
   // An unset option keeps the adapter default.
   const pi = config.runtimes?.pi;
   const claude = config.runtimes?.claude;
@@ -312,15 +344,16 @@ function buildAgyAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<
   }
 }
 
-/** `runtimes.pi.packageDir` is the one Pi asset root: absolute, and never also passed from the Host environment. */
+/** `runtimes.pi.packageDir` is the one Pi asset root: absolute, and never also passed by Pi's effective environment policy. */
 function piPackageDirIssues(config: DaemonRuntimeAdaptersConfig): DaemonConfigIssue[] {
   const issues: DaemonConfigIssue[] = [];
   const packageDir = config.runtimes?.pi?.packageDir;
   if (packageDir !== undefined && !(typeof packageDir === 'string' && isAbsolute(packageDir))) {
     issues.push(invalid('runtimes.pi.packageDir', 'DaemonConfig.runtimes.pi.packageDir must be an absolute path'));
   }
-  if (config.runtimeEnvironment?.pass?.some((name) => name.toUpperCase() === PI_PACKAGE_DIR_ENV) === true) {
-    issues.push(invalid('runtimeEnvironment.pass', `DaemonConfig.runtimeEnvironment.pass must not name ${PI_PACKAGE_DIR_ENV}; set runtimes.pi.packageDir, the only source of the Pi asset root`));
+  const path = config.runtimes?.pi?.runtimeEnvironment === undefined ? 'runtimeEnvironment.pass' : 'runtimes.pi.runtimeEnvironment.pass';
+  if (runtimeEnvironmentFor('pi', config)?.pass?.some((name) => name.toUpperCase() === PI_PACKAGE_DIR_ENV) === true) {
+    issues.push(invalid(path, `DaemonConfig.${path} must not name ${PI_PACKAGE_DIR_ENV}; set runtimes.pi.packageDir, the only source of the Pi asset root`));
   }
   return issues;
 }

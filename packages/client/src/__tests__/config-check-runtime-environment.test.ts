@@ -5,8 +5,8 @@ import { afterEach, expect, it } from 'vitest';
 import { runConfigCheckCommand } from '../bin/commands/config-check';
 
 /**
- * #1095: `config check` prints the runtime environment policy every runtime
- * of the file takes. It runs no login shell, so it prints no names.
+ * #1095, #1759: `config check` prints the environment policy each runtime of
+ * the file takes. It runs no login shell, so it prints no names.
  */
 
 const dirs: string[] = [];
@@ -30,20 +30,20 @@ async function check(runtimeEnvironment: unknown, json = false): Promise<{ code:
 it('prints the default and a pass policy as text', async () => {
   const defaults = await check(undefined);
   expect(defaults.code).toBe(0);
-  expect(defaults.out).toContain('  runtime environment: base=login-shell pass=(none) (names: byok-agent doctor, from the running daemon)');
+  expect(defaults.out).toContain('    pi [sdk-built] auto supported agentUserContext=inherit\n      environment: base=login-shell pass=(none) (names: byok-agent doctor, from the running daemon)');
   const passed = await check({ pass: ['ACME_TOKEN_FILE', 'ACME_*'] });
-  expect(passed.out).toContain('  runtime environment: base=login-shell pass=ACME_TOKEN_FILE,ACME_* (names: byok-agent doctor, from the running daemon)');
+  expect(passed.out).toContain('      environment: base=login-shell pass=ACME_TOKEN_FILE,ACME_* (names: byok-agent doctor, from the running daemon)');
 });
 
 it('prints an allowlist policy, and the JSON report carries it with the base spelled out', async () => {
   const text = await check({ base: 'allowlist', allow: ['ACME_HOME'] });
-  expect(text.out).toContain('  runtime environment: base=allowlist allow=ACME_HOME pass=(none) (names: byok-agent doctor, from the running daemon)');
-  const json = JSON.parse((await check({ pass: ['ACME_TOKEN_FILE'] }, true)).out) as { runtimeEnvironment: unknown };
-  expect(json.runtimeEnvironment).toEqual({ base: 'login-shell', pass: ['ACME_TOKEN_FILE'] });
+  expect(text.out).toContain('      environment: base=allowlist allow=ACME_HOME pass=(none) (names: byok-agent doctor, from the running daemon)');
+  const json = JSON.parse((await check({ pass: ['ACME_TOKEN_FILE'] }, true)).out) as { effective: { runtimes: { runtimeEnvironment: unknown }[] } };
+  for (const runtime of json.effective.runtimes) expect(runtime.runtimeEnvironment).toEqual({ base: 'login-shell', pass: ['ACME_TOKEN_FILE'] });
 });
 
 it('prints no policy when the file would not construct a daemon', async () => {
   const invalid = await check({ pass: ['BYOK_SECRET'] });
   expect(invalid.code).toBe(1);
-  expect(invalid.out).not.toContain('runtime environment:');
+  expect(invalid.out).not.toContain('environment: base=');
 });
