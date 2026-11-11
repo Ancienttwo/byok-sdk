@@ -1,4 +1,2 @@
-// The settings section slot: A5 #1809 replaces this placeholder, and only this file.
-export function SettingsSection() {
-  return <h1>Settings</h1>;
-}
+// The settings section slot: A5 #1809 owns the section under src/renderer/settings.
+export { SettingsSection } from '../../settings/settings-section.tsx';
