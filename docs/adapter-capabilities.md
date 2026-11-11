@@ -32,7 +32,7 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | Hermes | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `2.2.6` | `1.5.0` | `1.5.0` |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `2.2.6` | `1.5.2` | `1.5.2` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | no | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | no | yes | yes |

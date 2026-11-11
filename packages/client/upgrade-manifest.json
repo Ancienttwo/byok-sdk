@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "bb7d0ed20282f0d5a7d651d154f695a9725cc1854d2f34bb3434e4842a8067f1"
+    "snapshotSha256": "f72fbed8d4529a39a43ffd3fdd215c7eda77b77b03b33a7b2dedb078d263a766"
   },
   "configFields": {
     "status": "tracked",
@@ -259,6 +259,17 @@
         "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
         "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
         "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema"
+      ]
+    },
+    {
+      "id": "pi-152-closure",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "The official Pi closure is pinned to exactly 1.5.2 (upstream commit b4afdddf); the closureDigest changes, so a preparation compiled for 1.5.0 declines with preparation_runtime_identity_mismatch until it is prepared again. keys: PI_MODEL_CATALOG_PI_AI_VERSION is 1.5.2, and 12 entries pi-ai 1.5.2 dropped return not_in_catalog. pi-durable 1.5.2 keeps its document and SQLite schema versions, so replicas written by either release open in the other.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-152-closure",
+      "items": [
+        "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+        "store:pi-durable"
       ]
     }
   ],
@@ -690,6 +701,11 @@
       "entry": "opencode-go-keys-store"
     },
     {
+      "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+      "change": "changed",
+      "entry": "pi-152-closure"
+    },
+    {
       "item": "export:@byok-sdk/protocol#AgentHomeProjectionPayloadSchema",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
@@ -807,6 +823,13 @@
       "before": "ddl-sha256=a59cf523fe7a89d1",
       "after": "ddl-sha256=7c5c4e5f67ea8b36",
       "entry": "opencode-go-keys-store"
+    },
+    {
+      "item": "store:pi-durable",
+      "change": "changed",
+      "before": "@earendil-works/pi-durable@1.5.0",
+      "after": "@earendil-works/pi-durable@1.5.2",
+      "entry": "pi-152-closure"
     },
     {
       "item": "store:server-sqlite",

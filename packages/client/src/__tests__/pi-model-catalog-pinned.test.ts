@@ -171,8 +171,10 @@ type PiProviderBranch = readonly [file: string, line: string, kind: 'url' | 'dec
 const COPILOT = 'github-copilot is not a catalog vendor';
 const OPENCODE_GO = 'pi_model.providerId explicitly declares opencode-go with openai-completions';
 
-/** Every pinned pi-ai line that branches on a provider id, reviewed against pi-ai 1.5.0. */
+/** Every pinned pi-ai line that branches on a provider id, reviewed against pi-ai 1.5.2. */
 const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
+  ['api/anthropic-messages.js', '(model.provider === "anthropic" && model.baseUrl.includes("api.anthropic.com")),', 'differs',
+    'message threads default on only for the built-in anthropic provider; a projected anthropic profile sends full requests, and pi_model compat has no supportsMessageThreads'],
   ['api/anthropic-messages.js', 'const isOpenRouter = model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai");', 'url', 'openrouter base_url contains openrouter.ai'],
   ['api/anthropic-messages.js', 'if (model.provider !== "anthropic" || hasRequestAuth(apiKey, headers))', 'unreachable', 'federation runs only without a key; a byok launch always supplies one'],
   ['api/anthropic-messages.js', 'if (model.provider === "github-copilot") {', 'unreachable', COPILOT],

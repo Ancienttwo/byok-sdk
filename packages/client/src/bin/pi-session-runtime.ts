@@ -7,10 +7,23 @@ import { resolvePathWithoutCreate, type PathMutationGate } from '../util/path-mu
 import {
   createAgentSession, createAgentSessionRuntime, createAgentSessionServices, createCodingTools,
   getAgentDir, ModelRuntime, resolveCliModel, runRpcMode, SessionManager, SettingsManager,
-  type CreateAgentSessionOptions, type CreateAgentSessionResult, type CreateAgentSessionRuntimeFactory,
+  type CreateAgentSessionOptions, type CreateAgentSessionResult, type CreateAgentSessionRuntimeFactory, type ExtensionFactory,
 } from '@earendil-works/pi-coding-agent';
 
 function fail(message: string): never { throw new Error(`byok-pi-rpc: ${message}`); }
+
+/**
+ * Pi 1.5.1 made `cacheWarming: "idle"` the default: a session keeps re-sending
+ * its last request with a one-token cap for up to 30 minutes after its run
+ * settled. That is spend on the user's key with no task running, which a Host
+ * can neither see nor bound. Pi reads the mode only from global settings (the
+ * user's file), and asks extensions before every refresh, so the SDK stops a
+ * refresh whenever the session is idle: warming runs at most during an active
+ * run, as Pi's "streaming" mode does, and "off" never asks.
+ */
+const stopIdleCacheWarming: ExtensionFactory = (pi) => {
+  pi.on('cache_warming_decision', (_event, context) => (context.isIdle() ? { action: 'stop' } : undefined));
+};
 
 /** Native path normalization only: no file is opened and no session identity is claimed. */
 function resolveNativePiSessionPath(raw: string): string {
@@ -198,7 +211,8 @@ export async function runPiSessionRuntime(options: {
           defaultThinkingLevel: selection.getDefaultThinkingLevel(),
         }, { projectTrusted: false })
         : SettingsManager.create(options.cwd, agentDir, { projectTrusted: true }),
-      resourceLoaderOptions: options.resourceLoaderOptions,
+      resourceLoaderOptions: { ...options.resourceLoaderOptions,
+        extensionFactories: [...(options.resourceLoaderOptions?.extensionFactories ?? []), { name: 'byok-cache-warming', factory: stopIdleCacheWarming }] },
     });
     if (options.credentialSource === 'keys-profile' && services.modelRuntime.getError() !== undefined) {
       options.reject('keys_profile_model_composition_failed: launcher provider projection could not be composed');

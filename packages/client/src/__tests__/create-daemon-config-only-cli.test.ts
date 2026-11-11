@@ -120,7 +120,7 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     const effective = daemon.status().config;
     expect(effective.warnings).toEqual([]);
     expect(effective.runtimes).toEqual([
-      { id: 'pi', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'excluded' }, versionPolicy: { qualifiedVersion: '1.5.0', unqualified: 'allow' }, runtimeEnvironment: { base: 'login-shell' } },
+      { id: 'pi', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'excluded' }, versionPolicy: { qualifiedVersion: '1.5.2', unqualified: 'allow' }, runtimeEnvironment: { base: 'login-shell' } },
       { id: 'claude', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'excluded', agentSessionPersistence: 'disabled' }, versionPolicy: { qualifiedVersion: '2.1.312', unqualified: 'allow' }, runtimeEnvironment: { base: 'login-shell' } },
     ]);
     expect(effective.toolAuthorization).toEqual({

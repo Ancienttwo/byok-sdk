@@ -152,7 +152,7 @@ describe('B-P2 native composition: runtime identity', () => {
     expect(identity.packageVersion).toBe(pinned.version);
     expect(identity.packageName).toBe('@earendil-works/pi-coding-agent');
     expect(identity.tarballIntegrity).toMatch(/^sha512-/);
-    expect(identity.upstreamCommit).toBe('f9a26365568127461c47a07a37dcb42c140a3ac5');
+    expect(identity.upstreamCommit).toBe('b4afdddf44e059c67ccf5097e5317d913521b470');
     expect(identity.closureDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(identity.envelopeFormat).toBe('byok.pi.prepared-input');
     expect(identity.requestFormat).toBe('byok.pi.openai-completions.request');
@@ -329,6 +329,7 @@ describe('B-P2 native composition: pure compile', () => {
       'dist/auth/helpers.js',
       'dist/auth/resolve.js',
       'dist/auth/types.js',
+      'dist/cache-warming.js',
       'dist/index.js',
       'dist/models-store.js',
       'dist/models.js',

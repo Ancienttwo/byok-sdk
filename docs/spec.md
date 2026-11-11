@@ -276,16 +276,19 @@ and makes no network request.
   provider id are outside that promise, because the projected provider id is
   `byok-sdk-<profile_ref>` unless the profile explicitly declares `opencode-go`.
   The declared identity enables Pi's OpenCode Go reasoning replay and session
-  headers. In pi-ai 1.5.0 the other branches are `cacheControlFormat` for
-  openrouter `anthropic/*` models (`api/openai-completions.js:1257`), the
+  headers. In pi-ai 1.5.2 the other branches are Anthropic message threads,
+  on by default only for provider `anthropic` at `api.anthropic.com`
+  (`api/anthropic-messages.js:163`), so a projected anthropic profile sends
+  full requests, `cacheControlFormat` for
+  openrouter `anthropic/*` models (`api/openai-completions.js:1260`), the
   xai `reasoning.encrypted_content` include, which differs only for grok-4.3
-  at `off` (`api/openai-responses.js:302`), cerebras body-less overflow
+  at `off` (`api/openai-responses.js:305`), cerebras body-less overflow
   detection, which differs only for a 400 with an empty body
   (`utils/overflow.js:148`), the Responses tool-call id kept only for `OPENAI_TOOL_CALL_PROVIDERS`
   (`api/openai-responses.js:15`, `api/openai-responses-shared.js:104`), which
   applies only when replaying history from another model or provider id
   (`api/transform-messages.js:87`, `:120`),
-  the error message prefix (`api/openai-responses.js:176`), and openrouter
+  the error message prefix (`api/openai-responses.js:177`), and openrouter
   billed cost, read from the response only (`utils/openrouter-cost.js`). The pinned catalog
   drift test in `@byok-sdk/client` keeps a review list of these branches, so a
   pi-ai upgrade reviews them again.
@@ -2065,12 +2068,12 @@ remain the only device protocol.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
-`@earendil-works/pi-coding-agent@1.5.0` plus chord, pi-agent-core, pi-ai and
-pi-durable to exactly 1.5.0 (upstream commit
-`f9a26365568127461c47a07a37dcb42c140a3ac5`, closureDigest
-`9c94eaec01a9b7054843c0780a553d0c670a03f38d2b7d91fb6702835cbcf4b8`). pi-codemode, pi-mcp,
+`@earendil-works/pi-coding-agent@1.5.2` plus chord, pi-agent-core, pi-ai and
+pi-durable to exactly 1.5.2 (upstream commit
+`b4afdddf44e059c67ccf5097e5317d913521b470`, closureDigest
+`5b49e488317320fd0fbaf2a452b2d6f1455e40a2522c16e3e87b85d43daca603`). pi-codemode, pi-mcp,
 pi-schema, pi-telemetry and pi-tui reach an install only through the
-dependencies of the official packages, which pin them exactly in 1.5.0.
+dependencies of the official packages, which pin them exactly in 1.5.2.
 The SDK reads their installed version and does not gate it. Fork aliases and dual runtimes are
 retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
 resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
@@ -2082,6 +2085,14 @@ host refuses startup if it is unavailable. It is called through a read-only
 registry façade, with no copied parser or session-state mutation. Private
 imports, upstream patches, copied provider serializers or Session core, and
 global monkey-patches remain forbidden.
+
+Every SDK Pi RPC session answers Pi's `cache_warming_decision` with `stop`
+while the session is idle. Pi 1.5.1 defaults `cacheWarming` to `"idle"`,
+which re-sends the last request for up to 30 minutes after a run settled;
+that spend is invisible to the Host, so an SDK session warms its prompt
+cache at most during an active run, and the device's `"off"` stays off.
+Subagent children that pi-subagents creates read the device's own Pi
+settings.
 
 Upstream RAFT also embeds the Pi SDK and inherits the user's agent directory.
 It does not run the user's installed pi CLI (RAFT mirror commit

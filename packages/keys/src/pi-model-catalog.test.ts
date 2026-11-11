@@ -120,11 +120,11 @@ describe('pinned entries that declare sendSessionAffinityHeaders or allowEmptySi
   const timestamps = { created_at: '2026-10-26T00:00:00.000Z', updated_at: '2026-10-26T00:00:00.000Z' };
 
   it('returns an OpenRouter completions entry with sendSessionAffinityHeaders and projects it to Pi', () => {
-    // pi-ai 1.4.0 `providers/data/openrouter.json` deepseek/deepseek-chat.
+    // pi-ai 1.5.2 `providers/data/openrouter.json` deepseek/deepseek-chat.
     const result = piModelConfigFromPinnedCatalog({ provider: 'openrouter', api: 'openai-completions', model: 'deepseek/deepseek-chat', thinkingLevel: 'off' });
     const compat = { supportsDeveloperRole: false, thinkingFormat: 'openrouter', supportsStrictMode: true, sendSessionAffinityHeaders: true };
     expect(result).toEqual({
-      ok: true, config: { contextWindow: 128_000, maxTokens: 16_000, reasoning: false, thinkingLevel: 'off', compat }, input: ['text'],
+      ok: true, config: { contextWindow: 163_840, maxTokens: 16_384, reasoning: false, thinkingLevel: 'off', compat }, input: ['text'],
     });
     if (!result.ok) throw new Error(result.reason);
     const vendor = MODEL_PROVIDER_VENDORS.openrouter;

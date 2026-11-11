@@ -413,6 +413,12 @@ Before this release such a Host got untyped (`any`) SDK imports with
 Bundler resolution see no change. A NodeNext Host may now see type errors in
 code that compiled against `any`; fix them against the real types.
 
+## Pi 1.5.2 closure
+
+The official Pi closure moves from 1.5.0 to 1.5.2 (#1864). Prepare again every preparation compiled for 1.5.0: its runtime identity names the old closureDigest, so it declines with `preparation_runtime_identity_mismatch`. Check stored provider profiles against `piModelConfigFromPinnedCatalog` before the upgrade; 12 OpenRouter and Vercel AI Gateway entries that pi-ai 1.5.2 dropped return `not_in_catalog`. pi-durable replicas keep their document and schema versions, so this release and 0.41.0 open each other's replicas.
+
+No configuration change is needed for the new Pi defaults. Pi 1.5.1 keeps prompt caches warm for up to 30 minutes between runs by default (`cacheWarming: "idle"`). Because a Host cannot see or bound that spend, the session of every SDK Pi RPC host refuses each refresh while it is idle, so it warms only during an active run; a device setting of `"off"` still turns warming off. Subagent children that pi-subagents creates read the device's own Pi settings, where `"cacheWarming": "streaming"` restores the 1.5.0 behavior. On the native Pi auth route, a task on the built-in `anthropic` provider at `api.anthropic.com` now sends only new messages and continues the server-side thread, falling back to a full request when the server refuses; a keys profile route sends full requests as before. A native launch with no Host model selection still uses the device's Pi settings; only when those name no default model does Pi pick its per-provider default, which is now `claude-opus-5-5` for `anthropic`.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
