@@ -388,6 +388,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     if (before.exports?.['./rules/delegation'] === undefined && after.exports?.['./rules/delegation'] === './src/rules/delegation.ts') {
       delete after.exports['./rules/delegation'];
     }
+    // #1806: the desktop app imports BotCollaboration from the root entry.
+    if (before.exports?.['.'] === undefined && after.exports?.['.'] === './src/index.ts') delete after.exports['.'];
   } else if (path === 'examples/byok-mcp-server/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The MCP server example must stay private');
     // #1375: the routine calendar moved to protocol, so the core edge goes.

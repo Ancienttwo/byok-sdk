@@ -734,6 +734,9 @@ test('#1666: K8 adds only the shared delegation rules export', t => {
   assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
   f.write(path, { ...manifest, exports: { ...exports, './other': './src/other.ts' } });
   assert.throws(() => selectImpact([path], f), /more than/, 'an extra export');
+  // #1806: the root entry for the desktop app.
+  f.write(path, { ...manifest, exports: { '.': './src/index.ts', ...manifest.exports } });
+  assert.ok(selectImpact([path], f).dirs.includes('examples/bot-collaboration'));
 });
 
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
