@@ -100,8 +100,12 @@ const smoke = path.join(host, process.platform === 'win32' ? 'smoke-host.exe' : 
 try {
   await buildHostExecutable({ entry: path.join(root, 'scripts', 'package', 'smoke-host.ts'), format: 'sea', executable: smoke });
   const run = spawnSync(smoke, [], { cwd: host, env: hostEnvironment(), encoding: 'utf8', timeout: 300_000, windowsHide: true });
-  if (run.error) throw new Error(`could not run the smoke Host ${smoke}: ${run.error.message}`, { cause: run.error });
-  process.stderr.write(run.stderr);
+  process.stderr.write(run.stderr ?? '');
+  if (run.error) {
+    process.stdout.write(run.stdout ?? '');
+    const what = run.error.code === 'ETIMEDOUT' ? 'did not finish within 300 s' : `could not be run (${run.error.message})`;
+    throw new Error(`the smoke Host ${smoke} ${what}`, { cause: run.error });
+  }
   const line = run.stdout.split('\n').find(row => row.startsWith(MARKER));
   assert.ok(line, `no ${MARKER.trim()} report (exit ${run.status ?? run.signal}):\n${run.stdout}`);
   const report = JSON.parse(line.slice(MARKER.length));
