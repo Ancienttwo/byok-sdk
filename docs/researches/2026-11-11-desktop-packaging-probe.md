@@ -264,7 +264,7 @@ electron no-sandbox exit=0
 D0_ELECTRON_READY noSandboxSwitch=true
 ```
 
-Second run with the lane pinned to `ubuntu-24.04` (run 42996279984, job 130441554783, image `ubuntu-24.04` 20261101.360.1; all steps passed):
+One-off run with the lane pinned to `ubuntu-24.04` (run 42996279984, job 130441554783, image `ubuntu-24.04` 20261101.360.1; all steps passed):
 
 ```
 Package: libsecret-tools  Version: 0.21.4-1build3
@@ -281,7 +281,7 @@ electron no-sandbox exit=0
 D0_ELECTRON_READY noSandboxSwitch=true
 ```
 
-On both Ubuntu 24.04 and 26.04 the unprivileged user-namespace restriction is on, and an Electron whose `chrome-sandbox` is not setuid root refuses to start rather than run unsandboxed. It starts only with `--no-sandbox`, which the app must not ship. A Linux package therefore needs either a setuid-root `chrome-sandbox` (what electron-builder's deb `postinst` sets up) or an AppArmor profile granting `userns` to the app binary. AppImage, which cannot carry a setuid file, needs the profile. Because `ubuntu-latest` moved to 26.04, the lane pins `ubuntu-24.04`, the release this issue asks about.
+On both Ubuntu 24.04 and 26.04 the unprivileged user-namespace restriction is on, and an Electron whose `chrome-sandbox` is not setuid root refuses to start rather than run unsandboxed. It starts only with `--no-sandbox`, which the app must not ship. A Linux package therefore needs either a setuid-root `chrome-sandbox` (what electron-builder's deb `postinst` sets up) or an AppArmor profile granting `userns` to the app binary. AppImage, which cannot carry a setuid file, needs the profile. The lane runs on `ubuntu-latest` (26.04 today); the 24.04 result above came from a one-off run with the job pinned to `ubuntu-24.04`.
 
 Limits: the container proves the store logic against a real Secret Service, but not on Ubuntu's libsecret build or on x64; the runner result in the `desktop` lane replaces it. The `=1` read is the Colima VM's Ubuntu 24.04 kernel, which shows the restriction is on by default there, not what an end user's desktop session or AppArmor profile allows. Neither the container nor the runner installs the packaged app: whether a deb-installed (setuid `chrome-sandbox`) or AppImage build starts under Ubuntu 24.04's restriction without a custom AppArmor profile is open until A7 (#1811) builds the Linux packages.
 
