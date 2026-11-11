@@ -2609,8 +2609,6 @@ export interface ScopeKeyPackage {
     readonly keyId: string;
     /** Member id of the member that can open the package. */
     readonly recipient: string;
-    /** The KEM epoch of the recipient key the package is wrapped to. */
-    readonly recipientKemEpoch: number;
     /** Member id of the member that sealed and signed the package. */
     readonly sender: string;
     /** HPKE encapsulated key: base64url of a 65-byte uncompressed P-256 point. */
@@ -2619,6 +2617,8 @@ export interface ScopeKeyPackage {
     readonly ciphertext: string;
     /** Sender's ECDSA P-256 / SHA-256 signature, base64url of the 64-byte P1363 form. */
     readonly sig: string;
+    /** The KEM epoch of the recipient key the package is wrapped to. */
+    readonly recipientKemEpoch: number;
 }
 export interface SealScopeKeyPackageInput {
     readonly scopeKey: Uint8Array;

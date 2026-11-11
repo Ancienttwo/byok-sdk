@@ -2036,7 +2036,8 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   which carry the signed `recipientKemEpoch`; a version 1 package gets 400
   like any other bad shape. Reads parse every stored package as version 2;
   a stored version 1 row fails the whole read with
-  `e2ee_member_state_unreadable` (#1789). A chain entry with `op: 'rotate'` must have exactly the subject
+  `e2ee_member_state_unreadable` (#1789). A chain entry with
+  `op: 'rotate'` must have exactly the subject
   `{ memberId, kemPublicJwk, kemEpoch, kemSig }`; any other subject gets
   400. When the append newly stores a `rotate` entry, the Host raises that
   member's KEM floor to its `kemEpoch` in the same transaction; a floor never

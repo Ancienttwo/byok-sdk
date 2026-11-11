@@ -304,7 +304,9 @@ Only a Host that served `e2ee.member` on 0.30.0 or 0.30.1, or stored packages se
 - Postgres: `SELECT count(*) FROM e2ee_scope_key_package WHERE (package::jsonb)->>'v' = '1'`
 - embedded SQLite: `SELECT count(*) FROM e2ee_scope_key_package WHERE json_extract(package, '$.v') = 1`
 
-Upgrade only when it returns 0. If it does not, stay on the previous version and run a KEM rotation on each member that is the recipient of a version 1 row: the previous version re-wraps that member's own packages as version 2. Run the count again before upgrading. The SDK ships no migration for these rows.
+Upgrade only when it returns 0. If it does not, stay on the previous version and run a KEM rotation on each member that is the recipient of a version 1 row: the previous version re-wraps, as version 2, each package addressed to that member whose sender is still a current member of the scope policy. Run the count again before upgrading. The SDK ships no migration for these rows.
+
+A rotation leaves a version 1 row in place when its sender is no longer a current member of the scope, so the count can stay above 0. If version 1 rows remain after the rotation, stay on the previous version and open an issue: the SDK has no automatic way to re-wrap them.
 
 ## Release and verification checklist
 

@@ -1488,11 +1488,11 @@
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
-        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
-        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
-        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
+        "recipientKemEpoch": 1,
+        "enc": "BD3g7EJd_yOjnB_jpChYF1xY_OUZvN1nu2FlPigEr3ia6mWXYi5AURcy6aYHTD_-0IA0Vwv7UEZ0RRS8VvKOG1A",
+        "ciphertext": "a8hmJTsVkH-akmOIbJzp5drQISY4LHgIVX-mJazk7mAIXAruMyAW1b4TOA1qdHxl",
+        "sig": "39ZxS7HqdG2wMQz_5WPOETPS8sG6LhcmeGcH32W4kmU1hlJ2YNHC64q6XuJ1vyDLqWIgxpoAW1DCZdO8Q3XAdg"
       },
       "expect": "ok"
     },
@@ -1512,11 +1512,11 @@
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
-        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BDQwJ5Uy5gkhMtEM23Q4IrmlwCgSdxRCpeuNJ3LTuEZM5q-VOASHRdBx6pmZnUk_BrgbmGWB2Li17NAJyNIMf7I",
-        "ciphertext": "KkMvrLS7aJ9bMhNKr7xZmqAvr1BCgEgDzDAe2MMT3NKbZqrSejbg5Hv3MSs_KPpS",
-        "sig": "FdRXVVk6HgApFNYOawmokbVlflxkuwTnjUn8qZ9ZJCysHMOD56GJLyO8sXrurqzBv5FX9IYZuK3qLS3uP_-UDw"
+        "recipientKemEpoch": 1,
+        "enc": "BFdH9q3WnJL2FBLtq4X6Oj9ECdlXoFWJlNwclNXe0he7LoFV1UiVH6Chi3vkwmbGABIq8d3z0xJn508guvzEyuE",
+        "ciphertext": "yQWq0PbYFbF7CnrzhObFGp5CPaP_geSK064t18NgWlXiH5uddikg61M-ykUFMS3T",
+        "sig": "zuo1adKi6Vrvpjno6X1LLYrlZ7ptP3WnElnpqy9noJswC6VCNsdQk98u5hTt5aAMnJ7qyOr86uDPs-_PcMjbBw"
       },
       "expect": "key_package_open_failed"
     },
@@ -1536,11 +1536,11 @@
         "epoch": 1,
         "keyId": "n_k8FQbyP_xdCauyemUoyg",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
-        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BPsn1JXxZ1OM53c2JJhRv_nte89qiMHgbqikMAh51HjlPq9rbJIkcrnJxCshjhnT7UNprXhDA8BeCJzgh1ZKKvs",
-        "ciphertext": "HjFQ41ceEa6M1Hjvm654v8As95Wq9oORIqfsMpzSejXz5Lq_3esXlIsgUyTCmj40",
-        "sig": "O2H5zhGA9YvsFttG7Sw0k_yVqYzvW_SCFattTFeWXC3WZaflXReMvV0v0w9S3vbJuO4_21o5LoOmKFeO_U2eNw"
+        "recipientKemEpoch": 1,
+        "enc": "BL6AulzH9u20yjaHq7enSeSweITrN_obmmWTmM_lRwv1gDmPpJjfJwXYVD5FODEJtFxYDS_tDKWRUrxHlS3Y7Hc",
+        "ciphertext": "hFE8urZwNMuU12bqa4lnVh6jMX_qG-pTuUvcVMMC4G1XY7XSJojd4vtKHx6Bqnt0",
+        "sig": "5L0aysSu_W6XC1mc8TrcDYKzh0W9I1f4sTrycsQ_YAu4BCD2bcZEr_zYVM0bzJADhXiu7XgBQDgsgpEUnnjJTw"
       },
       "expect": "key_package_open_failed"
     },
@@ -1560,11 +1560,11 @@
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
-        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
-        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
-        "sig": "kS9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
+        "recipientKemEpoch": 1,
+        "enc": "BD3g7EJd_yOjnB_jpChYF1xY_OUZvN1nu2FlPigEr3ia6mWXYi5AURcy6aYHTD_-0IA0Vwv7UEZ0RRS8VvKOG1A",
+        "ciphertext": "a8hmJTsVkH-akmOIbJzp5drQISY4LHgIVX-mJazk7mAIXAruMyAW1b4TOA1qdHxl",
+        "sig": "3tZxS7HqdG2wMQz_5WPOETPS8sG6LhcmeGcH32W4kmU1hlJ2YNHC64q6XuJ1vyDLqWIgxpoAW1DCZdO8Q3XAdg"
       },
       "expect": "key_package_signature_invalid"
     },
@@ -1584,11 +1584,11 @@
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
-        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
-        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
-        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
+        "recipientKemEpoch": 1,
+        "enc": "BD3g7EJd_yOjnB_jpChYF1xY_OUZvN1nu2FlPigEr3ia6mWXYi5AURcy6aYHTD_-0IA0Vwv7UEZ0RRS8VvKOG1A",
+        "ciphertext": "a8hmJTsVkH-akmOIbJzp5drQISY4LHgIVX-mJazk7mAIXAruMyAW1b4TOA1qdHxl",
+        "sig": "39ZxS7HqdG2wMQz_5WPOETPS8sG6LhcmeGcH32W4kmU1hlJ2YNHC64q6XuJ1vyDLqWIgxpoAW1DCZdO8Q3XAdg"
       },
       "expect": "key_package_invalid"
     },
@@ -1608,11 +1608,11 @@
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
-        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
-        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
-        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
+        "recipientKemEpoch": 1,
+        "enc": "BD3g7EJd_yOjnB_jpChYF1xY_OUZvN1nu2FlPigEr3ia6mWXYi5AURcy6aYHTD_-0IA0Vwv7UEZ0RRS8VvKOG1A",
+        "ciphertext": "a8hmJTsVkH-akmOIbJzp5drQISY4LHgIVX-mJazk7mAIXAruMyAW1b4TOA1qdHxl",
+        "sig": "39ZxS7HqdG2wMQz_5WPOETPS8sG6LhcmeGcH32W4kmU1hlJ2YNHC64q6XuJ1vyDLqWIgxpoAW1DCZdO8Q3XAdg"
       },
       "expect": "key_package_invalid"
     },
@@ -1632,11 +1632,11 @@
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
-        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
-        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
-        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
+        "recipientKemEpoch": 1,
+        "enc": "BD3g7EJd_yOjnB_jpChYF1xY_OUZvN1nu2FlPigEr3ia6mWXYi5AURcy6aYHTD_-0IA0Vwv7UEZ0RRS8VvKOG1A",
+        "ciphertext": "a8hmJTsVkH-akmOIbJzp5drQISY4LHgIVX-mJazk7mAIXAruMyAW1b4TOA1qdHxl",
+        "sig": "39ZxS7HqdG2wMQz_5WPOETPS8sG6LhcmeGcH32W4kmU1hlJ2YNHC64q6XuJ1vyDLqWIgxpoAW1DCZdO8Q3XAdg"
       },
       "expect": "key_package_invalid"
     },
@@ -1656,11 +1656,11 @@
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
-        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
-        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
-        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
+        "recipientKemEpoch": 1,
+        "enc": "BD3g7EJd_yOjnB_jpChYF1xY_OUZvN1nu2FlPigEr3ia6mWXYi5AURcy6aYHTD_-0IA0Vwv7UEZ0RRS8VvKOG1A",
+        "ciphertext": "a8hmJTsVkH-akmOIbJzp5drQISY4LHgIVX-mJazk7mAIXAruMyAW1b4TOA1qdHxl",
+        "sig": "39ZxS7HqdG2wMQz_5WPOETPS8sG6LhcmeGcH32W4kmU1hlJ2YNHC64q6XuJ1vyDLqWIgxpoAW1DCZdO8Q3XAdg"
       },
       "expect": "key_package_invalid",
       "recipientKemEpoch": 2
@@ -1681,11 +1681,11 @@
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
-        "recipientKemEpoch": 2,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
-        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
-        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
+        "recipientKemEpoch": 2,
+        "enc": "BD3g7EJd_yOjnB_jpChYF1xY_OUZvN1nu2FlPigEr3ia6mWXYi5AURcy6aYHTD_-0IA0Vwv7UEZ0RRS8VvKOG1A",
+        "ciphertext": "a8hmJTsVkH-akmOIbJzp5drQISY4LHgIVX-mJazk7mAIXAruMyAW1b4TOA1qdHxl",
+        "sig": "39ZxS7HqdG2wMQz_5WPOETPS8sG6LhcmeGcH32W4kmU1hlJ2YNHC64q6XuJ1vyDLqWIgxpoAW1DCZdO8Q3XAdg"
       },
       "expect": "key_package_signature_invalid",
       "recipientKemEpoch": 2

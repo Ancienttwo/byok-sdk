@@ -108,8 +108,6 @@ export interface ScopeKeyPackage {
   readonly keyId: string;
   /** Member id of the member that can open the package. */
   readonly recipient: string;
-  /** The KEM epoch of the recipient key the package is wrapped to. */
-  readonly recipientKemEpoch: number;
   /** Member id of the member that sealed and signed the package. */
   readonly sender: string;
   /** HPKE encapsulated key: base64url of a 65-byte uncompressed P-256 point. */
@@ -118,6 +116,8 @@ export interface ScopeKeyPackage {
   readonly ciphertext: string;
   /** Sender's ECDSA P-256 / SHA-256 signature, base64url of the 64-byte P1363 form. */
   readonly sig: string;
+  /** The KEM epoch of the recipient key the package is wrapped to. */
+  readonly recipientKemEpoch: number;
 }
 
 const ScopeKeyPackageSchema = z.strictObject({
@@ -127,11 +127,12 @@ const ScopeKeyPackageSchema = z.strictObject({
   epoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   keyId: z.string().regex(SCOPE_KEY_ID_PATTERN),
   recipient: z.string().regex(MEMBER_ID_PATTERN),
-  recipientKemEpoch: KemEpochSchema,
   sender: z.string().regex(MEMBER_ID_PATTERN),
   enc: base64UrlBytes(P256_POINT_BYTES),
   ciphertext: base64UrlBytes(SCOPE_KEY_BYTES + AEAD_TAG_BYTES),
   sig: base64UrlBytes(64),
+  // Last, as the field version 2 added: the parsed identity, and so the sealed package's JSON, keep their key order.
+  recipientKemEpoch: KemEpochSchema,
 });
 
 type PackageIdentity = Omit<ScopeKeyPackage, 'enc' | 'ciphertext' | 'sig'>;

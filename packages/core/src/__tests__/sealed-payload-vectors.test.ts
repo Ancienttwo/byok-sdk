@@ -442,7 +442,7 @@ async function keyPackageVectors(
   // Packages core's seal cannot make: wrapped to another key, or naming another key's id, each for the device's KEM epoch 1.
   const sealCrafted = async (kem: VectorKeyPair, keyId: string): Promise<ScopeKeyPackage> => {
     const identity = {
-      v: 2 as const, tenantId: TENANT, scopeId: SCOPE.id, epoch: SCOPE.epoch, keyId, recipient: device.memberId, recipientKemEpoch: 1, sender: client.memberId,
+      v: 2 as const, tenantId: TENANT, scopeId: SCOPE.id, epoch: SCOPE.epoch, keyId, recipient: device.memberId, sender: client.memberId, recipientKemEpoch: 1,
     };
     const hpke = await hpkeSealBase({
       recipientPublicKey: rawPoint(kem),
