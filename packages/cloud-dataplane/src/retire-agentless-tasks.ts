@@ -6,7 +6,10 @@
  * (bodies become tombstones, object references go), its board item is removed,
  * and its row moves into `task_agentless_retired`, the fence that keeps its id
  * used. A task that is not terminal stops the command before any change: settle
- * it on v0.41.0 first. Safe to run again; a later run finds nothing to retire.
+ * it on v0.41.0 first. So does one whose offer or cancel delivery is still
+ * pending, which the archive refuses: the command bypasses the retention window,
+ * so the policy floor that keeps the archive step clear of those rows does not
+ * apply. Safe to run again; a later run finds nothing to retire.
  */
 import { taskArchiveInput, type CloudCrypto } from '@byok-sdk/cloud';
 import { tenantId, type Clock } from '@byok-sdk/core';
@@ -14,6 +17,7 @@ import type { ByokPool } from './pool';
 import { assertByokPool } from './pool-brand';
 import { PostgresBoardStore } from './stores/core/board';
 import { PostgresTaskArchiveStore } from './stores/task-archive';
+import { refusalFor } from './stores/task-redaction';
 
 export interface RetireAgentlessTasksOptions {
   readonly clock: Clock;
@@ -30,12 +34,29 @@ export async function retireAgentlessTasks(
   options: RetireAgentlessTasksOptions,
 ): Promise<RetireAgentlessTasksResult> {
   assertByokPool(pool, 'retireAgentlessTasks');
-  const live = await pool.query<{ n: number }>(
-    `SELECT count(*)::int AS n FROM task WHERE agent_id IS NULL AND status NOT IN ('complete', 'failed', 'cancelled')`,
-  );
-  if (live.rows[0]!.n > 0) {
-    throw new Error(`${live.rows[0]!.n} task(s) without an Agent identity are not terminal; nothing was changed. ` +
-      'Settle them on v0.41.0 with cancelTask, or abandonTask for a task whose device is gone or that stays cancel_requested.');
+  // Preflight with the archive's own refusal rule, so no task is retired unless all can be.
+  const blocked: Record<string, Partial<Record<'task_not_terminal' | 'pending_delivery', number>>> = {};
+  let after: readonly [string, string] = ['', ''];
+  for (;;) {
+    const page = await pool.query<{ tenant_id: string; task_id: string; device_id: string; owner_device_id: string | null; status: string }>(
+      `SELECT tenant_id, task_id, device_id, owner_device_id, status FROM task
+        WHERE agent_id IS NULL AND (tenant_id, task_id) > ($1, $2) ORDER BY tenant_id, task_id LIMIT 500`,
+      [...after],
+    );
+    if (page.rows.length === 0) break;
+    for (const row of page.rows) {
+      const refusal = await refusalFor(pool, tenantId(row.tenant_id), row.task_id, row, false);
+      if (refusal?.outcome !== 'refused') continue;
+      const tenant = (blocked[row.tenant_id] ??= {});
+      tenant[refusal.reason] = (tenant[refusal.reason] ?? 0) + 1;
+    }
+    const last = page.rows[page.rows.length - 1]!;
+    after = [last.tenant_id, last.task_id];
+  }
+  if (Object.keys(blocked).length > 0) {
+    throw new Error(`Tasks without an Agent identity cannot be retired yet; nothing was changed. Per tenant: ${JSON.stringify(blocked)}. ` +
+      'On v0.41.0, settle task_not_terminal ones with cancelTask, or abandonTask for a task whose device is gone or that stays cancel_requested; ' +
+      'for pending_delivery, bring the device online to receive them, or revokeDevice a device that will not return so its pending rows expire.');
   }
   const archive = new PostgresTaskArchiveStore(pool, options.clock);
   const board = new PostgresBoardStore(pool, options.clock);

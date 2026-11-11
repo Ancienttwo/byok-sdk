@@ -360,7 +360,10 @@ export declare function createPostgresWake(spec: PostgresWakeChannel, options: P
  * (bodies become tombstones, object references go), its board item is removed,
  * and its row moves into `task_agentless_retired`, the fence that keeps its id
  * used. A task that is not terminal stops the command before any change: settle
- * it on v0.41.0 first. Safe to run again; a later run finds nothing to retire.
+ * it on v0.41.0 first. So does one whose offer or cancel delivery is still
+ * pending, which the archive refuses: the command bypasses the retention window,
+ * so the policy floor that keeps the archive step clear of those rows does not
+ * apply. Safe to run again; a later run finds nothing to retire.
  */
 import { type CloudCrypto } from '@byok-sdk/cloud';
 import { type Clock } from '@byok-sdk/core';

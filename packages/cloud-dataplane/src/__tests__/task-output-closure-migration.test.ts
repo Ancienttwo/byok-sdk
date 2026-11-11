@@ -119,16 +119,21 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres 0038, retireAgentlessTasks, 0039 over 
       const [offerKey] = (await taskArchiveInput(crypto, tenant, { taskId: 'legacy-done', deviceId: 'device' }, clock.now().toISOString())).receiptKeys;
       await scope.pool.query(`INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at) VALUES ('tenant', $1, '{"secret":"offer"}', now())`, [offerKey]);
       await new PostgresBoardStore(scope.pool, clock).create(tenant, { itemId: 'legacy-done', channel: 'c', title: 't' });
+      // A terminal task whose cancel never reached its offline device.
+      await scope.pool.query(`INSERT INTO outbox (tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at)
+        VALUES ('tenant', 'device', 1, 'm1', '{"task_id":"legacy-done"}', 'h', 25, 'pending', '2026-01-01T00:00:00.000Z')`);
       await expect(tasks.get(tenant, 'legacy-done')).rejects.toMatchObject({ code: 'task_attempt_agent_ref_missing', message: expect.stringContaining('retireAgentlessTasks') });
       await expect(new PostgresTaskArchiveStore(scope.pool, clock).listWork(tenant, { archiveBefore: '2026-02-01T00:00:00.000Z', limit: 10 }))
         .rejects.toMatchObject({ code: 'task_attempt_agent_ref_missing' });
       await copy('0040');
 
       await expect(migrate(scope.pool, directory)).rejects.toThrow(/2 task\(s\) have no Agent identity; nothing was changed/);
-      await expect(retireAgentlessTasks(scope.pool, { clock, crypto })).rejects.toThrow(/1 task\(s\) without an Agent identity are not terminal/);
+      await expect(retireAgentlessTasks(scope.pool, { clock, crypto })).rejects.toThrow('{"tenant":{"pending_delivery":1,"task_not_terminal":1}}');
+      await scope.pool.query(`UPDATE task SET status = 'cancelled' WHERE task_id = 'legacy-live'`);
+      await expect(retireAgentlessTasks(scope.pool, { clock, crypto })).rejects.toThrow('{"tenant":{"pending_delivery":1}}');
       expect((await scope.pool.query(`SELECT count(*)::int AS n FROM task_agentless_retired`)).rows).toEqual([{ n: 0 }]);
 
-      await scope.pool.query(`UPDATE task SET status = 'cancelled' WHERE task_id = 'legacy-live'`);
+      await scope.pool.query(`UPDATE outbox SET state = 'expired'`);
       await expect(retireAgentlessTasks(scope.pool, { clock, crypto })).resolves.toEqual({ retired: { tenant: 2 } });
       await expect(retireAgentlessTasks(scope.pool, { clock, crypto })).resolves.toEqual({ retired: {} });
       expect((await scope.pool.query(`SELECT body FROM device_request_receipts WHERE key = $1`, [offerKey])).rows[0].body).not.toContain('secret');
