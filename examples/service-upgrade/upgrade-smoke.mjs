@@ -29,7 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { readDeviceEnrollmentStatus, sdkNativeAssetTargets } from '@byok-sdk/client';
+import { sdkNativeAssetTargets } from '@byok-sdk/client';
 import { byokSdkPackaging } from '@byok-sdk/client/packaging';
 import { createByokServer, listenLoopback } from '@byok-sdk/server';
 import { writeKoffiAssetRoot } from '../../scripts/testing/sdk-koffi-asset-root.mjs';
@@ -288,11 +288,14 @@ async function lifecycle(variant, cmd, server, payloads) {
     // The manager unloads the service before its daemon has released the store.
     await until(async () => (/^live status: daemon not reachable/mu.test((await run([agentCli, 'status', '--config', variant.config])).stdout) ? true : undefined),
       `${variant.name} exit`);
-    if (owner === 'app') await ok([installer, 'clear-enrollment', '--config', variant.config, '--install-root', variant.installRoot]);
-    else await ok([agentCli, 'unpair', '--yes', '--config', variant.config]);
-    const { nativeAssetRoot } = JSON.parse(await fs.readFile(variant.config, 'utf8'));
-    assert.deepEqual(await readDeviceEnrollmentStatus({ productId: variant.productId, storeDir, nativeAssetRoot }), { state: 'unpaired' });
-    log(`${owner}: enrollment cleared`);
+    if (owner === 'app') {
+      // Read back in the installer's process: koffi loaded here would lock the asset root against the final cleanup.
+      const status = await ok([installer, 'clear-enrollment', '--config', variant.config, '--install-root', variant.installRoot]);
+      assert.deepEqual(JSON.parse(status), { state: 'unpaired' });
+      log(`${owner}: enrollment cleared`);
+    } else {
+      await ok([agentCli, 'unpair', '--yes', '--config', variant.config]);
+    }
   }
   const left = await fs.readdir(variant.installRoot);
   assert.deepEqual(left, [], `install root after uninstall: ${left.join(', ')}`);

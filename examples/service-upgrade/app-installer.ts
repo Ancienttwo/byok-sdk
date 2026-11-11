@@ -11,7 +11,8 @@
 // A `user` scope service needs the Host's own stop program; this App's is its
 // `stop-daemon` action. After `uninstall`, `clear-enrollment` removes the
 // store's device enrollment from this account's OS credential set with
-// clearDeviceEnrollment; the store directory stays.
+// clearDeviceEnrollment and prints the status read back; the store directory
+// stays.
 //
 //   node app-installer.ts <install|upgrade|rollback|recover|uninstall|status|stop-daemon|clear-enrollment> --config <path> --install-root <dir>
 //     [--payload <dir>] [--name <svc>] [--winsw-bin <exe> [--winsw-install-dir <dir>] | --windows-user]
@@ -21,7 +22,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   agentServiceDefinition, agentServiceInstallation, clearDeviceEnrollment, createServiceInstallation, DeviceEnrollmentClearError,
-  ServiceInstallationError, type DaemonConfig, type ServiceWindowsOptions,
+  readDeviceEnrollmentStatus, ServiceInstallationError, type DaemonConfig, type ServiceWindowsOptions,
 } from '@byok-sdk/client';
 
 const { positionals, values } = parseArgs({
@@ -67,10 +68,12 @@ if (action === 'stop-daemon') {
 
 if (action === 'clear-enrollment') {
   const { storeDir } = agentServiceDefinition({ config, configPath, agentBin: 'byok-agent.mjs', owner: 'app' });
+  const enrollment = {
+    productId: config.productId, storeDir, ...(config.nativeAssetRoot === undefined ? {} : { nativeAssetRoot: config.nativeAssetRoot }),
+  };
   try {
-    await clearDeviceEnrollment({
-      productId: config.productId, storeDir, ...(config.nativeAssetRoot === undefined ? {} : { nativeAssetRoot: config.nativeAssetRoot }),
-    });
+    await clearDeviceEnrollment(enrollment);
+    console.log(JSON.stringify(await readDeviceEnrollmentStatus(enrollment)));
   } catch (error) {
     // A live owner of the store or another store's enrollment is an answer for the App's user.
     if (!(error instanceof DeviceEnrollmentClearError) || error.code === 'clear_failed') throw error;
