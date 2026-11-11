@@ -2302,8 +2302,9 @@ jobs:
   desktop:
     needs: select
     if: ${{ contains(fromJSON(needs.select.outputs.families), 'desktop') }}
-    name: desktop app (ubuntu-latest)
-    runs-on: ubuntu-latest
+    # ubuntu-24.04: #1803 D0 reports the Ubuntu 24.04 AppArmor user-namespace answer.
+    name: desktop app (ubuntu-24.04)
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
