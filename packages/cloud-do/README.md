@@ -151,7 +151,7 @@ openDurableObjectStorage has the local structural factory type
 (location: DurableObjectStorage) => Promise<Storage>.
 Storage is pi-durable's native interface. The package does not import client
 source or keys types. Its three runtime dependencies are pi-durable, pi-ai,
-and chord, each pinned to 1.5.0.
+and chord, each pinned to 1.5.2.
 
 The Durable Object owns the physical connection. Closing the adapter
 invalidates that adapter. It does not close the Durable Object database.

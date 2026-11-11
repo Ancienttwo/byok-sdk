@@ -19,7 +19,8 @@ function fail(message: string): never { throw new Error(`byok-pi-rpc: ${message}
  * can neither see nor bound. Pi reads the mode only from global settings (the
  * user's file), and asks extensions before every refresh, so the SDK stops a
  * refresh whenever the session is idle: warming runs at most during an active
- * run, as Pi's "streaming" mode does, and "off" never asks.
+ * run, as Pi's "streaming" mode does. A mode of "off" never asks; under
+ * `excluded` the in-memory settings below have no mode, so Pi's default applies.
  */
 const stopIdleCacheWarming: ExtensionFactory = (pi) => {
   pi.on('cache_warming_decision', (_event, context) => (context.isIdle() ? { action: 'stop' } : undefined));

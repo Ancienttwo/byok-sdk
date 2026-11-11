@@ -40,7 +40,7 @@ type PiCommandParser = (this: { _extensionRunner: { getCommand(name: string): vo
 
 /** Keep Host commands out of executor paths without a tool_call approval. */
 export function refusePiSubagentHostCommands(session: CreateAgentSessionResult['session'], sources: readonly string[]): void {
-  // SAFETY: Pi 1.5.0's private method owns first-space parsing. Its runtime
+  // SAFETY: Pi 1.5.2's private method owns first-space parsing. Its runtime
   // type is checked below; pin tests must re-check it on every Pi upgrade.
   const parse = (session as unknown as { _throwIfExtensionCommand?: PiCommandParser })._throwIfExtensionCommand;
   if (typeof parse !== 'function') {
