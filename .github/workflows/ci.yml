@@ -1009,10 +1009,8 @@ jobs:
             src/__tests__/service-enrollment-handover.test.ts `
             src/__tests__/local-state-relocation.test.ts
           if ($LASTEXITCODE -ne 0) { throw 'Windows client lease safety tests failed' }
-          # Only the junction case: the runtime-binding cases are not Windows-ready yet (#1818).
           bun run --filter @byok-sdk/client test -- `
-            src/__tests__/agent-home-contract.test.ts `
-            -t "rejects a hostStorageRoot behind a junction before creating homes"
+            src/__tests__/agent-home-contract.test.ts
 
       - name: Run runtime executable detection tests on Windows
         run: |
