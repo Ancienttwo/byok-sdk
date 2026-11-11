@@ -12,6 +12,7 @@ import { joinHandlers } from '../bridge/domain.ts';
 import { encodeMessage, type HostState } from '../bridge/protocol.ts';
 import { serveBridge, type BridgeHandlers } from '../bridge/server.ts';
 import { composeHost, HostStoppedError, type ComposedHost, type HostCompositionOptions } from './compose.ts';
+import { runKeysCommand } from './keys/commands.ts';
 import { HostStoreRefusedError } from './precheck.ts';
 
 /**
@@ -98,10 +99,15 @@ export async function superviseHost(
   await close();
 }
 
-/** Runs this process as the SDK helper its argv names; otherwise as the Host, exiting 0 once it closed. */
+/** Runs this process as the SDK helper or keys command its argv names; otherwise as the Host, exiting 0 once it closed. */
 async function main(exit: (code: number) => void): Promise<void> {
   if (await runSdkReservedHelperCommand()) return;
   const layout = resolveHostLayout({ productId: brand.productId, productName: brand.productName });
+  const keysExit = await runKeysCommand(process.argv.slice(2), layout.hostStorageRoot);
+  if (keysExit !== undefined) {
+    exit(keysExit);
+    return;
+  }
   await superviseHost({
     productId: brand.productId,
     productName: brand.productName,
