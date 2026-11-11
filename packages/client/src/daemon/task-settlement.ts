@@ -42,13 +42,20 @@ export interface TaskRuntimeOwnership {
   runtimeDisposed(taskId: string): void;
 }
 
+interface Waiter {
+  resolve(settlement: DaemonTaskSettlement): void;
+  reject(reason: unknown): void;
+}
+
 interface Entry {
   runtime: 'none' | 'held' | 'disposed' | 'failed';
   delivered?: Pick<DaemonTaskSettlement, 'terminal' | 'delivery'>;
   result?: DaemonTaskSettlement;
-  settled?: Promise<DaemonTaskSettlement>;
-  resolve?: (settlement: DaemonTaskSettlement) => void;
+  readonly waiters: Set<Waiter>;
 }
+
+// An entry that only a wait created: no runtime fact, no terminal, no result.
+const isWaitOnly = (entry: Entry): boolean => entry.runtime === 'none' && entry.delivered === undefined && entry.result === undefined;
 
 const TERMINAL_STATE_PREFIX = 'terminal:';
 const TERMINALS: ReadonlySet<string> = new Set<DaemonTaskTerminal>(['complete', 'failed', 'cancelled', 'declined']);
@@ -56,7 +63,9 @@ const TERMINALS: ReadonlySet<string> = new Set<DaemonTaskTerminal>(['complete', 
 // One per Daemon, across its runs. Fed by each terminal's first outbound
 // settlement, each runtime owner's first disposal outcome and, for a task this
 // daemon has not seen, the journal; never by public events. An offer seen
-// before its journal append keeps a wait in between from reading as unknown.
+// before its journal append keeps a wait in between from reading as unknown;
+// `offerJournaled` or `offerRefused` ends that window. A wait-only entry
+// (see `isWaitOnly`) is dropped when its last waiter leaves.
 export class TaskSettlementRegistry implements TaskRuntimeOwnership {
   readonly #entries = new Map<string, Entry>();
   readonly #offersSeen = new Set<string>();
@@ -66,6 +75,19 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
 
   offerSeen(taskId: string): void {
     if (!this.#entries.get(taskId)?.result) this.#offersSeen.add(taskId);
+  }
+
+  /** The offer's row is durable: later waits read the journal. */
+  offerJournaled(taskId: string): void { this.#offersSeen.delete(taskId); }
+
+  /** The journal refused the offer's append; its waiters fail closed. A redelivery starts a new window. */
+  offerRefused(taskId: string, reason: Error): void {
+    this.#offersSeen.delete(taskId);
+    const entry = this.#entries.get(taskId);
+    if (entry === undefined) return;
+    for (const waiter of [...entry.waiters]) waiter.reject(reason);
+    entry.waiters.clear();
+    if (isWaitOnly(entry)) this.#entries.delete(taskId);
   }
 
   runtimeHeld(taskId: string): void {
@@ -110,22 +132,29 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
       }
     }
     if (entry.result !== undefined) return entry.result;
-    const settled = entry.settled ??= new Promise<DaemonTaskSettlement>((resolve) => { entry.resolve = resolve; });
-    if (signal === undefined) return settled;
+    const target = entry;
     return new Promise<DaemonTaskSettlement>((resolve, reject) => {
-      const abort = (): void => reject(signal.reason);
+      let detach = (): void => {};
+      const waiter: Waiter = {
+        resolve: (settlement) => { detach(); resolve(settlement); },
+        reject: (reason) => { detach(); reject(reason); },
+      };
+      target.waiters.add(waiter);
+      if (signal === undefined) return;
+      const abort = (): void => {
+        target.waiters.delete(waiter);
+        if (target.waiters.size === 0 && isWaitOnly(target) && this.#entries.get(taskId) === target) this.#entries.delete(taskId);
+        reject(signal.reason);
+      };
       signal.addEventListener('abort', abort, { once: true });
-      void settled.then((settlement) => {
-        signal.removeEventListener('abort', abort);
-        resolve(settlement);
-      });
+      detach = () => signal.removeEventListener('abort', abort);
     });
   }
 
   #entry(taskId: string): Entry {
     let entry = this.#entries.get(taskId);
     if (entry === undefined) {
-      entry = { runtime: 'none' };
+      entry = { runtime: 'none', waiters: new Set() };
       this.#entries.set(taskId, entry);
     }
     return entry;
@@ -134,7 +163,8 @@ export class TaskSettlementRegistry implements TaskRuntimeOwnership {
   #settle(entry: Entry): void {
     if (entry.result !== undefined || entry.delivered === undefined || entry.runtime === 'held') return;
     entry.result = { ...entry.delivered, disposal: entry.runtime === 'none' ? 'none' : entry.runtime };
-    entry.resolve?.(entry.result);
+    for (const waiter of entry.waiters) waiter.resolve(entry.result);
+    entry.waiters.clear();
   }
 }
 

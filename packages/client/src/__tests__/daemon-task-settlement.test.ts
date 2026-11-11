@@ -7,7 +7,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
-import { DaemonTaskUnknownError, type DaemonTaskSettlement } from '../daemon/task-settlement';
+import { DaemonTaskUnknownError, TaskSettlementRegistry, type DaemonTaskSettlement } from '../daemon/task-settlement';
+import { LocalStorageEmergencyError } from '../daemon/retention/pressure';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -152,6 +153,49 @@ describe('Daemon.whenTaskSettled', () => {
       .resolves.toEqual({ terminal: 'complete', delivery: 'accepted', disposal: 'none' });
     await expect(restarted.whenTaskSettled('no-such-task')).rejects.toMatchObject({
       constructor: DaemonTaskUnknownError, code: 'daemon_task_unknown', taskId: 'no-such-task',
+    });
+  });
+
+  describe('TaskSettlementRegistry waiters', () => {
+    function registry(localState?: string): { registry: TaskSettlementRegistry; reads: () => number } {
+      let reads = 0;
+      const r = new TaskSettlementRegistry();
+      r.bindJournal({
+        readTask: async () => { reads += 1; return localState === undefined ? undefined : { localState }; },
+        unconfirmedTerminal: async () => undefined,
+      });
+      return { registry: r, reads: () => reads };
+    }
+
+    it('drops the entry a wait created when its last waiter aborts', async () => {
+      const { registry: r, reads } = registry('received');
+      const controller = new AbortController();
+      const waiting = r.wait('task-pending', controller.signal);
+      await vi.waitFor(() => expect(reads()).toBe(1));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      controller.abort('stop');
+      await expect(waiting).rejects.toBe('stop');
+      void r.wait('task-pending', AbortSignal.timeout(20)).catch(() => {});
+      await vi.waitFor(() => expect(reads()).toBe(2));
+    });
+
+    it('rejects the waiters of a refused offer with the typed error, and a wait after redelivery starts clean', async () => {
+      const { registry: r, reads } = registry();
+      r.offerSeen('task-refused');
+      const waiting = r.wait('task-refused');
+      await vi.waitFor(() => expect(reads()).toBe(1));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const refusal = new LocalStorageEmergencyError('free space is below the ack-critical reserve');
+      r.offerRefused('task-refused', refusal);
+      await expect(waiting).rejects.toBe(refusal);
+      await expect(r.wait('task-refused')).rejects.toBeInstanceOf(DaemonTaskUnknownError);
+    });
+
+    it('reads a redelivered offer of a task settled before a restart from the journal', async () => {
+      const { registry: r } = registry('terminal:complete');
+      r.offerSeen('task-old');
+      r.offerJournaled('task-old');
+      await expect(r.wait('task-old')).resolves.toEqual({ terminal: 'complete', delivery: 'accepted', disposal: 'none' });
     });
   });
 });

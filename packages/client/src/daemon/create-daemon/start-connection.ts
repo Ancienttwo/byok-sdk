@@ -85,15 +85,27 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
       // so the mailbox keeps the row and redelivers it later. The task
       // is not lost; it is left in the one place that still has room
       // for it. Nothing is deleted to make space.
-      activePressureEngine?.assertAckCriticalAllowed();
+      try {
+        activePressureEngine?.assertAckCriticalAllowed();
+      } catch (error: unknown) {
+        // A task with no journal row never reaches a terminal in this run unless
+        // the mailbox redelivers it; its waiters fail instead of waiting.
+        if (envelope.type === 'task.offer' && envelope.task_id !== undefined
+          && await activeJournal.readTask(envelope.task_id, journalIdentity) === undefined) {
+          taskSettlement.offerRefused(envelope.task_id, error as Error);
+        }
+        throw error;
+      }
       const record = toJournalEnvelopeRecord(envelope, journalIdentity);
       try {
         await activeJournal.appendEnvelope(record);
       } catch (error: unknown) {
         if (!(error instanceof JournalRecordTooLargeError)) throw error;
         await refuseOverBoundEnvelope(envelope, record, error.actualBytes);
+        if (envelope.type === 'task.offer' && envelope.task_id !== undefined) taskSettlement.offerJournaled(envelope.task_id);
         return;
       }
+      if (envelope.type === 'task.offer' && envelope.task_id !== undefined) taskSettlement.offerJournaled(envelope.task_id);
       if (envelope.type === 'task.offer' && envelope.task_id !== undefined) {
         // A selected terminal fences admission even if its transaction rolled
         // back to received. Check before reading a possibly stale task row.

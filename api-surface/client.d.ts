@@ -8712,6 +8712,10 @@ export declare class TaskSettlementRegistry implements TaskRuntimeOwnership {
     #private;
     bindJournal(journal: TaskSettlementJournal): void;
     offerSeen(taskId: string): void;
+    /** The offer's row is durable: later waits read the journal. */
+    offerJournaled(taskId: string): void;
+    /** The journal refused the offer's append; its waiters fail closed. A redelivery starts a new window. */
+    offerRefused(taskId: string, reason: Error): void;
     runtimeHeld(taskId: string): void;
     runtimeDisposed(taskId: string): void;
     runtimeDisposalFailed(taskId: string): void;
