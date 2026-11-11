@@ -12,6 +12,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DaemonConfig } from '../index';
 import type { ConnectControlResult, ControlClient } from '../daemon/control-client';
 import { appendAuditRecord } from '../daemon/audit-log';
+
+const auditRead = vi.hoisted(() => ({ fail: false }));
+vi.mock('../daemon/audit-log', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../daemon/audit-log')>();
+  const guard = <A extends unknown[], R>(read: (...args: A) => Promise<R>) => (...args: A): Promise<R> =>
+    auditRead.fail ? Promise.reject(new Error('EIO')) : read(...args);
+  return {
+    ...actual,
+    readLastLifecycleRecord: guard(actual.readLastLifecycleRecord),
+    readLastEnvironmentRecord: guard(actual.readLastEnvironmentRecord),
+  };
+});
 import { formatHaltRemedy } from '../diagnostics/format';
 import {
   DoctorConfirmationRequiredError,
@@ -152,6 +164,18 @@ describe('diagnostics collector', () => {
     const live = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: () => connected() });
     expect(live.lifecycle).toEqual({ status: 'known', source: 'live', lifecycle: { phase: 'running', connection: 'open' } });
     expect(live.checks.find((check) => check.id === 'lifecycle')?.status).toBe('pass');
+  });
+
+  it('#1774: an unreadable audit log fails the lifecycle and environment checks instead of reading as no record', async () => {
+    const dir = await tempDir();
+    auditRead.fail = true;
+    try {
+      const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+      expect(snapshot.lifecycle).toEqual({ status: 'unknown' });
+      for (const id of ['lifecycle', 'environment'] as const) {
+        expect(snapshot.checks.find((check) => check.id === id)).toEqual({ id, status: 'fail', summary: 'unknown (audit log unreadable)' });
+      }
+    } finally { auditRead.fail = false; }
   });
 
   it.skipIf(process.platform === 'win32')('#1732: an offline daemon with an owned store root that is not 0700 names secure_dir_mode', async () => {

@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as dshRuntime from '../../runtime/dsh-session-runtime';
-import { oarStartFailure } from '../oar-start-failure';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import {
@@ -284,7 +284,7 @@ export class DshAdapter implements RuntimeAdapter {
       } catch (disposal) {
         throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
       }
-      throw oarStartFailure(session.halted ?? thrown, { classes: dshRuntime, exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'dsh' });
+      throw runtimeStartFailure(session.halted ?? thrown, { classify: oarStartClassifier(dshRuntime), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'dsh' });
     }
   }
 }

@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { oarStartFailure } from '../oar-start-failure';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import {
@@ -253,7 +253,7 @@ export class GrokAdapter implements RuntimeAdapter {
       } catch (disposal) {
         throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
       }
-      throw oarStartFailure(session.halted ?? thrown, { classes: acp, exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'grok' });
+      throw runtimeStartFailure(session.halted ?? thrown, { classify: oarStartClassifier(acp), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'grok' });
     }
   }
 }
