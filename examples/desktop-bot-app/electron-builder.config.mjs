@@ -42,6 +42,9 @@ export default {
   appId: `io.byok-sdk.${brand.productId}`,
   productName: brand.productName,
   electronVersion: manifest.devDependencies.electron,
+  // The deb takes its package name from `name` (a scoped workspace name is not a
+  // valid one) and requires a homepage. A fork sets its own homepage here.
+  extraMetadata: { name: brand.productId, homepage: 'https://github.com/Ancienttwo/byok-sdk' },
   directories: { app: at('dist/package/stage/app'), output: at('dist/package/out'), buildResources: at('scripts/package') },
   asar: true,
   npmRebuild: false,
