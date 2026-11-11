@@ -190,6 +190,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     packageVersion: string;
     commit: string;
+    fork: { repository: string; branch: string; commit: string };
     release: { ecosystem: string; name: string; version: string; integrity: string; gitCommit: string; provenance: string };
     files: Array<{ path: string; sourcePath: string; upstreamSha256: string; vendoredSha256: string; delta?: string }>;
   };
@@ -207,6 +208,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     gitCommit: manifest.commit,
     provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.94.0',
   });
+  expect(manifest.fork).toEqual({ repository: 'https://github.com/Ancienttwo/oar', branch: `byok/${manifest.packageVersion}`, commit: expect.stringMatching(/^[0-9a-f]{40}$/) });
   expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['contracts/failure.ts', 'observe/events.ts', 'runtimes/codex/app-server-client.ts', 'runtimes/codex/failure.ts', 'runtimes/codex/open.ts', 'runtimes/codex/session.ts', 'runtimes/dsh/control.ts', 'runtimes/dsh/launch.ts', 'runtimes/dsh/session.ts', 'runtimes/grok/session.ts', 'runtimes/opencode/prompt-config.ts', 'runtimes/opencode/session.ts', 'runtimes/opencode/version.ts', 'shared/acp/client-app.ts', 'shared/acp/errors.ts', 'shared/acp/failure.ts', 'shared/acp/process.ts', 'shared/acp/session.ts', 'shared/acp/terminal.ts', 'shared/acp/turns.ts', 'shared/executable/process-tree.ts', 'shared/failure-class.ts']);
   expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Apache License');
 });
