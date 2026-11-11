@@ -6,15 +6,14 @@
 // - the app's Electron binary carries the app fuses (src/main/fuses.ts);
 // - macOS: the ad-hoc or Developer ID signature verifies deep and strict;
 // - the packaged SEA Host answers the bridge (host-smoke.mjs). It keeps a device
-//   credential in the OS store. --without-product-host skips it (and says so): off
-//   CI, and on Windows CI until #1839 gives compose.ts the koffi nativeAssetRoot;
+//   credential in the OS store, so this runs on CI only;
 // - a smoke Host SEA (smoke-host.ts) run from inside resources/host/ completes a Pi
 //   dispatch with memory_recall and gets pi_background_unavailable for a background
 //   subagent (#1499 R2). It is removed again afterwards.
 //
 // Prints the sizes, also into $GITHUB_STEP_SUMMARY when set.
 //
-//   node scripts/package/package-smoke.mjs [--without-product-host]
+//   node scripts/package/package-smoke.mjs
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -88,12 +87,7 @@ if (process.platform === 'darwin') {
 }
 
 // 4. The packaged SEA Host through the bridge.
-if (process.argv.includes('--without-product-host')) {
-  console.log('[package-smoke] SKIPPED the packaged product Host bridge run (--without-product-host): on Windows the Host needs '
-    + 'nativeAssetRoot from compose.ts for koffi (DeviceCredentialStoreUnavailableError), adopted after #1839; open on #1811');
-} else {
-  execFileSync(process.execPath, [path.join(root, 'scripts', 'package', 'host-smoke.mjs'), path.join(host, hostFile('sea'))], { stdio: 'inherit' });
-}
+execFileSync(process.execPath, [path.join(root, 'scripts', 'package', 'host-smoke.mjs'), path.join(host, hostFile('sea'))], { stdio: 'inherit' });
 
 // 5. Pi, memory and R2 from inside resources/host/.
 const smoke = path.join(host, process.platform === 'win32' ? 'smoke-host.exe' : 'smoke-host');

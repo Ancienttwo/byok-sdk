@@ -10,8 +10,6 @@ import type { BridgeDomain } from '../domain.ts';
 export interface K8Methods {
   /** The rail, the brand's roles and models, and the selected Bot's conversation. */
   'k8.view': { params: { botId: string | null }; result: ConversationSnapshot };
-  /** Held until the view version moves past `after`, or briefly with the current version. */
-  'k8.changes': { params: { after: number }; result: { version: number } };
   /** Creates (under a renderer-made id, reused on retry) or edits a Bot. */
   'k8.saveBot': { params: BotProfile; result: null };
   /** Archives a Bot for good. */
@@ -24,6 +22,6 @@ export interface K8Methods {
 }
 
 export const K8_DOMAIN = {
-  renderer: ['k8.view', 'k8.changes', 'k8.saveBot', 'k8.archiveBot', 'k8.send', 'k8.clear', 'k8.cancel', 'k8.answer'],
+  renderer: ['k8.view', 'k8.saveBot', 'k8.archiveBot', 'k8.send', 'k8.clear', 'k8.cancel', 'k8.answer'],
   main: [],
 } as const satisfies BridgeDomain<K8Methods>;

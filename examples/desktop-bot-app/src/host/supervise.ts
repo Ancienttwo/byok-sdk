@@ -4,6 +4,7 @@
  * and as the packaged SEA. stdout carries only bridge lines, so diagnostics go
  * to stderr.
  */
+import path from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { bundledSdkHelperHost, resolveHostLayout, runSdkReservedHelperCommand } from '@byok-sdk/client';
 import brand from '../../brand.config.ts';
@@ -16,11 +17,13 @@ import { runKeysCommand } from './keys/commands.ts';
 import { HostStoreRefusedError } from './precheck.ts';
 
 /**
- * Composes the Host after main's hello and pushes its state on every change.
- * Resolves once the Host is closed after main's `shutdown` or a closed pipe.
- * A refused store or a daemon halt leaves the Host `stopped` with the reason
- * and nothing composed; any other composition failure rejects, so the process
- * exits non-zero and main restarts it.
+ * Composes the Host after main's hello and pushes its state on every change,
+ * and again, unchanged, whenever a domain's views changed (main turns each push
+ * into one coalesced renderer hint). Resolves once the Host is closed after
+ * main's `shutdown` or a closed pipe. A missing SDK asset, a refused store, a
+ * refused embedded pairing or a daemon halt leaves the Host `stopped` with the
+ * reason and nothing composed; any other composition failure rejects, so the
+ * process exits non-zero and main restarts it.
  */
 export async function superviseHost(
   options: Omit<HostCompositionOptions, 'onChanged'>,
@@ -100,6 +103,12 @@ export async function superviseHost(
   await close();
 }
 
+/** bundle-host.mjs writes the SDK assets beside the Host executable: the CommonJS bundle in dev, the SEA in a package. */
+function hostedBesideExecutable(): HostCompositionOptions['sdkHosting'] {
+  const helperHost = bundledSdkHelperHost();
+  return { assetRoot: path.dirname(helperHost.entry ?? helperHost.executable), helperHost };
+}
+
 /** Runs this process as the SDK helper or keys command its argv names; otherwise as the Host, exiting 0 once it closed. */
 async function main(exit: (code: number) => void): Promise<void> {
   if (await runSdkReservedHelperCommand()) return;
@@ -115,7 +124,7 @@ async function main(exit: (code: number) => void): Promise<void> {
     releaseVersion: manifest.version,
     storeDir: layout.storeDir,
     hostStorageRoot: layout.hostStorageRoot,
-    sdkHelperHost: bundledSdkHelperHost(),
+    sdkHosting: hostedBesideExecutable(),
   });
   exit(0);
 }

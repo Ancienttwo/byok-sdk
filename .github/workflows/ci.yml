@@ -2440,11 +2440,7 @@ jobs:
           # the Host bundle step paired; the SDK halts a Host whose credential has no store (store_not_bound),
           # so the packaged Host uses that step's throwaway HOME and resumes the same device.
           if [ "$RUNNER_OS" = Linux ]; then export HOME="$RUNNER_TEMP/host-home"; fi
-          # #1811, until #1839: on Windows the product Host stops with "DeviceCredentialStoreUnavailableError:
-          # Windows Credential Manager requires the koffi optional dependency", because compose.ts does not pass
-          # nativeAssetRoot yet. The Desktop adoption of #1839 removes this flag in the same change.
-          flags=(); [ "$RUNNER_OS" = Windows ] && flags=(--without-product-host)
-          node examples/desktop-bot-app/scripts/package/package-smoke.mjs "${flags[@]}"
+          node examples/desktop-bot-app/scripts/package/package-smoke.mjs
       # Report only: does the deb (setuid chrome-sandbox) or the AppImage start under
       # Ubuntu's unprivileged user-namespace restriction without --no-sandbox?
       - name: Linux packages and the Electron sandbox (report)
@@ -2497,8 +2493,7 @@ jobs:
             if ($koffi.Status -ne "NotSigned") { throw "koffi.node was signed" }
             "koffi.node: NotSigned, SHA-256 $((Get-FileHash -Algorithm SHA256 "$host_/native/win32-x64/koffi.node").Hash.ToLower())"
           '
-          # --without-product-host: see the package smoke step (#1811, until #1839).
-          node examples/desktop-bot-app/scripts/package/package-smoke.mjs --without-product-host
+          node examples/desktop-bot-app/scripts/package/package-smoke.mjs
       # #1830: the built renderer loads in the real app, under main's CSP: React
       # mounts one slot per section, the bundled stylesheet supplies the theme
       # tokens, and an injected inline script stays blocked. After the AppArmor
