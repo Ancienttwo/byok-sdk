@@ -1221,6 +1221,38 @@ jobs:
       - name: Bundle, ship and run the embedded Host
         run: node examples/packaging/embedded-host-smoke.mjs --format ${{ matrix.format }}
 
+      # #1803 D0 Windows rows that need no certificate: the koffi.node taken from
+      # the pinned archive equals the pin, and the shipped asset root is measured.
+      # The pin is read from the built client, not repeated here.
+      - name: D0 Windows - koffi.node equals the pin and asset root sizes
+        if: matrix.os == 'windows-latest' && matrix.format == 'sea'
+        working-directory: examples/packaging
+        run: |
+          node --input-type=module -e "
+          import { createHash } from 'node:crypto';
+          import { mkdtemp, readFile, readdir, stat, rm } from 'node:fs/promises';
+          import { appendFileSync } from 'node:fs';
+          import { tmpdir } from 'node:os';
+          import path from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          import { copySdkPackagingAssets } from '@byok-sdk/client/packaging';
+          const { KOFFI } = await import(pathToFileURL(path.resolve('../../packages/client/dist/sdk-native-assets-pin.js')).href);
+          const out = await mkdtemp(path.join(tmpdir(), 'd0-win-'));
+          try {
+            await copySdkPackagingAssets({ outDir: out, platform: 'win32', arch: 'x64' });
+            const koffi = path.join(out, 'native', 'win32-x64', 'koffi.node');
+            const actual = createHash('sha256').update(await readFile(koffi)).digest('hex');
+            console.log('koffi.node sha256 ' + actual + ' pin ' + KOFFI.sha256);
+            if (actual !== KOFFI.sha256) { console.error('::error::koffi.node differs from the pin'); process.exitCode = 1; }
+            const size = async dir => { let n = 0; for (const e of await readdir(dir, { withFileTypes: true })) n += e.isDirectory() ? await size(path.join(dir, e.name)) : (await stat(path.join(dir, e.name))).size; return n; };
+            const rows = ['### D0 Windows asset root', '', '| path | bytes |', '| --- | --- |'];
+            for (const e of await readdir(out, { withFileTypes: true })) rows.push('| ' + e.name + ' | ' + (e.isDirectory() ? await size(path.join(out, e.name)) : (await stat(path.join(out, e.name))).size) + ' |');
+            rows.push('| koffi.node | ' + (await stat(koffi)).size + ' |', '| total | ' + await size(out) + ' |');
+            console.log(rows.join('\n'));
+            if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, rows.join('\n') + '\n');
+          } finally { await rm(out, { recursive: true, force: true }); }
+          "
+
   # S7-c public npm guarantee: pack every published package (the aligned
   # train plus keys, all on one version; no umbrella since 0.21.0),
   # install the exact tarballs into a clean npm project, import every direct
