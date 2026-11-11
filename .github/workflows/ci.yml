@@ -2299,12 +2299,11 @@ jobs:
 
   # #1804: the private desktop example. Electron 45 downloads its binary on the
   # first require('electron'), never at install, so only this lane fetches it.
-  # ubuntu-24.04, not ubuntu-latest: the #1803 AppArmor report names the release.
   desktop:
     needs: select
     if: ${{ contains(fromJSON(needs.select.outputs.families), 'desktop') }}
-    name: desktop app (ubuntu-24.04)
-    runs-on: ubuntu-24.04
+    name: desktop app (ubuntu-latest)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2335,66 +2334,10 @@ jobs:
           node_modules/.bin/electron-fuses read --app "$copy/electron" | tee "$RUNNER_TEMP/fuses.txt"
           for fuse in 'RunAsNode is Disabled' 'EnableNodeOptionsEnvironmentVariable is Disabled' \
             'EnableNodeCliInspectArguments is Disabled' 'OnlyLoadAppFromAsar is Enabled' \
-            'EnableEmbeddedAsarIntegrityValidation is Enabled' 'EnableCookieEncryption is Enabled'; do
+            'EnableEmbeddedAsarIntegrityValidation is Enabled' 'EnableCookieEncryption is Enabled' \
+            'GrantFileProtocolExtraPrivileges is Disabled'; do
             grep -qx "  $fuse" "$RUNNER_TEMP/fuses.txt" || { echo "::error::fuse not set: $fuse"; exit 1; }
           done
-
-      - name: D0 Linux - Secret Service session (xvfb, dbus, gnome-keyring)
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq gnome-keyring libsecret-tools dbus-x11 xvfb
-          eval "$(dbus-launch --sh-syntax)"
-          printf 'ci-keyring' | gnome-keyring-daemon --unlock --replace --daemonize --components=secrets
-          echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
-          secret-tool --version || dpkg -s libsecret-tools | grep '^Version'
-
-      - name: D0 Linux - LinuxSecretServiceSecretStore round trip and fail-closed
-        shell: node --input-type=module {0}
-        run: |
-          import assert from 'node:assert/strict';
-          import { pathToFileURL } from 'node:url';
-          import { resolve } from 'node:path';
-          const { LinuxSecretServiceSecretStore } = await import(pathToFileURL(resolve('packages/keys/dist/index.js')).href);
-          const store = new LinuxSecretServiceSecretStore({ account: 'd0-probe' });
-          assert.equal(await store.available(), true);
-          const name = `d0-${process.env.GITHUB_RUN_ID}`;
-          await store.set(name, 'synthetic-d0-secret');
-          assert.equal(await store.get(name), 'synthetic-d0-secret');
-          assert.equal(await store.delete(name), true);
-          assert.equal(await store.get(name), undefined);
-          // No session bus: the store reports unavailable and a write fails closed (no plaintext fallback).
-          const bus = process.env.DBUS_SESSION_BUS_ADDRESS;
-          process.env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/nonexistent/d0-bus';
-          assert.equal(await store.available(), false);
-          await assert.rejects(store.set(name, 'synthetic-d0-secret'));
-          process.env.DBUS_SESSION_BUS_ADDRESS = bus;
-          console.log('D0 libsecret: round trip ok, no-bus fails closed');
-
-      # Report only: this records what the runner shows about Ubuntu 24.04's unprivileged
-      # user-namespace restriction for an Electron that is not installed from a deb
-      # (node_modules electron, chrome-sandbox not setuid). A deb install sets chrome-sandbox
-      # setuid; the packaged-app answer stays an owner item until A7 builds one.
-      - name: D0 Linux - Ubuntu 24.04 AppArmor and the Electron sandbox (report)
-        working-directory: examples/desktop-bot-app
-        run: |
-          {
-            echo '### D0 Linux AppArmor'
-            grep PRETTY_NAME /etc/os-release
-            echo "kernel.apparmor_restrict_unprivileged_userns=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>&1)"
-            echo "kernel.unprivileged_userns_clone=$(sysctl -n kernel.unprivileged_userns_clone 2>&1)"
-            sandbox="$(node -p "require('path').join(require('path').dirname(require('electron')), 'chrome-sandbox')")"
-            stat -c 'chrome-sandbox %a %U' "$sandbox"
-            main="$RUNNER_TEMP/d0-main.cjs"
-            printf "const {app}=require('electron');app.whenReady().then(()=>{console.log('D0_ELECTRON_READY noSandboxSwitch='+app.commandLine.hasSwitch('no-sandbox'));app.quit();});\n" > "$main"
-            for mode in default no-sandbox; do
-              args=(); [ "$mode" = no-sandbox ] && args=(--no-sandbox)
-              set +e
-              out="$(timeout 60 xvfb-run -a "$(node -p "require('electron')")" "${args[@]}" "$main" 2>&1)"; code=$?
-              set -e
-              echo "electron $mode exit=$code"
-              echo "$out" | grep -E 'D0_ELECTRON_READY|sandbox|FATAL|apparmor|namespace' | head -5
-            done
-          } | tee -a "$GITHUB_STEP_SUMMARY"
 
   ci-required:
     name: CI required

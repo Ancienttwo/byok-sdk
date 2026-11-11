@@ -15,6 +15,8 @@ export const APP_FUSES = {
   [FuseV1Options.OnlyLoadAppFromAsar]: true,
   [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
   [FuseV1Options.EnableCookieEncryption]: true,
+  // The renderer is served on app://, so file:// needs no extra privileges.
+  [FuseV1Options.GrantFileProtocolExtraPrivileges]: false,
 } as const;
 
 export function flipAppFuses(electronBinary: string): Promise<unknown> {

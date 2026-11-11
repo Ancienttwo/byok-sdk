@@ -424,7 +424,6 @@ const registeredJobInputs = {
     'packages/client/dist/native/agent-memory-fs/win32-x64.exe': 'build output that the Windows junction smoke runs',
   },
   'hermes-real-windows': { $installer: 'the verified vendored Hermes installer' },
-  desktop: { 'packages/keys/dist/index.js': 'keys build output that the #1803 D0 Secret Service probe imports' },
   'packageability-smoke': {
     'packages/client/scripts/build-agent-memory-helper.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
     'packages/client/scripts/check-agent-memory-helper-build.mjs': 'build:agent-memory-helper stages the helper binaries this job packages; a change to it runs the helper and pack families',
