@@ -1255,7 +1255,10 @@ export interface LoopbackListenerOptions {
 }
 export interface LoopbackListener {
     readonly serverUrl: string;
-    /** Closes only this listener and its connections, not the SDK or persisted assignment. */
+    /**
+     * Closes only this listener and its connections, not the SDK or persisted assignment.
+     * Requests not yet dispatched get 503; resolves after every dispatched handler settled, with no timeout.
+     */
     close(): Promise<void>;
 }
 /** Own a loopback socket before committing an identity's immutable URL. Never adopts another process's listener. */

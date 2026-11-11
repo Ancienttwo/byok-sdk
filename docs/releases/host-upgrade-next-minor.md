@@ -2,6 +2,10 @@
 
 Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Loopback listener close waits for handlers
+
+`LoopbackListener.close()` now resolves only after every dispatched handler has settled; before, it destroyed connections and resolved while a handler could still run. Requests not yet dispatched get 503. There is no timeout. Shut down in the order `daemon.stop()`, `listener.close()`, `server.close()`, and do not make a request-scoped hook wait on anything the Host releases after `listener.close()`, or `close()` never resolves. See [Embedded path](../device-setup.md#embedded-path).
+
 ## OpenCode start failures
 
 OpenCode now reports unclassified start failures as retryable infrastructure failures. A native process that exits on its own reports `runtime_exited` during start or a turn; an archived resume target is non-retryable, while a target in use is retryable. Session limits accept fractional interrupt milliseconds and report invalid limits as `invalid opencode interrupt timeout` or `invalid opencode retention budget` (#1681).
