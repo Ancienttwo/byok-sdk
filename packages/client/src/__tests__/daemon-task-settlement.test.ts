@@ -160,16 +160,19 @@ describe('Daemon.whenTaskSettled', () => {
   it('rejects the waiter of an offer whose journal append failed with that error', async () => {
     const append = vi.spyOn(SqliteLocalTaskJournal.prototype, 'appendEnvelope').mockRejectedValueOnce(new Error('disk I/O error'));
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { d } = await started(new StubRuntimeAdapter());
-    let settlement: Promise<DaemonTaskSettlement> | undefined;
-    d.subscribe((event) => {
-      if (event.kind === 'offered' && event.taskId === 'task-append-failed') settlement = d.whenTaskSettled('task-append-failed');
-    });
-    offer('task-append-failed');
-    await vi.waitFor(() => expect(settlement).toBeDefined());
-    await expect(settlement).rejects.toThrow('disk I/O error');
-    expect(append).toHaveBeenCalled();
-    vi.restoreAllMocks();
+    try {
+      const { d } = await started(new StubRuntimeAdapter());
+      let settlement: Promise<DaemonTaskSettlement> | undefined;
+      d.subscribe((event) => {
+        if (event.kind === 'offered' && event.taskId === 'task-append-failed') settlement = d.whenTaskSettled('task-append-failed');
+      });
+      offer('task-append-failed');
+      await vi.waitFor(() => expect(settlement).toBeDefined());
+      await expect(settlement).rejects.toThrow('disk I/O error');
+      expect(append).toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   describe('TaskSettlementRegistry waiters', () => {
@@ -207,11 +210,11 @@ describe('Daemon.whenTaskSettled', () => {
       await expect(r.wait('task-refused')).rejects.toBeInstanceOf(DaemonTaskUnknownError);
     });
 
-    it('reads a redelivered offer of a task settled before a restart from the journal', async () => {
-      const { registry: r } = registry('terminal:complete');
-      r.offerSeen('task-old');
-      r.offerJournaled('task-old');
-      await expect(r.wait('task-old')).resolves.toEqual({ terminal: 'complete', delivery: 'accepted', disposal: 'none' });
+    it('reads an offer as unknown once it is journaled without a row, not as seen', async () => {
+      const { registry: r } = registry();
+      r.offerSeen('task-gone');
+      r.offerJournaled('task-gone');
+      await expect(r.wait('task-gone')).rejects.toBeInstanceOf(DaemonTaskUnknownError);
     });
   });
 });

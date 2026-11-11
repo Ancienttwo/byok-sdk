@@ -100,7 +100,9 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
         // An offer with no journal row never reaches a terminal in this run unless
         // the mailbox redelivers it; its waiters fail with this error instead of waiting.
         if (envelope.type === 'task.offer' && envelope.task_id !== undefined) {
-          if (await activeJournal.readTask(envelope.task_id, journalIdentity) === undefined) taskSettlement.offerRefused(envelope.task_id, error);
+          // An unreadable journal leaves no row to trust: the waiters still fail with the original error.
+          const row = await activeJournal.readTask(envelope.task_id, journalIdentity).catch(() => undefined);
+          if (row === undefined) taskSettlement.offerRefused(envelope.task_id, error);
           else taskSettlement.offerJournaled(envelope.task_id);
         }
         throw error;
