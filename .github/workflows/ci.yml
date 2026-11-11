@@ -2297,10 +2297,52 @@ jobs:
       - name: Run the runtime contract suite
         run: bun run --filter @byok-sdk/client test:runtime-contract -- src/__tests__/runtime-contract/${{ matrix.runtime }}.contract.ts
 
+  # #1804: the private desktop example. Electron 45 downloads its binary on the
+  # first require('electron'), never at install, so only this lane fetches it.
+  desktop:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'desktop') }}
+    name: desktop app (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup fixed Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Verify pinned Bun archive
+        shell: node {0}
+        run: *verify-bun
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Install dependencies
+        run: bun ci
+      - name: Build
+        run: bun run build
+      - name: Download the Electron binary
+        working-directory: examples/desktop-bot-app
+        run: node -p "require('electron')"
+      - name: Bridge test
+        run: bun run --filter @byok-sdk/example-desktop-bot-app test
+      - name: Flip the app fuses on a copy of Electron and read them back
+        working-directory: examples/desktop-bot-app
+        run: |
+          copy="$RUNNER_TEMP/electron-fuses"
+          cp -R "$(dirname "$(node -p "require('electron')")")" "$copy"
+          node src/main/fuses.ts "$copy/electron"
+          node_modules/.bin/electron-fuses read --app "$copy/electron" | tee "$RUNNER_TEMP/fuses.txt"
+          for fuse in 'RunAsNode is Disabled' 'EnableNodeOptionsEnvironmentVariable is Disabled' \
+            'EnableNodeCliInspectArguments is Disabled' 'OnlyLoadAppFromAsar is Enabled' \
+            'EnableEmbeddedAsarIntegrityValidation is Enabled' 'EnableCookieEncryption is Enabled' \
+            'GrantFileProtocolExtraPrivileges is Disabled'; do
+            grep -qx "  $fuse" "$RUNNER_TEMP/fuses.txt" || { echo "::error::fuse not set: $fuse"; exit 1; }
+          done
+
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "packaging-consistency", "npm-release-pack", "release-pack-migrate", "service-upgrade-smoke", "linux-systemd-smoke", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "agy-real-windows", "opencode-real-windows", "runtime-contract"]
+    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "packaging-consistency", "npm-release-pack", "release-pack-migrate", "service-upgrade-smoke", "linux-systemd-smoke", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "agy-real-windows", "opencode-real-windows", "runtime-contract", "desktop"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
