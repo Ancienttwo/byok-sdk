@@ -535,7 +535,11 @@ const daemon = createDaemonWithAdapters({
   localAgentRelease,
 }, []);
 await daemon.unpair();
-const status = await readDeviceEnrollmentStatus({ productId, storeDir, nativeAssetRoot });
+const status = await readDeviceEnrollmentStatus({
+  productId,
+  storeDir,
+  ...(nativeAssetRoot === undefined ? {} : { nativeAssetRoot }),
+});
 if (status.state !== 'unpaired') throw new Error('enrollment still present');
 ```
 
@@ -548,6 +552,9 @@ if (status.state !== 'unpaired') throw new Error('enrollment still present');
 - Unpair before deleting the data directory. `unpair()` takes the daemon owner
   lease, which recreates `storeDir` if it is already gone.
 - On Windows, pass `nativeAssetRoot`; the native credential backend loads from it.
+- A Host that sets `deviceCredentials` (for example `macosKeychainPath`) passes the
+  same `deviceCredentials` to both `createDaemonWithAdapters` and
+  `readDeviceEnrollmentStatus`.
 - `byok-agent unpair --yes --config <file>` runs the same `Daemon.unpair()` and
   adds the control-socket shutdown and service-status checks. The in-process
   route has neither, so the Host keeps its own "daemon not running" guard.
