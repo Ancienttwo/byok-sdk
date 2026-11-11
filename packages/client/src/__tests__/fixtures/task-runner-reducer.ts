@@ -164,6 +164,9 @@ export const ROW_FIXTURES: ReadonlyMap<string, RowFixture> = new Map<string, Row
   ['C7', fixture(makeEvent('runtime.start_failed', { reason: 'spawn failed', retryable: true }), {
     task: { phase: 'claimed' },
   })],
+  ['C7b', fixture(makeEvent('runtime.prestart_failed', { reason: 'blob failed', retryable: true }), {
+    task: { phase: 'claimed' },
+  })],
   ['C8', fixture(makeEvent('runtime.activation_failed', { reason: 'bind failed' }), {
     task: { phase: 'claimed' },
   })],

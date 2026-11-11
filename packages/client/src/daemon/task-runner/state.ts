@@ -501,6 +501,7 @@ export type ReducerEventType =
   | 'runtime.started'
   | 'runtime.activation_failed'
   | 'runtime.start_failed'
+  | 'runtime.prestart_failed'
   | 'runtime.run_failed'
   | 'turn.ended'
   | 'stream.ended'
@@ -1398,6 +1399,42 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
     },
     rejection:
       'With a cancel: send task.cancelled, never task.fail. Without one: failClaimedAgent with retryable from the failure/stoppingOffers state.',
+  },
+  {
+    id: 'C7b',
+    events: ['runtime.prestart_failed'],
+    phase: ['claimed'],
+    when: (snapshot) => snapshot.task?.terminal === undefined,
+    apply: (snapshot, event) => {
+      const task = taskOf(snapshot);
+      const terminal = selectTerminal(task, {
+        kind: 'failed',
+        cause: 'failed',
+        reason: event.reason ?? 'claimed task failed before runtime start',
+        retryable: event.retryable ?? false,
+      });
+      return {
+        runner: runnerWith(snapshot.runner, {
+          finished: addUniqueBounded(snapshot.runner.finished, task.taskId),
+        }),
+        task: taskWith(task, {
+          phase: 'terminalizing',
+          terminal,
+          teardown: { ...task.teardown, hostContexts: 'revoked', blob: 'aborted' },
+        }),
+        effects: [
+          atom('revoke.contexts', { token: terminal.token }, { requires: CLEANUP }),
+          barrier('failClaimedAgent', {
+            token: terminal.token,
+            ...(terminal.reason === undefined ? {} : { reason: terminal.reason }),
+            retryable: terminal.retryable ?? false,
+          }, { requires: CLAIMED }),
+          ...claimedCleanupEffects(),
+        ],
+      };
+    },
+    rejection:
+      'A claimed task refused after claim and before runtime start (#1760): always the failed terminal, because the legacy adapter always sends task.fail; no startup owner exists yet.',
   },
   {
     id: 'C8',
@@ -2854,7 +2891,7 @@ const FALLBACK_ROWS: readonly TransitionRow[] = [
   /* @__PURE__ */ fallbackRow('F-ADMISSION', ['admission.begin', 'admission.stage', 'admission.declined', 'admission.claimable']),
   /* @__PURE__ */ fallbackRow('F-CLAIM', ['claim.journaled', 'claim.journal_failed', 'claim.sent']),
   /* @__PURE__ */ fallbackRow('F-STARTUP', ['startup.registered', 'startup.transferred', 'startup.disposed']),
-  /* @__PURE__ */ fallbackRow('F-RUNTIME', ['runtime.session_bound', 'runtime.started', 'runtime.activation_failed', 'runtime.start_failed', 'runtime.run_failed']),
+  /* @__PURE__ */ fallbackRow('F-RUNTIME', ['runtime.session_bound', 'runtime.started', 'runtime.activation_failed', 'runtime.start_failed', 'runtime.prestart_failed', 'runtime.run_failed']),
   /* @__PURE__ */ fallbackRow('F-TURN', ['turn.ended', 'stream.ended', 'resource.exceeded']),
   /* @__PURE__ */ fallbackRow('F-APPROVAL', ['approval.requested', 'approval.dispatch_next', 'approval.decided', 'approval.withdrawn', 'approval.stale']),
   /* @__PURE__ */ fallbackRow('F-TERMINAL', ['terminal.requested', 'terminal.evidence', 'terminal.envelope_ready', 'terminal.envelope_failed', 'terminal.sent', 'terminal.close', 'terminal.commit', 'retry.finalization', 'finish.completed']),

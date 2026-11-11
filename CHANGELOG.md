@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (client; #1760)** — Redelivered offers for tasks that failed after claim but before the runtime started (instruction blob, native sessions, Agent memory, resident MEMORY.md or file scope failures) no longer claim and fail the task again. These failures now retain the task in the bounded finished collection; the first `task.claim` and `task.fail` are unchanged.
+
 - **Fixed (client; #1732)** — `byok-agent doctor` now names `secure_dir_mode <storeDir>` with a hint when the daemon is offline, no refusal is recorded, and the process-owned store root's mode is not 0700. A daemon that cannot set that mode refuses to start before it can record anything, so doctor previously showed only `daemon offline`. A foreign-owned store root is still not reported.
 - **Fixed (client; #1732)** — `ensureSecureDir` no longer swallows a failed chmod: an owned directory whose mode is not 0700 is set to 0700, and one that cannot be set is refused with `SecureDirModeError` (`secure_dir_mode`, chmod error as `cause`). A directory already 0700 is not chmod'ed. The store root (`ensureSecureStoreRoot`) follows the same rule only when the process owns it; a foreign-owned storeDir keeps the mode its owner set. New refusals: an owned directory on a mount that ignores chmod, and, under a sandbox that denies chmod, an owned directory whose mode is not 0700.
 
