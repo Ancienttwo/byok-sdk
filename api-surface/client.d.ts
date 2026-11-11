@@ -6829,16 +6829,21 @@ import type { DeviceCredentialBackend } from './device-credential-store.js';
 declare const CLEAR_MESSAGES: {
     readonly store_owned: 'another process holds this store\'s owner lease (a daemon, doctor or installer); the enrollment is unchanged';
     readonly store_not_bound: 'the OS credential entry for this productId holds an enrollment this storeDir did not pair; nothing was cleared';
-    readonly clear_failed: 'the device enrollment could not be fully cleared; a retry is safe';
+    readonly clear_failed: 'the device enrollment could not be cleared; see the cause';
 };
 export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
 /**
  * Why a device enrollment clear refused or failed:
  * - `store_owned`: another process holds the store's owner lease. It may be a
  *   running daemon, a doctor or an installer; nothing was read or cleared.
- * - `store_not_bound`: the OS entry holds an enrollment another storeDir paired.
- * - `clear_failed`: a credential provider or filesystem step failed; `cause`
- *   holds that error. A retry is safe.
+ * - `store_not_bound`: the OS entry holds an enrollment another storeDir
+ *   paired; nothing was cleared.
+ * - `clear_failed`: `cause` holds the error. A `device.json` that cannot be
+ *   parsed (`DeviceRecordRePairRequiredError`) is refused before anything is
+ *   deleted; the store needs a re-pair. A credential provider failure leaves
+ *   the store paired. A failed `device.json` removal after the credential was
+ *   deleted leaves a valid projection without its credential, which a retry
+ *   clears.
  */
 export declare class DeviceEnrollmentClearError extends Error {
     readonly code: DeviceEnrollmentClearErrorCode;
@@ -6855,7 +6860,12 @@ export interface EnrollmentCustody {
  * The one enrollment clear, shared by `Daemon.unpair()` and
  * {@link clearDeviceEnrollment}; the caller holds the store's owner lease.
  * `readCurrent` reads the bound enrollment under that lease, so another
- * store's OS entry is refused before anything is deleted. The member entries
+ * store's OS entry is refused before anything is deleted. A `device.json`
+ * that cannot be parsed is refused too, with its
+ * `DeviceRecordRePairRequiredError`: nothing proves the productId-wide OS
+ * entry is this store's, and `remove()` could never delete that file. A valid
+ * projection without its credential (left by a failed metadata removal) is
+ * cleared. The member entries
  * go first and the credential is read back after deletion: any failure up to
  * there leaves the device paired. `onCredentialCleared` runs once the
  * credential is gone, before `device.json` is removed. Returns the cleared

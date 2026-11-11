@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "f03d2dfee4bd37e01e6e061952f69d7dae8448a8b363859d92c6d2b0ced17557"
+    "snapshotSha256": "eb1abf8f960c8b3f9d391a83ba005234380e8055dc6fff48f772244c5151d0bc"
   },
   "configFields": {
     "status": "tracked",
@@ -326,7 +326,7 @@
     {
       "id": "clear-device-enrollment",
       "impact": "additive",
-      "summary": "clearDeviceEnrollment({ productId, storeDir, nativeAssetRoot?, deviceCredentials? }) clears one store's device enrollment without a daemon or serverUrl, under the store's owner lease: member custody entries, the device credential with a read-back, then device.json, the same clear Daemon.unpair() runs; it leaves the delivery cursor file. It throws the new DeviceEnrollmentClearError with code store_owned (another process holds the lease; nothing is read), store_not_bound (the OS entry holds another store's enrollment; it stays) or clear_failed (the provider or filesystem error is the cause). Host-visible on an existing path: Daemon.unpair() now throws DeviceEnrollmentClearError clear_failed, with the provider error as cause, when the device credential cannot be deleted, instead of an untyped Error; a Host that matched that error's text reads the code instead (#1841).",
+      "summary": "clearDeviceEnrollment({ productId, storeDir, nativeAssetRoot?, deviceCredentials? }) clears one store's device enrollment without a daemon or serverUrl, under the store's owner lease: member custody entries, the device credential with a read-back, then device.json, the same clear Daemon.unpair() runs; it leaves the delivery cursor file. It throws the new DeviceEnrollmentClearError with code store_owned (another process holds the lease; nothing is read), store_not_bound (the OS entry holds another store's enrollment; it stays) or clear_failed (the provider or filesystem error is the cause); a device.json that cannot be parsed is refused as clear_failed before anything is deleted and needs a re-pair. Host-visible on an existing path: Daemon.unpair() now throws DeviceEnrollmentClearError clear_failed, with the provider error as cause, when the device credential cannot be deleted, instead of an untyped Error; a Host that matched that error's text reads the code instead (#1841).",
       "migration": "docs/releases/host-upgrade-next-minor.md#clearing-a-device-enrollment-without-a-daemon",
       "items": [
         "export:@byok-sdk/client#DeviceEnrollmentClearError",

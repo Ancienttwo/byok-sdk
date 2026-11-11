@@ -556,9 +556,12 @@ await clearDeviceEnrollment({
 - `DeviceEnrollmentClearError.code` is `store_owned` when another process holds
   the owner lease (nothing is read or cleared), `store_not_bound` when the OS
   entry holds an enrollment another `storeDir` paired (it is left in place), or
-  `clear_failed` with the provider or filesystem error as `cause`. A failure
-  before the credential is deleted leaves the store paired, and a retry is safe.
-  A store with no enrollment clears successfully.
+  `clear_failed` with the provider or filesystem error as `cause`. A
+  `device.json` that cannot be parsed is refused as `clear_failed` before
+  anything is deleted; that store needs a re-pair. A credential provider
+  failure leaves the store paired. If removing `device.json` fails after the
+  credential was deleted, a retry clears the valid projection that remains. A
+  store with no enrollment clears successfully.
 - It clears the OS credential set of the account it runs as. A Windows
   `LocalSystem` service's enrollment is out of an interactive user's reach.
 - Clear before deleting the data directory. The owner lease recreates

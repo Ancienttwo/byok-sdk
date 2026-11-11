@@ -11,7 +11,7 @@ import type { DeviceCredentialBackend } from './device-credential-store.js';
 const CLEAR_MESSAGES = {
   store_owned: 'another process holds this store\'s owner lease (a daemon, doctor or installer); the enrollment is unchanged',
   store_not_bound: 'the OS credential entry for this productId holds an enrollment this storeDir did not pair; nothing was cleared',
-  clear_failed: 'the device enrollment could not be fully cleared; a retry is safe',
+  clear_failed: 'the device enrollment could not be cleared; see the cause',
 } as const;
 
 export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
@@ -20,9 +20,14 @@ export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
  * Why a device enrollment clear refused or failed:
  * - `store_owned`: another process holds the store's owner lease. It may be a
  *   running daemon, a doctor or an installer; nothing was read or cleared.
- * - `store_not_bound`: the OS entry holds an enrollment another storeDir paired.
- * - `clear_failed`: a credential provider or filesystem step failed; `cause`
- *   holds that error. A retry is safe.
+ * - `store_not_bound`: the OS entry holds an enrollment another storeDir
+ *   paired; nothing was cleared.
+ * - `clear_failed`: `cause` holds the error. A `device.json` that cannot be
+ *   parsed (`DeviceRecordRePairRequiredError`) is refused before anything is
+ *   deleted; the store needs a re-pair. A credential provider failure leaves
+ *   the store paired. A failed `device.json` removal after the credential was
+ *   deleted leaves a valid projection without its credential, which a retry
+ *   clears.
  */
 export class DeviceEnrollmentClearError extends Error {
   constructor(readonly code: DeviceEnrollmentClearErrorCode, options?: ErrorOptions) {
@@ -41,7 +46,12 @@ export interface EnrollmentCustody {
  * The one enrollment clear, shared by `Daemon.unpair()` and
  * {@link clearDeviceEnrollment}; the caller holds the store's owner lease.
  * `readCurrent` reads the bound enrollment under that lease, so another
- * store's OS entry is refused before anything is deleted. The member entries
+ * store's OS entry is refused before anything is deleted. A `device.json`
+ * that cannot be parsed is refused too, with its
+ * `DeviceRecordRePairRequiredError`: nothing proves the productId-wide OS
+ * entry is this store's, and `remove()` could never delete that file. A valid
+ * projection without its credential (left by a failed metadata removal) is
+ * cleared. The member entries
  * go first and the credential is read back after deletion: any failure up to
  * there leaves the device paired. `onCredentialCleared` runs once the
  * credential is gone, before `device.json` is removed. Returns the cleared
@@ -56,8 +66,11 @@ export async function clearEnrollmentUnderLease(
   try {
     current = await readCurrent();
   } catch (error) {
-    // A legacy or partial projection is cleared like a paired one.
     if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
+    // Re-pair-required is either a valid projection without its credential,
+    // which is cleared, or a projection that cannot be parsed, whose load
+    // throws here before anything is deleted.
+    await custody.store.load();
   }
   await custody.memberRecords?.clear();
   try {
@@ -66,8 +79,8 @@ export async function clearEnrollmentUnderLease(
     throw new DeviceEnrollmentClearError('clear_failed', { cause: error });
   }
   onCredentialCleared();
-  // A failure here leaves a projection without its credential, which reads
-  // as re-pair-required; a retry removes it.
+  // A failure here leaves a valid projection without its credential, which
+  // reads as re-pair-required; a retry removes it.
   await custody.store.remove();
   return current;
 }
@@ -109,6 +122,7 @@ export async function clearDeviceEnrollment(
   try {
     await clearEnrollmentUnderLease(custody, async () => {
       const read = await readStoreEnrollment(custody.store);
+      if (read.state === 're_pair_required') throw new DeviceRecordRePairRequiredError();
       return read.state === 'paired' ? read.record : undefined;
     });
   } catch (error) {
