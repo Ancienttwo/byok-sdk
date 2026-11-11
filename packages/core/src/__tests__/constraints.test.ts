@@ -653,6 +653,6 @@ describe('sealed provider secret', () => {
     for (const internal of ['setupBaseSender', 'setupBaseRecipient', 'hpkeAeadSeal', 'hpkeAeadOpen', 'hpkeNonce', 'hpkeSealBase', 'hpkeOpenBase']) {
       expect(exported).not.toContain(internal);
     }
-    expect(stripComments(read('index.ts'))).not.toContain("'./hpke'");
+    expect(stripComments(read('index.ts'))).not.toContain("'./hpke.js'");
   });
 });

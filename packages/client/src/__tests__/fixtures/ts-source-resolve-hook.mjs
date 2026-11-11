@@ -3,8 +3,9 @@
 // Two Node features do the work and neither is a new dependency: type
 // stripping (on by default since 22.18; `.node-version` pins 24.22.1) erases the
 // annotations, and `module.registerHooks` (22.15+) supplies the one thing
-// stripping does not — Node's ESM resolver never guesses extensions, and this
-// package's own imports are extensionless (`'../runtime-failure'`).
+// stripping does not — Node's ESM resolver never guesses extensions or maps
+// `.js` to `.ts`, and this package's source imports name `.js`
+// (`'../runtime-failure.js'`) while its tests import extensionless.
 //
 // It exists because the host-exit backstop can only be proven by a REAL
 // `process.exit()` in a real process, which the vitest worker cannot perform on

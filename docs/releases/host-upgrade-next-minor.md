@@ -416,6 +416,7 @@ code that compiled against `any`; fix them against the real types.
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
+- [ ] Before rebaselining, re-diff the 23 items of the `dts-node-next-specifiers` manifest entry against 0.41.0: the entry carries no per-item digest, so any change beyond the `.js` specifier spelling needs its own entry (#1828).
 - [ ] Run the H `unmigrated_dreams` and L `legacy_home` queries on v0.41.0; both must be 0 before the upgrade (#1669).
 - [ ] Run `HostedCollaborationStore.migrate()` on every existing hosted schema, then set `setBotAutonomy(..., 'auto')` for each Bot that must keep acting on its own (#1662).
 - [ ] Run `migrateWouldDo(ledger)` on each L ledger and `HostedCollaborationStore.migrate()` on each H schema; record the archived would-do count (#1756).
