@@ -14,8 +14,9 @@ function hostOfferSelectionRule(payload: Parameters<typeof offerSelectionViolati
   }
 }
 
-// safeExtend retains the wire's cross-field rules. Its static subtype check
-// needs an explicit widening here: those rules inspect commit and nativeSessions presence only.
+// safeExtend retains the wire's structural cross-field rules, which never read
+// agentMemoryCommit or nativeSessions; offerSelectionViolation checks both. The
+// static subtype check still needs an explicit widening for the Host values.
 export const HostOfferPlainPayloadSchema = TaskOfferPlainPayloadSchema.safeExtend<typeof fields>(fields as never).superRefine(hostOfferSelectionRule);
 export const HostOfferSealedPayloadSchema = TaskOfferSealedPayloadSchema.safeExtend<typeof fields>(fields as never).superRefine(hostOfferSelectionRule);
 type HostOfferPayload<T> = Omit<T, 'agentMemoryCommit' | 'nativeSessions'> & {

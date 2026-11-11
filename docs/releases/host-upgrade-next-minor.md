@@ -273,17 +273,20 @@ A Bot reply is now visible only when its Turn's outcome committed: iff the Turn'
 
 ## Offer selection rules
 
-`@byok-sdk/protocol` exports `offerSelectionViolation(payload)` and the types `OfferSelectionRule` and `OfferSelectionViolation` (#1674). The three offer selection rules have one definition, which the Host offer schemas and the daemon both run. A `HostOfferPlainPayloadSchema` or `HostOfferSealedPayloadSchema` issue carries `params.rule`, and the daemon declines the same offer with `task.decline.code` equal to that rule:
+`@byok-sdk/protocol` exports `offerSelectionViolation(payload)` and the types `OfferSelectionRule` and `OfferSelectionViolation` (#1674). The offer selection rules have one definition, which the Host offer schemas and the daemon both run. A `HostOfferPlainPayloadSchema` or `HostOfferSealedPayloadSchema` issue carries `params.rule`, and the daemon declines the same offer with `task.decline.code` equal to that rule:
 
 | Rule (`params.rule` and decline `code`) | Schema path |
 | --- | --- |
-| `agent_memory_selection_invalid` | `['agentMemory']` |
+| `agent_memory_selection_invalid` | `['agentMemory']` (reader with a read-write `agentMemory`), then `['agentMemoryCommit']` (reader with `agentMemoryCommit`) |
+| `native_sessions_selection_invalid` | the first `nativeSessions` field combination it breaks, in the order of the [Offer selection rules table](../protocol.md#32-declined-vs-failed-m1-gap-5) |
 | `runtime_selection_mismatch` | `['runtime']` |
 | `harness_selection_conflict` | `['harnessId']` |
 
-Rules are checked in that order, and a payload that breaks several reports only the first: one `ZodError` issue instead of one per rule. A Host that counted these issues or read a later path must read the first issue's `params.rule`.
+Rules are checked in that order, and a payload that breaks several reports only the first: one `ZodError` issue instead of one per rule. A Host that counted these issues or read a later path must read the first issue's `params.rule`. The order is a contract, defined by the **Offer selection rules** table in [protocol §3.2](../protocol.md); a later rule is appended at the end only.
 
-These declines are non-retryable, and their `reason` is `<rule>: <message>`. Classify them by `code`; `reason` is display text only. `readDeclineCode` reads the three codes as typed values; an earlier SDK reads them as `unknown` with `reportedCode`.
+These declines are non-retryable, and their `reason` is `<rule>: <message>`. Classify them by `code`; `reason` is display text only. `readDeclineCode` reads the four codes as typed values; an earlier SDK reads them as `unknown` with `reportedCode`.
+
+**Behavior change (#1757).** The reader + `agentMemoryCommit` rule and the `nativeSessions` combination rules moved out of the wire `task.offer` refinement into `offerSelectionViolation`. `TaskOfferPlainPayloadSchema`, `TaskOfferSealedPayloadSchema`, `TaskOfferPayloadSchema` and `parseMessage` now accept such an offer; the Host offer schemas still refuse it, now with one issue carrying `params.rule`. A device that receives one declines it non-retryably with that code, and its cursor moves past the offer; before, the envelope failed decoding and froze the device's acknowledgement cursor. A Host that validates offers with the wire schema and sends through a non-SDK sender now gets this non-retryable decline instead of a submit-time refusal: validate Host input with `HostOfferPlainPayloadSchema` / `HostOfferSealedPayloadSchema` or `offerSelectionViolation`. Structural offer rules (prepared shape, `egressPolicy`, `routineRef`) still fail decoding.
 
 **Breaking (cloud).** Enqueueing an offer whose `harnessId` the device did not advertise now throws `ByokCloudError` with code `agent_capability_missing` instead of `coordination_input_invalid`; the message is unchanged. A Host that branches on `coordination_input_invalid` for this refusal must branch on `agent_capability_missing`.
 

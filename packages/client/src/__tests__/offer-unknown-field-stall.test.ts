@@ -15,6 +15,7 @@ import { createEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
+import { PI_MEMORY_LANE } from '../bin/pi-memory-lane';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -91,5 +92,33 @@ describe('task.offer with a field this build does not know', () => {
     await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId);
     expect(adapter.startCalls).toHaveLength(1);
     await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server!.url, deviceId)).toBe(seq));
+  });
+
+  // #1757: a semantic selection rule is no longer a decode failure, so the device declines it and its cursor moves on.
+  it('declines a nativeSessions offer with homeAccess non-retryably and moves the cursor past it and the next envelope', async () => {
+    server = await TestServer.start();
+    const storeDir = await tmpDir('byok-offer-native-rule-store-');
+    const stub = new StubRuntimeAdapter('pi');
+    const adapter = Object.create(stub, { descriptor: { value: { ...stub.descriptor, memoryLane: PI_MEMORY_LANE } } }) as StubRuntimeAdapter;
+    daemon = createDaemonWithAdapters({
+      storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-offer-native-rule' },
+      productName: 'Offer native rule test', productId: 'offer-native-rule-test', serverUrl: server.url, storeDir,
+      agentHome: { hostStorageRoot: await tmpDir('byok-offer-native-rule-home-') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
+      nativeSessions: true,
+      piByokLauncher: { command: 'byok-pi-launcher', profileDbPath: path.join(storeDir, 'profiles.db'), sessionDir: path.join(storeDir, 'sessions') },
+    }, [adapter]);
+    const { deviceId } = await daemon.pair('offer-native-rule-pair-code');
+    await daemon.start();
+    expect(((await server.waitFor((envelope) => envelope.type === 'conn.hello')).payload as { capabilities: string[] }).capabilities).toContain('native-sessions');
+    const seq = server.nextSeq();
+    server.send(createEnvelope('task.offer', {
+      agentRef: { agentId: 'native-rule-agent', profileRevision: 'profile-r1' }, session: { mode: 'fresh' }, instruction: 'dream',
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 }, homeAccess: 'memory-reader',
+    }, { taskId: 'offer-native-rule', seq }));
+    server.send(createEnvelope('task.cancel', {}, { taskId: 'offer-native-rule-other', seq: server.nextSeq() }));
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'offer-native-rule');
+    expect(decline.payload).toMatchObject({ code: 'native_sessions_selection_invalid', retryable: false });
+    expect(adapter.startCalls).toHaveLength(0);
+    await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server!.url, deviceId)).toBe(seq + 1));
   });
 });

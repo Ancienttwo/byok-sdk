@@ -1089,11 +1089,14 @@ its memory admission.
 
 **`nativeSessions: { fromMs, toMs }` selects native Pi session input for a dream
 ([#1526](https://github.com/Ancienttwo/byok-sdk/issues/1526)).** Both timestamps are
-integers and `fromMs <= toMs`. The strict offer validator admits the field only
-with a fresh session, `agentMemory: 'none'`, and `terminalProjection` absent or
+integers and `fromMs <= toMs`. The offer selection rule
+`native_sessions_selection_invalid` (§3.2,
+**Offer selection rules**) admits the field only with a fresh
+session, `agentMemory: 'none'`, and `terminalProjection` absent or
 `{ mode: 'none' }`. It rejects any `agentMemoryCommit`, `homeAccess`, `preparation`,
-`requiredToolsets`, `messageEgress` or `harnessId`. The same rules apply to plain,
-sealed and Host input payloads, before conditional resolution. The wire-addition
+`requiredToolsets`, `messageEgress` or `harnessId`. The Host offer schemas refuse
+such a plain or sealed payload before conditional resolution; the wire decoder
+accepts it, and a device declines it non-retryably. The wire-addition
 offer row requires the target device's `native-sessions` capability; a literal
 window has a strict gate, while the Host's `ifAdvertised: true` value resolves at
 enqueue as described in §2.1.
@@ -1157,7 +1160,8 @@ directory the runtime removed is not created again. The field combines with ever
 `agentMemory` value, because file tools can change memory under `none` and `read`
 too.
 
-- `homeAccess: 'memory-reader'` with this field fails schema validation. A reader
+- `homeAccess: 'memory-reader'` with this field breaks the offer selection rule
+  `agent_memory_selection_invalid` (path `['agentMemoryCommit']`, §3.2). A reader
   reads the live files, so it can see a writer's writes before they are kept or
   restored, and its terminal reports a restore as an `unattributed` change.
 - A device configured for durable Pi declines an offer with this field without
@@ -2442,10 +2446,26 @@ read as `unknown` with `reportedCode`), selected by the rejected
 Attempt's requested home access. This includes capacity, lease acquisition,
 reader resume/run-directory and home initialization conflicts reported as
 `AgentHomeBusyError`. An offer that breaks an offer selection rule
-(`offerSelectionViolation`, checked in this order) is declined non-retryable
-with `code` equal to the rule: `agent_memory_selection_invalid`,
-`runtime_selection_mismatch` or `harness_selection_conflict`, and `reason`
-`<rule>: <message>`. A Host can check before it enqueues:
+(`offerSelectionViolation`) is declined non-retryable with `code` equal to the
+rule and `reason` `<rule>: <message>`.
+
+**Offer selection rules.** The predicate returns only the first
+violation, in the order of this table, which is the single source of truth for
+which rule wins on an offer that breaks several. The order is a contract: a new
+rule is appended at the end only.
+
+| Order | Rule (decline `code`, `params.rule`) | Condition | Path |
+| --- | --- | --- | --- |
+| 1 | `agent_memory_selection_invalid` | `homeAccess: 'memory-reader'` with `agentMemory` `read-write` or `read-write-if-admitted` | `['agentMemory']` |
+| 2 | `agent_memory_selection_invalid` | `homeAccess: 'memory-reader'` with `agentMemoryCommit` | `['agentMemoryCommit']` |
+| 3 | `native_sessions_selection_invalid` | `nativeSessions` with a session that is not fresh, `agentMemory` other than `none` (or absent), a `terminalProjection` other than `none`, or any of `agentMemoryCommit`, `homeAccess`, `preparation`, `requiredToolsets`, `messageEgress`, `harnessId`, checked in that order | the first such field |
+| 4 | `runtime_selection_mismatch` | `runtime` differs from `dispatchSelection.runtimeId` | `['runtime']` |
+| 5 | `harness_selection_conflict` | `harnessId` with `runtime` or `dispatchSelection` | `['harnessId']` |
+
+The device runs the capability and `native_sessions_unsupported` gates before
+the predicate, so those codes win over these rules. The wire decoder does not
+run these rules; a structural `task.offer` rule (prepared shape, `egressPolicy`,
+`routineRef`) still fails decoding. A Host can check before it enqueues:
 `HostOfferPlainPayloadSchema.safeParse(payload)` gives the same answer as the
 kernel, and its issue's `params.rule` equals the decline code the device would
 send; a sealed task's decline carries the same code. The sealed decline
