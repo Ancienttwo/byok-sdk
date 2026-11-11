@@ -2709,6 +2709,122 @@ metadata-only result projection. It remains host glue rather than public SDK
 API; Google verification/security assessment and the subprocess's OS authority
 remain host deployment responsibilities.
 
+## Host extension seams without a plugin API (#1846)
+
+A Host extends a device with declarations the SDK already has. There is no
+plugin runtime, no composition function and no plugin-side lifecycle hook: the
+decision and its reasoning are on #1846, and this section names the seams and
+the one recipe that ties them together. The skill seam per runtime is in the
+[adapter capability document](adapter-capabilities.md#host-provided-skills-by-runtime-1846).
+
+**The seams that exist.** Four, all Host-declared before the daemon starts:
+
+- Runtime adapters: `createDaemonWithAdapters(config, adapters, overrides)`
+  (`packages/client/src/daemon/create-daemon.ts:854`) takes Host-built
+  `RuntimeAdapter` instances, and `createRuntimeAdapters` builds the SDK ones
+  from the same options. The list is fixed at construction, and
+  `injectedAdapterConfigConflicts` refuses `DaemonConfig.codexSandbox`,
+  `DaemonConfig.runtimeEnvironment` and `DaemonConfig.runtimes` on that path,
+  because each of them configures an adapter that `createDaemon` builds.
+- MCP toolsets: `DaemonConfig.mcpToolsets`
+  (`packages/client/src/daemon/create-daemon.ts:357`), a
+  `Record<string, McpToolsetConfig>` of stdio servers.
+- Approvals: the optional `approveTools` on each `McpToolsetConfig` server
+  (`packages/client/src/types.ts:203`).
+- Tool authorization: `DaemonConfig.toolAuthorization`, the
+  `ToolAuthorizationPolicy` of `auto` and `all` with rules (see
+  [Tool authorization](#tool-authorization-auto-and-all-1061)).
+
+The capability set a device advertises is derived from those, never authored.
+`computeCapabilities` (`packages/client/src/daemon/create-daemon/support.ts:169`)
+advertises `toolset-selection` only when some adapter's
+`descriptor.capabilities.mcpToolsets` is `true`.
+`conn.hello.configuredToolsets` and the presence `configuredToolsets` read
+`toolsetRegistry.snapshot().configuredToolsets` when the message is sent
+(`create-daemon/start-connection.ts:40`, `create-daemon/presence.ts:159`), and
+a task that names `requiredToolsets` is admitted only on an adapter whose
+descriptor declares `mcpToolsets`
+(`task-runner/support.ts:406`, `unmetRequirements`). A Host writes
+no capability string of its own.
+
+**One declaration per product toolset.** A Host declares each product toolset
+once, as `{ id, server, mcp, approveTools, readOnly }`, and projects the
+fields:
+
+| Field | Projected to |
+| --- | --- |
+| `id` | the key in `DaemonConfig.mcpToolsets`, and the value a Host puts in an offer's `requiredToolsets` |
+| `server` | the server name key inside `McpToolsetConfig.mcpServers` |
+| `mcp` | that server's `command` and `args` |
+| `approveTools` | that server's `approveTools` |
+| `readOnly` | the Host's own `readOnlyToolsets` list |
+
+`id` must satisfy `ToolsetIdSchema` (`packages/protocol/src/messages.ts:207`).
+`server` is stricter than `id`: it must also be expressible as a runtime MCP
+server name (1-64 of `A-Z a-z 0-9 _ -`, not starting with `-`) and must not be
+an SDK-reserved name (`packages/client/src/daemon/toolset-registry.ts:164`).
+`command` must be an absolute path: `mcp_toolset_command_not_absolute` and
+`mcp_toolset_command_option_like` are raised when the registry is built or
+reloaded (`packages/client/src/daemon/toolset-registry.ts:99`), so a relative
+command name never reaches admission or a runtime `start()`. A server accepts
+only `command`, `args` and `approveTools` (`toolset-registry.ts:180`).
+`readOnlyToolsets` is the Host's list and is enforced where the Host composes
+offers: `ownReadOnlyToolsets` validates the ids
+(`examples/bot-collaboration/src/toolset-policy.ts:4`) and `admitBotToolsets`
+refuses an execution whose `requiredToolsets` names a toolset the list does not
+hold (`examples/bot-collaboration/src/rules/team.ts:14`).
+
+One declaration per product toolset is enough. A toolset carrying
+`approveTools` runs on every runtime since 0.35.0: the daemon projects the
+grant only to a runtime whose descriptor declares `mcpToolApprovals: true`
+(Codex, `packages/client/src/adapters/codex/codex-adapter.ts:139`,
+`task-runner/offer-runtime.ts:239`), and it takes no part in admission or
+runtime selection (#1324). A Host that split a toolset into one id per runtime
+can merge the copies.
+
+**A CLI tool is an MCP stdio toolset.** The wire carries a logical id and
+nothing else, and the daemon starts a toolset server as one stdio child with
+`command` and `args`. A CLI tool therefore reaches a task exactly as an SDK
+connector does: a Host-written stdio MCP server whose `command` is that CLI.
+There is no second shape and no per-runtime CLI option to add. The daemon
+appends one path as the last argument of every host toolset server, so the
+server must accept that argument (see [Task-scoped tool
+authority](#task-scoped-tool-authority-byok-task-assertion-v1)).
+
+**Task category is a Host-side rule.** An offer carries `requiredToolsets` and
+no category: `OFFER_FIELDS` (`packages/protocol/src/messages.ts:447`) lists
+every optional offer field, and both offer branches are `.strict()`
+(`messages.ts:572`), so a category would be a wire addition with no consumer.
+A Host that needs "this task category may use these toolsets" collapses it
+into one local function that sets `requiredToolsets` before it sends the
+offer. The device already declines an id it has no definition for, before
+claim, with `required MCP toolset "<id>" is not configured on this device`
+(`task-runner/mcp-contexts.ts:200`, reached from `admitOfferLimits` in
+`task-runner/offer-admission.ts:177`), so a category label from the same
+sender as `requiredToolsets` adds no integrity the SDK owner could check; the
+SDK keeps a gate only for an invariant it owns (`docs/security.md`).
+
+**"No hot reload" and `reloadMcpToolsets`.** The #1846 boundary is that a
+Host's declarations compose before the daemon starts, with no runtime install
+and no terminal user choosing them. The SDK does move one thing at runtime,
+and it is narrower than that boundary, not an exception to it.
+`Daemon.reloadMcpToolsets`
+(`packages/client/src/daemon/create-daemon/operations.ts:30`) and the control
+socket's `toolsets.reload` (`create-daemon/control-methods.ts:223`), which
+`byok-agent toolsets reload --config <path>` drives
+(`packages/client/src/bin/commands/toolsets.ts`), replace the complete
+device-local registry by expected-revision compare-and-swap
+(`packages/client/src/daemon/toolset-registry.ts:281`). What moves is the data
+behind logical ids: an already-admitted task keeps its sealed projection,
+later offers, presence heartbeats and the next `conn.hello` read the current
+ids, a same-content reload is a no-op at the same `sha256:` revision, and a
+stale or invalid reload leaves the snapshot unchanged. What cannot move is
+every adapter fact the boundary is about: the adapter list, every adapter
+option and therefore `computeCapabilities` are fixed at construction, so a
+reload can neither add a runtime nor make `toolset-selection` appear, and it
+is driven by the operator's own config, never by a terminal user choosing a
+program.
+
 ## Durable Agent homes
 
 The additive Agent path makes `AgentRef { agentId, profileRevision }` the
