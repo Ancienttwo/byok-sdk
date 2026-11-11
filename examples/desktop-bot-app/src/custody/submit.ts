@@ -12,6 +12,7 @@ export interface CustodyChild {
   readonly stdin: Writable;
   readonly stdout: Readable;
   once(event: 'exit', listener: (code: number | null) => void): this;
+  once(event: 'error', listener: (error: Error) => void): this;
 }
 
 function parseReceipt(text: string): CustodyReceipt | undefined {
@@ -25,7 +26,10 @@ function parseReceipt(text: string): CustodyReceipt | undefined {
 
 /** Resolves to the committed profile's secret-free status; a refusal rejects with its code. */
 export async function submitToCustody(child: CustodyChild, request: CustodyRequest): Promise<ProviderStatus> {
-  const exited = new Promise<number | null>(resolve => child.once('exit', resolve));
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.once('exit', resolve);
+    child.once('error', error => reject(new CustodyError('custody_exited', `Custody child failed to run: ${error.message}`)));
+  });
   let output = '';
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => { output += chunk; });

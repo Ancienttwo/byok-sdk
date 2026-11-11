@@ -13,7 +13,8 @@ export function keysDbPath(hostStorageRoot: string): string {
 }
 
 /** `piByokLauncher` for the daemon: Pi launches re-enter this Host's own executable. */
-export function piByokLauncher(helperHost: SdkHelperHostConfig & { readonly executable: string }, hostStorageRoot: string): PiByokLauncherConfig {
+export function piByokLauncher(helperHost: SdkHelperHostConfig, hostStorageRoot: string): PiByokLauncherConfig {
+  if (helperHost.executable === undefined) throw new Error('The Pi launcher re-entry needs the Host executable named explicitly');
   return {
     command: helperHost.executable,
     args: [...(helperHost.entry === undefined ? [] : [helperHost.entry]), PI_LAUNCHER_COMMAND],
