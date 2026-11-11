@@ -448,8 +448,16 @@ async function installOne(
   source: string,
   base: string,
 ): Promise<InstalledSkillPack> {
-  await secureSkillPacksDir(options.dataDir);
+  // Secured at the first write into the store (a refusal audit or the lock and
+  // revision files), so a refused install that writes nothing leaves nothing.
+  let secured = false;
+  const secureOnce = async (): Promise<void> => {
+    if (secured) return;
+    await secureSkillPacksDir(options.dataDir);
+    secured = true;
+  };
   const refuse = async (code: SkillPackInstallErrorCode, message: string): Promise<never> => {
+    await secureOnce();
     await appendAuditLine(options.dataDir, {
       ts: new Date().toISOString(),
       event: 'skill-pack-rejected',
@@ -521,6 +529,7 @@ async function installOne(
   const packRoot = path.join(skillPacksRoot(options.dataDir), manifest.name);
   const revisionDir = path.join(packRoot, (manifest.contentHash as string).slice('sha256:'.length));
   const revisionRelative = `${SKILL_PACKS_DIRNAME}/${manifest.name}/${(manifest.contentHash as string).slice('sha256:'.length)}`;
+  await secureOnce();
   const targets = new Map<string, string>();
   for (const relative of bodies.keys()) {
     targets.set(relative, await checkedFile(options.dataDir, `${revisionRelative}/${relative}`, true));
