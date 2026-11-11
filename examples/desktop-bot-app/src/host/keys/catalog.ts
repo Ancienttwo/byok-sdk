@@ -31,9 +31,14 @@ export class ProviderProfiles {
     this.#keysDb = keysDb;
   }
 
-  /** The store's profiles; none before custody first writes the store (the store's own verdict `absent`). */
+  /**
+   * The store's profiles: none before custody first writes the store (the store's own verdict `absent`). Any verdict
+   * but `absent` or `accepted` refuses, with the store's reason.
+   */
   async load(): Promise<readonly ModelProviderProfile[]> {
-    if ((await inspectProviderProfileStore(this.#keysDb)).verdict === 'absent') return [];
+    const inspected = await inspectProviderProfileStore(this.#keysDb);
+    if (inspected.verdict === 'absent') return [];
+    if (inspected.verdict !== 'accepted') throw new Error(`Keys store ${this.#keysDb} is ${inspected.verdict}: ${inspected.reason}`);
     const store = new SqliteProviderProfileStore({ path: this.#keysDb, readOnly: true });
     try {
       return await store.list();
