@@ -23,8 +23,8 @@ import {
 import {
   PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX,
   PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX,
-  RESULT_NOT_SUBMITTED_REASON_PREFIX,
 } from '../daemon/task-runner/state';
+import { RESULT_NOT_SUBMITTED_REASON_PREFIX } from '../daemon/task-runner/result-reason-prefixes';
 import {
   InputPreparationStore,
   type CounterReservationInput,

@@ -15,7 +15,7 @@ import {
   TaskRunner,
   type TaskRunnerDeps,
 } from '../daemon/task-runner';
-import { RESULT_NOT_SUBMITTED_REASON_PREFIX } from '../daemon/task-runner/state';
+import { RESULT_NOT_SUBMITTED_REASON_PREFIX } from '../daemon/task-runner/result-reason-prefixes';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
