@@ -154,7 +154,7 @@ describe('diagnostics collector', () => {
     expect(live.checks.find((check) => check.id === 'lifecycle')?.status).toBe('pass');
   });
 
-  it('#1732: an offline daemon with an owned store root that is not 0700 and no recorded refusal names secure_dir_mode', async () => {
+  it.skipIf(process.platform === 'win32')('#1732: an offline daemon with an owned store root that is not 0700 names secure_dir_mode', async () => {
     const dir = await tempDir();
     const control = async (): Promise<string | undefined> =>
       (await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable })).checks.find((check) => check.id === 'control')?.summary;

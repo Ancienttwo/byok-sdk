@@ -646,10 +646,6 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>, deviceReason: 
   ];
 }
 
-function hasRecordedRefusal(lifecycle: Parameters<typeof formatLifecycleRemedy>[0] | undefined): boolean {
-  return lifecycle !== undefined && formatLifecycleRemedy(lifecycle) !== undefined;
-}
-
 /** Issue #394: a halted or crashed daemon fails this check, and the summary says what fixes it. */
 function lifecycleCheck(lifecycle: DiagnosticsSnapshot['lifecycle']): DiagnosticCheck {
   if (lifecycle.status === 'unknown') return { id: 'lifecycle', status: 'warn', summary: 'unknown (no lifecycle event yet)' };
@@ -847,8 +843,8 @@ export async function collectDoctorDiagnostics(
     resume: runtime.resume,
   }));
 
-  // A daemon that could not set an owned store root to 0700 records nothing (its health file lives there), so the mode itself is the evidence.
-  const storeDirMode = control.status === 'offline' && !hasRecordedRefusal(liveLifecycle ?? lastAudited?.lifecycle)
+  // A daemon that could not set an owned store root to 0700 records nothing (its health file lives there), and an earlier run's lifecycle record says nothing about this start, so the current mode is the evidence.
+  const storeDirMode = control.status === 'offline'
     && await isModeNot0700(resolvedStoreDir, 'store-root').catch(() => false)
     ? `secure_dir_mode ${resolvedStoreDir}: the daemon requires the store directory to be 0700 and refuses to start when the filesystem or a sandbox/MAC policy will not allow setting it; move storeDir to a filesystem that honours chmod, or allow chmod / set it to 0700`
     : undefined;
