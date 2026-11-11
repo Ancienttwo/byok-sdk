@@ -65,7 +65,7 @@ export declare class SessionUnavailableError extends Error {
 export declare class RuntimeFailureError extends Error {
   readonly name: 'RuntimeFailureError';
   readonly failure: RuntimeFailureClass;
-  readonly code?: 'project_packages_blocked';
+  readonly code?: 'project_packages_blocked' | 'runtime_outdated' | 'runtime_config_invalid';
   readonly credential?: 'missing' | 'rejected';
   readonly status?: number;
   readonly reason: string;

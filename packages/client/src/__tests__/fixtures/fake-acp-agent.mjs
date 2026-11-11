@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fake ACP agent over stdio for offline adapter tests. It calls no model and
-// reads no login. Frame shapes follow OAR 45488e7 tests/fixtures
+// reads no login. Frame shapes follow OAR ac7fde4 tests/fixtures
 // (fake-acp-agent.mjs, fake-acp-grok.mjs: Grok 1.0.25 wire, Apache-2.0).
 //
 // argv: `--version` prints a version; `agent stdio --help` prints help;
@@ -84,6 +84,9 @@ let opencodeModel;
 async function prompt(message) {
   const full = promptText(message.params);
   log({ kind: 'prompt', text: full });
+  // Grok reports the prompt it runs under the `_meta.promptId` the client named.
+  const promptId = message.params?._meta?.promptId;
+  if (typeof promptId === 'string') send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: promptId, entries: [] } });
   // The daemon may put rules before the task; the last line selects the scenario.
   const input = full.trim().split('\n').at(-1) ?? '';
   // opencode's structured failures: data.errorName decides the class; a name outside the table leaves it to the words.
@@ -110,6 +113,41 @@ async function prompt(message) {
     update({ sessionUpdate: 'usage_update', used: 321, size: 1000 });
     update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'child private text' }, _meta: { 'opencode/child-session': { id: 'native-child', parentID: SESSION, depth: 1 } } });
     text('done'); result(message.id, { stopReason: 'end_turn' }); return;
+  }
+  // Grok's own turn after the prompt (a background command finished): it runs until FAKE_ACP_OWN_TURN_GATE exists.
+  if (input === 'own-turn') {
+    text('first');
+    result(message.id, answer());
+    setTimeout(async () => {
+      send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: 'bash-completed-1', entries: [] } });
+      text('background');
+      log({ kind: 'own-started' });
+      const gate = process.env.FAKE_ACP_OWN_TURN_GATE;
+      while (gate && !existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
+      // Grok's own ledger for the turn: OAR counts it once, and the SDK reports it with the next task turn.
+      send({ method: '_x.ai/session_notification', params: { sessionId: SESSION, _meta: { eventId: 'own-1' }, update: { sessionUpdate: 'turn_completed', prompt_id: 'bash-completed-1', stop_reason: 'end_turn', usage: { inputTokens: 50, outputTokens: 5 } } } });
+      send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: '', entries: [] } });
+      log({ kind: 'own-ended' });
+    }, 20);
+    return;
+  }
+  // Grok starts its own turn while the prompt still runs; OAR reports it after the prompt's turn closes.
+  if (input === 'own-turn-deferred') {
+    text('first');
+    send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: 'bash-completed-1', entries: [] } });
+    result(message.id, answer());
+    const gate = process.env.FAKE_ACP_OWN_TURN_GATE;
+    while (gate && !existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
+    vendor({ sessionUpdate: 'turn_completed', prompt_id: 'bash-completed-1', stop_reason: 'end_turn' });
+    send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: '', entries: [] } });
+    return;
+  }
+  // Grok's end report for a turn it never said was running.
+  if (input === 'stray-end') {
+    text('first');
+    result(message.id, answer());
+    setTimeout(() => vendor({ sessionUpdate: 'turn_completed', prompt_id: 'goal-summary-1', stop_reason: 'end_turn' }), 20);
+    return;
   }
   if (input === 'hold' || process.env.FAKE_ACP_HANG === '1') { pending.set(message.id, 'hold'); return; }
   if (input === 'hold-silent') { pending.set(message.id, 'silent'); return; }
