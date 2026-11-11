@@ -9,7 +9,8 @@ import { HostStore } from '../store/store.ts';
 import { Conversation } from './conversation.ts';
 
 /**
- * Opens the Host store and the K8 conversation on this device's catalog, then binds the server's consumers to it.
+ * Opens the Host store and the K8 conversation on this device's catalog, then binds the server's consumers to it. The
+ * catalog takes the keys profiles read at Host start and is rebuilt on every custody receipt (`ProviderProfiles`).
  * Closing closes the conversation (and its K8 ledger) before the store; the daemon stops after every domain closed.
  */
 export async function createK8Domain(context: HostContext): Promise<HostDomain<K8Methods>> {
@@ -17,17 +18,27 @@ export async function createK8Domain(context: HostContext): Promise<HostDomain<K
   if (deviceId === undefined) throw new Error('The daemon has no device id after start');
   const hostDir = path.join(context.hostStorageRoot, 'host');
   const store = HostStore.open(path.join(hostDir, 'store.sqlite'));
+  let catalog: ReturnType<typeof executionCatalog>;
   let conversation: Conversation;
   try {
+    catalog = executionCatalog(brand, deviceId, await context.profiles.load());
     conversation = await Conversation.open({
       server: context.server, productId: context.daemonConfig.productId, ledgerFile: path.join(hostDir, 'k8.sqlite'), store,
-      ...executionCatalog(brand, deviceId),
+      execution: catalog.execution, models: catalog.models,
     });
   } catch (error) {
     store.close();
     throw error;
   }
-  const service = new ConversationService({ conversation, store, server: context.server, brand, changed: context.changed });
+  const service = new ConversationService({
+    conversation, store, server: context.server, brand, models: () => catalog.choices, changed: context.changed,
+  });
+  const unsubscribe = context.profiles.subscribe(async profiles => {
+    const next = executionCatalog(brand, deviceId, profiles);
+    await conversation.setModels(next.models);
+    catalog = next;
+    service.changed();
+  });
   context.consumers.bind({
     consume: async (wake, signal) => {
       await conversation.consume(wake, signal);
@@ -50,6 +61,7 @@ export async function createK8Domain(context: HostContext): Promise<HostDomain<K
       'k8.answer': params => service.answer(params),
     },
     close: async () => {
+      unsubscribe();
       service.close();
       try {
         await conversation.close();

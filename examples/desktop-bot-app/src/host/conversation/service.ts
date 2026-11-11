@@ -4,14 +4,14 @@ import { BridgeError } from '../../bridge/protocol.ts';
 import type { Conversation } from '../k8/conversation.ts';
 import type { HostStore } from '../store/store.ts';
 import type { BotProfile } from '../store/types.ts';
-import type { ConversationBrand, RolePreset } from './catalog.ts';
+import type { ConversationBrand, ModelChoice, RolePreset } from './catalog.ts';
 import { DraftFollowers, type DraftTarget } from './drafts.ts';
 import { botViews, conversationItems, openTurns, type BotView, type ConversationView } from './view.ts';
 
 export interface ConversationSnapshot {
   readonly bots: readonly BotView[];
   readonly roles: readonly RolePreset[];
-  readonly models: readonly { readonly id: string; readonly label: string }[];
+  readonly models: readonly ModelChoice[];
   /** The selected Bot's conversation; absent when no Bot is selected or the Bot is unknown. */
   readonly conversation?: ConversationView;
   /** Some Bot has open work or a profile catching up: the renderer reads again while this holds. */
@@ -36,19 +36,23 @@ export class ConversationService {
   readonly #conversation: Conversation;
   readonly #store: HostStore;
   readonly #server: Pick<ByokServer, 'tasks'>;
-  readonly #brand: ConversationBrand;
+  readonly #roles: readonly RolePreset[];
+  readonly #models: () => readonly ModelChoice[];
   readonly #drafts: DraftFollowers;
   readonly #taskReasons = new Map<string, string>();
   readonly #changed: () => void;
 
   constructor(options: {
-    conversation: Conversation; store: HostStore; server: Pick<ByokServer, 'tasks'>; brand: ConversationBrand; changed: () => void;
+    conversation: Conversation; store: HostStore; server: Pick<ByokServer, 'tasks'>; brand: Pick<ConversationBrand, 'roles'>;
+    /** The catalog's current choices: it changes when the keys profiles do. */
+    models: () => readonly ModelChoice[]; changed: () => void;
   }) {
     this.#changed = options.changed;
     this.#conversation = options.conversation;
     this.#store = options.store;
     this.#server = options.server;
-    this.#brand = options.brand;
+    this.#roles = options.brand.roles;
+    this.#models = options.models;
     this.#drafts = new DraftFollowers(options.server, () => this.changed());
   }
 
@@ -86,8 +90,7 @@ export class ConversationService {
       });
     }
     return {
-      bots, roles: this.#brand.roles,
-      models: Object.entries(this.#brand.models).map(([id, entry]) => ({ id, label: entry.label })),
+      bots, roles: this.#roles, models: this.#models(),
       ...(conversation ? { conversation } : {}),
       busy: bots.some(bot => bot.state === 'working' || bot.state === 'profile_updating' || bot.state === 'runtime_unavailable'),
     };
