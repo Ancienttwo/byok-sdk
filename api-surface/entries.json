@@ -643,7 +643,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 563046,
+      "budgetBytes": 563494,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -977,7 +977,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 553685,
+      "budgetBytes": 554131,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1035,7 +1035,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 798733,
+      "budgetBytes": 799179,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1165,7 +1165,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 760474,
+      "budgetBytes": 760920,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1740,7 +1740,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 149348,
+      "budgetBytes": 149796,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1962,7 +1962,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 414696,
+      "budgetBytes": 415144,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2094,7 +2094,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 578416,
+      "budgetBytes": 578862,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

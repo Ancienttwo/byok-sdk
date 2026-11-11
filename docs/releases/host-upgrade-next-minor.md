@@ -228,6 +228,22 @@ The examples no longer read three old stored shapes (#1669). Before the upgrade,
 
 - Vendored Hosts: `src/history.ts` is removed from the `vendor host` layer. A Host that copied it imports `HISTORY_MAX_BYTES` and `HISTORY_MAX_ITEMS` from `rules/history` instead.
 
+## Offer selection rules
+
+`@byok-sdk/protocol` exports `offerSelectionViolation(payload)` and the types `OfferSelectionRule` and `OfferSelectionViolation` (#1674). The three offer selection rules have one definition, which the Host offer schemas and the daemon both run. A `HostOfferPlainPayloadSchema` or `HostOfferSealedPayloadSchema` issue carries `params.rule`, and the daemon declines the same offer with `task.decline.code` equal to that rule:
+
+| Rule (`params.rule` and decline `code`) | Schema path |
+| --- | --- |
+| `agent_memory_selection_invalid` | `['agentMemory']` |
+| `runtime_selection_mismatch` | `['runtime']` |
+| `harness_selection_conflict` | `['harnessId']` |
+
+Rules are checked in that order, and a payload that breaks several reports only the first: one `ZodError` issue instead of one per rule. A Host that counted these issues or read a later path must read the first issue's `params.rule`.
+
+These declines are non-retryable, and their `reason` is `<rule>: <message>`. Classify them by `code`; `reason` is display text only. `readDeclineCode` reads the three codes as typed values; an earlier SDK reads them as `unknown` with `reportedCode`.
+
+**Breaking (cloud).** Enqueueing an offer whose `harnessId` the device did not advertise now throws `ByokCloudError` with code `agent_capability_missing` instead of `coordination_input_invalid`; the message is unchanged. A Host that branches on `coordination_input_invalid` for this refusal must branch on `agent_capability_missing`.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.

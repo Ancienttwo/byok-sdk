@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "21bdf432f432f19a53d156365fc67f1f014a36a16627e7167d02a088c6903a73"
+    "snapshotSha256": "26901f8b00dce3516ec5beff611b9e8bbb2015ef25702dbe726317131e97aa20"
   },
   "configFields": {
     "status": "tracked",
@@ -137,6 +137,20 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#isolated-service-lifecycle-gate-root",
       "items": [
         "export:@byok-sdk/client#CreateServiceLifecycleOptions"
+      ]
+    },
+    {
+      "id": "offer-selection-rules",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol exports offerSelectionViolation, OfferSelectionRule and OfferSelectionViolation. TaskDeclineCode and the plaintext and sealed task.decline code enums gain agent_memory_selection_invalid, runtime_selection_mismatch and harness_selection_conflict, which the daemon now sends on its offer selection declines; an older Host reads them as unknown with reportedCode. A Host offer schema issue carries params.rule, and a payload that breaks several rules reports only the first. Breaking: @byok-sdk/cloud now refuses an offer whose custom harness the device did not advertise with agent_capability_missing instead of coordination_input_invalid (same message); a Host that branches on coordination_input_invalid for that refusal must branch on agent_capability_missing.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#offer-selection-rules",
+      "items": [
+        "export:@byok-sdk/protocol#OfferSelectionRule",
+        "export:@byok-sdk/protocol#OfferSelectionViolation",
+        "export:@byok-sdk/protocol#offerSelectionViolation",
+        "export:@byok-sdk/protocol#TaskDeclineCode",
+        "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+        "export:@byok-sdk/protocol#TaskDeclineSealedPayload"
       ]
     }
   ],
@@ -354,6 +368,36 @@
       "item": "export:@byok-sdk/keys/model-route#MODEL_PROVIDER_VENDORS",
       "change": "changed",
       "entry": "opencode-go-keys-store"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OfferSelectionRule",
+      "change": "added",
+      "entry": "offer-selection-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OfferSelectionViolation",
+      "change": "added",
+      "entry": "offer-selection-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineCode",
+      "change": "changed",
+      "entry": "offer-selection-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+      "change": "changed",
+      "entry": "offer-selection-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+      "change": "changed",
+      "entry": "offer-selection-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#offerSelectionViolation",
+      "change": "added",
+      "entry": "offer-selection-rules"
     },
     {
       "item": "store:keys-profile-store",

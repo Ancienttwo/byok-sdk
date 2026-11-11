@@ -2439,8 +2439,17 @@ Home-busy declines carry optional `code`: `agent_home_writer_busy` or
 read as `unknown` with `reportedCode`), selected by the rejected
 Attempt's requested home access. This includes capacity, lease acquisition,
 reader resume/run-directory and home initialization conflicts reported as
-`AgentHomeBusyError`. Other declines omit `code`. Hosts classify busy by
-`code`; `reason` is display text only. Cloud `readTaskResult` reads the code
+`AgentHomeBusyError`. An offer that breaks an offer selection rule
+(`offerSelectionViolation`, checked in this order) is declined non-retryable
+with `code` equal to the rule: `agent_memory_selection_invalid`,
+`runtime_selection_mismatch` or `harness_selection_conflict`, and `reason`
+`<rule>: <message>`. A Host can check before it enqueues:
+`HostOfferPlainPayloadSchema.safeParse(payload)` gives the same answer as the
+kernel, and its issue's `params.rule` equals the decline code the device would
+send; a sealed task's decline carries the same code. The sealed decline
+codes and the open token `runtime_unavailable` (sent with
+`runtimeUnavailable`) also set `code`; other declines omit it. Hosts
+classify busy by `code`; `reason` is display text only. Cloud `readTaskResult` reads the code
 (`readDeclineCode`), and `readDeviceTerminal` / embedded `tasks.deviceTerminal`
 preserve it verbatim in the canonical envelope.
 
