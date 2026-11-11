@@ -11,7 +11,9 @@ import { joinHandlers, type MethodHandlers, type MethodTable } from '../bridge/d
 import { MAIN_METHODS, type HostMethods, type MainMethod } from '../bridge/protocol.ts';
 import { createActivityDomain } from './activity/domain.ts';
 import { createK8Domain } from './k8/domain.ts';
+import { ProviderProfiles } from './keys/catalog.ts';
 import { createKeysDomain } from './keys/domain.ts';
+import { keysDbPath } from './keys/launcher.ts';
 import { createSettingsDomain } from './settings/domain.ts';
 
 /** The embedded server's wake and Agent message consumers. */
@@ -31,6 +33,8 @@ export interface HostContext {
   readonly consumers: { bind(consumers: ServerConsumers): void };
   /** A domain's views changed: the Host pushes its state again, so main hints the renderer to pull. */
   changed(): void;
+  /** The keys store's profiles: the keys domain reports custody receipts, the k8 domain builds its catalog from them. */
+  readonly profiles: ProviderProfiles;
 }
 
 /** One domain on the Host: a handler for each of its methods that main does not answer, and what it closes before the daemon stops. */
@@ -65,7 +69,8 @@ async function closeAll(domains: readonly { close?(): Promise<void> }[]): Promis
  * before it, then the failure propagates. A method two domains answer, or a
  * Host handler for a method main answers, refuses the composition.
  */
-export async function composeDomains(context: HostContext): Promise<ComposedDomains> {
+export async function composeDomains(host: Omit<HostContext, 'profiles'>): Promise<ComposedDomains> {
+  const context: HostContext = { ...host, profiles: new ProviderProfiles(keysDbPath(host.hostStorageRoot)) };
   const opened: { close?(): Promise<void> }[] = [];
   const open = async <M extends MethodTable<M>>(create: (context: HostContext) => Promise<HostDomain<M>>) => {
     const domain = await create(context);

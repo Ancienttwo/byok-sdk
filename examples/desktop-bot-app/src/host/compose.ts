@@ -91,6 +91,45 @@ function filePortStore(file: string): LoopbackPortStore {
   };
 }
 
+type ServerOptions = Parameters<typeof createByokServer>[0];
+
+/**
+ * The embedded server's wake and Agent message consumers, bound later. The server delivers wakes from its creation (a
+ * wake left due by the last run, at once) and Agent messages once the daemon runs, both before the k8 domain binds its
+ * consumers: a delivery waits for the binding, and one still waiting when the Host closes is refused, so the server
+ * retries it on the next run.
+ */
+export function lateServerConsumers(): {
+  readonly wake: NonNullable<ServerOptions['wake']>;
+  readonly agentMessage: NonNullable<ServerOptions['agentMessage']>;
+  bind(consumers: ServerConsumers): void;
+  refuse(reason: Error): void;
+} {
+  let bind!: (consumers: ServerConsumers) => void;
+  let refuse!: (reason: Error) => void;
+  const consumers = new Promise<ServerConsumers>((resolve, reject) => { bind = resolve; refuse = reject; });
+  // Every waiting delivery gets the refusal; with none waiting, it is not an unhandled rejection.
+  consumers.catch(() => {});
+  let bound = false;
+  return {
+    wake: {
+      consume: async (wake, signal) => {
+        const ready = await consumers;
+        // The server gave up on this delivery while it waited.
+        signal.throwIfAborted();
+        return ready.consume(wake, signal);
+      },
+    },
+    agentMessage: { consume: async input => (await consumers).consumeMessage(input) },
+    bind: next => {
+      if (bound) throw new Error('Server consumers are already bound');
+      bound = true;
+      bind(next);
+    },
+    refuse,
+  };
+}
+
 /** A missing SDK asset cannot heal by restarting: the Host stops with the missing paths. */
 function hostingOf(options: SdkHostingOptions | undefined): SdkHosting | undefined {
   try {
@@ -113,26 +152,10 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
   await precheckHostStores({ storeDir: options.storeDir, serverDb, keysDb: keysDbPath(options.hostStorageRoot) });
   await mkdir(hostDir, { recursive: true, mode: 0o700 });
 
-  // The server delivers wakes from its creation (a wake left due by the last run, at once) and Agent messages once the
-  // daemon runs, both before the k8 domain binds its consumers: a delivery waits for the binding, and one still waiting
-  // when the Host closes is refused, so the server retries it on the next run.
-  let bindConsumers!: (consumers: ServerConsumers) => void;
-  let refuseConsumers!: (reason: Error) => void;
-  const consumers = new Promise<ServerConsumers>((resolve, reject) => { bindConsumers = resolve; refuseConsumers = reject; });
-  // Every waiting delivery gets the refusal; with none waiting, it is not an unhandled rejection.
-  consumers.catch(() => {});
-  let consumersBound = false;
+  const late = lateServerConsumers();
   const server = createByokServer({
     productId: options.productId, storage: { kind: 'sqlite', path: serverDb },
-    wake: {
-      consume: async (wake, signal) => {
-        const bound = await consumers;
-        // The server gave up on this delivery while it waited.
-        signal.throwIfAborted();
-        return bound.consume(wake, signal);
-      },
-    },
-    agentMessage: { consume: async input => (await consumers).consumeMessage(input) },
+    wake: late.wake, agentMessage: late.agentMessage,
   });
   const listener = await listenLoopback({
     portStore: filePortStore(path.join(hostDir, 'loopback-port')),
@@ -144,7 +167,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
   let daemon: Daemon | undefined;
   let domains: ComposedDomains | undefined;
   const close = async () => {
-    refuseConsumers(new Error('The Host closed before the conversation opened'));
+    late.refuse(new Error('The Host closed before the conversation opened'));
     try {
       await domains?.close();
     } finally {
@@ -188,13 +211,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
     await started.start();
     domains = await composeDomains({
       daemon: started, daemonConfig, server, storeDir: options.storeDir, hostStorageRoot: options.hostStorageRoot,
-      consumers: {
-        bind: next => {
-          if (consumersBound) throw new Error('Server consumers are already bound');
-          consumersBound = true;
-          bindConsumers(next);
-        },
-      },
+      consumers: { bind: late.bind },
       changed: options.onChanged,
     });
     return { daemon: started, domains, close };

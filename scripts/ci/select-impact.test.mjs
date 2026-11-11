@@ -304,6 +304,9 @@ test('a platform family is selected only by a path it owns', () => {
   // #1805: renderer stylesheets select the desktop example; other renderer assets stay unmapped.
   assert.ok(selectImpact(['examples/desktop-bot-app/src/renderer/styles/theme.css']).families.includes('desktop'));
   assert.throws(() => selectImpact(['examples/desktop-bot-app/src/renderer/theme.scss']), /mapping/i);
+  // The tray icons select the desktop example; other images stay unmapped.
+  assert.ok(selectImpact(['examples/desktop-bot-app/assets/tray/trayTemplate@2x.png']).families.includes('desktop'));
+  assert.throws(() => selectImpact(['examples/desktop-bot-app/assets/logo.png']), /mapping/i);
   // #1811: the packaging scripts and configuration select the desktop example.
   for (const path of ['scripts/package/bundle-host.mjs', 'scripts/package/smoke-host.ts', 'scripts/package/entitlements-mac.plist', 'electron-builder.config.mjs']) {
     assert.ok(selectImpact([`examples/desktop-bot-app/${path}`]).families.includes('desktop'), path);

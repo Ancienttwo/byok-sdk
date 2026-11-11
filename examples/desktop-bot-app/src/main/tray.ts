@@ -1,5 +1,6 @@
 import { app, Menu, Tray, nativeImage } from 'electron';
-import type { HostState } from '../bridge/protocol.ts';
+import type { LoginItemView } from '../bridge/domains/settings.ts';
+import type { SupervisedHostState } from './host-process.ts';
 import { trayMenu, type TrayActions } from './tray-menu.ts';
 
 /**
@@ -13,7 +14,7 @@ export function createAppTray(iconPath: string, productName: string, actions: Tr
   const tray = new Tray(image);
   tray.setToolTip(productName);
   tray.on('click', actions.showWindow);
-  const render = (state: HostState | undefined) => tray.setContextMenu(Menu.buildFromTemplate(trayMenu(state, actions, productName)));
+  const render = (state: SupervisedHostState | undefined) => tray.setContextMenu(Menu.buildFromTemplate(trayMenu(state, actions, productName)));
   render(undefined);
   return { update: render, destroy: () => tray.destroy() };
 }
@@ -26,4 +27,9 @@ export function setLoginItem(enabled: boolean): void {
   if (process.platform === 'linux') throw new Error('Login item is not supported on Linux');
   app.setLoginItemSettings({ openAtLogin: enabled });
   if (app.getLoginItemSettings().openAtLogin !== enabled) throw new Error('The OS did not apply the login item setting');
+}
+
+/** The login item as the OS reports it; Linux has none. */
+export function loginItem(): LoginItemView {
+  return process.platform === 'linux' ? { supported: false, enabled: false } : { supported: true, enabled: app.getLoginItemSettings().openAtLogin };
 }

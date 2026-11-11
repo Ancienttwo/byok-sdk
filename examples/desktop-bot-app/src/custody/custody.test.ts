@@ -9,6 +9,7 @@ import {
   type ModelProviderSecretName, type ProviderConfiguration, type SecretStore,
 } from '@byok-sdk/keys';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
+import { executionCatalog } from '../host/conversation/catalog.ts';
 import { catalogEntryFor, ProviderProfiles } from '../host/keys/catalog.ts';
 import { refusalReceipt, runCustody } from './child.ts';
 import { keysMainHandlers } from './main-handlers.ts';
@@ -66,6 +67,16 @@ describe('custody child', () => {
     expect(catalogEntryFor(profile!, base)?.payload.dispatchSelection).toEqual({ lane: 'byok-profile', runtimeId: 'pi',
       providerProfile: { profileRef: 'writer', profileRevision: status.profile_revision, profileHash: status.profile_hash,
         modelId: 'writer-model', requiredCapabilities: [] } });
+    // K8's catalog: the brand entries, then one pinned Pi entry per profile Pi can launch; nothing for a profile without pi_model.
+    const { pi_model: _piModel, ...withoutPi } = profile!;
+    const catalog = executionCatalog({ instruction: 'reply', models: { pi: { label: 'Pi', runtime: 'pi' } } }, 'device',
+      [profile!, { ...withoutPi, profile_ref: 'no-pi' }]);
+    expect(catalog.choices).toEqual([{ id: 'pi', label: 'Pi' }, { id: 'pi:writer', label: 'Writer model' }]);
+    expect(catalog.models['pi:writer']).toEqual(catalogEntryFor(profile!, catalog.models.pi!));
+    expect(() => executionCatalog({ instruction: 'reply', models: { 'pi:writer': { label: 'Brand', runtime: 'pi' } } }, 'device', [profile!]))
+      .toThrow('brand.config.ts model pi:writer collides with the keys profile writer');
+    // A store that is neither absent nor accepted refuses with the store's own reason.
+    await expect(new ProviderProfiles(root).load()).rejects.toThrow(`Keys store ${root} is rejected: The store path is not a regular file`);
     const rotated = await submitToCustody(custodyChild(secrets, receipts), { op: 'replace_secret', profileRef: 'writer', secret: `${SECRET}-2` });
     expect([rotated.profile_revision, rotated.profile_hash]).toEqual([status.profile_revision, status.profile_hash]);
     await profiles.changed();

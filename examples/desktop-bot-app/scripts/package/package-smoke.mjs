@@ -6,7 +6,7 @@
 // - the app's Electron binary carries the app fuses (src/main/fuses.ts);
 // - macOS: the ad-hoc or Developer ID signature verifies deep and strict;
 // - the packaged SEA Host answers the bridge (host-smoke.mjs). It keeps a device
-//   credential in the OS store, so this runs on CI only;
+//   credential in the OS store, so the script refuses to run outside CI;
 // - a smoke Host SEA (smoke-host.ts) run from inside resources/host/ completes a Pi
 //   dispatch with memory_recall and gets pi_background_unavailable for a background
 //   subagent (#1499 R2). It is removed again afterwards.
@@ -26,6 +26,9 @@ import brand from '../../brand.config.ts';
 import { APP_FUSES } from '../../src/main/fuses.ts';
 import { hostEnvironment } from '../../src/main/packaged-host.ts';
 import { buildHostExecutable, hostFile } from './bundle-host.mjs';
+
+// The packaged Host pairs and keeps its device credential in this machine's OS store.
+if (process.env.CI !== 'true') throw new Error('package-smoke.mjs writes a device credential into the OS credential store: run it on CI only (CI=true)');
 
 const MARKER = 'BYOK_DESKTOP_SMOKE ';
 const root = fileURLToPath(new URL('../../', import.meta.url));

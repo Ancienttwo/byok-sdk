@@ -1,6 +1,8 @@
 import type { MethodHandlers } from '../bridge/domain.ts';
-import type { BridgeMethods, MainMethod } from '../bridge/protocol.ts';
+import type { SettingsMethods } from '../bridge/domains/settings.ts';
+import { BridgeError, type BridgeMethods, type MainMethod } from '../bridge/protocol.ts';
 import { keysMainHandlers, type KeysMainDependencies } from '../custody/main-handlers.ts';
+import { loginItem, setLoginItem } from './tray.ts';
 
 /** What main's own handlers need from main: the Host bridge and the Host executable. */
 export type MainDependencies = KeysMainDependencies;
@@ -10,5 +12,18 @@ export type MainDependencies = KeysMainDependencies;
  * domain that adds one fails to compile until its handler is connected here.
  */
 export function createMainHandlers(deps: MainDependencies): MethodHandlers<Pick<BridgeMethods, MainMethod>> {
-  return { ...keysMainHandlers(deps) };
+  return { ...keysMainHandlers(deps), ...loginItemHandlers() };
+}
+
+/** The login item lives in the OS, so main answers it; the renderer's switch is the only writer. */
+function loginItemHandlers(): MethodHandlers<Pick<SettingsMethods, 'settings.loginItem' | 'settings.setLoginItem'>> {
+  return {
+    'settings.loginItem': () => loginItem(),
+    'settings.setLoginItem': params => {
+      const enabled = (params as { enabled?: unknown } | null)?.enabled;
+      if (typeof enabled !== 'boolean') throw new BridgeError('invalid_params', 'settings.setLoginItem needs { enabled: boolean }');
+      setLoginItem(enabled);
+      return loginItem();
+    },
+  };
 }

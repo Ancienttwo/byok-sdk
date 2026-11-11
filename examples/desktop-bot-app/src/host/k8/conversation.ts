@@ -50,9 +50,12 @@ function sha256(text: string): string {
 export class Conversation {
   private readonly options: ConversationOptions;
   readonly bot: BotCollaboration;
+  /** K8's current `models`: `options.models` until {@link setModels} replaces them. */
+  private models: Readonly<Record<string, ExecutionTemplate>>;
   private constructor(options: ConversationOptions, bot: BotCollaboration) {
     this.options = options;
     this.bot = bot;
+    this.models = options.models;
   }
 
   /** Opens K8, sends the store's roster, recovers K8 and finishes every send that the store holds but K8 may not. */
@@ -123,8 +126,14 @@ export class Conversation {
   async saveBot(profile: BotProfile): Promise<void> {
     await this.applyRoster(this.options.store.saveBot(profile, (candidate, prior) => {
       checkTeamSnapshot(teamSnapshot(candidate));
-      if (prior?.model !== profile.model && !Object.hasOwn(this.options.models, profile.model)) throw new Error(`Unavailable model: ${profile.model}`);
+      if (prior?.model !== profile.model && !Object.hasOwn(this.models, profile.model)) throw new Error(`Unavailable model: ${profile.model}`);
     }));
+  }
+
+  /** Replaces K8's catalog. K8 refuses a catalog it cannot take and changes nothing; a Bot whose model left keeps its Turns blocked. */
+  async setModels(models: Readonly<Record<string, ExecutionTemplate>>): Promise<void> {
+    await this.bot.setModels(models);
+    this.models = models;
   }
 
   /** Archives a Bot for good: the store commits the roster, then K8 receives it. */
