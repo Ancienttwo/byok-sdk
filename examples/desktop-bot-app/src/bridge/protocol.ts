@@ -17,6 +17,12 @@ export const BRIDGE_VERSION = 1;
 export const BRIDGE_IPC_CHANNEL = 'byok:bridge';
 
 /**
+ * The channel main sends the renderer a bare "state changed" hint on. It
+ * carries nothing: the renderer pulls the state with `status`.
+ */
+export const STATE_HINT_CHANNEL = 'byok:state-changed';
+
+/**
  * What the Host is doing. `stopped` is final for this Host process: a store
  * refused at start or a daemon halt, with its reason; main does not restart it.
  */
@@ -60,6 +66,8 @@ export type HostMethods = Omit<BridgeMethods, 'hello' | 'shutdown' | MainMethod>
 /** What the preload exposes to the renderer as `window.byok`. */
 export interface ByokBridge {
   call<M extends RendererMethod>(method: M, params: BridgeMethods[M]['params']): Promise<BridgeMethods[M]['result']>;
+  /** Calls `listener` after the Host's state changed, at most once per burst; returns the unsubscribe. */
+  onStateChanged(listener: () => void): () => void;
 }
 
 /**

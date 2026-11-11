@@ -7,5 +7,5 @@
     "rootDir": ".",
     "outDir": "dist"
   },
-  "exclude": ["src/**/*.test.ts", "src/host/**", "src/bridge/server.ts", "src/bridge/stub-host.ts"]
+  "exclude": ["src/**/*.test.ts", "src/renderer", "src/host/**", "src/bridge/server.ts", "src/bridge/stub-host.ts"]
 }

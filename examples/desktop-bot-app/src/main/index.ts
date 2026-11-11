@@ -1,11 +1,12 @@
 import { resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { app, BrowserWindow, ipcMain, net, powerSaveBlocker, protocol, session, shell, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, ipcMain, net, powerSaveBlocker, protocol, session, shell, type IpcMainInvokeEvent, type WebFrameMain } from 'electron';
 import brand from '../../brand.config.ts';
-import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, type BridgeMethods, type MainMethod } from '../bridge/protocol.ts';
+import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMethods, type MainMethod } from '../bridge/protocol.ts';
 import { createRendererRouter } from '../bridge/route.ts';
 import { MAIN_HANDLERS } from './domains.ts';
 import { HostProcess, spawnDevHost, type SupervisedHostState } from './host-process.ts';
+import { coalesceStateHints } from './state-hint.ts';
 
 const SCHEME = 'app';
 const RENDERER_HOST = 'renderer';
@@ -30,10 +31,24 @@ function holdPower(state: SupervisedHostState): void {
   }
 }
 
+/** Our own window's main frame, on our own origin: the only frame that may call the bridge or get its hints. */
+function isOwnRenderer(frame: WebFrameMain | null | undefined): frame is WebFrameMain {
+  // A main frame that has not committed its first navigation has an empty url: not ours yet.
+  const url = frame && URL.canParse(frame.url) ? new URL(frame.url) : undefined;
+  return !!window && frame === window.webContents.mainFrame && url?.protocol === `${SCHEME}:` && url.host === RENDERER_HOST;
+}
+
+// No window, or one not showing the renderer yet, has nobody to hint: it reads `status` when it loads.
+const hintState = coalesceStateHints(() => {
+  const frame = window?.webContents.mainFrame;
+  if (isOwnRenderer(frame)) frame.send(STATE_HINT_CHANNEL);
+});
+
 const host = new HostProcess({
   spawnHost: spawnDevHost,
   onState: state => {
     holdPower(state);
+    hintState();
     if (state.state === 'stopped' || state.state === 'restarting' || state.state === 'failed') console.error(`Host ${state.state}: ${state.reason}`);
     // Fail closed: no window talks to a Host that did not pass hello.
     if (state.state === 'failed') app.exit(1);
@@ -62,11 +77,7 @@ function serveRenderer(request: Request): Promise<Response> | Response {
 
 /** Only the main frame of our own window, on our own origin, may call the bridge, and only allowlisted methods. */
 function forward(event: IpcMainInvokeEvent, method: unknown, params: unknown): Promise<unknown> {
-  const frame = event.senderFrame;
-  const url = frame ? new URL(frame.url) : undefined;
-  if (!window || frame !== window.webContents.mainFrame || url?.protocol !== `${SCHEME}:` || url.host !== RENDERER_HOST) {
-    throw new Error('bridge_sender_refused');
-  }
+  if (!isOwnRenderer(event.senderFrame)) throw new Error('bridge_sender_refused');
   return route(method, params);
 }
 

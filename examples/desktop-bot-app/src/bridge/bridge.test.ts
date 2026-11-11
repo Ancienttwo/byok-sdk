@@ -5,6 +5,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { HostProcess, type SupervisedHostState } from '../main/host-process.ts';
+import { coalesceStateHints } from '../main/state-hint.ts';
 import { BridgeClient, type HostChild } from './client.ts';
 import { BRIDGE_VERSION, BridgeError, encodeMessage } from './protocol.ts';
 import { createRendererRouter } from './route.ts';
@@ -133,5 +134,36 @@ describe('desktop bridge', () => {
     expect(() => route('test.reset', undefined)).toThrow('bridge_method_refused');
     expect(host).not.toHaveBeenCalled();
     expect(await route('test.echo', { text: 'hi' })).toEqual({ method: 'test.echo', params: { text: 'hi' } });
+  });
+
+  it('turns a burst of Host state changes into one renderer hint, after which status reads the new state', async () => {
+    // A Host that pushes three states in one burst and answers status with the last one.
+    const script = `let state = { state: 'starting', pid: process.pid };
+      const send = message => process.stdout.write(JSON.stringify(message) + '\\n');
+      require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+        const { id, method } = JSON.parse(line);
+        if (method === 'hello') {
+          send({ id, result: { bridgeVersion: ${BRIDGE_VERSION} } });
+          for (const activeWork of [undefined, 0, 2]) {
+            state = activeWork === undefined ? state : { state: 'running', pid: process.pid, activeWork };
+            send({ event: 'state', state });
+          }
+        }
+        if (method === 'status') send({ id, result: state });
+        if (method === 'shutdown') { send({ id, result: null }); process.exit(0); }
+      })`;
+    const child = spawn(process.execPath, ['-e', script], { stdio: ['pipe', 'pipe', 'ignore'] });
+    let hints = 0;
+    let hinted: () => void = () => {};
+    const firstHint = new Promise<void>(resolve => { hinted = resolve; });
+    const hint = coalesceStateHints(() => { hints += 1; hinted(); }, 20);
+    const host = new HostProcess({ spawnHost: () => child, onState: hint });
+    host.start();
+
+    await firstHint;
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(hints).toBe(1);
+    expect(await host.call('status', undefined)).toEqual({ state: 'running', pid: child.pid, activeWork: 2 });
+    await host.stop();
   });
 });
