@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "71164c88eb53a0651a8f3db313e85b2f41931dc5259026901b729e49852717a0"
+    "snapshotSha256": "0019f0e126a97230ece57ec2a32930c3cfe77eba0d34fce998fce130f5542780"
   },
   "configFields": {
     "status": "tracked",
@@ -180,6 +180,16 @@
         "export:@byok-sdk/protocol#E2eeScopeKeyPackageSchema",
         "export:@byok-sdk/protocol#E2eeScopeKeyPackageV2Schema"
       ]
+    },
+    {
+      "id": "k4-transaction-rows",
+      "impact": "breaking",
+      "summary": "OutcomeTransaction and OccurrenceTransaction gain a required rows: ApplicationRows, the application rows of the same commit, as MessageTransaction has. A handler or hook that reads the transaction needs no change; code that builds one itself, such as a test double, adds rows.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#k4-transaction-rows-and-required-command-store-capabilities",
+      "items": [
+        "export:@byok-sdk/server/execution-core#OccurrenceTransaction",
+        "export:@byok-sdk/server/execution-core#OutcomeTransaction"
+      ]
     }
   ],
   "changes": [
@@ -201,7 +211,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
-      "after": "K8 0.0.1 src-sha256=8ff81cb34f56ef28",
+      "after": "K8 0.0.1 src-sha256=fc52f35d4054f0ac",
       "entry": "example-bot-collaboration-autonomy"
     },
     {
@@ -488,6 +498,16 @@
       "item": "export:@byok-sdk/protocol#offerSelectionViolation",
       "change": "added",
       "entry": "offer-selection-rules"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#OccurrenceTransaction",
+      "change": "changed",
+      "entry": "k4-transaction-rows"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#OutcomeTransaction",
+      "change": "changed",
+      "entry": "k4-transaction-rows"
     },
     {
       "item": "store:keys-profile-store",
