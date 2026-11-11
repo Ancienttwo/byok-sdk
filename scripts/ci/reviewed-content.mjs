@@ -40,9 +40,10 @@ const HOSTED_WORKER = Object.freeze({ dir: 'examples/hosted-bot-collaboration-wo
 const PRIVATE_HOSTED = Object.freeze([HOSTED, HOSTED_WORKER]);
 const HOSTED_FIELDS = new Set(['name', 'version', 'private', 'type', 'description', 'scripts', 'dependencies', 'devDependencies']);
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies'];
-// #793 D2a-0: the K8 entries that the hosted example imports. There is no root
-// entry, so H never loads the K8 host (src/host.ts). The K8 rules still import
-// the K4 root, which loads HostLedger and node:sqlite.
+// #793 D2a-0: the K8 entries that the hosted example imports. H and HW must not
+// import the K8 root entry, which loads the K8 host (src/host.ts); since the
+// desktop app added that entry (#1806), only review enforces this. The K8 rules
+// still import the K4 root, which loads HostLedger and node:sqlite.
 const K8_HOSTED_EXPORTS = Object.freeze({
   './rules/commands': './src/rules/commands.ts',
   './rules/commit': './src/rules/commit.ts',
