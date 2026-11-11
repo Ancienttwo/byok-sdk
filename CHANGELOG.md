@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (cloud-dataplane tests; #1819)** — The object-storage test scope now deletes its objects (following `ListObjectsV2` pagination) and then its bucket in a per-file `afterAll`, so a long-lived local SeaweedFS stops accumulating one `byok-test-*` collection per fixture. A teardown failure is thrown, never swallowed. On 2026-11-11 the 500-collection `-volume.max` filled and every object PUT failed; CI starts a fresh tmpfs per run and never saw it. No product behavior changes.
+
 - **Fixed (client; #1774)** — A task runner reducer dispatch that rejects now fails the task's open terminal receipt through `TaskRunnerHost.dispatchOrReject` instead of being dropped; with no open receipt (not yet begun or already settled) the rejection is logged. An event that `JSON.stringify` cannot serialize now fails the task through the event pump instead of counting as 0 bytes toward `maxTaskOutputBytes`.
 
 - **Fixed (client; #1774)** — The journal's storage measurement (`measureUsage`) returns 0 only for a missing file or directory (an absent WAL/SHM or quarantine). Any other stat or readdir error now rejects the measurement, which the retention sweeper already records as `measurement_failed`, instead of reading as a small healthy journal.

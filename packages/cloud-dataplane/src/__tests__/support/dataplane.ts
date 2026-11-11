@@ -26,6 +26,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { AwsClient } from 'aws4fetch';
+import { afterAll } from 'vitest';
 import { createByokPool, type ByokPool } from '../../pool';
 
 export const POSTGRES_URL_ENV = 'BYOK_TEST_POSTGRES_URL';
@@ -214,9 +215,11 @@ export async function createDataplaneScope(poolSize = 8): Promise<DataplaneScope
  * manifest look uploaded. Object keys embed the tenant, and tenants repeat
  * across tests, so the bucket is where the isolation has to live.
  *
- * Nothing deletes the bucket afterwards. Reclaiming one means listing and
- * deleting its contents, which is `ListObjectsV2` — S4B's XML-paging cost
- * (design §3) — and the tmpfs already reclaims everything on `down`.
+ * Each scope is deleted at the teardown of the file that created it, so a
+ * long-lived local SeaweedFS stops accumulating one collection per fixture: on
+ * 2026-11-11 the 500-collection `-volume.max` filled and every object PUT began
+ * failing with InternalError (#1819). CI never saw it because CI starts a fresh
+ * tmpfs per run; a developer's container is not restarted between runs.
  */
 export interface ObjectStorageScope {
   readonly bucket: string;
@@ -244,6 +247,70 @@ function requireEndpoint(): string {
   return S3_ENDPOINT.replace(/\/+$/, '');
 }
 
+/** Every bucket this test file created, drained by the teardown below. */
+const createdBuckets: Array<{ endpoint: string; client: AwsClient; bucket: string }> = [];
+
+/**
+ * Lists every object in a bucket, following `continuation-token` across pages.
+ *
+ * The whole listing is collected before anything is deleted: a continuation
+ * token is only meaningful against the listing it came from, so deleting
+ * mid-walk is what would make a paginated drain skip keys.
+ */
+async function listObjectKeys(endpoint: string, client: AwsClient, bucket: string): Promise<{ keys: string[]; missing: boolean }> {
+  const keys: string[] = [];
+  let continuation: string | undefined;
+  do {
+    const query = new URLSearchParams({ 'list-type': '2' });
+    if (continuation !== undefined) query.set('continuation-token', continuation);
+    const listed = await client.fetch(`${endpoint}/${bucket}?${query.toString()}`);
+    const xml = await listed.text();
+    if (listed.status === 404) return { keys: [], missing: true };
+    if (!listed.ok) throw new Error(`ListObjectsV2 on ${bucket} answered HTTP ${listed.status}: ${xml}`);
+    keys.push(...[...xml.matchAll(/<Key>([^<]+)<\/Key>/gu)].map((match) => match[1]!));
+    const truncated = /<IsTruncated>true<\/IsTruncated>/u.test(xml);
+    continuation = truncated ? /<NextContinuationToken>([^<]+)<\/NextContinuationToken>/u.exec(xml)?.[1] : undefined;
+    if (truncated && continuation === undefined) {
+      throw new Error(`ListObjectsV2 on ${bucket} reported a truncated page without a continuation token.`);
+    }
+  } while (continuation !== undefined);
+  return { keys, missing: false };
+}
+
+/**
+ * Deletes every object in the bucket, then the bucket itself.
+ *
+ * Every failure throws. A teardown that swallowed its error would leave the
+ * collection behind and look like a pass, which is how one collection per
+ * fixture accumulated to SeaweedFS's 500-collection `-volume.max` and broke
+ * object PUTs for every later run (#1819). SeaweedFS drops the collection on the
+ * bucket DELETE, so `collection.list` stops growing.
+ */
+async function deleteObjectStorage(endpoint: string, client: AwsClient, bucket: string): Promise<void> {
+  const listed = await listObjectKeys(endpoint, client, bucket);
+  if (listed.missing) return;
+  for (const key of listed.keys) {
+    const deleted = await client.fetch(`${endpoint}/${bucket}/${key}`, { method: 'DELETE' });
+    if (!deleted.ok && deleted.status !== 404) {
+      throw new Error(`DELETE ${bucket}/${key} answered HTTP ${deleted.status}: ${await deleted.text()}`);
+    }
+  }
+  const removed = await client.fetch(`${endpoint}/${bucket}`, { method: 'DELETE' });
+  if (!removed.ok && removed.status !== 404) {
+    throw new Error(`Could not delete the test bucket ${bucket}: HTTP ${removed.status} ${await removed.text()}`);
+  }
+}
+
+// One teardown per test file, registered when this module is first imported.
+// `afterAll` rather than `onTestFinished` because a file may create its bucket
+// in `beforeAll` and share it across every test (worker-e2e.test.ts), and
+// `afterAll` is the only teardown legal from module scope.
+afterAll(async () => {
+  for (const { endpoint, client, bucket } of createdBuckets.splice(0).reverse()) {
+    await deleteObjectStorage(endpoint, client, bucket);
+  }
+});
+
 export async function createObjectStorageScope(): Promise<ObjectStorageScope> {
   const endpoint = requireEndpoint();
   // Bucket naming is stricter than a schema name: lowercase, 3-63 chars, no
@@ -262,6 +329,7 @@ export async function createObjectStorageScope(): Promise<ObjectStorageScope> {
   if (!created.ok) {
     throw new Error(`Could not create the test bucket ${bucket}: HTTP ${created.status} ${await created.text()}`);
   }
+  createdBuckets.push({ endpoint, client, bucket });
 
   return {
     bucket,
