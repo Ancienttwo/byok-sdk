@@ -5859,6 +5859,24 @@ export interface DaemonStatus {
      */
     config: DaemonEffectiveConfig;
 }
+/**
+ * The server surface {@link Daemon.pairEmbedded} reads: structural, so the
+ * client takes no package edge on `@byok-sdk/server`.
+ */
+export interface EmbeddedPairingServer {
+    readonly pairing: {
+        createPairingCode(input: {
+            productId: string;
+        }): Promise<{
+            readonly code: string;
+        }>;
+    };
+    readonly machines: {
+        list(): Promise<readonly {
+            readonly deviceId: string;
+        }[]>;
+    };
+}
 export interface Daemon {
     /** Present only with agentMemoryExport: true. Holds the home writer lease; AgentHomeBusyError is retryable. Raw contents remain Host-owned. */
     exportAgentMemory?(agentRef: AgentRef, options?: AgentMemoryExportOptions): Promise<AgentMemoryExport>;
@@ -5879,6 +5897,14 @@ export interface Daemon {
         readonly replaceOtherStore?: boolean;
     }): Promise<DeviceEnrollment>;
     /**
+     * The embedded Host's pairing: this daemon reads its own enrollment under
+     * the owner lease and reconciles it with `server`. An unpaired store
+     * against a server with no devices pairs; a paired store whose device the
+     * server lists is returned unchanged. Every other state throws
+     * {@link EmbeddedPairingError} and writes nothing. Never starts the daemon.
+     */
+    pairEmbedded(server: EmbeddedPairingServer): Promise<DeviceEnrollment>;
+    /**
      * Resolves once local startup is done — store ownership, storage, journal
      * recovery, the control socket and the task runner — with the reconnect
      * loop running. It does not wait for the server: `status().lifecycle` and
@@ -5887,6 +5913,15 @@ export interface Daemon {
      * is a crash.
      */
     start(): Promise<void>;
+    /**
+     * Valid after `start()` resolved. Resolves once `lifecycle` is
+     * `running/open`; rejects with {@link DaemonHaltError} on a halt,
+     * {@link DaemonNotOpenError} on `crashed` or `stopped`, and with
+     * `signal.reason` on abort (`AbortSignal.timeout(ms)` bounds the wait).
+     */
+    whenOpen(options: {
+        readonly signal: AbortSignal;
+    }): Promise<void>;
     stop(): Promise<void>;
     status(): DaemonStatus;
     /** Append one sanitized reliable record before its first transport attempt. */
@@ -6154,6 +6189,20 @@ export declare class DeviceStoreBindingMismatchError extends Error {
     } | undefined;
     constructor(stored: DeviceMetadata, bound: DeviceMetadata | undefined);
 }
+/**
+ * Why `Daemon.pairEmbedded` refused. Each reason leaves the local
+ * enrollment and the server unchanged:
+ * - `enrollment_missing`: this store is unpaired but the server already lists devices.
+ * - `device_unknown`: this store's device is not in the server's machine list.
+ * - `re_pair_required`: the device record has no OS credential entry.
+ * - `store_not_bound`: the OS entry holds an enrollment another storeDir paired.
+ */
+export declare class EmbeddedPairingError extends Error {
+    readonly reason: 'enrollment_missing' | 'device_unknown' | 're_pair_required' | 'store_not_bound';
+    constructor(reason: 'enrollment_missing' | 'device_unknown' | 're_pair_required' | 'store_not_bound', options?: {
+        cause?: unknown;
+    });
+}
 // ==== @byok-sdk/client dist/daemon/daemon-lifecycle.d.ts ====
 /**
  * The daemon's one lifecycle model (issues #391 and #394).
@@ -6226,6 +6275,11 @@ export declare class DaemonHaltError extends Error {
     constructor(reason: DaemonHaltReason, options?: {
         cause?: unknown;
     });
+}
+/** `whenOpen()` found the run ended without a halt reason: `stopped`, or `crashed`. */
+export declare class DaemonNotOpenError extends Error {
+    readonly reason: 'stopped' | 'crashed';
+    constructor(reason: 'stopped' | 'crashed');
 }
 /**
  * Strict read of a persisted or transported {@link DaemonLifecycle} (an
@@ -9861,7 +9915,7 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure.js';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 export { resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
@@ -9869,7 +9923,7 @@ export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals.j
 export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner/result-reason-prefixes.js';
 export { LocalTeamWorkspace, LocalTeamWorkspaceService, TeamWorkspaceError, TeamWorkspaceValidationError, TeamWorkspaceNotFoundError, TeamWorkspaceConflictError, TeamWorkspaceQuotaError, TeamWorkspaceLeaseError, TeamWorkspaceReceiptError, TeamWorkspaceCorruptError, encodeTeamMemberContext, decodeTeamMemberContext, type TeamWorkspaceDefinition, type TeamWorkspaceLimits, type TeamMessage, type TeamMemberLease, type TeamWorkspaceMemberReceipt, } from './daemon/team-workspace.js';
 export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './util/team-tmux-view.js';
-export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon.js';
+export type { Daemon, EmbeddedPairingServer, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon.js';
 export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS, } from './daemon/provider-provisioning.js';
 export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning.js';
 export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS, } from './daemon/agent-memory-intent.js';
@@ -9960,7 +10014,7 @@ export type { InstallSkillPacksOptions, InstalledSkillPack, ProjectedSkillPack, 
 export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client.js';
 export type { LocalMemoryFilter, MemorySelector, TruthManifestQueryInput, TruthManifestRecord, TruthMemoryClientErrorCode, TruthMemoryClientOptions, TruthMemoryMetric, TruthSnapshotCandidateInput, TruthSnapshotWriteInput, TruthTerminalWriteInput, TruthWriteBody, TruthWriteResult, VerifiedTruthRecord, } from './daemon/truth-memory-client.js';
 export type { ConnectionState } from './daemon/connection-manager.js';
-export { DAEMON_HALT_REASONS, DaemonHaltError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
+export { DAEMON_HALT_REASONS, DaemonHaltError, DaemonNotOpenError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
 export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle.js';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';
 export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client.js';

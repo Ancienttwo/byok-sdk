@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "bb7d0ed20282f0d5a7d651d154f695a9725cc1854d2f34bb3434e4842a8067f1"
+    "snapshotSha256": "2f4609d54bc85ccbd729bd38f8c6e39e50b115f764275546e3b5cf5c9a185bae"
   },
   "configFields": {
     "status": "tracked",
@@ -260,6 +260,32 @@
         "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
         "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema"
       ]
+    },
+    {
+      "id": "daemon-embedded-pairing",
+      "impact": "additive",
+      "summary": "Daemon.pairEmbedded(server) pairs an embedded Host's daemon against its in-process server and reconciles an existing enrollment; every other state throws the new EmbeddedPairingError (enrollment_missing, device_unknown, re_pair_required, store_not_bound) and writes nothing. EmbeddedPairingServer is the structural server type it reads. Daemon.whenOpen({ signal }) resolves on running/open and rejects with DaemonHaltError, the new DaemonNotOpenError (stopped, crashed) or signal.reason. Both Daemon members are required, so a Host test double typed as Daemon adds them (#1840).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#embedded-pairing-and-connection-wait",
+      "items": [
+        "export:@byok-sdk/client#Daemon",
+        "export:@byok-sdk/client#DaemonNotOpenError",
+        "export:@byok-sdk/client#EmbeddedPairingError",
+        "export:@byok-sdk/client#EmbeddedPairingServer"
+      ]
+    },
+    {
+      "id": "resolve-sdk-hosting",
+      "impact": "additive",
+      "summary": "resolveSdkHosting({ assetRoot, helperHost }) resolves a packaged Host's SDK hosting values from the copySdkPackagingAssets directory for process.platform and process.arch: daemon spreads into DaemonConfig and adapters into RuntimeAdaptersConfig. A missing required asset throws the new SdkHostingAssetsMissingError (code sdk_hosting_assets_missing, sorted relative missing paths); an unsupported target throws. sdkPackagingAssetLayout and sdkDistributionManifest keep the same values; only their declaration text changed (the agent-memory-fs directory now has one definition). The four existing configuration fields are unchanged (#1839).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#packaged-hosts-resolve-sdk-hosting-from-the-asset-root",
+      "items": [
+        "export:@byok-sdk/client#SdkHosting",
+        "export:@byok-sdk/client#SdkHostingAssetsMissingError",
+        "export:@byok-sdk/client#SdkHostingOptions",
+        "export:@byok-sdk/client#resolveSdkHosting",
+        "export:@byok-sdk/client#sdkDistributionManifest",
+        "export:@byok-sdk/client#sdkPackagingAssetLayout"
+      ]
     }
   ],
   "changes": [
@@ -325,6 +351,11 @@
       "entry": "dts-node-next-specifiers"
     },
     {
+      "item": "export:@byok-sdk/client#Daemon",
+      "change": "changed",
+      "entry": "daemon-embedded-pairing"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonConfig",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
@@ -333,6 +364,11 @@
       "item": "export:@byok-sdk/client#DaemonEffectiveRuntime",
       "change": "changed",
       "entry": "per-runtime-environment"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonNotOpenError",
+      "change": "added",
+      "entry": "daemon-embedded-pairing"
     },
     {
       "item": "export:@byok-sdk/client#DaemonOverrides",
@@ -353,6 +389,16 @@
       "item": "export:@byok-sdk/client#DshAdapterOptions",
       "change": "changed",
       "entry": "version-policy-source"
+    },
+    {
+      "item": "export:@byok-sdk/client#EmbeddedPairingError",
+      "change": "added",
+      "entry": "daemon-embedded-pairing"
+    },
+    {
+      "item": "export:@byok-sdk/client#EmbeddedPairingServer",
+      "change": "added",
+      "entry": "daemon-embedded-pairing"
     },
     {
       "item": "export:@byok-sdk/client#ExpiringClassId",
@@ -435,9 +481,39 @@
       "entry": "dts-node-next-specifiers"
     },
     {
+      "item": "export:@byok-sdk/client#SdkHosting",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkHostingAssetsMissingError",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkHostingOptions",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveSdkHosting",
+      "change": "added",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
       "item": "export:@byok-sdk/client#resolveStorageConfig",
       "change": "changed",
       "entry": "codex-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkDistributionManifest",
+      "change": "changed",
+      "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkPackagingAssetLayout",
+      "change": "changed",
+      "entry": "resolve-sdk-hosting"
     },
     {
       "item": "export:@byok-sdk/client/adapters#AgyAdapter",

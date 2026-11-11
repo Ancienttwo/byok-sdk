@@ -73,6 +73,14 @@ export class DaemonHaltError extends Error {
   }
 }
 
+/** `whenOpen()` found the run ended without a halt reason: `stopped`, or `crashed`. */
+export class DaemonNotOpenError extends Error {
+  constructor(readonly reason: 'stopped' | 'crashed') {
+    super(`daemon not open: ${reason}`);
+    this.name = 'DaemonNotOpenError';
+  }
+}
+
 /**
  * Strict read of a persisted or transported {@link DaemonLifecycle} (an
  * `audit.jsonl` line, a control `status` answer). Anything outside the closed

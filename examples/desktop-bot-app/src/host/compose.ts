@@ -5,8 +5,10 @@ import {
   type RuntimeEnvironmentPolicy, type SdkHelperHostConfig,
 } from '@byok-sdk/client';
 import { createRuntimeAdapters } from '@byok-sdk/client/adapters';
+import { createBotPersonaProjection } from '@byok-sdk/example-bot-collaboration';
 import { createByokServer, listenLoopback, type LoopbackPortStore } from '@byok-sdk/server';
-import { composeDomains, type ComposedDomains } from './domains.ts';
+import { AGENT_EGRESS_POLICY } from './conversation/catalog.ts';
+import { composeDomains, type ComposedDomains, type ServerConsumers } from './domains.ts';
 import { keysDbPath, piByokLauncher } from './keys/launcher.ts';
 import { precheckHostStores } from './precheck.ts';
 
@@ -107,7 +109,16 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
   await precheckHostStores({ storeDir: options.storeDir, serverDb, keysDb: keysDbPath(options.hostStorageRoot) });
   await mkdir(hostDir, { recursive: true, mode: 0o700 });
 
-  const server = createByokServer({ productId: options.productId, storage: { kind: 'sqlite', path: serverDb } });
+  let consumers: ServerConsumers | undefined;
+  const bound = () => {
+    if (!consumers) throw new Error('The conversation is not open yet');
+    return consumers;
+  };
+  const server = createByokServer({
+    productId: options.productId, storage: { kind: 'sqlite', path: serverDb },
+    wake: { consume: (wake, signal) => bound().consume(wake, signal) },
+    agentMessage: { consume: input => bound().consumeMessage(input) },
+  });
   const listener = await listenLoopback({
     portStore: filePortStore(path.join(hostDir, 'loopback-port')),
     createHandler: () => request => server.hono.fetch(request),
@@ -144,8 +155,9 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
       productName: options.productName,
       serverUrl: listener.serverUrl,
       storeDir: options.storeDir,
-      agentHome: { hostStorageRoot: options.hostStorageRoot },
-      agentEgress: {},
+      // K8 projects each Bot's persona into its Agent home; without it no Bot becomes ready.
+      agentHome: { hostStorageRoot: options.hostStorageRoot, projection: createBotPersonaProjection() },
+      agentEgress: { policy: AGENT_EGRESS_POLICY },
       localAgentRelease: { version: options.releaseVersion },
       ...(options.sdkHelperHost ? { sdkHelperHost: options.sdkHelperHost } : {}),
       ...launcher,
@@ -158,6 +170,12 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
     });
     domains = await composeDomains({
       daemon: started, daemonConfig, server, storeDir: options.storeDir, hostStorageRoot: options.hostStorageRoot,
+      consumers: {
+        bind: next => {
+          if (consumers) throw new Error('Server consumers are already bound');
+          consumers = next;
+        },
+      },
     });
     return { daemon: started, domains, close };
   } catch (error) {

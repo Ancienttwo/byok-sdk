@@ -255,7 +255,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const listeners = new Set<DaemonEventListener>();
     const stop = vi.fn().mockRejectedValue(failure);
     const fakeDaemon: Daemon = {
-      pair: vi.fn(), start: vi.fn().mockResolvedValue(undefined), stop,
+      pair: vi.fn(), pairEmbedded: vi.fn(), whenOpen: vi.fn(), start: vi.fn().mockResolvedValue(undefined), stop,
       status: vi.fn(), reloadMcpToolsets: vi.fn(), reportMcpToolsetObservation: vi.fn(),
       subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
       tasks: () => [], unpair: vi.fn(), approve: vi.fn(), reject: vi.fn(),
@@ -288,6 +288,8 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const stop = vi.fn().mockResolvedValue(undefined);
     const fakeDaemon: Daemon = {
       pair: vi.fn(),
+      pairEmbedded: vi.fn(),
+      whenOpen: vi.fn(),
       start: vi.fn().mockRejectedValue(new Error('boom-start')),
       stop,
       status: vi.fn().mockReturnValue({ paired: true, lifecycle: { phase: 'running', connection: 'connecting' }, activeTaskCount: 0 }),
@@ -347,6 +349,8 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const stop = vi.fn().mockResolvedValue(undefined);
     const fakeDaemon: Daemon = {
       pair: vi.fn(),
+      pairEmbedded: vi.fn(),
+      whenOpen: vi.fn(),
       start: vi.fn().mockRejectedValue(new DaemonHaltError('unpaired')),
       stop,
       status: vi.fn().mockReturnValue({ paired: false, lifecycle: { phase: 'stopped' }, activeTaskCount: 0 }),
@@ -382,6 +386,8 @@ describe('bin/commands/start: a crash after start (#394)', () => {
     const stop = vi.fn().mockResolvedValue(undefined);
     const fakeDaemon: Daemon = {
       pair: vi.fn(),
+      pairEmbedded: vi.fn(),
+      whenOpen: vi.fn(),
       start: vi.fn().mockImplementation(async () => {
         setTimeout(() => {
           for (const listener of listeners) listener({ kind: 'lifecycle', ts: 'T', lifecycle: { phase: 'crashed', at: 'T' } });
