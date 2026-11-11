@@ -1,5 +1,5 @@
-export { BotCollaboration, HostIntentError } from './host';
-export { DelegationError } from './rules/delegation';
+export { BotCollaboration } from './host';
+export { DelegationError, HostIntentError } from './rules/delegation';
 export { IntentOutcomeError } from './adapter-steps';
 export { botCompactVeto } from './compaction';
 export { RetentionRefused, retainRoots } from './retention';
