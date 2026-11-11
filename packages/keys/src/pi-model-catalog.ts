@@ -1,4 +1,5 @@
 import type { ModelProviderAdapter } from './provider-profile';
+import { piApiOf } from './pi-api';
 import { PI_MODEL_CATALOG } from './pi-model-catalog.generated';
 import {
   PI_COMPAT_KEYS_BY_API,
@@ -98,8 +99,10 @@ export function classifyPiCatalogModel(
   adapter: ModelProviderAdapter,
 ): PiCatalogModelEntry | PiCatalogUnrepresentableEntry {
   const api = model.api as PiModelApi;
+  // The api a profile declares for this entry; the generator passes only PI_MODEL_APIS entries.
+  const declared = api === 'openai-responses' ? api : undefined;
   const fields = new Set<string>();
-  if ((adapter === 'anthropic') !== (api === 'anthropic-messages')) fields.add('api');
+  if (piApiOf(adapter, declared) !== api) fields.add('api');
   for (const key of Object.keys(model)) {
     if (!PI_CATALOG_PROFILE_FIELDS.includes(key) && !PI_CATALOG_CONFIG_FIELDS.includes(key)) fields.add(key);
   }
@@ -113,7 +116,7 @@ export function classifyPiCatalogModel(
     ? PI_THINKING_LEVELS.find((level) => map?.[level] !== null) ?? 'off'
     : 'off';
   const parsed = PiModelConfigSchema.safeParse({
-    ...(api === 'openai-responses' ? { api } : {}),
+    ...(declared === undefined ? {} : { api: declared }),
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
     reasoning: model.reasoning,
