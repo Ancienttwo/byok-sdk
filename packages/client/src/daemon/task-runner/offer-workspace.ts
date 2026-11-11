@@ -1,14 +1,14 @@
 // `handleOffer` stage: bind the Agent home
 // (see ./support.ts for how a member module runs).
 import type { TerminalAgentHomeProjection } from '@byok-sdk/protocol';
-import { AgentHomeBusyError, AgentHomeReaderRunMissingError, AgentHomeResolutionError, type AgentHomeExecutionBinding } from '../../agent-home';
-import { digestAgentHomeMemory } from '../../agent-home-readers';
-import type { ActiveTask, OfferPhaseContext } from './support';
-import { errorMessage, outboundErrorMessage } from './support';
-import type { TaskRunner } from '../task-runner';
-import type { OfferHeld, OfferRequest, OfferRuntime } from './offer';
-import type { RuntimeSessionLease } from '../../types';
-import { PathMutationGateBusyError } from '../../util/path-mutation-gate';
+import { AgentHomeBusyError, AgentHomeReaderRunMissingError, AgentHomeResolutionError, type AgentHomeExecutionBinding } from '../../agent-home.js';
+import { digestAgentHomeMemory } from '../../agent-home-readers.js';
+import type { ActiveTask, OfferPhaseContext } from './support.js';
+import { errorMessage, outboundErrorMessage } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
+import type { OfferHeld, OfferRequest, OfferRuntime } from './offer.js';
+import type { RuntimeSessionLease } from '../../types.js';
+import { PathMutationGateBusyError } from '../../util/path-mutation-gate.js';
 
 export interface OfferWorkspaceInput extends Pick<OfferRequest, 'agentRef' | 'readerAttempt' | 'sessionRef' | 'homeAccess' | 'homeBusyCode'> {
   readonly pick: OfferRuntime['pick'];

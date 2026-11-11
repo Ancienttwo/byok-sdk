@@ -38,8 +38,8 @@ import {
   type MemberKeys,
   type UnsignedMemberChainEntryV1,
 } from '@byok-sdk/core/sealed-payload';
-import type { DeviceMemberRecords, DeviceMemberState, MemberChainPoint } from './device-member-custody';
-import { E2eeMemberClientError, type E2eeMemberClient } from './e2ee-member-client';
+import type { DeviceMemberRecords, DeviceMemberState, MemberChainPoint } from './device-member-custody.js';
+import { E2eeMemberClientError, type E2eeMemberClient } from './e2ee-member-client.js';
 
 /** How long `pv` lives after pairing: the pairing code TTL (10b). */
 export const PAIRING_VERIFICATION_TTL_MS = 10 * 60_000;

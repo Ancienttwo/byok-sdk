@@ -1,17 +1,17 @@
-import { parsePiMcpEnvironment } from './mcp-environment';
+import { parsePiMcpEnvironment } from './mcp-environment.js';
 import { isAbsolute } from 'node:path';
 import type { CallToolResult } from '@modelcontextprotocol/client';
-import { McpAuthorityError, McpStdioClient, type McpStdioServerSpec } from '../../mcp/client';
+import { McpAuthorityError, McpStdioClient, type McpStdioServerSpec } from '../../mcp/client.js';
 import {
   diffMcpObservation,
   GRANTABLE_TOOL_NAME,
   type McpServerObservation,
   type McpToolDescriptor,
   type McpToolsetServerObservation,
-} from '../../mcp/observation';
-import type { McpToolProjection } from '../../mcp/projection';
-import type { McpToolCallHost } from './mcp-tools';
-import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
+} from '../../mcp/observation.js';
+import type { McpToolProjection } from '../../mcp/projection.js';
+import type { McpToolCallHost } from './mcp-tools.js';
+import { isReservedMcpServerName } from '../../sdk-reserved-mcp.js';
 
 /**
  * The ONE task-scoped MCP host both Pi entries run on.

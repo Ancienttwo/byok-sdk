@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
-import { formatToolAuthorizationDenial, type ToolAuthorizationGate, type ToolAuthorizationVerdict, type ToolCall } from '../../tool-authorization';
-import type { ClaudeStreamMessage } from './events';
+import { formatToolAuthorizationDenial, type ToolAuthorizationGate, type ToolAuthorizationVerdict, type ToolCall } from '../../tool-authorization.js';
+import type { ClaudeStreamMessage } from './events.js';
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

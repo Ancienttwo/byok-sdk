@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
-import { LinuxSecretServiceSecretStore } from '../linux-secret-service';
-import { ByokKeysError } from '../errors';
-import { MacOsKeychainSecretStore } from '../macos-keychain';
+import { LinuxSecretServiceSecretStore } from '../linux-secret-service.js';
+import { ByokKeysError } from '../errors.js';
+import { MacOsKeychainSecretStore } from '../macos-keychain.js';
 import {
   type PiProviderLauncherOptions,
   parsePiProviderLauncherOptions,
   runPiProviderLauncher,
-} from '../pi-provider-launcher-core';
-import { type SecretStore } from '../secret-store';
-import { WindowsCredentialManagerSecretStore } from '../windows-credential-manager';
+} from '../pi-provider-launcher-core.js';
+import { type SecretStore } from '../secret-store.js';
+import { WindowsCredentialManagerSecretStore } from '../windows-credential-manager.js';
 
 /** The bundled executable's store: the platform OS store with the default storage options. */
 function createSecretStore(options: PiProviderLauncherOptions): SecretStore {

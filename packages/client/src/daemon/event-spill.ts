@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { AgentEvent, AgentEventSpill } from '@byok-sdk/protocol';
-import type { BlobResolver } from './blob-client';
+import type { BlobResolver } from './blob-client.js';
 
 /**
  * Default per-event inline ceiling (64 KiB) for the two `AgentEvent` variants

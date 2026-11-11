@@ -24,7 +24,7 @@ import {
   type AgentRef,
 } from '@byok-sdk/protocol';
 
-import { AgentHomeBusyError, type AgentHomeBinding, type AgentHomeLease, type AgentHomeManager } from '../agent-home';
+import { AgentHomeBusyError, type AgentHomeBinding, type AgentHomeLease, type AgentHomeManager } from '../agent-home.js';
 import {
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   AgentMemoryRevisionConflictError,
@@ -36,11 +36,11 @@ import {
   readAgentMemoryHomeInternalFile,
   replaceAgentMemoryHomeInternalFileStrict,
   type AgentMemoryHomeBinding,
-} from './agent-memory';
-import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
-import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper';
-import { verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
-import { snapshotPlainData } from '../util/plain-data';
+} from './agent-memory.js';
+import type { AgentMemoryFilesystem } from './agent-memory-filesystem.js';
+import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper.js';
+import { verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release.js';
+import { snapshotPlainData } from '../util/plain-data.js';
 import { AgentMemoryValidationError, validateAgentMemoryPath, type AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 /**

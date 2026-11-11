@@ -1,8 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { AsyncQueue } from '../../util/async-queue';
-import { RuntimeStartupDisposalFailure } from '../../runtime-failure';
-import type { ClaudeStreamMessage } from './events';
-import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
+import { AsyncQueue } from '../../util/async-queue.js';
+import { RuntimeStartupDisposalFailure } from '../../runtime-failure.js';
+import type { ClaudeStreamMessage } from './events.js';
+import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree.js';
 
 export type SpawnFn = typeof spawn;
 

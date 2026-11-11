@@ -20,11 +20,11 @@ import {
   type CloudStores,
   type InboundDedupStore,
 } from '@byok-sdk/cloud';
-import { RateLimiter, createCountingInboundRateLimiter, type RateLimiterOptions } from './rate-limiter';
-import { createSqliteEmbeddedStores } from './stores/sqlite';
-import { MemoryWakeStore, type WakeStore } from './wakes/store';
-import type { WakeConsumer } from './wakes/types';
-import type { ByokServerStorage } from './types';
+import { RateLimiter, createCountingInboundRateLimiter, type RateLimiterOptions } from './rate-limiter.js';
+import { createSqliteEmbeddedStores } from './stores/sqlite/index.js';
+import { MemoryWakeStore, type WakeStore } from './wakes/store.js';
+import type { WakeConsumer } from './wakes/types.js';
+import type { ByokServerStorage } from './types.js';
 
 /**
  * The store composition this façade hands the cloud kernel.

@@ -4,16 +4,16 @@ import {
   type DeviceAssertionEnvelopeV1,
   type TaskAssertionEnvelopeV1,
 } from '@byok-sdk/core';
-import { connectControlClient } from './control-client';
+import { connectControlClient } from './control-client.js';
 import {
   ControlError,
   type AssertionIssueErrorCode,
   type AssertionIssueResult,
   type TaskAssertionIssueErrorCode,
   type TaskAssertionIssueResult,
-} from './control-protocol';
-import { DeviceStore } from './store';
-import { readMcpContextFile, type SdkReservedMcpContext } from '../sdk-reserved-helper-context';
+} from './control-protocol.js';
+import { DeviceStore } from './store.js';
+import { readMcpContextFile, type SdkReservedMcpContext } from '../sdk-reserved-helper-context.js';
 
 /**
  * Plan `device-assertion-broker`: the ONE public entry point a sibling local

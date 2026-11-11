@@ -1,7 +1,7 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../agent-home';
+import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../agent-home.js';
 import type {
   AgentContentAuditReceipt,
   AgentContentActorKind,
@@ -9,7 +9,7 @@ import type {
   AgentContentReadReason,
   AgentContentReadSurface,
   AgentContentSessionIdentity,
-} from './agent-content-read';
+} from './agent-content-read.js';
 
 /**
  * A durable audit ledger for explicit Agent content reads.

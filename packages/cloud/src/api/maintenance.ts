@@ -1,5 +1,5 @@
-import type { ByokCloud, ByokCloudOptions } from '../cloud';
-import { type resolveProofReceiptRetention, runMaintenanceSteps } from '../maintenance';
+import type { ByokCloud, ByokCloudOptions } from '../cloud.js';
+import { type resolveProofReceiptRetention, runMaintenanceSteps } from '../maintenance.js';
 
 interface Dependencies {
   options: ByokCloudOptions;

@@ -1,9 +1,9 @@
-import { CloudDoError, type CloudDoErrorCode } from './errors';
-import { INBOX_DAY, type CloudInboxAdmission, type InboxSource } from './inbox-admission';
-import type { CloudOperationGuard } from './input-guard';
-import type { ExecutionRow, InvocationRow } from './invocation-ledger';
-import type { PlatformProfileId } from './platform-credentials';
-import { canonicalArgs } from './tools';
+import { CloudDoError, type CloudDoErrorCode } from './errors.js';
+import { INBOX_DAY, type CloudInboxAdmission, type InboxSource } from './inbox-admission.js';
+import type { CloudOperationGuard } from './input-guard.js';
+import type { ExecutionRow, InvocationRow } from './invocation-ledger.js';
+import type { PlatformProfileId } from './platform-credentials.js';
+import { canonicalArgs } from './tools.js';
 
 export type InboxState = 'queued' | 'running' | 'done' | 'failed' | 'interrupted' | 'cancelled' | 'expired';
 export interface InboxRow {

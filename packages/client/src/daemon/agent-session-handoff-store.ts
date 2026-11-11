@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, agentHomeReaderRunDirectory, ensureDirectoryNoSymlink, validateAgentRef, type AgentRef } from '../agent-home';
+import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeResolutionError, agentHomeReaderRunDirectory, ensureDirectoryNoSymlink, validateAgentRef, type AgentRef } from '../agent-home.js';
 
 export type AgentTerminalCause = 'complete' | 'failed' | 'cancelled';
 

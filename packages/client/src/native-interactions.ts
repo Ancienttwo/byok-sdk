@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { snapshotPlainData } from './util/plain-data';
+import { snapshotPlainData } from './util/plain-data.js';
 
 /** Native permission scope is explicit. There is intentionally no persistent grant. */
 export type NativeApprovalDecision = 'allow-once' | 'allow-session' | 'deny' | 'cancel';

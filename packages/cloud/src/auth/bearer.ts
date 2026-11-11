@@ -15,8 +15,8 @@
  * `tenantStoresFor` (`../tenant-stores.ts`).
  */
 import { isTenantId, tenantId, type DevicePrincipal } from '@byok-sdk/core';
-import type { DeviceDirectory } from '../stores/ports';
-import type { TokenSigner } from './tokens';
+import type { DeviceDirectory } from '../stores/ports.js';
+import type { TokenSigner } from './tokens.js';
 
 export interface BearerAuthDeps {
   readonly tokenSigner: TokenSigner;

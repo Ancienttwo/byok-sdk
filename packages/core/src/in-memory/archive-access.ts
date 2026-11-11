@@ -10,8 +10,8 @@
  * cloud package reads the same registry by the same key. Nothing here is
  * exported from the package entry.
  */
-import type { MailboxBody, MailboxMessage } from '../mailbox';
-import type { TenantId } from '../tenant';
+import type { MailboxBody, MailboxMessage } from '../mailbox.js';
+import type { TenantId } from '../tenant.js';
 
 export interface InMemoryMailboxArchiveAccess {
   /** The retained rows of one device. */

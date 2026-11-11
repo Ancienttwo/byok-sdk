@@ -13,7 +13,7 @@
  * file and test fixtures are the only allowed sites. A module that needs a
  * `TenantId` takes one as a parameter or mints it here.
  */
-import { ByokCoreError } from './errors';
+import { ByokCoreError } from './errors.js';
 
 /**
  * A validated tenant identifier.

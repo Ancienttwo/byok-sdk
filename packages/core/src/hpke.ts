@@ -21,8 +21,8 @@
  * interoperate in the test suite, but passing vectors is not an audit. A
  * dedicated security review is required before a release is published.
  */
-import { ByokCoreError } from './errors';
-import { webCryptoSubtle, type WebCryptoKey } from './webcrypto';
+import { ByokCoreError } from './errors.js';
+import { webCryptoSubtle, type WebCryptoKey } from './webcrypto.js';
 
 const KEM_ID = 0x0010;
 const KDF_ID = 0x0001;

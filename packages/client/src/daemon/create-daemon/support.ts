@@ -1,18 +1,18 @@
 import type { Envelope, RuntimeInfo, CapabilityFlag, RuntimeId, AgentEgressPolicy, ContentReadPolicy, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
-import { type JournalIdentity, type ReceivedEnvelopeRecord, journalHash } from '../journal/journal';
+import { type JournalIdentity, type ReceivedEnvelopeRecord, journalHash } from '../journal/journal.js';
 import { encodeEnvelope, PROVIDER_PROFILE_BINDING_CAPABILITY, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
-import type { RuntimeAdapter } from '../../types';
+import type { RuntimeAdapter } from '../../types.js';
 import { type HarnessInfo, HarnessIdSchema } from '@byok-sdk/protocol';
-import { type RuntimeObservation, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection';
-import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable';
-import { runtimeVersionPolicyProjection } from '../../runtime-version-policy';
-import { toRuntimeInfoCapabilities } from '../runtime-capabilities';
-import { type AgentContentReadSurface, type AgentContentReadPolicySelection, AGENT_CONTENT_READ_CAPABILITIES, createAgentContentReadPolicy, type AgentContentReadPolicy } from '../agent-content-read';
+import { type RuntimeObservation, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection.js';
+import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
+import { runtimeVersionPolicyProjection } from '../../runtime-version-policy.js';
+import { toRuntimeInfoCapabilities } from '../runtime-capabilities.js';
+import { type AgentContentReadSurface, type AgentContentReadPolicySelection, AGENT_CONTENT_READ_CAPABILITIES, createAgentContentReadPolicy, type AgentContentReadPolicy } from '../agent-content-read.js';
 import { DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_MAX_TTL_MS } from '@byok-sdk/core';
-import type { AgentContentReadConfig, DaemonConfig, DeviceAssertionConfig } from '../create-daemon';
-import { ALL_RUNTIME_IDS } from '../../adapters/runtime-adapters';
-import { agySessionStoreOf } from '../../util/agy-session-retention';
-import { LocalStorageConfigError, type ResolvedStorageConfig } from '../retention/config';
+import type { AgentContentReadConfig, DaemonConfig, DeviceAssertionConfig } from '../create-daemon.js';
+import { ALL_RUNTIME_IDS } from '../../adapters/runtime-adapters.js';
+import { agySessionStoreOf } from '../../util/agy-session-retention.js';
+import { LocalStorageConfigError, type ResolvedStorageConfig } from '../retention/config.js';
 
 /**
  * Module-scope helpers of the daemon composition (#926): constants, adapter

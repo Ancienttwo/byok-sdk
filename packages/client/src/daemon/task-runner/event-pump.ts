@@ -1,20 +1,20 @@
 // `TaskRunner` members that drain a runtime session's events into progress,
 // approvals, artifacts and the terminal (see ./support.ts for how a member
 // module runs).
-import { resultReplyFailureReason } from '../result-reply-failure';
-import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from '../artifact-read';
+import { resultReplyFailureReason } from '../result-reply-failure.js';
+import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from '../artifact-read.js';
 import { createEnvelope, type AgentEvent, type BlobRef, SEALED_SPLIT_TABLE } from '@byok-sdk/protocol';
-import { projectRuntimeBoundaryFailure } from '../../runtime-failure';
-import { spillOversizedEvent } from '../event-spill';
-import { ProgressEventTooLargeError } from '../progress-batcher';
-import type { ActiveTask } from './support';
-import { classifyToolCall, describeHighRiskToolCall } from '../../tool-authorization';
-import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, agentMessageSealing, closingReply, errorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, observeTerminalUsage, taskFinalizing, taskTearingDown, taskMessageAccepted, taskMessageSendAttempted } from './support';
-import type { TaskRunner } from '../task-runner';
-import { ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX, MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state';
-import { hostFor } from './host';
-import { agentMemoryCommitRefusalReason } from './agent-memory';
-import type { TerminalPlan } from './finish';
+import { projectRuntimeBoundaryFailure } from '../../runtime-failure.js';
+import { spillOversizedEvent } from '../event-spill.js';
+import { ProgressEventTooLargeError } from '../progress-batcher.js';
+import type { ActiveTask } from './support.js';
+import { classifyToolCall, describeHighRiskToolCall } from '../../tool-authorization.js';
+import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, agentMessageSealing, closingReply, errorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, observeTerminalUsage, taskFinalizing, taskTearingDown, taskMessageAccepted, taskMessageSendAttempted } from './support.js';
+import type { TaskRunner } from '../task-runner.js';
+import { ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX, MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state.js';
+import { hostFor } from './host.js';
+import { agentMemoryCommitRefusalReason } from './agent-memory.js';
+import type { TerminalPlan } from './finish.js';
 
 export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> {
   try {

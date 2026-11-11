@@ -2,8 +2,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureDir } from '../util/secure-dir';
+import { atomicWriteFile } from '../util/atomic-write.js';
+import { ensureSecureDir } from '../util/secure-dir.js';
 
 /**
  * The local team channel is deliberately a small, versioned contract.  It is

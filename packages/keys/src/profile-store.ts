@@ -7,13 +7,13 @@ import {
   type ProviderKeyCheckOutcome,
   PROVIDER_CUSTODY_RECEIPT_LIMIT,
   ProcessLocalMutex,
-} from './custody';
-import { ByokKeysError } from './errors';
+} from './custody.js';
+import { ByokKeysError } from './errors.js';
 import {
   type ModelProviderProfile,
   type ProviderProfileRef,
   parseModelProviderProfile,
-} from './provider-profile';
+} from './provider-profile.js';
 
 /**
  * Storage contract for provider profiles — everything needed to address a

@@ -1,8 +1,8 @@
 import type { z } from 'zod';
-import { EnvelopeSchema, type Envelope } from './envelope';
-import { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, type MessageType } from './messages';
-import { PROTOCOL_VERSION } from './version';
-import { EnvelopeParseError, EnvelopeValidationError, UnknownMessageTypeError } from './errors';
+import { EnvelopeSchema, type Envelope } from './envelope.js';
+import { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, type MessageType } from './messages.js';
+import { PROTOCOL_VERSION } from './version.js';
+import { EnvelopeParseError, EnvelopeValidationError, UnknownMessageTypeError } from './errors.js';
 
 const MESSAGE_TYPE_SET = new Set<string>(MESSAGE_TYPES);
 

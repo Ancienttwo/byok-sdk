@@ -33,9 +33,9 @@ import {
   type TenantReadinessDevice,
   type TenantReadiness,
 } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '../ports';
-import type { InMemoryTaskAttemptState } from './task-attempts';
-import { settleDeviceAttempts } from './task-retirement';
+import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '../ports.js';
+import type { InMemoryTaskAttemptState } from './task-attempts.js';
+import { settleDeviceAttempts } from './task-retirement.js';
 
 export class InMemoryDeviceDirectory implements DeviceDirectory {
   readonly #byTenant = new Map<string, DeviceRecord>();

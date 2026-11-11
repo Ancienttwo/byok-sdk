@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ClaudeStreamMessage } from './events';
+import type { ClaudeStreamMessage } from './events.js';
 
 export function parseClaudeContextWindow(
   modelUsage: unknown,

@@ -1,6 +1,6 @@
-import { awaitAdmission } from './admission-wait';
+import { awaitAdmission } from './admission-wait.js';
 import { TerminalProjectionSelectionSchema } from '@byok-sdk/protocol';
-import { preparedAgentMemoryModeWithinCeiling } from '../agent-memory/prepared-capability';
+import { preparedAgentMemoryModeWithinCeiling } from '../agent-memory/prepared-capability.js';
 import { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import {
   canonicalInputPreparationJson,
@@ -26,29 +26,29 @@ import {
   type InputPreparationRequestV1,
   type InputPreparationRuntimeIdentityV1,
   type InputPreparationScopeClaimV1,
-} from '../input-preparation';
+} from '../input-preparation.js';
 import {
   InputPreparationCompileError,
   InputPreparationRuntimeIdentityError,
   preparedRequestContentIsTextOnly,
   SUPPORTED_PREPARED_COMPILER_VERSION,
   type InputPreparationCompiler,
-} from '../adapters/pi/input-preparation';
+} from '../adapters/pi/input-preparation.js';
 import {
   buildPreparedPromptCommand,
   PREPARED_PROMPT_COMMAND_ID,
-} from '../adapters/pi/prepared-prompt-frame';
+} from '../adapters/pi/prepared-prompt-frame.js';
 // The SDK owns the single-frame bound: official Pi 1.0.4 reads stdin without
 // one, so this send-side check is the only thing that keeps an oversized frame
 // off the peer. `util/rpc-frame.ts` is the one authority for the cap and the
 // length function.
-import { fitsRpcFrame, rpcFrameByteLength, RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
-import { MAX_TIMER_DELAY_MS } from '../util/timer-delay';
+import { fitsRpcFrame, rpcFrameByteLength, RPC_MAX_FRAME_BYTES } from '../util/rpc-frame.js';
+import { MAX_TIMER_DELAY_MS } from '../util/timer-delay.js';
 import type {
   PreparedToolSurface,
   PreparedToolSurfaceAssembler,
   PreparedToolSurfaceRefusal,
-} from './prepared-tool-surface';
+} from './prepared-tool-surface.js';
 import {
   InputPreparationConflictError,
   InputPreparationDurabilityError,
@@ -58,7 +58,7 @@ import {
   isTerminalInputPreparationState,
   type InputPreparationRecord,
   type InputPreparationRecordKey,
-} from './input-preparation-store';
+} from './input-preparation-store.js';
 
 /**
  * B-P2 local primitive — binding, authority resolution and orchestration

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { RuntimeExecutionFailure } from '../../runtime-failure';
-import type { MessageDraftDelta } from '../../types';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
+import type { MessageDraftDelta } from '../../types.js';
 
 /** Structural SPI: complete kernel records enter here; only the explicit BYOK native origin is interpreted. */
 export interface CodexRecord {

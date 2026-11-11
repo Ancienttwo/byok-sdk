@@ -14,12 +14,12 @@ import {
   DeviceStore,
   type DeviceMetadata,
   type DeviceRecord,
-} from './store';
-import type { DeviceCredentialBackend } from './device-credential-store';
-import { DeviceStoreBindingMismatchError } from './daemon-errors';
-import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys';
-import { toHttpBase } from './url';
-import { MAX_TIMER_DELAY_MS } from '../util/timer-delay';
+} from './store.js';
+import type { DeviceCredentialBackend } from './device-credential-store.js';
+import { DeviceStoreBindingMismatchError } from './daemon-errors.js';
+import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys.js';
+import { toHttpBase } from './url.js';
+import { MAX_TIMER_DELAY_MS } from '../util/timer-delay.js';
 
 /**
  * Thrown when the server has revoked this device (protocol §6.3): a

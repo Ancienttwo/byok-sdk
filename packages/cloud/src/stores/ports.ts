@@ -1,5 +1,5 @@
-import type { AgentMessageDraftStore } from '../agent-message-draft';
-import type { TaskArchiveStore } from '../task-archive';
+import type { AgentMessageDraftStore } from '../agent-message-draft.js';
+import type { TaskArchiveStore } from '../task-archive.js';
 import { MAILBOX_STREAM_CLOSE_CAUSES, type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
@@ -51,8 +51,8 @@ import type {
   RuntimeId,
 } from '@byok-sdk/protocol';
 export type { AgentEgressReliablePayload, AgentRef } from '@byok-sdk/protocol';
-import type { ActivityStore } from '../activity';
-import type { ApprovalTimelineStore } from '../approval-timeline';
+import type { ActivityStore } from '../activity.js';
+import type { ApprovalTimelineStore } from '../approval-timeline.js';
 
 // ---------------------------------------------------------------------------
 // Device directory (S1's `DeviceRegistry`, tenant-first)

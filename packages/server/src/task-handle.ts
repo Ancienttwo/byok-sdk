@@ -7,9 +7,9 @@ import {
   type TenantId,
 } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
-import type { TaskEventRelay } from './relay';
-import { readTaskEvents, type TaskEventDeps } from './task-events';
-import type { ServerTaskEvent, TaskHandle, TaskResult } from './types';
+import type { TaskEventRelay } from './relay.js';
+import { readTaskEvents, type TaskEventDeps } from './task-events.js';
+import type { ServerTaskEvent, TaskHandle, TaskResult } from './types.js';
 
 function steerRejectionMessage(
   taskId: string,

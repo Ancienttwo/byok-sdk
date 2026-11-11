@@ -1,4 +1,4 @@
-import { awaitAdmission } from './admission-wait';
+import { awaitAdmission } from './admission-wait.js';
 import { createHash } from 'node:crypto';
 import {
   InputPreparationContextDocumentSchema,
@@ -19,13 +19,13 @@ import {
   type InputPreparationReadinessReasonV1,
   type InputPreparationReceiptV1,
   type InputPreparationRequestV1,
-} from '../input-preparation';
+} from '../input-preparation.js';
 import {
   InputPreparationRequestError,
   type InputPreparationService,
-} from './input-preparation-service';
-import type { InputPreparationCompletionClient } from './input-preparation-completion-client';
-import { MAX_TIMER_DELAY_MS } from '../util/timer-delay';
+} from './input-preparation-service.js';
+import type { InputPreparationCompletionClient } from './input-preparation-completion-client.js';
+import { MAX_TIMER_DELAY_MS } from '../util/timer-delay.js';
 
 /**
  * C07 G4-remote, device half: turn one `agent.input.preparation` envelope into

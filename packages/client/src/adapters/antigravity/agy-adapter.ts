@@ -1,11 +1,11 @@
-import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits';
+import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import type { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
-import type { ExecutionScratch } from '../../daemon/retention/scratch';
-import type { McpEventIdentities } from '../../mcp/event-identity';
+import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
+import type { McpEventIdentities } from '../../mcp/event-identity.js';
 import {
   freezeRuntimeAdapterDescriptor,
   PolicyUnsupportedError,
@@ -18,29 +18,29 @@ import {
   type RuntimeTaskInput,
   type RuntimeVersionPolicy,
   type Session,
-} from '../../types';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import type { AcpPermissionRequest, AcpPermissionResponse, AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime';
-import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
-import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
-import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
-import { AsyncQueue } from '../../util/async-queue';
-import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce } from '../session-kit';
-import { comparablePath } from '../../util/comparable-path';
-import { agentPersona } from '../agent-persona';
-import { agyEndpointOf } from './agy-endpoint';
-import { startAgyGeminiProxy, type AgyGeminiProxy } from './agy-gemini-proxy';
-import { agyPermissionDecision, type AgyReaderScope } from './permissions';
-import { acquireAgySessionRetention, brandAgySessionStore } from '../../util/agy-session-retention';
-import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
-import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
-import type { ResolvedBin } from '../codex/resolve-bin';
-import { AGY_RUNTIME_CAPABILITIES } from './agy-capabilities';
-import { agyEnvironment, agyNativeHome, agyStoreDir, ensureAgyHome } from './agy-profile';
-import { AGY_VERSION_POLICY, agyHasNativeAcp, agyVersionToken } from './agy-version';
-import { AgyProjection, agyMcpEventIdentities, type AgyTurnOutcome } from './projection';
-import { resolveAgyBin } from './resolve-bin';
+} from '../../types.js';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import type { AcpPermissionRequest, AcpPermissionResponse, AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime.js';
+import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
+import { AsyncQueue } from '../../util/async-queue.js';
+import { RetainedRecordBudget, haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce } from '../session-kit.js';
+import { comparablePath } from '../../util/comparable-path.js';
+import { agentPersona } from '../agent-persona.js';
+import { agyEndpointOf } from './agy-endpoint.js';
+import { startAgyGeminiProxy, type AgyGeminiProxy } from './agy-gemini-proxy.js';
+import { agyPermissionDecision, type AgyReaderScope } from './permissions.js';
+import { acquireAgySessionRetention, brandAgySessionStore } from '../../util/agy-session-retention.js';
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
+import { AGY_RUNTIME_CAPABILITIES } from './agy-capabilities.js';
+import { agyEnvironment, agyNativeHome, agyStoreDir, ensureAgyHome } from './agy-profile.js';
+import { AGY_VERSION_POLICY, agyHasNativeAcp, agyVersionToken } from './agy-version.js';
+import { AgyProjection, agyMcpEventIdentities, type AgyTurnOutcome } from './projection.js';
+import { resolveAgyBin } from './resolve-bin.js';
 
 /** Upstream's bound: the CLI can read its update state before it prints the version. */
 const VERSION_TIMEOUT_MS = 30_000;

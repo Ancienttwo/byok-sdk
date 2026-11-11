@@ -1,8 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { AsyncQueue } from '../../util/async-queue';
-import { createJsonlLineDecoder } from '../../util/jsonl-lines';
-import { observePiRpcSettlement, closePiRpcSettlement } from './interrupt-settlement';
-import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
+import { AsyncQueue } from '../../util/async-queue.js';
+import { createJsonlLineDecoder } from '../../util/jsonl-lines.js';
+import { observePiRpcSettlement, closePiRpcSettlement } from './interrupt-settlement.js';
+import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree.js';
 
 export type SpawnFn = typeof spawn;
 

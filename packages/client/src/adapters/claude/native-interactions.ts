@@ -5,9 +5,9 @@ import {
   type NativeInteractionOptions,
   type NativeInteractionResponse,
   type NativeQuestion,
-} from '../../native-interactions';
-import { snapshotPlainData } from '../../util/plain-data';
-import type { ClaudeStreamMessage } from './events';
+} from '../../native-interactions.js';
+import { snapshotPlainData } from '../../util/plain-data.js';
+import type { ClaudeStreamMessage } from './events.js';
 
 /** Questions only: tool permission is the SDK `auto | all` decision. */
 export const CLAUDE_NATIVE_INTERACTION_CAPABILITIES = Object.freeze({

@@ -1,12 +1,12 @@
 // ==== @byok-sdk/cloud-do dist/agent-do.d.ts ====
 import { DurableObject } from 'cloudflare:workers';
-import { type PlatformProfileId } from './platform-credentials';
-import { SessionRuntime, type CloudRenewRequest, type CloudRenewResult, type CloudRunSettlement } from './session-runtime';
-import type { CloudToolDispatcher } from './tools';
-import type { InvocationTerminalState, InvocationRow } from './invocation-ledger';
-import { type AdmissionIdentity, type InboxRow, type TranscriptCursor, type TranscriptRun } from './cloud-state';
-import { type CloudWakeAdmission } from './wake-runner';
-export { CLOUD_HARNESS_SETTINGS } from './session-runtime';
+import { type PlatformProfileId } from './platform-credentials.js';
+import { SessionRuntime, type CloudRenewRequest, type CloudRenewResult, type CloudRunSettlement } from './session-runtime.js';
+import type { CloudToolDispatcher } from './tools.js';
+import type { InvocationTerminalState, InvocationRow } from './invocation-ledger.js';
+import { type AdmissionIdentity, type InboxRow, type TranscriptCursor, type TranscriptRun } from './cloud-state.js';
+import { type CloudWakeAdmission } from './wake-runner.js';
+export { CLOUD_HARNESS_SETTINGS } from './session-runtime.js';
 /** One named DO owns one Harness; 4b adds platform-only text model submissions. */
 export declare class AgentDO extends DurableObject<Record<string, unknown>> {
     #private;
@@ -36,13 +36,13 @@ export declare class AgentDO extends DurableObject<Record<string, unknown>> {
         highWater: number;
         trimmedThrough: number;
         inbox: InboxRow[];
-        runs: import("./cloud-state").RunRow[];
+        runs: import("./cloud-state.js").RunRow[];
         invocations: Array<Pick<InvocationRow, 'seq' | 'invocationId' | 'toolName' | 'state' | 'errorCode'>>;
     }>;
     readRuns(input?: {
         after?: number;
         limit?: number;
-    }): Promise<import("./cloud-state").RunRow[]>;
+    }): Promise<import("./cloud-state.js").RunRow[]>;
     readInbox(input?: {
         after?: number;
         limit?: number;
@@ -56,7 +56,7 @@ export declare class AgentDO extends DurableObject<Record<string, unknown>> {
         limit?: number;
     }): Promise<{
         runs: TranscriptRun[];
-        items: import("./cloud-state").TranscriptItem[];
+        items: import("./cloud-state.js").TranscriptItem[];
         next: TranscriptCursor;
     }>;
     readRunOutput(conversationId: number, input?: {
@@ -86,11 +86,11 @@ export declare class AgentDO extends DurableObject<Record<string, unknown>> {
     submit(input: unknown): Promise<Response>;
 }
 // ==== @byok-sdk/cloud-do dist/cloud-state.d.ts ====
-import { type CloudDoErrorCode } from './errors';
-import { type CloudInboxAdmission, type InboxSource } from './inbox-admission';
-import type { CloudOperationGuard } from './input-guard';
-import type { ExecutionRow, InvocationRow } from './invocation-ledger';
-import type { PlatformProfileId } from './platform-credentials';
+import { type CloudDoErrorCode } from './errors.js';
+import { type CloudInboxAdmission, type InboxSource } from './inbox-admission.js';
+import type { CloudOperationGuard } from './input-guard.js';
+import type { ExecutionRow, InvocationRow } from './invocation-ledger.js';
+import type { PlatformProfileId } from './platform-credentials.js';
 export type InboxState = 'queued' | 'running' | 'done' | 'failed' | 'interrupted' | 'cancelled' | 'expired';
 export interface InboxRow {
     seq: number;
@@ -356,7 +356,7 @@ export declare function safeCloudError(error: unknown): CloudDoError;
 export declare function cloudErrorResponse(error: unknown): Response;
 export {};
 // ==== @byok-sdk/cloud-do dist/identity.d.ts ====
-import type { AgentDO } from './agent-do';
+import type { AgentDO } from './agent-do.js';
 export interface AgentIdentity {
     readonly tenantId: string;
     readonly workspaceId: string;
@@ -372,7 +372,7 @@ export declare function sessionObjectName(identity: SessionIdentity): Promise<st
 /** The consuming platform authorizes all four identity fields before this lookup. */
 export declare function getSessionObject(namespace: DurableObjectNamespace<AgentDO>, identity: SessionIdentity): Promise<DurableObjectStub<AgentDO>>;
 // ==== @byok-sdk/cloud-do dist/inbox-admission.d.ts ====
-import { type PlatformProfileId } from './platform-credentials';
+import { type PlatformProfileId } from './platform-credentials.js';
 export type InboxSource = 'message' | 'schedule' | 'invocation';
 export interface CloudInboxAdmission {
     readonly dedupKey: string;
@@ -386,21 +386,21 @@ export declare const INBOX_DAY = 86400000;
 /** Freeze the wire schema before credential reads or storage writes. */
 export declare function admitCloudInbox(input: unknown, now?: number): CloudInboxAdmission;
 // ==== @byok-sdk/cloud-do dist/index.d.ts ====
-export { AgentDO } from './agent-do';
-export type { CloudWakeAdmission } from './wake-runner';
-export type { InboxRow, RunRow, CloudEventRow, CloudEventMeta } from './cloud-state';
-export type { TranscriptCursor, TranscriptRun, TranscriptTurn, TranscriptItem } from './cloud-state';
-export type { CloudRenewRequest, CloudRenewResult, CloudRunSettlement } from './session-runtime';
-export { agentObjectName, getAgentObject, type AgentIdentity } from './identity';
-export { sessionObjectName, getSessionObject, type SessionIdentity } from './identity';
-export { CLOUD_SAFE_REPLAY_TOOLS, CLOUD_LIVE_IPO_TOOLS, type CloudToolResult, type CloudToolDefinition, type CloudToolDispatcher, type CloudDispatchContext, type CloudToolCallContext } from './tools';
-export { DurableObjectSqliteDatabase, openDurableObjectStorage } from './storage';
+export { AgentDO } from './agent-do.js';
+export type { CloudWakeAdmission } from './wake-runner.js';
+export type { InboxRow, RunRow, CloudEventRow, CloudEventMeta } from './cloud-state.js';
+export type { TranscriptCursor, TranscriptRun, TranscriptTurn, TranscriptItem } from './cloud-state.js';
+export type { CloudRenewRequest, CloudRenewResult, CloudRunSettlement } from './session-runtime.js';
+export { agentObjectName, getAgentObject, type AgentIdentity } from './identity.js';
+export { sessionObjectName, getSessionObject, type SessionIdentity } from './identity.js';
+export { CLOUD_SAFE_REPLAY_TOOLS, CLOUD_LIVE_IPO_TOOLS, type CloudToolResult, type CloudToolDefinition, type CloudToolDispatcher, type CloudDispatchContext, type CloudToolCallContext } from './tools.js';
+export { DurableObjectSqliteDatabase, openDurableObjectStorage } from './storage.js';
 declare const _default: {
     fetch: () => Response;
 };
 export default _default;
 // ==== @byok-sdk/cloud-do dist/input-guard.d.ts ====
-import { type PlatformProfileId } from './platform-credentials';
+import { type PlatformProfileId } from './platform-credentials.js';
 /** Keep the existing pre-storage text guard shared by submission and tool data. */
 export declare function admitCloudText(env: Readonly<Record<string, unknown>>, text: string, selected?: PlatformProfileId): Promise<void>;
 /** Check decoded JSON values before any part enters pi or the invocation ledger. */
@@ -414,8 +414,8 @@ export interface CloudOperationGuard {
 }
 export declare function prepareCloudGuard(env: Readonly<Record<string, unknown>>, selected?: PlatformProfileId): Promise<CloudOperationGuard>;
 // ==== @byok-sdk/cloud-do dist/invocation-ledger.d.ts ====
-import { type CloudDoErrorCode } from './errors';
-import type { CloudOperationGuard } from './input-guard';
+import { type CloudDoErrorCode } from './errors.js';
+import type { CloudOperationGuard } from './input-guard.js';
 export type InvocationState = 'accepted' | 'running' | 'succeeded' | 'failed' | 'aborted' | 'interrupted' | 'timed_out';
 export type InvocationTerminalState = Exclude<InvocationState, 'accepted' | 'running'>;
 export interface InvocationInput {
@@ -546,12 +546,12 @@ export declare function platformCredentialReader(env: Readonly<Record<string, un
 };
 // ==== @byok-sdk/cloud-do dist/session-runtime.d.ts ====
 import { Harness, type AgentChange } from '@earendil-works/pi-durable';
-import { type CloudDoErrorCode } from './errors';
-import { type CloudOperationGuard } from './input-guard';
-import { CloudState, type RunRow } from './cloud-state';
-import { InvocationLedger, type InvocationRow, type InvocationTerminalState } from './invocation-ledger';
-import { type PlatformProfileId } from './platform-credentials';
-import { type CloudToolDispatcher } from './tools';
+import { type CloudDoErrorCode } from './errors.js';
+import { type CloudOperationGuard } from './input-guard.js';
+import { CloudState, type RunRow } from './cloud-state.js';
+import { InvocationLedger, type InvocationRow, type InvocationTerminalState } from './invocation-ledger.js';
+import { type PlatformProfileId } from './platform-credentials.js';
+import { type CloudToolDispatcher } from './tools.js';
 /**
  * `restartLimit: Infinity` keeps the Pi 1.3 behavior: a task that an eviction,
  * crash or reset cut off is run again on the next open, never parked.
@@ -662,7 +662,7 @@ export declare class SessionRuntime {
         digest: string;
         seqs: number[];
     }): void;
-    claimWake(lease: ExecutionLease, seqs: readonly number[], profile?: "deepseek_direct" | "zai_openai"): import("./cloud-state").InboxRow[];
+    claimWake(lease: ExecutionLease, seqs: readonly number[], profile?: "deepseek_direct" | "zai_openai"): import("./cloud-state.js").InboxRow[];
     settle(lease: ExecutionLease, outcome: RunOutcome): Promise<void>;
     cancelActive(code?: CloudDoErrorCode): boolean;
     /** Only an owner that exited may be repaired. A live provider run is never adjudicated here. */
@@ -697,8 +697,8 @@ export {};
 // ==== @byok-sdk/cloud-do dist/tools.d.ts ====
 import type { JsonValue } from '@earendil-works/pi-ai';
 import type { ToolRegistration } from '@earendil-works/pi-durable';
-import { type CloudDoErrorCode } from './errors';
-import type { SessionIdentity } from './identity';
+import { type CloudDoErrorCode } from './errors.js';
+import type { SessionIdentity } from './identity.js';
 export declare const CLOUD_SAFE_REPLAY_TOOLS: readonly ["load_financial_analysis_skill", "resolve_security", "guarded_screen", "search_f10_datasets", "query_f10_dataset", "get_security_profile", "get_quote_snapshot", "get_corporate_actions", "get_financial_statements", "get_financial_facts", "get_financial_ratios", "get_sdi_disclosures", "get_directorate", "get_ownership", "get_related_warrants"];
 export declare const CLOUD_LIVE_IPO_TOOLS: readonly ["get_ipo_profile", "search_ipo_calendar", "get_ipo_timetable", "get_ipo_offering", "get_ipo_allotment", "screen_ipos", "compare_ipos"];
 export interface CloudToolDefinition {
@@ -765,9 +765,9 @@ export declare function invocationId(conversationId: number, assistantEntryId: n
 export declare function argsDigest(toolName: string, args: Record<string, unknown>): Promise<string>;
 // ==== @byok-sdk/cloud-do dist/wake-runner.d.ts ====
 import type { Conversation, Harness } from '@earendil-works/pi-durable';
-import { type AdmissionIdentity, type InboxRow, type RunHistory } from './cloud-state';
-import { type CloudDoErrorCode } from './errors';
-import { type RunOutcome, type SessionRuntime } from './session-runtime';
+import { type AdmissionIdentity, type InboxRow, type RunHistory } from './cloud-state.js';
+import { type CloudDoErrorCode } from './errors.js';
+import { type RunOutcome, type SessionRuntime } from './session-runtime.js';
 export type CloudWakeAdmission = {
     accepted: true;
     reservation: 'held' | 'none';

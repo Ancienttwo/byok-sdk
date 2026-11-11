@@ -1,7 +1,7 @@
 import { execFile, type ExecFileException } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { createPrivateSystemTempDir } from '../../util/secure-dir';
+import { createPrivateSystemTempDir } from '../../util/secure-dir.js';
 
 /**
  * Windows process ancestry for the Hermes gateway ownership check

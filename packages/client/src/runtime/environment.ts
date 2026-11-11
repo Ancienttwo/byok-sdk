@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { loginShellSnapshot, type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
-import { PI_PROVIDER_ENV_KEY_NAMES } from '../adapters/pi/pi-provider-env.generated';
+import { loginShellSnapshot, type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
+import { PI_PROVIDER_ENV_KEY_NAMES } from '../adapters/pi/pi-provider-env.generated.js';
 
 /**
  * The environment of every child process of a task: the runtime CLI and the
@@ -486,7 +486,7 @@ export async function readWindowsRegistryKey(key: string): Promise<ReadonlyMap<s
   if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot) || /[\u0000\r\n]/u.test(systemRoot)) throw new Error('SystemRoot is not an absolute path');
   const reg = path.win32.join(systemRoot, 'System32', 'reg.exe');
   // Loaded on the first read, so only a win32 build pulls it into this module's graph.
-  const { createPrivateSystemTempDir } = await import('../util/secure-dir');
+  const { createPrivateSystemTempDir } = await import('../util/secure-dir.js');
   const directory = await createPrivateSystemTempDir('byok-reg-');
   try {
     const file = path.join(directory, 'key.reg');

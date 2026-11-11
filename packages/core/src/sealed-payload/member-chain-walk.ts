@@ -62,18 +62,18 @@
  */
 import { z } from 'zod';
 
-import { canonicalizeJson, type JsonObject } from '../attestation';
-import { safeParseTotal } from '../total-parse';
+import { canonicalizeJson, type JsonObject } from '../attestation.js';
+import { safeParseTotal } from '../total-parse.js';
 import {
   KemEpochSchema,
   KemSigSchema,
   parseMemberKeyBundle,
   verifyMemberKem,
   type MemberKeyBundleV1,
-} from './member-bundle';
-import { MEMBER_ID_PATTERN, deriveMemberId, verifyMemberChainEntry, type MemberChainEntryV1 } from './member-chain';
-import { P256PublicJwkSchema, type P256PublicJwk } from './primitives';
-import { SEALED_CATEGORIES, type SealedCategory } from './sealed-content';
+} from './member-bundle.js';
+import { MEMBER_ID_PATTERN, deriveMemberId, verifyMemberChainEntry, type MemberChainEntryV1 } from './member-chain.js';
+import { P256PublicJwkSchema, type P256PublicJwk } from './primitives.js';
+import { SEALED_CATEGORIES, type SealedCategory } from './sealed-content.js';
 
 export interface MemberChainScope {
   readonly categories: readonly SealedCategory[];

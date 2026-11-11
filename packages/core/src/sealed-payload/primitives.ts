@@ -12,15 +12,15 @@
  */
 import { z } from 'zod';
 
-import { ByokCoreError } from '../errors';
+import { ByokCoreError } from '../errors.js';
 import {
   SealingPublicJwkSchema,
   decodeBase64Url,
   encodeBase64Url,
   sealingPublicKeyBytes,
   type SealingPublicJwk,
-} from '../sealed-provider-secret';
-import { webCryptoSubtle, type WebCryptoKey } from '../webcrypto';
+} from '../sealed-provider-secret.js';
+import { webCryptoSubtle, type WebCryptoKey } from '../webcrypto.js';
 
 export type Bytes = Uint8Array<ArrayBuffer>;
 

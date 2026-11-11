@@ -19,7 +19,7 @@ import {
   base64UrlEncode,
   type CryptoKeyLike,
   type KeyUsageLike,
-} from '../crypto/web-crypto';
+} from '../crypto/web-crypto.js';
 
 /** Access tokens are ~1h, matching the reference server (docs/protocol.md §6.1/§6.2). */
 export const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;

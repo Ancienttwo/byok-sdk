@@ -1,11 +1,11 @@
-import { compareCodeUnits } from '../util/compare-code-units';
-import { McpAuthorityError } from './authority-error';
-import type { McpStdioServerSpec } from './client';
+import { compareCodeUnits } from '../util/compare-code-units.js';
+import { McpAuthorityError } from './authority-error.js';
+import type { McpStdioServerSpec } from './client.js';
 import {
   GRANTABLE_MCP_SERVER_NAME,
   type McpServerObservation,
   type McpToolsetServerObservation,
-} from './observation';
+} from './observation.js';
 
 /**
  * One model-visible MCP tool, in vocabulary no runtime owns.

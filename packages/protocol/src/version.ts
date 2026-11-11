@@ -137,4 +137,4 @@ import {
   AGENT_INPUT_PREPARATION_CAPABILITY,
   SEALED_PAYLOAD_CAPABILITY,
   SEALED_PAYLOAD_V2_CAPABILITY,
-} from './capability-constants';
+} from './capability-constants.js';

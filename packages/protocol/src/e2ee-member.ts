@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 
-import { CONTENT_HASH_RE } from './blob';
+import { CONTENT_HASH_RE } from './blob.js';
 
 /** The most chain entries one append accepts. */
 export const E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES = 64;

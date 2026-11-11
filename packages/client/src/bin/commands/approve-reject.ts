@@ -1,6 +1,6 @@
-import { APPROVAL_REQUIRES_HOST } from '../../daemon/approvals';
-import { ControlError } from '../../daemon/control-protocol';
-import { connectControlClient } from '../../daemon/control-client';
+import { APPROVAL_REQUIRES_HOST } from '../../daemon/approvals.js';
+import { ControlError } from '../../daemon/control-protocol.js';
+import { connectControlClient } from '../../daemon/control-client.js';
 
 export interface ApproveRejectDeps {
   log?: (line: string) => void;

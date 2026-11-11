@@ -7,8 +7,8 @@ import {
   type DeviceAssertionExpectedBinding,
   type DeviceAssertionReplayAuthority,
 } from '@byok-sdk/core';
-import type { CloudCrypto } from '../crypto/port';
-import type { DeviceDirectory } from '../stores/ports';
+import type { CloudCrypto } from '../crypto/port.js';
+import type { DeviceDirectory } from '../stores/ports.js';
 
 export interface HostedDeviceAssertionAuthDeps {
   readonly devices: DeviceDirectory;

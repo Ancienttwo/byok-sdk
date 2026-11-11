@@ -21,8 +21,8 @@ import {
   type TaskStateV1,
   type TerminalCause,
   type TerminalKind,
-} from './state';
-import type { TaskRunner } from '../task-runner';
+} from './state.js';
+import type { TaskRunner } from '../task-runner.js';
 
 /** Mutable per-offer facts the host keeps out of the serializable State. */
 export interface HostOfferContext {

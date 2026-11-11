@@ -1,5 +1,5 @@
-import type * as OarErrors from '../runtime/acp-session-runtime';
-import { RuntimeExecutionFailure, isRuntimeExecutionFailure, runtimeFailureClassOf, type RuntimeExecutionFailureInput } from '../runtime-failure';
+import type * as OarErrors from '../runtime/acp-session-runtime.js';
+import { RuntimeExecutionFailure, isRuntimeExecutionFailure, runtimeFailureClassOf, type RuntimeExecutionFailureInput } from '../runtime-failure.js';
 
 /** A runtime's own error types, mapped before the untyped fallback; `undefined` leaves the error untyped. */
 export type RuntimeStartClassifier = (error: unknown) => Omit<RuntimeExecutionFailureInput, 'phase' | 'reason'> | undefined;

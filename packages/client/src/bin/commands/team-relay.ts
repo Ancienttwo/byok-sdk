@@ -1,12 +1,12 @@
-import { TeamNotificationRelay } from '../team-notification-relay';
+import { TeamNotificationRelay } from '../team-notification-relay.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import type { DaemonConfig } from '../../daemon/create-daemon';
-import { ensureSecureDir } from '../../util/secure-dir';
-import { connectControlClient } from '../../daemon/control-client';
-import { resolveStoreDir } from '../config';
-import { loadCodexTeamBindings, preflightCodexRelay, queueCodexTeamNotification } from '../team-codex-relay';
+import type { DaemonConfig } from '../../daemon/create-daemon.js';
+import { ensureSecureDir } from '../../util/secure-dir.js';
+import { connectControlClient } from '../../daemon/control-client.js';
+import { resolveStoreDir } from '../config.js';
+import { loadCodexTeamBindings, preflightCodexRelay, queueCodexTeamNotification } from '../team-codex-relay.js';
 
 /** One foreground owner per room. Stale locks are never guessed away or stolen. */
 export async function acquireTeamRelayLock(storeDir: string, workspaceId: string): Promise<() => Promise<void>> {

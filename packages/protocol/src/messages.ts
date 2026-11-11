@@ -1,7 +1,7 @@
-import { PreparedAgentMemoryModeSchema } from './input-preparation';
+import { PreparedAgentMemoryModeSchema } from './input-preparation.js';
 import { z } from 'zod';
-import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type RuntimeUnavailableCause } from './constants';
-import { BlobRefSchema } from './blob';
+import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type RuntimeUnavailableCause } from './constants.js';
+import { BlobRefSchema } from './blob.js';
 import {
   SEALED_DECLINE_CODES,
   SealedTaskInputSchema,
@@ -10,8 +10,8 @@ import {
   RoutineRefSchema,
   TaskSealingSchema,
   sealedOfferRule,
-} from './sealed-payload';
-import { AgentEventOrUnknownSchema } from './agent-event';
+} from './sealed-payload.js';
+import { AgentEventOrUnknownSchema } from './agent-event.js';
 import {
   AgentContentActorSchema,
   AgentContentDecodeAsSchema,
@@ -27,15 +27,15 @@ import {
   AGENT_MESSAGE_MAX_BYTES,
   AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES,
   ContentReadPolicySchema,
-} from './agent-egress';
+} from './agent-egress.js';
 import {
   AgentHomeProjectionHashSchema,
   AgentHomeProjectionHostRevisionSchema,
   AgentHomeProjectionProfileRevisionSchema,
   AgentHomeProjectionValueSchema,
-} from './agent-home-projection';
-import { ProviderProvisioningAvailablePayloadSchema } from './provider-provisioning';
-import { E2eeKeyPackageAvailablePayloadSchema } from './e2ee-member';
+} from './agent-home-projection.js';
+import { ProviderProvisioningAvailablePayloadSchema } from './provider-provisioning.js';
+import { E2eeKeyPackageAvailablePayloadSchema } from './e2ee-member.js';
 import {
   InputPreparationAccountingPolicyRefSchema,
   InputPreparationArtifactSummarySchema,
@@ -45,11 +45,11 @@ import {
   InputPreparationProfileIdSchema,
   InputPreparationSelectionSchema,
   InputPreparationSourceSchema,
-} from './input-preparation';
-import { openVocabularyToken, unrecognizedToken } from './open-vocabulary';
-import { ProviderProfileBindingSchema } from './provider-profile-binding';
-import { TerminalProjectionSelectionSchema } from './terminal-projection';
-import { canonicalizePlainJson, type PlainJsonCheck } from './plain-json';
+} from './input-preparation.js';
+import { openVocabularyToken, unrecognizedToken } from './open-vocabulary.js';
+import { ProviderProfileBindingSchema } from './provider-profile-binding.js';
+import { TerminalProjectionSelectionSchema } from './terminal-projection.js';
+import { canonicalizePlainJson, type PlainJsonCheck } from './plain-json.js';
 
 /** Max size of an inlined artifact payload, per the delivery-model spec (<=64KB). */
 const MAX_INLINE_BYTES = 64 * 1024;

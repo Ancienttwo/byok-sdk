@@ -1,4 +1,4 @@
-import { compareCodeUnits } from '../util/compare-code-units';
+import { compareCodeUnits } from '../util/compare-code-units.js';
 import {
   McpAuthorityError,
   McpStdioClient,
@@ -7,7 +7,7 @@ import {
   MCP_OBSERVATION_MAX_STDOUT_BYTES,
   type McpStdioClientOptions,
   type McpStdioServerSpec,
-} from './client';
+} from './client.js';
 
 /**
  * Tool names an adapter registers must be OBSERVED, never configured: the

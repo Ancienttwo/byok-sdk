@@ -429,6 +429,13 @@ export const reviewedScripts = Object.freeze({
     tests: ['scripts/release/install-matrix.test.mjs', 'scripts/release/pack-and-smoke.test.mjs'],
     families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
+  // #1828: each of the same families runs pack-and-smoke.mjs, which runs this NodeNext probe on the installed tarballs.
+  'scripts/release/node-next-consumer-probe.mjs': {
+    tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
+  },
+  // #1828: the one-time relative-specifier codemod. Open branches rerun it by hand; the release pack's
+  // NodeNext consumer probe proves the specifiers it writes.
+  'scripts/codemod/relative-js-specifiers.mjs': { tests: [], families: ['npm-release-pack'] },
   // #1378: the shared Secret Service wrapper that these family jobs run their
   // suites under. build-test also runs it, but plan-ci never lets a routine
   // path select build-test (the same rule as .node-version).

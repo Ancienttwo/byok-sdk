@@ -1,10 +1,10 @@
 import packageManifest from '../package.json' with { type: 'json' };
-import { AnthropicMessagesClient } from './anthropic-client';
-import type { ProviderKeyCheckOutcome } from './custody';
-import { ByokKeysError } from './errors';
-import type { ProviderFetch } from './http';
-import { OpenAiCompatibleChatClient } from './openai-client';
-import type { ModelProviderProfile } from './provider-profile';
+import { AnthropicMessagesClient } from './anthropic-client.js';
+import type { ProviderKeyCheckOutcome } from './custody.js';
+import { ByokKeysError } from './errors.js';
+import type { ProviderFetch } from './http.js';
+import { OpenAiCompatibleChatClient } from './openai-client.js';
+import type { ModelProviderProfile } from './provider-profile.js';
 
 /** Default bound on one key check, below the transport's own 15 s ceiling. */
 export const PROVIDER_KEY_CHECK_TIMEOUT_MS = 10_000;

@@ -1,4 +1,4 @@
-import { servesHermesHome, type HermesGatewayIdentity } from './gateway-identity';
+import { servesHermesHome, type HermesGatewayIdentity } from './gateway-identity.js';
 
 /**
  * Whether the gateway that answers with `pid` runs in the process tree the

@@ -25,13 +25,13 @@
  */
 import { z } from 'zod';
 
-import { canonicalizeJsonBytes } from '../attestation';
-import { ByokCoreError } from '../errors';
-import { hpkeOpenBase, hpkeSealBase } from '../hpke';
-import { safeParseTotal } from '../total-parse';
-import type { WebCryptoKey } from '../webcrypto';
-import { KemEpochSchema } from './member-bundle';
-import { MEMBER_ID_PATTERN, deriveMemberId } from './member-chain';
+import { canonicalizeJsonBytes } from '../attestation.js';
+import { ByokCoreError } from '../errors.js';
+import { hpkeOpenBase, hpkeSealBase } from '../hpke.js';
+import { safeParseTotal } from '../total-parse.js';
+import type { WebCryptoKey } from '../webcrypto.js';
+import { KemEpochSchema } from './member-bundle.js';
+import { MEMBER_ID_PATTERN, deriveMemberId } from './member-chain.js';
 import {
   base64UrlBytes,
   concat,
@@ -47,7 +47,7 @@ import {
   utf8,
   type Bytes,
   type P256PublicJwk,
-} from './primitives';
+} from './primitives.js';
 
 export const SCOPE_KEY_BYTES = 32;
 

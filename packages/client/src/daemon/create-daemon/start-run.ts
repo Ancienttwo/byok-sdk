@@ -1,23 +1,23 @@
-import { attachOwnedProcessGroupLedger } from '../../adapters/process-tree';
-import { InputPreparationUnsupportedRecordVersionError } from '../input-preparation-store';
-import type { DeviceRecord } from '../store';
-import { DaemonHaltError } from '../daemon-lifecycle';
-import { AgentEgressController } from '../agent-egress-controller';
+import { attachOwnedProcessGroupLedger } from '../../adapters/process-tree.js';
+import { InputPreparationUnsupportedRecordVersionError } from '../input-preparation-store.js';
+import type { DeviceRecord } from '../store.js';
+import { DaemonHaltError } from '../daemon-lifecycle.js';
+import { AgentEgressController } from '../agent-egress-controller.js';
 import path from 'node:path';
-import { createFleetJitter } from '../deterministic-jitter';
-import { type JournalIdentity, journalHash } from '../journal/journal';
-import type { AgentRef } from '../../agent-home';
-import type { SealedRunState } from './state';
+import { createFleetJitter } from '../deterministic-jitter.js';
+import { type JournalIdentity, journalHash } from '../journal/journal.js';
+import type { AgentRef } from '../../agent-home.js';
+import type { SealedRunState } from './state.js';
 import { decodeEnvelope, createEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
-import { DAEMON_TASK_FAILURE } from '../task-failure';
-import { terminalIdentity } from '../terminal-identity';
-import { assertJournalEnvelopeProtocol } from '../daemon-errors';
-import { resultReplyFailureFromState } from '../result-reply-failure';
-import { loginShellSnapshot, serviceEnvironmentStatus } from '../../login-shell-environment';
-import { detectRuntimes } from './support';
-import { recordRuntimeVersionChanges } from '../runtime-versions-store';
-import { BlobClient } from '../blob-client';
-import type { DaemonScope } from './scope';
+import { DAEMON_TASK_FAILURE } from '../task-failure.js';
+import { terminalIdentity } from '../terminal-identity.js';
+import { assertJournalEnvelopeProtocol } from '../daemon-errors.js';
+import { resultReplyFailureFromState } from '../result-reply-failure.js';
+import { loginShellSnapshot, serviceEnvironmentStatus } from '../../login-shell-environment.js';
+import { detectRuntimes } from './support.js';
+import { recordRuntimeVersionChanges } from '../runtime-versions-store.js';
+import { BlobClient } from '../blob-client.js';
+import type { DaemonScope } from './scope.js';
 
 /**
  * The first stage of `runStartUnderLease` (#926), under the owner lease:
@@ -126,7 +126,7 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
   const journalIdentity: JournalIdentity = { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId };
   const resultReplyRecoveryTasks = new Map<string, { agentRef: AgentRef; contract: string }>();
   const sealedRun: SealedRunState = { sealedTasks: undefined, sealedMember: undefined, ownSealIdentity: undefined };
-  const recordRecoveryFailure = async (task: import('../journal/journal').RecoverableTask, reason: string, interrupted = false) => {
+  const recordRecoveryFailure = async (task: import('../journal/journal.js').RecoverableTask, reason: string, interrupted = false) => {
     const offer = decodeEnvelope(task.envelopeBytes);
     const { agentRef } = offer.payload as { agentRef?: AgentRef };
     const failure = createEnvelope('task.fail', { reason, retryable: false,

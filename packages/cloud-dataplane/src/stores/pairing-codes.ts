@@ -24,9 +24,9 @@ import type {
   PairingEnrollmentInput,
 } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
-import type { ByokPool } from '../pool';
-import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer';
-import { getDeviceOnClient, registerDeviceOnClient } from './devices';
+import type { ByokPool } from '../pool.js';
+import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer.js';
+import { getDeviceOnClient, registerDeviceOnClient } from './devices.js';
 
 interface PairingCodeRow {
   readonly tenant_id: string;

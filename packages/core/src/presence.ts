@@ -1,4 +1,4 @@
-import type { CollectExpiredInput, CollectExpiredResult } from './retention';
+import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 /**
  * Presence hints (§12.3).
  *
@@ -14,7 +14,7 @@ import type { CollectExpiredInput, CollectExpiredResult } from './retention';
  * moved anywhere.
  *
  */
-import type { TenantId } from './tenant';
+import type { TenantId } from './tenant.js';
 
 /** The five presence levels. */
 export const PRESENCE_LEVELS = ['online', 'thinking', 'working', 'error', 'offline'] as const;

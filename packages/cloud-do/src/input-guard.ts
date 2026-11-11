@@ -1,7 +1,7 @@
-import { hasUserKeyShape } from './admission';
-import { CloudDoError } from './errors';
-import { RollingLeakGuard } from './leak-guard';
-import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } from './platform-credentials';
+import { hasUserKeyShape } from './admission.js';
+import { CloudDoError } from './errors.js';
+import { RollingLeakGuard } from './leak-guard.js';
+import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } from './platform-credentials.js';
 
 /** Keep the existing pre-storage text guard shared by submission and tool data. */
 export async function admitCloudText(env: Readonly<Record<string, unknown>>, text: string, selected?: PlatformProfileId): Promise<void> {

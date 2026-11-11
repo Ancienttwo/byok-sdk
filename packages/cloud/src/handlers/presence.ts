@@ -1,7 +1,7 @@
 import { freezePresenceRuntimeFact, isCoreError } from '@byok-sdk/core';
 import { PresencePublishRequestSchema } from '@byok-sdk/protocol';
 import type { Context } from 'hono';
-import { admitDeviceRequest, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
+import { admitDeviceRequest, readBoundedJsonBody, type DeviceRouteDeps } from './shared.js';
 
 export interface PresenceRouteDeps extends DeviceRouteDeps {
   readonly ttlMs: number;

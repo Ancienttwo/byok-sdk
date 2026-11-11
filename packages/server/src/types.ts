@@ -26,8 +26,8 @@ import type {
 } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
-import type { WakeConsumer } from './wakes/types';
-import type { RateLimiterOptions } from './rate-limiter';
+import type { WakeConsumer } from './wakes/types.js';
+import type { RateLimiterOptions } from './rate-limiter.js';
 
 /** Mutually-exclusive storage authority for the embedded reference server. */
 export type ByokServerStorage =

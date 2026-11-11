@@ -6,15 +6,15 @@ import {
   AgentHomeLayout,
   validateAgentRef,
   type AgentRef,
-} from '../agent-home';
+} from '../agent-home.js';
 import {
   AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
   AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
   AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
 } from '@byok-sdk/protocol';
-import { AgentContentAuditStore, AgentContentAuditStoreError } from './agent-content-audit-store';
-import { type ExistingAncestor, resolveExistingAncestor as findExistingAncestor } from '../util/existing-ancestor';
-import { sameContent } from '../util/file-state';
+import { AgentContentAuditStore, AgentContentAuditStoreError } from './agent-content-audit-store.js';
+import { type ExistingAncestor, resolveExistingAncestor as findExistingAncestor } from '../util/existing-ancestor.js';
+import { sameContent } from '../util/file-state.js';
 
 export const AGENT_CONTENT_READ_SURFACES = ['workspace', 'transcript', 'artifact'] as const;
 export type AgentContentReadSurface = (typeof AGENT_CONTENT_READ_SURFACES)[number];

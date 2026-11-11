@@ -1,5 +1,5 @@
 import type { RuntimeCapabilities as ProtocolRuntimeCapabilities } from '@byok-sdk/protocol';
-import type { RuntimeCapabilities } from '../types';
+import type { RuntimeCapabilities } from '../types.js';
 
 /**
  * Maps a frozen `RuntimeAdapterDescriptor`'s internal `capabilities` value

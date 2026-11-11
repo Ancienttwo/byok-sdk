@@ -22,9 +22,9 @@ import {
   type TruthRecordKind,
 } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
-import type { ByokPool } from './pool';
-import { assertByokPool } from './pool-brand';
-import { PostgresTruthStore } from './stores/core/truth';
+import type { ByokPool } from './pool.js';
+import { assertByokPool } from './pool-brand.js';
+import { PostgresTruthStore } from './stores/core/truth.js';
 
 const RECORD_COLUMNS =
   'tenant_id, kind, subject_id, rev, content_hash, byte_size, body_kind, body_inline, body_object_hash, label, request_id, written_at';

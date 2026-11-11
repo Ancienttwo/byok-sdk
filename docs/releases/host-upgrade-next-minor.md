@@ -403,9 +403,20 @@ SELECT count(*) FROM task_attempt WHERE agent_ref_json IS NULL;
 
 A version 9 file cannot be opened by an earlier build.
 
+## Declarations resolve under NodeNext
+
+The published declaration files spell every relative specifier with its
+runtime extension (`./x.js`, `./x/index.js`), so a Host that compiles with
+`moduleResolution` NodeNext or Node16 now resolves the SDK types (#1828).
+Before this release such a Host got untyped (`any`) SDK imports with
+`skipLibCheck: true`, or TS2834 errors with `skipLibCheck: false`. Hosts on
+Bundler resolution see no change. A NodeNext Host may now see type errors in
+code that compiled against `any`; fix them against the real types.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
+- [ ] Before rebaselining, re-diff the 23 items of the `dts-node-next-specifiers` manifest entry against 0.41.0: the entry carries no per-item digest, so any change beyond the `.js` specifier spelling needs its own entry (#1828).
 - [ ] Run the H `unmigrated_dreams` and L `legacy_home` queries on v0.41.0; both must be 0 before the upgrade (#1669).
 - [ ] Run `HostedCollaborationStore.migrate()` on every existing hosted schema, then set `setBotAutonomy(..., 'auto')` for each Bot that must keep acting on its own (#1662).
 - [ ] Run `migrateWouldDo(ledger)` on each L ledger and `HostedCollaborationStore.migrate()` on each H schema; record the archived would-do count (#1756).

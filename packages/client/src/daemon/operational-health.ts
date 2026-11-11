@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureStoreRoot } from '../util/secure-dir';
-import { sameContent } from '../util/file-state';
+import { atomicWriteFile } from '../util/atomic-write.js';
+import { ensureSecureStoreRoot } from '../util/secure-dir.js';
+import { sameContent } from '../util/file-state.js';
 
 export type OperationalHealthState = 'healthy' | 'degraded' | 'recovering';
 export type OperationalFailureSource = 'reconnect' | 'upload' | 'maintenance' | 'lifecycle';

@@ -1,6 +1,6 @@
-import { ControlError, type ApprovalsListResult } from '../../daemon/control-protocol';
-import { connectControlClient } from '../../daemon/control-client';
-import { formatApprovalsListLines } from '../../diagnostics/format';
+import { ControlError, type ApprovalsListResult } from '../../daemon/control-protocol.js';
+import { connectControlClient } from '../../daemon/control-client.js';
+import { formatApprovalsListLines } from '../../diagnostics/format.js';
 
 export interface ApprovalsListDeps {
   log?: (line: string) => void;

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "78aca5acbfff749dc8ced535df55908ea66b6c8775fa3cb49200e7305f1b8e0e"
+    "snapshotSha256": "61726a2fa2fecb7ffc1da41320c4fe42795cf504b992cf68fd114ac3887ddb9d"
   },
   "configFields": {
     "status": "tracked",
@@ -229,6 +229,37 @@
         "store:cloud-dataplane-postgres",
         "store:server-sqlite"
       ]
+    },
+    {
+      "id": "dts-node-next-specifiers",
+      "impact": "additive",
+      "summary": "Published declarations spell relative specifiers with their runtime extension (./x.js, ./x/index.js), so NodeNext and Node16 Hosts resolve real SDK types instead of any or TS2834. The listed digests change only in the spelling of import(\"./x\") type references; the types are unchanged and Bundler Hosts see no difference.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#declarations-resolve-under-nodenext",
+      "items": [
+        "export:@byok-sdk/client#CreateStoredDeviceProofSignerOptions",
+        "export:@byok-sdk/client#DaemonConfig",
+        "export:@byok-sdk/client#DaemonOverrides",
+        "export:@byok-sdk/client#OpenCodeAdapter",
+        "export:@byok-sdk/client#PiAdapter",
+        "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client#RuntimeOperationStartInput",
+        "export:@byok-sdk/client/adapters#OpenCodeAdapter",
+        "export:@byok-sdk/client/adapters#PiAdapter",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+        "export:@byok-sdk/cloud#ByokCloudObserver",
+        "export:@byok-sdk/cloud-do#AgentDO",
+        "export:@byok-sdk/protocol#AgentHomeProjectionPayloadSchema",
+        "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol#InputPreparationBindingSchema",
+        "export:@byok-sdk/protocol#InputPreparationCompletionRequestSchema",
+        "export:@byok-sdk/protocol#InputPreparationReadbackSchema",
+        "export:@byok-sdk/protocol#InputPreparationReceiptSummarySchema",
+        "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema"
+      ]
     }
   ],
   "changes": [
@@ -289,9 +320,24 @@
       "entry": "service-lifecycle-gate-root"
     },
     {
+      "item": "export:@byok-sdk/client#CreateStoredDeviceProofSignerOptions",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfig",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonEffectiveRuntime",
       "change": "changed",
       "entry": "per-runtime-environment"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonOverrides",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
@@ -334,9 +380,19 @@
       "entry": "version-policy-source"
     },
     {
+      "item": "export:@byok-sdk/client#OpenCodeAdapter",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
       "item": "export:@byok-sdk/client#OpenCodeAdapterOptions",
       "change": "changed",
       "entry": "version-policy-source"
+    },
+    {
+      "item": "export:@byok-sdk/client#PiAdapter",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
     },
     {
       "item": "export:@byok-sdk/client#PiAdapterOptions",
@@ -347,6 +403,11 @@
       "item": "export:@byok-sdk/client#ProtectedClassId",
       "change": "changed",
       "entry": "codex-session-store"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeEnvironmentReport",
@@ -367,6 +428,11 @@
       "item": "export:@byok-sdk/client#RuntimeFailureCategory",
       "change": "removed",
       "entry": "runtime-failure-category-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
     },
     {
       "item": "export:@byok-sdk/client#resolveStorageConfig",
@@ -434,9 +500,19 @@
       "entry": "version-policy-source"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#OpenCodeAdapter",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#OpenCodeAdapterOptions",
       "change": "changed",
       "entry": "version-policy-source"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapter",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
     },
     {
       "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",
@@ -447,6 +523,11 @@
       "item": "export:@byok-sdk/client/adapters#PiRuntimeConfig",
       "change": "changed",
       "entry": "per-runtime-environment"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
@@ -474,6 +555,11 @@
       "entry": "runtime-failure-category-removed"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",
       "change": "changed",
       "entry": "agent-memory-helper-protocol-4"
@@ -482,6 +568,11 @@
       "item": "export:@byok-sdk/cloud#ByokCloud",
       "change": "changed",
       "entry": "scope-key-package-v1-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ByokCloudObserver",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
     },
     {
       "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
@@ -554,6 +645,11 @@
       "entry": "task-attempt-agent-ref-required"
     },
     {
+      "item": "export:@byok-sdk/cloud-do#AgentDO",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
       "item": "export:@byok-sdk/core/sealed-payload#ScopeKeyPackage",
       "change": "changed",
       "entry": "scope-key-package-v1-removed"
@@ -594,6 +690,11 @@
       "entry": "opencode-go-keys-store"
     },
     {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionPayloadSchema",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
       "item": "export:@byok-sdk/protocol#E2eeScopeKeyPackageSchema",
       "change": "changed",
       "entry": "scope-key-package-v1-removed"
@@ -602,6 +703,36 @@
       "item": "export:@byok-sdk/protocol#E2eeScopeKeyPackageV2Schema",
       "change": "removed",
       "entry": "scope-key-package-v1-removed"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationBindingSchema",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationCompletionRequestSchema",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationReadbackSchema",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationReceiptSummarySchema",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
     },
     {
       "item": "export:@byok-sdk/protocol#OfferSelectionRule",
@@ -627,6 +758,21 @@
       "item": "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
       "change": "changed",
       "entry": "offer-selection-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "dts-node-next-specifiers"
     },
     {
       "item": "export:@byok-sdk/protocol#offerSelectionViolation",

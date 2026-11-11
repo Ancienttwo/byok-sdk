@@ -20,7 +20,7 @@
  * Adding a port method means editing this table, which is the point: a port
  * grows by contract, not by whichever composition needed something.
  */
-import { CORE_STORE_NAMES, type CoreStoreName } from './stores';
+import { CORE_STORE_NAMES, type CoreStoreName } from './stores.js';
 
 /**
  * Ports that are core ports but NOT members of the composition contract.

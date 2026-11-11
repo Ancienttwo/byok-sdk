@@ -45,7 +45,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
-import type { ByokPool } from '../../pool';
+import type { ByokPool } from '../../pool.js';
 
 const DEFAULT_LIST_LIMIT = 50;
 

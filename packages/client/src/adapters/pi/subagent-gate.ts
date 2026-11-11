@@ -1,8 +1,8 @@
 import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
-import { isScopedFileToolName } from '../../file-scope-types';
-import type { ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc';
-import { piSubagentScopedToolSource } from './subagent-scope-registry';
-import { createPiToolAuthorizationHook } from './tool-authorization-hook';
+import { isScopedFileToolName } from '../../file-scope-types.js';
+import type { ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc.js';
+import { piSubagentScopedToolSource } from './subagent-scope-registry.js';
+import { createPiToolAuthorizationHook } from './tool-authorization-hook.js';
 
 /**
  * The gate every native Pi subagent child loads (#1061 D11).

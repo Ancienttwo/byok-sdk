@@ -1,9 +1,9 @@
-import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult } from '../retention';
-import type { TenantId } from '../tenant';
+import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult } from '../retention.js';
+import type { TenantId } from '../tenant.js';
 import type {
   DeviceAssertionReplayConsumeInput,
   DeviceAssertionReplayAuthority,
-} from '../device-assertion';
+} from '../device-assertion.js';
 
 /**
  * The reference key, in the SAME segment order as the durable primary key

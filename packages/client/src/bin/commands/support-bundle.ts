@@ -1,8 +1,8 @@
 import path from 'node:path';
-import type { DaemonConfig } from '../../index';
-import { createSupportBundle, isSupportBundleOutputInStore, writeSupportBundle } from '../../diagnostics/support-bundle';
-import type { CollectDiagnosticsOptions } from '../../diagnostics/diagnostics';
-import { resolveStoreDir } from '../config';
+import type { DaemonConfig } from '../../index.js';
+import { createSupportBundle, isSupportBundleOutputInStore, writeSupportBundle } from '../../diagnostics/support-bundle.js';
+import type { CollectDiagnosticsOptions } from '../../diagnostics/diagnostics.js';
+import { resolveStoreDir } from '../config.js';
 
 export interface SupportBundleOptions extends CollectDiagnosticsOptions {
   outputPath: string;

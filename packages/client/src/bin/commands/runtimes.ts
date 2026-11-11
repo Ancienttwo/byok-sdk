@@ -1,7 +1,7 @@
-import { type DaemonConfig, type RuntimeAdapter } from '../../index';
-import { formatRuntimeLines } from '../../diagnostics/format';
-import { probeRuntimes } from '../../diagnostics/runtime-probe';
-import { buildRuntimeAdapters, resolvePiByokLauncher } from '../../adapters/runtime-adapters';
+import { type DaemonConfig, type RuntimeAdapter } from '../../index.js';
+import { formatRuntimeLines } from '../../diagnostics/format.js';
+import { probeRuntimes } from '../../diagnostics/runtime-probe.js';
+import { buildRuntimeAdapters, resolvePiByokLauncher } from '../../adapters/runtime-adapters.js';
 
 export interface RuntimesDeps {
   log?: (line: string) => void;

@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { RuntimeVersionChange, RuntimeVersionChangeDirection, RuntimeObservation } from '../runtime-detection';
-import { atomicWriteFile } from '../util/atomic-write';
+import type { RuntimeVersionChange, RuntimeVersionChangeDirection, RuntimeObservation } from '../runtime-detection.js';
+import { atomicWriteFile } from '../util/atomic-write.js';
 
 /**
  * The restart-only runtime version baseline (#1103 §2.6).

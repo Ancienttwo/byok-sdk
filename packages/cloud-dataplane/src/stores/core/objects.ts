@@ -1,6 +1,6 @@
-import { settleDeletedObject } from './object-gc';
+import { settleDeletedObject } from './object-gc.js';
 import { assertCollectExpiredInput, CollectExpiredFailure, type CollectExpiredResult, type ObjectCollectExpiredInput } from '@byok-sdk/core';
-import type { R2ObjectMaintenance } from '../r2-blobs';
+import type { R2ObjectMaintenance } from '../r2-blobs.js';
 /**
  * Postgres {@link ObjectStore} — the manifest, and only the manifest
  * (§12.7.4, §12.7.8).
@@ -52,7 +52,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
-import type { ByokPool } from '../../pool';
+import type { ByokPool } from '../../pool.js';
 
 const DEFAULT_LIST_LIMIT = 100;
 

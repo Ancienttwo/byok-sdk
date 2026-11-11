@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { CreateAgentSessionResult, ExtensionFactory, InlineExtension } from '@earendil-works/pi-coding-agent';
 import { dependencies as clientDependencies } from '../../../package.json';
-import type { ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc';
+import type { ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc.js';
 
 // pi-subagents reads its own package files (manifest, agents, prompts, runner
 // scripts) at run time, so it loads only from a package directory: the

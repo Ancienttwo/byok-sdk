@@ -1,6 +1,6 @@
-import { CloudDoError } from './errors';
-import type { SessionIdentity } from './identity';
-import type { CloudDispatchContext } from './tools';
+import { CloudDoError } from './errors.js';
+import type { SessionIdentity } from './identity.js';
+import type { CloudDispatchContext } from './tools.js';
 
 export interface CloudLimits {
   readonly modelSteps: number;

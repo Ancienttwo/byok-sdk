@@ -1,6 +1,6 @@
-import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
-import type { McpEventIdentities, McpEventIdentity } from '../../mcp/event-identity';
-import type { McpStdioServerConfig } from '../../types';
+import { isReservedMcpServerName } from '../../sdk-reserved-mcp.js';
+import type { McpEventIdentities, McpEventIdentity } from '../../mcp/event-identity.js';
+import type { McpStdioServerConfig } from '../../types.js';
 
 /**
  * Claude's own runtime name part for an MCP server or tool name. Observed in

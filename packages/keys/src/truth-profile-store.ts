@@ -16,8 +16,8 @@ import {
   type ProviderCustodyReceipt,
   type ProviderCustodyReservation,
   type ProviderKeyCheckOutcome,
-} from './custody';
-import { ByokKeysError } from './errors';
+} from './custody.js';
+import { ByokKeysError } from './errors.js';
 import {
   type ProviderProfileStore,
   applyReceipt,
@@ -25,13 +25,13 @@ import {
   raiseWatermark,
   reservationOf,
   recordReceiptKeyCheck,
-} from './profile-store';
+} from './profile-store.js';
 import {
   type ModelProviderProfile,
   ModelProviderProfileSchema,
   type ProviderProfileRef,
   parseModelProviderProfile,
-} from './provider-profile';
+} from './provider-profile.js';
 
 export const PROVIDER_PROFILE_TRUTH_RECORD_KEY =
   'byok-sdk.keys/model-provider-registry-v1';

@@ -33,9 +33,9 @@ import {
 } from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
 import type { Pool, PoolClient } from 'pg';
-import type { ByokPool } from '../pool';
-import { BEGIN_OUTBOX_WRITE, reopenDeviceStream } from './core/outbox-writer';
-import { retireDevices } from './task-retirement';
+import type { ByokPool } from '../pool.js';
+import { BEGIN_OUTBOX_WRITE, reopenDeviceStream } from './core/outbox-writer.js';
+import { retireDevices } from './task-retirement.js';
 
 interface DeviceRow {
   readonly tenant_id: string;

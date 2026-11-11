@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { RuntimeDisposalFailure } from '../runtime-failure';
+import { RuntimeDisposalFailure } from '../runtime-failure.js';
 
 /** A validated POSIX snapshot shared by owned-group signal and quiescence checks. */
 export function readProcessGroupRows(): string[][] {

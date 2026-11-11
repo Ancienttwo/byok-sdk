@@ -1,4 +1,4 @@
-import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl } from '../cloud';
+import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl } from '../cloud.js';
 import { type TenantId } from '@byok-sdk/core';
 import {
   E2eeKeyPackageAvailablePayloadSchema,
@@ -6,10 +6,10 @@ import {
   requiredReceiverCapabilities,
   type E2eeKeyPackageAvailablePayload,
 } from '@byok-sdk/protocol';
-import * as e2eeMember from '../e2ee-member';
-import { ByokCloudError } from '../errors';
-import { uuidFromSha256 } from '../offer-identity';
-import type { EnqueuePaths } from './enqueue';
+import * as e2eeMember from '../e2ee-member.js';
+import { ByokCloudError } from '../errors.js';
+import { uuidFromSha256 } from '../offer-identity.js';
+import type { EnqueuePaths } from './enqueue.js';
 
 interface Dependencies {
   options: ByokCloudOptions;

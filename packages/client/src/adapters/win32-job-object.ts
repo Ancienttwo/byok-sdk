@@ -1,4 +1,4 @@
-import { loadSdkKoffiAsset } from '../sdk-native-assets-runtime';
+import { loadSdkKoffiAsset } from '../sdk-native-assets-runtime.js';
 /**
  * Windows kill-on-close Job Object ownership for owned runtime process trees.
  *

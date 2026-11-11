@@ -52,7 +52,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
-import type { ByokPool } from '../../pool';
+import type { ByokPool } from '../../pool.js';
 import {
   BEGIN_OUTBOX_WRITE,
   closeDeviceStreams,
@@ -61,7 +61,7 @@ import {
   lockDeviceStreams,
   readMailboxBytes,
   reopenDeviceStream,
-} from './outbox-writer';
+} from './outbox-writer.js';
 
 const DEFAULT_READ_LIMIT = 50;
 

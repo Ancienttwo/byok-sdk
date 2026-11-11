@@ -8,8 +8,8 @@ import {
 } from '@byok-sdk/core';
 import { DEVICE_PROOF_HEADER, type DeviceProofEnvelopeV1 } from '@byok-sdk/core';
 import { BYOK_RECORDS_PATH, byokRecordPath } from '@byok-sdk/protocol';
-import type { DeviceProofSigner } from './device-proof-signer';
-import { toHttpBase } from './url';
+import type { DeviceProofSigner } from './device-proof-signer.js';
+import { toHttpBase } from './url.js';
 
 const EMPTY_BODY = new Uint8Array();
 const LARGE_SNAPSHOT_THRESHOLD_BYTES = 1024 * 1024;

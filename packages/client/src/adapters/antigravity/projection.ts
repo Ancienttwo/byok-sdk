@@ -1,9 +1,9 @@
-import { BufferedToolUse } from '../buffered-tool-use';
+import { BufferedToolUse } from '../buffered-tool-use.js';
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
-import type { McpEventIdentities, McpEventIdentity } from '../../mcp/event-identity';
-import { runtimeFailureClassOf } from '../../runtime-failure';
-import type { AcpRecord } from '../../runtime/acp-session-runtime';
-import type { McpToolsetToolObservation } from '../../types';
+import type { McpEventIdentities, McpEventIdentity } from '../../mcp/event-identity.js';
+import { runtimeFailureClassOf } from '../../runtime-failure.js';
+import type { AcpRecord } from '../../runtime/acp-session-runtime.js';
+import type { McpToolsetToolObservation } from '../../types.js';
 
 /** The turn end the vendored ACP turn machinery recorded, as `AgySession` reads it. */
 export type AgyTurnOutcome =

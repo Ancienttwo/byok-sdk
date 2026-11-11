@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, type MessageType } from './messages';
-import { PROTOCOL_VERSION } from './version';
+import { MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, type MessageType } from './messages.js';
+import { PROTOCOL_VERSION } from './version.js';
 
 const REQUIRED_TASK_ID = z.string().min(1);
 const OPTIONAL_TASK_ID = REQUIRED_TASK_ID.optional();

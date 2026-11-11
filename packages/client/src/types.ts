@@ -1,21 +1,21 @@
-import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment';
-import type { RuntimeEnvironment } from './runtime/environment';
-import type { ExecutionScratch } from './daemon/retention/scratch';
-import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
-import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization';
+import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
+import type { RuntimeEnvironment } from './runtime/environment.js';
+import type { ExecutionScratch } from './daemon/retention/scratch.js';
+import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions.js';
+import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
+import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory.js';
 import type {
   AgentEgressPolicy,
   AgentEvent,
   TaskOfferPlainPayload,
 } from '@byok-sdk/protocol';
-import type { InputPreparationModelV1 } from './input-preparation';
-import type { AgentRef } from './agent-home';
-import type { McpToolsetServerObservation } from './mcp/observation';
-import { freezeRuntimeVersionPolicy } from './runtime-version-policy';
+import type { InputPreparationModelV1 } from './input-preparation.js';
+import type { AgentRef } from './agent-home.js';
+import type { McpToolsetServerObservation } from './mcp/observation.js';
+import { freezeRuntimeVersionPolicy } from './runtime-version-policy.js';
 
-export type { AgentRef } from './agent-home';
+export type { AgentRef } from './agent-home.js';
 
 /**
  * The offer fields a runtime adapter receives. The client owns this shape;
@@ -30,7 +30,7 @@ export type {
   McpServerObservation,
   McpToolDescriptor,
   McpToolsetServerObservation,
-} from './mcp/observation';
+} from './mcp/observation.js';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 
 /**
@@ -335,7 +335,7 @@ export interface SessionEvidence {
  */
 export interface RuntimeAdapterDescriptor {
   /** Pi RPC memory-only execution contract; omission means unsupported. */
-  readonly memoryLane?: typeof import('./adapters/pi/memory-lane-contract').PI_MEMORY_LANE;
+  readonly memoryLane?: typeof import('./adapters/pi/memory-lane-contract.js').PI_MEMORY_LANE;
   readonly id: string;
   readonly capabilities: RuntimeCapabilities;
   /**
@@ -583,7 +583,7 @@ export interface RuntimeLaunchResources {
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
   /** Device-owned memory grant; never sourced from the offer. */
-  readonly memoryLane?: import('./file-scope-guard').FileScopeGrant;
+  readonly memoryLane?: import('./file-scope-guard.js').FileScopeGrant;
   readonly scratch: ExecutionScratch;
   /** Exact local resource acquired by this operation before resume handoff validation; never serialized. */
   readonly sessionLease?: RuntimeSessionLease;

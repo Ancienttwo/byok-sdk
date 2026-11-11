@@ -1,8 +1,8 @@
-import { checkDaemonConfig, type DaemonConfigCheck } from '../../daemon/config-schema/check';
-import type { DaemonEffectiveConfig } from '../../daemon/config-schema/effective';
-import { formatConfigIssue, readConfigFile } from '../config';
-import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../official-release';
-import { assertRuntimeEnvironmentPolicy, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { checkDaemonConfig, type DaemonConfigCheck } from '../../daemon/config-schema/check.js';
+import type { DaemonEffectiveConfig } from '../../daemon/config-schema/effective.js';
+import { formatConfigIssue, readConfigFile } from '../config.js';
+import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../official-release.js';
+import { assertRuntimeEnvironmentPolicy, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 
 export interface ConfigCheckOptions {
   /** Fail on warnings (unknown fields) too, for CI. */

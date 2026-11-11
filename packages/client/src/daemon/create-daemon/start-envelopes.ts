@@ -1,17 +1,17 @@
-import { resultReplyFailureFromState, resultReplyFailureReason } from '../result-reply-failure';
+import { resultReplyFailureFromState, resultReplyFailureReason } from '../result-reply-failure.js';
 import { decodeEnvelope } from '@byok-sdk/protocol';
-import type { AgentRef } from '../../agent-home';
-import { assertJournalEnvelopeProtocol } from '../daemon-errors';
-import { terminalKindOf, hasExactContentReadTransfer, policyRevisionMismatchPolicies } from './support';
+import type { AgentRef } from '../../agent-home.js';
+import { assertJournalEnvelopeProtocol } from '../daemon-errors.js';
+import { terminalKindOf, hasExactContentReadTransfer, policyRevisionMismatchPolicies } from './support.js';
 import type { Envelope } from '@byok-sdk/protocol';
-import { processE2eeKeyPackageNotice } from '../e2ee-key-package-notice';
-import { type AgentContentSessionIdentity, AgentContentReadPolicyEngine, AGENT_CONTENT_READ_CAPABILITIES } from '../agent-content-read';
-import { AgentContentAuditStore } from '../agent-content-audit-store';
-import type { AgentContentReceiptWithoutReliableIdentity } from '../agent-egress-spool';
-import type { DaemonScope } from './scope';
-import type { StartRun } from './start-run';
-import type { StartLanes } from './start-lanes';
-import type { StartTerminals } from './start-terminals';
+import { processE2eeKeyPackageNotice } from '../e2ee-key-package-notice.js';
+import { type AgentContentSessionIdentity, AgentContentReadPolicyEngine, AGENT_CONTENT_READ_CAPABILITIES } from '../agent-content-read.js';
+import { AgentContentAuditStore } from '../agent-content-audit-store.js';
+import type { AgentContentReceiptWithoutReliableIdentity } from '../agent-egress-spool.js';
+import type { DaemonScope } from './scope.js';
+import type { StartRun } from './start-run.js';
+import type { StartLanes } from './start-lanes.js';
+import type { StartTerminals } from './start-terminals.js';
 
 /**
  * The fifth stage of `runStartUnderLease` (#926), synchronous: builds the

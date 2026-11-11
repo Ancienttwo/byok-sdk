@@ -1,4 +1,4 @@
-import { CloudDoError } from './errors';
+import { CloudDoError } from './errors.js';
 
 const FRAGMENT_LENGTH = 16;
 

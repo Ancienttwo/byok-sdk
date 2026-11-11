@@ -8,7 +8,7 @@ import type {
   TaskArchiveWork,
 } from '@byok-sdk/cloud';
 import type { DatabaseSync } from 'node:sqlite';
-import { removeActivityContent } from './activity';
+import { removeActivityContent } from './activity.js';
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed', 'cancelled']);
 const TERMINAL_SQL = "('complete', 'failed', 'cancelled')";

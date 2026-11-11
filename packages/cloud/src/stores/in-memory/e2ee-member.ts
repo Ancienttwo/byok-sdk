@@ -11,9 +11,9 @@ import type {
   E2eeScopeKeyPackagePutInput,
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
-} from '../../e2ee-member';
-import { parseRecordedWriteResult } from '../../e2ee-member';
-import type { RequestReceiptStore } from '../ports';
+} from '../../e2ee-member.js';
+import { parseRecordedWriteResult } from '../../e2ee-member.js';
+import type { RequestReceiptStore } from '../ports.js';
 
 interface Expiring {
   readonly body: string;

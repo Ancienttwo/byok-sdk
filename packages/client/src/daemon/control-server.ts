@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
-import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureStoreRoot } from '../util/secure-dir';
-import { listenPrivateUnixSocket, PrivateSocketInUseError, reclaimPrivateSocketFallbackDirectory } from '../util/private-unix-socket';
+import { atomicWriteFile } from '../util/atomic-write.js';
+import { ensureSecureStoreRoot } from '../util/secure-dir.js';
+import { listenPrivateUnixSocket, PrivateSocketInUseError, reclaimPrivateSocketFallbackDirectory } from '../util/private-unix-socket.js';
 import {
   computeClientAuth,
   computeServerProof,
@@ -19,7 +19,7 @@ import {
   HANDSHAKE_TIMEOUT_MS,
   NdjsonLineReader,
   type ControlErrorShape,
-} from './control-protocol';
+} from './control-protocol.js';
 
 /**
  * M4 Phase 2: the daemon-side local control socket — Unix domain socket

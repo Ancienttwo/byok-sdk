@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
-import type { ServiceProgram } from './service-types';
+import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate.js';
+import type { ServiceProgram } from './service-types.js';
 
 /**
  * Every unit this SDK generates carries this text (an XML comment in a

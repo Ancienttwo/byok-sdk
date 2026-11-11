@@ -5,12 +5,12 @@ import path from 'node:path';
 import exportLayout from './pi-export-asset-layout.json';
 import exportSource from './pi-export-assets.source.json';
 import todoLayout from './todo-locale-layout.json';
-import { clientPackageRoot } from './client-manifest';
-import { resolvePinnedPiPackage } from './resolve-bin';
-import { verifyTodoLocaleAssets } from './todo-locale-assets';
+import { clientPackageRoot } from './client-manifest.js';
+import { resolvePinnedPiPackage } from './resolve-bin.js';
+import { verifyTodoLocaleAssets } from './todo-locale-assets.js';
 import {
   PI_SUBAGENT_EXTENSIONS_ASSET_DIR, PI_SUBAGENT_FILE_SCOPE_FILE, PI_SUBAGENT_GATE_FILE, PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENTS_PIN,
-} from './subagents';
+} from './subagents.js';
 
 /**
  * How a single-file product runs Pi. `interpreter+bundle`: an interpreter

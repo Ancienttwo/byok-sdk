@@ -1,15 +1,15 @@
 import { createRequire } from 'node:module';
-import { sdkReservedHelperKinds, type SdkReservedHelperKind } from './sdk-reserved-helper-host';
+import { sdkReservedHelperKinds, type SdkReservedHelperKind } from './sdk-reserved-helper-host.js';
 import distributionBins from './sdk-distribution-bins.json';
 import { byok, engines } from '../package.json';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
-import { copyAgentMemoryHelperAssets } from './util/agent-memory-helper-release';
+import { copyAgentMemoryHelperAssets } from './util/agent-memory-helper-release.js';
 
 // Official npm archive integrity, also locked in bun.lock. Never fetched at runtime.
-import { KOFFI } from './sdk-native-assets-pin';
+import { KOFFI } from './sdk-native-assets-pin.js';
 
 export const sdkNativeAssetTargets = Object.freeze({
   // Koffi must stay byte-identical; the Agent memory helper may be re-signed.
@@ -98,7 +98,7 @@ export async function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): 
   await fs.writeFile(path.join(root, 'KOFFI-LICENSE.txt'), license, { flag: 'wx' });
   return Object.freeze(['KOFFI-LICENSE.txt', 'manifest.json', 'win32-x64/koffi.node', ...helperFiles.map(file => `agent-memory-fs/${file}`)].sort());
 }
-export { loadSdkKoffiAsset } from './sdk-native-assets-runtime';
+export { loadSdkKoffiAsset } from './sdk-native-assets-runtime.js';
 
 /**
  * What a single-file product does with each published bin. `cli`: the daemon CLI, not shipped by an embedded Host.

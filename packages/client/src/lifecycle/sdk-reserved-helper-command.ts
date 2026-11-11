@@ -1,7 +1,7 @@
-import { BYOK_SDK_HELPER_SUBCOMMAND, sdkReservedHelperKinds, type SdkReservedHelperKind } from '../sdk-reserved-helper-host';
-import { sdkReservedHelperArgumentCount } from '../sdk-reserved-helper-context';
-import { runSdkReservedHelper } from '../bin/sdk-reserved-helper-runners';
-import { runBundledSubagentCommand } from '../adapters/pi/bundled-subagent-runtime';
+import { BYOK_SDK_HELPER_SUBCOMMAND, sdkReservedHelperKinds, type SdkReservedHelperKind } from '../sdk-reserved-helper-host.js';
+import { sdkReservedHelperArgumentCount } from '../sdk-reserved-helper-context.js';
+import { runSdkReservedHelper } from '../bin/sdk-reserved-helper-runners.js';
+import { runBundledSubagentCommand } from '../adapters/pi/bundled-subagent-runtime.js';
 
 const RESERVED_HELPER_KIND_SET: ReadonlySet<string> = new Set(sdkReservedHelperKinds);
 

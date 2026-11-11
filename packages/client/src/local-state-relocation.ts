@@ -1,18 +1,18 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { ConfiguredPathLinkError, foldNameAliases } from './util/fold-name-aliases';
-import { AGENT_HOME_DIRECTORY, AGENT_HOME_INTERNAL_DIRECTORY } from './agent-home';
+import { ConfiguredPathLinkError, foldNameAliases } from './util/fold-name-aliases.js';
+import { AGENT_HOME_DIRECTORY, AGENT_HOME_INTERNAL_DIRECTORY } from './agent-home.js';
 import {
   assertDaemonStoreQuiescent,
   DaemonOwnerActiveError,
-} from './util/daemon-owner';
+} from './util/daemon-owner.js';
 import {
   acquirePathMutationGate,
   acquirePathMutationGates,
   PathMutationGateBusyError,
   resolvePathWithoutCreate,
   type PathMutationGate,
-} from './util/path-mutation-gate';
+} from './util/path-mutation-gate.js';
 
 export class LocalStateRelocationError extends Error {
   constructor(message: string) {

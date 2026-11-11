@@ -1,9 +1,9 @@
-import { declares, E2EE_MEMBER_CAPABILITY, E2EE_MEMBER_KEM_EPOCH_CAPABILITY, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from '../capabilities-client';
+import { declares, E2EE_MEMBER_CAPABILITY, E2EE_MEMBER_KEM_EPOCH_CAPABILITY, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from '../capabilities-client.js';
 import { HOST_MCP_TASK_CONTEXT_CAPABILITY, SEALED_PAYLOAD_CAPABILITY, SEALED_PAYLOAD_V2_CAPABILITY, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import type { CapabilityDeclaration } from '@byok-sdk/core';
 import type { CapabilityFlag } from '@byok-sdk/protocol';
-import { PresencePublisher } from '../presence-publisher';
-import type { DaemonScope } from './scope';
+import { PresencePublisher } from '../presence-publisher.js';
+import type { DaemonScope } from './scope.js';
 
 /** Capability discovery, the hello capabilities and the presence producer (#926). */
 

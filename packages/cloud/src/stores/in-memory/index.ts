@@ -1,6 +1,6 @@
-import { InMemoryAgentMessageDraftStore, deleteAgentMessageDraft } from './agent-message-draft';
-export { InMemoryAgentMessageDraftStore } from './agent-message-draft';
-export { InMemoryE2eeMemberStore } from './e2ee-member';
+import { InMemoryAgentMessageDraftStore, deleteAgentMessageDraft } from './agent-message-draft.js';
+export { InMemoryAgentMessageDraftStore } from './agent-message-draft.js';
+export { InMemoryE2eeMemberStore } from './e2ee-member.js';
 /**
  * The in-memory reference implementation of every cloud-local port.
  *
@@ -10,29 +10,29 @@ export { InMemoryE2eeMemberStore } from './e2ee-member';
  * when a durable composition (S3b's journal, S4A's schema) runs them later.
  */
 import type { Clock, MailboxStore, ObjectStore, TenantId } from '@byok-sdk/core';
-import type { CloudCrypto } from '../../crypto/port';
-import type { ProofReceiptRetentionAuthority } from '../../maintenance';
-import type { TaskArchiveStore } from '../../task-archive';
-import type { BlobContentProxy, CloudStores } from '../ports';
-import { AllowAllRateLimiter } from './rate-limiter';
-import { createInMemoryBlobs, type InMemoryBlobBytes } from './blobs';
-import { InMemoryDeviceDirectory } from './device-directory';
-import { InMemoryInboundDedupStore } from './dedup';
-import { InMemoryNonceStore } from './nonces';
-import { InMemoryPairingCodeStore } from './pairing-codes';
-import { InMemoryRequestReceiptStore } from './receipts';
-import { InMemoryProofReceiptRetentionAuthority, InMemoryProofRequestReceiptStore } from './proof-receipts';
-import { InMemoryTaskArchiveStore } from './task-archive';
-import { archiveAccessOf, type InMemoryMailboxArchiveAccess, type InMemoryObjectArchiveAccess } from './core-access';
-import { InMemoryTaskAttemptState, InMemoryTaskAttemptStore } from './task-attempts';
-import { InMemoryTaskCancellationStore } from './task-cancellations';
-import { InMemoryActivityStore, closeActivityLog, deleteActivityTail } from './activity';
-import { InMemoryApprovalTimelineStore, closeApprovalTimeline, deleteApprovalTimelineTail } from './approval-timeline';
-import { InMemoryAgentEgressStore } from './agent-egress';
-import { createInProcessTaskEventsWake } from './mailbox-wake';
-import type { TaskEventsWake } from '../../task-events-wake';
+import type { CloudCrypto } from '../../crypto/port.js';
+import type { ProofReceiptRetentionAuthority } from '../../maintenance.js';
+import type { TaskArchiveStore } from '../../task-archive.js';
+import type { BlobContentProxy, CloudStores } from '../ports.js';
+import { AllowAllRateLimiter } from './rate-limiter.js';
+import { createInMemoryBlobs, type InMemoryBlobBytes } from './blobs.js';
+import { InMemoryDeviceDirectory } from './device-directory.js';
+import { InMemoryInboundDedupStore } from './dedup.js';
+import { InMemoryNonceStore } from './nonces.js';
+import { InMemoryPairingCodeStore } from './pairing-codes.js';
+import { InMemoryRequestReceiptStore } from './receipts.js';
+import { InMemoryProofReceiptRetentionAuthority, InMemoryProofRequestReceiptStore } from './proof-receipts.js';
+import { InMemoryTaskArchiveStore } from './task-archive.js';
+import { archiveAccessOf, type InMemoryMailboxArchiveAccess, type InMemoryObjectArchiveAccess } from './core-access.js';
+import { InMemoryTaskAttemptState, InMemoryTaskAttemptStore } from './task-attempts.js';
+import { InMemoryTaskCancellationStore } from './task-cancellations.js';
+import { InMemoryActivityStore, closeActivityLog, deleteActivityTail } from './activity.js';
+import { InMemoryApprovalTimelineStore, closeApprovalTimeline, deleteApprovalTimelineTail } from './approval-timeline.js';
+import { InMemoryAgentEgressStore } from './agent-egress.js';
+import { createInProcessTaskEventsWake } from './mailbox-wake.js';
+import type { TaskEventsWake } from '../../task-events-wake.js';
 
-export { AllowAllRateLimiter } from './rate-limiter';
+export { AllowAllRateLimiter } from './rate-limiter.js';
 export {
   BLOB_URL_TTL_MS,
   InMemoryBlobContentProxy,
@@ -40,19 +40,19 @@ export {
   createInMemoryBlobs,
   createInMemoryBlobBytes,
   InMemoryBlobBytes,
-} from './blobs';
-export type { InMemoryBlobs, InMemoryBlobStoreOptions } from './blobs';
-export { DEDUP_RING_CAPACITY, InMemoryInboundDedupStore } from './dedup';
-export { InMemoryDeviceDirectory } from './device-directory';
-export { InMemoryNonceStore, NONCE_TTL_MS } from './nonces';
-export { InMemoryPairingCodeStore } from './pairing-codes';
-export { InMemoryRequestReceiptStore } from './receipts';
-export { InMemoryProofRequestReceiptStore } from './proof-receipts';
-export { InMemoryTaskAttemptStore } from './task-attempts';
-export { InMemoryTaskCancellationStore } from './task-cancellations';
-export { InMemoryActivityStore } from './activity';
-export { InMemoryApprovalTimelineStore } from './approval-timeline';
-export { InMemoryAgentEgressStore } from './agent-egress';
+} from './blobs.js';
+export type { InMemoryBlobs, InMemoryBlobStoreOptions } from './blobs.js';
+export { DEDUP_RING_CAPACITY, InMemoryInboundDedupStore } from './dedup.js';
+export { InMemoryDeviceDirectory } from './device-directory.js';
+export { InMemoryNonceStore, NONCE_TTL_MS } from './nonces.js';
+export { InMemoryPairingCodeStore } from './pairing-codes.js';
+export { InMemoryRequestReceiptStore } from './receipts.js';
+export { InMemoryProofRequestReceiptStore } from './proof-receipts.js';
+export { InMemoryTaskAttemptStore } from './task-attempts.js';
+export { InMemoryTaskCancellationStore } from './task-cancellations.js';
+export { InMemoryActivityStore } from './activity.js';
+export { InMemoryApprovalTimelineStore } from './approval-timeline.js';
+export { InMemoryAgentEgressStore } from './agent-egress.js';
 
 /**
  * The port bundle plus the byte proxy, in the shape `createInMemoryCoreStores`

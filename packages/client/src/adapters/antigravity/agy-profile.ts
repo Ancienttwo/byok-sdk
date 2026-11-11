@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { atomicWriteFile } from '../../util/atomic-write';
-import type { AgyGeminiProxy } from './agy-gemini-proxy';
+import { atomicWriteFile } from '../../util/atomic-write.js';
+import type { AgyGeminiProxy } from './agy-gemini-proxy.js';
 
 /** The native settings that select the Gemini provider. They name no auth method. */
 const SETTINGS = `${JSON.stringify({ modelProvider: 'gemini', setupComplete: true, onboardingComplete: true })}\n`;

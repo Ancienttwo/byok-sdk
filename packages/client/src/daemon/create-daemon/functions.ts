@@ -1,14 +1,14 @@
-import { initializeInputPreparation, runInputPreparation, initializeOwnedHostedStorage, provenAgentMemoryBackend } from './services';
-import { memberClient, startDeviceMember } from './member';
-import { checkServerUrl, pair, pairUnderLease, unpair, unpairUnderLease } from './pairing';
-import { runLifecycleMutation, replaceControlServer, setLifecycle, halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown } from './lifecycle';
-import { runStartUnderLease } from './start';
-import { taskContextCapabilityAvailable, applyCapabilityDeclaration, setHelloCapability, startPresenceProducer, waitForHostTaskContext, runPresenceDiscovery } from './presence';
-import { runShutdownSequence, performControlShutdown } from './shutdown';
-import { approve, reject, subscribe, tasks, reloadMcpToolsets, reportMcpToolsetObservation } from './operations';
-import { buildStorageStatus, buildControlStatus, agentHomeExecutionStatus, outboundStatus, status } from './status';
-import { dispatchReliableRecord, publishReliableAgentEgress } from './egress';
-import type { DaemonScope } from './scope';
+import { initializeInputPreparation, runInputPreparation, initializeOwnedHostedStorage, provenAgentMemoryBackend } from './services.js';
+import { memberClient, startDeviceMember } from './member.js';
+import { checkServerUrl, pair, pairUnderLease, unpair, unpairUnderLease } from './pairing.js';
+import { runLifecycleMutation, replaceControlServer, setLifecycle, halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown } from './lifecycle.js';
+import { runStartUnderLease } from './start.js';
+import { taskContextCapabilityAvailable, applyCapabilityDeclaration, setHelloCapability, startPresenceProducer, waitForHostTaskContext, runPresenceDiscovery } from './presence.js';
+import { runShutdownSequence, performControlShutdown } from './shutdown.js';
+import { approve, reject, subscribe, tasks, reloadMcpToolsets, reportMcpToolsetObservation } from './operations.js';
+import { buildStorageStatus, buildControlStatus, agentHomeExecutionStatus, outboundStatus, status } from './status.js';
+import { dispatchReliableRecord, publishReliableAgentEgress } from './egress.js';
+import type { DaemonScope } from './scope.js';
 
 const daemonFunctions = {
   initializeInputPreparation, runInputPreparation, initializeOwnedHostedStorage,

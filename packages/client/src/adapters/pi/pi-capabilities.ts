@@ -1,4 +1,4 @@
-import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types';
+import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../types.js';
 
 /**
  * Best-case Pi capabilities on its ordinary RPC lane under its adapter options.

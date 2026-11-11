@@ -3,9 +3,9 @@ import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-s
 import type { Api, AssistantMessage, JsonObject, Model, ProviderStreams, StreamOptions, ToolCall } from '@earendil-works/pi-ai';
 import { getCurrentTools, type TranscriptContext } from '@earendil-works/pi-ai/utils/transcript';
 import { getSystemMessageText } from '@earendil-works/pi-ai/utils/text';
-import { CloudDoError, safeCloudError } from './errors';
-import { createProviderFetch, readSseData } from './provider-fetch';
-import { PLATFORM_PROFILES, platformCredentialReader, requirePlatformKey, type PlatformProfile, type PlatformCredentialReader } from './platform-credentials';
+import { CloudDoError, safeCloudError } from './errors.js';
+import { createProviderFetch, readSseData } from './provider-fetch.js';
+import { PLATFORM_PROFILES, platformCredentialReader, requirePlatformKey, type PlatformProfile, type PlatformCredentialReader } from './platform-credentials.js';
 
 export const PLATFORM_MAX_OUTPUT_TOKENS = 4096;
 export const REQUEST_FRAMING_BYTES = 4096;

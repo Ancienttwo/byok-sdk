@@ -1,6 +1,6 @@
 import type { TerminalProjectionSelection } from '@byok-sdk/protocol';
-import { inputPreparationDigest, type InputPreparationToolV1 } from '../input-preparation';
-import { AGENT_RESULT_TOOL_DESCRIPTION, AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
+import { inputPreparationDigest, type InputPreparationToolV1 } from '../input-preparation.js';
+import { AGENT_RESULT_TOOL_DESCRIPTION, AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp.js';
 
 /** One schema-bound SDK tool, shared by preparation and prepared launch. */
 export function preparedResultProjection(selection: TerminalProjectionSelection | undefined, runtimeIdentity: string): {

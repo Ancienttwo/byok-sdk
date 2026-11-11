@@ -7,10 +7,10 @@ import {
 } from '@byok-sdk/core';
 import { z } from 'zod';
 
-import { CanonicalBase64Url32 } from './canonical-base64url';
-import { ByokKeysError } from './errors';
-import { assertSecretName } from './secret-name';
-import type { SecretStore } from './secret-store';
+import { CanonicalBase64Url32 } from './canonical-base64url.js';
+import { ByokKeysError } from './errors.js';
+import { assertSecretName } from './secret-name.js';
+import type { SecretStore } from './secret-store.js';
 
 /**
  * Credential-store entry holding this device's long-lived P-256 sealing key

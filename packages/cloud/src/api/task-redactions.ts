@@ -1,17 +1,17 @@
-import type { ByokCloud, ByokCloudOptions } from '../cloud';
+import type { ByokCloud, ByokCloudOptions } from '../cloud.js';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
-import { ByokCloudError } from '../errors';
-import { terminalReceiptKey } from '../inbound';
-import { taskOfferMessageId } from '../offer-identity';
-import { SEALED_TASK_REFERENCE_KIND } from '../sealed-ciphertext';
+import { ByokCloudError } from '../errors.js';
+import { terminalReceiptKey } from '../inbound.js';
+import { taskOfferMessageId } from '../offer-identity.js';
+import { SEALED_TASK_REFERENCE_KIND } from '../sealed-ciphertext.js';
 import {
   parseTaskRedactionInput,
   taskRedactionCodec,
   taskRedactionReceiptKey,
   type TaskRedactionResult,
   type TaskRedactionTaskResult,
-} from '../task-redaction';
-import { tenantStoresFor, type CloudRootStores } from '../tenant-stores';
+} from '../task-redaction.js';
+import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
 
 interface Dependencies {
   root: CloudRootStores;

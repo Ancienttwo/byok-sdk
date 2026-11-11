@@ -2,8 +2,8 @@ import { PreparedAgentMemoryModeSchema } from '@byok-sdk/protocol';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { atomicWriteFile } from '../util/atomic-write';
-import { DurableJsonlFile } from '../util/durable-jsonl';
+import { atomicWriteFile } from '../util/atomic-write.js';
+import { DurableJsonlFile } from '../util/durable-jsonl.js';
 import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_RECORD_FORMAT,
@@ -16,7 +16,7 @@ import {
   type InputPreparationProjectionV1,
   type InputPreparationResidualKeyV1,
   type InputPreparationStateV1,
-} from '../input-preparation';
+} from '../input-preparation.js';
 
 /**
  * Durable request / receipt / artifact persistence for the B-P2 local

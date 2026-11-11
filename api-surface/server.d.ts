@@ -6,15 +6,15 @@
 export declare function hash(value: unknown): string;
 export declare function canonical(value: unknown): string;
 // ==== @byok-sdk/server dist/execution-core/core.d.ts ====
-import type { ByokServer } from '../index';
-import type { CreateByokServerOptions } from '../types';
-import type { DueWake } from '../wakes/types';
-import { type HostMemoryPage } from './memory';
-import { HostLedger, type ApplicationRows } from './ledger';
-import { type HostJobHandler, type HostOccurrenceRun, type Intent, type IntentInput, type Json, type LedgerState, type Routine, type RoutineDefinition, type Terminal } from './model';
-import { type NextOccurrence } from './schedule';
-import { type RoutineCommands } from './routines';
-import { type FrozenSubmitPort } from './submit';
+import type { ByokServer } from '../index.js';
+import type { CreateByokServerOptions } from '../types.js';
+import type { DueWake } from '../wakes/types.js';
+import { type HostMemoryPage } from './memory.js';
+import { HostLedger, type ApplicationRows } from './ledger.js';
+import { type HostJobHandler, type HostOccurrenceRun, type Intent, type IntentInput, type Json, type LedgerState, type Routine, type RoutineDefinition, type Terminal } from './model.js';
+import { type NextOccurrence } from './schedule.js';
+import { type RoutineCommands } from './routines.js';
+import { type FrozenSubmitPort } from './submit.js';
 export type ExecutionServer = {
     /** `submitSealed` is the sealed lane (#654). Without it, the core fails a sealed intent before any submit. */
     executions: Pick<ByokServer['executions'], 'submit'> & Pick<FrozenSubmitPort, 'submitSealed'>;
@@ -188,29 +188,29 @@ export declare class HostExecutionCore {
     flushProjections(deliver: (id: string, value: Json) => Promise<void>): Promise<void>;
 }
 // ==== @byok-sdk/server dist/execution-core/index.d.ts ====
-export { HostExecutionCore } from './core';
-export type { ExecutionServer, HostOptions, OutcomeTransaction, OccurrenceHook, OccurrenceTransaction, AgentMessageInput, MessageDecision, MessageTransaction } from './core';
-export { CompactVetoError, HostLedger, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './ledger';
-export type { ApplicationRows, CompactionOptions, CompactionResult, CompactVeto, TombstoneKind, HostLedgerOptions, ProjectionOutboxLimits, ProjectionOutboxUsage, LedgerDump, LedgerDumpMemoryTombstone, LedgerDumpRow, LedgerDumpTombstone } from './ledger';
-export { nextIntervalOccurrence } from './schedule';
-export type { NextOccurrence } from './schedule';
-export { DEFAULT_RETRY, frozenInput, isOccurrenceIntentKey, occurrenceIntentKey, occurrenceOfIntentKey, taskId, validateRetry } from './model';
-export type { IntentInput, LedgerIntentInput, Intent, ExecutionTemplate, SealedExecutionTemplate, IntentExecution, SealedAgentExecutionInput, FrozenExecutionInput, RetryPolicy, AgentRoutineDefinition, HostJobRoutineDefinition, HostJobSpec, HostJobRun, HostJobResult, HostJobHandler, HostOccurrenceRoutineDefinition, HostOccurrenceRun, RoutineDefinition, Routine, Occurrence, Conclusion, Json } from './model';
-export { HostMemoryPage, MemoryBlockedError, memoryRevision, EMPTY_MEMORY_REVISION } from './memory';
-export type { MemoryApproval, MemoryBinding, MemoryOptions, MemoryContextPack } from './memory';
-export { hash, canonical, isSealed, project, time, validateJson } from './model';
-export type { LedgerState, IgnoredWakeAudit } from './model';
-export { enqueue, agentKey, fifoHeads, queuedExpiry, settle } from './transitions';
-export { FrozenOfferMismatchError, SealedDispatchUnavailableError, sameFrozenOffer, submitFrozen } from './submit';
-export type { FrozenSubmitPort, FrozenInput, FrozenOffer } from './submit';
-export { routineTemplateBinding, sealRoutineTemplate } from './sealed-routine';
-export type { RoutineRef, SealRoutineTemplateInput, SealedTaskInput } from './sealed-routine';
-export { WAKE_HORIZON_MS, IGNORED_WAKE_AUDIT_LIMIT, parseRoutineWakeKey, routineWakeKey, versionSwitchDue, promoteOccurrence, concludeOccurrence, recordOccurrence, createRoutine, stageVersion, setLifecycle, switchVersion, nextWake, validateRoutineDefinition, occurrenceRun, routineCommands, applyPlan, auditCalendarError, scheduleNext } from './routines';
-export type { RoutineValidation, RoutineCommands, RoutineCommandOptions } from './routines';
-export type { MemoryRestoreInput, MemoryRestoreResult, MemoryRestoreFileResult } from './memory-restore';
+export { HostExecutionCore } from './core.js';
+export type { ExecutionServer, HostOptions, OutcomeTransaction, OccurrenceHook, OccurrenceTransaction, AgentMessageInput, MessageDecision, MessageTransaction } from './core.js';
+export { CompactVetoError, HostLedger, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './ledger.js';
+export type { ApplicationRows, CompactionOptions, CompactionResult, CompactVeto, TombstoneKind, HostLedgerOptions, ProjectionOutboxLimits, ProjectionOutboxUsage, LedgerDump, LedgerDumpMemoryTombstone, LedgerDumpRow, LedgerDumpTombstone } from './ledger.js';
+export { nextIntervalOccurrence } from './schedule.js';
+export type { NextOccurrence } from './schedule.js';
+export { DEFAULT_RETRY, frozenInput, isOccurrenceIntentKey, occurrenceIntentKey, occurrenceOfIntentKey, taskId, validateRetry } from './model.js';
+export type { IntentInput, LedgerIntentInput, Intent, ExecutionTemplate, SealedExecutionTemplate, IntentExecution, SealedAgentExecutionInput, FrozenExecutionInput, RetryPolicy, AgentRoutineDefinition, HostJobRoutineDefinition, HostJobSpec, HostJobRun, HostJobResult, HostJobHandler, HostOccurrenceRoutineDefinition, HostOccurrenceRun, RoutineDefinition, Routine, Occurrence, Conclusion, Json } from './model.js';
+export { HostMemoryPage, MemoryBlockedError, memoryRevision, EMPTY_MEMORY_REVISION } from './memory.js';
+export type { MemoryApproval, MemoryBinding, MemoryOptions, MemoryContextPack } from './memory.js';
+export { hash, canonical, isSealed, project, time, validateJson } from './model.js';
+export type { LedgerState, IgnoredWakeAudit } from './model.js';
+export { enqueue, agentKey, fifoHeads, queuedExpiry, settle } from './transitions.js';
+export { FrozenOfferMismatchError, SealedDispatchUnavailableError, sameFrozenOffer, submitFrozen } from './submit.js';
+export type { FrozenSubmitPort, FrozenInput, FrozenOffer } from './submit.js';
+export { routineTemplateBinding, sealRoutineTemplate } from './sealed-routine.js';
+export type { RoutineRef, SealRoutineTemplateInput, SealedTaskInput } from './sealed-routine.js';
+export { WAKE_HORIZON_MS, IGNORED_WAKE_AUDIT_LIMIT, parseRoutineWakeKey, routineWakeKey, versionSwitchDue, promoteOccurrence, concludeOccurrence, recordOccurrence, createRoutine, stageVersion, setLifecycle, switchVersion, nextWake, validateRoutineDefinition, occurrenceRun, routineCommands, applyPlan, auditCalendarError, scheduleNext } from './routines.js';
+export type { RoutineValidation, RoutineCommands, RoutineCommandOptions } from './routines.js';
+export type { MemoryRestoreInput, MemoryRestoreResult, MemoryRestoreFileResult } from './memory-restore.js';
 // ==== @byok-sdk/server dist/execution-core/ledger.d.ts ====
-import type { MemoryIntentRow } from './memory';
-import { type Json, type LedgerState } from './model';
+import type { MemoryIntentRow } from './memory.js';
+import { type Json, type LedgerState } from './model.js';
 export interface ProjectionOutboxLimits {
     maxCount?: number;
     maxBytes?: number;
@@ -363,9 +363,9 @@ export declare class HostLedger {
     close(): void;
 }
 // ==== @byok-sdk/server dist/execution-core/memory-restore.d.ts ====
-import { HostLedger } from './ledger';
-import { type LedgerState } from './model';
-import type { MemoryApproval, MemoryBinding, MemoryIntentRow, MemoryOptions } from './memory';
+import { HostLedger } from './ledger.js';
+import { type LedgerState } from './model.js';
+import type { MemoryApproval, MemoryBinding, MemoryIntentRow, MemoryOptions } from './memory.js';
 import { type AgentMemoryExport, type AgentMemoryFile } from '@byok-sdk/protocol/agent-memory';
 export interface MemoryRestoreInput extends MemoryBinding {
     restoreId: string;
@@ -408,8 +408,8 @@ export declare class MemoryRestoreCoordinator {
 }
 // ==== @byok-sdk/server dist/execution-core/memory.d.ts ====
 import { type AgentMemoryIntentReadback, type AgentMemoryIntentV1, type AgentMemoryProjectionMutation } from '@byok-sdk/protocol';
-import { HostLedger } from './ledger';
-import { type MemoryRestoreInput, type MemoryRestoreResult, type MemoryRestoreRow } from './memory-restore';
+import { HostLedger } from './ledger.js';
+import { type MemoryRestoreInput, type MemoryRestoreResult, type MemoryRestoreRow } from './memory-restore.js';
 import type { AgentMemoryExport, AgentMemoryIntentTransport, AgentMemoryProjectionPort } from '@byok-sdk/protocol/agent-memory';
 export declare class MemoryBlockedError extends Error {
 }
@@ -517,11 +517,11 @@ export declare class HostMemoryPage {
 }
 export {};
 // ==== @byok-sdk/server dist/execution-core/model.d.ts ====
-import type { MemoryState } from './memory';
-import { canonical, hash } from './canonical';
+import type { MemoryState } from './memory.js';
+import { canonical, hash } from './canonical.js';
 import type { AgentExecutionInput } from '@byok-sdk/cloud';
-import type { ByokServer } from '../index';
-import type { WakeScheduleInput } from '../wakes/types';
+import type { ByokServer } from '../index.js';
+import type { WakeScheduleInput } from '../wakes/types.js';
 import { type HostOfferSealedPayload, type AgentMessageServerContext } from '@byok-sdk/protocol';
 export type Json = null | boolean | number | string | Json[] | {
     [key: string]: Json;
@@ -763,9 +763,9 @@ export declare function validateInput(input: LedgerIntentInput): void;
 export declare function validateRetry(retry: RetryPolicy): void;
 export declare function project(state: LedgerState, id: string, value: Json): void;
 // ==== @byok-sdk/server dist/execution-core/routines.d.ts ====
-import { type DueWake, type WakeScheduleInput } from '../wakes/types';
-import { type Conclusion, type HostOccurrenceRun, type IntentExecution, type IgnoredWakeAudit, type Intent, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model';
-import { type NextOccurrence } from './schedule';
+import { type DueWake, type WakeScheduleInput } from '../wakes/types.js';
+import { type Conclusion, type HostOccurrenceRun, type IntentExecution, type IgnoredWakeAudit, type Intent, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model.js';
+import { type NextOccurrence } from './schedule.js';
 export declare const WAKE_HORIZON_MS: number;
 /** Retain the newest ignored deliveries without growing the Host JSON ledger indefinitely. */
 export declare const IGNORED_WAKE_AUDIT_LIMIT = 128;
@@ -843,7 +843,7 @@ export declare function concludeOccurrence(state: LedgerState, occurrenceKey: st
 export declare function setLifecycle(state: LedgerState, id: string, lifecycle: Routine['lifecycle'], now: number, nextTime: NextOccurrence): void;
 export {};
 // ==== @byok-sdk/server dist/execution-core/schedule.d.ts ====
-import { type RoutineDefinition } from './model';
+import { type RoutineDefinition } from './model.js';
 /** The Host can inject its shared cron/time-zone calendar. K4 does not define a cron dialect. */
 export type NextOccurrence = (definition: Readonly<RoutineDefinition>, after: number) => number | null;
 /** Default example rule: { anchorMs, everyMs, quietHours?: { startMinute, endMinute } }, UTC. */
@@ -856,7 +856,7 @@ export declare const nextIntervalOccurrence: NextOccurrence;
  */
 import { type SealedBinding, type SealedCategory } from '@byok-sdk/core/sealed-payload';
 import { type AgentRef, type TaskSealing } from '@byok-sdk/protocol';
-import type { SealedExecutionTemplate } from './model';
+import type { SealedExecutionTemplate } from './model.js';
 export type RoutineRef = NonNullable<SealedExecutionTemplate['payload']['routineRef']>;
 /** The inline `sealed` member of a sealed offer. */
 export type SealedTaskInput = NonNullable<SealedExecutionTemplate['payload']['sealed']>;
@@ -890,8 +890,8 @@ export interface SealRoutineTemplateInput {
 export declare function sealRoutineTemplate(input: SealRoutineTemplateInput): Promise<SealedTaskInput>;
 // ==== @byok-sdk/server dist/execution-core/submit.d.ts ====
 import type { AgentExecutionInput } from '@byok-sdk/cloud';
-import type { ByokServer } from '../index';
-import { type FrozenExecutionInput, type SealedAgentExecutionInput } from './model';
+import type { ByokServer } from '../index.js';
+import { type FrozenExecutionInput, type SealedAgentExecutionInput } from './model.js';
 /**
  * The SDK calls that one frozen submit uses. L binds them to its `ByokServer`; H binds them to its cloud tenant.
  * `submitSealed` is the cloud's `submitSealedAgentExecution`. A port without it cannot dispatch a sealed input.
@@ -930,7 +930,7 @@ export declare function frozenDelivered(port: Pick<FrozenSubmitPort, 'offer'>, i
  */
 export declare function submitFrozen(port: FrozenSubmitPort, input: FrozenExecutionInput, beforeSubmit: () => boolean | Promise<boolean>): Promise<'delivered' | 'stopped'>;
 // ==== @byok-sdk/server dist/execution-core/transitions.d.ts ====
-import { type Conclusion, type Intent, type IntentExecution, type IntentInput, type LedgerIntentInput, type LedgerState } from './model';
+import { type Conclusion, type Intent, type IntentExecution, type IntentInput, type LedgerIntentInput, type LedgerState } from './model.js';
 /**
  * Enqueues a plain intent. A sealed execution enters the ledger only as an occurrence of its routine (`admit`), whose
  * stored definition pins the `routineRef`: here no routine is checked, so `source: 'routine'` would be only a label.
@@ -947,21 +947,21 @@ export declare function queuedExpiry(intent: Pick<Intent, 'cancelReason' | 'wait
 export declare function settle(state: LedgerState, intent: Intent, conclusion: Conclusion): void;
 export declare function cancelWake(state: LedgerState, key: string): void;
 // ==== @byok-sdk/server dist/index.d.ts ====
-export { listenLoopback } from './loopback';
-export type { LoopbackPortStore, LoopbackHandler, LoopbackListenerOptions, LoopbackListener } from './loopback';
-import type { AgentMessageDraftEvent } from './types';
-export type { AgentMessageDraftEvent } from './types';
-import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
-export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, WAKE_MAX_FUTURE_MS } from './wakes/types';
-export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
+export { listenLoopback } from './loopback.js';
+export type { LoopbackPortStore, LoopbackHandler, LoopbackListenerOptions, LoopbackListener } from './loopback.js';
+import type { AgentMessageDraftEvent } from './types.js';
+export type { AgentMessageDraftEvent } from './types.js';
+import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types.js';
+export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, WAKE_MAX_FUTURE_MS } from './wakes/types.js';
+export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types.js';
 import { type MaintenanceReport } from '@byok-sdk/cloud';
 export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import { type ActivityReadOptions, type ActivityTail, type ApprovalTimelineTail, type AgentExecutionInput, type AgentMemoryIntentNoticeInput, type EnqueuedAgentControl, type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
-import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, TaskEventEntry, TaskHandle, TaskSnapshot } from './types';
-export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, } from './types';
-export { TaskEventsUnavailableError } from './types';
+import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, TaskEventEntry, TaskHandle, TaskSnapshot } from './types.js';
+export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, } from './types.js';
+export { TaskEventsUnavailableError } from './types.js';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
@@ -982,7 +982,7 @@ export { StaleApprovalError } from '@byok-sdk/cloud';
  * `task-handle.ts` for the full reasoning and for why `SteerRejectionCode` and
  * {@link StaleApprovalError} stay kernel re-exports.
  */
-export { SteerRejectedError } from './task-handle';
+export { SteerRejectedError } from './task-handle.js';
 export type { SteerRejectionCode } from '@byok-sdk/cloud';
 /**
  * Auth v2 types an embedder needs to talk about devices and tokens. All owned
@@ -991,10 +991,10 @@ export type { SteerRejectionCode } from '@byok-sdk/cloud';
  */
 export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenSigner } from '@byok-sdk/cloud';
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
-export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
-export type { SqliteSchemaErrorCode } from './sqlite-support';
-export { inspectSqliteStore } from './store-compatibility';
-export type { RateLimiterOptions } from './rate-limiter';
+export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support.js';
+export type { SqliteSchemaErrorCode } from './sqlite-support.js';
+export { inspectSqliteStore } from './store-compatibility.js';
+export type { RateLimiterOptions } from './rate-limiter.js';
 /** Page size `tasks.list()` uses when the caller names none. */
 export declare const DEFAULT_TASK_PAGE_LIMIT = 100;
 /** Input to {@link ByokServer.pairing.createPairingCode}. */
@@ -1413,7 +1413,7 @@ export declare function createCountingInboundRateLimiter(limiter: RateLimiter, o
 // ==== @byok-sdk/server dist/relay.d.ts ====
 import type { InboundCommitted, ByokCloudObserver } from '@byok-sdk/cloud';
 import type { TaskState } from '@byok-sdk/protocol';
-import type { ByokServerEvent } from './types';
+import type { ByokServerEvent } from './types.js';
 /**
  * Post-commit wake-ups and the cross-task `ByokServerEvent` feed.
  *
@@ -1624,8 +1624,8 @@ export declare function inspectSqliteStore(path: string): Promise<StoreCompatibi
 // ==== @byok-sdk/server dist/task-events.d.ts ====
 import { type ActivityTail, type TaskEventsWake, type TenantId } from '@byok-sdk/cloud';
 import { type TaskState } from '@byok-sdk/protocol';
-import type { TaskEventRelay } from './relay';
-import { type ServerTaskEvent, type TaskEventEntry } from './types';
+import type { TaskEventRelay } from './relay.js';
+import { type ServerTaskEvent, type TaskEventEntry } from './types.js';
 /** One task's current facts, from the same reads `tasks.get` answers with. */
 export interface TaskEventFacts {
     readonly state: TaskState;
@@ -1678,9 +1678,9 @@ export declare function readTaskEvents<T = TaskEventEntry>(deps: TaskEventDeps, 
 // ==== @byok-sdk/server dist/task-handle.d.ts ====
 import { type ByokCloud, type SteerRejectionCode, type TaskAbandonCause, type TaskAttempt } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
-import type { TaskEventRelay } from './relay';
-import { type TaskEventDeps } from './task-events';
-import type { TaskHandle, TaskResult } from './types';
+import type { TaskEventRelay } from './relay.js';
+import { type TaskEventDeps } from './task-events.js';
+import type { TaskHandle, TaskResult } from './types.js';
 /**
  * Thrown by {@link TaskHandle.steer} when the kernel refuses the steer.
  *
@@ -1766,8 +1766,8 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
 import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
-import type { WakeConsumer } from './wakes/types';
-import type { RateLimiterOptions } from './rate-limiter';
+import type { WakeConsumer } from './wakes/types.js';
+import type { RateLimiterOptions } from './rate-limiter.js';
 /** Mutually-exclusive storage authority for the embedded reference server. */
 export type ByokServerStorage = {
     readonly kind: 'memory';

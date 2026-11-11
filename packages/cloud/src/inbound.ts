@@ -1,9 +1,9 @@
-import { readTaskAgentMessageBinding } from './task-agent-message';
+import { readTaskAgentMessageBinding } from './task-agent-message.js';
 import {
   agentMessageWithinLimit, parseAgentMessageDisposition, sameAgentRef,
   type AgentMessageConsumers, type AgentMessageDecision,
-} from './agent-message-disposition';
-import { taskOfferMessageId, hashOfferBytes } from './offer-identity';
+} from './agent-message-disposition.js';
+import { taskOfferMessageId, hashOfferBytes } from './offer-identity.js';
 /**
  * The single inbound choke point for every daemon -> cloud envelope.
  *
@@ -76,24 +76,24 @@ import {
   appendActivityEvents,
   DEFAULT_ACTIVITY_BOUNDS,
   type ActivityBounds,
-} from './coordination';
+} from './coordination.js';
 import {
   validateApprovalTimelineAppend,
   type ApprovalTimelineAppendInput,
-} from './approval-timeline';
-import { isCloudError } from './errors';
-import { projectTerminalToReview } from './board-projection';
-import { agentReliabilityKey } from './agent-reliability';
-import type { TenantStores } from './tenant-stores';
-import type { TaskAttempt } from './stores/ports';
-import { isTaskRedactionTombstone, sameTaskBody, taskRedactionReceiptKey } from './task-redaction';
+} from './approval-timeline.js';
+import { isCloudError } from './errors.js';
+import { projectTerminalToReview } from './board-projection.js';
+import { agentReliabilityKey } from './agent-reliability.js';
+import type { TenantStores } from './tenant-stores.js';
+import type { TaskAttempt } from './stores/ports.js';
+import { isTaskRedactionTombstone, sameTaskBody, taskRedactionReceiptKey } from './task-redaction.js';
 import {
   releaseSealedCiphertext,
   retainSealedCiphertext,
   sealedCiphertextCommitted,
   sealedCiphertextHeld,
   sealedCiphertextRef,
-} from './sealed-ciphertext';
+} from './sealed-ciphertext.js';
 
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected';
 
@@ -209,7 +209,7 @@ export interface InboundCommitted {
 export interface ByokCloudObserver {
   /** Post-commit wake hint, including exact replays; durable receipts remain authoritative. */
   onAgentHomeProjectionCompleted?(readback: import('@byok-sdk/protocol').AgentHomeProjectionReadback): void;
-  onMaintenance?(report: import('./maintenance').MaintenanceReport): void;
+  onMaintenance?(report: import('./maintenance.js').MaintenanceReport): void;
   onInboundCommitted(input: InboundCommitted): void;
   /**
    * One envelope the gate refused, with the reason. Same rules as

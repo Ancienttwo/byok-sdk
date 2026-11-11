@@ -1,9 +1,9 @@
 import type { TenantId } from '@byok-sdk/core';
 import { AgentRefSchema, type AgentRef } from '@byok-sdk/protocol';
-import { readDeviceTerminalReceipt } from './terminal-result';
-import { terminalReceiptKey } from './inbound';
-import type { TenantStores } from './tenant-stores';
-import { readTaskAgentMessage, readTaskAgentMessageBinding } from './task-agent-message';
+import { readDeviceTerminalReceipt } from './terminal-result.js';
+import { terminalReceiptKey } from './inbound.js';
+import type { TenantStores } from './tenant-stores.js';
+import { readTaskAgentMessage, readTaskAgentMessageBinding } from './task-agent-message.js';
 
 export interface AgentMessageDraftCursor {
   readonly revision: number;

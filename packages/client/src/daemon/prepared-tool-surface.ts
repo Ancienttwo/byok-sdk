@@ -1,21 +1,21 @@
-import { RuntimeEnvironmentUnavailableError } from '../runtime/environment';
-import { preparedResultProjection } from '../agent-memory/prepared-agent-result';
+import { RuntimeEnvironmentUnavailableError } from '../runtime/environment.js';
+import { preparedResultProjection } from '../agent-memory/prepared-agent-result.js';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import { observePreparedMemory, preparedMemoryProjection, type PreparedAgentMemoryHelper, type PreparedAgentMemoryState } from '../agent-memory/prepared-agent-memory';
-import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
+import { observePreparedMemory, preparedMemoryProjection, type PreparedAgentMemoryHelper, type PreparedAgentMemoryState } from '../agent-memory/prepared-agent-memory.js';
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment.js';
 import {
   preparedToolBindingDigest,
   preparedToolSurfaceObservationDigest,
   type InputPreparationToolV1,
-} from '../input-preparation';
-import type { McpStdioServerConfig } from '../types';
-import type { McpToolsetServerObservation } from '../mcp/observation';
-import { bindMcpToolsetServerObservation } from '../mcp/observation';
-import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../mcp/projection';
-import { buildToolExecutorsFromObservation, InputPreparationCompileError } from '../adapters/pi/input-preparation';
-import { McpAuthorityError } from '../mcp/client';
-import { MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from './mcp-tools-probe';
-import type { McpToolsetRegistry } from './toolset-registry';
+} from '../input-preparation.js';
+import type { McpStdioServerConfig } from '../types.js';
+import type { McpToolsetServerObservation } from '../mcp/observation.js';
+import { bindMcpToolsetServerObservation } from '../mcp/observation.js';
+import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../mcp/projection.js';
+import { buildToolExecutorsFromObservation, InputPreparationCompileError } from '../adapters/pi/input-preparation.js';
+import { McpAuthorityError } from '../mcp/client.js';
+import { MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from './mcp-tools-probe.js';
+import type { McpToolsetRegistry } from './toolset-registry.js';
 
 /**
  * The ONE place a prepared input's tool surface is assembled.

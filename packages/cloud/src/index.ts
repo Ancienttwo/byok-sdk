@@ -21,9 +21,9 @@ export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 
 // The composition entry points
-export { createByokCloud } from './cloud';
-export type { TaskAgentMessage } from './task-agent-message';
-export type { AgentMessageConsumers, AgentMessageConsumeInput, AgentMessageDecision } from './agent-message-disposition';
+export { createByokCloud } from './cloud.js';
+export type { TaskAgentMessage } from './task-agent-message.js';
+export type { AgentMessageConsumers, AgentMessageConsumeInput, AgentMessageDecision } from './agent-message-disposition.js';
 export type {
   ByokCloud,
   ByokCloudOptions,
@@ -47,46 +47,46 @@ export type {
   EnqueuedInputPreparation,
   EnqueuedOffer,
   TaskOfferReadback,
-} from './cloud';
+} from './cloud.js';
 export {
   agentHomeProjectionCompletionKey,
   agentHomeProjectionRequestKey,
   readAgentHomeProjectionStatus,
   recordAgentHomeProjectionCompletion,
-} from './agent-home-projections';
-export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
+} from './agent-home-projections.js';
+export type { AgentHomeProjectionReceiptInput } from './agent-home-projections.js';
 export {
   inputPreparationCompletionKey,
   inputPreparationRequestKey,
   readInputPreparationStatus,
   recordInputPreparationCompletion,
   sameInputPreparationRequest,
-} from './input-preparations';
-export type { InputPreparationReceiptInput } from './input-preparations';
+} from './input-preparations.js';
+export type { InputPreparationReceiptInput } from './input-preparations.js';
 export {
   AGENT_HOME_CONTRACT_CAPABILITY,
   DEFAULT_EVENTS_PAGE_LIMIT,
   DEFAULT_LONG_POLL_HOLD_MS,
   DEFAULT_MAX_BLOB_SIZE_BYTES,
-} from './cloud';
+} from './cloud.js';
 export {
   DEFAULT_BOARD_PAGE_LIMIT,
   DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS,
   DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS,
   DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS,
-} from './handlers/board';
-export { DEFAULT_SKILL_PACK_PAGE_LIMIT } from './handlers/skill-packs';
-export { createInMemoryByokCloud } from './composition/in-memory';
-export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/in-memory';
+} from './handlers/board.js';
+export { DEFAULT_SKILL_PACK_PAGE_LIMIT } from './handlers/skill-packs.js';
+export { createInMemoryByokCloud } from './composition/in-memory.js';
+export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/in-memory.js';
 
 // Errors
-export { ByokCloudError, CLOUD_ERROR_CODES, DeviceRetiredError, TaskOfferAppendRefusedError, isCloudError } from './errors';
-export type { CloudErrorCode } from './errors';
+export { ByokCloudError, CLOUD_ERROR_CODES, DeviceRetiredError, TaskOfferAppendRefusedError, isCloudError } from './errors.js';
+export type { CloudErrorCode } from './errors.js';
 
 export {
   InMemoryAgentMemoryProjectionAuthorizer,
   InMemoryAgentMemoryProjectionStore,
-} from './stores/in-memory/agent-memory-projection';
+} from './stores/in-memory/agent-memory-projection.js';
 export type {
   AgentMemoryProjectionAuthorization,
   AgentMemoryProjectionEraseResult,
@@ -98,7 +98,7 @@ export type {
   AgentMemoryProjectionReceipt,
   AgentMemoryProjectionSealing,
   AgentMemoryProjectionStore,
-} from './agent-memory-projection';
+} from './agent-memory-projection.js';
 
 export type {
   TaskArchiveCounts,
@@ -108,9 +108,9 @@ export type {
   TaskArchiveStoreInput,
   TaskArchiveStoreResult,
   TaskArchiveWork,
-} from './task-archive';
-export { taskArchiveInput } from './task-archive';
-export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
+} from './task-archive.js';
+export { taskArchiveInput } from './task-archive.js';
+export { TASK_REDACTION_MAX_TASKS } from './task-redaction.js';
 export type {
   TaskRedactionCodec,
   TaskRedactionCounts,
@@ -119,9 +119,9 @@ export type {
   TaskRedactionStore,
   TaskRedactionStoreInput,
   TaskRedactionTaskResult,
-} from './task-redaction';
+} from './task-redaction.js';
 
-export { parseRecordedWriteResult } from './e2ee-member';
+export { parseRecordedWriteResult } from './e2ee-member.js';
 export type {
   E2eeMemberChainAppendInput,
   E2eeMemberChainAppendResult,
@@ -136,7 +136,7 @@ export type {
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
   E2eeScopeShred,
-} from './e2ee-member';
+} from './e2ee-member.js';
 
 // Capability declaration (ADR-010)
 export {
@@ -145,52 +145,52 @@ export {
   capabilityDeclarationForPorts,
   declares,
   fullCapabilityDeclaration,
-} from './capabilities';
+} from './capabilities.js';
 export type {
   CapabilitiesResponse,
   CapabilityPorts,
   CloudCapability,
   FullCapabilityDeclarationOptions,
-} from './capabilities';
+} from './capabilities.js';
 
 // Route inventory (I1)
-export { CloudRouteRegistry, ROUTE_CLASSES, ROUTE_METHODS, routeKey } from './router/registry';
-export type { CloudRouteHandler, RouteClass, RouteDescriptor, RouteMethod } from './router/registry';
+export { CloudRouteRegistry, ROUTE_CLASSES, ROUTE_METHODS, routeKey } from './router/registry.js';
+export type { CloudRouteHandler, RouteClass, RouteDescriptor, RouteMethod } from './router/registry.js';
 
 // Auth plane
-export { ACCESS_TOKEN_TTL_SECONDS, createHmacTokenSigner } from './auth/tokens';
-export type { AccessTokenClaims, TokenSigner } from './auth/tokens';
-export { NONCE_SIGNING_DOMAIN, verifyNonceSignature } from './auth/verify';
-export { authenticateBearer, extractBearerToken } from './auth/bearer';
-export type { BearerAuthDeps } from './auth/bearer';
+export { ACCESS_TOKEN_TTL_SECONDS, createHmacTokenSigner } from './auth/tokens.js';
+export type { AccessTokenClaims, TokenSigner } from './auth/tokens.js';
+export { NONCE_SIGNING_DOMAIN, verifyNonceSignature } from './auth/verify.js';
+export { authenticateBearer, extractBearerToken } from './auth/bearer.js';
+export type { BearerAuthDeps } from './auth/bearer.js';
 export {
   DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS,
   DEFAULT_DEVICE_PROOF_MAX_LIFETIME_MS,
   MAX_DEVICE_PROOF_CLOCK_SKEW_MS,
   MAX_DEVICE_PROOF_MAX_LIFETIME_MS,
   authenticateDeviceProof,
-} from './auth/device-proof';
+} from './auth/device-proof.js';
 export type {
   AuthenticatedDeviceProof,
   DeviceProofAuthDeps,
   DeviceProofRequestBinding,
-} from './auth/device-proof';
-export { authenticateHostedDeviceAssertion, authenticateHostedTaskAssertion } from './auth/device-assertion';
-export type { HostedDeviceAssertionAuthDeps, HostedTaskAssertionAuthDeps } from './auth/device-assertion';
+} from './auth/device-proof.js';
+export { authenticateHostedDeviceAssertion, authenticateHostedTaskAssertion } from './auth/device-assertion.js';
+export type { HostedDeviceAssertionAuthDeps, HostedTaskAssertionAuthDeps } from './auth/device-assertion.js';
 export {
   DEVICE_IDENTITY_PROOF_KEY_EPOCH,
   DEVICE_IDENTITY_PROOF_KEY_ID,
   PAIRING_CODE_TTL_MS,
   createAuthPlane,
-} from './auth/plane';
-export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './auth/plane';
+} from './auth/plane.js';
+export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './auth/plane.js';
 
 // The crypto seam
-export { createWebCrypto } from './crypto/web-crypto';
-export type { CloudCrypto } from './crypto/port';
+export { createWebCrypto } from './crypto/web-crypto.js';
+export type { CloudCrypto } from './crypto/port.js';
 
 // Inbound gate
-export { INBOUND_REFUSAL_REASONS, handleInboundEnvelope, terminalReceiptKey } from './inbound';
+export { INBOUND_REFUSAL_REASONS, handleInboundEnvelope, terminalReceiptKey } from './inbound.js';
 export type {
   ByokCloudObserver,
   InboundCommitted,
@@ -198,14 +198,14 @@ export type {
   InboundRefusalReason,
   InboundResult,
   InboundRefused,
-} from './inbound';
+} from './inbound.js';
 
 // Typed terminal read model (the receipt `readTerminalReceipt` hands back raw)
-export { projectTerminalResult } from './terminal-result';
-export type { TerminalResult } from './terminal-result';
+export { projectTerminalResult } from './terminal-result.js';
+export type { TerminalResult } from './terminal-result.js';
 
 // Tenant facade (layer 2 of §12.6.2)
-export { tenantStoresFor } from './tenant-stores';
+export { tenantStoresFor } from './tenant-stores.js';
 export type {
   TenantBoundActivity,
   TenantBoundApprovalTimeline,
@@ -222,7 +222,7 @@ export type {
   TenantBoundReceipts,
   TenantBoundTaskAttempts,
   TenantStores,
-} from './tenant-stores';
+} from './tenant-stores.js';
 
 export {
   ApprovalObservationSchema,
@@ -239,7 +239,7 @@ export {
   sameApprovalTimelineEvent,
   validateApprovalTimelineAppend,
   validateApprovalTimelineResolve,
-} from './approval-timeline';
+} from './approval-timeline.js';
 export type {
   ApprovalObservation,
   ApprovalTimelineAppendInput,
@@ -248,20 +248,20 @@ export type {
   ApprovalTimelineResolvePendingResult,
   ApprovalTimelineStore,
   ApprovalTimelineTail,
-} from './approval-timeline';
+} from './approval-timeline.js';
 
 // Host approval resolution. `pendingApproval` is exported alongside the error
 // because it IS the rule the two host calls are gated on — a host that renders
 // an approval prompt reads the same derived fact the kernel enforces, instead
 // of re-deriving a second, drifting answer from the raw timeline.
-export { StaleApprovalError, pendingApproval } from './approval-control';
-export type { PendingApproval } from './approval-control';
+export { StaleApprovalError, pendingApproval } from './approval-control.js';
+export type { PendingApproval } from './approval-control.js';
 
 // Host steering. The error is exported with its code union because a host that
 // renders a steer control needs to explain a refusal in its own UI, and the
 // three codes are the whole vocabulary for that.
-export { SteerRejectedError } from './steer-control';
-export type { SteerRejectionCode } from './steer-control';
+export { SteerRejectedError } from './steer-control.js';
+export type { SteerRejectionCode } from './steer-control.js';
 
 export {
   assertTaskAttemptListLimit,
@@ -273,8 +273,8 @@ export {
   DEFAULT_PRESENCE_DETAIL_MAX_BYTES,
   DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
   DEFAULT_PRESENCE_TTL_MS,
-} from './coordination';
-export type { ActivityBounds } from './coordination';
+} from './coordination.js';
+export type { ActivityBounds } from './coordination.js';
 export {
   TimelineEventSchema,
   ActivityAppendRequestSchema,
@@ -285,7 +285,7 @@ export {
   activityEntryBytes,
   createActivityEntry,
   activitySourceHash,
-} from './activity';
+} from './activity.js';
 export type {
   ActivityAppendInput,
   ActivityCursor,
@@ -294,15 +294,15 @@ export type {
   ActivityTail,
   ActivityTailEntry,
   TimelineEvent,
-} from './activity';
-export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';
+} from './activity.js';
+export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client.js';
 export type {
   BoardFeedClientOptions,
   BoardFeedItem,
   BoardFeedMode,
   BoardFeedPage,
   BoardFeedRead,
-} from './coordination-client';
+} from './coordination-client.js';
 
 export {
   TRUTH_BATCH_MAX_RECORDS,
@@ -319,12 +319,12 @@ export {
   TruthWriteRequestSchema,
   truthManifestMetadata,
   truthRecordMetadata,
-} from './truth/contract';
+} from './truth/contract.js';
 export {
   DEFAULT_MAX_TRUTH_REQUEST_BYTES,
   DEVICE_PROOF_HEADER,
   MAX_DEVICE_PROOF_HEADER_BYTES,
-} from './handlers/truth';
+} from './handlers/truth.js';
 export type {
   PreparedTruthWrite,
   TruthBodyInput,
@@ -335,9 +335,9 @@ export type {
   TruthObjectDownloads,
   TruthRecordMetadata,
   TruthWriteRequest,
-} from './truth/contract';
-export { TruthCommitError, isTruthCommitError } from './truth/errors';
-export type { TruthCommitErrorCode } from './truth/errors';
+} from './truth/contract.js';
+export { TruthCommitError, isTruthCommitError } from './truth/errors.js';
+export type { TruthCommitErrorCode } from './truth/errors.js';
 
 // Cloud-local ports
 export {
@@ -347,10 +347,10 @@ export {
   TASK_ATTEMPT_STATUSES,
   TASK_ATTEMPT_ACTIVE_STATUSES,
   TASK_ATTEMPT_UNFINISHED_STATUSES,
-} from './stores/ports';
+} from './stores/ports.js';
 // The port method inventory. Contract data, shipped so `@byok-sdk/conformance` and
 // durable adapters read the same table; `ports.ts` itself is untouched.
-export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract';
+export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract.js';
 export type {
   BlobContent,
   BlobContentProxy,
@@ -396,7 +396,7 @@ export type {
   TaskCancellationMutation,
   TaskCancellationRequest,
   TaskCancellationStore,
-} from './stores/ports';
+} from './stores/ports.js';
 
 // In-memory reference implementations
 export {
@@ -422,41 +422,41 @@ export {
   createInMemoryCloudStores,
   createInMemoryBlobBytes,
   InMemoryBlobBytes,
-} from './stores/in-memory/index';
+} from './stores/in-memory/index.js';
 export type {
   InMemoryBlobStoreOptions,
   InMemoryBlobs,
   InMemoryCloudComposition,
-} from './stores/in-memory/index';
+} from './stores/in-memory/index.js';
 
-export type { DeviceTerminal } from './terminal-result';
+export type { DeviceTerminal } from './terminal-result.js';
 
 export {
   AgentExecutionInputSchema,
   SealedAgentExecutionInputSchema,
   type AgentExecutionInput,
   type SealedAgentExecutionInput,
-} from './agent-execution';
+} from './agent-execution.js';
 
 export {
   DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy,
   DEFAULT_PROOF_RECEIPT_RETENTION_MS, PROOF_RECEIPT_RETENTION_FLOOR_MS,
-} from './maintenance';
+} from './maintenance.js';
 export type {
   RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport,
   ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofReceiptRetentionOptions,
-} from './maintenance';
-export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
-export type { ReceiptRetentionClass } from './receipt-retention';
-export type { ReceiptCollectExpiredInput } from './stores/ports';
-export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
-export type { TaskEventsWake, TaskEventsWakeSubscription } from './task-events-wake';
+} from './maintenance.js';
+export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention.js';
+export type { ReceiptRetentionClass } from './receipt-retention.js';
+export type { ReceiptCollectExpiredInput } from './stores/ports.js';
+export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake.js';
+export type { TaskEventsWake, TaskEventsWakeSubscription } from './task-events-wake.js';
 export {
   createInProcessMailboxWake,
   createInProcessTaskEventsWake,
   DEFAULT_MAILBOX_WAKE_FALLBACK_MS,
   DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS,
-} from './stores/in-memory/mailbox-wake';
-export type { InProcessMailboxWakeOptions, InProcessTaskEventsWakeOptions } from './stores/in-memory/mailbox-wake';
+} from './stores/in-memory/mailbox-wake.js';
+export type { InProcessMailboxWakeOptions, InProcessTaskEventsWakeOptions } from './stores/in-memory/mailbox-wake.js';
 
-export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCursor, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult, AgentMessageDraftReadback } from './agent-message-draft';
+export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCursor, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult, AgentMessageDraftReadback } from './agent-message-draft.js';

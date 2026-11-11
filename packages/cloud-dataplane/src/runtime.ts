@@ -26,8 +26,8 @@
  */
 
 // The pool factory (int8 parsing configured per-pool, never globally)
-export { createByokPool } from './pool';
-export type { ByokPool, ByokPoolOptions } from './pool';
+export { createByokPool } from './pool.js';
+export type { ByokPool, ByokPoolOptions } from './pool.js';
 
 // The cloud-local port implementations, and the composition that bundles them
 export {
@@ -52,7 +52,7 @@ export {
   createPostgresCloudStores,
   POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED,
   PostgresMailboxProtocolUnsupportedError,
-} from './stores/index';
+} from './stores/index.js';
 export type {
   PostgresCloudStoreOptions,
   PostgresCloudStores,
@@ -60,7 +60,7 @@ export type {
   PostgresRateLimitOptions,
   PostgresAgentMemoryProjectionStoreOptions,
   PostgresTaskRedactionStoreOptions,
-} from './stores/index';
+} from './stores/index.js';
 
 // The object-storage half of blobs. Grants only: this composition supplies no
 // `BlobContentProxy`, because a device uploading straight to R2 is exactly what
@@ -76,15 +76,15 @@ export {
   R2BlobStoreError,
   R2CloudBlobStore,
   R2ObjectMaintenanceStore,
-} from './stores/index';
-export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index';
+} from './stores/index.js';
+export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index.js';
 export type {
   R2DeleteResult,
   R2ListedObject,
   R2ObjectMaintenance,
   R2ObjectMaintenanceOptions,
   R2ObjectPage,
-} from './stores/index';
+} from './stores/index.js';
 
 // The core port implementations, and the composition that bundles them. All
 // seven ship together because `runCoreConformance` certifies a composition as
@@ -98,14 +98,14 @@ export {
   PostgresSkillPackStore,
   PostgresTruthStore,
   createPostgresCoreStores,
-} from './stores/core/index';
-export type { PostgresCoreStoreOptions } from './stores/core/index';
+} from './stores/core/index.js';
+export type { PostgresCoreStoreOptions } from './stores/core/index.js';
 
-export { PostgresTruthCommitter } from './truth-committer';
-export type { PostgresTruthCommitterOptions } from './truth-committer';
+export { PostgresTruthCommitter } from './truth-committer.js';
+export type { PostgresTruthCommitterOptions } from './truth-committer.js';
 
 // Hosted cron/alarm policy uses the same portable SQL authority as maintenance.
-export { PostgresRetentionPolicyStore } from './stores/retention-policy';
-export type { TenantRetentionPolicy, TenantRetentionPolicyInput } from './stores/retention-policy';
-export { CLOUD_CLEANUP_ERROR_CODES, CloudCleanupError } from './maintenance-errors';
-export type { CloudCleanupErrorCode } from './maintenance-errors';
+export { PostgresRetentionPolicyStore } from './stores/retention-policy.js';
+export type { TenantRetentionPolicy, TenantRetentionPolicyInput } from './stores/retention-policy.js';
+export { CLOUD_CLEANUP_ERROR_CODES, CloudCleanupError } from './maintenance-errors.js';
+export type { CloudCleanupErrorCode } from './maintenance-errors.js';

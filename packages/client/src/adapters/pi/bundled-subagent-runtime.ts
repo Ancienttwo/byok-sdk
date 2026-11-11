@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, writeFileS
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
-import { PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENT_EXTENSIONS_ASSET_DIR, isNodeSea, writePiSubagentsHostSdk } from './subagents';
+import { PI_SUBAGENTS_ASSET_DIR, PI_SUBAGENT_EXTENSIONS_ASSET_DIR, isNodeSea, writePiSubagentsHostSdk } from './subagents.js';
 
 export const BUNDLED_SUBAGENT_DIR = 'pi-subagent-runtime';
 export interface TrustedBunSubagentAssets {

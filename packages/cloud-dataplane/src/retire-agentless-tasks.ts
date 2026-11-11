@@ -13,11 +13,11 @@
  */
 import { taskArchiveInput, type CloudCrypto } from '@byok-sdk/cloud';
 import { tenantId, type Clock } from '@byok-sdk/core';
-import type { ByokPool } from './pool';
-import { assertByokPool } from './pool-brand';
-import { PostgresBoardStore } from './stores/core/board';
-import { PostgresTaskArchiveStore } from './stores/task-archive';
-import { refusalFor } from './stores/task-redaction';
+import type { ByokPool } from './pool.js';
+import { assertByokPool } from './pool-brand.js';
+import { PostgresBoardStore } from './stores/core/board.js';
+import { PostgresTaskArchiveStore } from './stores/task-archive.js';
+import { refusalFor } from './stores/task-redaction.js';
 
 export interface RetireAgentlessTasksOptions {
   readonly clock: Clock;

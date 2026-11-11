@@ -24,8 +24,8 @@
  */
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import type { DeviceCommandRunner } from './device-credential-store';
-import { runDeviceCommand } from './device-credential-store';
+import type { DeviceCommandRunner } from './device-credential-store.js';
+import { runDeviceCommand } from './device-credential-store.js';
 
 export interface ResolveMachineIdOptions {
   /** Domain separator for the digest — the same machine yields a different value per product. */

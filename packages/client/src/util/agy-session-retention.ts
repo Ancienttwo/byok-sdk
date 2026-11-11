@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import type { RuntimeSessionLease } from '../types';
+import type { RuntimeSessionLease } from '../types.js';
 
 // A registered symbol: the daemon and a Host-built adapter can come from different bundles, so neither class identity nor a WeakMap crosses.
 const AGY_SESSION_STORE = Symbol.for('byok.adapters.agy-session-store');
@@ -30,7 +30,7 @@ export function agySessionPaths(store: string, sessionRef: string): readonly str
 /** A resume holds this across admission and the session; a sweep that cannot take it keeps the session. */
 export async function acquireAgySessionRetention(store: string, sessionRef: string): Promise<RuntimeSessionLease> {
   if (typeof sessionRef !== 'string' || sessionRef.length === 0) throw new Error('agy session retention requires an authoritative session id');
-  const { acquirePathMutationGate } = await import('./path-mutation-gate');
+  const { acquirePathMutationGate } = await import('./path-mutation-gate.js');
   const digest = createHash('sha256').update(sessionRef).digest('hex');
   const gate = await acquirePathMutationGate({ scope: `agy-session:${digest}`, targetPath: store });
   return Object.freeze({ sessionRef, release: () => gate.release() });

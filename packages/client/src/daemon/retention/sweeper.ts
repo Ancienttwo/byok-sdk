@@ -1,7 +1,7 @@
-import { PASS_INSPECTIONS, runtimeReclaimedBytes } from './runtime-accounting';
-import type { ResolvedStorageConfig } from './config';
-import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type ClassUsage, type RetentionClassId, type RetentionTrigger, type SweepBudget, type SweepReport, RetentionRegistry } from './registry';
-import { StoragePressure } from './pressure';
+import { PASS_INSPECTIONS, runtimeReclaimedBytes } from './runtime-accounting.js';
+import type { ResolvedStorageConfig } from './config.js';
+import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type ClassUsage, type RetentionClassId, type RetentionTrigger, type SweepBudget, type SweepReport, RetentionRegistry } from './registry.js';
+import { StoragePressure } from './pressure.js';
 
 export interface RetentionTimers {
   setTimeout(handler: () => void, ms: number): unknown;

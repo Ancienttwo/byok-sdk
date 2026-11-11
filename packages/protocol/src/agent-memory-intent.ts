@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AgentHomeProjectionAgentRefSchema } from './messages';
+import { AgentHomeProjectionAgentRefSchema } from './messages.js';
 
 /**
  * Host-approved Agent memory intents — the wire half.

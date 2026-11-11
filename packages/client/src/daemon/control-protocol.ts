@@ -1,20 +1,20 @@
 import { PreparedAgentMemoryModeSchema, TerminalProjectionSelectionSchema } from '@byok-sdk/protocol';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
-import { privateSocketEndpoint } from '../util/private-unix-socket';
+import { privateSocketEndpoint } from '../util/private-unix-socket.js';
 import type { TaskState } from '@byok-sdk/protocol';
-import type { ApprovalDecision, PendingApproval } from './approvals';
-import type { ClockSkewObservation } from './auth-manager';
-import type { StoragePressureState } from './retention/pressure';
-import type { RetentionSnapshot } from './retention/sweeper';
-import type { OperationalHealthSnapshot } from './operational-health';
-import type { DaemonLifecycle } from './daemon-lifecycle';
-import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detection';
-import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
-import type { RuntimeEnvironmentReport } from '../runtime/environment';
-import type { LocalAgentReleaseIdentity } from '../release-identity';
-import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types';
-import type { AgentHomeExecutionStatus } from '../agent-home';
+import type { ApprovalDecision, PendingApproval } from './approvals.js';
+import type { ClockSkewObservation } from './auth-manager.js';
+import type { StoragePressureState } from './retention/pressure.js';
+import type { RetentionSnapshot } from './retention/sweeper.js';
+import type { OperationalHealthSnapshot } from './operational-health.js';
+import type { DaemonLifecycle } from './daemon-lifecycle.js';
+import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detection.js';
+import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
+import type { RuntimeEnvironmentReport } from '../runtime/environment.js';
+import type { LocalAgentReleaseIdentity } from '../release-identity.js';
+import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types.js';
+import type { AgentHomeExecutionStatus } from '../agent-home.js';
 import type {
   InputPreparationAccountingPolicyRefV1,
   InputPreparationCancelParamsV1,
@@ -27,14 +27,14 @@ import type {
   InputPreparationRequestV1,
   InputPreparationScopeClaimV1,
   InputPreparationSnapshotV1,
-} from '../input-preparation';
+} from '../input-preparation.js';
 import {
   INPUT_PREPARATION_REQUEST_FORMAT,
   INPUT_PREPARATION_RETIRED_PROMPT_KEYS,
   INPUT_PREPARATION_RETIRED_REQUEST_KEYS,
   INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS,
   INPUT_PREPARATION_VERSION,
-} from '../input-preparation';
+} from '../input-preparation.js';
 
 
 /**
@@ -433,7 +433,7 @@ export interface ControlStatusResult {
   storage: ControlStorageStatus;
   /** Local retry budget. This is not the lifecycle above. */
   operationalHealth: OperationalHealthSnapshot;
-  outbound: import('./outbound-settlement').OutboundStatus;
+  outbound: import('./outbound-settlement.js').OutboundStatus;
   /** Redacted content-addressed status from the daemon's single local registry. */
   toolsets: McpToolsetRegistryStatus;
   /**
@@ -512,7 +512,7 @@ export interface ApprovalsListResult {
   approvals: PendingApproval[];
 }
 
-export type { ApprovalDecision, PendingApproval } from './approvals';
+export type { ApprovalDecision, PendingApproval } from './approvals.js';
 
 export interface ApprovalsResolveParams {
   approvalId: string;

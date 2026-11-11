@@ -11,10 +11,10 @@ import {
   type EventsPollResponse,
   type OutboundRefusalReason,
 } from '@byok-sdk/protocol';
-import { AuthManager, DeviceRevokedError } from './auth-manager';
-import { authedFetch } from './http-client';
-import { ReplayCursorTooOldError } from './replay-cursor';
-import { describeEndpoint, toHttpBase, type TransportEndpoint } from './url';
+import { AuthManager, DeviceRevokedError } from './auth-manager.js';
+import { authedFetch } from './http-client.js';
+import { ReplayCursorTooOldError } from './replay-cursor.js';
+import { describeEndpoint, toHttpBase, type TransportEndpoint } from './url.js';
 
 /**
  * A long-poll request failed in a way that today told the caller only

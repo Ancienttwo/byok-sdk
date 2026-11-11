@@ -1,4 +1,4 @@
-import { CloudDoError } from './errors';
+import { CloudDoError } from './errors.js';
 
 /** The platform reads one key. It does not own a local credential store. */
 export type ModelProviderSecretName = `model-${string}-api-key`;

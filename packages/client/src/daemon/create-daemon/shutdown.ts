@@ -1,6 +1,6 @@
-import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS, delay, DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS } from './support';
-import type { ShutdownReason } from '../control-protocol';
-import type { DaemonScope } from './scope';
+import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS, delay, DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS } from './support.js';
+import type { ShutdownReason } from '../control-protocol.js';
+import type { DaemonScope } from './scope.js';
 
 /** The shutdown sequence and the control-socket shutdown (#926). */
 

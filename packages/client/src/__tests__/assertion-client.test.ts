@@ -59,7 +59,7 @@ describe('client public surface', () => {
     // above cannot see one. Scan the index source too.
     const index = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
     const withoutComments = index.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
-    expect(withoutComments).not.toContain("from './bin/control-client'");
+    expect(withoutComments).not.toContain("from './bin/control-client.js'");
     expect(withoutComments).not.toContain('connectControlClient');
     expect(withoutComments).not.toMatch(/export .*\bControlClient\b/);
   });

@@ -93,8 +93,8 @@ import {
   createBoundedLineReader,
   MCP_SERVER_MAX_PENDING_BYTES,
   MCP_SERVER_MAX_PENDING_FRAMES,
-} from './framing';
-import { classifyJsonRpcMessage, isUsableRequestId, SeenRequestIds, type McpServerRequestId } from './dispatch';
+} from './framing.js';
+import { classifyJsonRpcMessage, isUsableRequestId, SeenRequestIds, type McpServerRequestId } from './dispatch.js';
 
 /** The revisions this core implements and will answer `initialize` with. Final; see the module header for each entry's and each exclusion's citation. */
 export const MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS: readonly string[] = ['2025-11-25', '2025-06-18', '2024-11-05'];

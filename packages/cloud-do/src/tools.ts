@@ -1,7 +1,7 @@
 import type { JsonValue } from '@earendil-works/pi-ai';
 import type { ToolRegistration } from '@earendil-works/pi-durable';
-import { CloudDoError, type CloudDoErrorCode } from './errors';
-import type { SessionIdentity } from './identity';
+import { CloudDoError, type CloudDoErrorCode } from './errors.js';
+import type { SessionIdentity } from './identity.js';
 
 export const CLOUD_SAFE_REPLAY_TOOLS = Object.freeze([
   'load_financial_analysis_skill', 'resolve_security', 'guarded_screen', 'search_f10_datasets',

@@ -14,9 +14,9 @@ import {
   type AgentHomeProjectionReadback,
 } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
-import { agentReliabilityKey } from './agent-reliability';
-import { ByokCloudError } from './errors';
-import type { TenantBoundReceipts } from './tenant-stores';
+import { agentReliabilityKey } from './agent-reliability.js';
+import { ByokCloudError } from './errors.js';
+import type { TenantBoundReceipts } from './tenant-stores.js';
 
 export interface AgentHomeProjectionReceiptInput {
   readonly requestId: string;

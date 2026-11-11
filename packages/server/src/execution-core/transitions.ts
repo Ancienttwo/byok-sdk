@@ -1,5 +1,5 @@
 import { canonical, DEFAULT_RETRY, frozenInput, hash, isSealed, project, taskId, validateInput,
-  type Conclusion, type Intent, type IntentExecution, type IntentInput, type Json, type LedgerIntentInput, type LedgerState } from './model';
+  type Conclusion, type Intent, type IntentExecution, type IntentInput, type Json, type LedgerIntentInput, type LedgerState } from './model.js';
 
 /**
  * Enqueues a plain intent. A sealed execution enters the ledger only as an occurrence of its routine (`admit`), whose

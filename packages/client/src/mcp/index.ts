@@ -14,8 +14,8 @@ export {
   MCP_DEFAULT_REQUEST_TIMEOUT_MS,
   MCP_MAX_FRAME_BYTES,
   MCP_OBSERVATION_MAX_STDOUT_BYTES,
-} from './client';
-export type { McpStdioClientOptions, McpStdioServerSpec } from './client';
+} from './client.js';
+export type { McpStdioClientOptions, McpStdioServerSpec } from './client.js';
 
 export {
   bindMcpToolsetServerObservation,
@@ -24,7 +24,7 @@ export {
   observeMcpServer,
   GRANTABLE_MCP_SERVER_NAME,
   GRANTABLE_TOOL_NAME,
-} from './observation';
+} from './observation.js';
 export type {
   McpObservationDrift,
   McpObservationDriftReason,
@@ -32,13 +32,13 @@ export type {
   McpToolDescriptor,
   McpToolsetServerObservation,
   ObserveMcpServerOptions,
-} from './observation';
+} from './observation.js';
 
 export {
   projectMcpTools,
   qualifiedMcpToolName,
-} from './projection';
+} from './projection.js';
 export type {
   McpLaunchProjection,
   McpToolProjection,
-} from './projection';
+} from './projection.js';

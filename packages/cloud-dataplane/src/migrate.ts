@@ -38,7 +38,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Pool, PoolClient } from 'pg';
-import { migrationsDir } from './migrations-dir';
+import { migrationsDir } from './migrations-dir.js';
 
 /**
  * An arbitrary but permanently fixed advisory-lock key. Its only requirement is

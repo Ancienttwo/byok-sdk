@@ -13,29 +13,29 @@ import {
   type ProviderProvisioningRejection,
   type ProviderProvisioningResult,
   withConfigurationLock,
-} from './custody';
-import type { DeviceSealingKey } from './device-sealing-key';
-import { ByokKeysError } from './errors';
-import { PiModelConfigSchema } from './pi-model-config';
-import { modelProviderVendor } from './provider-catalog';
-import { checkProviderKey, type ProviderKeyCheckOptions } from './provider-key-check';
+} from './custody.js';
+import type { DeviceSealingKey } from './device-sealing-key.js';
+import { ByokKeysError } from './errors.js';
+import { PiModelConfigSchema } from './pi-model-config.js';
+import { modelProviderVendor } from './provider-catalog.js';
+import { checkProviderKey, type ProviderKeyCheckOptions } from './provider-key-check.js';
 import {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
   type ModelProviderProfile,
   type ProviderProfileRef,
-} from './provider-profile';
-import { exactProviderProfileBinding } from './provider-profile-binding';
-import type { ProviderProfileStore } from './profile-store';
-import { buildConfiguredProfile } from './registry';
+} from './provider-profile.js';
+import { exactProviderProfileBinding } from './provider-profile-binding.js';
+import type { ProviderProfileStore } from './profile-store.js';
+import { buildConfiguredProfile } from './registry.js';
 import {
   type ModelProviderSecretName,
   type SecretStore,
   assertSharedSecretValue,
   modelProviderSecretName,
-} from './secret-store';
-import { PROVIDER_PROVISIONING_SECRET_MAX_BYTES } from './secret-value';
-import { normalizeProviderUrl } from './url';
+} from './secret-store.js';
+import { PROVIDER_PROVISIONING_SECRET_MAX_BYTES } from './secret-value.js';
+import { normalizeProviderUrl } from './url.js';
 
 /** Largest issuedAt-in-the-future a device tolerates (bounded clock skew, A9). */
 export const PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;

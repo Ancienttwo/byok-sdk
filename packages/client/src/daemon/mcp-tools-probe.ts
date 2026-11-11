@@ -1,6 +1,6 @@
-import type { McpStdioServerConfig } from '../types';
-import { McpAuthorityError } from '../mcp/client';
-import { observeMcpServer, type McpServerObservation } from '../mcp/observation';
+import type { McpStdioServerConfig } from '../types.js';
+import { McpAuthorityError } from '../mcp/client.js';
+import { observeMcpServer, type McpServerObservation } from '../mcp/observation.js';
 
 /**
  * The daemon's admission-time use of the shared MCP core (`../mcp/`).

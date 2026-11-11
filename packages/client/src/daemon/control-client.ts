@@ -15,20 +15,20 @@ import {
   parseServerReady,
   randomNonceHex,
   timingSafeEqualHex,
-} from './control-protocol';
+} from './control-protocol.js';
 import {
   INPUT_PREPARATION_CANCEL_METHOD,
   INPUT_PREPARATION_LOOKUP_METHOD,
   INPUT_PREPARATION_PREPARE_METHOD,
   type InputPreparationResult,
-} from './control-protocol';
+} from './control-protocol.js';
 import type {
   InputPreparationCancelParamsV1,
   InputPreparationLookupParamsV1,
   InputPreparationReceiptV1,
   InputPreparationRequestV1,
-} from '../input-preparation';
-import { sameContent } from '../util/file-state';
+} from '../input-preparation.js';
+import { sameContent } from '../util/file-state.js';
 
 /**
  * M4 Phase 2: the CLI-side half of the control socket — connects, performs

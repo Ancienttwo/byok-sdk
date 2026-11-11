@@ -1,26 +1,26 @@
 import type { spawn as nodeSpawn } from 'node:child_process';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { AsyncQueue } from '../../util/async-queue';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeDisposalFailure, runtimeFailureClassOf } from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
-import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
-import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime';
+import { AsyncQueue } from '../../util/async-queue.js';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeDisposalFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
+import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime.js';
 import { freezeRuntimeAdapterDescriptor, PolicyUnsupportedError, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
-  type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeOperationStartInput, type RuntimeVersionPolicy, type Session } from '../../types';
-import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
-import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
-import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
-import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invocation';
-import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits';
-import { haltGate, raceDeadline, RetainedRecordBudget, RetryableOnce } from '../session-kit';
-import type { ResolvedBin } from '../codex/resolve-bin';
-import { agentPersona } from '../agent-persona';
-import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure';
-import { OPENCODE_RUNTIME_CAPABILITIES } from './opencode-capabilities';
-import { OPENCODE_VERSION_POLICY, opencodeVersionToken } from './opencode-version';
-import { resolveOpenCodeBin } from './resolve-bin';
-import { object, OpenCodeProjection, type OpenCodeTurnOutcome } from './projection';
+  type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeOperationStartInput, type RuntimeVersionPolicy, type Session } from '../../types.js';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invocation.js';
+import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { haltGate, raceDeadline, RetainedRecordBudget, RetryableOnce } from '../session-kit.js';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
+import { agentPersona } from '../agent-persona.js';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
+import { OPENCODE_RUNTIME_CAPABILITIES } from './opencode-capabilities.js';
+import { OPENCODE_VERSION_POLICY, opencodeVersionToken } from './opencode-version.js';
+import { resolveOpenCodeBin } from './resolve-bin.js';
+import { object, OpenCodeProjection, type OpenCodeTurnOutcome } from './projection.js';
 
 export interface OpenCodeAdapterOptions {
   /** Ordered Host model ids. The SDK has no default and does not consult prices or a model catalog. */

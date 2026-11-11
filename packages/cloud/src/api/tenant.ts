@@ -1,7 +1,7 @@
-import type { ByokCloud, ByokCloudOptions } from '../cloud';
+import type { ByokCloud, ByokCloudOptions } from '../cloud.js';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
-import { assertBoardLabels, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES } from '../coordination';
-import { tenantStoresFor, type CloudRootStores } from '../tenant-stores';
+import { assertBoardLabels, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES } from '../coordination.js';
+import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
 
 interface Dependencies {
   root: CloudRootStores;

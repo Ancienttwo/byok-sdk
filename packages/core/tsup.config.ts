@@ -28,8 +28,8 @@ type EsbuildPlugin = NonNullable<Options['esbuildPlugins']>[number];
 const errorsFromRoot: EsbuildPlugin = {
   name: 'core-errors-from-root',
   setup(build) {
-    build.onResolve({ filter: /(^|\/)errors$/ }, (args) =>
-      path.resolve(args.resolveDir, `${args.path}.ts`) === ERRORS_MODULE ? { path: '@byok-sdk/core', external: true } : undefined);
+    build.onResolve({ filter: /(^|\/)errors\.js$/ }, (args) =>
+      path.resolve(args.resolveDir, args.path.replace(/\.js$/, '.ts')) === ERRORS_MODULE ? { path: '@byok-sdk/core', external: true } : undefined);
   },
 };
 

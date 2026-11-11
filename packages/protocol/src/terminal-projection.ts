@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { checkResultSchema, type ResultSchema } from './result-schema';
+import { checkResultSchema, type ResultSchema } from './result-schema.js';
 
 export const TerminalProjectionContractSchema = z
   .string()

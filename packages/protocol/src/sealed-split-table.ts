@@ -8,8 +8,8 @@
  * Plain data with no runtime imports, so `wire-additions.ts` can derive the
  * sealed gates from it and stay free of zod.
  */
-import type { MessageType } from './messages';
-import type { SealedPayloadCategory } from './sealed-payload';
+import type { MessageType } from './messages.js';
+import type { SealedPayloadCategory } from './sealed-payload.js';
 
 /**
  * How the sealed branch of a type treats one digest field of its plaintext

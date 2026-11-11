@@ -9,7 +9,7 @@
  * is not throws to the owned line transport, which fails and disposes the
  * process tree.
  */
-import type { RuntimeStartClassifier } from '../runtime-start-failure';
+import type { RuntimeStartClassifier } from '../runtime-start-failure.js';
 
 export interface AcpLineTransport {
   write(text: string): void;

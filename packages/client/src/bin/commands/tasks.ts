@@ -1,9 +1,9 @@
-import { type DaemonConfig, type DaemonEvent } from '../../index';
-import { readAuditRecords } from '../../daemon/audit-log';
-import { connectControlClient } from '../../daemon/control-client';
-import { resolveStoreDir } from '../config';
-import { formatDaemonEventLine, formatTaskListLines } from '../../diagnostics/format';
-import { deriveTasksFromRecords } from '../../diagnostics/tasks-view';
+import { type DaemonConfig, type DaemonEvent } from '../../index.js';
+import { readAuditRecords } from '../../daemon/audit-log.js';
+import { connectControlClient } from '../../daemon/control-client.js';
+import { resolveStoreDir } from '../config.js';
+import { formatDaemonEventLine, formatTaskListLines } from '../../diagnostics/format.js';
+import { deriveTasksFromRecords } from '../../diagnostics/tasks-view.js';
 
 export interface TasksListDeps {
   log?: (line: string) => void;

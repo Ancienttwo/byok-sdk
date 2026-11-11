@@ -1,5 +1,5 @@
-import { InMemoryStorageLedger } from './storage-ledger';
-import type { InMemoryObjectBytes } from './blob';
+import { InMemoryStorageLedger } from './storage-ledger.js';
+import type { InMemoryObjectBytes } from './blob.js';
 /**
  * The in-memory reference composition.
  *
@@ -10,25 +10,25 @@ import type { InMemoryObjectBytes } from './blob';
  * a database, which is what makes the same assertions meaningful when a
  * Postgres + R2 composition runs them later.
  */
-import { InMemoryPresenceStore } from './presence';
-import { InMemoryBoardStore } from './board';
-import { InMemoryMailboxStore } from './mailbox';
-import { InMemoryObjectStore } from './blob';
-import { InMemoryQuotaStore } from './quota';
-import { InMemorySkillPackStore } from './skill-pack';
-import { InMemoryTruthStore } from './truth';
-import { createMutableClock } from './clock';
-import type { Clock, CoreStores, MutableClock } from '../stores';
+import { InMemoryPresenceStore } from './presence.js';
+import { InMemoryBoardStore } from './board.js';
+import { InMemoryMailboxStore } from './mailbox.js';
+import { InMemoryObjectStore } from './blob.js';
+import { InMemoryQuotaStore } from './quota.js';
+import { InMemorySkillPackStore } from './skill-pack.js';
+import { InMemoryTruthStore } from './truth.js';
+import { createMutableClock } from './clock.js';
+import type { Clock, CoreStores, MutableClock } from '../stores.js';
 
-export { createMutableClock, IN_MEMORY_CLOCK_EPOCH } from './clock';
-export { InMemoryMailboxStore } from './mailbox';
-export { InMemoryBoardStore } from './board';
-export { InMemoryTruthStore } from './truth';
-export { InMemoryPresenceStore } from './presence';
-export { InMemoryObjectStore } from './blob';
-export { InMemoryQuotaStore } from './quota';
-export { InMemorySkillPackStore } from './skill-pack';
-export { InMemoryDeviceAssertionReplayAuthority } from './device-assertion-replay';
+export { createMutableClock, IN_MEMORY_CLOCK_EPOCH } from './clock.js';
+export { InMemoryMailboxStore } from './mailbox.js';
+export { InMemoryBoardStore } from './board.js';
+export { InMemoryTruthStore } from './truth.js';
+export { InMemoryPresenceStore } from './presence.js';
+export { InMemoryObjectStore } from './blob.js';
+export { InMemoryQuotaStore } from './quota.js';
+export { InMemorySkillPackStore } from './skill-pack.js';
+export { InMemoryDeviceAssertionReplayAuthority } from './device-assertion-replay.js';
 
 export interface InMemoryCoreOptions {
   readonly objectBytes: InMemoryObjectBytes;
@@ -70,5 +70,5 @@ export function createInMemoryCoreCompositionWithClock(objectBytes: InMemoryObje
   return { stores: createInMemoryCoreStores({ clock, objectBytes }).stores, clock };
 }
 
-export { InMemoryStorageLedger } from './storage-ledger';
-export type { InMemoryObjectBytes } from './blob';
+export { InMemoryStorageLedger } from './storage-ledger.js';
+export type { InMemoryObjectBytes } from './blob.js';

@@ -1,6 +1,6 @@
 import type { ContentHash } from '@byok-sdk/core';
 import type { BlobRef } from '@byok-sdk/protocol';
-import type { TenantBoundObjects } from './tenant-stores';
+import type { TenantBoundObjects } from './tenant-stores.js';
 
 /** The object reference kind of a sealed ciphertext blob that a task names (#654). Its id is the task id. */
 export const SEALED_TASK_REFERENCE_KIND = 'sealed-task';

@@ -1,8 +1,8 @@
 import type { FetchFunction } from '@earendil-works/pi-ai';
-import { CloudDoError, safeCloudError } from './errors';
-import { RollingLeakGuard } from './leak-guard';
-import { hasUserKeyShape } from './admission';
-import { requirePlatformKey, type PlatformProfile } from './platform-credentials';
+import { CloudDoError, safeCloudError } from './errors.js';
+import { RollingLeakGuard } from './leak-guard.js';
+import { hasUserKeyShape } from './admission.js';
+import { requirePlatformKey, type PlatformProfile } from './platform-credentials.js';
 
 const FRAME_LIMIT = 65_536;
 const TOOL_ARGUMENT_LIMIT = 65_536;

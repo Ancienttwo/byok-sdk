@@ -1,5 +1,5 @@
-import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl } from '../cloud';
-import { uuidFromSha256 } from '../offer-identity';
+import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl } from '../cloud.js';
+import { uuidFromSha256 } from '../offer-identity.js';
 import { requiredReceiverCapabilities } from '@byok-sdk/protocol';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import {
@@ -12,11 +12,11 @@ import {
   AgentMemoryIntentAvailablePayloadSchema,
   type AgentRef,
 } from '@byok-sdk/protocol';
-import { ByokCloudError } from '../errors';
-import { agentHomeProjectionRequestKey, sameAgentHomeProjectionRequest } from '../agent-home-projections';
-import { inputPreparationRequestKey, sameInputPreparationRequest } from '../input-preparations';
-import { agentReliabilityKey } from '../agent-reliability';
-import { tenantStoresFor, type CloudRootStores } from '../tenant-stores';
+import { ByokCloudError } from '../errors.js';
+import { agentHomeProjectionRequestKey, sameAgentHomeProjectionRequest } from '../agent-home-projections.js';
+import { inputPreparationRequestKey, sameInputPreparationRequest } from '../input-preparations.js';
+import { agentReliabilityKey } from '../agent-reliability.js';
+import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
 
 interface Dependencies {
   root: CloudRootStores;

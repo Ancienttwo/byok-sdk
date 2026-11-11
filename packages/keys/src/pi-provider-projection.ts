@@ -1,9 +1,9 @@
-import type { ModelProviderProfile } from './provider-profile';
+import type { ModelProviderProfile } from './provider-profile.js';
 import { isAbsolute } from 'node:path';
-import { ByokKeysError } from './errors';
-import { modelApiUrl } from './http';
-import { piApiOf } from './pi-api';
-import { PiModelConfigSchema } from './pi-model-config';
+import { ByokKeysError } from './errors.js';
+import { modelApiUrl } from './http.js';
+import { piApiOf } from './pi-api.js';
+import { PiModelConfigSchema } from './pi-model-config.js';
 
 /**
  * The environment name the launcher delivers the key under to a prepared host,

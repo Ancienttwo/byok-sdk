@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
-import { PI_TEAM_OPERATOR_TOKEN } from './team-pi-operator-entry';
-import { runTeamPiRelayCommand } from './commands/team-pi-relay';
-import { runTeamRelayCommand } from './commands/team-relay';
-import { createDaemon, createServiceLifecycle, readServiceInstallationRecord, type ServiceLifecycle } from '../index';
-import { argValue, ConfigError, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from './config';
-import { formatHaltRemedy } from '../diagnostics/format';
-import { applyLoginShellEnvironment, SERVICE_FLAG } from '../lifecycle/service-environment';
-import { runApprovalsCommand } from './commands/approvals';
-import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
-import { readPairInput, runPairCommand } from './commands/pair';
-import { runDoctorCommand } from './commands/doctor';
-import { runConfigCheckCommand } from './commands/config-check';
-import { runRuntimesCommand } from './commands/runtimes';
+import { PI_TEAM_OPERATOR_TOKEN } from './team-pi-operator-entry.js';
+import { runTeamPiRelayCommand } from './commands/team-pi-relay.js';
+import { runTeamRelayCommand } from './commands/team-relay.js';
+import { createDaemon, createServiceLifecycle, readServiceInstallationRecord, type ServiceLifecycle } from '../index.js';
+import { argValue, ConfigError, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from './config.js';
+import { formatHaltRemedy } from '../diagnostics/format.js';
+import { applyLoginShellEnvironment, SERVICE_FLAG } from '../lifecycle/service-environment.js';
+import { runApprovalsCommand } from './commands/approvals.js';
+import { runApproveCommand, runRejectCommand } from './commands/approve-reject.js';
+import { readPairInput, runPairCommand } from './commands/pair.js';
+import { runDoctorCommand } from './commands/doctor.js';
+import { runConfigCheckCommand } from './commands/config-check.js';
+import { runRuntimesCommand } from './commands/runtimes.js';
 import {
   cliServiceDefinition,
   cliServiceInstallation,
@@ -21,19 +21,19 @@ import {
   runServiceStatusCommand,
   runServiceStopCommand,
   runUninstallCommand,
-} from './commands/service';
-import { formatStartErrorReason, runStartCommand, type StartOutcome } from './commands/start';
-import { daemonExitCode, EXIT_FAILURE } from '../lifecycle/exit-codes';
-import { boundServiceRedirectLogs, routeProcessOutputToDaemonLog } from '../lifecycle/service-log';
-import { serviceLogDir } from '../daemon/host-layout';
-import { runStatusCommand } from './commands/status';
-import { runSupportBundleCommand } from './commands/support-bundle';
-import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
-import { runToolsetsReloadCommand } from './commands/toolsets';
-import { runTeamCreateCommand, runTeamJoinCommand, runTeamListCommand, runTeamOpenCommand, runTeamWatchCommand } from './commands/team';
-import { runUnpairCommand } from './commands/unpair';
-import { runUpgradeFromCheckCommand, runUpgradeInstallationCommand, runUpgradeStatusCommand, runUpgradeStoreCheckCommand, UPGRADE_INSTALLATION_ACTIONS, type UpgradeInstallationAction } from './commands/upgrade';
-import { runVersionCommand } from './version';
+} from './commands/service.js';
+import { formatStartErrorReason, runStartCommand, type StartOutcome } from './commands/start.js';
+import { daemonExitCode, EXIT_FAILURE } from '../lifecycle/exit-codes.js';
+import { boundServiceRedirectLogs, routeProcessOutputToDaemonLog } from '../lifecycle/service-log.js';
+import { serviceLogDir } from '../daemon/host-layout.js';
+import { runStatusCommand } from './commands/status.js';
+import { runSupportBundleCommand } from './commands/support-bundle.js';
+import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks.js';
+import { runToolsetsReloadCommand } from './commands/toolsets.js';
+import { runTeamCreateCommand, runTeamJoinCommand, runTeamListCommand, runTeamOpenCommand, runTeamWatchCommand } from './commands/team.js';
+import { runUnpairCommand } from './commands/unpair.js';
+import { runUpgradeFromCheckCommand, runUpgradeInstallationCommand, runUpgradeStatusCommand, runUpgradeStoreCheckCommand, UPGRADE_INSTALLATION_ACTIONS, type UpgradeInstallationAction } from './commands/upgrade.js';
+import { runVersionCommand } from './version.js';
 
 /**
  * `byok-agent`: a PLAIN structured CLI (subcommands + line-oriented stdout +

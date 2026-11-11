@@ -1,11 +1,11 @@
 import path from 'node:path';
 import { VERSION } from '@earendil-works/pi-coding-agent';
-import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
-import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
-import { parseTaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
-import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
-import teamInteractionExtension from '../adapters/pi/team-interaction-extension';
-import { runPiSessionRuntime } from './pi-session-runtime';
+import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding.js';
+import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin.js';
+import { parseTaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool.js';
+import { createByokMcpExtension } from '../adapters/pi/mcp-extension.js';
+import teamInteractionExtension from '../adapters/pi/team-interaction-extension.js';
+import { runPiSessionRuntime } from './pi-session-runtime.js';
 
 function fail(message: string): never {
   process.stderr.write(`byok-pi-team-operator: ${message}\n`);

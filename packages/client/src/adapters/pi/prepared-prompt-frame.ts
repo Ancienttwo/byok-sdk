@@ -1,4 +1,4 @@
-import type { RuntimePreparedLaunchExpectationV1 } from '../../types';
+import type { RuntimePreparedLaunchExpectationV1 } from '../../types.js';
 
 /**
  * The ONE `prompt_prepared` command shape, written once.

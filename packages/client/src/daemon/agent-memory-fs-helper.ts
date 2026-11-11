@@ -1,10 +1,10 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 
-import type { AgentHomeLease } from '../agent-home';
-import { verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
-import { AgentMemoryIoError, AgentMemoryRevisionConflictError } from './agent-memory';
-import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry } from './agent-memory-filesystem';
+import type { AgentHomeLease } from '../agent-home.js';
+import { verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release.js';
+import { AgentMemoryIoError, AgentMemoryRevisionConflictError } from './agent-memory.js';
+import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry } from './agent-memory-filesystem.js';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 
 export const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 4;

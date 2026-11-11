@@ -1,4 +1,4 @@
-import type { AgentDO } from './agent-do';
+import type { AgentDO } from './agent-do.js';
 
 export interface AgentIdentity {
   readonly tenantId: string;

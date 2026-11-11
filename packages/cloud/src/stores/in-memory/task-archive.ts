@@ -5,14 +5,14 @@ import type {
   TaskArchiveStoreInput,
   TaskArchiveStoreResult,
   TaskArchiveWork,
-} from '../../task-archive';
-import type { TaskAttempt } from '../ports';
-import { deleteActivityTail, type InMemoryActivityStore } from './activity';
-import { deleteAgentMessageDraft, type InMemoryAgentMessageDraftStore } from './agent-message-draft';
-import { deleteApprovalTimelineTail, type InMemoryApprovalTimelineStore } from './approval-timeline';
-import type { InMemoryMailboxArchiveAccess, InMemoryObjectArchiveAccess } from './core-access';
-import { receiptBodyOf, setReceiptBody, type InMemoryRequestReceiptStore } from './receipts';
-import type { InMemoryTaskAttemptState } from './task-attempts';
+} from '../../task-archive.js';
+import type { TaskAttempt } from '../ports.js';
+import { deleteActivityTail, type InMemoryActivityStore } from './activity.js';
+import { deleteAgentMessageDraft, type InMemoryAgentMessageDraftStore } from './agent-message-draft.js';
+import { deleteApprovalTimelineTail, type InMemoryApprovalTimelineStore } from './approval-timeline.js';
+import type { InMemoryMailboxArchiveAccess, InMemoryObjectArchiveAccess } from './core-access.js';
+import { receiptBodyOf, setReceiptBody, type InMemoryRequestReceiptStore } from './receipts.js';
+import type { InMemoryTaskAttemptState } from './task-attempts.js';
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed', 'cancelled']);
 

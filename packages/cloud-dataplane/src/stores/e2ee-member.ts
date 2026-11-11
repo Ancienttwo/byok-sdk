@@ -14,7 +14,7 @@ import type {
 } from '@byok-sdk/cloud';
 import { parseRecordedWriteResult } from '@byok-sdk/cloud';
 import type { PoolClient } from 'pg';
-import type { ByokPool } from '../pool';
+import type { ByokPool } from '../pool.js';
 
 type PackageRow = { scope_id: string; epoch: string; recipient: string; key_id: string; sender: string; package: string };
 

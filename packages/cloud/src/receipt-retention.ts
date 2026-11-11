@@ -1,4 +1,4 @@
-import { ByokCloudError } from './errors';
+import { ByokCloudError } from './errors.js';
 export type ReceiptRetentionClass = 'identity' | 'request';
 /** The sole receipt classification authority. Existing and unknown identities never expire. */
 export const RECEIPT_RETENTION: readonly Readonly<{ prefix: string; class: ReceiptRetentionClass }>[] = Object.freeze([
