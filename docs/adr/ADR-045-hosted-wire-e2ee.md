@@ -175,7 +175,7 @@ task receipt、task 行、`agent_message_admission` 行和 `agent_egress_event` 
 2. 第一份事实不被覆写。重复投递仍按元数据去重。
 3. Host 不持有任何私钥或 scope key。Host 不封装，也不解密。
 4. 一套字节规则。封装格式、AAD、MAC 和签名输入都在 `@byok-sdk/core`，只用 WebCrypto。浏览器和 daemon 用同一份代码。
-5. SDK 不新增 Conversation 或 Room 存储（[ADR-038](../architecture/adr-2026-10-13-bot-platform.md) 决策 8）。scope 是 Host 给的不透明标签。
+5. 核心包不新增 Conversation 或 Room 存储（[ADR-038](../architecture/adr-2026-10-13-bot-platform.md) 决策 8）。scope 是 Host 给的不透明标签。
 6. 一项事实一个权威（[ADR-027/028](../architecture/adr-2026-09-03-domain-model-and-authority.md)）。成员链是成员公钥的唯一来源。设备行仍是 SDK 认证的权威。
 7. 旧接收方不能悄悄丢掉加密内容。每项新增都走 freeze rule 的 gated 路径。
 8. 设备仍是执行权威。加密不改变 Host 能下发什么任务（[security](../security.md) 线路表的「Malicious or compromised SaaS」一行）。
