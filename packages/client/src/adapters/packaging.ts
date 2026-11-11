@@ -5,6 +5,7 @@ import { copySdkNativeAssets, sdkPackagingAssetLayout, sdkPackagingFormats, sdkP
 
 export type { SdkPackagingFormat } from '../sdk-native-assets.js';
 export { loadSdkKoffiAsset } from '../sdk-native-assets-runtime.js';
+export { writeServicePayloadManifest } from '../lifecycle/service-payload-manifest.js';
 
 /** The part of an esbuild build that this plugin reads and sets. Declared here so esbuild is not an SDK dependency. */
 export interface SdkPackagingBuild {

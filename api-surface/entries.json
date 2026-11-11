@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2373680,
+      "budgetBytes": 2374653,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -407,7 +407,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Single-file Host build: esbuild packaging plugin and SDK asset copy",
-      "budgetBytes": 30802,
+      "budgetBytes": 32915,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2181,7 +2181,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2341805,
+      "budgetBytes": 2342683,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

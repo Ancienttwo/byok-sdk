@@ -890,6 +890,7 @@ export declare class OpenCodeAdapter implements RuntimeAdapter {
 import { type SdkPackagingFormat } from '../sdk-native-assets.js';
 export type { SdkPackagingFormat } from '../sdk-native-assets.js';
 export { loadSdkKoffiAsset } from '../sdk-native-assets-runtime.js';
+export { writeServicePayloadManifest } from '../lifecycle/service-payload-manifest.js';
 /** The part of an esbuild build that this plugin reads and sets. Declared here so esbuild is not an SDK dependency. */
 export interface SdkPackagingBuild {
     readonly initialOptions: {
@@ -10043,8 +10044,10 @@ export { generateSystemdUnit } from './lifecycle/systemd.js';
 export { generateWinswXml } from './lifecycle/winsw.js';
 export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service.js';
 export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service.js';
-export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError, } from './lifecycle/service-installation.js';
-export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation.js';
+export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, ServiceInstallationError } from './lifecycle/service-installation.js';
+export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation.js';
+export { SERVICE_PAYLOAD_MANIFEST } from './lifecycle/service-payload-manifest.js';
+export type { ServicePayloadManifest } from './lifecycle/service-payload-manifest.js';
 export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit.js';
 export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit.js';
 export { checkUpgradeFrom } from './lifecycle/upgrade-from.js';
@@ -11394,22 +11397,8 @@ export declare function captureAndApply(options: ApplyLoginShellEnvironmentOptio
 import type { StoreCompatibilityVerdict } from '@byok-sdk/core';
 import { type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
 import type { ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { type ServicePayloadManifest } from './service-payload-manifest.js';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types.js';
-/** The manifest every payload directory carries at its root. */
-export declare const SERVICE_PAYLOAD_MANIFEST = "byok-payload.json";
-/**
- * A payload's manifest (#1097). The Host verifies the payload's signature
- * before handing it to the SDK; the SDK checks every file against `files`
- * and accepts no file the manifest does not list.
- */
-export interface ServicePayloadManifest {
-    format: 'byok-service-payload';
-    version: 1;
-    /** The version id: 1-64 of `A-Z a-z 0-9 . _ -`, starting with a letter or digit. Becomes `versions/<id>`. */
-    id: string;
-    /** Every file of the payload except the manifest: `/`-separated relative path → lowercase hex SHA-256. */
-    files: Record<string, string>;
-}
 /**
  * One store the candidate's precheck reports (#1328): an SDK `LocalStoreId`
  * or a Host store id, with the verdict the candidate gives it. The snapshot
@@ -11493,6 +11482,15 @@ export interface ServiceInstallationOptions {
     daemonStores?(): Promise<readonly ServiceDaemonStore[]>;
     /** How long a stop may take to leave every daemon store quiescent, shared by all of them. Default 30000. */
     stopTimeoutMs?: number;
+    /**
+     * The Host's own payload policy (#1842), such as a Node floor, file-size
+     * ceilings or file modes. Runs on the staged copy after every digest
+     * passed and before it becomes `versions/<id>`, and on an existing
+     * `versions/<id>` whose manifest matched, so it checks the exact bytes
+     * that will run. A throw is `payload_invalid` with the error as `cause`;
+     * nothing new appears under `versions/`.
+     */
+    verifyPayload?(stagedDir: string, manifest: ServicePayloadManifest): void | Promise<void>;
     /** Test seams for the underlying lifecycle. */
     lifecycle?: CreateServiceLifecycleOptions;
 }
@@ -11701,6 +11699,42 @@ export interface ServiceLogReport {
 }
 /** Location and size of every regular file in `logDir` (#1097: `status` and `doctor` report them). Read-only. */
 export declare function inspectServiceLogs(logDir: string): Promise<ServiceLogReport>;
+// ==== @byok-sdk/client dist/lifecycle/service-payload-manifest.d.ts ====
+import type { JsonObject } from '@byok-sdk/core';
+/** The manifest every payload directory carries at its root. */
+export declare const SERVICE_PAYLOAD_MANIFEST = "byok-payload.json";
+/**
+ * A payload's manifest (#1097). The Host verifies the payload's signature
+ * before handing it to the SDK; the SDK checks every file against `files`
+ * and accepts no file the manifest does not list.
+ */
+export interface ServicePayloadManifest {
+    format: 'byok-service-payload';
+    version: 1;
+    /** The version id: 1-64 of `A-Z a-z 0-9 . _ -`, starting with a letter or digit. Becomes `versions/<id>`. */
+    id: string;
+    /** Every file of the payload except the manifest: `/`-separated relative path → lowercase hex SHA-256. */
+    files: Record<string, string>;
+    /** Host data (#1842). Not interpreted by the SDK. Must be a JSON object. */
+    meta?: JsonObject;
+}
+export declare const VERSION_ID: RegExp;
+export declare const SHA256_HEX: RegExp;
+export declare function isPayloadPath(relative: string): boolean;
+export declare function isJsonObject(value: unknown): value is JsonObject;
+/** Every regular file under `dir`, `/`-separated and relative. Any other entry type throws `refuse(relative)`. */
+export declare function listPayloadFiles(dir: string, refuse: (relative: string) => Error, prefix?: string): Promise<string[]>;
+export declare function sha256File(file: string): Promise<string>;
+/**
+ * Writes `byok-payload.json` for the payload in `dir` at build time (#1842)
+ * and returns the bytes written. Every regular file is listed; a symlink or
+ * other entry type, an existing manifest, an empty directory, an invalid id
+ * and a `meta` that is not a JSON object throw.
+ */
+export declare function writeServicePayloadManifest(dir: string, options: {
+    id: string;
+    meta?: JsonObject;
+}): Promise<Uint8Array>;
 // ==== @byok-sdk/client dist/lifecycle/service-types.d.ts ====
 import type { ServiceLogReport } from './service-log.js';
 import type { ServiceRepairResult, ServiceUnitInspection } from './service-unit.js';

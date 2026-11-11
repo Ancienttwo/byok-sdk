@@ -8,10 +8,10 @@ import {
   readServiceInstallationRecord,
   serviceInstallationOver,
   ServiceInstallationError,
-  SERVICE_PAYLOAD_MANIFEST,
   type ServiceInstallation,
   type ServiceInstallationOptions,
 } from '../lifecycle/service-installation';
+import { SERVICE_PAYLOAD_MANIFEST, writeServicePayloadManifest, type ServicePayloadManifest } from '../lifecycle/service-payload-manifest';
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { SERVICE_UNIT_MARKER, withServiceOwnerGate } from '../lifecycle/service-unit';
 import * as daemonOwner from '../util/daemon-owner';
@@ -199,7 +199,57 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     const tampered = await payload('1.0.1');
     await fs.writeFile(path.join(tampered, 'host.js'), 'tampered');
     await expect(installation.install(tampered)).rejects.toMatchObject({ code: 'payload_invalid' });
+    const missing = await payload('1.0.2');
+    await fs.rm(path.join(missing, 'precheck.cjs'));
+    await expect(installation.install(missing)).rejects.toMatchObject({ code: 'payload_invalid' });
     expect(await pointer('current')).toBeUndefined();
+  });
+
+  it('writeServicePayloadManifest writes a manifest stage accepts, with meta, and refuses what it cannot list (#1842)', async () => {
+    const dir = path.join(root, 'built');
+    await fs.mkdir(path.join(dir, 'lib'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'precheck.cjs'), PRECHECK);
+    await fs.writeFile(path.join(dir, 'host.js'), '// built');
+    await fs.writeFile(path.join(dir, 'lib', 'b.js'), 'b');
+    await expect(writeServicePayloadManifest(dir, { id: '../x' })).rejects.toThrow('Invalid payload id');
+    await expect(writeServicePayloadManifest(dir, { id: '1.0.0', meta: [] as never })).rejects.toThrow('JSON object');
+    const bytes = await writeServicePayloadManifest(dir, { id: '1.0.0', meta: { node: '>=22' } });
+    expect(await fs.readFile(path.join(dir, SERVICE_PAYLOAD_MANIFEST))).toEqual(Buffer.from(bytes));
+    const written = JSON.parse(new TextDecoder().decode(bytes)) as ServicePayloadManifest;
+    expect(Object.keys(written)).toEqual(['format', 'version', 'id', 'files', 'meta']);
+    expect(Object.keys(written.files)).toEqual(['host.js', 'lib/b.js', 'precheck.cjs']);
+    await expect(writeServicePayloadManifest(dir, { id: '1.0.0' })).rejects.toThrow('already exists');
+
+    const seen: ServicePayloadManifest[] = [];
+    installation = installationOver(fakeLifecycle(), { verifyPayload: (_dir, manifest) => { seen.push(manifest); } });
+    await installation.install(dir);
+    expect(seen[0]?.meta).toEqual({ node: '>=22' });
+    expect(await fs.readFile(path.join(installRoot, 'versions', '1.0.0', SERVICE_PAYLOAD_MANIFEST))).toEqual(Buffer.from(bytes));
+
+    const empty = path.join(root, 'empty');
+    await fs.mkdir(empty);
+    await expect(writeServicePayloadManifest(empty, { id: '1.0.0' })).rejects.toThrow('has no files');
+    await fs.symlink(path.join(dir, 'host.js'), path.join(empty, 'link.js'));
+    await expect(writeServicePayloadManifest(empty, { id: '1.0.0' })).rejects.toThrow('link.js is not a regular file');
+  });
+
+  it('verifyPayload runs on the staged copy and on a matched existing version; a throw is payload_invalid (#1842)', async () => {
+    const staged: string[] = [];
+    let refuse = false;
+    installation = installationOver(fakeLifecycle(), {
+      verifyPayload: async (dir) => {
+        staged.push(path.relative(installRoot, dir).split(path.sep)[1]!.replace(/^\.staging-.*/u, '.staging'));
+        expect(await fs.readFile(path.join(dir, 'host.js'), 'utf8')).toMatch(/^\/\/ /u);
+        if (refuse) throw new Error('node too old');
+      },
+    });
+    await installation.install(await payload('1.0.0'));
+    await expect(installation.upgrade(await payload('1.0.0'))).rejects.toMatchObject({ code: 'version_current' });
+    expect(staged).toEqual(['.staging', '1.0.0']);
+    refuse = true;
+    const error = await installation.upgrade(await payload('2.0.0')).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'payload_invalid', cause: { message: 'node too old' } });
+    expect(await fs.readdir(path.join(installRoot, 'versions'))).toEqual(['1.0.0']);
   });
 
   it('upgrade stops, prechecks, snapshots, switches and confirms health', async () => {
@@ -352,6 +402,11 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await installation.upgrade(await payload('2.0.0'));
     await installation.rollback();
     await expect(installation.upgrade(await payload('2.0.0', { 'host.js': 'other' }))).rejects.toMatchObject({ code: 'version_conflict' });
+    // The same files under a different manifest (#1842: Host meta) are a different payload too.
+    const relabeled = await payload('2.0.0');
+    const manifest = JSON.parse(await fs.readFile(path.join(relabeled, SERVICE_PAYLOAD_MANIFEST), 'utf8')) as ServicePayloadManifest;
+    await fs.writeFile(path.join(relabeled, SERVICE_PAYLOAD_MANIFEST), JSON.stringify({ ...manifest, meta: { build: 2 } }));
+    await expect(installation.upgrade(relabeled)).rejects.toMatchObject({ code: 'version_conflict' });
   });
 
   it('uninstall removes the versions, pointers, snapshots, receipt and record, and leaves the store', async () => {
