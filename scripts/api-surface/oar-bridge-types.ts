@@ -1,4 +1,4 @@
-import type { OarStartErrorClasses } from '../../packages/client/src/adapters/oar-start-failure';
+import type { OarStartErrorClasses } from '../../packages/client/src/adapters/runtime-start-failure';
 type ErrorExports<M> = Extract<keyof M, `${string}Error`>;
 // Check source types across the private JS/declaration boundary.
 // The bridge exposes a smaller surface than the full OAR adapter.

@@ -14,6 +14,7 @@ import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-execu
 import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invocation';
 import type { ResolvedBin } from '../codex/resolve-bin';
 import { agentPersona } from '../agent-persona';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure';
 import { OPENCODE_RUNTIME_CAPABILITIES } from './opencode-capabilities';
 import { OPENCODE_VERSION_POLICY, opencodeVersionToken } from './opencode-version';
 import { resolveOpenCodeBin } from './resolve-bin';
@@ -110,15 +111,7 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     } catch (error) {
       try { await session.close(); }
       catch (disposal) { throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal }); }
-      if (isRuntimeExecutionFailure(error)) {
-        if (error.phase === 'start') throw error;
-        throw new RuntimeExecutionFailure({ phase: 'start', category: error.category, retry: error.retry, reason: error.message, failure: error.failure }, { cause: error });
-      }
-      const acp = await import('#byok-acp-runtime');
-      if (error instanceof acp.UnsupportedOptionError || error instanceof acp.SessionNotFoundError) throw authority(error.message);
-      if (error instanceof acp.RuntimeFailureError) throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable',
-        reason: error.message, failure: { class: runtimeFailureClassOf(error.failure) } }, { cause: error });
-      throw infrastructure(error instanceof Error ? error.message : 'opencode start failed', 'start');
+      throw runtimeStartFailure(error, { classify: oarStartClassifier(await import('#byok-acp-runtime')), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'opencode' });
     }
   }
 }
@@ -148,6 +141,10 @@ class OpenCodeSession implements Session {
 
   constructor(private readonly input: RuntimeOperationStartInput & { kind: 'instruction' }, private readonly options: OpenCodeAdapterOptions,
     private readonly command: string, private readonly version: string, private readonly persona?: string) {}
+
+  get exitedOnItsOwn(): boolean {
+    return this.child?.exitedOnItsOwn === true;
+  }
 
   async start(): Promise<void> {
     await this.open(0);
