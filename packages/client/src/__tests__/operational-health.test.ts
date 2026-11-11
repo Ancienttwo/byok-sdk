@@ -6,15 +6,15 @@ import { MAX_OPERATIONAL_HEALTH_FILE_BYTES, OperationalHealthTracker } from '../
 import type { Runner } from '../util/exec-runner';
 import { SecureDirHardeningError } from '../util/secure-dir';
 
-// Route the tracker's ensureSecureDir through the win32 icacls branch with a
+// Route the tracker's ensureSecureStoreRoot through the win32 icacls branch with a
 // fake runner so the hardening count is observable on any host OS.
 const icacls = vi.hoisted(() => ({ run: undefined as Runner | undefined }));
 vi.mock('../util/secure-dir', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../util/secure-dir')>();
   return {
     ...actual,
-    ensureSecureDir: (dir: string) =>
-      icacls.run ? actual.ensureSecureDir(dir, { platform: 'win32', run: icacls.run }) : actual.ensureSecureDir(dir),
+    ensureSecureStoreRoot: (dir: string) =>
+      icacls.run ? actual.ensureSecureStoreRoot(dir, { platform: 'win32', run: icacls.run }) : actual.ensureSecureStoreRoot(dir),
   };
 });
 
