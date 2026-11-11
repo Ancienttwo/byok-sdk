@@ -748,6 +748,8 @@ export interface ModelRouteHostEntry {
     /** `pi_model` without `thinkingLevel`. */
     readonly config: unknown;
     readonly input: readonly PiCatalogModelInput[];
+    /** The thinking level a draft takes when this entry is selected. One of the levels its `config` supports. */
+    readonly default_thinking_level?: PiThinkingLevel;
 }
 /** Product choices a Host passes in, instead of forking SDK data. */
 export interface ModelRoutePolicy {
