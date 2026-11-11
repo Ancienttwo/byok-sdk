@@ -1,6 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation.js';
 import { z } from 'zod';
-import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type RuntimeUnavailableCause } from './constants.js';
+import { AGENT_MEMORY_START_REFUSALS, RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type AgentMemoryStartRefusal, type RuntimeUnavailableCause } from './constants.js';
 import { BlobRefSchema } from './blob.js';
 import {
   SEALED_DECLINE_CODES,
@@ -1534,11 +1534,16 @@ export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
 export const RuntimeQuotaScopeSchema = z.enum(RUNTIME_QUOTA_SCOPES);
 export type RuntimeQuotaScope = z.infer<typeof RuntimeQuotaScopeSchema>;
 
+const KNOWN_FAILURE_CLASSES: readonly string[] = [...RUNTIME_FAILURE_CLASSES, ...AGENT_MEMORY_START_REFUSALS];
+
 /**
  * The machine-readable failure of a `task.fail` (#869); `reason` stays display
  * text. `resetsAt` (ISO 8601 UTC) and `scope` exist only on `quota`, and only
  * when the runtime reported them. `scope` is gated on the server's
  * `runtime-quota-scope` flag (#1271).
+ *
+ * A device-made Agent-memory start refusal carries one of
+ * {@link AGENT_MEMORY_START_REFUSALS} (#1843).
  *
  * The class is open (#1121): a well-formed class this version does not know,
  * with whatever fields a newer device put beside it, is accepted and kept
@@ -1548,7 +1553,8 @@ export type RuntimeQuotaScope = z.infer<typeof RuntimeQuotaScopeSchema>;
 export const TaskFailureSchema = z.union([
   z.object({ class: z.literal('quota'), resetsAt: z.iso.datetime().optional(), scope: RuntimeQuotaScopeSchema.optional() }).strict(),
   z.object({ class: RuntimeFailureClassSchema.exclude(['quota']) }).strict(),
-  z.looseObject({ class: unrecognizedToken(RUNTIME_FAILURE_CLASSES) }),
+  z.object({ class: z.enum(AGENT_MEMORY_START_REFUSALS) }).strict(),
+  z.looseObject({ class: unrecognizedToken(KNOWN_FAILURE_CLASSES) }),
 ]);
 export type TaskFailure = z.infer<typeof TaskFailureSchema>;
 
@@ -1556,10 +1562,11 @@ export type TaskFailure = z.infer<typeof TaskFailureSchema>;
 export type TaskFailureReading =
   | { readonly class: 'quota'; readonly resetsAt?: string; readonly scope?: RuntimeQuotaScope }
   | { readonly class: Exclude<RuntimeFailureClass, 'quota' | 'unknown'> }
+  | { readonly class: AgentMemoryStartRefusal }
   | { readonly class: 'unknown'; readonly reportedClass?: string };
 
 export function readTaskFailure(failure: TaskFailure): TaskFailureReading {
-  if ((RUNTIME_FAILURE_CLASSES as readonly string[]).includes(failure.class)) return failure as TaskFailureReading;
+  if (KNOWN_FAILURE_CLASSES.includes(failure.class)) return failure as TaskFailureReading;
   return { class: 'unknown', reportedClass: failure.class };
 }
 

@@ -23,7 +23,7 @@ import { HostStoreRefusedError } from './precheck.ts';
  * exits non-zero and main restarts it.
  */
 export async function superviseHost(
-  options: HostCompositionOptions,
+  options: Omit<HostCompositionOptions, 'onChanged'>,
   io: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout },
 ): Promise<void> {
   let state: HostState = { state: 'starting', pid: process.pid };
@@ -50,7 +50,8 @@ export async function superviseHost(
   const compose = async (): Promise<ComposedHost | undefined> => {
     let host: ComposedHost;
     try {
-      host = await composeHost(options);
+      // A domain's view change re-sends the unchanged state: main turns every state push into one coalesced renderer hint.
+      host = await composeHost({ ...options, onChanged: () => push(state) });
     } catch (error) {
       if (!(error instanceof HostStoreRefusedError || error instanceof HostStoppedError)) throw error;
       push({ state: 'stopped', pid: process.pid, reason: error.message });

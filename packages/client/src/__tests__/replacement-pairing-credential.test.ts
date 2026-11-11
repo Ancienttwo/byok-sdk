@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { DeviceCredentialStore, type DeviceCommandRunner } from '../daemon/device-credential-store';
 import { DeviceStore } from '../daemon/store';
-import { InMemoryDeviceCredentialStore } from './fixtures/credential-backend';
+import { InMemoryDeviceCredentialBackend } from './fixtures/credential-backend';
 import { TestServer } from './fixtures/test-server';
 
 describe.each(['OS entry', 'injected backend'] as const)('replacement pairing preserves the current enrollment until success (%s)', (backend) => {
@@ -24,7 +24,7 @@ describe.each(['OS entry', 'injected backend'] as const)('replacement pairing pr
   });
 
   it.each(['rejected', 'network', 'invalid-response'] as const)('keeps the old authority after a %s replacement and retries the staged key', async (failure) => {
-    const injected = new InMemoryDeviceCredentialStore();
+    const injected = new InMemoryDeviceCredentialBackend();
     let value: string | undefined;
     const run: DeviceCommandRunner = async (_executable, args, stdin) => {
       if (args[0] === 'lookup') return { exitCode: value === undefined ? 1 : 0, stdout: value ?? '', stderr: '' };

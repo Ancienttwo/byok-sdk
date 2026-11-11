@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { template } from './k4-fixtures.test-support';
 import type { LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf, type Turn } from './model';
 import { applyManagement, roomFields } from './team';

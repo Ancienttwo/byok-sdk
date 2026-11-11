@@ -1,12 +1,12 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { SqliteLocalTaskJournal } from '../../daemon/journal/sqlite-journal';
 import { StubRuntimeAdapter } from './stub-adapter';
-import { InMemoryDeviceCredentialStore } from './credential-backend';
+import { InMemoryDeviceCredentialBackend } from './credential-backend';
 import { waitForDaemonOpen } from './lifecycle-barrier';
 
 const input = JSON.parse(readFileSync(process.argv[2]!, 'utf8'));
 const { createDaemonWithAdapters } = await import(input.clientEntry);
-const credentials = new InMemoryDeviceCredentialStore();
+const credentials = new InMemoryDeviceCredentialBackend();
 await credentials.replace(input.credentials);
 const journal = new SqliteLocalTaskJournal({ storeDir: input.config.storeDir });
 const originalTransition = journal.recordTransition.bind(journal);

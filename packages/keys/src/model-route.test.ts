@@ -752,3 +752,33 @@ describe('submission', () => {
     expect(saved.secret).toEqual({ replace: 'k' });
   });
 });
+
+describe('Host entry default thinking level', () => {
+  const reasoning = { contextWindow: 131072, maxTokens: 8192, reasoning: true, compat: {} };
+  const entry = (extra: Partial<ModelRouteHostEntry> = {}): ModelRouteHostEntry => ({
+    provider_kind: 'groq', api: 'openai-completions', model: 'house', config: reasoning, input: ['text'], ...extra,
+  });
+  const pick = [{ field: 'provider_kind', value: 'groq' }, { field: 'model', value: 'house', api: 'openai-completions' }] as const;
+
+  it('applies the declared level on a new draft and when switching to the entry', () => {
+    const context = modelRouteContext({ policy: { overrides: [entry({ default_thinking_level: 'low' })] } });
+    expect(named(context, ...pick).thinking_level).toBe('low');
+    expect(named(context, pick[0], { field: 'model', value: 'openai/gpt-oss-120b' }, pick[1]).thinking_level).toBe('low');
+  });
+
+  it('refuses a declared level the entry config does not support', () => {
+    const bad = entry({ config: { ...reasoning, reasoning: false }, default_thinking_level: 'high' });
+    expect(() => modelRouteContext({ policy: { overrides: [bad] } })).toThrow(/unsupported default thinking level/);
+  });
+
+  it('leaves an entry without the field on Pi\'s default level', () => {
+    expect(named(modelRouteContext({ policy: { overrides: [entry()] } }), ...pick).thinking_level).toBe('medium');
+  });
+
+  it('does not replace a stored valid level', () => {
+    const open = modelRouteContext({ policy: { overrides: [entry({ default_thinking_level: 'low' })] } });
+    const profile = persisted(named(open, ...pick, { field: 'thinking_level', value: 'high' }, { field: 'secret', value: { replace: 'k' } }), open).profile;
+    const reopened = modelRouteContext({ policy: open.policy, stored: { profile, secret_configured: true } });
+    expect(createModelRouteDraft(reopened)).toMatchObject({ model_source: 'host', thinking_level: 'high' });
+  });
+});

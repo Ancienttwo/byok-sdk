@@ -18,6 +18,7 @@
     "@byok-sdk/example-bot-collaboration": "workspace:*",
     "@byok-sdk/keys": "workspace:*",
     "@byok-sdk/server": "workspace:*",
+    "@byok-sdk/ui-runtime": "workspace:*",
     "electron-updater": "6.8.11"
   },
   "devDependencies": {

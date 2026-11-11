@@ -11,11 +11,13 @@ import { copyAgentMemoryHelperAssets } from './util/agent-memory-helper-release.
 // Official npm archive integrity, also locked in bun.lock. Never fetched at runtime.
 import { KOFFI } from './sdk-native-assets-pin.js';
 
+/** The Agent memory helper directory inside the native asset root. */
+const agentMemoryHelperDir = 'agent-memory-fs';
 export const sdkNativeAssetTargets = Object.freeze({
   // Koffi must stay byte-identical; the Agent memory helper may be re-signed.
   'win32-x64': Object.freeze({ ...KOFFI, files: ['KOFFI-LICENSE.txt', 'manifest.json', 'win32-x64/koffi.node'] as readonly string[], signingPolicy: 'unmodified-official-addon',
-    agentMemoryHelper: Object.freeze({ files: ['agent-memory-fs/manifest.json', 'agent-memory-fs/win32-x64.exe'] as readonly string[], signingPolicy: 'product-resigning-allowed' }) }),
-  darwin: Object.freeze({ files: ['agent-memory-fs/darwin-arm64', 'agent-memory-fs/darwin-x64', 'agent-memory-fs/manifest.json'] as readonly string[], signingPolicy: 'product-resigning-allowed' }),
+    agentMemoryHelper: Object.freeze({ files: [`${agentMemoryHelperDir}/manifest.json`, `${agentMemoryHelperDir}/win32-x64.exe`] as readonly string[], signingPolicy: 'product-resigning-allowed' }) }),
+  darwin: Object.freeze({ files: [`${agentMemoryHelperDir}/darwin-arm64`, `${agentMemoryHelperDir}/darwin-x64`, `${agentMemoryHelperDir}/manifest.json`] as readonly string[], signingPolicy: 'product-resigning-allowed' }),
 });
 export interface CopySdkNativeAssetsOptions {
   readonly outDir: string;
@@ -62,8 +64,8 @@ export async function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): 
   const present = await fs.readdir(root).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; return []; });
   if (present.length) throw new Error('SDK native assets require a new or empty output directory');
   if (options.platform === 'darwin') {
-    const files = await copyAgentMemoryHelperAssets({ outDir: path.join(root, 'agent-memory-fs') });
-    return Object.freeze(files.map(file => `agent-memory-fs/${file}`));
+    const files = await copyAgentMemoryHelperAssets({ outDir: path.join(root, agentMemoryHelperDir) });
+    return Object.freeze(files.map(file => `${agentMemoryHelperDir}/${file}`));
   }
   const archive = options.archivePath === undefined ? await downloadArchive() : await readArchive(options.archivePath);
   if (`sha512-${createHash('sha512').update(archive).digest('base64')}` !== KOFFI.integrity) throw new Error('SDK native asset archive integrity mismatch');
@@ -89,14 +91,14 @@ export async function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): 
   const installed = JSON.parse(await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8'));
   if (installed.version !== KOFFI.version) throw new Error('Koffi license source version mismatch');
   const license = await fs.readFile(path.join(packageRoot, 'LICENSE.txt'));
-  const helperFiles = await copyAgentMemoryHelperAssets({ outDir: path.join(root, 'agent-memory-fs'), platform: 'win32' });
+  const helperFiles = await copyAgentMemoryHelperAssets({ outDir: path.join(root, agentMemoryHelperDir), platform: 'win32' });
   const manifest = { version: 1, target: 'win32-x64', package: KOFFI.package, packageVersion: KOFFI.version,
     archiveIntegrity: KOFFI.integrity, sha256: createHash('sha256').update(addon).digest('hex') };
   await fs.mkdir(path.join(root, 'win32-x64'), { recursive: true });
   await fs.writeFile(path.join(root, 'win32-x64/koffi.node'), addon, { flag: 'wx' });
   await fs.writeFile(path.join(root, 'manifest.json'), `${JSON.stringify(manifest)}\n`, { flag: 'wx' });
   await fs.writeFile(path.join(root, 'KOFFI-LICENSE.txt'), license, { flag: 'wx' });
-  return Object.freeze(['KOFFI-LICENSE.txt', 'manifest.json', 'win32-x64/koffi.node', ...helperFiles.map(file => `agent-memory-fs/${file}`)].sort());
+  return Object.freeze(['KOFFI-LICENSE.txt', 'manifest.json', 'win32-x64/koffi.node', ...helperFiles.map(file => `${agentMemoryHelperDir}/${file}`)].sort());
 }
 export { loadSdkKoffiAsset } from './sdk-native-assets-runtime.js';
 
@@ -123,7 +125,38 @@ export const sdkPackagingFormats = Object.freeze({
   sea: Object.freeze({ esbuildFormat: 'cjs', helperHost: 'executable', piRuntimeForm: 'interpreter+bundle' }),
 } as const);
 export type SdkPackagingFormat = keyof typeof sdkPackagingFormats;
-export const sdkPackagingAssetLayout = Object.freeze({ pi: 'pi', native: 'native', agentMemoryHelper: 'native/agent-memory-fs' } as const);
+export const sdkPackagingAssetLayout = Object.freeze({ pi: 'pi', native: 'native', agentMemoryHelper: `native/${agentMemoryHelperDir}` } as const);
+
+/** One build target in `sdkPackagingAssetLayout`; every path is relative to the packaging output directory and `/`-separated. */
+export interface SdkPackagingTarget {
+  readonly piPackageDir: typeof sdkPackagingAssetLayout.pi;
+  /** The `copySdkNativeAssets` target, written under `sdkPackagingAssetLayout.native`; absent on Linux. */
+  readonly native?: { readonly platform: 'win32' | 'darwin'; readonly arch: 'x64' | 'arm64' };
+  /** Windows x64 only. */
+  readonly nativeAssetRoot?: typeof sdkPackagingAssetLayout.native;
+  /** macOS and Windows x64. Linux memory needs no helper. */
+  readonly agentMemoryHelperAssetRoot?: typeof sdkPackagingAssetLayout.agentMemoryHelper;
+  /** The files every build of this target writes, sorted: the Pi package marker and the native files. */
+  readonly requiredFiles: readonly string[];
+}
+/** The single source of the per-target packaging layout, for `copySdkPackagingAssets` and `resolveSdkHosting`. */
+export function sdkPackagingTarget(platform: string, arch: string): SdkPackagingTarget {
+  const layout = sdkPackagingAssetLayout;
+  const pi = `${layout.pi}/package.json`;
+  const nativeFiles = (files: readonly string[]) => files.map(file => `${layout.native}/${file}`);
+  if (platform === 'linux' && (arch === 'x64' || arch === 'arm64')) return Object.freeze({ piPackageDir: layout.pi, requiredFiles: Object.freeze([pi]) });
+  if (platform === 'darwin' && (arch === 'x64' || arch === 'arm64')) {
+    return Object.freeze({ piPackageDir: layout.pi, native: Object.freeze({ platform, arch }), agentMemoryHelperAssetRoot: layout.agentMemoryHelper,
+      requiredFiles: Object.freeze([...nativeFiles(sdkNativeAssetTargets.darwin.files), pi].sort()) });
+  }
+  if (platform === 'win32' && arch === 'x64') {
+    const target = sdkNativeAssetTargets['win32-x64'];
+    return Object.freeze({ piPackageDir: layout.pi, native: Object.freeze({ platform, arch }), nativeAssetRoot: layout.native,
+      agentMemoryHelperAssetRoot: layout.agentMemoryHelper,
+      requiredFiles: Object.freeze([...nativeFiles([...target.files, ...target.agentMemoryHelper.files]), pi].sort()) });
+  }
+  throw new Error(`SDK packaging assets: unsupported target ${platform}-${arch}`);
+}
 
 /** Machine-readable build inputs. Target presence is not runtime/platform qualification. */
 export const sdkDistributionManifest = Object.freeze({ version: 1, piRuntimePin: byok.piRuntimePin, nodeEngine: engines.node,

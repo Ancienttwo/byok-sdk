@@ -20,7 +20,7 @@ import { createByokServer } from '@byok-sdk/server';
 import type { AgentEgressPolicy } from '@byok-sdk/protocol';
 import { startServer, stopServer } from '../../../server/src/__tests__/test-support';
 import { createDaemonWithAdapters } from '@byok-sdk/client';
-import { InMemoryDeviceCredentialStore } from './fixtures/device-credentials';
+import { InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { OPEN_LIFECYCLE } from './fixtures/lifecycle-barrier';
@@ -52,7 +52,7 @@ async function withHarness(
     localAgentRelease: { version: '0.0.0-blocked-input-test' }, productName: 'blocked input test', productId: PRODUCT_ID,
     serverUrl: http.baseUrl, storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: daemonPolicy },
-  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
+  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialBackend() });
   try {
     const pairing = await sdk.pairing.createPairingCode({ productId: PRODUCT_ID });
     const { deviceId } = await daemon.pair(pairing.code);

@@ -60,3 +60,5 @@ export function fakeRuntimeAdapter(id: FakeRuntimeAdapterId, behavior: FakeRunti
       : prepare(input),
   });
 }
+
+export { InMemoryDeviceCredentialBackend } from './device-credentials.js';

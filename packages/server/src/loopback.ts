@@ -27,7 +27,10 @@ export interface LoopbackListenerOptions {
 }
 export interface LoopbackListener {
   readonly serverUrl: string;
-  /** Closes only this listener and its connections, not the SDK or persisted assignment. */
+  /**
+   * Closes only this listener and its connections, not the SDK or persisted assignment.
+   * Requests not yet dispatched get 503; resolves after every dispatched handler settled, with no timeout.
+   */
   close(): Promise<void>;
 }
 
@@ -106,6 +109,7 @@ export async function listenLoopback(options: LoopbackListenerOptions): Promise<
   let handler: LoopbackHandler | undefined;
   let expectedHost = '';
   let closing: Promise<void> | undefined;
+  const dispatched = new Set<Promise<unknown>>();
   const close = (): Promise<void> => {
     handler = undefined;
     if (closing) return closing;
@@ -115,7 +119,7 @@ export async function listenLoopback(options: LoopbackListenerOptions): Promise<
     closing = new Promise<void>((resolve) => {
       owned.close(() => resolve());
       owned.closeAllConnections();
-    }).finally(() => { closing = undefined; });
+    }).then(() => Promise.allSettled(dispatched)).then(() => undefined).finally(() => { closing = undefined; });
     return closing;
   };
   const onAbort = () => { void close(); };
@@ -146,7 +150,9 @@ export async function listenLoopback(options: LoopbackListenerOptions): Promise<
     const body = reader ? Buffer.concat(chunks, size) : undefined;
     const bounded = new Request(request.url, { method: request.method, headers: request.headers, body, signal: request.signal });
     if (!handler) return new Response(null, { status: 503 });
-    return active(bounded);
+    const run = (async () => active(bounded))();
+    dispatched.add(run);
+    return run.finally(() => dispatched.delete(run));
   }, { overrideGlobalObjects: false });
   const receive = (request: IncomingMessage, response: ServerResponse) => {
     const origin = admit(request, expectedHost, allowedOrigins);

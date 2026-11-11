@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { copyPiRuntimeAssets } from './pi/runtime-assets.js';
-import { copySdkNativeAssets, sdkPackagingAssetLayout, sdkPackagingFormats, type SdkPackagingFormat } from '../sdk-native-assets.js';
+import { copySdkNativeAssets, sdkPackagingAssetLayout, sdkPackagingFormats, sdkPackagingTarget, type SdkPackagingFormat } from '../sdk-native-assets.js';
 
 export type { SdkPackagingFormat } from '../sdk-native-assets.js';
 export { loadSdkKoffiAsset } from '../sdk-native-assets-runtime.js';
@@ -142,19 +142,19 @@ export interface SdkPackagingAssets {
  * integrity-pinned koffi archive.
  */
 export async function copySdkPackagingAssets(options: CopySdkPackagingAssetsOptions): Promise<SdkPackagingAssets> {
-  const { outDir, platform, arch } = options;
+  const { outDir } = options;
   if (typeof outDir !== 'string' || !path.isAbsolute(outDir) || /[\0\r\n]/u.test(outDir)) throw new Error('SDK packaging assets require an absolute output directory');
-  if (!['darwin', 'linux', 'win32'].includes(platform) || !['x64', 'arm64'].includes(arch) || (platform === 'win32' && arch !== 'x64')) {
-    throw new Error('SDK packaging assets: unsupported target');
-  }
+  const target = sdkPackagingTarget(options.platform, options.arch);
   const present = await fs.readdir(outDir).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; return []; });
   if (present.length) throw new Error('SDK packaging assets require a new or empty output directory');
   const layout = sdkPackagingAssetLayout;
-  const pi = await copyPiRuntimeAssets({ outDir: path.join(outDir, layout.pi), form: sdkPackagingFormats.esm.piRuntimeForm });
-  const files = pi.map(file => `${layout.pi}/${file}`);
-  if (platform === 'linux') return Object.freeze({ files: Object.freeze(files.sort()), piPackageDir: layout.pi });
-  const native = await copySdkNativeAssets({ outDir: path.join(outDir, layout.native), platform, arch });
-  files.push(...native.map(file => `${layout.native}/${file}`));
-  return Object.freeze({ files: Object.freeze(files.sort()), piPackageDir: layout.pi,
-    ...(platform === 'win32' ? { nativeAssetRoot: layout.native } : {}), agentMemoryHelperAssetRoot: layout.agentMemoryHelper });
+  const pi = await copyPiRuntimeAssets({ outDir: path.join(outDir, target.piPackageDir), form: sdkPackagingFormats.esm.piRuntimeForm });
+  const files = pi.map(file => `${target.piPackageDir}/${file}`);
+  if (target.native !== undefined) {
+    const native = await copySdkNativeAssets({ outDir: path.join(outDir, layout.native), ...target.native });
+    files.push(...native.map(file => `${layout.native}/${file}`));
+  }
+  return Object.freeze({ files: Object.freeze(files.sort()), piPackageDir: target.piPackageDir,
+    ...(target.nativeAssetRoot === undefined ? {} : { nativeAssetRoot: target.nativeAssetRoot }),
+    ...(target.agentMemoryHelperAssetRoot === undefined ? {} : { agentMemoryHelperAssetRoot: target.agentMemoryHelperAssetRoot }) });
 }

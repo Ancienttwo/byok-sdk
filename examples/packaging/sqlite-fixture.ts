@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { createByokServer, createHmacTokenSigner } from '@byok-sdk/server';
 import { createDaemonWithAdapters, SqliteLocalTaskJournal, journalHash } from '@byok-sdk/client';
 import { SqliteProviderProfileStore, parseModelProviderProfile } from '@byok-sdk/keys';
-import { InMemoryDeviceCredentialStore } from '../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 
 async function main() {
   const root = await realpath(await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'b-sql-')));
@@ -26,7 +26,7 @@ async function main() {
     const daemon = createDaemonWithAdapters({ productId: 'sqlite-bundle', productName: 'SQLite bundle probe',
       localAgentRelease: { version: '0.0.0-test' }, serverUrl: 'http://127.0.0.1:0', storeDir,
       storage: { scratchRoot: join(root, 'scratch') },
-    }, [], { deviceCredentials: new InMemoryDeviceCredentialStore() });
+    }, [], { deviceCredentials: new InMemoryDeviceCredentialBackend() });
     try {
       // Startup opens its owned journal before reporting the empty enrollment.
       // It never pairs or connects, and never selects OS credential custody.

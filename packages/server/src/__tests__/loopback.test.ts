@@ -311,3 +311,20 @@ it('retries a real new-identity collision on a different port and removes failed
     expect(await (await fetch(listener.serverUrl)).text()).toBe('retried');
   } finally { spy.mockRestore(); }
 });
+
+it('close() resolves only after a dispatched handler settles', async () => {
+  let entered!: () => void;
+  const dispatched = new Promise<void>(resolve => { entered = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const { listener, selected } = await start(vi.fn(async () => { entered(); await gate; return new Response('late'); }));
+  void raw(selected, `GET / HTTP/1.1\r\nHost: 127.0.0.1:${selected}\r\nConnection: close\r\n\r\n`).catch(() => {});
+  await dispatched;
+  let closed = false;
+  const closing = listener.close().then(() => { closed = true; });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(closed).toBe(false);
+  release();
+  await closing;
+  expect(closed).toBe(true);
+});

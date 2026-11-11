@@ -7,7 +7,7 @@ import { createByokServer } from '@byok-sdk/server';
 import type { AgentMessagePublishPlainPayload } from '@byok-sdk/protocol';
 import { startServer, stopServer } from '../../../server/src/__tests__/test-support';
 import { AgentHomeManager, createDaemonWithAdapters } from '@byok-sdk/client';
-import { InMemoryDeviceCredentialStore } from './fixtures/device-credentials';
+import { InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
 import { connectControlClient } from '../daemon/control-client';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -25,7 +25,7 @@ it('runs two recurring executions through real HTTP and TaskRunner with distinct
     localAgentRelease: { version: '0.0.0-recurring-test' }, productName: 'recurring test', productId: 'execution-submit-integration',
     serverUrl: http.baseUrl, storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
-  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
+  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialBackend() });
   let releaseClose: (() => void) | undefined;
   try {
     const pairing = await sdk.pairing.createPairingCode({ productId: 'execution-submit-integration' });
@@ -98,7 +98,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     serverUrl: http.baseUrl, storeDir,
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     // A result-document offer is admitted only by a daemon that journals its terminals.
-  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
+  }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialBackend() });
   /** The route the SDK result helper's submit_result forwards to. */
   const submit = async (index: number, value: unknown): Promise<unknown> => {
     const token = reservedMcpToken(adapter.startCalls[index]?.ctx.mcpServers?.byokagentresult);
