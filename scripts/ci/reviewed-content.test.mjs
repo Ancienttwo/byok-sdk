@@ -461,7 +461,7 @@ test('#794 D3: the Worker example manifest and lock rows are admitted by the sam
   assert.throws(() => selectImpact(['bun.lock'], f), /lock rows differ/, 'a lock entry that differs from the manifest');
 });
 
-test('#1845 S2: K8 moves to packages/bot-collaboration with its reviewed manifest; the K4 example stays a devDependency', t => {
+test('#1845: the published K8 manifest has one reviewed shape; the K4 example stays a devDependency', t => {
   const f = fixture(t);
   for (const id of ['protocol', 'server', 'cloud', 'core']) {
     const manifest = { name: `@byok-sdk/${id}`, version: '0.28.0' };
@@ -469,55 +469,38 @@ test('#1845 S2: K8 moves to packages/bot-collaboration with its reviewed manifes
   }
   const k4 = { name: '@byok-sdk/example-host-execution-core', version: '0.0.1', private: true, devDependencies: { '@hono/node-server': '^2.1.3', vitest: '^5.1.0' } };
   f.write('examples/host-execution-core/package.json', k4); f.lock.workspaces['examples/host-execution-core'] = k4;
-  const old = { dir: 'examples/bot-collaboration', name: '@byok-sdk/example-bot-collaboration' };
-  const oldManifest = { name: old.name, version: '0.0.1', private: true };
-  f.write(`${old.dir}/package.json`, oldManifest); f.lock.workspaces[old.dir] = oldManifest;
-  f.lock.packages[old.name] = [`${old.name}@workspace:${old.dir}`];
-  const hosted = 'examples/hosted-bot-collaboration';
-  const hostedManifest = { name: '@byok-sdk/example-hosted-bot-collaboration', version: '0.0.1', private: true, dependencies: { [old.name]: 'workspace:*' } };
-  f.write(`${hosted}/package.json`, hostedManifest); f.lock.workspaces[hosted] = hostedManifest;
-  f.write('bun.lock', f.lock); rebase(f, 'K8 as an example');
-
   const dir = 'packages/bot-collaboration', path = `${dir}/package.json`, name = '@byok-sdk/bot-collaboration';
+  f.write(path, { name, version: '0.0.0', private: true }); f.write('bun.lock', f.lock); rebase(f, 'private K8');
+
   const peers = { '@hono/node-server': '^2.1.3', vitest: '^5.1.0' };
-  const manifest = { name, version: '0.0.0', private: true, type: 'module', description: 'K8', main: './dist/index.js', types: './dist/index.d.ts',
+  const manifest = { name, version: '0.28.0', type: 'module', description: 'K8', license: 'MIT',
+    repository: { type: 'git', url: 'git+https://github.com/Ancienttwo/byok-sdk.git', directory: dir },
+    bugs: { url: 'https://github.com/Ancienttwo/byok-sdk/issues' }, homepage: 'https://github.com/Ancienttwo/byok-sdk#readme',
+    engines: { node: '>=24.22.1' }, sideEffects: false, main: './dist/index.js', module: './dist/index.js', types: './dist/index.d.ts',
     exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' }, './host-kit': { types: './dist/host-kit.d.ts', import: './dist/host-kit.js' },
       './rules': { types: './dist/rules/index.d.ts', import: './dist/rules/index.js' },
       './testing': { types: './dist/testing.d.ts', import: './dist/testing.js' }, './package.json': './package.json' },
-    sideEffects: false, engines: { node: '>=24.15.0' }, scripts: { build: 'tsup && tsc -p tsconfig.build.json', typecheck: 'tsc --noEmit', test: 'vitest run', clean: 'rm -rf dist' },
+    files: ['dist', 'README.md', 'LICENSE'], publishConfig: { access: 'public' },
+    scripts: { build: 'tsup && tsc -p tsconfig.build.json', typecheck: 'tsc --noEmit', test: 'vitest run', clean: 'rm -rf dist' },
     dependencies: { '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' },
     peerDependencies: peers, peerDependenciesMeta: { '@hono/node-server': { optional: true }, vitest: { optional: true } },
     devDependencies: { '@byok-sdk/cloud': 'workspace:*', '@byok-sdk/core': 'workspace:*', '@byok-sdk/example-host-execution-core': 'workspace:*', ...peers } };
-  rmSync(join(f.cwd, old.dir), { recursive: true });
   f.write(path, manifest);
-  f.write(`${hosted}/package.json`, { ...hostedManifest, dependencies: { [name]: 'workspace:*' } });
-  delete f.lock.workspaces[old.dir]; delete f.lock.packages[old.name];
-  f.lock.workspaces[dir] = { name, version: manifest.version, dependencies: manifest.dependencies, devDependencies: manifest.devDependencies,
-    peerDependencies: peers, optionalPeers: ['@hono/node-server', 'vitest'] };
-  f.lock.packages[name] = [`${name}@workspace:${dir}`];
-  f.lock.workspaces[hosted] = { ...hostedManifest, dependencies: { [name]: 'workspace:*' } };
-  f.write('bun.lock', f.lock);
-  const plan = selectImpact([`${old.dir}/package.json`, path, `${hosted}/package.json`, 'bun.lock'], f);
-  for (const selected of [dir, hosted]) assert.ok(plan.dirs.includes(selected), selected);
+  assert.ok(selectImpact([path], f).dirs.includes(dir));
 
   const { '@byok-sdk/example-host-execution-core': k4Edge, ...devDependencies } = manifest.devDependencies;
   for (const [candidate, reason] of [
     [{ ...manifest, dependencies: { ...manifest.dependencies, '@byok-sdk/example-host-execution-core': k4Edge }, devDependencies }, /runtime dependencies/],
     [{ ...manifest, peerDependenciesMeta: { vitest: { optional: true } } }, /optional testing peers/],
     [{ ...manifest, exports: { ...manifest.exports, './internal': './dist/internal.js' } }, /unreviewed shape/],
-    [{ ...manifest, private: false }, /unreviewed shape/],
-    [{ ...manifest, bin: { k8: './dist/bin.js' } }, /unreviewed field/],
+    [{ ...manifest, files: [...manifest.files, 'src'] }, /unreviewed shape/],
+    [{ ...manifest, private: true }, /unreviewed field/],
     [{ ...manifest, devDependencies: { ...manifest.devDependencies, 'left-pad': '1.0.0' } }, /reuse a base dependency spec \(left-pad\)/],
     [{ ...manifest, devDependencies: (({ '@byok-sdk/cloud': _cloud, ...rest }) => rest)(manifest.devDependencies) }, /edges differ from the reviewed graph/],
   ]) {
     f.write(path, candidate);
     assert.throws(() => selectImpact([path], f), reason);
   }
-  f.write(path, manifest);
-  f.write(`${hosted}/package.json`, { ...hostedManifest, dependencies: { [name]: 'workspace:^' } });
-  assert.throws(() => selectImpact([`${hosted}/package.json`], f), /more than the reviewed fields/, 'a renamed edge with another spec');
-  f.lock.workspaces[dir].optionalPeers = ['vitest']; f.write('bun.lock', f.lock);
-  assert.throws(() => selectImpact(['bun.lock'], f), /K8 lock rows differ/);
 });
 
 test('#1375: the MCP server example drops its core edge, and stays private', t => {

@@ -112,6 +112,10 @@ test('docs and known CI contracts select light checks, not release families', ()
   }
 });
 
+test('a published package LICENSE selects the release pack; a LICENSE outside the published set does not map', () => {
+  assert.deepEqual(selectImpact(['packages/server/LICENSE']).families, ['npm-release-pack']);
+  assert.throws(() => selectImpact(['packages/unknown/LICENSE']), /Reviewed CI mapping required/);
+});
 test('shared device credential fixtures select client consumers and native smoke owners', () => {
   const impact = selectImpact(['packages/client/src/testing/device-credentials.ts',
     'scripts/testing/device-credentials.mjs', 'scripts/testing/device-credentials.d.mts']);

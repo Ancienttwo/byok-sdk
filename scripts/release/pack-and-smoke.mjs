@@ -38,6 +38,7 @@ const packages = [
   { name: '@byok-sdk/cloud-dataplane', directory: 'packages/cloud-dataplane' },
   { name: '@byok-sdk/cloud-do', directory: 'packages/cloud-do' },
   { name: '@byok-sdk/ui-runtime', directory: 'packages/ui-runtime' },
+  { name: '@byok-sdk/bot-collaboration', directory: 'packages/bot-collaboration' },
   { name: '@byok-sdk/keys', directory: 'packages/keys' },
 ];
 const registryExpectations = readRegistryExpectations(repoRoot, packages.map(({ name }) => name));
@@ -374,9 +375,19 @@ try {
     for (const entry of tarballs) {
       copyFileSync(path.join(outDir, entry.file), path.join(smokeArtifactsDir, entry.file));
     }
+    // The smoke imports every entry, so it installs what a consumer of every entry
+    // installs: the optional peers too (#1845: vitest and @hono/node-server for
+    // @byok-sdk/bot-collaboration/testing), at the spec each packed manifest declares.
     const dependencies = Object.fromEntries(
       tarballs.map((entry) => [entry.package, `file:./artifacts/${entry.file}`]),
     );
+    for (const entry of tarballs) {
+      const packed = JSON.parse(readTarballEntry(path.join(outDir, entry.file), 'package/package.json').toString('utf8'));
+      for (const [name, spec] of Object.entries(packed.peerDependencies ?? {})) {
+        if (dependencies[name] !== undefined && dependencies[name] !== spec) throw new Error(`${name}: packed manifests declare different peer specs`);
+        dependencies[name] = spec;
+      }
+    }
     writeFileSync(
       path.join(smokeDir, 'package.json'),
       `${JSON.stringify({ name: 'byok-release-smoke', private: true, type: 'module', dependencies }, null, 2)}\n`,
@@ -473,7 +484,7 @@ try {
         `  rmSync(piAssets, { recursive: true, force: true });\n` +
         `}\n` +
         `console.log('[release-pack] installed copyPiRuntimeAssets builds a Pi asset root');\n` +
-        `for (const [name, version] of [['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/cloud-do','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/keys','${releaseVersion}']]) {\n` +
+        `for (const [name, version] of [['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/cloud-do','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/bot-collaboration','${releaseVersion}'],['@byok-sdk/keys','${releaseVersion}']]) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, version, name);\n` +
         `}\n` +
