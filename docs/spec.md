@@ -4502,7 +4502,7 @@ acceptance.
 
 ## K8 Host-declared read-only toolsets (#606)
 
-The copy-and-own Bot collaboration example refuses required toolsets by default.
+The `@byok-sdk/bot-collaboration` package refuses required toolsets by default.
 A Host may declare an immutable `readOnlyToolsets` list of logical IDs, enforced
 across initial/model templates, restored non-archived Bots, creation, update and
 enqueue. The list governs Bot turns only; a Host that calls the K4 core directly
