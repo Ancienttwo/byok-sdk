@@ -6,7 +6,6 @@ import { createToolUseCorrelation, mapClaudeMessageToAgentEvents } from '../adap
 import { mapPiMessageToAgentEvent } from '../adapters/pi/events';
 import { projectDurableEvent, withMcpIdentity } from '../adapters/pi-durable/events';
 import { GrokProjection } from '../adapters/grok/projection';
-import { HermesProjection } from '../adapters/hermes/projection';
 
 const identities = mcpEventIdentities({ market__feed: { toolsetId: 'market', serverName: 'market__feed', serverInfo: { name: 'market', version: '1' }, protocolVersion: '2025-03-26', tools: [
   { name: 'get__quote', description: 'quote', inputSchema: { type: 'object' } },
@@ -66,18 +65,6 @@ it('assigns Grok no MCP identity from its collapsed tool name', () => {
     { kind: 'tool_call_ended', callId: `call-${index}`, result: 'completed' },
   ]) } }, event => events.push(event), () => {});
   expect(events.map(event => event.type)).toEqual(tools.flatMap(() => ['tool_use', 'tool_result']));
-  for (const event of events) expect(event).not.toHaveProperty('mcp');
-});
-
-it('assigns Hermes no MCP identity from its ACP title', () => {
-  const events: Array<AgentEvent | MessageDraftDelta> = [];
-  const projection = new HermesProjection();
-  // Hermes 0.22.4 titles an MCP call with its registry name, often followed by `: <preview>`.
-  for (const [index, title] of [name, `${name}: AAPL`, 'terminal: ls'].entries()) {
-    projection.update({ sessionUpdate: 'tool_call', toolCallId: `call-${index}`, title, rawInput: {} }, event => events.push(event));
-    projection.update({ sessionUpdate: 'tool_call_update', toolCallId: `call-${index}`, status: 'completed', rawOutput: 'ok' }, event => events.push(event));
-  }
-  expect(events.map(event => event.type)).toEqual(['tool_use', 'tool_result', 'tool_use', 'tool_result', 'tool_use', 'tool_result']);
   for (const event of events) expect(event).not.toHaveProperty('mcp');
 });
 

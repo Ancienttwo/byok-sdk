@@ -509,7 +509,6 @@ flowchart TB
     Pi(["PiAdapter<br/>RPC session"]):::adapter
     Claude(["ClaudeAdapter<br/>stream-json + control_request"]):::adapter
     Codex(["CodexAdapter<br/>app-server + OAR kernel"]):::adapter
-    Hermes(["HermesAdapter<br/>ACP viewer + owned gateway<br/>Host-injected"]):::adapter
     Grok(["GrokAdapter<br/>ACP via OAR Grok profile<br/>Host-injected"]):::adapter
   end
 
@@ -534,7 +533,6 @@ flowchart TB
   Runner --> Pi
   Runner --> Claude
   Runner --> Codex
-  Runner --> Hermes
   Runner --> Grok
   Auth --> Stores
   Conn --> Stores
@@ -547,7 +545,7 @@ flowchart TB
   style Local fill:none,stroke:#fb923c,stroke-width:2px,color:#fb923c
 ```
 
-`createDaemon()` 只内置 Pi、Claude 与 Codex 三个 adapter（`create-daemon.ts` 的 `ALL_RUNTIME_IDS` 与 `buildAdapter`），再按 `runtimeAllowlist` 过滤。`HermesAdapter` 与 `GrokAdapter` 从 package 导出，由 Host 构造后经 `createDaemonWithAdapters(config, adapters)` 注入；`hermes` 与 `grok` 不是 frozen wire runtime id，task 以 custom-harness identity（`harnessId`）路由到它们。
+`createDaemon()` 只内置 Pi、Claude 与 Codex 三个 adapter（`create-daemon.ts` 的 `ALL_RUNTIME_IDS` 与 `buildAdapter`），再按 `runtimeAllowlist` 过滤。`GrokAdapter` 从 package 导出，由 Host 构造后经 `createDaemonWithAdapters(config, adapters)` 注入；`grok` 不是 frozen wire runtime id，task 以 custom-harness identity（`harnessId`）路由到它。
 
 ### 4.2 Public surface 与 CLI
 
@@ -557,7 +555,7 @@ Library exports 分成六组：
 | --- | --- |
 | daemon | `createDaemon`、`createDaemonWithAdapters`、`Daemon*`、credential-blind `readDeviceEnrollmentStatus` / `readDeviceEnrollmentIdentity` / `DeviceEnrollment*`、按 operation allowlist 限定的 `createStoredDeviceProofSigner`（不外泄私钥）、`BlobClient`；`AuthManager`、secret-bearing local record/store、`StoredDeviceProofSigner` 均为 package-internal |
 | adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`RuntimeExecutionFailure` 及其 closed phase/retry types、`RuntimeDisposalFailure` 及 stage、`PolicyUnsupportedError` |
-| bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter`、`HermesAdapter` 与 `GrokAdapter`（后两者是 custom harness，Host 显式加入）与 options |
+| bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter` 与 `GrokAdapter`（后者是 custom harness，Host 显式加入）与 options |
 | observability | `DaemonObserver`、event/task projection types |
 | OS integration | service lifecycle factories/generators、`ensureSecureDir`、Windows DACL error |
 
@@ -617,7 +615,7 @@ adapter-only build/import surface。
 | `connection-manager.ts` | 单一 client outbox、long-poll ack/cursor、chunking、shutdown drain |
 | `long-poll-transport.ts` | authenticated HTTP poll/post、cursor retry/backoff 与 cancellation |
 | `task-runner.ts` | offer admission、runtime selection、workspace、Session event pump、approval/cancel/steer、resource limits |
-| `../runtime/environment.ts` | runtime env（#1095，从 `daemon/` 移入 `runtime/`，adapters 不再逆层导入）：各 adapter 按 `RuntimeEnvironmentPolicy` 构造；默认基底是登录 shell 快照（封闭种子 + 固定 PATH，不读 daemon `process.env`），`pass` 从实时环境取名，失败即拒绝；移除 `CLAUDECODE` 与 `BYOK_*`，`NO_PROXY` 补 loopback；durable Pi tool shell、prepared Pi lane 与 Hermes custody 使用窄 allowlist |
+| `../runtime/environment.ts` | runtime env（#1095，从 `daemon/` 移入 `runtime/`，adapters 不再逆层导入）：各 adapter 按 `RuntimeEnvironmentPolicy` 构造；默认基底是登录 shell 快照（封闭种子 + 固定 PATH，不读 daemon `process.env`），`pass` 从实时环境取名，失败即拒绝；移除 `CLAUDECODE` 与 `BYOK_*`，`NO_PROXY` 补 loopback；durable Pi tool shell、prepared Pi lane 使用窄 allowlist |
 | `progress-batcher.ts` | normalized `AgentEvent` 批次与 task-level sequence |
 | `approvals.ts` | bounded pending approval registry、first resolution wins |
 | `control-server.ts` / `control-protocol.ts` | HMAC mutual auth、local RPC、endpoint/token derivation |
@@ -641,7 +639,7 @@ adapter-only build/import surface。
 | task-scoped host MCP toolsets | yes，daemon 观测 `tools/list` 后注册 | yes，task `--mcp-config`；用户 MCP 配置同时加载 | yes，`thread/start` config 的 `mcp_servers`；用户 `config.toml` 同时生效 |
 | usage event | provider counters + estimate context | provider counters + modelUsage window | cumulative cost deltas + last context |
 
-上表只列 `createDaemon()` 内置的三个 adapter。Host 注入的 adapter 各自在 frozen descriptor 中声明 capability：`GrokAdapter` 为 steer no、resume yes、MCP toolsets yes（ACP `mcpServers`），以 `grok agent --always-approve` 运行；`HermesAdapter` 为 steer no、resume no、MCP toolsets yes。两者的 confirm/approval 都是 no。逐项证据与 qualification 状态见 [`docs/adapter-capabilities.md`](../adapter-capabilities.md)。
+上表只列 `createDaemon()` 内置的三个 adapter。Host 注入的 adapter 在 frozen descriptor 中声明 capability：`GrokAdapter` 为 steer no、resume yes、MCP toolsets yes（ACP `mcpServers`），以 `grok agent --always-approve` 运行；它的 confirm/approval 是 no。逐项证据与 qualification 状态见 [`docs/adapter-capabilities.md`](../adapter-capabilities.md)。
 
 SDK 不再向 adapter 下发 permission policy（ADR-037）。各 runtime 的 guardrail 由用户自己的 agent 配置决定。adapter 仍然拒绝它无法执行的 offer 字段（例如 `limits.maxTokens`），不丢弃，也不近似。
 
@@ -1053,7 +1051,7 @@ SDK 只交付 npm library 与 reference recipes。host product 拥有 binary sig
 CI 验证层次：
 
 1. Node 24.22.1 基线与 Node 26 forward-compatibility leg：build → typecheck → test；build 必须先跑，因为 workspace exports 指向 `dist`。
-2. Windows client tests（job `windows-client`）：特殊字符路径下的 secure-dir，diagnostics、support-bundle、daemon-auth、daemon 停止流程，Agent-home 文件写入崩溃测试，Hermes adapter/custody/gateway/home 和 keys 的 Hermes launcher。
+2. Windows client tests（job `windows-client`）：特殊字符路径下的 secure-dir，diagnostics、support-bundle、daemon-auth、daemon 停止流程，Agent-home 文件写入崩溃测试。
 3. Bun/SEA packageability smoke。
 4. WinSW real service install/start/stop/uninstall smoke。
 5. macOS/Linux/Windows control socket smoke。

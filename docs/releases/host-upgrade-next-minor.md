@@ -186,11 +186,11 @@ No Host configuration change is required (#1688). When the daemon refuses its co
 
 ## Runtime environment lanes in doctor
 
-No Host configuration change is required (#1688). `RuntimeEnvironmentReport` gains an optional `lanes` list of `RuntimeEnvironmentLaneReport`, also carried by the `runtimes.environment` control method and `byok-agent doctor`. The Pi adapter reports a `pi-prepared` lane unless it is a durable adapter, and a `pi-keys-profile` lane when a BYOK launcher is configured; the Hermes adapter reports a `hermes-custody` lane when a BYOK launcher is configured. An `sdk` lane lists the names its launch removes; the `pi-keys-profile` lane says only that the keys launcher passes its fixed names. A Host that sets `runtimeEnvironment.pass` names such as `PI_OFFLINE` can read there which lanes never give them to the runtime. No lane narrows differently than before. A Host that builds a `RuntimeEnvironmentReport` itself may omit `lanes`.
+No Host configuration change is required (#1688). `RuntimeEnvironmentReport` gains an optional `lanes` list of `RuntimeEnvironmentLaneReport`, also carried by the `runtimes.environment` control method and `byok-agent doctor`. The Pi adapter reports a `pi-prepared` lane unless it is a durable adapter, and a `pi-keys-profile` lane when a BYOK launcher is configured. An `sdk` lane lists the names its launch removes; the `pi-keys-profile` lane says only that the keys launcher passes its fixed names. A Host that sets `runtimeEnvironment.pass` names such as `PI_OFFLINE` can read there which lanes never give them to the runtime. No lane narrows differently than before. A Host that builds a `RuntimeEnvironmentReport` itself may omit `lanes`.
 
 ## Per-runtime environment policy
 
-`runtimes.<id>.runtimeEnvironment` sets the environment policy of one SDK-built runtime (#1759), on `DaemonConfig`, a config file and `createRuntimeAdapters` alike. It replaces the top-level `runtimeEnvironment` for that runtime; it is not merged with the top-level `pass`, so a name the top-level `pass` lists does not reach a runtime that sets its own policy. A runtime without the field keeps the top-level policy, so an existing configuration keeps its meaning. Pi's effective policy must not pass `PI_PACKAGE_DIR`. The Pi prepared, Pi keys-profile and Hermes custody lanes still ignore `pass`. `DaemonEffectiveRuntime` gains an optional `runtimeEnvironment`, each runtime's effective policy, and `byok-agent config check` prints it under each runtime; its JSON keeps the top-level `runtimeEnvironment` (the configured default) and adds `effective.runtimes[].runtimeEnvironment`. No Host change is required.
+`runtimes.<id>.runtimeEnvironment` sets the environment policy of one SDK-built runtime (#1759), on `DaemonConfig`, a config file and `createRuntimeAdapters` alike. It replaces the top-level `runtimeEnvironment` for that runtime; it is not merged with the top-level `pass`, so a name the top-level `pass` lists does not reach a runtime that sets its own policy. A runtime without the field keeps the top-level policy, so an existing configuration keeps its meaning. Pi's effective policy must not pass `PI_PACKAGE_DIR`. The Pi prepared and Pi keys-profile lanes still ignore `pass`. `DaemonEffectiveRuntime` gains an optional `runtimeEnvironment`, each runtime's effective policy, and `byok-agent config check` prints it under each runtime; its JSON keeps the top-level `runtimeEnvironment` (the configured default) and adds `effective.runtimes[].runtimeEnvironment`. No Host change is required.
 
 To give a key to one runtime only, name it on that runtime instead of in the top-level `pass`:
 
@@ -216,7 +216,7 @@ K8 rules now build the Bot autonomy gate themselves (#1665). A Host adapter that
 
 ## Version policy source
 
-The eight built-in adapter option types (`AgyAdapterOptions`, `ClaudeAdapterOptions`, `CodexAdapterOptions`, `DshAdapterOptions`, `GrokAdapterOptions`, `HermesAdapterOptions`, `OpenCodeAdapterOptions`, `PiAdapterOptions`) no longer accept the internal `versionPolicySource` option (#1682). A Host that constructs an adapter directly deletes `versionPolicySource` from the options object. `versionPolicy` itself, `DaemonConfig.runtimes.<id>.versionPolicy` and the version verdicts they produce are unchanged: a Host policy still replaces the descriptor default wholesale.
+The seven built-in adapter option types (`AgyAdapterOptions`, `ClaudeAdapterOptions`, `CodexAdapterOptions`, `DshAdapterOptions`, `GrokAdapterOptions`, `OpenCodeAdapterOptions`, `PiAdapterOptions`) no longer accept the internal `versionPolicySource` option (#1682). A Host that constructs an adapter directly deletes `versionPolicySource` from the options object. `versionPolicy` itself, `DaemonConfig.runtimes.<id>.versionPolicy` and the version verdicts they produce are unchanged: a Host policy still replaces the descriptor default wholesale.
 
 ## Hosted passes
 
@@ -441,6 +441,35 @@ code that compiled against `any`; fix them against the real types.
 An embedded Host that pairs its daemon against its own in-process server replaces its `createPairingCode` and `pair` calls with `daemon.pairEmbedded(byokServer)`. It reads the store's enrollment under the daemon owner lease and never starts the daemon. An unpaired store against a server with no devices pairs and returns the new device. A paired store whose device `machines.list()` reports is returned unchanged. Every other state throws `EmbeddedPairingError` and writes nothing: `enrollment_missing` (unpaired store, server already lists devices), `device_unknown` (the server does not list this store's device), `re_pair_required` (the device record has no OS credential entry) or `store_not_bound` (the OS entry holds another storeDir's enrollment). The enrollment record is the one device id authority; a Host that keeps its own copy compares it with the returned `deviceId`. If the server database is lost while the store survives, the refusal is `device_unknown`; if the store is lost while the server keeps devices, it is `enrollment_missing`.
 
 A Host that polls `status().lifecycle` for `running/open` after `start()` calls `await daemon.whenOpen({ signal: AbortSignal.timeout(ms) })` instead. It rejects with `DaemonHaltError` on a halt, `DaemonNotOpenError` (`stopped` or `crashed`) when the run ended otherwise, and with `signal.reason` on abort.
+
+## Hermes runtime adapter removed
+
+The SDK no longer drives Hermes Agent as a runtime (#1854). These exports are
+removed, with no alias and no stub:
+
+- `HermesAdapter`, `HermesAdapterOptions`, `HermesModelSelection` and
+  `HermesByokLauncher` from `@byok-sdk/client` and `@byok-sdk/client/adapters`;
+- `runHermesProviderLauncher`, `parseHermesProviderLauncherRequest`,
+  `hermesProviderModel`, `HERMES_PROVIDER_KEY_ENV` and
+  `HermesProviderLauncherRequest` from `@byok-sdk/keys`;
+- `'hermes'` from `FakeRuntimeAdapterId` in `@byok-sdk/client/testing`.
+
+A Host that constructed `HermesAdapter` deletes that adapter and its imports,
+and retires its Hermes custody launcher process. The Hermes root it passed as
+`HermesAdapterOptions.home` holds only SDK-made profiles and caches; the Host
+may delete that directory. The device then no longer advertises the `hermes`
+harness, so enqueueing an offer with `harnessId: 'hermes'` throws
+`ByokCloudError` with code `agent_capability_missing`, like an offer for any
+harness the device does not advertise. `DaemonConfig` and
+`createRuntimeAdapters` never had a Hermes runtime: a `runtimes.hermes` key is
+reported and ignored as an unknown field, before and after this release.
+Hermes as a byok MCP client (`examples/byok-mcp-server/docs/hermes.md`) is
+unchanged.
+
+The adapter code is archived at the git tag `archive/hermes-runtime-adapter`.
+It comes back when upstream OAR ships a Hermes runtime, or when a product needs
+the Hermes runtime; it is then restored from that tag through the OAR fork
+rules of #1851.
 
 ## Release and verification checklist
 

@@ -65,7 +65,7 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
           kind: 'available', version: '1.0.62', versionVerdict: WARN,
           advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '1.0.52' },
         }),
-        new StubRuntimeAdapter('hermes', { kind: 'refused', reason: 'acp_unavailable' }),
+        new StubRuntimeAdapter('dsh', { kind: 'refused', reason: 'acp_unavailable' }),
         // No policy: the projection must omit the field instead of inventing allow.
         new StubRuntimeAdapter('zeta', { kind: 'available', version: '2.0.0' }),
       ],
@@ -90,11 +90,11 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
     const harnesses = new Map((hello.payload.harnesses ?? []).map((harness) => [harness.id, harness]));
     expect(harnesses.get('grok')?.versionPolicy).toEqual(WARN);
     expect(harnesses.get('zeta')).not.toHaveProperty('versionPolicy');
-    expect(harnesses.has('hermes')).toBe(false);
+    expect(harnesses.has('dsh')).toBe(false);
 
     expect(hello.payload.runtimeUnavailable).toEqual([
       { id: 'claude', cause: 'not_installed', retryable: true },
-      { id: 'hermes', cause: 'acp_unavailable', retryable: true },
+      { id: 'dsh', cause: 'acp_unavailable', retryable: true },
     ]);
     // A blocked runtime is still detected and available; block is not a
     // runtime_unavailable entry.

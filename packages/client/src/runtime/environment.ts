@@ -32,7 +32,7 @@ import { PI_PROVIDER_ENV_KEY_NAMES } from '../adapters/pi/pi-provider-env.genera
  *
  * {@link buildAllowlistedEnv} is the narrow form over a given environment. It
  * is used by the durable Pi tool shell, the prepared Pi lane on the Pi auth
- * store, and Hermes launcher or custody paths.
+ * store.
  *
  * Every name in every list may be an exact match or a `*`-suffixed prefix
  * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
@@ -266,12 +266,12 @@ export interface RuntimeEnvironmentReport {
  * so its lane is reported by name only.
  */
 export type RuntimeEnvironmentLaneReport =
-  | { readonly lane: 'pi-prepared' | 'hermes-custody'; readonly narrowedBy: 'sdk'; readonly removed: readonly string[] }
+  | { readonly lane: 'pi-prepared'; readonly narrowedBy: 'sdk'; readonly removed: readonly string[] }
   | { readonly lane: 'pi-keys-profile'; readonly narrowedBy: 'keys-launcher' };
 
 /** The `sdk` lane that launches with `buildAllowlistedEnv({ ambient: env, allow })`: `removed` is every name of `env` it drops, sorted. */
 export function sdkLaneReport(
-  lane: 'pi-prepared' | 'hermes-custody',
+  lane: 'pi-prepared',
   env: Readonly<Record<string, string>>,
   allow: readonly string[],
 ): RuntimeEnvironmentLaneReport {

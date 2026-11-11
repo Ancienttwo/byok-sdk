@@ -8,14 +8,12 @@ import { CLAUDE_ABSENT_ISOLATION_SOURCES, CLAUDE_RUNTIME_CAPABILITIES } from '..
 import { CODEX_ABSENT_ISOLATION_SOURCES, CODEX_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/codex/codex-capabilities.ts';
 import { DSH_ABSENT_ISOLATION_SOURCES, DSH_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/dsh/dsh-capabilities.ts';
 import { GROK_ABSENT_ISOLATION_SOURCES, GROK_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/grok/grok-capabilities.ts';
-import { HERMES_ABSENT_ISOLATION_SOURCES, HERMES_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/hermes/hermes-capabilities.ts';
 import { PI_ABSENT_ISOLATION_SOURCES, PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/pi/pi-capabilities.ts';
 import { QUALIFIED_AGY_VERSION } from '../../packages/client/src/adapters/antigravity/agy-version.ts';
 import { QUALIFIED_CLAUDE_VERSION } from '../../packages/client/src/adapters/claude/claude-version.ts';
 import { QUALIFIED_CODEX_VERSION } from '../../packages/client/src/adapters/codex/codex-version.ts';
 import { QUALIFIED_DSH_VERSION } from '../../packages/client/src/adapters/dsh/dsh-version.ts';
 import { QUALIFIED_GROK_VERSION } from '../../packages/client/src/adapters/grok/grok-version.ts';
-import { QUALIFIED_HERMES_VERSION } from '../../packages/client/src/adapters/hermes/hermes-version.ts';
 
 // #1103: the capability matrix table in docs/adapter-capabilities.md is a
 // projection of the adapter capability constants, which are also what each
@@ -32,7 +30,6 @@ export const COLUMNS = [
   ['Codex', CODEX_RUNTIME_CAPABILITIES, QUALIFIED_CODEX_VERSION, CODEX_ABSENT_ISOLATION_SOURCES],
   ['dsh', DSH_RUNTIME_CAPABILITIES, QUALIFIED_DSH_VERSION, DSH_ABSENT_ISOLATION_SOURCES],
   ['Grok', GROK_RUNTIME_CAPABILITIES, QUALIFIED_GROK_VERSION, GROK_ABSENT_ISOLATION_SOURCES],
-  ['Hermes', HERMES_RUNTIME_CAPABILITIES, QUALIFIED_HERMES_VERSION, HERMES_ABSENT_ISOLATION_SOURCES],
   ['OpenCode', OPENCODE_RUNTIME_CAPABILITIES, QUALIFIED_OPENCODE_VERSION, {}],
   ['Pi', PI_RUNTIME_CAPABILITIES, piPin, PI_ABSENT_ISOLATION_SOURCES],
   ['Pi (`durableLane`)', PI_DURABLE_RUNTIME_CAPABILITIES, piPin, PI_ABSENT_ISOLATION_SOURCES],

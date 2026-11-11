@@ -32,8 +32,8 @@ declared `true` with neither a check nor absent evidence fails the suite.
 | `detect.auth.*` | `authPresent` is false with no credential, and true for an API key in the environment and for the runtime's own stored login. |
 | `mcp.submitResult` | A Host MCP server's `submit_result` call reaches the server, including through deferred-tool search (Claude `ToolSearch`, Grok `search_tool`/`use_tool`). |
 | `instructions.project` | The project instruction file (AGENTS.md, or CLAUDE.md for Claude) reaches the model. |
-| `isolation.userInstructions`, `.userOutputStyle`, `.userMemory`, `.userSkills`, `.userHookContext` | In an Agent task with user context excluded, a marker in that user source (instruction file, output style, memory store, skill name, description or body, hook output) does not reach the model. A positive control shows the marker does reach the model: the same adapter with the user context inherited (Claude, Pi), the marker in the adapter's own home (agy, dsh), or the same binary run outside the adapter on a user home (Hermes, which has no inherit mode). A bit declared absent runs no case; its evidence is the absent-sources record (see above). |
-| `isolation.userMcp` | With user MCP servers excluded, a user-configured MCP server is not started. Claude, Codex and Grok show it starts when inherited, and agy that a server in its own home is offered; dsh and Hermes assert only that it does not start. |
+| `isolation.userInstructions`, `.userOutputStyle`, `.userMemory`, `.userSkills`, `.userHookContext` | In an Agent task with user context excluded, a marker in that user source (instruction file, output style, memory store, skill name, description or body, hook output) does not reach the model. A positive control shows the marker does reach the model: the same adapter with the user context inherited (Claude, Pi), or the marker in the adapter's own home (agy, dsh). A bit declared absent runs no case; its evidence is the absent-sources record (see above). |
+| `isolation.userMcp` | With user MCP servers excluded, a user-configured MCP server is not started. Claude, Codex and Grok show it starts when inherited, and agy that a server in its own home is offered; dsh asserts only that it does not start. |
 | `isolation.sessionPersistence` | With session persistence disabled, no transcript is written; a persisted session writes one as the positive control (Claude). |
 | `drafts` | Streamed text reaches the Agent message draft, either as `message_draft_delta` events or as `progress` deltas, using the daemon's own rule. |
 | `gate.auto` | The `auto` gate refuses a high-risk native write before it executes. |
@@ -91,7 +91,7 @@ prerelease (`0.2.1-rc.5`) as an exact version.
   `scripts/ci/select-impact.mjs`): one leg per adapter, at the qualified
   versions. Each qualified version comes from the adapter's constant:
   `QUALIFIED_CODEX_VERSION`, `QUALIFIED_GROK_VERSION`,
-  `QUALIFIED_HERMES_VERSION`, `QUALIFIED_DSH_VERSION`, or
+  `QUALIFIED_DSH_VERSION`, or
   `QUALIFIED_CLAUDE_VERSION`. Pi has no
   separate constant: it is bundled, and its version is
   `byok.piRuntimePin`.

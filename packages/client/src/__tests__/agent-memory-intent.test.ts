@@ -60,8 +60,7 @@ import { TestServer } from './fixtures/test-server';
 import { AgentMemoryValidationError, validateAgentMemoryPath, type AgentMemoryIntentFetchInput, type AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 /*
- * WP2I-S2 — the daemon half of Host-approved Agent memory intents
- * (docs/researches/2026-09-28-hermes-device-memory-cas-contract.md).
+ * WP2I-S2 — the daemon half of Host-approved Agent memory intents.
  *
  * Every trace runs against a REAL temp Agent home (real `AgentHomeManager`
  * leases and directories) and an injected fake Host transport. The memory

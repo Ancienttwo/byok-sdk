@@ -5,7 +5,6 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter.js';
 import { AgyAdapter } from '../adapters/antigravity/agy-adapter.js';
 import { DshAdapter } from '../adapters/dsh/dsh-adapter.js';
 import { GrokAdapter } from '../adapters/grok/grok-adapter.js';
-import { HermesAdapter } from '../adapters/hermes/hermes-adapter.js';
 import { PiAdapter } from '../adapters/pi/pi-adapter.js';
 import { buildRuntimeEnvironment, type RuntimeEnvironment } from '../runtime/environment.js';
 import type {
@@ -17,7 +16,7 @@ import type {
 } from '../types.js';
 
 /** The built-in adapters a fake can stand in for. */
-export type FakeRuntimeAdapterId = 'agy' | 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';
+export type FakeRuntimeAdapterId = 'agy' | 'claude' | 'codex' | 'dsh' | 'grok' | 'pi';
 
 /** What the fake does. It never spawns a process. */
 export interface FakeRuntimeAdapterBehavior {
@@ -37,7 +36,6 @@ function realDescriptor(id: FakeRuntimeAdapterId): RuntimeAdapterDescriptor {
     case 'codex': return new CodexAdapter().descriptor;
     case 'dsh': return new DshAdapter({ home: path.join(os.tmpdir(), 'byok-fake-dsh'), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'FAKE_DSH_PROVIDER_KEY' } }).descriptor;
     case 'grok': return new GrokAdapter().descriptor;
-    case 'hermes': return new HermesAdapter({ home: path.join(os.tmpdir(), 'byok-fake-hermes') }).descriptor;
     case 'pi': return new PiAdapter().descriptor;
     default: throw new TypeError(`unknown runtime adapter id: ${String(id)}`);
   }
