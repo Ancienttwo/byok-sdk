@@ -2181,7 +2181,7 @@ export declare class CollectExpiredFailure extends ByokCoreError {
 export { SEALED_CATEGORIES, SEALED_CONTENT_SUITE, SEALED_CONTENT_VERSION, SEALED_DIRECTIONS, SealedContentHeaderV1Schema, openSealedContent, sealContent, } from './sealed-content';
 export type { OpenSealedContentInput, SealContentInput, SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, SealedContentOpenResult, SealedDirection, SealedScopePolicy, } from './sealed-content';
 export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './scope-key';
-export type { OpenScopeKeyPackageInput, ScopeKeyPackage, ScopeKeyPackageOpenResult, ScopeKeyPackageV1, ScopeKeyPackageV2, SealScopeKeyPackageInput, } from './scope-key';
+export type { OpenScopeKeyPackageInput, ScopeKeyPackage, ScopeKeyPackageOpenResult, ScopeKeyPackageV2, SealScopeKeyPackageInput, } from './scope-key';
 export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, } from './member-chain';
 export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain';
 export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle';
@@ -2586,12 +2586,9 @@ export declare const SCOPE_KEY_BYTES = 32;
 export declare const SCOPE_KEY_ID_PATTERN: RegExp;
 /** Byte length of the per-content HKDF salt. */
 export declare const SEALED_SALT_BYTES = 32;
-export declare const SCOPE_KEY_PACKAGE_VERSION = 1;
-export declare const SCOPE_KEY_HPKE_INFO = "byok-sdk.scope-key.v1";
-/** Prepended to the canonical package bytes the sender signs. */
-export declare const SCOPE_KEY_PACKAGE_DOMAIN_PREFIX = "byok-scope-key-package-v1\n";
 export declare const SCOPE_KEY_PACKAGE_V2 = 2;
 export declare const SCOPE_KEY_HPKE_INFO_V2 = "byok-sdk.scope-key.v2";
+/** Prepended to the canonical package bytes the sender signs. */
 export declare const SCOPE_KEY_PACKAGE_V2_DOMAIN_PREFIX = "byok-scope-key-package-v2\n";
 /** A fresh scope key from the platform CSPRNG. */
 export declare function generateScopeKey(): Bytes;
@@ -2604,14 +2601,16 @@ export declare function deriveSealedContentKey(scopeKey: Uint8Array, salt: Uint8
  * runtime has to accept a zero-length HKDF salt.
  */
 export declare function deriveSealedMacKey(scopeKey: Uint8Array): Promise<Bytes>;
-export interface ScopeKeyPackageV1 {
-    readonly v: typeof SCOPE_KEY_PACKAGE_VERSION;
+export interface ScopeKeyPackageV2 {
+    readonly v: typeof SCOPE_KEY_PACKAGE_V2;
     readonly tenantId: string;
     readonly scopeId: string;
     readonly epoch: number;
     readonly keyId: string;
     /** Member id of the member that can open the package. */
     readonly recipient: string;
+    /** The KEM epoch of the recipient key the package is wrapped to. */
+    readonly recipientKemEpoch: number;
     /** Member id of the member that sealed and signed the package. */
     readonly sender: string;
     /** HPKE encapsulated key: base64url of a 65-byte uncompressed P-256 point. */
@@ -2621,12 +2620,7 @@ export interface ScopeKeyPackageV1 {
     /** Sender's ECDSA P-256 / SHA-256 signature, base64url of the 64-byte P1363 form. */
     readonly sig: string;
 }
-export interface ScopeKeyPackageV2 extends Omit<ScopeKeyPackageV1, 'v'> {
-    readonly v: typeof SCOPE_KEY_PACKAGE_V2;
-    /** The KEM epoch of the recipient key the package is wrapped to. */
-    readonly recipientKemEpoch: number;
-}
-export type ScopeKeyPackage = ScopeKeyPackageV1 | ScopeKeyPackageV2;
+export type ScopeKeyPackage = ScopeKeyPackageV2;
 export interface SealScopeKeyPackageInput {
     readonly scopeKey: Uint8Array;
     readonly tenantId: string;
@@ -2661,7 +2655,7 @@ export interface OpenScopeKeyPackageInput {
         readonly memberId: string;
         readonly kemPublicJwk: P256PublicJwk;
         readonly kemPrivateKey: WebCryptoKey;
-        /** The KEM epoch of this key pair. A version 2 package must name it. */
+        /** The KEM epoch of this key pair. The package must name it. */
         readonly kemEpoch: number;
     };
     /** The signing key the caller's verified chain holds for `package.sender`. */
@@ -2677,10 +2671,10 @@ export type ScopeKeyPackageOpenResult = {
 };
 /**
  * Verify and open one key package, in this order: shape; addressed to this
- * recipient (and, for version 2, its KEM epoch) for the expected tenant,
- * scope and epoch; sender key matches the
- * sender id; sender signature; HPKE open; key length; and `keyId` equal to
- * the opened key's own id. Nothing here throws for hostile input.
+ * recipient and its KEM epoch for the expected tenant, scope and epoch;
+ * sender key matches the sender id; sender signature; HPKE open; key
+ * length; and `keyId` equal to the opened key's own id. Nothing here throws
+ * for hostile input.
  */
 export declare function openScopeKeyPackage(input: OpenScopeKeyPackageInput): Promise<ScopeKeyPackageOpenResult>;
 // ==== @byok-sdk/core dist/sealed-payload/sealed-content.d.ts ====

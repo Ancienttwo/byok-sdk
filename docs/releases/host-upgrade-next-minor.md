@@ -293,6 +293,17 @@ No Host code change is required (#1759). A store whose `<storeDir>/control.sock`
 
 Stop the daemon of the previous version before you upgrade such a store. A new CLI or doctor derives the new control address and cannot reach an old daemon, so it reports `daemon offline`. A new daemon started while the old one runs still refuses to start with `DaemonOwnerActiveError`: the old daemon's `daemon-owner.json` lease and the path-mutation gate do not depend on the fallback name. An empty old `/tmp/byok-<hash>` or `/tmp/byok-store-mutex-<hash>` directory left by a crashed daemon is no longer reclaimed; remove it by hand if no byok process uses it.
 
+## Scope key packages are version 2 only
+
+`openScopeKeyPackage` refuses a version 1 scope key package with `key_package_invalid` (#1789). Every package must name the recipient's KEM epoch as `recipientKemEpoch`, and the recipient opens it only with that KEM key. `ScopeKeyPackageV1` is no longer exported, and `ScopeKeyPackage` is `ScopeKeyPackageV2`. SDK writers have sealed only version 2 since 0.30.2, and a 0.30.2 or later Host refuses a version 1 put. A device no longer re-wraps a version 1 package during a KEM rotation, because core cannot open it.
+
+Only a Host that served `e2ee.member` on 0.30.0 or 0.30.1, or stored packages sealed by 0.29.0 core, can hold a version 1 row. Before upgrading, run this count on every Host store:
+
+- Postgres: `SELECT count(*) FROM e2ee_scope_key_package WHERE (package::jsonb)->>'v' = '1'`
+- embedded SQLite: `SELECT count(*) FROM e2ee_scope_key_package WHERE json_extract(package, '$.v') = 1`
+
+Upgrade only when it returns 0. If it does not, stay on the previous version and run a KEM rotation on each member that is the recipient of a version 1 row: the previous version re-wraps that member's own packages as version 2. Run the count again before upgrading. The SDK ships no migration for these rows.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.

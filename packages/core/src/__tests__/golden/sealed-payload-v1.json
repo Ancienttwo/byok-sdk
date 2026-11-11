@@ -1482,16 +1482,17 @@
         "epoch": 1
       },
       "package": {
-        "v": 1,
+        "v": 2,
         "tenantId": "tenant-1",
         "scopeId": "scope-1",
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BC7kwv2ZOevwP04P6QbbK-kjZjjijYvYIkzPOm3gn5yA-SSquoBzUQB92AvdwAXB3lKfrB3xPAbXtFMj0Rb95ns",
-        "ciphertext": "9dWFFkVMCXmPok01iHLkxRNGUdQhnA-iTrvFtBPY_OhSGtbeYHPnKEAWNHVoqpVk",
-        "sig": "_tRtvrZaaHjWWDKAFDq_5j2Cfecxhv8Mr3F-5xY-EyCnbonmbFVGhx59LgfwIQKaQaiBSBZjsd4EG2JL89QYvg"
+        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
+        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
+        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
       },
       "expect": "ok"
     },
@@ -1505,16 +1506,17 @@
         "epoch": 1
       },
       "package": {
-        "v": 1,
+        "v": 2,
         "tenantId": "tenant-1",
         "scopeId": "scope-1",
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BFFVYM8hMTZMruecxw94F-4NSS1z_aWFvaxvmvkhBxpQ6iiU0cCTQim6VwakWOWleSTxf-h9tNXKhf2eOIIFDhg",
-        "ciphertext": "DrSS2waCmt3JDyqcisPAGpNxAhEl5E6ZArV0cc9aFo8ax1rAiUNIsVUMZdjpy0wD",
-        "sig": "CxX1IhzO8Gb6zL0ei3gzIFLBWda7owlJm1tQLOKC6C4mvQCFmZZwgFFcup9sjihCwGDUZM62GrxWj8eW3t8CpA"
+        "enc": "BDQwJ5Uy5gkhMtEM23Q4IrmlwCgSdxRCpeuNJ3LTuEZM5q-VOASHRdBx6pmZnUk_BrgbmGWB2Li17NAJyNIMf7I",
+        "ciphertext": "KkMvrLS7aJ9bMhNKr7xZmqAvr1BCgEgDzDAe2MMT3NKbZqrSejbg5Hv3MSs_KPpS",
+        "sig": "FdRXVVk6HgApFNYOawmokbVlflxkuwTnjUn8qZ9ZJCysHMOD56GJLyO8sXrurqzBv5FX9IYZuK3qLS3uP_-UDw"
       },
       "expect": "key_package_open_failed"
     },
@@ -1528,16 +1530,17 @@
         "epoch": 1
       },
       "package": {
-        "v": 1,
+        "v": 2,
         "tenantId": "tenant-1",
         "scopeId": "scope-1",
         "epoch": 1,
         "keyId": "n_k8FQbyP_xdCauyemUoyg",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BEITdTDFmTAayGMF-Dc6TEluvZf6yW2ioeNXQ4j1h-WNoGZ1a4rpbl_Nd9NJJklFAqw46U8uEH_-tI2iAs05iE4",
-        "ciphertext": "QW9PuMeoss_LfU4Fd3kfIV2mazcGdiGx6ak5c6NL7QHqOqOp8K4ucMNHh6WLdxGm",
-        "sig": "hfE4X3lcCfdE56y3YvEyHW42FtuP8NHkkwlfvZ_jmlbomIxO99u04R__Yj_IzQRiOKnMvBTMr8mdEmbuOl5LtA"
+        "enc": "BPsn1JXxZ1OM53c2JJhRv_nte89qiMHgbqikMAh51HjlPq9rbJIkcrnJxCshjhnT7UNprXhDA8BeCJzgh1ZKKvs",
+        "ciphertext": "HjFQ41ceEa6M1Hjvm654v8As95Wq9oORIqfsMpzSejXz5Lq_3esXlIsgUyTCmj40",
+        "sig": "O2H5zhGA9YvsFttG7Sw0k_yVqYzvW_SCFattTFeWXC3WZaflXReMvV0v0w9S3vbJuO4_21o5LoOmKFeO_U2eNw"
       },
       "expect": "key_package_open_failed"
     },
@@ -1551,16 +1554,17 @@
         "epoch": 1
       },
       "package": {
-        "v": 1,
+        "v": 2,
         "tenantId": "tenant-1",
         "scopeId": "scope-1",
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BC7kwv2ZOevwP04P6QbbK-kjZjjijYvYIkzPOm3gn5yA-SSquoBzUQB92AvdwAXB3lKfrB3xPAbXtFMj0Rb95ns",
-        "ciphertext": "9dWFFkVMCXmPok01iHLkxRNGUdQhnA-iTrvFtBPY_OhSGtbeYHPnKEAWNHVoqpVk",
-        "sig": "_9RtvrZaaHjWWDKAFDq_5j2Cfecxhv8Mr3F-5xY-EyCnbonmbFVGhx59LgfwIQKaQaiBSBZjsd4EG2JL89QYvg"
+        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
+        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
+        "sig": "kS9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
       },
       "expect": "key_package_signature_invalid"
     },
@@ -1574,16 +1578,17 @@
         "epoch": 2
       },
       "package": {
-        "v": 1,
+        "v": 2,
         "tenantId": "tenant-1",
         "scopeId": "scope-1",
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BC7kwv2ZOevwP04P6QbbK-kjZjjijYvYIkzPOm3gn5yA-SSquoBzUQB92AvdwAXB3lKfrB3xPAbXtFMj0Rb95ns",
-        "ciphertext": "9dWFFkVMCXmPok01iHLkxRNGUdQhnA-iTrvFtBPY_OhSGtbeYHPnKEAWNHVoqpVk",
-        "sig": "_tRtvrZaaHjWWDKAFDq_5j2Cfecxhv8Mr3F-5xY-EyCnbonmbFVGhx59LgfwIQKaQaiBSBZjsd4EG2JL89QYvg"
+        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
+        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
+        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
       },
       "expect": "key_package_invalid"
     },
@@ -1597,16 +1602,17 @@
         "epoch": 1
       },
       "package": {
-        "v": 1,
+        "v": 2,
         "tenantId": "tenant-1",
         "scopeId": "scope-1",
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BC7kwv2ZOevwP04P6QbbK-kjZjjijYvYIkzPOm3gn5yA-SSquoBzUQB92AvdwAXB3lKfrB3xPAbXtFMj0Rb95ns",
-        "ciphertext": "9dWFFkVMCXmPok01iHLkxRNGUdQhnA-iTrvFtBPY_OhSGtbeYHPnKEAWNHVoqpVk",
-        "sig": "_tRtvrZaaHjWWDKAFDq_5j2Cfecxhv8Mr3F-5xY-EyCnbonmbFVGhx59LgfwIQKaQaiBSBZjsd4EG2JL89QYvg"
+        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
+        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
+        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
       },
       "expect": "key_package_invalid"
     },
@@ -1620,21 +1626,22 @@
         "epoch": 1
       },
       "package": {
-        "v": 1,
+        "v": 2,
         "tenantId": "tenant-1",
         "scopeId": "scope-1",
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+        "recipientKemEpoch": 1,
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "enc": "BC7kwv2ZOevwP04P6QbbK-kjZjjijYvYIkzPOm3gn5yA-SSquoBzUQB92AvdwAXB3lKfrB3xPAbXtFMj0Rb95ns",
-        "ciphertext": "9dWFFkVMCXmPok01iHLkxRNGUdQhnA-iTrvFtBPY_OhSGtbeYHPnKEAWNHVoqpVk",
-        "sig": "_tRtvrZaaHjWWDKAFDq_5j2Cfecxhv8Mr3F-5xY-EyCnbonmbFVGhx59LgfwIQKaQaiBSBZjsd4EG2JL89QYvg"
+        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
+        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
+        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
       },
       "expect": "key_package_invalid"
     },
     {
-      "name": "v2-client-to-device",
+      "name": "opened-with-another-kem-epoch",
       "sender": "client",
       "recipient": "device",
       "expected": {
@@ -1649,41 +1656,17 @@
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
-        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
         "recipientKemEpoch": 1,
-        "enc": "BC8SICXFThk4bE--lLY9qnDxf7gaM_7rkwEPk46RofPJ-hMUfs4YmB1W5GCzxjVZzXgpMOpQMOSnW7r0gQX5LMU",
-        "ciphertext": "T6okddIeX_7cNcL7psts75o9EDc0377BiR8ZWByckUPFjDJamzEogHuduafCIj_G",
-        "sig": "4JBhnE-b-fF3ioLdVpqGxMq6Q7pp6nIsrnbJ1dIGEj2t5NP0AWUqDf6Z1xwAtY9bihLNN_hHJGgBqLvkFbZbbg"
-      },
-      "expect": "ok"
-    },
-    {
-      "name": "v2-opened-with-another-kem-epoch",
-      "sender": "client",
-      "recipient": "device",
-      "expected": {
-        "tenantId": "tenant-1",
-        "scopeId": "scope-1",
-        "epoch": 1
-      },
-      "package": {
-        "v": 2,
-        "tenantId": "tenant-1",
-        "scopeId": "scope-1",
-        "epoch": 1,
-        "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
-        "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
         "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
-        "recipientKemEpoch": 1,
-        "enc": "BC8SICXFThk4bE--lLY9qnDxf7gaM_7rkwEPk46RofPJ-hMUfs4YmB1W5GCzxjVZzXgpMOpQMOSnW7r0gQX5LMU",
-        "ciphertext": "T6okddIeX_7cNcL7psts75o9EDc0377BiR8ZWByckUPFjDJamzEogHuduafCIj_G",
-        "sig": "4JBhnE-b-fF3ioLdVpqGxMq6Q7pp6nIsrnbJ1dIGEj2t5NP0AWUqDf6Z1xwAtY9bihLNN_hHJGgBqLvkFbZbbg"
+        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
+        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
+        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
       },
       "expect": "key_package_invalid",
       "recipientKemEpoch": 2
     },
     {
-      "name": "v2-kem-epoch-changed",
+      "name": "kem-epoch-changed",
       "sender": "client",
       "recipient": "device",
       "expected": {
@@ -1698,11 +1681,11 @@
         "epoch": 1,
         "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
         "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
-        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
         "recipientKemEpoch": 2,
-        "enc": "BC8SICXFThk4bE--lLY9qnDxf7gaM_7rkwEPk46RofPJ-hMUfs4YmB1W5GCzxjVZzXgpMOpQMOSnW7r0gQX5LMU",
-        "ciphertext": "T6okddIeX_7cNcL7psts75o9EDc0377BiR8ZWByckUPFjDJamzEogHuduafCIj_G",
-        "sig": "4JBhnE-b-fF3ioLdVpqGxMq6Q7pp6nIsrnbJ1dIGEj2t5NP0AWUqDf6Z1xwAtY9bihLNN_hHJGgBqLvkFbZbbg"
+        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "enc": "BCEqDfWaz-dtrnpJ4bZk0kVSSlMegGzLT_BvCKNmj2Z7ky6w6uPEzdnUCrpg5kgd_Chb047ftho4IqXr-prr2Ag",
+        "ciphertext": "GK_cSbhB65OJEVz99HYt-dUs0yqsTfQx3ZGAyUEGwdZNwkuZq-OKY5kpxSSDRsXs",
+        "sig": "kC9KVqr7dtsWz3w3xjKV-fbtDFqjfXUHrzXTDD3oK8_cL_dJmuq0KePHNmSd6hKGXLrzQB3DSyc6gg_q2LR0DA"
       },
       "expect": "key_package_signature_invalid",
       "recipientKemEpoch": 2

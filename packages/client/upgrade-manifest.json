@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "2a4c82df4e064d2d92c5af63f9a52c65804374c473a37c3db38edb6eefe099e3"
+    "snapshotSha256": "84c66057e5044c4f9ee72689607a42d869328f8e9d98efab09c0d8c6084b25ff"
   },
   "configFields": {
     "status": "tracked",
@@ -163,6 +163,17 @@
         "export:@byok-sdk/client#DaemonEffectiveRuntime",
         "export:@byok-sdk/client/adapters#PiRuntimeConfig",
         "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
+      ]
+    },
+    {
+      "id": "scope-key-package-v1-removed",
+      "impact": "breaking",
+      "summary": "Version 1 scope-key packages are removed (#1789). @byok-sdk/core no longer exports ScopeKeyPackageV1, ScopeKeyPackage is ScopeKeyPackageV2, and openScopeKeyPackage refuses a version 1 package with key_package_invalid, so a recipient opens a package only when it names the recipient's KEM epoch. A device no longer re-wraps a version 1 package during a KEM rotation. Before upgrading, run the version 1 count check on every Host store; a Host with version 1 rows runs a KEM rotation on each affected member on the previous version first.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#scope-key-packages-are-version-2-only",
+      "items": [
+        "export:@byok-sdk/core/sealed-payload#ScopeKeyPackage",
+        "export:@byok-sdk/core/sealed-payload#ScopeKeyPackageV1",
+        "export:@byok-sdk/core/sealed-payload#ScopeKeyPackageV2"
       ]
     }
   ],
@@ -382,6 +393,21 @@
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",
       "change": "changed",
       "entry": "agent-memory-helper-protocol-4"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#ScopeKeyPackage",
+      "change": "changed",
+      "entry": "scope-key-package-v1-removed"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#ScopeKeyPackageV1",
+      "change": "removed",
+      "entry": "scope-key-package-v1-removed"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#ScopeKeyPackageV2",
+      "change": "changed",
+      "entry": "scope-key-package-v1-removed"
     },
     {
       "item": "export:@byok-sdk/keys#MODEL_PROVIDER_VENDORS",
