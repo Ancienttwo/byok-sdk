@@ -1,10 +1,9 @@
 import { resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { app, BrowserWindow, ipcMain, net, protocol, session, shell, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, ipcMain, net, powerSaveBlocker, protocol, session, shell, type IpcMainInvokeEvent } from 'electron';
 import brand from '../../brand.config.ts';
-import type { BridgeClient } from '../bridge/client.ts';
 import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, type RendererMethod } from '../bridge/protocol.ts';
-import { startHost, stopHost } from './host.ts';
+import { HostProcess, spawnDevHost, type SupervisedHostState } from './host-process.ts';
 
 const SCHEME = 'app';
 const RENDERER_HOST = 'renderer';
@@ -17,7 +16,27 @@ const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 's
 protocol.registerSchemesAsPrivileged([{ scheme: SCHEME, privileges: { standard: true, secure: true } }]);
 
 let window: BrowserWindow | undefined;
-let host: BridgeClient | undefined;
+let powerBlocker: number | undefined;
+
+/** Keeps the app from suspending while the Host has work; the display may still sleep (docs/host-execution-core.md "Device sleep"). */
+function holdPower(state: SupervisedHostState): void {
+  const busy = state.state === 'running' && state.activeWork > 0;
+  if (busy && powerBlocker === undefined) powerBlocker = powerSaveBlocker.start('prevent-app-suspension');
+  if (!busy && powerBlocker !== undefined) {
+    powerSaveBlocker.stop(powerBlocker);
+    powerBlocker = undefined;
+  }
+}
+
+const host = new HostProcess({
+  spawnHost: spawnDevHost,
+  onState: state => {
+    holdPower(state);
+    if (state.state === 'stopped' || state.state === 'restarting' || state.state === 'failed') console.error(`Host ${state.state}: ${state.reason}`);
+    // Fail closed: no window talks to a Host that did not pass hello.
+    if (state.state === 'failed') app.exit(1);
+  },
+});
 
 /** Serves the renderer directory on app://renderer/ with the CSP header; anything outside it is 404. */
 function serveRenderer(request: Request): Promise<Response> | Response {
@@ -41,7 +60,6 @@ function forward(event: IpcMainInvokeEvent, method: unknown, params: unknown): P
     throw new Error('bridge_sender_refused');
   }
   if (!RENDERER_METHODS.includes(method as RendererMethod)) throw new Error('bridge_method_refused');
-  if (!host) throw new Error('host_unavailable');
   return host.call(method as RendererMethod, params as undefined);
 }
 
@@ -84,29 +102,20 @@ if (!app.requestSingleInstanceLock()) {
 
   let stopping = false;
   app.on('before-quit', event => {
-    if (!host || stopping) return;
+    if (stopping) return;
     event.preventDefault();
     stopping = true;
-    void stopHost(host).finally(() => app.exit(0));
+    host.stop().then(() => app.exit(0), (error: Error) => {
+      console.error(`Host shutdown failed: ${error.message}`);
+      app.exit(1);
+    });
   });
 
-  void app.whenReady().then(async () => {
+  void app.whenReady().then(() => {
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     protocol.handle(SCHEME, serveRenderer);
     ipcMain.handle(BRIDGE_IPC_CHANNEL, forward);
-    try {
-      host = await startHost();
-    } catch (error) {
-      // Fail closed: no window talks to a Host that did not pass hello.
-      console.error(`Host did not start: ${(error as Error).message}`);
-      app.exit(1);
-      return;
-    }
-    void host.exited.then(code => {
-      host = undefined;
-      // #1805 adds restart with backoff; until then a Host exit ends the app.
-      if (!stopping) { console.error(`Host exited with code ${code}`); app.exit(1); }
-    });
+    host.start();
     createWindow();
   });
 }

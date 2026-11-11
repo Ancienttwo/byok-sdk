@@ -2,10 +2,9 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "rewriteRelativeImportExtensions": true,
-    "erasableSyntaxOnly": true
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "rewriteRelativeImportExtensions": true
   },
   "include": ["brand.config.ts", "src"]
 }

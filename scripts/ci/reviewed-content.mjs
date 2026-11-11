@@ -199,6 +199,33 @@ function verifyRegisteredPrivateManifest(manifest, dir, { base, cwd, workspaceGr
   return manifest;
 }
 
+/**
+ * #1805: an existing graph-registered private example may change its scripts
+ * and dependencies, and nothing else, when the whole new manifest passes the
+ * registered-workspace check: edges equal the reviewed graph, and every script
+ * and external spec is a base declaration or an exact registered addition.
+ * The final comparison still refuses any other field.
+ */
+function admitRegisteredPrivateManifest(before, after, path, context) {
+  const dir = path.slice(0, -'/package.json'.length);
+  if (!/^examples\/[^/]+\/package\.json$/.test(path) || !context.workspaceGraph?.[dir]
+    || PRIVATE_HOSTED.some(example => example.dir === dir) || before.private !== true) return [];
+  const fields = ['scripts', ...DEPENDENCY_FIELDS];
+  if (fields.every(field => isDeepStrictEqual(before[field], after[field]))) return [];
+  const rest = manifest => Object.fromEntries(Object.entries(manifest).filter(([key]) => !fields.includes(key)));
+  if (!isDeepStrictEqual(rest(before), rest(after))) return [];
+  try {
+    verifyRegisteredPrivateManifest(JSON.parse(readFileSync(resolve(context.cwd, path), 'utf8')), dir, context);
+  } catch (error) {
+    throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields (${error.message})`);
+  }
+  for (const field of fields) {
+    if (before[field] === undefined) delete after[field];
+    else after[field] = before[field];
+  }
+  return [dir];
+}
+
 /** Returns the admitted workspace records too: their dependencies declare the lock rows they add. */
 function admitRegisteredPrivateLock(before, after, context) {
   const added = [], records = [];
@@ -361,6 +388,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     if (before.exports?.['./rules/delegation'] === undefined && after.exports?.['./rules/delegation'] === './src/rules/delegation.ts') {
       delete after.exports['./rules/delegation'];
     }
+    // #1806: the desktop app imports BotCollaboration from the root entry.
+    if (before.exports?.['.'] === undefined && after.exports?.['.'] === './src/index.ts') delete after.exports['.'];
   } else if (path === 'examples/byok-mcp-server/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The MCP server example must stay private');
     // #1375: the routine calendar moved to protocol, so the core edge goes.
@@ -529,6 +558,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     }
     delete before.version; delete after.version;
   }
+  // After every dedicated admission, so an edge a branch above already reviewed is not taken here.
+  qualify.push(...admitRegisteredPrivateManifest(before, after, path, { base, cwd, workspaceGraph }));
   if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields`);
   return { dirs: qualify };
 }

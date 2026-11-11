@@ -1,12 +1,12 @@
 /**
- * Dev-mode Host child: answers the bridge with no SDK composed behind it.
- * Main runs it under Node; #1805 replaces it with the composed Host.
- * stdout carries only bridge lines, so diagnostics go to stderr.
+ * The bridge test's Host child: answers the bridge with no SDK composed behind
+ * it. stdout carries only bridge lines, so diagnostics go to stderr.
  */
 import { serveBridge } from './server.ts';
 
 serveBridge({
-  status: () => ({ state: 'running', pid: process.pid }),
+  greeted: () => {},
+  status: () => ({ state: 'running', pid: process.pid, activeWork: 0 }),
   shutdown: async () => {},
 }).catch((error: Error) => {
   console.error(`Host bridge stopped: ${error.message}`);
