@@ -836,7 +836,7 @@ export async function collectDoctorDiagnostics(
     runtimeEnvironmentUnknown = 'daemon-offline';
     observations = await probeRuntimes(options.adapters ?? buildRuntimeAdapters(config, resolvePiByokLauncher(config)), { timeoutMs: options.runtimeProbeTimeoutMs });
     runtimeSource = 'local-shell';
-    environment = lastEnvironment === 'unreadable' ? { status: 'unknown' } : lastEnvironment ?? { status: 'unknown' };
+    environment = lastEnvironment === 'unreadable' || lastEnvironment === undefined ? { status: 'unknown' } : lastEnvironment;
   }
   const runtimes: DiagnosticsSnapshot['runtimes'] = observations.map(runtime => ({
     idHash: stableIdentifierHash(runtime.id),

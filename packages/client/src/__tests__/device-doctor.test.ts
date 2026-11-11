@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, type DaemonConfig } from '../index';
-import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceRecord } from '../daemon/store';
+import { DeviceStore, type DeviceRecord } from '../daemon/store';
 import { AuthManager } from '../daemon/auth-manager';
 import { acquireDaemonOwner } from '../util/daemon-owner';
 import { connectControlClient } from '../daemon/control-client';
@@ -213,9 +213,14 @@ describe('public diagnostics and CLI consumers', () => {
 });
 
 describe('cursor reset reads the device record', () => {
-  it('reports an absent record as unpaired and an unreadable one as its own error', async () => {
+  it('reports an absent record as unpaired and a corrupt one as reset-failed', async () => {
     await expect(resetDeviceCursor(config, { confirmed: true })).rejects.toMatchObject({ code: 'unpaired' });
     await fs.writeFile(path.join(root, 'device.json'), '{"deviceId":', { mode: 0o600 });
-    await expect(resetDeviceCursor(config, { confirmed: true })).rejects.toBeInstanceOf(DeviceRecordRePairRequiredError);
+    await expect(resetDeviceCursor(config, { confirmed: true })).rejects.toMatchObject({ code: 'reset-failed' });
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('reports an unreadable record as reset-failed, not unpaired', async () => {
+    await fs.writeFile(path.join(root, 'device.json'), '{}', { mode: 0o000 });
+    await expect(resetDeviceCursor(config, { confirmed: true })).rejects.toMatchObject({ code: 'reset-failed' });
   });
 });
