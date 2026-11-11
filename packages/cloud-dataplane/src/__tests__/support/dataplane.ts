@@ -305,9 +305,22 @@ async function deleteObjectStorage(endpoint: string, client: AwsClient, bucket: 
 // `afterAll` rather than `onTestFinished` because a file may create its bucket
 // in `beforeAll` and share it across every test (worker-e2e.test.ts), and
 // `afterAll` is the only teardown legal from module scope.
+//
+// Every registered bucket is attempted even when one drain throws: stopping at
+// the first failure would leave that file's remaining buckets behind, which is
+// the leak this teardown exists to prevent. Failures are rethrown together.
 afterAll(async () => {
+  const failures: unknown[] = [];
   for (const { endpoint, client, bucket } of createdBuckets.splice(0).reverse()) {
-    await deleteObjectStorage(endpoint, client, bucket);
+    try {
+      await deleteObjectStorage(endpoint, client, bucket);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) {
+    throw new AggregateError(failures, `Could not delete ${String(failures.length)} test buckets; each failure is in .errors.`);
   }
 });
 
