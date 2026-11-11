@@ -158,15 +158,20 @@ function admitHostedLock(before, after, cwd, example) {
 
 // #1804: the desktop example's reviewed additions to the checked shape, exact:
 // its Electron build and dev scripts and the two Electron devDependencies.
+// #1830: the build bundles the React renderer with esbuild (the base 0.28.1
+// spec), and React with its types joins the devDependencies (#1499 D9).
 const REGISTERED_PRIVATE_ADDITIONS = Object.freeze({
   'examples/desktop-bot-app': Object.freeze({
     scripts: Object.freeze({
-      build: "tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/renderer/index.html', 'dist/src/renderer/index.html')\"",
+      build: "tsc -p tsconfig.build.json && esbuild src/renderer/index.tsx --bundle --format=esm --platform=browser --target=es2022 --minify --log-level=warning --outdir=dist/src/renderer && node -e \"require('node:fs').cpSync('src/renderer/index.html', 'dist/src/renderer/index.html')\"",
       // #1811: the one Host bundle (CommonJS under Node in dev, a SEA when packaged); dev runs it.
       'build:host': 'node scripts/package/bundle-host.mjs --format cjs',
       dev: 'bun run build && bun run build:host && electron dist/src/main/index.js',
     }),
-    devDependencies: Object.freeze({ electron: '45.3.0', '@electron/fuses': '2.1.3' }),
+    devDependencies: Object.freeze({
+      electron: '45.3.0', '@electron/fuses': '2.1.3',
+      react: '19.3.1', 'react-dom': '19.3.1', '@types/react': '19.3.0', '@types/react-dom': '19.3.0',
+    }),
   }),
 });
 

@@ -2405,6 +2405,63 @@ jobs:
               echo "$out" | grep -E 'D0_ELECTRON_READY|sandbox|FATAL|apparmor|namespace' | head -5
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
+      # #1830: the built renderer loads in the real app, under main's CSP: React
+      # mounts one slot per section, the bundled stylesheet supplies the theme
+      # tokens, and an injected inline script stays blocked. After the AppArmor
+      # report, so that report still shows the runner default.
+      - name: Renderer loads under the CSP (xvfb)
+        working-directory: examples/desktop-bot-app
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          export HOME="$RUNNER_TEMP/renderer-home"
+          unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME
+          mkdir -p "$HOME"
+          xvfb-run -a "$(node -p "require('electron')")" --remote-debugging-port=9333 dist/src/main/index.js > "$RUNNER_TEMP/renderer-app.log" 2>&1 &
+          cat > "$RUNNER_TEMP/renderer-check.mjs" <<'EOF'
+          import assert from 'node:assert/strict';
+          const deadline = Date.now() + 60_000;
+          let page;
+          while (!page) {
+            if (Date.now() > deadline) throw new Error('no app://renderer page within 60 s');
+            const pages = await fetch('http://127.0.0.1:9333/json/list').then(response => response.json(), () => []);
+            page = pages.find(entry => entry.url === 'app://renderer/index.html');
+            if (!page) await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          const socket = new WebSocket(page.webSocketDebuggerUrl);
+          await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
+          const probe = () => new Promise(resolve => {
+            const started = Date.now();
+            const tick = () => {
+              const sections = [...document.querySelectorAll('main[data-section]')].map(element => element.dataset.section);
+              if (sections.length === 0 && Date.now() - started < 15_000) return setTimeout(tick, 100);
+              const inline = document.createElement('script');
+              inline.textContent = 'window.__inlineRan = true';
+              document.head.append(inline);
+              resolve(JSON.stringify({
+                sections,
+                accent: getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim(),
+                inlineRan: window.__inlineRan === true,
+                host: document.querySelector('.shell-host')?.textContent,
+              }));
+            };
+            tick();
+          });
+          socket.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: `(${probe})()`, awaitPromise: true, returnByValue: true } }));
+          const reply = await new Promise(resolve => { socket.onmessage = event => resolve(JSON.parse(event.data)); });
+          socket.close();
+          if (reply.result?.exceptionDetails) throw new Error(JSON.stringify(reply.result.exceptionDetails));
+          const seen = JSON.parse(reply.result.result.value);
+          console.log(JSON.stringify(seen));
+          assert.deepEqual(seen.sections, ['conversation', 'cards', 'settings', 'keys']);
+          assert.notEqual(seen.accent, '', 'theme tokens missing: index.css did not load');
+          assert.equal(seen.inlineRan, false, 'an inline script ran: the CSP is not in force');
+          EOF
+          set +e
+          node "$RUNNER_TEMP/renderer-check.mjs"; code=$?
+          set -e
+          pkill -f 'dist/src/main/index.js' || true
+          echo '--- app log'; cat "$RUNNER_TEMP/renderer-app.log"
+          exit $code
 
   ci-required:
     name: CI required
