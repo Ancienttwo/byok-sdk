@@ -9,7 +9,7 @@ export const PRIVATE_SOCKET_FALLBACK_PREFIXES = { control: 'byok', storeMutex: '
 const FALLBACK_UID = String(process.getuid?.() ?? 'unknown');
 const FALLBACK_LEAF = new RegExp(`^(${Object.values(PRIVATE_SOCKET_FALLBACK_PREFIXES).join('|')})-${FALLBACK_UID}-[0-9a-f]{16}$`);
 
-type PrivateDirectoryRefusalCode = 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner' | 'private_dir_mode';
+export type PrivateDirectoryRefusalCode = 'private_dir_symlink' | 'private_dir_not_directory' | 'private_dir_foreign_owner' | 'private_dir_mode';
 
 export class PrivateDirectoryRefusedError extends Error {
   constructor(
@@ -65,26 +65,31 @@ export function privateSocketEndpoint(
   return path.join(PRIVATE_SOCKET_FALLBACK_ROOT, `${PRIVATE_SOCKET_FALLBACK_PREFIXES[kind]}-${FALLBACK_UID}-${identity16}`, 'sock');
 }
 
-export async function ensureOwnedPrivateDirectory(dir: string): Promise<void> {
+/** `refuse` lets a caller that owns its own error contract type the refusal; the checks are the same for every caller. */
+export async function ensureOwnedPrivateDirectory(
+  dir: string,
+  refuse: (code: PrivateDirectoryRefusalCode, ownerUid?: number, cause?: unknown) => Error =
+    (code, ownerUid, cause) => new PrivateDirectoryRefusedError(code, dir, process.getuid?.(), ownerUid, cause),
+): Promise<void> {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
     // Inspect existing non-directories below so they receive a typed refusal.
     if (error.code !== 'EEXIST' && error.code !== 'ENOTDIR') throw error;
   });
   const stat = await fs.lstat(dir);
   const uid = process.getuid?.();
-  if (stat.isSymbolicLink()) throw new PrivateDirectoryRefusedError('private_dir_symlink', dir, uid);
-  if (!stat.isDirectory()) throw new PrivateDirectoryRefusedError('private_dir_not_directory', dir, uid);
-  if (uid !== undefined && stat.uid !== uid) throw new PrivateDirectoryRefusedError('private_dir_foreign_owner', dir, uid, stat.uid);
+  if (stat.isSymbolicLink()) throw refuse('private_dir_symlink');
+  if (!stat.isDirectory()) throw refuse('private_dir_not_directory');
+  if (uid !== undefined && stat.uid !== uid) throw refuse('private_dir_foreign_owner', stat.uid);
   // Windows has no uid and no POSIX mode bits; the mode contract is POSIX only.
   if (uid === undefined) return;
   // An already-private directory needs no chmod, so a sandbox that denies chmod does not refuse it.
   if ((stat.mode & 0o777) === 0o700) return;
   await fs.chmod(dir, 0o700).catch((error: unknown) => {
-    throw new PrivateDirectoryRefusedError('private_dir_mode', dir, uid, undefined, error);
+    throw refuse('private_dir_mode', undefined, error);
   });
   const after = await fs.lstat(dir);
-  if (after.isSymbolicLink()) throw new PrivateDirectoryRefusedError('private_dir_symlink', dir, uid);
-  if ((after.mode & 0o777) !== 0o700) throw new PrivateDirectoryRefusedError('private_dir_mode', dir, uid);
+  if (after.isSymbolicLink()) throw refuse('private_dir_symlink');
+  if ((after.mode & 0o777) !== 0o700) throw refuse('private_dir_mode');
 }
 
 function isFallbackDirectory(dir: string): boolean {

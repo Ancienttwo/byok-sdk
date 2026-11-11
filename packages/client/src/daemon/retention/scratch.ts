@@ -4,7 +4,8 @@ import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { RuntimeDisposalFailure } from '../../runtime-failure';
 import { atomicWriteFile } from '../../util/atomic-write';
-import { createPrivateTempDir, ensureSecureDir } from '../../util/secure-dir';
+import { ensureOwnedPrivateDirectory } from '../../util/private-unix-socket';
+import { createPrivateTempDir, ensureSecureDir, SecureDirModeError } from '../../util/secure-dir';
 
 export class ScratchRootPathError extends Error {
   constructor(reason: string) {
@@ -121,13 +122,9 @@ export async function privateDirectory(directory: string, options: { ownedLeaf?:
     });
     if (stat !== undefined && (!stat.isDirectory() || stat.isSymbolicLink())) throw new ScratchRootPathError('contains a non-directory or symbolic link');
   }
-  const uid = process.getuid?.();
-  if (options.ownedLeaf && uid !== undefined) {
-    await fs.mkdir(path.dirname(absolute), { recursive: true, mode: 0o700 });
-    await fs.mkdir(absolute, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
-    const leaf = await fs.lstat(absolute);
-    if (!leaf.isDirectory() || leaf.isSymbolicLink()) throw new ScratchRootPathError('contains a non-directory or symbolic link');
-    if (leaf.uid !== uid) throw new ScratchRootPathError('is owned by another user');
+  if (options.ownedLeaf && process.getuid !== undefined) {
+    await ensureOwnedPrivateDirectory(absolute, (code, _ownerUid, cause) => code === 'private_dir_mode' ? new SecureDirModeError(absolute, cause)
+      : new ScratchRootPathError(code === 'private_dir_foreign_owner' ? 'is owned by another user' : 'contains a non-directory or symbolic link'));
   }
   await ensureSecureDir(absolute);
 }
