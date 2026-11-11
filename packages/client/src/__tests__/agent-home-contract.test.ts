@@ -107,6 +107,16 @@ describe('SDK-owned Agent home contract', () => {
     expect(await fs.readdir(outside)).toEqual([]);
   });
 
+  it.skipIf(process.platform !== 'win32')('rejects a hostStorageRoot behind a junction before creating homes', async () => {
+    const root = await makeRoot();
+    const outside = await makeRoot();
+    const junction = path.join(root, 'host');
+    await fs.symlink(outside, junction, 'junction');
+    expect(() => new AgentHomeLayout(path.join(junction, 'missing'))).toThrow(AgentHomeResolutionError);
+    expect(() => new AgentHomeLayout(junction)).toThrow(/agentHome.hostStorageRoot: .*windows_link/);
+    expect(await fs.readdir(outside)).toEqual([]);
+  });
+
   it('keeps one Agent home across profile revisions and different Agents isolated', async () => {
     const root = await makeRoot();
     const layout = new AgentHomeLayout(root);
