@@ -26,7 +26,6 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
   nonces: ['issue', 'consumeIfValid', 'collectExpired'],
   dedup: ['checkAndRecord', 'checkAndRecordAgent'],
   tasks: [
-    'open',
     'reserveAgentOffer',
     'reserveAgentMessage',
     'recordFirstOutput',

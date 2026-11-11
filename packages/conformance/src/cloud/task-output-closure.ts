@@ -15,6 +15,8 @@ import { describe, expect, it } from 'vitest';
 import { registration } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory, type CloudConformanceStores } from './harness';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const TENANT = tenantId('tenant-output-closure-conformance');
 const TTL_MS = 600_000;
 
@@ -35,7 +37,7 @@ function deadline(at: string): string {
 }
 
 async function claimed(stores: CloudConformanceStores, taskId: string, deviceId = 'device-1'): Promise<void> {
-  await stores.tasks.open(TENANT, { taskId, deviceId });
+  await stores.tasks.reserveAgentOffer(TENANT, { taskId, deviceId, agentRef: AGENT_REF });
   await stores.tasks.claim(TENANT, { taskId, deviceId });
 }
 
@@ -63,7 +65,7 @@ export function runTaskOutputClosureConformance(factory: CloudCompositionFactory
         await claimed(stores, 'task');
         const logged = await stores.activity.append(TENANT, progress('task', 1));
         const requested = await stores.approvals.append(TENANT, approval('task', 1));
-        const terminal = await stores.tasks.recordStatus(TENANT, { taskId: 'task', status: 'complete' });
+        const terminal = await stores.tasks.recordStatus(TENANT, { taskId: 'task', status: 'complete', agentRef: AGENT_REF });
         await expectClosedAt(stores, 'task', terminal?.terminalAt, 1, 1);
         // A replay of what was admitted still returns the log; it is not new output.
         await expect(stores.activity.append(TENANT, progress('task', 1))).resolves.toMatchObject({ cursor: logged.cursor, terminalAt: terminal?.terminalAt });
@@ -77,7 +79,7 @@ export function runTaskOutputClosureConformance(factory: CloudCompositionFactory
           event: { type: 'approval_resolved', approvalId: 'task-1', decision: 'approve', resolvedBy: 'host', at: terminal!.terminalAt! },
         })).resolves.toMatchObject({ status: 'absent' });
         await handle.advanceTime(TTL_MS - 1);
-        await stores.tasks.recordStatus(TENANT, { taskId: 'task', status: 'failed' });
+        await stores.tasks.recordStatus(TENANT, { taskId: 'task', status: 'failed', agentRef: AGENT_REF });
         await expectClosedAt(stores, 'task', terminal?.terminalAt, 1, 1);
         await handle.advanceTime(1);
         await expect(stores.activity.read(TENANT, 'task')).resolves.toBeUndefined();
@@ -91,7 +93,7 @@ export function runTaskOutputClosureConformance(factory: CloudCompositionFactory
     it('a task that logged nothing is closed too', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await claimed(stores, 'silent');
-        const terminal = await stores.tasks.recordStatus(TENANT, { taskId: 'silent', status: 'failed' });
+        const terminal = await stores.tasks.recordStatus(TENANT, { taskId: 'silent', status: 'failed', agentRef: AGENT_REF });
         await expectClosedAt(stores, 'silent', terminal?.terminalAt, 0);
       });
     });
@@ -99,14 +101,14 @@ export function runTaskOutputClosureConformance(factory: CloudCompositionFactory
     it('an accepted Host cancellation closes the log at its request instant, claimed or not', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.devices.register(TENANT, registration('device-1'));
-        await stores.tasks.open(TENANT, { taskId: 'unclaimed', deviceId: 'device-1' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'unclaimed', deviceId: 'device-1', agentRef: AGENT_REF });
         const unclaimed = await stores.cancellations.request(TENANT, {
           taskId: 'unclaimed', proposedMessageId: 'cancel-unclaimed', materialize: async () => cancelBody('cancel-unclaimed'),
         });
         await expectClosedAt(stores, 'unclaimed', unclaimed?.attempt.cancellation?.requestedAt, 0);
 
         await claimed(stores, 'running');
-        await stores.tasks.recordStatus(TENANT, { taskId: 'running', status: 'running' });
+        await stores.tasks.recordStatus(TENANT, { taskId: 'running', status: 'running', agentRef: AGENT_REF });
         await stores.activity.append(TENANT, progress('running', 1));
         await stores.approvals.append(TENANT, approval('running', 1));
         const requested = await stores.cancellations.request(TENANT, {
@@ -116,7 +118,7 @@ export function runTaskOutputClosureConformance(factory: CloudCompositionFactory
         const requestedAt = requested?.attempt.cancellation?.requestedAt;
         await expectClosedAt(stores, 'running', requestedAt, 1, 1);
         // The device's own cancelled terminal later keeps the request's deadline.
-        await stores.tasks.recordStatus(TENANT, { taskId: 'running', status: 'cancelled' });
+        await stores.tasks.recordStatus(TENANT, { taskId: 'running', status: 'cancelled', agentRef: AGENT_REF });
         await expectClosedAt(stores, 'running', requestedAt, 1, 1);
       });
     });
@@ -130,7 +132,7 @@ export function runTaskOutputClosureConformance(factory: CloudCompositionFactory
         const abandoned = await stores.cancellations.abandon(TENANT, { taskId: 'abandoned', cause: 'operator' });
         await expectClosedAt(stores, 'abandoned', abandoned?.terminalAt, 1);
 
-        await stores.tasks.open(TENANT, { taskId: 'retired-offered', deviceId: 'retired' });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'retired-offered', deviceId: 'retired', agentRef: AGENT_REF });
         await claimed(stores, 'retired-running', 'retired');
         await stores.activity.append(TENANT, progress('retired-running', 1));
         await claimed(stores, 'kept-running', 'kept');

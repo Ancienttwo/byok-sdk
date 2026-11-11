@@ -13,8 +13,10 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { describe, expect, it } from 'vitest';
 import { migrate } from '../migrate';
+import { PostgresTaskAttemptStore } from '../stores/task-attempts';
 import { createDataplaneScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
@@ -83,6 +85,43 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres 0035 over tasks closed before it — $
       expect(closed.rows).toEqual([{ terminal_at: '2026-01-01T00:20:00.123Z', expires_at: '2026-01-01T00:30:00.123Z' }]);
       const closedTail = await scope.pool.query(`SELECT terminal_at, expires_at, jsonb_array_length(entries) AS entries FROM approval_timeline_tail WHERE task_id = 'running'`);
       expect(closedTail.rows).toEqual([{ terminal_at: '2026-01-01T00:20:00.123Z', expires_at: '2026-01-01T00:30:00.123Z', entries: 1 }]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+      await scope.dispose();
+    }
+  });
+});
+
+describe.skipIf(SKIP_DATAPLANE)(`Postgres 0038 over tasks without an Agent identity — ${SKIP_REASON}`, () => {
+  it('refuses while one is live, then retires the terminal ones and keeps their ids fenced', async () => {
+    const scope = await createDataplaneScope();
+    const directory = await mkdtemp(join(tmpdir(), 'byok-before-0038-'));
+    const step = '0038_task_agent_ref_required.sql';
+    const tasks = new PostgresTaskAttemptStore(scope.pool, createMutableClock());
+    const tenant = tenantId('tenant');
+    try {
+      for (const name of await readdir(DEPLOY_SQL)) {
+        if (name.endsWith('.sql') && name < '0038') await copyFile(join(DEPLOY_SQL, name), join(directory, name));
+      }
+      await migrate(scope.pool, directory);
+      await scope.pool.query(`INSERT INTO task (tenant_id, task_id, device_id, agent_id, agent_profile_revision, status, updated_at)
+        VALUES ('tenant', 'legacy-done', 'device', NULL, NULL, 'complete', now()), ('tenant', 'legacy-live', 'device', NULL, NULL, 'running', now()),
+               ('tenant', 'agent', 'device', 'a', '1', 'offered', now())`);
+      await expect(tasks.get(tenant, 'legacy-done')).rejects.toMatchObject({ code: 'task_attempt_agent_ref_missing', message: expect.stringContaining('0038') });
+      await copyFile(join(DEPLOY_SQL, step), join(directory, step));
+
+      await expect(migrate(scope.pool, directory)).rejects.toThrow(/1 task\(s\) without an Agent identity are not terminal/);
+      expect((await scope.pool.query(`SELECT count(*)::int AS n FROM task`)).rows).toEqual([{ n: 3 }]);
+
+      await scope.pool.query(`UPDATE task SET status = 'cancelled' WHERE task_id = 'legacy-live'`);
+      await expect(migrate(scope.pool, directory)).resolves.toMatchObject({ applied: [step] });
+      expect((await scope.pool.query(`SELECT task_id FROM task_agentless_retired ORDER BY task_id`)).rows)
+        .toEqual([{ task_id: 'legacy-done' }, { task_id: 'legacy-live' }]);
+      expect((await scope.pool.query(`SELECT task_id FROM task`)).rows).toEqual([{ task_id: 'agent' }]);
+      await expect(scope.pool.query(`INSERT INTO task (tenant_id, task_id, device_id, status, updated_at) VALUES ('tenant', 'x', 'device', 'offered', now())`))
+        .rejects.toThrow(/agent_id/);
+      await expect(tasks.reserveAgentOffer(tenant, { taskId: 'legacy-done', deviceId: 'device', agentRef: { agentId: 'a', profileRevision: '1' } }))
+        .rejects.toMatchObject({ code: 'agent_task_already_exists' });
     } finally {
       await rm(directory, { recursive: true, force: true });
       await scope.dispose();

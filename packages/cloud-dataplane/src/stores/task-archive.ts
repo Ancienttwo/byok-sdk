@@ -26,8 +26,8 @@ import { readTask, refusalFor, rewriteTaskBodies, type Querier } from './task-re
 interface WorkRow {
   readonly task_id: string;
   readonly device_id: string;
-  readonly agent_id: string | null;
-  readonly agent_profile_revision: string | null;
+  readonly agent_id: string;
+  readonly agent_profile_revision: string;
   readonly phase: 'archive' | 'settle';
 }
 
@@ -55,9 +55,7 @@ export class PostgresTaskArchiveStore implements TaskArchiveStore {
     return result.rows.slice(0, input.limit).map((row) => ({
       taskId: row.task_id,
       deviceId: row.device_id,
-      ...(row.agent_id === null || row.agent_profile_revision === null
-        ? {}
-        : { agentRef: { agentId: row.agent_id, profileRevision: row.agent_profile_revision } }),
+      agentRef: { agentId: row.agent_id, profileRevision: row.agent_profile_revision },
       phase: row.phase,
     }));
   }

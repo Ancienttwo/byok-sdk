@@ -2909,6 +2909,12 @@ export declare const CLOUD_ERROR_CODES: {
     /** A strict Agent task id already names a durable attempt and cannot be re-enqueued. */
     readonly agent_task_already_exists: 'agent_task_already_exists';
     /**
+     * A stored task attempt has no Agent identity: the Postgres store has not run
+     * `deploy/sql/0038_task_agent_ref_required.sql`. The read fails closed; the
+     * operator runs that migration (docs/releases/host-upgrade-next-minor.md).
+     */
+    readonly task_attempt_agent_ref_missing: 'task_attempt_agent_ref_missing';
+    /**
      * A task attempt was opened but the mailbox refused its offer append, so the
      * device never saw it. Raised as {@link TaskOfferAppendRefusedError}, which
      * names the task so the Host can retry with that `taskId` (the retry
@@ -4236,11 +4242,6 @@ interface StoredAgentMessageAdmission extends AgentMessageAdmission {
 export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     #private;
     constructor(clock: Clock, state?: InMemoryTaskAttemptState);
-    open(tenant: TenantId, input: {
-        readonly taskId: string;
-        readonly deviceId: string;
-        readonly agentRef?: AgentRef;
-    }): Promise<TaskAttempt>;
     reserveAgentOffer(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
@@ -4290,7 +4291,7 @@ export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     recordStatus(tenant: TenantId, input: {
         readonly taskId: string;
         readonly status: TaskAttemptStatus;
-        readonly agentRef?: AgentRef;
+        readonly agentRef: AgentRef;
         readonly terminalCause?: string;
     }): Promise<TaskAttempt | undefined>;
 }
@@ -4636,9 +4637,9 @@ export interface TaskAttempt {
     readonly taskId: string;
     /** The device the offer was addressed to. */
     readonly deviceId: string;
-    /** Exact Agent identity sealed when the strict Agent offer was opened. */
-    readonly agentRef?: AgentRef;
-    /** Set by `task.claim`, and only by the first one. Legacy attempts remain claimable by any tenant device until then; strict Agent attempts are target-device bound before this field is consulted. */
+    /** Exact Agent identity sealed when the strict Agent offer was reserved. */
+    readonly agentRef: AgentRef;
+    /** Set by `task.claim`, and only by the first one. Attempts are target-device bound before this field is consulted. */
     readonly ownerDeviceId?: string;
     readonly status: TaskAttemptStatus;
     /**
@@ -4752,12 +4753,6 @@ export interface TaskAttemptPage {
     readonly nextCursor?: string;
 }
 export interface TaskAttemptStore {
-    /** Called when an offer is enqueued: records the pending attempt with no owner yet. */
-    open(tenant: TenantId, input: {
-        readonly taskId: string;
-        readonly deviceId: string;
-        readonly agentRef?: AgentRef;
-    }): Promise<TaskAttempt>;
     /**
      * Atomically reserve one strict Agent offer. `created: false` means the task
      * id already had durable authority and no caller may append another offer.
@@ -4853,7 +4848,7 @@ export interface TaskAttemptStore {
     recordStatus(tenant: TenantId, input: {
         readonly taskId: string;
         readonly status: TaskAttemptStatus;
-        readonly agentRef?: AgentRef;
+        readonly agentRef: AgentRef;
         readonly terminalCause?: string;
     }): Promise<TaskAttempt | undefined>;
 }
@@ -5195,7 +5190,7 @@ import type { CloudStores } from './stores/ports';
 export interface TaskArchiveWork {
     readonly taskId: string;
     readonly deviceId: string;
-    readonly agentRef?: AgentRef;
+    readonly agentRef: AgentRef;
     /** `archive`: not archived yet. `settle`: archived, and its board item may remain. */
     readonly phase: 'archive' | 'settle';
 }
@@ -5478,15 +5473,10 @@ export interface TenantBoundDevices {
     readiness(): Promise<TenantReadiness>;
 }
 export interface TenantBoundTaskAttempts {
-    open(input: {
-        readonly taskId: string;
-        readonly deviceId: string;
-        readonly agentRef?: TaskAttempt['agentRef'];
-    }): Promise<TaskAttempt>;
     reserveAgentOffer(input: {
         readonly taskId: string;
         readonly deviceId: string;
-        readonly agentRef: NonNullable<TaskAttempt['agentRef']>;
+        readonly agentRef: TaskAttempt['agentRef'];
     }): Promise<{
         readonly attempt: TaskAttempt;
         readonly created: boolean;
@@ -5532,7 +5522,7 @@ export interface TenantBoundTaskAttempts {
     recordStatus(input: {
         readonly taskId: string;
         readonly status: TaskAttemptStatus;
-        readonly agentRef?: TaskAttempt['agentRef'];
+        readonly agentRef: TaskAttempt['agentRef'];
         readonly terminalCause?: TaskAttempt['terminalCause'];
     }): Promise<TaskAttempt | undefined>;
 }

@@ -13,6 +13,8 @@ import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { SqliteOwnershipError } from '../sqlite-support';
 import { TEST_AGENT_REF, TEST_SESSION_REF } from './test-support';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 const tenant = tenantId('receipts');
 const other = tenantId('other');
 const deviceId = 'device-receipts';
@@ -154,10 +156,10 @@ describe('SQLite receipt recovery', () => {
       const { open } = fixture(); let runtime = open();
       const taskId = 'busy-decline';
       const terminal = createEnvelope('task.decline', {
-        reason: 'display only', retryable: true, ...(code === undefined ? {} : { code }),
+        agentRef: AGENT_REF, reason: 'display only', retryable: true, ...(code === undefined ? {} : { code }),
       }, { taskId });
       try {
-        await runtime.stores.cloud.tasks.open(tenant, { taskId, deviceId });
+        await runtime.stores.cloud.tasks.reserveAgentOffer(tenant, { taskId, deviceId, agentRef: AGENT_REF });
         expect(await handleInboundEnvelope(runtime.bound, deviceId, terminal).then(r => r.outcome)).toBe('accepted');
         const first = await runtime.cloud.readDeviceTerminal(tenant, taskId);
         expect(first).toMatchObject({ envelope: terminal });
@@ -205,7 +207,7 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE request_receipt'); db.close();
     expect(() => open()).toThrow();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '8' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '9' }));
     const check = new DatabaseSync(path, { readOnly: true });
     expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'request_receipt'").get()).toBeUndefined();
     check.close();
@@ -215,7 +217,7 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE mailbox_message'); db.close();
     expect(() => open()).toThrow(expect.objectContaining({
-      name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '8', requiredVersion: '8',
+      name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '9', requiredVersion: '9',
       message: expect.stringContaining('FROM mailbox_message'),
     }));
     const check = new DatabaseSync(path, { readOnly: true });
@@ -275,7 +277,7 @@ describe('SQLite receipt recovery', () => {
     corrupt.exec('DROP TABLE request_receipt; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)');
     corrupt.close();
     expect(() => open()).toThrow('Invalid BYOK SQLite request receipt schema');
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '8' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '9' }));
   });
 
   it('keeps cancellation result authority after reopen', async () => {
@@ -301,7 +303,7 @@ describe('SQLite receipt recovery', () => {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
-      await runtime.stores.cloud.tasks.open(tenant, { taskId: 'unsubmitted', deviceId });
+      await runtime.stores.cloud.tasks.reserveAgentOffer(tenant, { taskId: 'unsubmitted', deviceId, agentRef: AGENT_REF });
       expect(await runtime.cloud.readTaskOffer(tenant, 'unsubmitted')).toBeUndefined();
       const enqueued = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { taskId, payload });
       const original = await runtime.cloud.readTaskOffer(tenant, taskId);

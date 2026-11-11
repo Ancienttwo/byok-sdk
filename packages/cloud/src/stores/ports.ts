@@ -332,9 +332,9 @@ export interface TaskAttempt {
   readonly taskId: string;
   /** The device the offer was addressed to. */
   readonly deviceId: string;
-  /** Exact Agent identity sealed when the strict Agent offer was opened. */
-  readonly agentRef?: AgentRef;
-  /** Set by `task.claim`, and only by the first one. Legacy attempts remain claimable by any tenant device until then; strict Agent attempts are target-device bound before this field is consulted. */
+  /** Exact Agent identity sealed when the strict Agent offer was reserved. */
+  readonly agentRef: AgentRef;
+  /** Set by `task.claim`, and only by the first one. Attempts are target-device bound before this field is consulted. */
   readonly ownerDeviceId?: string;
   readonly status: TaskAttemptStatus;
   /**
@@ -451,15 +451,6 @@ export interface TaskAttemptPage {
 }
 
 export interface TaskAttemptStore {
-  /** Called when an offer is enqueued: records the pending attempt with no owner yet. */
-  open(
-    tenant: TenantId,
-    input: {
-      readonly taskId: string;
-      readonly deviceId: string;
-      readonly agentRef?: AgentRef;
-    },
-  ): Promise<TaskAttempt>;
   /**
    * Atomically reserve one strict Agent offer. `created: false` means the task
    * id already had durable authority and no caller may append another offer.
@@ -569,7 +560,7 @@ export interface TaskAttemptStore {
     input: {
       readonly taskId: string;
       readonly status: TaskAttemptStatus;
-      readonly agentRef?: AgentRef;
+      readonly agentRef: AgentRef;
       readonly terminalCause?: string;
     },
   ): Promise<TaskAttempt | undefined>;

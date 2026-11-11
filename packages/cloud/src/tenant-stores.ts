@@ -124,15 +124,10 @@ export interface TenantBoundDevices {
 }
 
 export interface TenantBoundTaskAttempts {
-  open(input: {
-    readonly taskId: string;
-    readonly deviceId: string;
-    readonly agentRef?: TaskAttempt['agentRef'];
-  }): Promise<TaskAttempt>;
   reserveAgentOffer(input: {
     readonly taskId: string;
     readonly deviceId: string;
-    readonly agentRef: NonNullable<TaskAttempt['agentRef']>;
+    readonly agentRef: TaskAttempt['agentRef'];
   }): Promise<{ readonly attempt: TaskAttempt; readonly created: boolean }>;
   reserveAgentMessage(input: {
     readonly taskId: string;
@@ -171,7 +166,7 @@ export interface TenantBoundTaskAttempts {
   recordStatus(input: {
     readonly taskId: string;
     readonly status: TaskAttemptStatus;
-    readonly agentRef?: TaskAttempt['agentRef'];
+    readonly agentRef: TaskAttempt['agentRef'];
     readonly terminalCause?: TaskAttempt['terminalCause'];
   }): Promise<TaskAttempt | undefined>;
 }
@@ -326,7 +321,6 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       readiness: () => cloud.devices.readiness(tenant, core.presence),
     },
     tasks: {
-      open: (input) => cloud.tasks.open(tenant, input),
       reserveAgentOffer: (input) => cloud.tasks.reserveAgentOffer(tenant, input),
       reserveAgentMessage: (input) => cloud.tasks.reserveAgentMessage(tenant, input),
       recordFirstOutput: (input) => cloud.tasks.recordFirstOutput(tenant, input),

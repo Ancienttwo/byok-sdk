@@ -1593,11 +1593,6 @@ export declare function taskRowToAttempt(row: TaskRow): TaskAttempt;
 export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     #private;
     constructor(pool: ByokPool, clock: Clock);
-    open(tenant: TenantId, input: {
-        readonly taskId: string;
-        readonly deviceId: string;
-        readonly agentRef?: AgentRef;
-    }): Promise<TaskAttempt>;
     reserveAgentOffer(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
@@ -1647,7 +1642,7 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     recordStatus(tenant: TenantId, input: {
         readonly taskId: string;
         readonly status: TaskAttemptStatus;
-        readonly agentRef?: AgentRef;
+        readonly agentRef: AgentRef;
         readonly terminalCause?: string;
     }): Promise<TaskAttempt | undefined>;
 }
@@ -1772,7 +1767,7 @@ import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { ByokPool } from './pool';
 import { type R2BlobStoreOptions, type R2ObjectMaintenance } from './stores/r2-blobs';
 /** Every tenant-owned table as of 0017, in child-before-parent deletion order. */
-export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_log_entry', 'activity_log_head', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_kem_floor', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
+export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_log_entry', 'activity_log_head', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_kem_floor', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task', 'task_agentless_retired', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
 export declare const TENANT_ERASURE_ERROR_CODES: {
     readonly tenant_erasure_invalid_input: 'tenant_erasure_invalid_input';
     readonly tenant_erasure_schema_drift: 'tenant_erasure_schema_drift';

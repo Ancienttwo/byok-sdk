@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "71164c88eb53a0651a8f3db313e85b2f41931dc5259026901b729e49852717a0"
+    "snapshotSha256": "76d758d21c4aa36ee17eda5a2846d47d4d0327f1d3d00f37cdefeb91b9f5f4b9"
   },
   "configFields": {
     "status": "tracked",
@@ -179,6 +179,27 @@
         "export:@byok-sdk/core/sealed-payload#sealScopeKeyPackage",
         "export:@byok-sdk/protocol#E2eeScopeKeyPackageSchema",
         "export:@byok-sdk/protocol#E2eeScopeKeyPackageV2Schema"
+      ]
+    },
+    {
+      "id": "task-attempt-agent-ref-required",
+      "impact": "breaking",
+      "acceptance": "migrate",
+      "summary": "Every task attempt has an Agent identity (#1780). TaskAttemptStore.open and TenantBoundTaskAttempts.open are removed; reserveAgentOffer is the only way to create an attempt. TaskAttempt.agentRef, the recordStatus agentRef, TaskArchiveWork.agentRef and server TaskSnapshot.agentRef are required. Postgres migration 0038_task_agent_ref_required refuses, with the count and no change, while a task without an Agent identity is not terminal; otherwise it moves those tasks into task_agentless_retired, reports the count, and makes task.agent_id and task.agent_profile_revision NOT NULL. A retired task id refuses a new offer with agent_task_already_exists, and TENANT_ERASURE_TABLES gains task_agentless_retired. Before 0038 runs, a read that meets such a row throws the new CLOUD_ERROR_CODES member task_attempt_agent_ref_missing. The embedded SQLite schema moves to version 9 on open; the upgrade refuses a file holding such an attempt. Run the read-only count, settle live legacy tasks on the previous version, then run the migrations and record the retired count.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#every-task-attempt-has-an-agent-identity",
+      "items": [
+        "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
+        "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+        "export:@byok-sdk/cloud#TaskArchiveWork",
+        "export:@byok-sdk/cloud#TaskAttempt",
+        "export:@byok-sdk/cloud#TaskAttemptStore",
+        "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskAttemptStore",
+        "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskAttemptStore",
+        "export:@byok-sdk/server#TaskSnapshot",
+        "store:cloud-dataplane-postgres",
+        "store:server-sqlite"
       ]
     }
   ],
@@ -405,9 +426,54 @@
       "entry": "scope-key-package-v1-removed"
     },
     {
+      "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
+      "change": "changed",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
       "item": "export:@byok-sdk/cloud#E2eeMemberStore",
       "change": "changed",
       "entry": "scope-key-package-v1-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+      "change": "changed",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveWork",
+      "change": "changed",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAttempt",
+      "change": "changed",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAttemptStore",
+      "change": "changed",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
+      "change": "changed",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskAttemptStore",
+      "change": "changed",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES",
+      "change": "changed",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskAttemptStore",
+      "change": "changed",
+      "entry": "task-attempt-agent-ref-required"
     },
     {
       "item": "export:@byok-sdk/core/sealed-payload#ScopeKeyPackage",
@@ -490,11 +556,30 @@
       "entry": "offer-selection-rules"
     },
     {
+      "item": "export:@byok-sdk/server#TaskSnapshot",
+      "change": "changed",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
+      "item": "store:cloud-dataplane-postgres",
+      "change": "changed",
+      "before": "migrations=37 last=0037_agent_memory_projection_sealed.sql sha256=90707df3bd89ebed",
+      "after": "migrations=38 last=0038_task_agent_ref_required.sql sha256=357bf1205d94ec5e",
+      "entry": "task-attempt-agent-ref-required"
+    },
+    {
       "item": "store:keys-profile-store",
       "change": "changed",
       "before": "ddl-sha256=a59cf523fe7a89d1",
       "after": "ddl-sha256=7c5c4e5f67ea8b36",
       "entry": "opencode-go-keys-store"
+    },
+    {
+      "item": "store:server-sqlite",
+      "change": "changed",
+      "before": "schema_version=8",
+      "after": "schema_version=9",
+      "entry": "task-attempt-agent-ref-required"
     }
   ]
 }

@@ -400,8 +400,8 @@ export interface TaskSnapshot {
   state: TaskState;
   deviceId?: string;
   sessionRef?: string;
-  /** Exact Agent identity for an Agent-bound task; absent for legacy tasks. */
-  agentRef?: AgentRef;
+  /** Exact Agent identity the task was reserved for. */
+  agentRef: AgentRef;
   /**
    * Creation time from the immutable offer receipt, preserved after terminal
    * transitions and SQLite restart. Independent of mailbox delivery time.

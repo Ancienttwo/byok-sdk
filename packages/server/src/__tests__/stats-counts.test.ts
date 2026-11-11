@@ -20,6 +20,8 @@ import {
   TEST_AGENT_REF,
 } from './test-support';
 
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
+
 /**
  * Issue #415: `stats()` re-reads only tasks still in flight, its counts
  * match the full-history projection `tasks.list()` reports at quiescence.
@@ -218,16 +220,16 @@ describe('store-aggregated stats()', () => {
     const started = await start();
     const tasks = kernelCalls.rawTasks!;
     const tenant = serverTenantId(PRODUCT_ID);
-    await tasks.open(tenant, { taskId: 'external', deviceId: 'device' });
+    await tasks.reserveAgentOffer(tenant, { taskId: 'external', deviceId: 'device', agentRef: AGENT_REF });
     expect((await started.byok.stats()).taskCountsByState.Offered).toBe(1);
-    await tasks.recordStatus(tenant, { taskId: 'external', status: 'complete' });
+    await tasks.recordStatus(tenant, { taskId: 'external', status: 'complete', agentRef: AGENT_REF });
     expect((await started.byok.stats()).taskCountsByState).toMatchObject({ Offered: 0, Complete: 1 });
   });
 
   it('walks every active page when more than 100 attempts remain in flight', async () => {
     const started = await start();
     for (let index = 0; index < 205; index += 1) {
-      await kernelCalls.rawTasks!.open(serverTenantId(PRODUCT_ID), { taskId: `external-${index}`, deviceId: 'device' });
+      await kernelCalls.rawTasks!.reserveAgentOffer(serverTenantId(PRODUCT_ID), { taskId: `external-${index}`, deviceId: 'device', agentRef: AGENT_REF });
     }
     const reads = await statsReads(started.byok);
     expect(reads.stats.taskCountsByState.Offered).toBe(205);
@@ -255,7 +257,7 @@ describe('store-aggregated stats()', () => {
   it('counts a new active task created after the aggregate exactly once', async () => {
     const started = await start();
     kernelCalls.afterCount = async () => {
-      await kernelCalls.rawTasks!.open(serverTenantId(PRODUCT_ID), { taskId: 'new', deviceId: 'device' });
+      await kernelCalls.rawTasks!.reserveAgentOffer(serverTenantId(PRODUCT_ID), { taskId: 'new', deviceId: 'device', agentRef: AGENT_REF });
     };
     const counts = (await started.byok.stats()).taskCountsByState;
     expect(counts.Offered).toBe(1);

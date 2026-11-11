@@ -313,12 +313,50 @@ Upgrade only when it returns 0. If it does not, stay on the previous version and
 
 A rotation leaves a version 1 row in place when its sender is no longer a current member of the scope, so the count can stay above 0. If version 1 rows remain after the rotation, stay on the previous version and open an issue: the SDK has no automatic way to re-wrap them.
 
+## Every task attempt has an Agent identity
+
+`TaskAttemptStore.open` is removed (#1780). `reserveAgentOffer` is the only way to create a task attempt, and `TaskAttempt.agentRef` is required, as is `agentRef` on `recordStatus`; server `TaskSnapshot.agentRef` is required too. A store that implements `TaskAttemptStore` drops `open` and always returns `agentRef`. No build since v0.31.0 creates an attempt without an Agent identity. Builds up to v0.30.2 did, through the legacy `enqueueOffer` and `enqueueToolsetOffer`, and the rows they wrote are still stored: task rows are never deleted.
+
+This build reads such a row as an error. On Postgres every read that meets one throws `ByokCloudError` `task_attempt_agent_ref_missing`, naming the task and `deploy/sql/0038_task_agent_ref_required.sql`; a task page or count that contains one fails as a whole, and offer reservation fails until 0038 has run. Run 0038 as part of the upgrade, as follows.
+
+**Postgres (cloud-dataplane).** Before the upgrade, set the Host schema (for example `SET search_path TO byok_control;`) and run this read-only count. Record its result.
+
+```sql
+SELECT tenant_id,
+       count(*)                                                                 AS no_agent_ref,
+       count(*) FILTER (WHERE status NOT IN ('complete','failed','cancelled'))  AS no_agent_ref_live,
+       min(updated_at)                                                          AS oldest_update,
+       max(updated_at)                                                          AS newest_update
+  FROM task
+ WHERE agent_id IS NULL
+ GROUP BY tenant_id
+ ORDER BY tenant_id;
+SELECT count(*) AS no_agent_ref_total FROM task WHERE agent_id IS NULL;
+```
+
+1. If `no_agent_ref_live` is above 0 for any tenant, those tasks are still open. Settle them first with the previous build: let them finish, or cancel them. 0038 refuses while any remains.
+2. Stop the old application, then run the package migrations (`migrate()` over the new `dist/sql`). 0038 locks `task`, and:
+   - refuses with `0038_task_agent_ref_required: N task(s) without an Agent identity are not terminal; nothing was changed`, when N such tasks are not terminal. The transaction rolls back; go back to step 1;
+   - otherwise moves every terminal task without an Agent identity, whole, into `task_agentless_retired`, removes it from `task`, reports `NOTICE: 0038_task_agent_ref_required: retired N terminal task(s) ...`, and makes `task.agent_id` and `task.agent_profile_revision` NOT NULL.
+3. Record the retired count: `SELECT tenant_id, count(*) FROM task_agentless_retired GROUP BY tenant_id ORDER BY tenant_id;`. It equals `no_agent_ref_total` from the count above, and `SELECT count(*) FROM task WHERE agent_id IS NULL` returns 0 (the column now refuses NULL).
+
+A retired task id stays used: `enqueueAgentOffer` with that `taskId` throws `agent_task_already_exists`. The retired tasks' receipts, mailbox rows, activity and approval history stay where they were; no Agent identity is invented and nothing else is deleted. The retired tasks no longer appear in task reads, lists or counts. Tenant erasure also erases `task_agentless_retired`. Rerunning the migrations is a no-op. Allow for the lock: 0038 holds `task` exclusively until it commits.
+
+**Embedded SQLite.** The SQLite schema moves to version 9 when a version 8 file is opened. The step changes nothing else; it refuses a file that holds any task attempt without an Agent identity with `SqliteSchemaError` `SQLITE_SCHEMA_UNSUPPORTED`, naming the count, and leaves the file at version 8. No SQLite file this build can open was written by a build that created such attempts (every adoptable file is from v0.31.0 or later), so the expected count is 0. To check before upgrading, open the state file read-only (`sqlite3 -readonly <file>`):
+
+```sql
+SELECT count(*) FROM task_attempt WHERE agent_ref_json IS NULL;
+```
+
+A version 9 file cannot be opened by an earlier build.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
 - [ ] Run the H `unmigrated_dreams` and L `legacy_home` queries on v0.41.0; both must be 0 before the upgrade (#1669).
 - [ ] Run `HostedCollaborationStore.migrate()` on every existing hosted schema, then set `setBotAutonomy(..., 'auto')` for each Bot that must keep acting on its own (#1662).
 - [ ] Run `hostProjectionDdl(HOST_SCHEMA)` once before serving the new Worker, and watch `send.failed` in the first pass reports (#1663).
+- [ ] On every hosted Postgres store, run the agent-identity count and record it, then run the migrations including 0038 and record the retired count (#1780).
 - [ ] Pin the Host's direct and resolved SDK dependencies to the release graph.
 - [ ] Apply the Host's backup, stop, precheck, smoke and rollback gates, adjusted to the final release.
 - [ ] Check Codex retention settings and resume behavior where `agentUserContext: 'excluded'` is enabled.

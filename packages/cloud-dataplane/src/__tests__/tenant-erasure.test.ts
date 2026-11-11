@@ -162,8 +162,13 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
   await pool.query(`INSERT INTO auth_nonce (tenant_id, device_id, nonce, expires_at) VALUES ($1, $2, 'nonce', $3)`, [tenant, device, now]);
   await pool.query(`INSERT INTO inbound_dedup (tenant_id, device_id, envelope_id) VALUES ($1, $2, 'envelope')`, [tenant, device]);
   await pool.query(
-    `INSERT INTO task (tenant_id, task_id, device_id, status, updated_at)
-     VALUES ($1, 'task', $2, 'offered', $3)`,
+    `INSERT INTO task (tenant_id, task_id, device_id, agent_id, agent_profile_revision, status, updated_at)
+     VALUES ($1, 'task', $2, 'agent-1', 'rev-1', 'offered', $3)`,
+    [tenant, device, now],
+  );
+  await pool.query(
+    `INSERT INTO task_agentless_retired (tenant_id, task_id, device_id, status, updated_at, retired_at)
+     VALUES ($1, 'retired-task', $2, 'complete', $3, $3)`,
     [tenant, device, now],
   );
   await pool.query(

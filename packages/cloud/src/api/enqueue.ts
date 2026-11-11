@@ -136,7 +136,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
     const messageId = await taskOfferMessageId(tenant, taskId, deviceId, agentRef, bytes => options.crypto.sha256(bytes));
     const proposed = buildEnvelope(taskId, 0, messageId);
     await assertSealedCiphertext(tenant, proposed.payload);
-    // An attempt is the task authority, so reserve/open it BEFORE the offer is
+    // An attempt is the task authority, so reserve it BEFORE the offer is
     // observable in a mailbox.  The stable message identity then makes an
     // append failure retry converge on the one offer rather than allocating a
     // second executable body.
@@ -144,7 +144,6 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
     const openedBeforeAppend = reservation.attempt;
     if (
       openedBeforeAppend.deviceId !== deviceId ||
-      openedBeforeAppend.agentRef === undefined ||
       !sameAgentRef(agentRef, openedBeforeAppend.agentRef)
     ) {
       throw new ByokCloudError('agent_ref_mismatch', `Task ${taskId} already has a different durable target or Agent identity.`);

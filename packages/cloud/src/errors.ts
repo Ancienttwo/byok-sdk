@@ -109,6 +109,12 @@ export const CLOUD_ERROR_CODES = {
   /** A strict Agent task id already names a durable attempt and cannot be re-enqueued. */
   agent_task_already_exists: 'agent_task_already_exists',
   /**
+   * A stored task attempt has no Agent identity: the Postgres store has not run
+   * `deploy/sql/0038_task_agent_ref_required.sql`. The read fails closed; the
+   * operator runs that migration (docs/releases/host-upgrade-next-minor.md).
+   */
+  task_attempt_agent_ref_missing: 'task_attempt_agent_ref_missing',
+  /**
    * A task attempt was opened but the mailbox refused its offer append, so the
    * device never saw it. Raised as {@link TaskOfferAppendRefusedError}, which
    * names the task so the Host can retry with that `taskId` (the retry

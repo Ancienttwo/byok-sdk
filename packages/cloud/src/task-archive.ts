@@ -27,7 +27,7 @@ import type { CloudStores } from './stores/ports';
 export interface TaskArchiveWork {
   readonly taskId: string;
   readonly deviceId: string;
-  readonly agentRef?: AgentRef;
+  readonly agentRef: AgentRef;
   /** `archive`: not archived yet. `settle`: archived, and its board item may remain. */
   readonly phase: 'archive' | 'settle';
 }
