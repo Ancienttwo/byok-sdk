@@ -147,3 +147,25 @@ it('keeps a reply out of the transcript when the daemon stops between its accept
   expect(fx.store.turns(WRITER.id)[0]!.reply).toBeUndefined();
   expect(fx.store.transcript(WRITER.id).map(entry => entry.kind)).toEqual(['input']);
 });
+
+/** A refused Bot leaves the store and its revision unchanged, so the next open still sends a roster that K8 accepts. */
+async function refused(fx: Fixture, profile: typeof WRITER, message: RegExp): Promise<void> {
+  const before = fx.store.roster();
+  await expect(fx.conversation.saveBot(profile)).rejects.toThrow(message);
+  expect(fx.store.roster()).toEqual(before);
+  await reopen(fx);
+  expect(fx.conversation.bot.snapshot().team.external!.revision).toBe(before.revision);
+}
+
+it('refuses a Bot beyond K8\'s team limit before the store commits it', async () => {
+  const fx = await open();
+  for (let n = 1; n <= 24; n++) await fx.conversation.saveBot({ ...WRITER, id: `bot-${n}` });
+  await refused(fx, { ...WRITER, id: 'bot-25' }, /Team Bot limit/);
+}, 30_000);
+
+it('refuses a created or re-pointed Bot whose model is not in the catalog before the store commits it', async () => {
+  const fx = await open();
+  await refused(fx, { ...WRITER, model: 'missing' }, /Unavailable model: missing/);
+  await fx.conversation.saveBot(WRITER);
+  await refused(fx, { ...WRITER, model: 'missing' }, /Unavailable model: missing/);
+});

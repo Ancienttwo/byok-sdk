@@ -96,12 +96,18 @@ export class HostStore {
       .map(row => ({ ...row, archived: row.archived === 1 }));
   }
 
-  /** Creates or edits a Bot and bumps the team revision. An archived Bot cannot be edited. An unchanged profile writes nothing. */
-  saveBot(profile: BotProfile): Roster {
+  /**
+   * Creates or edits a Bot and bumps the team revision. An archived Bot cannot be edited. An unchanged profile writes nothing.
+   * `admit` sees the candidate roster and the Bot's prior profile before anything is written; a throw leaves the store unchanged.
+   */
+  saveBot(profile: BotProfile, admit: (candidate: Roster, prior: BotProfile | undefined) => void): Roster {
     return this.transaction(() => {
-      const prior = this.db.prepare(`SELECT name, role, persona, model, archived FROM bots WHERE id = ?`).get(profile.id) as (BotProfile & { archived: number }) | undefined;
+      const prior = this.db.prepare(`SELECT id, name, role, persona, model, archived FROM bots WHERE id = ?`).get(profile.id) as (BotProfile & { archived: number }) | undefined;
       if (prior?.archived === 1) throw new StoreConflictError(`Bot ${profile.id} is archived`);
       if (prior && prior.name === profile.name && prior.role === profile.role && prior.persona === profile.persona && prior.model === profile.model) return this.roster();
+      const current = this.roster();
+      const bots = prior ? current.bots.map(bot => bot.id === profile.id ? { ...profile } : bot) : [...current.bots, { ...profile }];
+      admit({ revision: current.revision + 1, bots }, prior && { id: prior.id, name: prior.name, role: prior.role, persona: prior.persona, model: prior.model });
       this.db.prepare(`INSERT INTO bots (id, name, role, persona, model, created) VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT (id) DO UPDATE SET name = excluded.name, role = excluded.role, persona = excluded.persona, model = excluded.model`)
         .run(profile.id, profile.name, profile.role, profile.persona, profile.model, this.now());

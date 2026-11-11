@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
-  BotCollaboration, botCompactVeto, historyRowFromTurn, RetentionRefused, TeamModeError, type AgentMessageInput, type ContextTurn, type MessageServer, type TeamSnapshot,
+  BotCollaboration, botCompactVeto, historyRowFromTurn, RetentionRefused, TeamModeError, teamSnapshot as checkTeamSnapshot, type AgentMessageInput, type ContextTurn, type MessageServer, type TeamSnapshot,
 } from '@byok-sdk/example-bot-collaboration';
 import type { DueWake } from '@byok-sdk/server';
 import { HostLedger, type ExecutionTemplate, type Json } from '@byok-sdk/server/execution-core';
@@ -115,11 +115,20 @@ export class Conversation {
   /** Advances the Bot's context epoch. Frozen Turns, K8 cards and questions are untouched. */
   clear(actionId: string, botId: string): void { this.options.store.recordClear(actionId, botId); }
 
-  /** Creates or edits a Bot: the store commits the roster, then K8 receives it. */
-  saveBot(profile: BotProfile): Promise<void> { return this.applyRoster(this.options.store.saveBot(profile)); }
+  /**
+   * Creates or edits a Bot: the store commits the roster, then K8 receives it. The candidate passes K8's own snapshot check
+   * first, and a created or re-pointed Bot needs a catalog template, so K8 never refuses a committed roster at a later open.
+   * A Bot whose template left the catalog later keeps it until it is re-pointed: K8 keeps that Bot's Turns blocked.
+   */
+  async saveBot(profile: BotProfile): Promise<void> {
+    await this.applyRoster(this.options.store.saveBot(profile, (candidate, prior) => {
+      checkTeamSnapshot(teamSnapshot(candidate));
+      if (prior?.model !== profile.model && !Object.hasOwn(this.options.models, profile.model)) throw new Error(`Unavailable model: ${profile.model}`);
+    }));
+  }
 
   /** Archives a Bot for good: the store commits the roster, then K8 receives it. */
-  archiveBot(id: string): Promise<void> { return this.applyRoster(this.options.store.archiveBot(id)); }
+  async archiveBot(id: string): Promise<void> { await this.applyRoster(this.options.store.archiveBot(id)); }
 
   async close(): Promise<void> {
     try {
