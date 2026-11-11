@@ -57,7 +57,7 @@ export class HostedRoutineScheduler {
   }
 
   /**
-   * Run once when the scheduler starts, as K4 `recover`: each scope with an active routine that had no slot within the
+   * Run once when the scheduler starts: each scope with an active routine that had no slot within the
    * horizon re-plans it, and each scope with a staged version checks the switch. One transaction per scope.
    */
   async start(): Promise<RoutineFailure[]> {
@@ -69,7 +69,7 @@ export class HostedRoutineScheduler {
   /**
    * One pass: the schedule upkeep of the scopes with a `schedule_retrying` slot now within the horizon, then the fire of each
    * due routine in slot order. The rows are read in keyset pages, so fenced rows and backed-off rows cannot fill the batch.
-   * Each fire reads the clock, as K4 does when it consumes a wake. The pass time only selects the due rows.
+   * Each fire reads the clock. The pass time only selects the due rows.
    */
   async run(): Promise<SchedulerPass> {
     const now = this.now(), pass: SchedulerPass = { fired: 0, fenced: [], failed: [] }, changed = new Set<string>();

@@ -1,7 +1,7 @@
 import type { ReplyCheck, ReplyReadback } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { DueReplyCheck, HostedCollaborationStore } from './store';
 
-/** The SDK reply readback of one tenant, as L binds `server.tasks.agentMessage`: the SDK `readTaskAgentMessage`. */
+/** The SDK reply readback of one tenant: the SDK `readTaskAgentMessage`. */
 export interface HostedReplyPort {
   agentMessage(taskId: string, deviceId: string, agentRef: NonNullable<DueReplyCheck['task']>['agentRef']): Promise<ReplyReadback>;
 }
@@ -15,11 +15,11 @@ export interface ReplyCheckerOptions {
 }
 
 /**
- * The H reply check (#793 S7), as L's `flushReplies`: for each due reply check of a scope, the chain end's SDK readback, then
+ * The H reply check (#793 S7): for each due reply check of a scope, the chain end's SDK readback, then
  * the K8 `checkReply` decision. Each read runs outside any transaction; each settle is fenced, so a second checker that read
- * the same delegation applies nothing. A read that throws or times out is a failed read, as in L. A settle that throws
+ * the same delegation applies nothing. A read that throws or times out is a failed read. A settle that throws
  * propagates. `delegationDue` puts each check time into `scope.due_at`, so the deployment runs the check from its due
- * scheduler `sync`, before `store.sync`, as L's pass syncs after its reply checks.
+ * scheduler `sync`, before `store.sync`.
  */
 export class HostedReplyChecker {
   private readonly now: () => number;

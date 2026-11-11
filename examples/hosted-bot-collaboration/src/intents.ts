@@ -36,9 +36,9 @@ const ONE_ATTEMPT: RetryPolicy = { maxAttempts: 1, delaysMs: [], retryFailures: 
 /**
  * Saves one intent of generation 0 with its frozen input and its stable task id, `taskId(key, 0)`. The caller holds the
  * scope lock. A second freeze of the same Turn with the same identity changes nothing and returns the stored input, whose
- * task id is the stored row's (an imported row may be of a later generation, #975); another identity throws, as in K4 `enqueue`.
+ * task id is the stored row's (an imported row may be of a later generation, #975); another identity throws.
  * The handler is part of the identity, so a Turn never takes over a Host intent row, and a Host intent never a Turn's.
- * A Turn whose intent compaction retired throws `RetiredIntentIdentityError`, as K4 `enqueue` refuses a retired key (#793 S8).
+ * A Turn whose intent compaction retired throws `RetiredIntentIdentityError` (#793 S8).
  */
 export async function freezeIntent<E extends IntentExecution>(client: PoolClient, scope: string, freeze: IntentFreeze<E>, routine: RoutineTimes = {}):
   Promise<E & { taskId: string }> {
@@ -92,7 +92,7 @@ export async function currentIntent(client: PoolClient, scope: string, key: stri
 
 /**
  * The frozen input of task `task` of an earlier generation of an imported intent (#975 D1): the intent's input with that
- * task id, as K4 `frozenInput` builds each generation's input.
+ * task id.
  */
 export async function earlierIntent(client: PoolClient, scope: string, task: string): Promise<{ turnId: string; input: FrozenExecutionInput } | undefined> {
   const found = await client.query<{ key: string; input: FrozenExecutionInput }>(`SELECT e.key, i.input FROM intent_execution e
@@ -130,7 +130,7 @@ async function loadIntentFacts(client: PoolClient, scope: string, turnIds: reado
     earlierStarted: new Set(found.rows.filter(row => row.earlier_started).map(row => row.key)) };
 }
 /**
- * The intent facts that a command reads (K8 `CommandPorts.intents`), as L reads its K4 intents in the commit transaction.
+ * The intent facts that a command reads (K8 `CommandPorts.intents`).
  * The caller holds the scope lock.
  */
 export async function commandIntentFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<Pick<SyncFacts, 'intent'>> {
@@ -138,8 +138,8 @@ export async function commandIntentFacts(client: PoolClient, scope: string, turn
   return { intent };
 }
 /**
- * The K8 room seat facts (#793 S6), from the intent rows of the seat Turns, as K8 `advanceRooms` (rooms.ts) reads L's K4
- * intents: `admitted` when the seat Turn has an intent, `started` from the reconciliation's claim fact, and the conclusion.
+ * The K8 room seat facts (#793 S6), from the intent rows of the seat Turns:
+ * `admitted` when the seat Turn has an intent, `started` from the reconciliation's claim fact, and the conclusion.
  * The caller holds the scope lock.
  */
 export async function seatFacts(client: PoolClient, scope: string, seatIds: readonly string[]): Promise<Record<string, SeatFacts>> {
@@ -183,8 +183,8 @@ export async function cancelIntent(client: PoolClient, scope: string, turnId: st
 }
 
 /**
- * The intent conclusions that the K8 delivery rules read (#793 D2b-out-2), keyed by K4 `hash(turnId)` as L's ledger keys
- * its intents. The caller holds the scope lock.
+ * The intent conclusions that the K8 delivery rules read (#793 D2b-out-2), keyed by K4 `hash(turnId)`.
+ * The caller holds the scope lock.
  */
 export async function intentConclusions(client: PoolClient, scope: string): Promise<IntentConclusions> {
   const rows = await client.query<{ key: string; conclusion: Conclusion | null }>('SELECT key, conclusion FROM intent WHERE scope = $1', [storedKey(scope)]);
@@ -209,7 +209,7 @@ export async function deliverCancels(client: PoolClient, scope: string, state: C
 
 /**
  * The K4 facts that K8 `settleDelegations` (#793 D2f-5) and `observeDevices` (#793 S11) read, from the intent rows of these
- * Turns, as K8 `intentFacts` reads them from L's ledger: a Turn started when any generation of its intent did, the current
+ * Turns: a Turn started when any generation of its intent did, the current
  * row or an earlier one that an import moved (`intent_execution`, #975). A generation started when the reconciliation saw a
  * claim (`started`) or it has a terminal that is not a decline. The caller holds the scope lock.
  */
@@ -231,9 +231,9 @@ export async function settleFacts(client: PoolClient, scope: string, turnIds: re
 type SettleFacts = Parameters<typeof settleDelegations>[1];
 
 /**
- * Writes the intent side of one sync step, as L writes it to K4 (K8 commit.ts). A routine step and a routine Turn's `ended`
+ * Writes the intent side of one sync step (K8 commit.ts). A routine step and a routine Turn's `ended`
  * step run the K4 rules on `slice`, which the caller writes back after the last step. The caller holds the scope lock.
- * Returns true when the step changed an intent fact or an occurrence, so the sync runs its Turns again, as L drains again.
+ * Returns true when the step changed an intent fact or an occurrence, so the sync runs its Turns again.
  */
 export async function writeSyncStep(client: PoolClient, scope: string, state: CollaborationState, turn: Turn, step: SyncStep<ExecutionTemplate>, slice: RoutineSlice,
   now: number): Promise<boolean> {

@@ -10,22 +10,22 @@ import { errorText, HOST_JOB_EXECUTION_UNSUPPORTED, type DeliveryTimes, type Hom
   type HostedCollaborationStore, type HostJobOutcome } from './store';
 
 /**
- * The Host's projection receiver. It must deduplicate by `(scope, id)`: a send is at least once, as K4's projection flush
- * is, and a crash after the receiver call and before the settle sends the same value again.
+ * The Host's projection receiver. It must deduplicate by `(scope, id)`: a send is at least once,
+ * and a crash after the receiver call and before the settle sends the same value again.
  */
 export interface ProjectionPort {
   deliver(scope: string, id: string, value: Json, signal: AbortSignal): Promise<void>;
 }
 type HomeRequest = Extract<HomeClaim, { kind: 'flush' }>['op']['request'];
 /**
- * The SDK Agent home calls of one tenant (#793 S13), as L binds `readAgentHomeProjection` and `enqueueAgentHomeProjection`:
+ * The SDK Agent home calls of one tenant (#793 S13):
  * the SDK `getAgentHomeProjectionStatus` and `enqueueAgentHomeProjection` for the request's device.
  */
 export interface HostedHomePort {
   read(request: HomeRequest): Promise<HomeReadback | undefined>;
   enqueue(request: HomeRequest): Promise<unknown>;
 }
-/** The Host connector of a confirmed card (#793 S12), as L's `HostOptions.connector`. */
+/** The Host connector of a confirmed card (#793 S12). */
 export type CardConnector = (id: string, action: string, draft: Json, signal: AbortSignal) => Promise<unknown>;
 export interface SenderOptions {
   projections: ProjectionPort;
@@ -33,7 +33,7 @@ export interface SenderOptions {
   channel?: ChannelPort;
   /** The connector of the confirmed cards. Absent: the Host has no connector, and a card row fails. */
   connector?: CardConnector;
-  /** The deadline of one connector call, as L's `connectorTimeoutMs`. Default 30 s. With a connector, `leaseMs` must be longer. */
+  /** The deadline of one connector call. Default 30 s. With a connector, `leaseMs` must be longer. */
   connectorTimeoutMs?: number;
   /**
    * The deadline of one Host job handler run (#793 S14); its signal aborts then. Default 30 s. With Host job handlers in the
@@ -50,7 +50,7 @@ export interface SenderOptions {
   now?: () => number;
   /** How long a claim holds a row. It must be longer than `sendTimeoutMs`, or a running send could be recovered. Default 60 s. */
   leaseMs?: number;
-  /** The deadline of one receiver or channel send, as L's `sendTimeoutMs`. Default 15 s. */
+  /** The deadline of one receiver or channel send. Default 15 s. */
   sendTimeoutMs?: number;
   /** The wait between two readbacks of an `unknown` delivery. Default 30 s. */
   readbackMs?: number;
@@ -76,8 +76,8 @@ type DueRow = { scope: string; key: string; kind: 'projection' | 'delivery' | 'c
  * own steps; a failed row does not stop the later rows.
  * - A projection is sent at least once: a claim raises `tries` and takes a lease under the scope lock, the receiver call runs
  *   with no lock, and the settle is fenced by that `tries`. A sent projection keeps its row, with `settled_at`.
- * - A delivery runs the K8 delivery rules through the store (`claimDelivery`, `finishDelivery`, `readDelivery`), as L's
- *   `flushDeliveries` does: the claim commits before the send, and a claim whose lease passed becomes `unknown`.
+ * - A delivery runs the K8 delivery rules through the store (`claimDelivery`, `finishDelivery`, `readDelivery`):
+ *   the claim commits before the send, and a claim whose lease passed becomes `unknown`.
  * - A card calls its connector at most once (#793 S12): the claim (`claimCard`) takes a try and a lease before the call, the
  *   call runs with no lock and `connectorTimeoutMs`, and the settle (`settleCard`) is fenced by that try. A claim whose lease
  *   passed with no settle ends the card as a timeout, where L calls again after a crash (owner Q3 A).
@@ -155,8 +155,8 @@ export class HostedOutboxSender {
   }
 
   /**
-   * C1-C3 of one card row: claim, one connector call, fenced settle. A connector error or timeout is the card's outcome, as
-   * in L, not a failed step. Returns false when the claim found nothing to call.
+   * C1-C3 of one card row: claim, one connector call, fenced settle. A connector error or timeout is the card's outcome,
+   * not a failed step. Returns false when the claim found nothing to call.
    */
   private async call(scope: string, cardId: string, changed: Set<string>): Promise<boolean> {
     const connector = this.options.connector;
@@ -288,7 +288,7 @@ export class HostedOutboxSender {
     if (claim.kind === 'none') return false;
     if (claim.kind === 'moved') return true;
     if (claim.kind === 'readback') {
-      // Missing readback evidence leaves the row unknown, as in L. A readback that outlasts the send deadline is missing
+      // Missing readback evidence leaves the row unknown. A readback that outlasts the send deadline is missing
       // evidence too, so one hung readback cannot stop the rest of the pass. Its wait is fenced by the attempt it read back,
       // and by its claim's lease, so a later readback claim keeps the row.
       let result: Awaited<ReturnType<NonNullable<ChannelPort['readback']>>> | undefined, failure: { error: unknown } | undefined;
@@ -308,8 +308,8 @@ export class HostedOutboxSender {
   }
 
   /**
-   * Runs a channel or receiver call with an abort signal, and rejects with `SendDeadline` after `ms` (`sendTimeoutMs`), as
-   * L's delivery deadline. H bounds a readback with it too, where L awaits a readback with no deadline.
+   * Runs a channel or receiver call with an abort signal, and rejects with `SendDeadline` after `ms` (`sendTimeoutMs`).
+   * H bounds a readback with it too, where L awaits a readback with no deadline.
    */
   private async deadline<T>(send: (signal: AbortSignal) => Promise<T>, ms = this.sendTimeoutMs): Promise<T> {
     const controller = new AbortController();

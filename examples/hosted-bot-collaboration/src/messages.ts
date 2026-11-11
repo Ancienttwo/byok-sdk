@@ -22,7 +22,7 @@ export interface HostedIntentMessageTransaction {
   publish: Publish;
 }
 /**
- * Decides an Agent message of a Host intent (#1362), as L's `HostIntentMessageHandler`. Synchronous: a throw, a thenable or
+ * Decides an Agent message of a Host intent (#1362). Synchronous: a throw, a thenable or
  * another result than a disposition throws, and the consume transaction writes nothing.
  */
 export type HostedIntentMessageHandler = (input: AgentMessageInput, transaction: HostedIntentMessageTransaction) => MessageDisposition;
@@ -71,7 +71,7 @@ export async function decideMessage(client: PoolClient, scope: string, state: Co
 }
 
 /**
- * A message for the task of an earlier generation of an imported intent (#975 D1), as K4 `consumeMessage` answers it from
+ * A message for the task of an earlier generation of an imported intent (#975 D1), answered from
  * that generation's execution: the binding check, then its receipt (the K8 accepted reply of the task), else
  * `stale_generation`. A task that no generation has is `unknown_task`. It writes nothing.
  */
