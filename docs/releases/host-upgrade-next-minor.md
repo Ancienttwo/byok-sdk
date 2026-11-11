@@ -315,7 +315,7 @@ A rotation leaves a version 1 row in place when its sender is no longer a curren
 
 ## Runtime failures have no category
 
-`RuntimeExecutionFailure` and `RuntimeExecutionFailureInput` no longer have a `category` field, and `RuntimeFailureCategory` is no longer exported from `@byok-sdk/client` or `@byok-sdk/client/adapters` (#1758). Nothing read it: `retry` is the only retry authority and `failure` the only failure class, and the wire projection (`reason`, `retryable`, `failure`) is unchanged. A Host or runtime adapter that constructs a `RuntimeExecutionFailure` deletes the `category` key from the input object; TypeScript reports it as an unknown property until then. Code that names `RuntimeFailureCategory` or reads `.category` deletes that reference.
+`RuntimeExecutionFailure` and `RuntimeExecutionFailureInput` no longer have a `category` field, and `RuntimeFailureCategory` is no longer exported from `@byok-sdk/client` or `@byok-sdk/client/adapters` (#1758). Nothing read it: `retry` is the only retry authority and `failure` the only failure class, and the wire projection (`reason`, `retryable`, `failure`) is unchanged. A Host or runtime adapter that constructs a `RuntimeExecutionFailure` deletes the `category` key from the input object; TypeScript reports it as an unknown property until then. Code that names `RuntimeFailureCategory` or reads `.category` deletes that reference. Load runtime adapters and the daemon from the same client version: an older client's `isRuntimeExecutionFailure` refuses a failure without `category` and reports it as an adapter-contract violation.
 
 ## Release and verification checklist
 
