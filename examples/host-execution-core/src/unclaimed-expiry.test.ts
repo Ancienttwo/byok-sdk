@@ -8,7 +8,7 @@ import { serve } from '@hono/node-server';
 import { createByokServer } from '@byok-sdk/server';
 import { createDaemonWithAdapters, type AgentEgressPolicy } from '@byok-sdk/client';
 import { expect, it, vi } from 'vitest';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 
 it('distinguishes pre-claim cancellation from claimed cancellation through attempt readback', async () => {
@@ -26,7 +26,7 @@ it('distinguishes pre-claim cancellation from claimed cancellation through attem
   const address = http.address();
   if (!address || typeof address === 'string') throw new Error('Missing TCP address');
   const adapter = new BotStubAdapter();
-  const deviceCredentials = new InMemoryDeviceCredentialStore();
+  const deviceCredentials = new InMemoryDeviceCredentialBackend();
   const config = {
     productId, productName: 'K4 probe', localAgentRelease: { version: '0.0.0-probe' },
     serverUrl: `http://127.0.0.1:${address.port}`,

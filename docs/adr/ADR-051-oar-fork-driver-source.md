@@ -11,7 +11,7 @@ appliesTo:
 
 > **来源**：parent issue [#1851](https://github.com/Ancienttwo/byok-sdk/issues/1851)（owner 2026-11-11 的决定和批准）；做法见 [#1852](https://github.com/Ancienttwo/byok-sdk/issues/1852) 和其上的 planner `decision` 评论。
 > **例外的依据**：Pi 见 [#1855 的 decision 评论](https://github.com/Ancienttwo/byok-sdk/issues/1855#issuecomment-6799690796)；Hermes 见 [#1854](https://github.com/Ancienttwo/byok-sdk/issues/1854) 的第一条评论和 body。
-> **关联**：`packages/client/vendor/oar/45488e7/PROVENANCE.md`（改动清单、bump 流程）、`scripts/ci/oar-sync.mjs`。
+> **关联**：`packages/client/vendor/oar/ac7fde4/PROVENANCE.md`（改动清单、bump 流程）、`scripts/ci/oar-sync.mjs`。
 
 状态：已决定。本 ADR 随 #1852 合入；Claude 驱动的迁移（#1853）和 Hermes adapter 的封存（#1854）各自落地。
 
@@ -47,7 +47,7 @@ SDK 的 runtime 驱动有两种来源：Codex、Grok、OpenCode、Antigravity、
 ### D4. 例外
 
 - **Pi 和 pi-durable 留在 SDK**，没有退出条件。SDK 自己就是 Pi 的 host：把 Pi 当库嵌进自己的进程，在 `packages/client/src/bin/pi-rpc-host.ts` 装 extension；上游 OAR 的 pi 做的是同一层的事，没有调用方注入 extension 的口子，凭证从 Pi 的 agent dir 读，子进程环境从 `process.env` 起算，也没有 prepared lane。这个例外保护的不变量：provider key 只经一次性私有 IPC 进 host 的内存，子进程只看到显式环境；每次工具调用过 SDK 的授权 hook，文件范围和 subagent 闸门作为 SDK extension 装入；prepared 和 durable 两条 lane（按 execution 的副本、和 lease 绑定的写锁、重启预算）。
-- **Hermes 不搬到 fork，runtime adapter 封存**（#1854）。删除前在 `train/next-minor` 最后一个带 adapter 的 commit 上打 tag `archive/hermes-runtime-adapter`。重启条件：上游 OAR 提供 hermes runtime，或者有产品要用 Hermes runtime。恢复时从 tag 取代码，按本 ADR 的规则走 fork。
+- **Hermes 不搬到 fork，runtime adapter 封存**（#1854）。删除前在 main 最后一个带 adapter 的 commit 上打 tag `archive/hermes-runtime-adapter`（2026-11-12 起只有 main 一条 lane）。重启条件：上游 OAR 提供 hermes runtime，或者有产品要用 Hermes runtime。恢复时从 tag 取代码，按本 ADR 的规则走 fork。
 
 ## 3. 对下游的约束
 

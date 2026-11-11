@@ -77,6 +77,8 @@ describe('daemon lifecycle (#391)', () => {
     server.setRejectHello(true);
     await startDaemon();
 
+    await expect(daemon!.whenOpen({ signal: AbortSignal.timeout(5_000) }))
+      .rejects.toMatchObject({ name: 'DaemonHaltError', reason: 'handshake_rejected' });
     await vi.waitFor(() => {
       expect(daemon!.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'handshake_rejected' });
     }, { timeout: 5_000 });
@@ -103,11 +105,18 @@ describe('daemon lifecycle (#391)', () => {
     }, { timeout: 5_000 });
     expect(daemon!.status().lifecycle).toEqual({ phase: 'running', connection: 'connecting' });
     expect(hellos()).toHaveLength(0);
+    const host = new AbortController();
+    const abandoned = daemon!.whenOpen({ signal: host.signal });
+    host.abort(new Error('host gave up'));
+    await expect(abandoned).rejects.toThrow('host gave up');
 
     server.setFailMessagesSends(false);
-    await waitForDaemonOpen(daemon!, 5_000);
+    await daemon!.whenOpen({ signal: AbortSignal.timeout(5_000) });
     expect(daemon!.status().lifecycle).toEqual(OPEN_LIFECYCLE);
     expect(lifecycles).toEqual([{ phase: 'running', connection: 'connecting' }, OPEN_LIFECYCLE]);
+    await daemon!.stop();
+    await expect(daemon!.whenOpen({ signal: AbortSignal.timeout(1_000) }))
+      .rejects.toMatchObject({ name: 'DaemonNotOpenError', reason: 'stopped' });
   });
 
   it('sends an unacknowledged reliable record again after a reconnect, without a restart', async () => {
@@ -221,6 +230,8 @@ describe('daemon lifecycle (#391)', () => {
       await daemon.start();
 
       await vi.waitFor(() => expect(daemon!.status().lifecycle).toMatchObject({ phase: 'crashed' }), { timeout: 5_000 });
+      await expect(daemon.whenOpen({ signal: AbortSignal.timeout(1_000) }))
+        .rejects.toMatchObject({ name: 'DaemonNotOpenError', reason: 'crashed' });
       expect(hook).toHaveBeenCalledTimes(1);
       expect(lifecycles.map((lifecycle) => lifecycle.phase)).toEqual(['running', 'running', 'crashed']);
       await vi.waitFor(async () => {

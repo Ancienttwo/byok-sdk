@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
-import { InMemoryDeviceCredentialStore } from '../../../../../scripts/testing/device-credentials.mjs';
+import { InMemoryDeviceCredentialBackend } from '../../../dist/testing/index.js';
 const config = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const {createDaemon} = await import(pathToFileURL(config.clientEntry).href);
 const enrollment = await new Promise(resolve => process.once('message', resolve));
-const credentials = new InMemoryDeviceCredentialStore();
+const credentials = new InMemoryDeviceCredentialBackend();
 if (enrollment.record) await credentials.replace(enrollment.record);
 const daemon = createDaemon({
   localAgentRelease:{version:'0.0.0-durable-recovery-test'},productName:'Durable recovery',productId:config.productId,serverUrl:config.serverUrl,

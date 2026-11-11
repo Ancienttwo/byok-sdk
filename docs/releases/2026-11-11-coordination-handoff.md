@@ -10,22 +10,24 @@
 - 跨机器只走 hc（`hc run|exec|file --on <machine>`）。不开 raw ssh、scp 或隧道，也不做 Cloudflare Access 登录。
 - commit 和 PR 不带 AI attribution。PR 正文只用 `Refs #N`，不用 closing keyword（`Fixes` 和 `does not close #N` 都会触发关闭）。
 
-## 2. 分支状态（写本文时）
+## 2. 分支状态
 
-- main：`06605ea91`（batch main-1：#1779、#1794、#1786）
-- train/next-minor：`41216a2c3`（batch train-2：#1797、#1798、#1800）
+- 现役只有一条发布 lane，就是 main。`58576c2ec` 是 PR #1872 的 merge commit，把 train/next-minor 合了进来；train/next-minor 就此退役，不再有 main→train 的同步 PR。
+- 下面两条是写本文时（2026-11-11）的状态，只作历史记录：
+  - main：`06605ea91`（batch main-1：#1779、#1794、#1786）
+  - train/next-minor：`41216a2c3`（batch train-2：#1797、#1798、#1800）
 
 ## 3. 合并方式（owner 2026-11-11 裁定）
 
 改用批量合并，不再逐个串行合：
 
-- **分批**：main 和 train 各开一条 batch 分支，名为 `batch/main-<n>`、`batch/train-<n>`，收进所有 review 已通过的 PR。CHANGELOG、README 预算表和 upgrade-manifest 在 batch 上统一处理一次（脚本重新生成），CI 只跑一次。
-- **合并**：main 的 batch 用 squash，正文逐行列出 PR 和对应的 `Refs`；train 的 batch 用 merge commit。合完后把原 PR 关掉，留言「merged via batch #N」。
+- **分批**：只开一条 batch 分支，名为 `batch/main-<n>`，收进所有 review 已通过的 PR。CHANGELOG、README 预算表和 upgrade-manifest 在 batch 上统一处理一次（脚本重新生成），CI 只跑一次。
+- **合并**：batch 用 squash 合进 main，正文逐行列出 PR 和对应的 `Refs`。合完后把原 PR 关掉，留言「merged via batch #N」。
 - **失败**：batch 挂了，只移出出问题的 PR，其余照合。
-- **节奏**：新 PR 每 30–60 分钟攒成一批。
+- **节奏**：一个 PR 的必需 CI 全绿、review 按 tier 拿到 PASS，就立刻合，单独合或攒成小批都行。什么时候合由总控和策划定，不问 owner（2026-11-12 总控与策划的联合作法）。
 - **不变的门**：review 门、tier、closing-ref 检查和 AI trailer 检查都不变。
-- 合并管家 seat 负责 rebase 和生成文件，不改产品代码。冲突超出 CHANGELOG、README、`api-surface/entries.json`、`packages/client/upgrade-manifest.json` 这几个文件，或者会改动 golden `.d.ts` 时，PR 退回 writer。
-- issue 的修复合进 main 或 train 后，随即留言关闭，不再等发版（owner 同日裁定）。
+- 合并管家 seat 负责 rebase 和生成文件，不改产品代码。golden `.d.ts`、`api-surface`、CHANGELOG、upgrade-manifest、README 预算表这些生成物的漂移，由管家在合并时重新生成，不因此退回 PR；只有产品代码冲突才退回 writer。
+- issue 的修复合进 main 后，随即留言关闭，不再等发版（owner 同日裁定）。
 
 ## 4. 在途 PR
 

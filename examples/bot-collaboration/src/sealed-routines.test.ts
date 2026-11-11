@@ -2,7 +2,7 @@ import { describe, expect, it, beforeAll } from 'vitest';
 import { hash, promoteOccurrence, recordOccurrence, routineCommands, routineTemplateBinding, sealRoutineTemplate, type LedgerState,
   type Routine } from '@byok-sdk/server/execution-core';
 import { sealContent } from '@byok-sdk/core/sealed-payload';
-import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { template } from './k4-fixtures.test-support';
 import { BOT_ROUTINE, botRoutines, resealDefinition, routineCalendar, routineTurn, sealedDefinition, sealedRoutineInstruction, sealedTemplate,
   SealedRoutineVersionError, updateDefinition, type SealedRoutineAction, type SealedRoutineTemplate } from './routines';
 import { SYSTEM_PROMPT } from './rules/schema';

@@ -145,6 +145,7 @@ export {
   DaemonConfigFieldRemovedError,
   DaemonJournalProtocolUnsupportedError,
   DeviceStoreBindingMismatchError,
+  EmbeddedPairingError,
   HostLayoutInputError,
   type DaemonJournalProtocolRecord,
 } from './daemon/daemon-errors.js';
@@ -180,6 +181,7 @@ export {
 export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './util/team-tmux-view.js';
 export type {
   Daemon,
+  EmbeddedPairingServer,
   DaemonConfig,
   DaemonStatus,
   DaemonOverrides,
@@ -484,7 +486,7 @@ export type {
   VerifiedTruthRecord,
 } from './daemon/truth-memory-client.js';
 export type { ConnectionState } from './daemon/connection-manager.js';
-export { DAEMON_HALT_REASONS, DaemonHaltError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
+export { DAEMON_HALT_REASONS, DaemonHaltError, DaemonNotOpenError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
 export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle.js';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';
 export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client.js';
@@ -616,6 +618,7 @@ export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp.js';
 export { isReservedMcpServerName } from './sdk-reserved-mcp.js';
 
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets.js';
+export { resolveSdkHosting, SdkHostingAssetsMissingError, type SdkHosting, type SdkHostingOptions } from './sdk-hosting.js';
 
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export.js';
 

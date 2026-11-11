@@ -2,6 +2,21 @@
 
 Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Loopback listener close waits for handlers
+
+`LoopbackListener.close()` now resolves only after every dispatched handler has settled; before, it destroyed connections and resolved while a handler could still run. Requests not yet dispatched get 503. There is no timeout. Shut down in the order `daemon.stop()`, `listener.close()`, `server.close()`, and do not make a request-scoped hook wait on anything the Host releases after `listener.close()`, or `close()` never resolves. See [Embedded path](../device-setup.md#embedded-path).
+## Packaged Hosts resolve SDK hosting from the asset root
+
+A single-file Host that ships `copySdkPackagingAssets` output can replace its hand-built `sdkHelperHost`, `runtimes.pi.packageDir`, `nativeAssetRoot` and `agentMemoryHelperAssetRoot` with one `resolveSdkHosting({ assetRoot, helperHost })` call at startup (#1839). Spread `hosting.daemon` into `DaemonConfig` and `hosting.adapters` into `RuntimeAdaptersConfig`, merging `hosting.adapters.runtimes.pi` into the Host's own `runtimes`; pass `hosting.daemon.nativeAssetRoot` to `readDeviceEnrollmentStatus` and to `loadSdkKoffiAsset` in a provider launcher. A missing required asset now throws `SdkHostingAssetsMissingError` at that call instead of failing at the first Windows credential, Job Object or memory helper use. Hosts that keep setting the four fields directly need no change.
+## Agent memory start refusal classes
+
+A task that an Agent home's memory refuses before its runtime starts now carries a typed `task.fail.failure.class` (#1843): `agent_memory_resident_over_limit`, `agent_memory_resident_multiple_links`, `agent_memory_resident_not_regular_file`, `agent_memory_resident_not_utf8`, `agent_memory_snapshot_over_file_limit`, `agent_memory_snapshot_over_byte_limit` or `agent_memory_snapshot_refused`. The list is `AGENT_MEMORY_START_REFUSALS` from `@byok-sdk/protocol/constants`. The reason text is unchanged, so a Host that parses the reason prefix keeps working, but it should branch on `readTaskFailure(failure).class` instead.
+
+A Host on 0.41.0 reads these as `unknown` with `reportedClass` until it upgrades. A missing file, a changed home identity and an I/O failure stay `unknown`. A task that seals its output sends `unknown` for every refusal, so a Host that seals output still needs its own pre-dispatch check until `checkAgentMemoryHome` ships (#1843 slice 2). `TaskFailureReading` gains a member: an exhaustive `switch` over `readTaskFailure(failure).class` stops compiling until it handles the new classes. `agent_memory_resident_not_regular_file` cannot be repaired by a write task: the file has to be replaced outside a task. A `MEMORY.md` that is already not a regular file when the offer arrives is declined before claim with reason text and no class. Code that constructs `AgentMemorySnapshotLimitError` must pass the bound it hit as the new first argument.
+## OAR 0.99.0 driver base (#1863)
+
+A Grok follow-up sent while Grok runs a turn of its own is held until that turn closes; budget the task deadline for that wait. Grok 429s that name a spending limit now fail as `quota` or `billing` (non-retryable) instead of retryable `rate_limited`. A Codex older than OAR needs, or with an unreadable `config.toml`, fails the start as non-retryable `invalid_request`. Confirm that the Host does not retry those classes as transient.
+
 ## OpenCode start failures
 
 OpenCode now reports unclassified start failures as retryable infrastructure failures. A native process that exits on its own reports `runtime_exited` during start or a turn; an archived resume target is non-retryable, while a target in use is retryable. Session limits accept fractional interrupt milliseconds and report invalid limits as `invalid opencode interrupt timeout` or `invalid opencode retention budget` (#1681).
@@ -156,6 +171,8 @@ No Host configuration change is required (#1632). OpenCode now advertises `mcpTo
 ## Bot collaboration vendoring
 
 Hosts that vendor K8 must also copy `src/adapter-steps.ts` in Layer 2 (#1664). The local and hosted adapters use it for terminal routing, synchronous Host intent handling and Bot outcome port assembly. The hosted example now exports K8's `IntentOutcomeError` class; use that shared class for `instanceof` checks.
+
+Layer 3 no longer needs a module of your own for K4 test data (#1845). Copy `src/k4-fixtures.test-support.ts` with the vectors and drop whatever you resolved `@byok-sdk/example-host-execution-core/test-support` to: the `policy` constant and the `template(deviceId, agentId)` function are K8's own copy now, and the vectors read them from there. Nothing else in the layer changed, and the returned template is the same value, so a ledger and a daemon fixture behave as before.
 
 H vendors also receive one outbox projection row per stored inbound destination from sync; an unchanged destination reuses its projection row (#1664 PR-3b).
 
@@ -419,6 +436,14 @@ The official Pi closure moves from 1.5.0 to 1.5.2 (#1864). Prepare again every p
 
 No configuration change is needed for the new Pi defaults. Pi 1.5.1 keeps prompt caches warm for up to 30 minutes between runs by default (`cacheWarming: "idle"`). Because a Host cannot see or bound that spend, the session of every SDK Pi RPC host refuses each refresh while it is idle, so it warms only during an active run. Under `agentUserContext: 'inherit'` a device setting of `"off"` still turns warming off; under `excluded` the session's settings are in memory and do not read the device file. A pi-subagents child is disposed when its run ends, and disposal cancels its warmer, so no child warms after its run either. On the native Pi auth route, a task on the built-in `anthropic` provider at `api.anthropic.com` now sends only new messages and continues the server-side thread, falling back to a full request when the server refuses; a keys profile route sends full requests as before. A native launch with no Host model selection still uses the device's Pi settings; only when those name no default model does Pi pick its per-provider default, which is now `claude-opus-5-5` for `anthropic`.
 
+## Embedded pairing and connection wait
+
+`Daemon` gains two required members, `pairEmbedded(server)` and `whenOpen({ signal })` (#1840). A Host test double typed as `Daemon` must add both.
+
+An embedded Host that pairs its daemon against its own in-process server replaces its `createPairingCode` and `pair` calls with `daemon.pairEmbedded(byokServer)`. It reads the store's enrollment under the daemon owner lease and never starts the daemon. An unpaired store against a server with no devices pairs and returns the new device. A paired store whose device `machines.list()` reports is returned unchanged. Every other state throws `EmbeddedPairingError` and writes nothing: `enrollment_missing` (unpaired store, server already lists devices), `device_unknown` (the server does not list this store's device), `re_pair_required` (the device record has no OS credential entry) or `store_not_bound` (the OS entry holds another storeDir's enrollment). The enrollment record is the one device id authority; a Host that keeps its own copy compares it with the returned `deviceId`. If the server database is lost while the store survives, the refusal is `device_unknown`; if the store is lost while the server keeps devices, it is `enrollment_missing`.
+
+A Host that polls `status().lifecycle` for `running/open` after `start()` calls `await daemon.whenOpen({ signal: AbortSignal.timeout(ms) })` instead. It rejects with `DaemonHaltError` on a halt, `DaemonNotOpenError` (`stopped` or `crashed`) when the run ended otherwise, and with `signal.reason` on abort.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
@@ -442,3 +467,10 @@ On Windows, the SDK now refuses a configured root that passes through a symbolic
 Before, a `hostStorageRoot` behind a link was followed silently, and relocation already refused the same root. A `storeDir` behind a link failed later in the scratch, retention or relocation checks. Subst drives, mapped network drives and mount points to a volume with a drive letter still resolve to their final path. A mount point to a volume with no drive letter is expected to fail construction. A subst or mapped drive whose backing path contains a link is still followed, because only the configured spelling is checked. POSIX keeps its trusted-link rule.
 
 Before upgrading a Windows Host, check every configured root for a link in its existing ancestors, for example with `dir /AL` on each parent or `(Get-Item <path>).LinkType` in PowerShell. Point a linked setting at the physical directory, the link's target. Roots without a link keep their identities. Changing `storeDir` to its physical spelling changes its control pipe name and Agent-home owner id, so stop the daemon before changing it.
+
+## Host model-route entries can declare a default thinking level
+
+`ModelRouteHostEntry` accepts an optional `default_thinking_level` (#1856), additive. A Host that keeps its own default-level rule for a Host entry can move it onto the entry; the level must be one its `config` supports, or `modelRouteContext` throws. Entries without the field behave as before.
+## In-memory device credential backend (#1844)
+
+`@byok-sdk/client/testing` exports `InMemoryDeviceCredentialBackend`, a `DeviceCredentialBackend` held in memory. A Host that hand-rolls a memory backend for its tests deletes it and injects this one as `deviceCredentials`, so a test that builds a daemon never writes an enrollment to the Keychain or Credential Manager. No runtime Host change is required.

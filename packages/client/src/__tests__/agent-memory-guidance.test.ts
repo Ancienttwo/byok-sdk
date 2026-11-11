@@ -24,7 +24,7 @@ import {
   prependAgentReaderResultGuidance,
 } from '../daemon/memory-guidance';
 import { serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio } from '../agent-memory/mcp-server';
-import { TaskRunner } from '../daemon/task-runner';
+import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { testIngressBudget } from './fixtures/activity-ingress';
@@ -192,7 +192,7 @@ describe('Agent memory guidance', () => {
 
 // #614 follow-ups: the guidance follows `agentMemoryMcp`, and a reader gets no write tool.
 // `withHelperBin: false` under `auto` leaves out the memory MCP helper, which is admission `unavailable`.
-async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mcpToolsets = true, withHelperBin = true) {
+async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mcpToolsets = true, withHelperBin = true, sealedTasks?: TaskRunnerDeps['sealedTasks']) {
   const hostStorageRoot = await makeRoot();
   const storeDir = await makeRoot();
   const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets });
@@ -203,6 +203,7 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-memory-admission',
     agentMemoryCommit: { copy: async () => {}, refusal: async () => undefined, settle: async () => {} },
+    ...(sealedTasks === undefined ? {} : { sealedTasks }),
     send: (envelope) => { sent.push(envelope); },
     blobClient: {
       resolveInstruction: async () => { throw new Error('not used in this test'); },
@@ -294,18 +295,29 @@ describe('Agent memory at task start', () => {
   });
 
   it.each([
-    ['one byte over the limit', async (file: string) => fs.writeFile(file, 'x'.repeat(8193)), `agent_memory_resident_over_limit: 8193/8192${AGENT_MEMORY_RECOVERY}`],
-    ['invalid UTF-8', async (file: string) => fs.writeFile(file, Buffer.from([0xff, 0xfe])), 'agent_memory_resident_unreadable: not valid UTF-8'],
+    ['one byte over the limit', async (file: string) => fs.writeFile(file, 'x'.repeat(8193)), `agent_memory_resident_over_limit: 8193/8192${AGENT_MEMORY_RECOVERY}`, 'agent_memory_resident_over_limit'],
+    ['invalid UTF-8', async (file: string) => fs.writeFile(file, Buffer.from([0xff, 0xfe])), 'agent_memory_resident_unreadable: not valid UTF-8', 'agent_memory_resident_not_utf8'],
     ['a file with a second hard link', async (file: string) => {
       await fs.writeFile(file, 'small');
       await fs.link(file, `${path.dirname(file)}-outside.md`);
-    }, 'agent_memory_resident_unreadable: multiple links'],
-  ])('fails a fresh task on %s before the runtime starts, without retry', async (_label, plant, reason) => {
+    }, 'agent_memory_resident_unreadable: multiple links', 'agent_memory_resident_multiple_links'],
+  ])('fails a fresh task on %s before the runtime starts, without retry', async (_label, plant, reason, failureClass) => {
     const { adapter, offer, failureOf, prepareHome } = await createMemoryRunner('auto');
     const home = await prepareHome('agent-refused');
     await plant(path.join(home, 'MEMORY.md'));
     await offer('refused', { agentId: 'agent-refused' });
-    expect(failureOf('refused')?.payload).toMatchObject({ reason, retryable: false });
+    expect(failureOf('refused')?.payload).toMatchObject({ reason, retryable: false, failure: { class: failureClass } });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('sends the unknown class for a task that seals its output, whose sealing hides its memory state', async () => {
+    // Only the class choice is under test: a task the runner knows as sealed, sending in plaintext.
+    const sealed = { isSealed: () => true, sealsOutput: () => true, sealsMessages: () => false, sealsInput: () => false, sealsOutbound: () => false };
+    const { adapter, offer, failureOf, prepareHome } = await createMemoryRunner('auto', true, true, sealed as unknown as TaskRunnerDeps['sealedTasks']);
+    const home = await prepareHome('agent-sealed');
+    await fs.writeFile(path.join(home, 'MEMORY.md'), 'x'.repeat(8193));
+    await offer('sealed-refused', { agentId: 'agent-sealed' });
+    expect(failureOf('sealed-refused')?.payload).toMatchObject({ retryable: false, failure: { class: 'unknown' } });
     expect(adapter.startCalls).toHaveLength(0);
   });
 });

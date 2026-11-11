@@ -748,6 +748,8 @@ export interface ModelRouteHostEntry {
     /** `pi_model` without `thinkingLevel`. */
     readonly config: unknown;
     readonly input: readonly PiCatalogModelInput[];
+    /** The thinking level a draft takes when this entry is selected. One of the levels its `config` supports. */
+    readonly default_thinking_level?: PiThinkingLevel;
 }
 /** Product choices a Host passes in, instead of forking SDK data. */
 export interface ModelRoutePolicy {
@@ -777,8 +779,9 @@ export interface ModelRouteContext {
 }
 /**
  * A context over the pinned Pi catalog. A policy that lists one vendor, api
- * and model in two Host entries, or a Host entry whose model id a profile
- * cannot hold, is a Host programming error and throws.
+ * and model in two Host entries, a Host entry whose model id a profile cannot
+ * hold, or one whose `default_thinking_level` its config does not support, is
+ * a Host programming error and throws.
  */
 export declare function modelRouteContext(input?: {
     readonly stored?: ModelRouteStoredProfile | null;

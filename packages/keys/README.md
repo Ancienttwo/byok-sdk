@@ -423,7 +423,10 @@ if (submission.ok) {
   (`providerProfileRouteIssues`) accept it; otherwise it is unrepresentable,
   and selecting it falls back to manual. `modelRouteContext` throws on a
   policy that repeats a Host entry or has one whose model id a profile cannot
-  hold.
+  hold, or whose `default_thinking_level` its `config` does not support.
+- A Host entry's optional `default_thinking_level` is the level a draft takes
+  when that entry is selected. It applies after a kept valid level and before
+  `off`-only and Pi's default; a stored valid level is never replaced.
 - The key is write-only. A view shows `keep`, `none` or `replace`, never the
   key. `providerSecretReusable` keeps a stored key only while `profile_ref`,
   `provider_kind`, `adapter`, `auth_mode` and the normalized `base_url` are
