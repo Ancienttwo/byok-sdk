@@ -1,10 +1,8 @@
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
-import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
 import { toRuntimeInfoCapabilities } from '../daemon/runtime-capabilities';
 import type { RuntimeAdapter, RuntimeCapabilities } from '../types';
 
@@ -34,7 +32,6 @@ const adapters = (): ReadonlyArray<readonly [string, RuntimeAdapter]> => [
   ['claude', new ClaudeAdapter()],
   ['codex', new CodexAdapter()],
   ['grok', new GrokAdapter()],
-  ['hermes', new HermesAdapter({ home: path.resolve('/byok-runtime-capability-matrix') })],
 ];
 
 describe('runtime capability matrix projection to conn.hello / presence', () => {

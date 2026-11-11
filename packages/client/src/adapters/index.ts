@@ -41,8 +41,6 @@ export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-ada
 
 export { GrokAdapter } from './grok/grok-adapter.js';
 export type { GrokAdapterOptions } from './grok/grok-adapter.js';
-export { HermesAdapter } from './hermes/hermes-adapter.js';
-export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter.js';
 export { AgyAdapter } from './antigravity/agy-adapter.js';
 export type { AgyAdapterOptions } from './antigravity/agy-adapter.js';
 export { DshAdapter } from './dsh/dsh-adapter.js';

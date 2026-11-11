@@ -584,7 +584,6 @@ export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter.js';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter.js';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter.js';
 
-export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter.js';
 export { AgyAdapter, type AgyAdapterOptions } from './adapters/antigravity/agy-adapter.js';
 export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter.js';
 

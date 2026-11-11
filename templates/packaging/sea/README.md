@@ -118,7 +118,7 @@ SEA entry.
 `import.meta`. They are the plugin's reviewed `sdkBundleImportMetaExemptions`,
 each with its reason:
 - koffi's native loader (`import.meta.dirname`). On Windows the SDK loads koffi
-  for process ownership and for the Hermes gateway pipe. Pass `nativeAssetRoot`
+  for process ownership. Pass `nativeAssetRoot`
   from `copySdkNativeAssets`. The SDK then loads the addon itself, and koffi's
   loader never runs. `examples/packaging/native-assets-smoke.mjs`
   proves this route in a Windows SEA built with this recipe.
