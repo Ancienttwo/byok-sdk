@@ -1,8 +1,8 @@
 // ==== @byok-sdk/client dist/adapters/antigravity/agy-adapter.d.ts ====
 import type { spawn as nodeSpawn } from 'node:child_process';
-import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
-import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import type { ResolvedBin } from '../codex/resolve-bin';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types.js';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
 export interface AgyAdapterOptions {
     /**
      * Absolute path of the OS home (`HOME`, `USERPROFILE`) this SDK owns for the
@@ -41,7 +41,7 @@ export declare class AgyAdapter implements RuntimeAdapter {
     private readonly effectiveVersionPolicy;
     private readonly interruptTimeoutMs;
     private readonly maxRetainedBytes;
-    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     constructor(options: AgyAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     /** Reads the version. `authPresent` is whether the runtime environment carries `GEMINI_API_KEY`; the key is not checked against the provider. */
@@ -50,11 +50,11 @@ export declare class AgyAdapter implements RuntimeAdapter {
     private start;
 }
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
-import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
-import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { type ResolvedBin } from './resolve-bin';
-import { type NativeInteractionHostOptions } from '../../native-interactions';
-import { type SpawnFn } from './process-client';
+import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types.js';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { type ResolvedBin } from './resolve-bin.js';
+import { type NativeInteractionHostOptions } from '../../native-interactions.js';
+import { type SpawnFn } from './process-client.js';
 export interface ClaudeAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
@@ -96,7 +96,7 @@ export interface ClaudeAdapterOptions {
 }
 export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
-    readonly descriptor: import("..").RuntimeAdapterDescriptor;
+    readonly descriptor: import("../index.js").RuntimeAdapterDescriptor;
     private readonly nativeOptions?;
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
@@ -127,10 +127,10 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private resolveBin;
 }
 // ==== @byok-sdk/client dist/adapters/claude/events.d.ts ====
-import type { McpEventIdentities } from '../../mcp/event-identity';
+import type { McpEventIdentities } from '../../mcp/event-identity.js';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { MessageDraftDelta } from '../../types';
-import { RuntimeExecutionFailure } from '../../runtime-failure';
+import type { MessageDraftDelta } from '../../types.js';
+import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 /**
  * A raw parsed line from `claude --output-format stream-json`. Shapes vary
  * a lot by `type` (and, for `system`, by `subtype`) — see the doc comments
@@ -248,7 +248,7 @@ export declare class AssistantMessageTracker {
 export declare function mapClaudeMessageToAgentEvents(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, options: MapClaudeMessageOptions): MapClaudeMessageResult;
 // ==== @byok-sdk/client dist/adapters/claude/process-client.d.ts ====
 import { spawn } from 'node:child_process';
-import type { ClaudeStreamMessage } from './events';
+import type { ClaudeStreamMessage } from './events.js';
 export type SpawnFn = typeof spawn;
 export interface ClaudeProcessClientOptions {
     nativeAssetRoot?: string;
@@ -439,11 +439,11 @@ export interface ResolvedBin {
  */
 export declare function resolveClaudeBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/codex/codex-adapter.d.ts ====
-import { type NativeInteractionHostOptions } from '../../native-interactions';
+import { type NativeInteractionHostOptions } from '../../native-interactions.js';
 import { type spawn as nodeSpawn } from 'node:child_process';
-import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
-import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { type ResolvedBin } from './resolve-bin';
+import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types.js';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { type ResolvedBin } from './resolve-bin.js';
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
 export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
 /** Throws a TypeError unless `value` is a {@link CodexSandboxSetting}. */
@@ -509,7 +509,7 @@ export interface CodexAdapterOptions {
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export declare class CodexAdapter implements RuntimeAdapter {
     private readonly options;
-    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
     private readonly interruptTimeoutMs;
@@ -547,9 +547,9 @@ export interface ResolvedBin {
 export declare function resolveCodexBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/dsh/dsh-adapter.d.ts ====
 import { type spawn as nodeSpawn } from 'node:child_process';
-import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
-import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import type { ResolvedBin } from '../codex/resolve-bin';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types.js';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
 /**
  * Provider and model for every dsh execution (#1258 O4). Credentials stay in
  * the environment: `keyEnv` names the variable, its value never enters the
@@ -629,7 +629,7 @@ export declare class DshAdapter implements RuntimeAdapter {
     private readonly effectiveVersionPolicy;
     private readonly interruptTimeoutMs;
     private readonly maxRetainedBytes;
-    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     constructor(options: DshAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     private ensureRoot;
@@ -646,9 +646,9 @@ export declare class DshAdapter implements RuntimeAdapter {
 }
 // ==== @byok-sdk/client dist/adapters/grok/grok-adapter.d.ts ====
 import { type spawn as nodeSpawn } from 'node:child_process';
-import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
-import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import type { ResolvedBin } from '../codex/resolve-bin';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types.js';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
 export interface GrokAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
@@ -704,7 +704,7 @@ export interface GrokAdapterOptions {
  */
 export declare class GrokAdapter implements RuntimeAdapter {
     private readonly options;
-    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
     private readonly interruptTimeoutMs;
@@ -717,12 +717,12 @@ export declare class GrokAdapter implements RuntimeAdapter {
     private start;
 }
 // ==== @byok-sdk/client dist/adapters/hermes/hermes-adapter.d.ts ====
-import { type HermesByokLauncher } from './hermes-custody';
-export type { HermesByokLauncher } from './hermes-custody';
+import { type HermesByokLauncher } from './hermes-custody.js';
+export type { HermesByokLauncher } from './hermes-custody.js';
 import { spawn as nodeSpawn } from 'node:child_process';
-import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
-import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import type { ResolvedBin } from '../codex/resolve-bin';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types.js';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
 /** Provider choice written into each execution profile. Credentials stay in the environment. */
 export interface HermesModelSelection {
     /** Hermes provider id, for example `openrouter`, `anthropic` or `custom`. */
@@ -778,7 +778,7 @@ export declare class HermesAdapter implements RuntimeAdapter {
     private readonly interruptTimeoutMs;
     /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
     private readonly liveHomes;
-    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     constructor(options: HermesAdapterOptions);
     private command;
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
@@ -801,8 +801,8 @@ export declare class HermesAdapter implements RuntimeAdapter {
 }
 // ==== @byok-sdk/client dist/adapters/hermes/hermes-custody.d.ts ====
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
-import type { RuntimeAdapterPrepareInput } from '../../types';
-import type { HermesModelSelection } from './hermes-adapter';
+import type { RuntimeAdapterPrepareInput } from '../../types.js';
+import type { HermesModelSelection } from './hermes-adapter.js';
 type SelectedProfile = Omit<ProviderProfileBinding, 'requiredCapabilities'> & {
     readonly requiredCapabilities: readonly ProviderProfileBinding['requiredCapabilities'][number][];
 };
@@ -827,40 +827,40 @@ export declare function hermesCustodyArgs(launcher: HermesByokLauncher, binding:
 export declare function prepareHermesCustody(launcher: HermesByokLauncher, offer: RuntimeAdapterPrepareInput['offer']): Promise<PreparedHermesCustody>;
 export {};
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types';
-export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection';
-export type { RuntimeObservation } from '../runtime-detection';
-export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
-export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure';
-export { createRuntimeAdapters } from './runtime-adapters';
-export type { PiRuntimeConfig, RuntimeAdaptersConfig, RuntimeAdaptersRuntimes } from './runtime-adapters';
-export { PiAdapter } from './pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig } from './pi/pi-adapter';
-export { PI_PACKAGE_NAME } from './pi/resolve-bin';
-export { ClaudeAdapter } from './claude/claude-adapter';
-export type { ClaudeAdapterOptions } from './claude/claude-adapter';
-export { CodexAdapter } from './codex/codex-adapter';
-export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter';
-export { GrokAdapter } from './grok/grok-adapter';
-export type { GrokAdapterOptions } from './grok/grok-adapter';
-export { HermesAdapter } from './hermes/hermes-adapter';
-export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter';
-export { AgyAdapter } from './antigravity/agy-adapter';
-export type { AgyAdapterOptions } from './antigravity/agy-adapter';
-export { DshAdapter } from './dsh/dsh-adapter';
-export type { DshAdapterOptions, DshModelSelection, DshSandboxMode } from './dsh/dsh-adapter';
-export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
-export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
-export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from '../runtime/environment';
-export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from '../runtime/environment';
-export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
-export type { ExecutionScratch } from '../daemon/retention/scratch';
-export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './opencode/opencode-adapter';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types.js';
+export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
+export type { RuntimeObservation } from '../runtime-detection.js';
+export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure.js';
+export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure.js';
+export { createRuntimeAdapters } from './runtime-adapters.js';
+export type { PiRuntimeConfig, RuntimeAdaptersConfig, RuntimeAdaptersRuntimes } from './runtime-adapters.js';
+export { PiAdapter } from './pi/pi-adapter.js';
+export type { PiAdapterOptions, PiByokLauncherConfig } from './pi/pi-adapter.js';
+export { PI_PACKAGE_NAME } from './pi/resolve-bin.js';
+export { ClaudeAdapter } from './claude/claude-adapter.js';
+export type { ClaudeAdapterOptions } from './claude/claude-adapter.js';
+export { CodexAdapter } from './codex/codex-adapter.js';
+export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter.js';
+export { GrokAdapter } from './grok/grok-adapter.js';
+export type { GrokAdapterOptions } from './grok/grok-adapter.js';
+export { HermesAdapter } from './hermes/hermes-adapter.js';
+export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter.js';
+export { AgyAdapter } from './antigravity/agy-adapter.js';
+export type { AgyAdapterOptions } from './antigravity/agy-adapter.js';
+export { DshAdapter } from './dsh/dsh-adapter.js';
+export type { DshAdapterOptions, DshModelSelection, DshSandboxMode } from './dsh/dsh-adapter.js';
+export { NativeInteractionController, NativeInteractionError } from '../native-interactions.js';
+export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions.js';
+export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from '../runtime/environment.js';
+export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from '../runtime/environment.js';
+export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch.js';
+export type { ExecutionScratch } from '../daemon/retention/scratch.js';
+export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './opencode/opencode-adapter.js';
 // ==== @byok-sdk/client dist/adapters/opencode/opencode-adapter.d.ts ====
 import type { spawn as nodeSpawn } from 'node:child_process';
-import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
-import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
-import type { ResolvedBin } from '../codex/resolve-bin';
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types.js';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
 export interface OpenCodeAdapterOptions {
     /** Ordered Host model ids. The SDK has no default and does not consult prices or a model catalog. */
     models: readonly string[];
@@ -879,17 +879,17 @@ export declare class OpenCodeAdapter implements RuntimeAdapter {
     private readonly environment;
     private readonly policy?;
     constructor(options: OpenCodeAdapterOptions);
-    get descriptor(): import("..").RuntimeAdapterDescriptor;
-    runtimeEnvironment(): Promise<import("..").RuntimeEnvironment>;
+    get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
+    runtimeEnvironment(): Promise<import("../index.js").RuntimeEnvironment>;
     private probe;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
 // ==== @byok-sdk/client dist/adapters/packaging.d.ts ====
-import { type SdkPackagingFormat } from '../sdk-native-assets';
-export type { SdkPackagingFormat } from '../sdk-native-assets';
-export { loadSdkKoffiAsset } from '../sdk-native-assets-runtime';
+import { type SdkPackagingFormat } from '../sdk-native-assets.js';
+export type { SdkPackagingFormat } from '../sdk-native-assets.js';
+export { loadSdkKoffiAsset } from '../sdk-native-assets-runtime.js';
 /** The part of an esbuild build that this plugin reads and sets. Declared here so esbuild is not an SDK dependency. */
 export interface SdkPackagingBuild {
     readonly initialOptions: {
@@ -987,12 +987,12 @@ export declare const PI_MEMORY_LANE: Readonly<{
     cancellation: 'await-rpc-abort-or-process-exit';
 }>;
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
-import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
-import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
-import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
-import { type ResolvedBin } from './resolve-bin';
-import { type SpawnFn } from './rpc-client';
+import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types.js';
+import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host.js';
+import { type ResolvedBin } from './resolve-bin.js';
+import { type SpawnFn } from './rpc-client.js';
 /** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
     /** Agent tasks only: exclude user resources/settings while retaining Pi model/auth stores and the global default model selection. Default inherit. Not a tool permission. */
@@ -1048,7 +1048,7 @@ export interface PiByokLauncherConfig {
 export declare function validatePiByokLauncherConfig(launcher: PiByokLauncherConfig | undefined): void;
 export declare class PiAdapter implements RuntimeAdapter {
     private readonly options;
-    readonly descriptor: import("..").RuntimeAdapterDescriptor;
+    readonly descriptor: import("../index.js").RuntimeAdapterDescriptor;
     private readonly agentResources;
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
@@ -1331,18 +1331,18 @@ export interface CopyPiRuntimeAssetsOptions {
  */
 export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;
 // ==== @byok-sdk/client dist/adapters/runtime-adapters.d.ts ====
-import { type OpenCodeAdapterOptions } from './opencode/opencode-adapter';
+import { type OpenCodeAdapterOptions } from './opencode/opencode-adapter.js';
 import type { RuntimeId } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, RuntimeVersionPolicy } from '../types';
-import { type RuntimeEnvironmentPolicy } from '../runtime/environment';
-import type { SdkHelperHostConfig } from '../sdk-reserved-helper-host';
-import type { DaemonConfigIssue } from '../daemon/config-schema/validate';
-import { type PiAdapterOptions, type PiByokLauncherConfig } from './pi/pi-adapter';
-import { type ClaudeAdapterOptions } from './claude/claude-adapter';
-import { type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter';
-import { type GrokAdapterOptions } from './grok/grok-adapter';
-import { type DshAdapterOptions } from './dsh/dsh-adapter';
-import { type AgyAdapterOptions } from './antigravity/agy-adapter';
+import type { RuntimeAdapter, RuntimeVersionPolicy } from '../types.js';
+import { type RuntimeEnvironmentPolicy } from '../runtime/environment.js';
+import type { SdkHelperHostConfig } from '../sdk-reserved-helper-host.js';
+import type { DaemonConfigIssue } from '../daemon/config-schema/validate.js';
+import { type PiAdapterOptions, type PiByokLauncherConfig } from './pi/pi-adapter.js';
+import { type ClaudeAdapterOptions } from './claude/claude-adapter.js';
+import { type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter.js';
+import { type GrokAdapterOptions } from './grok/grok-adapter.js';
+import { type DshAdapterOptions } from './dsh/dsh-adapter.js';
+import { type AgyAdapterOptions } from './antigravity/agy-adapter.js';
 /** `RuntimeAdaptersConfig.runtimes.pi`: the Pi options a Host can configure. */
 export interface PiRuntimeConfig {
     /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
@@ -1595,7 +1595,7 @@ export declare function readResidentMemory(home: string, homeIdentity: Readonly<
 export declare function compareAgentHomeMemory(before: AgentHomeMemoryDigest | undefined, after: AgentHomeMemoryDigest | undefined, writerOverlapped: boolean): TerminalAgentHomeMemoryChange;
 // ==== @byok-sdk/client dist/agent-home.d.ts ====
 import { type AgentHomeProjectionOutcome, type AgentHomeProjectionPayload, type AgentRef, type TerminalAgentHomeProjection } from '@byok-sdk/protocol';
-import { type AgentHomeAccessMode } from './agent-home-readers';
+import { type AgentHomeAccessMode } from './agent-home-readers.js';
 export type { AgentRef } from '@byok-sdk/protocol';
 export declare const AGENT_HOME_DIRECTORY = "agents";
 export declare const AGENT_HOME_INTERNAL_DIRECTORY = ".byok";
@@ -2046,48 +2046,48 @@ export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjec
  * is the single gate a host consults before offering memory at all.
  */
 /** Per-task memory authority: `recall`/`save` under sha256 compare-and-swap, bound to one exact active Agent task context. */
-export { AgentMemoryService } from '../daemon/agent-memory';
+export { AgentMemoryService } from '../daemon/agent-memory.js';
 /** Bounded, audited snapshot of the Agent's local memory files, taken after `Session.close()` while the home lease still exists. */
-export { captureAgentMemorySnapshot } from '../daemon/agent-memory';
+export { captureAgentMemorySnapshot } from '../daemon/agent-memory.js';
 /** The sole platform gate for the memory write authority: native Linux, macOS and Windows x64 only with the host's helper. */
-export { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
+export { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory.js';
 /** Compare-and-swap failure carrying the expected and actual content revisions. */
-export { AgentMemoryRevisionConflictError } from '../daemon/agent-memory';
+export { AgentMemoryRevisionConflictError } from '../daemon/agent-memory.js';
 /** The exact active-task binding required to construct the service; every field is validated on each call. */
-export type { AgentMemoryTaskContext } from '../daemon/agent-memory';
+export type { AgentMemoryTaskContext } from '../daemon/agent-memory.js';
 /** Result of `recall`, including the metadata-only audit warning when the audit write failed but the read did not. */
-export type { AgentMemoryRecallResult } from '../daemon/agent-memory';
+export type { AgentMemoryRecallResult } from '../daemon/agent-memory.js';
 /** Result of `save`, distinguishing a replace (with new revision) from a delete. */
-export type { AgentMemorySaveResult } from '../daemon/agent-memory';
+export type { AgentMemorySaveResult } from '../daemon/agent-memory.js';
 /** Metadata-only signal that the audit record could not be written; the source operation still succeeded. */
-export type { AgentMemoryAuditWarning } from '../daemon/agent-memory';
+export type { AgentMemoryAuditWarning } from '../daemon/agent-memory.js';
 /** Whether this platform can admit an external filesystem helper at all (macOS and Windows x64 today). */
-export { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper';
+export { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper.js';
 /** Admits the host's absolute signed/notarized helper binary and returns the root-pinned filesystem for one Agent home. */
-export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
+export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper.js';
 /** Root-bound filesystem authority the service operates through; the host supplies it only on macOS. */
-export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem';
+export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem.js';
 /** One file's state as reported by that filesystem authority. */
-export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
+export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem.js';
 /** Types of the observe, walk and restore cleanup methods of `AgentMemoryFilesystem`. */
-export type { AgentMemoryFileObservation, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry, AgentMemoryWalkEntryKind, } from '../daemon/agent-memory-filesystem';
+export type { AgentMemoryFileObservation, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalk, AgentMemoryWalkEntry, AgentMemoryWalkEntryKind, } from '../daemon/agent-memory-filesystem.js';
 /** Serves `memory_recall`/`memory_save` as a stdio MCP server over host-provided streams. */
-export { serveAgentMemoryMcpOverStdio } from './mcp-server';
+export { serveAgentMemoryMcpOverStdio } from './mcp-server.js';
 /** MCP tool name a host must allowlist for reads. */
-export { AGENT_MEMORY_RECALL_TOOL_NAME } from './mcp-server';
+export { AGENT_MEMORY_RECALL_TOOL_NAME } from './mcp-server.js';
 /** MCP tool name a host must allowlist for writes. */
-export { AGENT_MEMORY_SAVE_TOOL_NAME } from './mcp-server';
+export { AGENT_MEMORY_SAVE_TOOL_NAME } from './mcp-server.js';
 /** The two calls the stdio server delegates to; an `AgentMemoryService` satisfies it directly. */
-export type { AgentMemoryMcpDeps } from './mcp-server';
+export type { AgentMemoryMcpDeps } from './mcp-server.js';
 /** Runtime-neutral instructions telling the model how to use `MEMORY.md` and `notes/`. */
-export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance';
+export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance.js';
 /** Prepends that guidance to an Agent instruction, exactly as the daemon's task runner does. */
-export { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
+export { prependAgentMemoryGuidance } from '../daemon/memory-guidance.js';
 /** The validated Agent identity carried by `AgentMemoryTaskContext`. */
-export type { AgentRef } from '../agent-home';
+export type { AgentRef } from '../agent-home.js';
 // ==== @byok-sdk/client dist/agent-memory/mcp-server.d.ts ====
-import { type McpServerToolCall } from '../mcp-server';
-export { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_RECALL_TOOL_NAME, AGENT_MEMORY_SAVE_TOOL_NAME, AGENT_MEMORY_TOOLS, PREPARED_AGENT_MEMORY_OPERATION_META_KEY, type AgentMemoryOperation, type AgentMemoryToolDefinition, } from './tool-manifest';
+import { type McpServerToolCall } from '../mcp-server/index.js';
+export { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_RECALL_TOOL_NAME, AGENT_MEMORY_SAVE_TOOL_NAME, AGENT_MEMORY_TOOLS, PREPARED_AGENT_MEMORY_OPERATION_META_KEY, type AgentMemoryOperation, type AgentMemoryToolDefinition, } from './tool-manifest.js';
 export interface AgentMemoryMcpDeps {
     recall(input: {
         path: string;
@@ -2133,7 +2133,7 @@ export declare function serveAgentMemoryDescriptorOverStdio(input: {
 }): void;
 // ==== @byok-sdk/client dist/agent-memory/prepared-agent-memory.d.ts ====
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import { type PreparedAgentMemoryObservation } from './prepared-capability';
+import { type PreparedAgentMemoryObservation } from './prepared-capability.js';
 /** The SDK-owned Agent-memory helper launch (`resolveSdkReservedHelperBin`). */
 export interface PreparedAgentMemoryHelper {
     readonly command: string;
@@ -2146,7 +2146,7 @@ export interface PreparedAgentMemoryState {
 /** Spawn the task-free descriptor helper and read its tools/list answer. */
 export declare function observePreparedMemory(describe: PreparedAgentMemoryHelper, env: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<PreparedAgentMemoryState>;
 export declare function preparedMemoryProjection(mode: PreparedAgentMemoryMode, memory: PreparedAgentMemoryState | null, runtimeIdentity: string): {
-    tools: readonly import("./prepared-capability").PreparedAgentMemorySelectedTool[];
+    tools: readonly import("./prepared-capability.js").PreparedAgentMemorySelectedTool[];
     toolExecutors: {
         [k: string]: string;
     };
@@ -2154,8 +2154,8 @@ export declare function preparedMemoryProjection(mode: PreparedAgentMemoryMode, 
 export declare function parsePreparedMemoryState(raw: unknown): PreparedAgentMemoryState | null;
 // ==== @byok-sdk/client dist/agent-memory/prepared-capability.d.ts ====
 import { type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import { PREPARED_AGENT_MEMORY_OPERATION_META_KEY, type AgentMemoryOperation } from './tool-manifest';
-export { PREPARED_AGENT_MEMORY_OPERATION_META_KEY } from './tool-manifest';
+import { PREPARED_AGENT_MEMORY_OPERATION_META_KEY, type AgentMemoryOperation } from './tool-manifest.js';
+export { PREPARED_AGENT_MEMORY_OPERATION_META_KEY } from './tool-manifest.js';
 export interface PreparedAgentMemoryObservationTool {
     readonly name: string;
     readonly description: string;
@@ -2189,7 +2189,7 @@ export declare function preparedAgentMemoryExecutorFingerprints(observation: Pre
 /** The sole canonical serialization used by descriptor validation and both memory digests. */
 export declare function canonicalPreparedAgentMemoryJson(value: unknown): string;
 // ==== @byok-sdk/client dist/agent-memory/tool-manifest.d.ts ====
-import type { McpServerToolDefinition } from '../mcp-server';
+import type { McpServerToolDefinition } from '../mcp-server/index.js';
 export declare const AGENT_MEMORY_RECALL_TOOL_NAME = "memory_recall";
 export declare const AGENT_MEMORY_SAVE_TOOL_NAME = "memory_save";
 export declare const PREPARED_AGENT_MEMORY_OPERATION_META_KEY = "byok.agent-memory.operation";
@@ -2252,23 +2252,23 @@ export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
  * entry is a narrower door to the same authority, not a replacement for it.
  */
 /** Asks a running daemon for one short-lived task assertion bound to the caller's context file. */
-export { requestTaskAssertion } from '../daemon/assertion-client';
+export { requestTaskAssertion } from '../daemon/assertion-client.js';
 /** Asks a running daemon for one short-lived device assertion scoped to an allowlisted audience. */
-export { requestDeviceAssertion } from '../daemon/assertion-client';
+export { requestDeviceAssertion } from '../daemon/assertion-client.js';
 /** Everything `requestTaskAssertion` needs: the context file path from this process's final argv element, the exact audience, and an optional round-trip bound. */
-export type { RequestTaskAssertionOptions } from '../daemon/assertion-client';
+export type { RequestTaskAssertionOptions } from '../daemon/assertion-client.js';
 /** The daemon's nine refusal codes plus `unavailable` and `bad_response`, kept as an open string union so a newer daemon's code surfaces verbatim. */
-export type { RequestTaskAssertionErrorCode } from '../daemon/assertion-client';
+export type { RequestTaskAssertionErrorCode } from '../daemon/assertion-client.js';
 /** Typed result: a parsed `TaskAssertionEnvelopeV1` with its expiry, or a refusal code and reason. Never throws for an expected outcome. */
-export type { RequestTaskAssertionResult } from '../daemon/assertion-client';
+export type { RequestTaskAssertionResult } from '../daemon/assertion-client.js';
 /** Everything `requestDeviceAssertion` needs: the daemon's `productId`/`storeDir`, the exact audience, and an optional round-trip bound. */
-export type { RequestDeviceAssertionOptions } from '../daemon/assertion-client';
+export type { RequestDeviceAssertionOptions } from '../daemon/assertion-client.js';
 /** The daemon's six refusal codes plus `unavailable` and `bad_response`, kept as an open string union for the same reason. */
-export type { RequestDeviceAssertionErrorCode } from '../daemon/assertion-client';
+export type { RequestDeviceAssertionErrorCode } from '../daemon/assertion-client.js';
 /** Typed result: a parsed `DeviceAssertionEnvelopeV1` with its expiry, or a refusal code and reason. Never throws for an expected outcome. */
-export type { RequestDeviceAssertionResult } from '../daemon/assertion-client';
+export type { RequestDeviceAssertionResult } from '../daemon/assertion-client.js';
 // ==== @byok-sdk/client dist/daemon-config-invalid-error.d.ts ====
-import type { DaemonConfigIssue } from './daemon/config-schema/validate';
+import type { DaemonConfigIssue } from './daemon/config-schema/validate.js';
 /**
  * `DaemonConfig` failed {@link validateDaemonConfig} at daemon construction:
  * a missing required field, or a value of the wrong JSON type or literal.
@@ -2282,7 +2282,7 @@ export declare class DaemonConfigInvalidError extends Error {
     constructor(issues: readonly DaemonConfigIssue[]);
 }
 // ==== @byok-sdk/client dist/daemon/agent-content-audit-store.d.ts ====
-import type { AgentContentAuditReceipt } from './agent-content-read';
+import type { AgentContentAuditReceipt } from './agent-content-read.js';
 /**
  * A durable audit ledger for explicit Agent content reads.
  *
@@ -2318,8 +2318,8 @@ export declare class AgentContentAuditStore {
     private enqueue;
 }
 // ==== @byok-sdk/client dist/daemon/agent-content-read.d.ts ====
-import { AgentHomeLayout, type AgentRef } from '../agent-home';
-import { AgentContentAuditStore } from './agent-content-audit-store';
+import { AgentHomeLayout, type AgentRef } from '../agent-home.js';
+import { AgentContentAuditStore } from './agent-content-audit-store.js';
 export declare const AGENT_CONTENT_READ_SURFACES: readonly ['workspace', 'transcript', 'artifact'];
 export type AgentContentReadSurface = (typeof AGENT_CONTENT_READ_SURFACES)[number];
 /** Additive capability names. Each surface is independently admitted. */
@@ -2487,9 +2487,9 @@ export declare class AgentContentReadPolicyEngine {
 }
 // ==== @byok-sdk/client dist/daemon/agent-egress-controller.d.ts ====
 import { type AgentEvent } from '@byok-sdk/protocol';
-import type { AgentRef } from '../agent-home';
-import { type AgentEgressDropReason, type AgentEgressDropReceipt, type AgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy';
-import { type AgentReliableAck, type AgentContentReceiptWithoutReliableIdentity, type AgentReliableEgressRecord } from './agent-egress-spool';
+import type { AgentRef } from '../agent-home.js';
+import { type AgentEgressDropReason, type AgentEgressDropReceipt, type AgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy.js';
+import { type AgentReliableAck, type AgentContentReceiptWithoutReliableIdentity, type AgentReliableEgressRecord } from './agent-egress-spool.js';
 export interface AgentEgressControllerOptions {
     readonly policy: Readonly<AgentEgressPolicy>;
     /** Authenticated tenant identity, never accepted from an egress event. */
@@ -2612,8 +2612,8 @@ export declare function resolveAgentEgressPolicy(policy: AgentEgressPolicy | und
 export declare function eventBytes(event: AgentEvent): number;
 // ==== @byok-sdk/client dist/daemon/agent-egress-spool.d.ts ====
 import { type AgentContentReceiptPayload } from '@byok-sdk/protocol';
-import type { AgentRef } from '../agent-home';
-import { type AgentEgressPolicy, type AgentEgressDropReason } from './agent-egress-policy';
+import type { AgentRef } from '../agent-home.js';
+import { type AgentEgressPolicy, type AgentEgressDropReason } from './agent-egress-policy.js';
 export declare const AGENT_EGRESS_DIRECTORY: string;
 export declare const AGENT_RELIABLE_SPOOL_FILENAME = "reliable-v1.jsonl";
 /** A spool row's intended envelope type, never inferred from its payload. */
@@ -2729,7 +2729,7 @@ export declare class AgentLatestValueState {
 }
 export {};
 // ==== @byok-sdk/client dist/daemon/agent-memory-export.d.ts ====
-import type { AgentHomeManager, AgentRef } from '../agent-home';
+import type { AgentHomeManager, AgentRef } from '../agent-home.js';
 import { type AgentMemoryExport } from '@byok-sdk/protocol/agent-memory';
 export interface AgentMemoryExportOptions {
     readonly signal?: AbortSignal;
@@ -2796,8 +2796,8 @@ export interface AgentMemoryRestoreCleanup {
     readonly deleted: number;
 }
 // ==== @byok-sdk/client dist/daemon/agent-memory-fs-helper.d.ts ====
-import type { AgentHomeLease } from '../agent-home';
-import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
+import type { AgentHomeLease } from '../agent-home.js';
+import type { AgentMemoryFilesystem } from './agent-memory-filesystem.js';
 export declare const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 4;
 export declare const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = "4";
 export declare function isAgentMemoryFilesystemHelperSupported(): boolean;
@@ -2823,8 +2823,8 @@ export declare function openAgentMemoryFilesystemHelper(input: Readonly<{
 }>): Promise<AgentMemoryFilesystem>;
 // ==== @byok-sdk/client dist/daemon/agent-memory-intent.d.ts ====
 import { type AgentMemoryIntentAvailablePayload, type AgentMemoryIntentCompletion, type AgentMemoryIntentFileObservation, type AgentMemoryIntentOperation, type AgentMemoryIntentReadback, type AgentMemoryIntentRejectionCode } from '@byok-sdk/protocol';
-import { type AgentHomeLease, type AgentHomeManager } from '../agent-home';
-import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
+import { type AgentHomeLease, type AgentHomeManager } from '../agent-home.js';
+import type { AgentMemoryFilesystem } from './agent-memory-filesystem.js';
 import { type AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 /**
  * Host-approved Agent memory intents — the daemon half.
@@ -2979,8 +2979,8 @@ export declare function parseAgentMemoryIntentLedger(content: string): readonly 
 export declare function createAgentMemoryIntentProcessor(options: AgentMemoryIntentProcessorOptions): (payload: AgentMemoryIntentAvailablePayload) => Promise<AgentMemoryIntentProcessResult>;
 // ==== @byok-sdk/client dist/daemon/agent-memory.d.ts ====
 import { AGENT_MEMORY_PROJECTION_CAPABILITY, type AgentMemoryProjectionMutation, type AgentMemoryProjectionSealedMutation } from '@byok-sdk/protocol';
-import { type AgentHomeLease, type AgentRef } from '../agent-home';
-import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalkEntry } from './agent-memory-filesystem';
+import { type AgentHomeLease, type AgentRef } from '../agent-home.js';
+import type { AgentMemoryFileObservation, AgentMemoryFilesystem, AgentMemoryFilesystemFileState, AgentMemoryRestoreCleanup, AgentMemoryRestoreRecord, AgentMemoryWalkEntry } from './agent-memory-filesystem.js';
 import { AgentMemoryError, AgentMemoryValidationError, type AgentMemoryProjectionPort, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
 export declare const AGENT_MEMORY_AUDIT_FILENAME = "agent-memory-audit-v1.jsonl";
 /** v2 is one atomically replaced state file, never an append-only log. */
@@ -3277,7 +3277,7 @@ export declare class AgentMemoryRedactedOutbox {
 /** Missing capability, grant, redactor, or port has exactly zero network side effects. */
 export declare function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContext, projection: AgentMemoryHostedProjection | undefined, sealer?: AgentMemoryProjectionSealer): Promise<void>;
 // ==== @byok-sdk/client dist/daemon/agent-session-handoff-store.d.ts ====
-import { type AgentRef } from '../agent-home';
+import { type AgentRef } from '../agent-home.js';
 export type AgentTerminalCause = 'complete' | 'failed' | 'cancelled';
 export interface AgentSessionHandoff {
     readonly agentRef: AgentRef;
@@ -3518,7 +3518,7 @@ export declare class ApprovalRegistry {
 export {};
 // ==== @byok-sdk/client dist/daemon/assertion-client.d.ts ====
 import { type DeviceAssertionEnvelopeV1, type TaskAssertionEnvelopeV1 } from '@byok-sdk/core';
-import { type AssertionIssueErrorCode, type TaskAssertionIssueErrorCode } from './control-protocol';
+import { type AssertionIssueErrorCode, type TaskAssertionIssueErrorCode } from './control-protocol.js';
 /**
  * Plan `device-assertion-broker`: the ONE public entry point a sibling local
  * process uses to obtain a device assertion from an already-running daemon.
@@ -3651,8 +3651,8 @@ export type RequestTaskAssertionResult = {
  */
 export declare function requestTaskAssertion(options: RequestTaskAssertionOptions): Promise<RequestTaskAssertionResult>;
 // ==== @byok-sdk/client dist/daemon/auth-manager.d.ts ====
-import { DeviceStore, type DeviceRecord } from './store';
-import type { DeviceCredentialBackend } from './device-credential-store';
+import { DeviceStore, type DeviceRecord } from './store.js';
+import type { DeviceCredentialBackend } from './device-credential-store.js';
 /**
  * Thrown when the server has revoked this device (protocol §6.3): a
  * `/byok/challenge` or `/byok/token` 401 with the typed
@@ -3815,7 +3815,7 @@ export declare class AuthManager {
 }
 // ==== @byok-sdk/client dist/daemon/blob-client.d.ts ====
 import type { BlobRef } from '@byok-sdk/protocol';
-import type { AuthManager } from './auth-manager';
+import type { AuthManager } from './auth-manager.js';
 export type BlobRequestAbortReason = 'deadline' | 'cancelled';
 /** A blob request/body read did not complete before its deadline or its owner cancelled it. */
 export declare class BlobRequestAbortedError extends Error {
@@ -3861,10 +3861,10 @@ export declare class BlobClient implements BlobResolver {
     }): Promise<BlobRef>;
 }
 // ==== @byok-sdk/client dist/daemon/config-schema/check.d.ts ====
-import type { LocalAgentReleaseIdentity } from '../../release-identity';
-import type { RuntimeAdapter } from '../../types';
-import { type DaemonEffectiveConfig } from './effective';
-import { type DaemonConfigIssue, type DaemonConfigSource } from './validate';
+import type { LocalAgentReleaseIdentity } from '../../release-identity.js';
+import type { RuntimeAdapter } from '../../types.js';
+import { type DaemonEffectiveConfig } from './effective.js';
+import { type DaemonConfigIssue, type DaemonConfigSource } from './validate.js';
 export interface DaemonConfigCheckOptions {
     readonly source: DaemonConfigSource;
     /**
@@ -3893,11 +3893,11 @@ export interface DaemonConfigCheck {
  */
 export declare function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOptions): DaemonConfigCheck;
 // ==== @byok-sdk/client dist/daemon/config-schema/effective.d.ts ====
-import { type ToolAuthorizationMode, type ToolFileScope } from '../../tool-authorization';
-import type { RuntimeAdapter, RuntimeVersionPolicy } from '../../types';
-import type { DaemonConfig, DaemonStatus } from '../create-daemon';
-import type { DaemonConfigIssue } from './validate';
-import type { RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { type ToolAuthorizationMode, type ToolFileScope } from '../../tool-authorization.js';
+import type { RuntimeAdapter, RuntimeVersionPolicy } from '../../types.js';
+import type { DaemonConfig, DaemonStatus } from '../create-daemon.js';
+import type { DaemonConfigIssue } from './validate.js';
+import type { RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 /**
  * How daemon construction resolved the SDK Agent memory filesystem helper
  * (#603, #614).
@@ -4036,13 +4036,13 @@ export interface EffectiveDaemonConfigInput {
 export declare function describeEffectiveDaemonConfig(input: EffectiveDaemonConfigInput): DaemonEffectiveConfig;
 // ==== @byok-sdk/client dist/daemon/config-schema/index.d.ts ====
 /** #1094: the DaemonConfig schema, its one validator and the effective-values report. */
-export { DAEMON_CONFIG_SCHEMA_VERSION } from './schema.generated';
-export { validateDaemonConfig } from './validate';
-export type { DaemonConfigIssue, DaemonConfigIssueCode, DaemonConfigSource, DaemonConfigValidation } from './validate';
-export { checkDaemonConfig } from './check';
-export type { DaemonConfigCheck, DaemonConfigCheckOptions } from './check';
-export { DaemonConfigInvalidError } from '../../daemon-config-invalid-error';
-export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRuntime, DaemonEffectiveToolAuthorization, DaemonMemoryHelperResolution } from './effective';
+export { DAEMON_CONFIG_SCHEMA_VERSION } from './schema.generated.js';
+export { validateDaemonConfig } from './validate.js';
+export type { DaemonConfigIssue, DaemonConfigIssueCode, DaemonConfigSource, DaemonConfigValidation } from './validate.js';
+export { checkDaemonConfig } from './check.js';
+export type { DaemonConfigCheck, DaemonConfigCheckOptions } from './check.js';
+export { DaemonConfigInvalidError } from '../../daemon-config-invalid-error.js';
+export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRuntime, DaemonEffectiveToolAuthorization, DaemonMemoryHelperResolution } from './effective.js';
 // ==== @byok-sdk/client dist/daemon/config-schema/removed-fields.d.ts ====
 /**
  * `DaemonConfig` fields that no longer exist (#1094). The one table both the
@@ -4099,11 +4099,11 @@ export interface DaemonConfigJsonSchema {
     }[];
 }
 // ==== @byok-sdk/client dist/daemon/config-schema/schema.generated.d.ts ====
-import type { DaemonConfigJsonSchema } from './schema-types';
+import type { DaemonConfigJsonSchema } from './schema-types.js';
 export declare const DAEMON_CONFIG_SCHEMA_VERSION = 1;
 export declare const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema;
 // ==== @byok-sdk/client dist/daemon/config-schema/validate.d.ts ====
-import { type RemovedDaemonConfigField } from './removed-fields';
+import { type RemovedDaemonConfigField } from './removed-fields.js';
 /**
  * Where a `DaemonConfig` comes from (#1094).
  *
@@ -4154,11 +4154,11 @@ export declare function validateDaemonConfig(input: unknown, options: {
 // ==== @byok-sdk/client dist/daemon/connection-manager.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import { type OutboundRefusalReason, type ActivityIngress, type CapabilityFlag, type Envelope, type RuntimeInfo, type RuntimeUnavailableEntry, type ToolsetId } from '@byok-sdk/protocol';
-import { AuthManager } from './auth-manager';
-import type { CursorStore } from './cursor-store';
-import type { DaemonHaltReason } from './daemon-lifecycle';
-import { type FleetJitter } from './deterministic-jitter';
-export { ReplayCursorTooOldError } from './replay-cursor';
+import { AuthManager } from './auth-manager.js';
+import type { CursorStore } from './cursor-store.js';
+import type { DaemonHaltReason } from './daemon-lifecycle.js';
+import { type FleetJitter } from './deterministic-jitter.js';
+export { ReplayCursorTooOldError } from './replay-cursor.js';
 /**
  * #1121: the most bytes of droppable envelopes the outbox holds while the
  * Host is unreachable. Past it the oldest of them are dropped unsent.
@@ -4560,19 +4560,19 @@ export declare class ConnectionManager {
 }
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
 import type { TaskState } from '@byok-sdk/protocol';
-import type { ApprovalDecision, PendingApproval } from './approvals';
-import type { ClockSkewObservation } from './auth-manager';
-import type { StoragePressureState } from './retention/pressure';
-import type { RetentionSnapshot } from './retention/sweeper';
-import type { OperationalHealthSnapshot } from './operational-health';
-import type { DaemonLifecycle } from './daemon-lifecycle';
-import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detection';
-import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
-import type { RuntimeEnvironmentReport } from '../runtime/environment';
-import type { LocalAgentReleaseIdentity } from '../release-identity';
-import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types';
-import type { AgentHomeExecutionStatus } from '../agent-home';
-import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation';
+import type { ApprovalDecision, PendingApproval } from './approvals.js';
+import type { ClockSkewObservation } from './auth-manager.js';
+import type { StoragePressureState } from './retention/pressure.js';
+import type { RetentionSnapshot } from './retention/sweeper.js';
+import type { OperationalHealthSnapshot } from './operational-health.js';
+import type { DaemonLifecycle } from './daemon-lifecycle.js';
+import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detection.js';
+import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
+import type { RuntimeEnvironmentReport } from '../runtime/environment.js';
+import type { LocalAgentReleaseIdentity } from '../release-identity.js';
+import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types.js';
+import type { AgentHomeExecutionStatus } from '../agent-home.js';
+import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation.js';
 /**
  * M4 Phase 2: shared local-IPC contract between the daemon's control server
  * (`control-server.ts`) and the CLI's control client (`daemon/control-client.ts`)
@@ -4848,7 +4848,7 @@ export interface ControlStatusResult {
     storage: ControlStorageStatus;
     /** Local retry budget. This is not the lifecycle above. */
     operationalHealth: OperationalHealthSnapshot;
-    outbound: import('./outbound-settlement').OutboundStatus;
+    outbound: import('./outbound-settlement.js').OutboundStatus;
     /** Redacted content-addressed status from the daemon's single local registry. */
     toolsets: McpToolsetRegistryStatus;
     /**
@@ -4887,7 +4887,7 @@ export declare function parseToolsetsReloadParams(value: unknown): ToolsetsReloa
 export interface ApprovalsListResult {
     approvals: PendingApproval[];
 }
-export type { ApprovalDecision, PendingApproval } from './approvals';
+export type { ApprovalDecision, PendingApproval } from './approvals.js';
 export interface ApprovalsResolveParams {
     approvalId: string;
     decision: ApprovalDecision;
@@ -5228,38 +5228,38 @@ export declare function parseInputPreparationLookupParams(value: unknown): Input
 /** Strict shape gate for `input_preparation.cancel`. Same two fields as lookup, and no third. */
 export declare function parseInputPreparationCancelParams(value: unknown): InputPreparationCancelParamsV1 | undefined;
 // ==== @byok-sdk/client dist/daemon/create-daemon.d.ts ====
-import type { OutboundStatus } from './outbound-settlement';
-import { type RuntimeObservation } from '../runtime-detection';
-import { type ServiceEnvironmentStatus } from '../login-shell-environment';
+import type { OutboundStatus } from './outbound-settlement.js';
+import { type RuntimeObservation } from '../runtime-detection.js';
+import { type ServiceEnvironmentStatus } from '../login-shell-environment.js';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
-import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
-import type { AgentRef } from '../agent-home';
-import { type LocalAgentReleaseIdentity } from '../release-identity';
-import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
-import type { RuntimeEnvironmentPolicy } from '../runtime/environment';
-import { type LocalToolApprovalPolicy } from './approvals';
-import { type DaemonLifecycle } from './daemon-lifecycle';
-import { type ControlStorageStatus } from './control-protocol';
-import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation';
-import { type OperationalHealthSnapshot } from './operational-health';
-import { type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
-import { type DeviceEnrollment } from './store';
-import { type LocalTaskJournal } from './journal/journal';
-import type { JournalOpenFaultSeam } from '../util/sqlite-support';
-import { type StorageConfig } from './retention/config';
-import { type RetentionTimers } from './retention/sweeper';
-import { type ProgressBatcherOptions } from './progress-batcher';
-import { type AgentEgressReliableAppendResult } from './agent-egress-controller';
-import { type AgentEgressStatus } from './agent-egress-policy';
-import { type ProviderProvisioningHandler } from './provider-provisioning';
-import { type AgentMemoryExportOptions } from './agent-memory-export';
-import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
-import { type DaemonRuntimesConfig } from '../adapters/runtime-adapters';
-import { type AgentMemoryHostedProjection } from './agent-memory';
-import { type AgentContentReadRoot } from './agent-content-read';
-import type { ToolAuthorizationPolicy } from '../tool-authorization';
-import { type DaemonEffectiveConfig } from './config-schema/effective';
+import type { RuntimeAdapter, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types.js';
+import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home.js';
+import type { AgentRef } from '../agent-home.js';
+import { type LocalAgentReleaseIdentity } from '../release-identity.js';
+import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter.js';
+import type { RuntimeEnvironmentPolicy } from '../runtime/environment.js';
+import { type LocalToolApprovalPolicy } from './approvals.js';
+import { type DaemonLifecycle } from './daemon-lifecycle.js';
+import { type ControlStorageStatus } from './control-protocol.js';
+import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation.js';
+import { type OperationalHealthSnapshot } from './operational-health.js';
+import { type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer.js';
+import { type DeviceEnrollment } from './store.js';
+import { type LocalTaskJournal } from './journal/journal.js';
+import type { JournalOpenFaultSeam } from '../util/sqlite-support.js';
+import { type StorageConfig } from './retention/config.js';
+import { type RetentionTimers } from './retention/sweeper.js';
+import { type ProgressBatcherOptions } from './progress-batcher.js';
+import { type AgentEgressReliableAppendResult } from './agent-egress-controller.js';
+import { type AgentEgressStatus } from './agent-egress-policy.js';
+import { type ProviderProvisioningHandler } from './provider-provisioning.js';
+import { type AgentMemoryExportOptions } from './agent-memory-export.js';
+import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host.js';
+import { type DaemonRuntimesConfig } from '../adapters/runtime-adapters.js';
+import { type AgentMemoryHostedProjection } from './agent-memory.js';
+import { type AgentContentReadRoot } from './agent-content-read.js';
+import type { ToolAuthorizationPolicy } from '../tool-authorization.js';
+import { type DaemonEffectiveConfig } from './config-schema/effective.js';
 import type { AgentMemoryExport, AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 /**
  * Optional white-label product display info — purely opaque passthrough
@@ -5333,7 +5333,7 @@ export interface DaemonConfig {
      */
     localToolApproval?: LocalToolApprovalPolicy;
     /** Select an explicit macOS keychain for device enrollment custody. */
-    deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
+    deviceCredentials?: import('./device-credential-store.js').DeviceCredentialConfig;
     storage?: StorageConfig;
     /** Distribution-owned application release; observability only, never a protocol/capability gate. */
     localAgentRelease: LocalAgentReleaseIdentity;
@@ -5466,7 +5466,7 @@ export interface DaemonConfig {
      * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
      * Pi tasks do not invoke it.
      */
-    piByokLauncher?: import('../adapters/pi/pi-adapter').PiByokLauncherConfig;
+    piByokLauncher?: import('../adapters/pi/pi-adapter.js').PiByokLauncherConfig;
     /**
      * M5 batch-3 (workstream 1): explicit auto-select priority order for
      * `TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)
@@ -5941,7 +5941,7 @@ export interface DaemonOverrides {
      * Explicit enrollment-custody dependency. The caller owns its secret storage
      * and lifetime; omission composes the platform OS credential store.
      */
-    deviceCredentials?: import('./device-credential-store').DeviceCredentialBackend;
+    deviceCredentials?: import('./device-credential-store.js').DeviceCredentialBackend;
     retention?: {
         clock?: () => Date;
         timers?: RetentionTimers;
@@ -6079,7 +6079,7 @@ export declare class CursorStore {
     clear(serverUrl: string, deviceId: string): Promise<void>;
 }
 // ==== @byok-sdk/client dist/daemon/daemon-errors.d.ts ====
-import type { DeviceMetadata } from './device-credential-store';
+import type { DeviceMetadata } from './device-credential-store.js';
 /**
  * A `DaemonConfig` field that no longer exists was supplied. Construction
  * refuses it rather than ignoring it, so a host upgrading across a removal
@@ -6244,11 +6244,11 @@ export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | 
  */
 export declare function daemonLifecycleHealth(lifecycle: DaemonLifecycle): 'up' | 'starting' | 'ended';
 // ==== @byok-sdk/client dist/daemon/daemon-record.d.ts ====
-import type { ToolAuthorizationReason, ToolFileAccess, ToolRiskReason } from '../tool-authorization';
-import type { DaemonLifecycle } from './daemon-lifecycle';
-import { type AssertionLane, type DaemonEvent } from './observer';
-import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../login-shell-environment';
-import type { RuntimeObservation } from '../runtime-detection';
+import type { ToolAuthorizationReason, ToolFileAccess, ToolRiskReason } from '../tool-authorization.js';
+import type { DaemonLifecycle } from './daemon-lifecycle.js';
+import { type AssertionLane, type DaemonEvent } from './observer.js';
+import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../login-shell-environment.js';
+import type { RuntimeObservation } from '../runtime-detection.js';
 /**
  * The content-free projection of what a daemon observed — the ONE shape every
  * sink that outlives the process writes (issue #395): `byok-agent start`'s
@@ -6515,7 +6515,7 @@ export interface FleetJitter {
 }
 export declare function createFleetJitter(productId: string, deviceId: string): FleetJitter;
 // ==== @byok-sdk/client dist/daemon/device-credential-store.d.ts ====
-import { type Win32CredentialBindings } from './win32-credential-api';
+import { type Win32CredentialBindings } from './win32-credential-api.js';
 /** Secret fields inside the internal complete enrollment authority. */
 export interface DeviceCredentials {
     readonly accessToken: string;
@@ -6653,8 +6653,8 @@ export declare class DeviceCredentialStore implements DeviceCredentialBackend {
 export declare function runDeviceCommand(executable: string, args: readonly string[], stdin?: string, signal?: AbortSignal): Promise<DeviceCommandResult>;
 // ==== @byok-sdk/client dist/daemon/device-proof-signer.d.ts ====
 import { type DeviceProofEnvelopeV1 } from '@byok-sdk/core';
-import type { AuthManager } from './auth-manager';
-import { type DeviceEnrollmentIdentity } from './store';
+import type { AuthManager } from './auth-manager.js';
+import { type DeviceEnrollmentIdentity } from './store.js';
 export interface DeviceProofRequest {
     readonly method: string;
     /** Exact origin-relative path, including the query string when present. */
@@ -6717,7 +6717,7 @@ export declare class DeviceProofSignerError extends Error {
 export interface CreateStoredDeviceProofSignerOptions {
     readonly productId: string;
     /** Same OS keychain selection as the daemon and enrollment identity read. */
-    readonly deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
+    readonly deviceCredentials?: import('./device-credential-store.js').DeviceCredentialConfig;
     /** Same store directory the daemon uses; omitted resolves the product default. */
     readonly storeDir?: string;
     /** `DaemonConfig.nativeAssetRoot` of a packaged Windows Host, which has no installed koffi. */
@@ -6761,8 +6761,8 @@ export declare function createStoredDeviceProofSigner(options: CreateStoredDevic
 export {};
 // ==== @byok-sdk/client dist/daemon/execution-record.d.ts ====
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { RuntimeAdapterDescriptor } from '../types';
-import type { DeclaredSessionMembers } from './session-contract';
+import type { RuntimeAdapterDescriptor } from '../types.js';
+import type { DeclaredSessionMembers } from './session-contract.js';
 /**
  * Octop ③ (#553): a local, content-free diagnostic that says whether the SDK
  * saw the whole event trajectory of one started execution. `TaskRunner`
@@ -7289,8 +7289,8 @@ export declare class JournalClosedError extends Error {
     constructor(operation: string);
 }
 // ==== @byok-sdk/client dist/daemon/journal/sqlite-journal.d.ts ====
-import { type JournalIdentity, type AdmissionRecord, type CompactOptions, type CompactResult, type JournalReceipt, type LocalStorageUsage, type LocalTaskJournal, type LocalTerminalRecord, type LocalTransitionRecord, type RecoverableTask, type RecoveryOutcome, type ReceivedEnvelopeRecord, type WithheldOfferRecord, type WithheldOfferTask } from './journal';
-import { JournalHandleCleanupError, type JournalOpenFaultSeam } from '../../util/sqlite-support';
+import { type JournalIdentity, type AdmissionRecord, type CompactOptions, type CompactResult, type JournalReceipt, type LocalStorageUsage, type LocalTaskJournal, type LocalTerminalRecord, type LocalTransitionRecord, type RecoverableTask, type RecoveryOutcome, type ReceivedEnvelopeRecord, type WithheldOfferRecord, type WithheldOfferTask } from './journal.js';
+import { JournalHandleCleanupError, type JournalOpenFaultSeam } from '../../util/sqlite-support.js';
 export { JournalHandleCleanupError };
 /** The single database file, per §12.7.2's "建议单库 `<storeDir>/daemon.db`". */
 export declare const JOURNAL_DB_FILENAME = "daemon.db";
@@ -7463,13 +7463,13 @@ export interface ResidentMemoryData {
  */
 export declare function prependAgentMemoryModeGuidance(instruction: string, mode: 'none' | 'read' | 'read-write', reader: boolean, resident?: ResidentMemoryData): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
-import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
-import type { ToolAuthorizationDecision, ToolFileAccess, ToolReminder } from '../tool-authorization';
+import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry.js';
+import type { ToolAuthorizationDecision, ToolFileAccess, ToolReminder } from '../tool-authorization.js';
 import { type AgentEvent, type BlobRef, type Envelope, type OfferAdmissionTimings, type TaskState } from '@byok-sdk/protocol';
-import type { DaemonLifecycle } from './daemon-lifecycle';
-import type { ExecutionRecord } from './execution-record';
-import type { RuntimeObservation } from '../runtime-detection';
-import type { ServiceEnvironmentStatus } from '../login-shell-environment';
+import type { DaemonLifecycle } from './daemon-lifecycle.js';
+import type { ExecutionRecord } from './execution-record.js';
+import type { RuntimeObservation } from '../runtime-detection.js';
+import type { ServiceEnvironmentStatus } from '../login-shell-environment.js';
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a
  * live task feed, a task list, and approve/reject/unpair from, all LOCALLY
@@ -7501,7 +7501,7 @@ import type { ServiceEnvironmentStatus } from '../login-shell-environment';
  */
 /** Every local event kind this daemon can emit — see {@link DaemonEvent}. */
 export type DaemonEventKind = DaemonEvent['kind'];
-import type { OutboundRejection } from './outbound-settlement';
+import type { OutboundRejection } from './outbound-settlement.js';
 export type DaemonEvent = ({
     kind: 'outbound-rejected';
     ts: string;
@@ -8249,7 +8249,7 @@ export declare class ReplayCursorTooOldError extends Error {
     constructor(recoverableFrom?: number | undefined);
 }
 // ==== @byok-sdk/client dist/daemon/retention/config.d.ts ====
-import { type ExpiringClassId } from './registry';
+import { type ExpiringClassId } from './registry.js';
 export declare class LocalStorageConfigError extends Error {
     constructor(field: string, reason?: string);
 }
@@ -8325,7 +8325,7 @@ export declare function resolveStorageConfig(storeDir: string, input?: StorageCo
 }>;
 export type ResolvedStorageConfig = ReturnType<typeof resolveStorageConfig>;
 // ==== @byok-sdk/client dist/daemon/retention/pressure.d.ts ====
-import type { StorageBudget } from './config';
+import type { StorageBudget } from './config.js';
 export type StoragePressureState = 'normal' | 'pressure' | 'hard-pressure' | 'emergency';
 export declare class LocalStorageEmergencyError extends Error {
     constructor(reason: string);
@@ -8505,9 +8505,9 @@ export declare function createExecutionScratch(options: {
 }): Promise<ExecutionScratch>;
 export declare function createDaemonScratch(storeDir: string, kind: 'diag' | 'credential' | 'prepare'): Promise<string>;
 // ==== @byok-sdk/client dist/daemon/retention/sweeper.d.ts ====
-import type { ResolvedStorageConfig } from './config';
-import { type ClassUsage, type RetentionClassId, type RetentionTrigger, type SweepReport, RetentionRegistry } from './registry';
-import { StoragePressure } from './pressure';
+import type { ResolvedStorageConfig } from './config.js';
+import { type ClassUsage, type RetentionClassId, type RetentionTrigger, type SweepReport, RetentionRegistry } from './registry.js';
+import { StoragePressure } from './pressure.js';
 export interface RetentionTimers {
     setTimeout(handler: () => void, ms: number): unknown;
     clearTimeout(handle: unknown): void;
@@ -8551,7 +8551,7 @@ export declare class RetentionSweeper {
 }
 // ==== @byok-sdk/client dist/daemon/session-contract.d.ts ====
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { RuntimeAdapterDescriptor, Session, SessionEvidence } from '../types';
+import type { RuntimeAdapterDescriptor, Session, SessionEvidence } from '../types.js';
 /**
  * The optional `Session` members that the adapter descriptor declares, bound
  * once when the session started. The daemon reads these and never
@@ -8579,7 +8579,7 @@ export interface DeclaredSessionMembers {
 export declare function bindDeclaredSessionMembers(descriptor: RuntimeAdapterDescriptor, session: Session): DeclaredSessionMembers;
 // ==== @byok-sdk/client dist/daemon/skill-pack-installer.d.ts ====
 import { type CapabilityDeclaration } from '@byok-sdk/core';
-import type { AuthManager } from './auth-manager';
+import type { AuthManager } from './auth-manager.js';
 /**
  * The hosted capability this pipeline gates on. A plain string, not an import
  * from `@byok-sdk/cloud`: the daemon must not gain a dependency on the hosted
@@ -8696,9 +8696,9 @@ export interface ProjectedSkillPack {
  */
 export declare function projectSkillPack(dataDir: string, name: string, targetDir: string): Promise<ProjectedSkillPack>;
 // ==== @byok-sdk/client dist/daemon/store.d.ts ====
-import { type EnsureSecureDirOptions } from '../util/secure-dir';
-import { type DeviceCredentialBackend, type DeviceCredentialConfig, type DeviceMetadata, type DeviceRecord } from './device-credential-store';
-export type { DeviceMetadata, DeviceRecord } from './device-credential-store';
+import { type EnsureSecureDirOptions } from '../util/secure-dir.js';
+import { type DeviceCredentialBackend, type DeviceCredentialConfig, type DeviceMetadata, type DeviceRecord } from './device-credential-store.js';
+export type { DeviceMetadata, DeviceRecord } from './device-credential-store.js';
 /**
  * Non-secret projection of an authenticated device enrollment. This is the
  * complete permitted `device.json` shape. The complete record, including
@@ -9101,7 +9101,7 @@ export declare class LocalTeamWorkspace {
 export { LocalTeamWorkspace as LocalTeamWorkspaceService };
 // ==== @byok-sdk/client dist/daemon/toolset-registry.d.ts ====
 import { type ToolsetId } from '@byok-sdk/protocol';
-import type { McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
+import type { McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types.js';
 export type McpToolsetConfigInput = Record<string, McpToolsetConfig> | undefined;
 export interface McpToolsetRegistrySnapshot {
     revision: string;
@@ -9132,7 +9132,7 @@ export declare class McpToolsetRegistry {
 }
 // ==== @byok-sdk/client dist/daemon/truth-memory-client.d.ts ====
 import { type ContentHash, type TruthRecordKind, type TruthRecordSelector } from '@byok-sdk/core';
-import type { DeviceProofSigner } from './device-proof-signer';
+import type { DeviceProofSigner } from './device-proof-signer.js';
 export interface TruthManifestRecord {
     readonly kind: TruthRecordKind;
     readonly recordKey: string;
@@ -9273,10 +9273,10 @@ export declare function readWin32Credential(bindings: Win32CredentialBindings, t
 export declare function writeWin32Credential(bindings: Win32CredentialBindings, target: string, userName: string, value: string): Promise<number>;
 export declare function deleteWin32Credential(bindings: Win32CredentialBindings, target: string): Promise<number>;
 // ==== @byok-sdk/client dist/diagnostics/device-doctor.d.ts ====
-import type { DaemonConfig } from '../daemon/create-daemon';
-import type { RuntimeAdapter } from '../types';
-import type { DiagnosticsSnapshot } from './types';
-export type { DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus } from './types';
+import type { DaemonConfig } from '../daemon/create-daemon.js';
+import type { RuntimeAdapter } from '../types.js';
+import type { DiagnosticsSnapshot } from './types.js';
+export type { DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus } from './types.js';
 export interface DiagnoseDeviceOptions {
     /** The same adapters used by an embedded host; omitted uses bundled adapters. */
     adapters?: RuntimeAdapter[];
@@ -9353,9 +9353,9 @@ export declare class DeviceCursorResetError extends Error {
 export declare function resetDeviceCursor(config: DaemonConfig, input: ResetDeviceCursorInput): Promise<DeviceCursorResetResult>;
 // ==== @byok-sdk/client dist/diagnostics/operator-actions.d.ts ====
 import { type AgentRef } from '@byok-sdk/protocol';
-import type { DaemonConfig } from '../daemon/create-daemon';
-import type { OperationalHealthFixResult } from './types';
-import type { DiagnoseDeviceOptions } from './device-doctor';
+import type { DaemonConfig } from '../daemon/create-daemon.js';
+import type { OperationalHealthFixResult } from './types.js';
+import type { DiagnoseDeviceOptions } from './device-doctor.js';
 declare const MESSAGES: {
     readonly 'confirmation-required': 'Explicit confirmation is required for this local maintenance action.';
     readonly 'invalid-input': 'The maintenance action requires valid explicit inputs.';
@@ -9440,12 +9440,12 @@ export interface InspectDaemonStoresInput {
  */
 export declare function inspectDaemonStores(input: InspectDaemonStoresInput): Promise<readonly StoreCompatibility[]>;
 // ==== @byok-sdk/client dist/diagnostics/types.d.ts ====
-import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types';
-import type { RuntimeVersionChange } from '../runtime-detection';
-import type { ControlStatusResult } from '../daemon/control-protocol';
-import type { OperationalHealthFileInspection } from '../daemon/operational-health';
-import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import type { ServiceEnvironmentRecord, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
+import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types.js';
+import type { RuntimeVersionChange } from '../runtime-detection.js';
+import type { ControlStatusResult } from '../daemon/control-protocol.js';
+import type { OperationalHealthFileInspection } from '../daemon/operational-health.js';
+import type { DaemonLifecycle } from '../daemon/daemon-lifecycle.js';
+import type { ServiceEnvironmentRecord, ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 export interface DiagnosticCheck {
     id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'clock-skew' | 'health' | 'journal' | 'quarantine';
@@ -9600,9 +9600,9 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/file-scope-guard.d.ts ====
-import { type ToolAuthorizationHomeAccess, type ToolAuthorizationLane, type ToolFileAccess, type ToolFileScope } from './tool-authorization';
-import { type FileScopeGuardCode, type FileScopeGuardReason, type MemoryFileScope } from './file-scope-types';
-export { FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS, type FileScopeGuardCode, type FileScopeGuardReason, } from './file-scope-types';
+import { type ToolAuthorizationHomeAccess, type ToolAuthorizationLane, type ToolFileAccess, type ToolFileScope } from './tool-authorization.js';
+import { type FileScopeGuardCode, type FileScopeGuardReason, type MemoryFileScope } from './file-scope-types.js';
+export { FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS, type FileScopeGuardCode, type FileScopeGuardReason, } from './file-scope-types.js';
 /**
  * The internal path guard of the explicit file-scope policy (#1061 slice 2,
  * D14) on darwin, linux and win32. It deliberately uses only Node built-ins:
@@ -9842,45 +9842,45 @@ export type FileScopeGuardCode = 'file_scope_denied' | 'file_scope_unavailable' 
 export declare const FILE_SCOPE_GUARD_REASONS: readonly FileScopeGuardReason[];
 export declare const FILE_SCOPE_GUARD_CODES: readonly FileScopeGuardCode[];
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
-export type { AgentRef } from './agent-home';
-export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
-export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
-export type { AgentSessionHandoff, AgentSessionHandoffMatch, AgentTaskTerminalEvidence, AgentTaskTerminalMatch, AgentTerminalCause, } from './daemon/agent-session-handoff-store';
-export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput, AgentHomeProjectionApplyInput, AgentHomeProjectionFunction, AgentHomeProjectionApplyFunction, AgentHomeLease, AgentHomeBinding, AgentHomeExecutionLease, AgentHomeExecutionBinding, AgentHomeExecutionStatus, } from './agent-home';
-export type { AgentHomeAccessMode } from './agent-home-readers';
-export { localStateRelocation, LocalStateRelocationError, LocalStateRelocationBusyError, LocalStateRelocationIntegrityError, } from './local-state-relocation';
-export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './local-state-relocation';
-export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
-export { resolveLocalAgentReleaseIdentity } from './release-identity';
-export type { LocalAgentReleaseIdentity } from './release-identity';
-export { BYOK_SDK_HELPER_SUBCOMMAND, bundledSdkHelperHost, resolveSdkReservedHelperBin, } from './sdk-reserved-helper-host';
-export { runSdkReservedHelperCommand } from './lifecycle/sdk-reserved-helper-command';
-export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHelperBin, } from './sdk-reserved-helper-host';
-export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
-export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
-export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
-export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
-export { resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
+export type { AgentRef } from './agent-home.js';
+export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
+export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store.js';
+export type { AgentSessionHandoff, AgentSessionHandoffMatch, AgentTaskTerminalEvidence, AgentTaskTerminalMatch, AgentTerminalCause, } from './daemon/agent-session-handoff-store.js';
+export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput, AgentHomeProjectionApplyInput, AgentHomeProjectionFunction, AgentHomeProjectionApplyFunction, AgentHomeLease, AgentHomeBinding, AgentHomeExecutionLease, AgentHomeExecutionBinding, AgentHomeExecutionStatus, } from './agent-home.js';
+export type { AgentHomeAccessMode } from './agent-home-readers.js';
+export { localStateRelocation, LocalStateRelocationError, LocalStateRelocationBusyError, LocalStateRelocationIntegrityError, } from './local-state-relocation.js';
+export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './local-state-relocation.js';
+export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types.js';
+export { resolveLocalAgentReleaseIdentity } from './release-identity.js';
+export type { LocalAgentReleaseIdentity } from './release-identity.js';
+export { BYOK_SDK_HELPER_SUBCOMMAND, bundledSdkHelperHost, resolveSdkReservedHelperBin, } from './sdk-reserved-helper-host.js';
+export { runSdkReservedHelperCommand } from './lifecycle/sdk-reserved-helper-command.js';
+export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHelperBin, } from './sdk-reserved-helper-host.js';
+export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure.js';
+export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure.js';
+export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
+export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
+export { resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
-export { APPROVAL_REQUIRES_HOST } from './daemon/approvals';
-export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals';
-export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner/result-reason-prefixes';
-export { LocalTeamWorkspace, LocalTeamWorkspaceService, TeamWorkspaceError, TeamWorkspaceValidationError, TeamWorkspaceNotFoundError, TeamWorkspaceConflictError, TeamWorkspaceQuotaError, TeamWorkspaceLeaseError, TeamWorkspaceReceiptError, TeamWorkspaceCorruptError, encodeTeamMemberContext, decodeTeamMemberContext, type TeamWorkspaceDefinition, type TeamWorkspaceLimits, type TeamMessage, type TeamMemberLease, type TeamWorkspaceMemberReceipt, } from './daemon/team-workspace';
-export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './util/team-tmux-view';
-export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon';
-export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS, } from './daemon/provider-provisioning';
-export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning';
-export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS, } from './daemon/agent-memory-intent';
-export type { AgentMemoryIntentNoticeFailureReason, } from './daemon/agent-memory-intent';
-export { AgentMemorySnapshotLimitError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory';
-export type { AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryHostedProjection, } from './daemon/agent-memory';
-export type { AgentEgressDropReceipt, AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy';
-export { AGENT_CONTENT_READ_CAPABILITIES, AGENT_CONTENT_READ_CAPABILITY_WORKSPACE, AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT, AGENT_CONTENT_READ_CAPABILITY_ARTIFACT, } from './daemon/agent-content-read';
-export type { AgentContentReadSurface, AgentContentReadDecision, AgentContentReadReason, AgentContentReadRoot, AgentContentReadPolicy, AgentContentReadPolicySelection, AgentContentReadRequest, AgentContentReadResult, AgentContentReadAllowed, AgentContentReadDenied, AgentContentSessionIdentity, AgentContentAuditReceipt, } from './daemon/agent-content-read';
-export { McpToolsetRevisionConflictError, McpToolsetDefinitionRevisionConflictError, } from './daemon/toolset-registry';
-export type { ProgressBatcherOptions } from './daemon/progress-batcher';
+export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
+export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals.js';
+export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner/result-reason-prefixes.js';
+export { LocalTeamWorkspace, LocalTeamWorkspaceService, TeamWorkspaceError, TeamWorkspaceValidationError, TeamWorkspaceNotFoundError, TeamWorkspaceConflictError, TeamWorkspaceQuotaError, TeamWorkspaceLeaseError, TeamWorkspaceReceiptError, TeamWorkspaceCorruptError, encodeTeamMemberContext, decodeTeamMemberContext, type TeamWorkspaceDefinition, type TeamWorkspaceLimits, type TeamMessage, type TeamMemberLease, type TeamWorkspaceMemberReceipt, } from './daemon/team-workspace.js';
+export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './util/team-tmux-view.js';
+export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon.js';
+export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS, } from './daemon/provider-provisioning.js';
+export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning.js';
+export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS, } from './daemon/agent-memory-intent.js';
+export type { AgentMemoryIntentNoticeFailureReason, } from './daemon/agent-memory-intent.js';
+export { AgentMemorySnapshotLimitError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory.js';
+export type { AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryHostedProjection, } from './daemon/agent-memory.js';
+export type { AgentEgressDropReceipt, AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy.js';
+export { AGENT_CONTENT_READ_CAPABILITIES, AGENT_CONTENT_READ_CAPABILITY_WORKSPACE, AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT, AGENT_CONTENT_READ_CAPABILITY_ARTIFACT, } from './daemon/agent-content-read.js';
+export type { AgentContentReadSurface, AgentContentReadDecision, AgentContentReadReason, AgentContentReadRoot, AgentContentReadPolicy, AgentContentReadPolicySelection, AgentContentReadRequest, AgentContentReadResult, AgentContentReadAllowed, AgentContentReadDenied, AgentContentSessionIdentity, AgentContentAuditReceipt, } from './daemon/agent-content-read.js';
+export { McpToolsetRevisionConflictError, McpToolsetDefinitionRevisionConflictError, } from './daemon/toolset-registry.js';
+export type { ProgressBatcherOptions } from './daemon/progress-batcher.js';
 /**
  * Plan `device-assertion-broker`: the ONLY control-socket capability this
  * package exposes publicly. `connectControlClient`/`ControlClient` are
@@ -9889,8 +9889,8 @@ export type { ProgressBatcherOptions } from './daemon/progress-batcher';
  * would make all of it public API in one line. See `daemon/assertion-client.ts`
  * and the constraint test that pins this.
  */
-export { requestDeviceAssertion, requestTaskAssertion } from './daemon/assertion-client';
-export type { RequestDeviceAssertionOptions, RequestDeviceAssertionResult, RequestDeviceAssertionErrorCode, RequestTaskAssertionOptions, RequestTaskAssertionResult, RequestTaskAssertionErrorCode, } from './daemon/assertion-client';
+export { requestDeviceAssertion, requestTaskAssertion } from './daemon/assertion-client.js';
+export type { RequestDeviceAssertionOptions, RequestDeviceAssertionResult, RequestDeviceAssertionErrorCode, RequestTaskAssertionOptions, RequestTaskAssertionResult, RequestTaskAssertionErrorCode, } from './daemon/assertion-client.js';
 /**
  * Contract §8.1 / §8.2(1): the task lane's wire contract.
  *
@@ -9901,9 +9901,9 @@ export type { RequestDeviceAssertionOptions, RequestDeviceAssertionResult, Reque
  * apart. Nothing else about the control socket becomes public with it: this is
  * a pure function over a params value, not a way to reach the client.
  */
-export { parseTaskAssertionIssueParams, TASK_ASSERTION_ISSUE_ERROR_CODES, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, } from './daemon/control-protocol';
-export type { TaskAssertionIssueParams, TaskAssertionIssueResult, TaskAssertionIssueErrorCode, } from './daemon/control-protocol';
-export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon/operational-health';
+export { parseTaskAssertionIssueParams, TASK_ASSERTION_ISSUE_ERROR_CODES, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, } from './daemon/control-protocol.js';
+export type { TaskAssertionIssueParams, TaskAssertionIssueResult, TaskAssertionIssueErrorCode, } from './daemon/control-protocol.js';
+export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon/operational-health.js';
 /**
  * B-P2 local primitive (`docs/researches/runtime-input-preparation-contract.md`
  * §10.3 / §10.4): the task-free `input_preparation.*` control surface's public
@@ -9921,33 +9921,33 @@ export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon
  * needs the same gate the daemon enforces; a hand-rolled copy is how the two
  * drift apart.
  */
-export { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_ERROR_CODES, INPUT_PREPARATION_RECEIPT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_RETIRED_PROMPT_KEYS, INPUT_PREPARATION_RETIRED_REQUEST_KEYS, INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS, INPUT_PREPARATION_VERSION, InputPreparationPolicyError, validateInputPreparationLimits, } from './input-preparation';
-export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationSourceAuthorityRequestV1, InputPreparationSourceAuthorityOutcomeV1, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationErrorCodeV1, InputPreparationHostCanonicalAssistantMessageV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationMessageV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation';
-export { INPUT_PREPARATION_CANCEL_METHOD, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationCancelParams, parseInputPreparationLookupParams, parseInputPreparationRequestParams, } from './daemon/control-protocol';
-export type { InputPreparationResult } from './daemon/control-protocol';
-export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal';
-export type { LocalTaskJournal, JournalIdentity, JournalReceipt, ReceivedEnvelopeRecord, AdmissionRecord, LocalTransitionRecord, LocalTerminalRecord, TerminalTruthState, RecoverableTask, WithheldOfferRecord, WithheldOfferTask, RecoveryOutcome, RecoveryDisposition, LocalStorageUsage, CompactOptions, CompactResult, } from './daemon/journal/journal';
-export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal';
-export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal';
-export { inspectDaemonStores } from './diagnostics/store-compatibility';
-export type { InspectDaemonStoresInput } from './diagnostics/store-compatibility';
-export { LocalStorageConfigError, resolveStorageConfig, DEFAULT_RETENTION_TTL_MS } from './daemon/retention/config';
-export type { StorageConfig, StorageBudgetInput } from './daemon/retention/config';
-export { LocalStorageEmergencyError } from './daemon/retention/pressure';
-export type { StoragePressureState } from './daemon/retention/pressure';
-export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry';
-export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store';
-export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store';
-export { AuthResponseInvalidError } from './daemon/auth-manager';
-export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store';
-export type { DeviceEnrollment, DeviceEnrollmentIdentity, DeviceEnrollmentIdentityStatus, DeviceEnrollmentStatus, DeviceEnrollmentStatusOptions, } from './daemon/store';
+export { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_ERROR_CODES, INPUT_PREPARATION_RECEIPT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_RETIRED_PROMPT_KEYS, INPUT_PREPARATION_RETIRED_REQUEST_KEYS, INPUT_PREPARATION_RETIRED_SNAPSHOT_KEYS, INPUT_PREPARATION_VERSION, InputPreparationPolicyError, validateInputPreparationLimits, } from './input-preparation.js';
+export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV1, InputPreparationCompiledPromptSnapshotV1, InputPreparationCompiledSnapshotV1, InputPreparationAuthorityOutcomeV1, InputPreparationAuthorityResolver, InputPreparationSourceAuthorityRequestV1, InputPreparationSourceAuthorityOutcomeV1, InputPreparationBindingV1, InputPreparationCancelParamsV1, InputPreparationCounterAdapter, InputPreparationCounterAuthorityV1, InputPreparationCounterEvidenceV1, InputPreparationCounterRequestV1, InputPreparationCounterResultV1, InputPreparationCounterTargetV1, InputPreparationCoverageProofV1, InputPreparationDenialReasonV1, InputPreparationErrorCodeV1, InputPreparationHostCanonicalAssistantMessageV1, InputPreparationLimitsPolicyV1, InputPreparationLookupParamsV1, InputPreparationModelCostV1, InputPreparationMessageV1, InputPreparationModelV1, InputPreparationOptionsV1, InputPreparationPinV1, InputPreparationPromptSnapshotV1, InputPreparationReadinessReasonV1, InputPreparationReceiptV1, InputPreparationRequestV1, InputPreparationRuntimeIdentityV1, InputPreparationScopeClaimV1, InputPreparationSelectionV1, InputPreparationSnapshotV1, InputPreparationSourceV1, InputPreparationStateV1, InputPreparationToolV1, InputPreparationUserMessageV1, } from './input-preparation.js';
+export { INPUT_PREPARATION_CANCEL_METHOD, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationCancelParams, parseInputPreparationLookupParams, parseInputPreparationRequestParams, } from './daemon/control-protocol.js';
+export type { InputPreparationResult } from './daemon/control-protocol.js';
+export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal.js';
+export type { LocalTaskJournal, JournalIdentity, JournalReceipt, ReceivedEnvelopeRecord, AdmissionRecord, LocalTransitionRecord, LocalTerminalRecord, TerminalTruthState, RecoverableTask, WithheldOfferRecord, WithheldOfferTask, RecoveryOutcome, RecoveryDisposition, LocalStorageUsage, CompactOptions, CompactResult, } from './daemon/journal/journal.js';
+export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal.js';
+export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal.js';
+export { inspectDaemonStores } from './diagnostics/store-compatibility.js';
+export type { InspectDaemonStoresInput } from './diagnostics/store-compatibility.js';
+export { LocalStorageConfigError, resolveStorageConfig, DEFAULT_RETENTION_TTL_MS } from './daemon/retention/config.js';
+export type { StorageConfig, StorageBudgetInput } from './daemon/retention/config.js';
+export { LocalStorageEmergencyError } from './daemon/retention/pressure.js';
+export type { StoragePressureState } from './daemon/retention/pressure.js';
+export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry.js';
+export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store.js';
+export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store.js';
+export { AuthResponseInvalidError } from './daemon/auth-manager.js';
+export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store.js';
+export type { DeviceEnrollment, DeviceEnrollmentIdentity, DeviceEnrollmentIdentityStatus, DeviceEnrollmentStatus, DeviceEnrollmentStatusOptions, } from './daemon/store.js';
 /**
  * Host device proofs signed with the stored enrollment key, scoped to one
  * enrollment identity and an explicit operation allowlist. The key never
  * leaves the signer; `DeviceProofSigner` is also what `TruthMemoryClient` takes.
  */
-export { createStoredDeviceProofSigner, DeviceProofSignerError } from './daemon/device-proof-signer';
-export type { CreateStoredDeviceProofSignerOptions, DeviceProofRequest, DeviceProofSigner, DeviceProofSignerErrorCode, HostDeviceProofSigner, } from './daemon/device-proof-signer';
+export { createStoredDeviceProofSigner, DeviceProofSignerError } from './daemon/device-proof-signer.js';
+export type { CreateStoredDeviceProofSignerOptions, DeviceProofRequest, DeviceProofSigner, DeviceProofSignerErrorCode, HostDeviceProofSigner, } from './daemon/device-proof-signer.js';
 /**
  * Plan `skill-pack-delivery-channel`: the device half of the `skills.pack`
  * channel. The install pipeline and the two read APIs are public because the
@@ -9955,82 +9955,82 @@ export type { CreateStoredDeviceProofSignerOptions, DeviceProofRequest, DevicePr
  * lists what is installed and projects the pack it wants into the directory its
  * own runtime reads. Nothing here ever writes to a vendor CLI's skill directory.
  */
-export { SKILL_PACKS_CAPABILITY, SKILL_PACKS_DIRNAME, SKILL_PACK_AUDIT_FILENAME, SKILL_PACK_INSTALL_ERROR_CODES, SKILL_PACK_LOCK_FILENAME, SKILL_PACK_LOCK_SCHEMA, SKILL_PACK_RESPONSE_MAX_BYTES, SkillPackInstallError, installSkillPacks, listInstalledSkillPacks, projectSkillPack, skillPacksRoot, } from './daemon/skill-pack-installer';
-export type { InstallSkillPacksOptions, InstalledSkillPack, ProjectedSkillPack, SkillPackInstallErrorCode, SkillPackInstallResult, SkillPackLock, } from './daemon/skill-pack-installer';
-export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client';
-export type { LocalMemoryFilter, MemorySelector, TruthManifestQueryInput, TruthManifestRecord, TruthMemoryClientErrorCode, TruthMemoryClientOptions, TruthMemoryMetric, TruthSnapshotCandidateInput, TruthSnapshotWriteInput, TruthTerminalWriteInput, TruthWriteBody, TruthWriteResult, VerifiedTruthRecord, } from './daemon/truth-memory-client';
-export type { ConnectionState } from './daemon/connection-manager';
-export { DAEMON_HALT_REASONS, DaemonHaltError, isDaemonHaltReason } from './daemon/daemon-lifecycle';
-export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle';
-export { ReplayCursorTooOldError } from './daemon/replay-cursor';
-export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client';
-export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client';
-export { DaemonObserver } from './daemon/observer';
-export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer';
-export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record';
-export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record';
-export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, ExecutionRecordUnknown } from './daemon/execution-record';
-export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle';
-export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle';
-export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types';
-export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram, ServiceStatusResult, ServiceWindowsOptions, } from './lifecycle/service-types';
-export { generateLaunchdPlist } from './lifecycle/launchd';
-export { generateSystemdUnit } from './lifecycle/systemd';
-export { generateWinswXml } from './lifecycle/winsw';
-export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service';
-export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service';
-export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError, } from './lifecycle/service-installation';
-export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation';
-export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit';
-export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit';
-export { checkUpgradeFrom } from './lifecycle/upgrade-from';
-export type { UpgradeFromBreakingEntry, UpgradeFromRefusalCode, UpgradeFromReport, UpgradeTrainPackage, } from './lifecycle/upgrade-from';
-export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes';
-export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes';
-export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log';
-export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log';
-export { applyLoginShellEnvironment } from './lifecycle/service-environment';
-export { serviceEnvironmentStatus } from './login-shell-environment';
-export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment';
-export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from './runtime/environment';
-export type { RuntimeObservation, RuntimeVersionChange, RuntimeVersionChangeDirection } from './runtime-detection';
-export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment';
-export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
-export type { EnsureSecureDirOptions } from './util/secure-dir';
+export { SKILL_PACKS_CAPABILITY, SKILL_PACKS_DIRNAME, SKILL_PACK_AUDIT_FILENAME, SKILL_PACK_INSTALL_ERROR_CODES, SKILL_PACK_LOCK_FILENAME, SKILL_PACK_LOCK_SCHEMA, SKILL_PACK_RESPONSE_MAX_BYTES, SkillPackInstallError, installSkillPacks, listInstalledSkillPacks, projectSkillPack, skillPacksRoot, } from './daemon/skill-pack-installer.js';
+export type { InstallSkillPacksOptions, InstalledSkillPack, ProjectedSkillPack, SkillPackInstallErrorCode, SkillPackInstallResult, SkillPackLock, } from './daemon/skill-pack-installer.js';
+export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client.js';
+export type { LocalMemoryFilter, MemorySelector, TruthManifestQueryInput, TruthManifestRecord, TruthMemoryClientErrorCode, TruthMemoryClientOptions, TruthMemoryMetric, TruthSnapshotCandidateInput, TruthSnapshotWriteInput, TruthTerminalWriteInput, TruthWriteBody, TruthWriteResult, VerifiedTruthRecord, } from './daemon/truth-memory-client.js';
+export type { ConnectionState } from './daemon/connection-manager.js';
+export { DAEMON_HALT_REASONS, DaemonHaltError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
+export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle.js';
+export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';
+export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client.js';
+export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client.js';
+export { DaemonObserver } from './daemon/observer.js';
+export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer.js';
+export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record.js';
+export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record.js';
+export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, ExecutionRecordUnknown } from './daemon/execution-record.js';
+export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle.js';
+export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle.js';
+export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types.js';
+export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram, ServiceStatusResult, ServiceWindowsOptions, } from './lifecycle/service-types.js';
+export { generateLaunchdPlist } from './lifecycle/launchd.js';
+export { generateSystemdUnit } from './lifecycle/systemd.js';
+export { generateWinswXml } from './lifecycle/winsw.js';
+export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service.js';
+export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service.js';
+export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError, } from './lifecycle/service-installation.js';
+export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation.js';
+export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit.js';
+export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit.js';
+export { checkUpgradeFrom } from './lifecycle/upgrade-from.js';
+export type { UpgradeFromBreakingEntry, UpgradeFromRefusalCode, UpgradeFromReport, UpgradeTrainPackage, } from './lifecycle/upgrade-from.js';
+export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes.js';
+export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes.js';
+export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log.js';
+export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log.js';
+export { applyLoginShellEnvironment } from './lifecycle/service-environment.js';
+export { serviceEnvironmentStatus } from './login-shell-environment.js';
+export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment.js';
+export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from './runtime/environment.js';
+export type { RuntimeObservation, RuntimeVersionChange, RuntimeVersionChangeDirection } from './runtime-detection.js';
+export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
+export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir.js';
+export type { EnsureSecureDirOptions } from './util/secure-dir.js';
 export { SystemToolUnavailableError } from '@byok-sdk/core/system-tool';
-export { PiAdapter } from './adapters/pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
-export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
-export { copyPiRuntimeAssets } from './adapters/pi/runtime-assets';
-export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/pi/runtime-assets';
-export { ClaudeAdapter } from './adapters/claude/claude-adapter';
-export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
-export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
-export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
-export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter';
-export { AgyAdapter, type AgyAdapterOptions } from './adapters/antigravity/agy-adapter';
-export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter';
-export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor';
-export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, ResetDeviceCursorInput, DeviceCursorResetResult, DeviceCursorResetErrorCode, } from './diagnostics/device-doctor';
-export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
-export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions';
-export { NativeInteractionController, NativeInteractionError } from './native-interactions';
-export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from './native-interactions';
-export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement';
-export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch';
-export type { ExecutionScratch } from './daemon/retention/scratch';
-export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './util/agent-memory-helper-release';
+export { PiAdapter } from './adapters/pi/pi-adapter.js';
+export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter.js';
+export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin.js';
+export { copyPiRuntimeAssets } from './adapters/pi/runtime-assets.js';
+export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/pi/runtime-assets.js';
+export { ClaudeAdapter } from './adapters/claude/claude-adapter.js';
+export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter.js';
+export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter.js';
+export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter.js';
+export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter.js';
+export { AgyAdapter, type AgyAdapterOptions } from './adapters/antigravity/agy-adapter.js';
+export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter.js';
+export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor.js';
+export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, ResetDeviceCursorInput, DeviceCursorResetResult, DeviceCursorResetErrorCode, } from './diagnostics/device-doctor.js';
+export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions.js';
+export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions.js';
+export { NativeInteractionController, NativeInteractionError } from './native-interactions.js';
+export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from './native-interactions.js';
+export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement.js';
+export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch.js';
+export type { ExecutionScratch } from './daemon/retention/scratch.js';
+export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './util/agent-memory-helper-release.js';
 /** The reserved name of the SDK memory MCP server in an Agent task's MCP servers. */
-export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
+export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp.js';
 /** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
-export { isReservedMcpServerName } from './sdk-reserved-mcp';
-export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets';
-export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
-export { classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES, TOOL_FILE_ACCESS, } from './tool-authorization';
-export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolAuthorizationMode, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolFileAccess, ToolFileScope, ToolFileScopeRoot, ToolReminder, ToolRisk, ToolRiskReason, ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule, } from './tool-authorization';
-export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './adapters/opencode/opencode-adapter';
+export { isReservedMcpServerName } from './sdk-reserved-mcp.js';
+export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets.js';
+export type { AgentMemoryExportOptions } from './daemon/agent-memory-export.js';
+export { classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES, TOOL_FILE_ACCESS, } from './tool-authorization.js';
+export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolAuthorizationMode, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolFileAccess, ToolFileScope, ToolFileScopeRoot, ToolReminder, ToolRisk, ToolRiskReason, ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule, } from './tool-authorization.js';
+export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './adapters/opencode/opencode-adapter.js';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
-import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
+import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory.js';
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
 /** Wire format tag for a preparation request. One strict shape, one version. */
 export declare const INPUT_PREPARATION_REQUEST_FORMAT = "byok.input-preparation.request";
@@ -11013,9 +11013,9 @@ export interface PreparedToolSurfaceDigestInputV1 {
 /** The whole observed surface: the schemas and the executors. */
 export declare function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceDigestInputV1): string;
 // ==== @byok-sdk/client dist/lifecycle/agent-service.d.ts ====
-import type { DaemonConfig } from '../daemon/create-daemon';
-import type { ServiceInstallationOptions } from './service-installation';
-import { type ServiceDefinition } from './service-types';
+import type { DaemonConfig } from '../daemon/create-daemon.js';
+import type { ServiceInstallationOptions } from './service-installation.js';
+import { type ServiceDefinition } from './service-types.js';
 export interface AgentServiceDefinitionInput {
     config: Pick<DaemonConfig, 'productId' | 'productName' | 'storeDir' | 'branding'>;
     /** The config file `byok-agent start` loads; resolved to an absolute path, since the service starts in the manager's own working directory. */
@@ -11056,12 +11056,12 @@ export interface AgentServiceInstallationInput extends Omit<AgentServiceDefiniti
  */
 export declare function agentServiceInstallation(input: AgentServiceInstallationInput): ServiceInstallationOptions;
 // ==== @byok-sdk/client dist/lifecycle/create-service-lifecycle.d.ts ====
-import { type LaunchdDeps } from './launchd';
-import { type SystemdDeps } from './systemd';
-import { type WindowsUserDeps } from './windows-user';
-import { type WinswDeps } from './winsw';
-import type { ManagedServiceLifecycle } from './managed-lifecycle';
-import type { ServiceDefinition, ServiceLifecycle } from './service-types';
+import { type LaunchdDeps } from './launchd.js';
+import { type SystemdDeps } from './systemd.js';
+import { type WindowsUserDeps } from './windows-user.js';
+import { type WinswDeps } from './winsw.js';
+import type { ManagedServiceLifecycle } from './managed-lifecycle.js';
+import type { ServiceDefinition, ServiceLifecycle } from './service-types.js';
 export declare class UnsupportedServicePlatformError extends Error {
     constructor(platform: string);
 }
@@ -11190,9 +11190,9 @@ export interface DaemonExitOutcome {
  */
 export declare function daemonExitCode(outcome: DaemonExitOutcome, service: boolean): ExitCode;
 // ==== @byok-sdk/client dist/lifecycle/launchd.d.ts ====
-import { type Runner } from '../util/exec-runner';
-import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
-import { type ServiceDefinition } from './service-types';
+import { type Runner } from '../util/exec-runner.js';
+import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { type ServiceDefinition } from './service-types.js';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment for why a mocked `run` is enough to unit-test all of this file's install/uninstall/start/stop/status logic on any host OS. */
 export interface LaunchdDeps {
     run?: Runner;
@@ -11245,8 +11245,8 @@ export declare function generateLaunchdPlist(def: {
 export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: LaunchdDeps, gateRoot?: string): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/managed-lifecycle.d.ts ====
 import { promises as fsp } from 'node:fs';
-import { type ServiceUnitFile } from './service-unit';
-import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceStatusResult } from './service-types';
+import { type ServiceUnitFile } from './service-unit.js';
+import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceStatusResult } from './service-types.js';
 export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod'>;
 /** The platform half of a lifecycle: where its files go and how its manager loads them. */
 export interface PlatformUnit {
@@ -11300,7 +11300,7 @@ export declare function createManagedLifecycle(def: ServiceDefinition, unit: Pla
  */
 export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
 // ==== @byok-sdk/client dist/lifecycle/service-environment.d.ts ====
-import { type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus } from '../login-shell-environment';
+import { type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus } from '../login-shell-environment.js';
 /**
  * Issue #392: `byok-agent start --service` runs under a service manager's
  * minimal environment. {@link applyLoginShellEnvironment} replaces this
@@ -11327,9 +11327,9 @@ export declare function applyLoginShellEnvironment(): Promise<ServiceEnvironment
 export declare function captureAndApply(options: ApplyLoginShellEnvironmentOptions): Promise<ServiceEnvironmentStatus>;
 // ==== @byok-sdk/client dist/lifecycle/service-installation.d.ts ====
 import type { StoreCompatibilityVerdict } from '@byok-sdk/core';
-import { type CreateServiceLifecycleOptions } from './create-service-lifecycle';
-import type { ManagedServiceLifecycle } from './managed-lifecycle';
-import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types';
+import { type CreateServiceLifecycleOptions } from './create-service-lifecycle.js';
+import type { ManagedServiceLifecycle } from './managed-lifecycle.js';
+import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types.js';
 /** The manifest every payload directory carries at its root. */
 export declare const SERVICE_PAYLOAD_MANIFEST = "byok-payload.json";
 /**
@@ -11637,8 +11637,8 @@ export interface ServiceLogReport {
 /** Location and size of every regular file in `logDir` (#1097: `status` and `doctor` report them). Read-only. */
 export declare function inspectServiceLogs(logDir: string): Promise<ServiceLogReport>;
 // ==== @byok-sdk/client dist/lifecycle/service-types.d.ts ====
-import type { ServiceLogReport } from './service-log';
-import type { ServiceRepairResult, ServiceUnitInspection } from './service-unit';
+import type { ServiceLogReport } from './service-log.js';
+import type { ServiceRepairResult, ServiceUnitInspection } from './service-unit.js';
 /**
  * What the stable launcher executes (#1097). The unit never names it: on
  * macOS and Linux the unit runs `<storeDir>/service/<name>.launcher.sh`,
@@ -11877,7 +11877,7 @@ export interface ServiceLifecycle {
 export declare function sanitizeServiceName(name: string): string;
 // ==== @byok-sdk/client dist/lifecycle/service-unit.d.ts ====
 import { promises as fsp } from 'node:fs';
-import type { ServiceProgram } from './service-types';
+import type { ServiceProgram } from './service-types.js';
 /**
  * Every unit this SDK generates carries this text (an XML comment in a
  * plist or WinSW descriptor, a `#` comment in a systemd unit). It is the
@@ -12028,9 +12028,9 @@ export declare function releaseServiceLifecycleOwner(input: Omit<ServiceLifecycl
 export declare function releaseHeldServiceLifecycleOwner(input: Omit<ServiceLifecycleOwnerInput, 'service'>, fs: ServiceOwnerFs): Promise<void>;
 export {};
 // ==== @byok-sdk/client dist/lifecycle/systemd.d.ts ====
-import { type Runner } from '../util/exec-runner';
-import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
-import { type ServiceDefinition } from './service-types';
+import { type Runner } from '../util/exec-runner.js';
+import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { type ServiceDefinition } from './service-types.js';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface SystemdDeps {
     run?: Runner;
@@ -12118,9 +12118,9 @@ export declare function checkUpgradeFrom(fromVersion: string, options?: {
     readonly resolveFrom?: string;
 }): UpgradeFromReport;
 // ==== @byok-sdk/client dist/lifecycle/windows-user.d.ts ====
-import { type Runner } from '../util/exec-runner';
-import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
-import { type ServiceDefinition, type ServiceProgram } from './service-types';
+import { type Runner } from '../util/exec-runner.js';
+import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { type ServiceDefinition, type ServiceProgram } from './service-types.js';
 /** DI seams for tests; the real ones start Windows processes. */
 export interface WindowsUserDeps {
     /** Runs the launcher process query (PowerShell). */
@@ -12163,9 +12163,9 @@ export declare function generateWindowsStartupUnit(launcherPath: string): string
 export declare function createWindowsUserLifecycle(def: ServiceDefinition, deps?: WindowsUserDeps, gateRoot?: string): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/winsw.d.ts ====
 import { promises as fsp } from 'node:fs';
-import { type Runner } from '../util/exec-runner';
-import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
-import { type ServiceDefinition, type ServiceProgram } from './service-types';
+import { type Runner } from '../util/exec-runner.js';
+import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
+import { type ServiceDefinition, type ServiceProgram } from './service-types.js';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface WinswDeps {
     run?: Runner;
@@ -12439,7 +12439,7 @@ export declare class SeenRequestIds {
     static key(id: McpServerRequestId): string;
 }
 // ==== @byok-sdk/client dist/mcp-server/http.d.ts ====
-import { type McpServerOptions } from './index';
+import { type McpServerOptions } from './index.js';
 /** Maximum accepted HTTP request body, in UTF-8 bytes. */
 export declare const MCP_HTTP_MAX_BODY_BYTES: number;
 export interface McpHttpServerOptions extends Omit<McpServerOptions, 'input' | 'output' | 'onClose' | 'maxLineBytes'> {
@@ -12469,7 +12469,7 @@ export interface McpHttpServer {
  */
 export declare function createMcpHttpServer(options: McpHttpServerOptions): McpHttpServer;
 // ==== @byok-sdk/client dist/mcp-server/index.d.ts ====
-import { type McpServerRequestId } from './dispatch';
+import { type McpServerRequestId } from './dispatch.js';
 /** The revisions this core implements and will answer `initialize` with. Final; see the module header for each entry's and each exclusion's citation. */
 export declare const MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS: readonly string[];
 /** Inbound: maximum bytes between two newlines before the session fails closed. */
@@ -12630,7 +12630,7 @@ export declare class McpAuthorityError extends Error {
 }
 // ==== @byok-sdk/client dist/mcp/client.d.ts ====
 import { type CallToolResult, type Tool } from '@modelcontextprotocol/client';
-import { McpAuthorityError } from './authority-error';
+import { McpAuthorityError } from './authority-error.js';
 export { McpAuthorityError };
 /**
  * The SDK's single MCP client authority.
@@ -12785,7 +12785,7 @@ export declare class McpStdioClient {
 }
 // ==== @byok-sdk/client dist/mcp/event-identity.d.ts ====
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { McpToolsetToolObservation } from '../types';
+import type { McpToolsetToolObservation } from '../types.js';
 export type McpEventIdentity = NonNullable<Extract<AgentEvent, {
     type: 'tool_use';
 }>['mcp']>;
@@ -12793,7 +12793,7 @@ export type McpEventIdentities = ReadonlyMap<string, McpEventIdentity>;
 /** Exact admitted names, never split an arbitrary runtime label (names may contain __). */
 export declare function mcpEventIdentities(observation?: McpToolsetToolObservation): McpEventIdentities;
 // ==== @byok-sdk/client dist/mcp/observation.d.ts ====
-import { type McpStdioClientOptions, type McpStdioServerSpec } from './client';
+import { type McpStdioClientOptions, type McpStdioServerSpec } from './client.js';
 /**
  * Tool names an adapter registers must be OBSERVED, never configured: the
  * daemon's own `mcpToolsets` config carries `command`/`args` only (see
@@ -13044,8 +13044,8 @@ export declare const LOCAL_AGENT_RELEASE_BUILD_ID_MAX_LENGTH = 128;
 export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleaseIdentity | undefined): Readonly<LocalAgentReleaseIdentity>;
 // ==== @byok-sdk/client dist/runtime-detection.d.ts ====
 import type { RuntimeId } from '@byok-sdk/protocol';
-import { type ServiceEnvironmentUnavailableCode } from './login-shell-environment';
-import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeExecutableSource, type RuntimeVersionVerdict } from './types';
+import { type ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
+import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeExecutableSource, type RuntimeVersionVerdict } from './types.js';
 /** How one restart changed an installed runtime's version token (#1103 §2.6). */
 export type RuntimeVersionChangeDirection = 'upgrade' | 'downgrade' | 'changed' | 'unknown';
 /** The local, restart-only version comparison; never sent on the wire or into audit. */
@@ -13222,7 +13222,7 @@ export declare class RuntimeStartupDisposalFailure extends Error {
 }
 export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
 // ==== @byok-sdk/client dist/runtime/environment.d.ts ====
-import { type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
+import { type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
 /**
  * The environment of every child process of a task: the runtime CLI and the
  * MCP servers the daemon probes for it (#1095).
@@ -13458,7 +13458,7 @@ export declare function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions)
 /** Runtime loader: explicit absolute root only, no download or package-search fallback. */
 export declare function loadSdkKoffiAsset(root: string): unknown;
 // ==== @byok-sdk/client dist/sdk-native-assets.d.ts ====
-import { type SdkReservedHelperKind } from './sdk-reserved-helper-host';
+import { type SdkReservedHelperKind } from './sdk-reserved-helper-host.js';
 export declare const sdkNativeAssetTargets: Readonly<{
     'win32-x64': Readonly<{
         package: "@koromix/koffi-win32-x64";
@@ -13487,7 +13487,7 @@ export interface CopySdkNativeAssetsOptions {
 }
 /** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
 export declare function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]>;
-export { loadSdkKoffiAsset } from './sdk-native-assets-runtime';
+export { loadSdkKoffiAsset } from './sdk-native-assets-runtime.js';
 /**
  * What a single-file product does with each published bin. `cli`: the daemon CLI, not shipped by an embedded Host.
  * `reserved-helper` and `pi-host`: re-entered through `sdkHelperHost` as `kind`. `provider-launcher`: the keys
@@ -13649,8 +13649,8 @@ export declare const SDK_RESERVED_MCP_TOOL_NAMES: Readonly<{
     byokagentresult: readonly string[];
 }>;
 // ==== @byok-sdk/client dist/testing/index.d.ts ====
-import { type RuntimeEnvironment } from '../runtime/environment';
-import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types';
+import { type RuntimeEnvironment } from '../runtime/environment.js';
+import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types.js';
 /** The built-in adapters a fake can stand in for. */
 export type FakeRuntimeAdapterId = 'agy' | 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';
 /** What the fake does. It never spawns a process. */
@@ -13669,7 +13669,7 @@ export interface FakeRuntimeAdapterBehavior {
  */
 export declare function fakeRuntimeAdapter(id: FakeRuntimeAdapterId, behavior?: FakeRuntimeAdapterBehavior): RuntimeAdapter;
 // ==== @byok-sdk/client dist/tool-authorization.d.ts ====
-import type { AgentRef } from './agent-home';
+import type { AgentRef } from './agent-home.js';
 /**
  * The only product tool-authorization modes, chosen by the local Host per task
  * and shared by every runtime:
@@ -13924,18 +13924,18 @@ export interface ToolReminder {
     readonly suppressedReasons?: readonly ToolRiskReason[];
 }
 // ==== @byok-sdk/client dist/types.d.ts ====
-import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment';
-import type { RuntimeEnvironment } from './runtime/environment';
-import type { ExecutionScratch } from './daemon/retention/scratch';
-import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
-import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization';
+import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
+import type { RuntimeEnvironment } from './runtime/environment.js';
+import type { ExecutionScratch } from './daemon/retention/scratch.js';
+import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions.js';
+import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
+import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory.js';
 import type { AgentEvent, TaskOfferPlainPayload } from '@byok-sdk/protocol';
-import type { InputPreparationModelV1 } from './input-preparation';
-import type { AgentRef } from './agent-home';
-import type { McpToolsetServerObservation } from './mcp/observation';
-export type { AgentRef } from './agent-home';
+import type { InputPreparationModelV1 } from './input-preparation.js';
+import type { AgentRef } from './agent-home.js';
+import type { McpToolsetServerObservation } from './mcp/observation.js';
+export type { AgentRef } from './agent-home.js';
 /**
  * The offer fields a runtime adapter receives. The client owns this shape;
  * the daemon projects each wire offer onto it.
@@ -13945,7 +13945,7 @@ export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'runtime' | 'harnessI
     /** The runtime session to resume (`session.mode: 'resume'` on the offer); absent for a fresh session. */
     sessionRef?: string;
 };
-export type { McpServerObservation, McpToolDescriptor, McpToolsetServerObservation, } from './mcp/observation';
+export type { McpServerObservation, McpToolDescriptor, McpToolsetServerObservation, } from './mcp/observation.js';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 /**
  * Failure vocabulary shared by the detection contract and local diagnostics.
@@ -14246,7 +14246,7 @@ export interface SessionEvidence {
  */
 export interface RuntimeAdapterDescriptor {
     /** Pi RPC memory-only execution contract; omission means unsupported. */
-    readonly memoryLane?: typeof import('./adapters/pi/memory-lane-contract').PI_MEMORY_LANE;
+    readonly memoryLane?: typeof import('./adapters/pi/memory-lane-contract.js').PI_MEMORY_LANE;
     readonly id: string;
     readonly capabilities: RuntimeCapabilities;
     /**
@@ -14484,7 +14484,7 @@ export interface RuntimeLaunchResources {
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
     /** Device-owned memory grant; never sourced from the offer. */
-    readonly memoryLane?: import('./file-scope-guard').FileScopeGrant;
+    readonly memoryLane?: import('./file-scope-guard.js').FileScopeGrant;
     readonly scratch: ExecutionScratch;
     /** Exact local resource acquired by this operation before resume handoff validation; never serialized. */
     readonly sessionLease?: RuntimeSessionLease;
@@ -14786,7 +14786,7 @@ export declare function isIdempotentAbsence(result: RunResult, absence: Idempote
  */
 export declare function runIdempotent(run: Runner, command: string, args: string[], label: string, absence: IdempotentAbsence): Promise<RunResult>;
 // ==== @byok-sdk/client dist/util/secure-dir.d.ts ====
-import { type Runner } from './exec-runner';
+import { type Runner } from './exec-runner.js';
 /**
  * Pure command-construction seam (finding F7) — kept separate from the
  * actual `icacls` invocation below so it's unit-testable on ANY host OS,

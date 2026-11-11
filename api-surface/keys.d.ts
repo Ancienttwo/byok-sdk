@@ -1,5 +1,5 @@
 // ==== @byok-sdk/keys dist/anthropic-client.d.ts ====
-import type { ModelProviderClientOptions } from './openai-client';
+import type { ModelProviderClientOptions } from './openai-client.js';
 /** One Anthropic message. `content` is `unknown` so block arrays pass through. */
 export interface AnthropicMessage {
     role: 'user' | 'assistant';
@@ -62,8 +62,8 @@ export declare function runCommand(executable: string, args: string[], stdin?: s
 // ==== @byok-sdk/keys dist/custody.d.ts ====
 import { z } from 'zod';
 import { type ProviderProvisioningOperation } from '@byok-sdk/core';
-import { ByokKeysError } from './errors';
-import type { ModelProviderProfile, ProviderProfileRef } from './provider-profile';
+import { ByokKeysError } from './errors.js';
+import type { ModelProviderProfile, ProviderProfileRef } from './provider-profile.js';
 /**
  * Credential custody coordination (plan web-sealed-provisioning D5, A3, A4, A8, A9).
  *
@@ -283,7 +283,7 @@ export declare function withConfigurationLock<T>(store: {
 export declare function configurationPendingError(): ByokKeysError;
 // ==== @byok-sdk/keys dist/device-sealing-key.d.ts ====
 import { type SealingPublicJwk, type WebCryptoKey } from '@byok-sdk/core';
-import type { SecretStore } from './secret-store';
+import type { SecretStore } from './secret-store.js';
 /**
  * Credential-store entry holding this device's long-lived P-256 sealing key
  * (plan D1). Validated by the same secret-name rule as every other entry.
@@ -427,7 +427,7 @@ export declare const BYOK_KEYS_ERROR_CODES: {
 };
 export type ByokKeysErrorCode = (typeof BYOK_KEYS_ERROR_CODES)[keyof typeof BYOK_KEYS_ERROR_CODES];
 // ==== @byok-sdk/keys dist/headers.d.ts ====
-import type { ProviderAuthMode } from './provider-profile';
+import type { ProviderAuthMode } from './provider-profile.js';
 /** The subset of a profile the header builder reads. */
 export interface ProviderAuthProfile {
     auth_mode: ProviderAuthMode;
@@ -450,9 +450,9 @@ export declare function requiredProviderSecret(profile: ProviderAuthProfile, sec
 export declare function providerHeaders(profile: ProviderAuthProfile, secret: string | undefined): Record<string, string>;
 // ==== @byok-sdk/keys dist/hermes-provider-launcher.d.ts ====
 import { z } from 'zod';
-import { type ModelProviderProfile } from './provider-profile';
-import { type ExactProviderProfileBinding } from './provider-profile-binding';
-import { type SecretStore } from './secret-store';
+import { type ModelProviderProfile } from './provider-profile.js';
+import { type ExactProviderProfileBinding } from './provider-profile-binding.js';
+import { type SecretStore } from './secret-store.js';
 declare const RequestSchema: z.ZodObject<{
     profileDbPath: z.ZodString;
     binding: z.ZodObject<{
@@ -560,65 +560,65 @@ export declare function objectValue(value: unknown): Record<string, unknown> | u
 /** `providers.ts:2301-2308` — an empty completion does not prove a live key. */
 export declare function assertLiveModelResponse(value: string): void;
 // ==== @byok-sdk/keys dist/index.d.ts ====
-export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors';
-export type { ByokKeysErrorCode } from './errors';
-export { PiModelConfigSchema, PI_THINKING_LEVELS, PI_OPENAI_COMPATIBLE_APIS, PI_MODEL_APIS, PI_COMPAT_KEYS_BY_API, } from './pi-model-config';
-export type { PiCompatKey, PiModelApi, PiModelConfig, PiOpenAICompatibleApi, PiThinkingLevel } from './pi-model-config';
-export { MODEL_PROVIDER_ADAPTERS, MODEL_PROVIDER_KINDS, PROVIDER_AUTH_MODES, PROVIDER_MODEL_CAPABILITIES, ModelProviderProfileSchema, ProviderModelCapabilitySchema, ProviderProfileRefSchema, parseModelProviderProfile, } from './provider-profile';
-export type { ModelProviderAdapter, ModelProviderKind, ModelProviderProfile, ModelProviderProfileInput, ProviderAuthMode, ProviderModelCapability, ProviderProfileRef, } from './provider-profile';
-export { exactProviderProfileBinding, assertExactProviderProfileBinding, } from './provider-profile-binding';
-export type { ExactProviderProfileBinding } from './provider-profile-binding';
-export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS, modelProviderVendor, } from './provider-catalog';
-export type { ModelProviderVendor, ModelProviderVendorId, } from './provider-catalog';
-export { providerHeaders, requiredProviderSecret } from './headers';
-export type { ProviderAuthProfile } from './headers';
-export { normalizeProviderUrl, isLoopbackHost, isLoopbackProviderUrl, isPrivateNetworkLiteral, } from './url';
-export { assertLiveModelResponse, classifyModelProviderHttpError, fetchWithProviderGuards, modelApiUrl, modelMessageText, objectValue, parseBoundedJsonResponse, PROVIDER_RESPONSE_MAX_BYTES, PROVIDER_TIMEOUT_MS, readModelProviderResponse, } from './http';
-export type { ProviderFetch } from './http';
-export { OpenAiCompatibleChatClient, chatCompletionText } from './openai-client';
-export type { ChatCompletionRequest, ChatMessage, ModelProviderClientOptions, } from './openai-client';
-export { AnthropicMessagesClient, anthropicMessageText } from './anthropic-client';
-export type { AnthropicMessage, AnthropicMessageRequest, } from './anthropic-client';
-export { runCommand } from './command-runner';
-export type { CommandResult, CommandRunner } from './command-runner';
-export { SECRET_NAME_PATTERN, SECRET_NAMESPACE_PATTERN, assertSecretName, assertSecretNamespace, } from './secret-name';
-export { DEFAULT_SECRET_SERVICE_PREFIX, InMemorySecretStore, assertSharedSecretValue, decodeStrictBase64Utf8, modelProviderSecretName, } from './secret-store';
-export { PROVIDER_PROVISIONING_SECRET_MAX_BYTES } from './secret-value';
-export type { ModelProviderSecretName, SecretStore } from './secret-store';
-export { DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX, MacOsKeychainSecretStore, } from './macos-keychain';
-export type { MacOsKeychainSecretStoreOptions } from './macos-keychain';
-export { LinuxSecretServiceSecretStore } from './linux-secret-service';
-export type { LinuxSecretServiceSecretStoreOptions } from './linux-secret-service';
-export { WindowsCredentialManagerSecretStore } from './windows-credential-manager';
-export type { WindowsCredentialManagerSecretStoreOptions } from './windows-credential-manager';
-export { DEFAULT_SECRET_ENVELOPE_PREFIX, EnvelopeScopedSecretStore, scopeSecretStore, secretScopeId, } from './secret-scope';
-export type { SecretScope } from './secret-scope';
-export { InMemoryProviderProfileStore } from './profile-store';
-export type { ProviderProfileStore } from './profile-store';
-export { isSqliteAvailable, loadSqliteModule, openSqliteDatabase, secureSqliteFilePermissions, } from './sqlite-support';
-export { SqliteProviderProfileStore, migrateProviderProfileStore } from './sqlite-profile-store';
-export type { ProviderProfileStoreMigration, SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
-export { inspectProviderProfileStore } from './store-compatibility';
-export { PROVIDER_PROFILE_TRUTH_RECORD_KEY, TruthStoreProviderProfileStore, } from './truth-profile-store';
-export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store';
-export { PROVIDER_CONFIGURATION_LOCK_WAIT_MS, PROVIDER_CUSTODY_RECEIPT_LIMIT, PROVIDER_KEY_CHECK_OUTCOMES, PROVIDER_PROVISIONING_REJECTIONS, withConfigurationLock, } from './custody';
-export type { ProviderConfigurationLock, ProviderCustodyCommit, ProviderCustodyOperation, ProviderCustodyPending, ProviderCustodyReceipt, ProviderKeyCheckOutcome, ProviderProvisioningBinding, ProviderProvisioningRejection, ProviderProvisioningResult, } from './custody';
-export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
-export type { DeviceSealingEnrollment, DeviceSealingKey, DeviceSealingSecretName, } from './device-sealing-key';
-export { PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS, applySealedProviderProvisioning, readSealedProvisioningResult, } from './sealed-provisioning';
-export type { ApplySealedProviderProvisioningOptions, ProviderProvisioningIdentitySnapshot, SealedProvisioningReadback, ProviderProvisioningCutPoint, ProviderProvisioningFaultSeam, } from './sealed-provisioning';
-export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-check';
-export type { ProviderKeyCheckOptions } from './provider-key-check';
-export { ProviderRegistry } from './registry';
-export type { ModelProviderClient, ProviderConfiguration, ProviderRegistryOptions, ProviderStatus, } from './registry';
-export { PI_AUTH_NONE_API_KEY, PI_PROJECTED_KEY_ENV, assertPiLaunchArgs, buildPiProviderProjection, } from './pi-provider-projection';
-export { parsePiProviderLauncherOptions, runPiProviderLauncher, } from './pi-provider-launcher-core';
-export type { PiProviderLauncherHost, PiProviderLauncherOptions, } from './pi-provider-launcher-core';
-export { HERMES_PROVIDER_KEY_ENV, hermesProviderModel, parseHermesProviderLauncherRequest, runHermesProviderLauncher } from './hermes-provider-launcher';
-export type { HermesProviderLauncherRequest } from './hermes-provider-launcher';
+export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors.js';
+export type { ByokKeysErrorCode } from './errors.js';
+export { PiModelConfigSchema, PI_THINKING_LEVELS, PI_OPENAI_COMPATIBLE_APIS, PI_MODEL_APIS, PI_COMPAT_KEYS_BY_API, } from './pi-model-config.js';
+export type { PiCompatKey, PiModelApi, PiModelConfig, PiOpenAICompatibleApi, PiThinkingLevel } from './pi-model-config.js';
+export { MODEL_PROVIDER_ADAPTERS, MODEL_PROVIDER_KINDS, PROVIDER_AUTH_MODES, PROVIDER_MODEL_CAPABILITIES, ModelProviderProfileSchema, ProviderModelCapabilitySchema, ProviderProfileRefSchema, parseModelProviderProfile, } from './provider-profile.js';
+export type { ModelProviderAdapter, ModelProviderKind, ModelProviderProfile, ModelProviderProfileInput, ProviderAuthMode, ProviderModelCapability, ProviderProfileRef, } from './provider-profile.js';
+export { exactProviderProfileBinding, assertExactProviderProfileBinding, } from './provider-profile-binding.js';
+export type { ExactProviderProfileBinding } from './provider-profile-binding.js';
+export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS, modelProviderVendor, } from './provider-catalog.js';
+export type { ModelProviderVendor, ModelProviderVendorId, } from './provider-catalog.js';
+export { providerHeaders, requiredProviderSecret } from './headers.js';
+export type { ProviderAuthProfile } from './headers.js';
+export { normalizeProviderUrl, isLoopbackHost, isLoopbackProviderUrl, isPrivateNetworkLiteral, } from './url.js';
+export { assertLiveModelResponse, classifyModelProviderHttpError, fetchWithProviderGuards, modelApiUrl, modelMessageText, objectValue, parseBoundedJsonResponse, PROVIDER_RESPONSE_MAX_BYTES, PROVIDER_TIMEOUT_MS, readModelProviderResponse, } from './http.js';
+export type { ProviderFetch } from './http.js';
+export { OpenAiCompatibleChatClient, chatCompletionText } from './openai-client.js';
+export type { ChatCompletionRequest, ChatMessage, ModelProviderClientOptions, } from './openai-client.js';
+export { AnthropicMessagesClient, anthropicMessageText } from './anthropic-client.js';
+export type { AnthropicMessage, AnthropicMessageRequest, } from './anthropic-client.js';
+export { runCommand } from './command-runner.js';
+export type { CommandResult, CommandRunner } from './command-runner.js';
+export { SECRET_NAME_PATTERN, SECRET_NAMESPACE_PATTERN, assertSecretName, assertSecretNamespace, } from './secret-name.js';
+export { DEFAULT_SECRET_SERVICE_PREFIX, InMemorySecretStore, assertSharedSecretValue, decodeStrictBase64Utf8, modelProviderSecretName, } from './secret-store.js';
+export { PROVIDER_PROVISIONING_SECRET_MAX_BYTES } from './secret-value.js';
+export type { ModelProviderSecretName, SecretStore } from './secret-store.js';
+export { DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX, MacOsKeychainSecretStore, } from './macos-keychain.js';
+export type { MacOsKeychainSecretStoreOptions } from './macos-keychain.js';
+export { LinuxSecretServiceSecretStore } from './linux-secret-service.js';
+export type { LinuxSecretServiceSecretStoreOptions } from './linux-secret-service.js';
+export { WindowsCredentialManagerSecretStore } from './windows-credential-manager.js';
+export type { WindowsCredentialManagerSecretStoreOptions } from './windows-credential-manager.js';
+export { DEFAULT_SECRET_ENVELOPE_PREFIX, EnvelopeScopedSecretStore, scopeSecretStore, secretScopeId, } from './secret-scope.js';
+export type { SecretScope } from './secret-scope.js';
+export { InMemoryProviderProfileStore } from './profile-store.js';
+export type { ProviderProfileStore } from './profile-store.js';
+export { isSqliteAvailable, loadSqliteModule, openSqliteDatabase, secureSqliteFilePermissions, } from './sqlite-support.js';
+export { SqliteProviderProfileStore, migrateProviderProfileStore } from './sqlite-profile-store.js';
+export type { ProviderProfileStoreMigration, SqliteProviderProfileStoreOptions } from './sqlite-profile-store.js';
+export { inspectProviderProfileStore } from './store-compatibility.js';
+export { PROVIDER_PROFILE_TRUTH_RECORD_KEY, TruthStoreProviderProfileStore, } from './truth-profile-store.js';
+export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store.js';
+export { PROVIDER_CONFIGURATION_LOCK_WAIT_MS, PROVIDER_CUSTODY_RECEIPT_LIMIT, PROVIDER_KEY_CHECK_OUTCOMES, PROVIDER_PROVISIONING_REJECTIONS, withConfigurationLock, } from './custody.js';
+export type { ProviderConfigurationLock, ProviderCustodyCommit, ProviderCustodyOperation, ProviderCustodyPending, ProviderCustodyReceipt, ProviderKeyCheckOutcome, ProviderProvisioningBinding, ProviderProvisioningRejection, ProviderProvisioningResult, } from './custody.js';
+export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key.js';
+export type { DeviceSealingEnrollment, DeviceSealingKey, DeviceSealingSecretName, } from './device-sealing-key.js';
+export { PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS, applySealedProviderProvisioning, readSealedProvisioningResult, } from './sealed-provisioning.js';
+export type { ApplySealedProviderProvisioningOptions, ProviderProvisioningIdentitySnapshot, SealedProvisioningReadback, ProviderProvisioningCutPoint, ProviderProvisioningFaultSeam, } from './sealed-provisioning.js';
+export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-check.js';
+export type { ProviderKeyCheckOptions } from './provider-key-check.js';
+export { ProviderRegistry } from './registry.js';
+export type { ModelProviderClient, ProviderConfiguration, ProviderRegistryOptions, ProviderStatus, } from './registry.js';
+export { PI_AUTH_NONE_API_KEY, PI_PROJECTED_KEY_ENV, assertPiLaunchArgs, buildPiProviderProjection, } from './pi-provider-projection.js';
+export { parsePiProviderLauncherOptions, runPiProviderLauncher, } from './pi-provider-launcher-core.js';
+export type { PiProviderLauncherHost, PiProviderLauncherOptions, } from './pi-provider-launcher-core.js';
+export { HERMES_PROVIDER_KEY_ENV, hermesProviderModel, parseHermesProviderLauncherRequest, runHermesProviderLauncher } from './hermes-provider-launcher.js';
+export type { HermesProviderLauncherRequest } from './hermes-provider-launcher.js';
 // ==== @byok-sdk/keys dist/linux-secret-service.d.ts ====
-import { type CommandRunner } from './command-runner';
-import { type SecretStore } from './secret-store';
+import { type CommandRunner } from './command-runner.js';
+import { type SecretStore } from './secret-store.js';
 export interface LinuxSecretServiceSecretStoreOptions {
     account?: string;
     commandRunner?: CommandRunner;
@@ -639,8 +639,8 @@ export declare class LinuxSecretServiceSecretStore<TName extends string = string
     set(name: TName, secret: string): Promise<void>;
 }
 // ==== @byok-sdk/keys dist/macos-keychain.d.ts ====
-import { type CommandRunner } from './command-runner';
-import { type SecretStore } from './secret-store';
+import { type CommandRunner } from './command-runner.js';
+import { type SecretStore } from './secret-store.js';
 /**
  * Marker written in front of every stored value so a read can tell a value this
  * package wrote from anything else already sitting at the same service name.
@@ -689,11 +689,11 @@ export declare class MacOsKeychainSecretStore<TName extends string = string> imp
     set(name: TName, secret: string): Promise<void>;
 }
 // ==== @byok-sdk/keys dist/model-route.d.ts ====
-import type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog';
-import { type PiModelApi, type PiThinkingLevel } from './pi-model-config';
-import { PI_DEFAULT_THINKING_LEVEL } from './pi-runtime-defaults.generated';
-import { type ModelProviderVendorId } from './provider-catalog';
-import { type ModelProviderAdapter, type ModelProviderKind, type ModelProviderProfile, type ModelProviderProfileInput, type ProviderAuthMode, type ProviderModelCapability } from './provider-profile';
+import type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog.js';
+import { type PiModelApi, type PiThinkingLevel } from './pi-model-config.js';
+import { PI_DEFAULT_THINKING_LEVEL } from './pi-runtime-defaults.generated.js';
+import { type ModelProviderVendorId } from './provider-catalog.js';
+import { type ModelProviderAdapter, type ModelProviderKind, type ModelProviderProfile, type ModelProviderProfileInput, type ProviderAuthMode, type ProviderModelCapability } from './provider-profile.js';
 /** The draft fields, in the order a Host renders them. */
 export declare const MODEL_ROUTE_FIELDS: readonly ['profile_ref', 'display_name', 'provider_kind', 'adapter', 'auth_mode', 'base_url', 'model', 'pi_model', 'thinking_level', 'capabilities', 'secret'];
 export type ModelRouteField = (typeof MODEL_ROUTE_FIELDS)[number];
@@ -901,15 +901,15 @@ export declare function validateModelRoute(draft: ModelRouteDraft, context: Mode
  * passes a `replace` key to `ProviderRegistry.configure`.
  */
 export declare function modelRouteSubmission(draft: ModelRouteDraft, context: ModelRouteContext): ModelRouteSubmission;
-export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS } from './provider-catalog';
-export type { ModelProviderVendor, ModelProviderVendorId } from './provider-catalog';
-export { PI_THINKING_LEVELS, piSupportedThinkingLevels } from './pi-model-config';
-export type { PiModelApi, PiModelConfig, PiThinkingLevel } from './pi-model-config';
+export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS } from './provider-catalog.js';
+export type { ModelProviderVendor, ModelProviderVendorId } from './provider-catalog.js';
+export { PI_THINKING_LEVELS, piSupportedThinkingLevels } from './pi-model-config.js';
+export type { PiModelApi, PiModelConfig, PiThinkingLevel } from './pi-model-config.js';
 export { PI_DEFAULT_THINKING_LEVEL };
-export type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog';
-export type { ModelProviderAdapter, ModelProviderKind, ProviderAuthMode, ProviderModelCapability, } from './provider-profile';
+export type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog.js';
+export type { ModelProviderAdapter, ModelProviderKind, ProviderAuthMode, ProviderModelCapability, } from './provider-profile.js';
 // ==== @byok-sdk/keys dist/openai-client.d.ts ====
-import { type ProviderFetch } from './http';
+import { type ProviderFetch } from './http.js';
 /** One chat message. `content` is `unknown` so multimodal block arrays pass through. */
 export interface ChatMessage {
     role: 'system' | 'user' | 'assistant';
@@ -972,12 +972,12 @@ export declare class OpenAiCompatibleChatClient {
  */
 export declare function chatCompletionText(payload: Record<string, unknown>): string;
 // ==== @byok-sdk/keys dist/pi-catalog.d.ts ====
-export { PI_MODEL_CATALOG_PI_AI_VERSION, piModelConfigFromPinnedCatalog } from './pi-model-catalog';
-export type { PiCatalogLookup, PiCatalogModelInput, PiCatalogSelection } from './pi-model-catalog';
+export { PI_MODEL_CATALOG_PI_AI_VERSION, piModelConfigFromPinnedCatalog } from './pi-model-catalog.js';
+export type { PiCatalogLookup, PiCatalogModelInput, PiCatalogSelection } from './pi-model-catalog.js';
 // ==== @byok-sdk/keys dist/pi-model-catalog.d.ts ====
-import type { ModelProviderAdapter } from './provider-profile';
-import { type PiModelApi, type PiModelConfig, type PiThinkingLevel } from './pi-model-config';
-export { PI_MODEL_CATALOG_PI_AI_VERSION } from './pi-model-catalog.generated';
+import type { ModelProviderAdapter } from './provider-profile.js';
+import { type PiModelApi, type PiModelConfig, type PiThinkingLevel } from './pi-model-config.js';
+export { PI_MODEL_CATALOG_PI_AI_VERSION } from './pi-model-catalog.generated.js';
 /** The input modalities a Pi catalog entry declares; a profile states `image` as the `image-input` capability. */
 export type PiCatalogModelInput = 'text' | 'image';
 /** A catalog entry that `PiModelConfig` expresses exactly, without the launch-time thinking level. */
@@ -1036,7 +1036,7 @@ export declare function piModelConfigFromPinnedCatalog(selection: PiCatalogSelec
  */
 export declare function classifyPiCatalogModel(model: Readonly<Record<string, unknown>>, adapter: ModelProviderAdapter): PiCatalogModelEntry | PiCatalogUnrepresentableEntry;
 // ==== @byok-sdk/keys dist/pi-model-catalog.generated.d.ts ====
-import type { PiModelCatalogTable } from './pi-model-catalog';
+import type { PiModelCatalogTable } from './pi-model-catalog.js';
 /** The pi-ai version this table and the thinking levels were generated from. */
 export declare const PI_MODEL_CATALOG_PI_AI_VERSION = "1.5.0";
 /** Pi's `MODEL_THINKING_LEVELS`, in Pi's order. */
@@ -1045,7 +1045,7 @@ export declare const PI_THINKING_LEVELS: readonly ["off", "minimal", "low", "med
 export declare const PI_MODEL_CATALOG: PiModelCatalogTable;
 // ==== @byok-sdk/keys dist/pi-model-config.d.ts ====
 import { z } from 'zod';
-import { PI_THINKING_LEVELS } from './pi-model-catalog.generated';
+import { PI_THINKING_LEVELS } from './pi-model-catalog.generated.js';
 /**
  * Pi's own `MODEL_THINKING_LEVELS`, generated from the pinned
  * `@earendil-works/pi-ai` (see `pi-model-catalog.generated.ts`). The Pi host
@@ -1210,12 +1210,12 @@ export declare function piCompatIssues(declared: object, admitted: readonly stri
 export type PiModelConfig = z.infer<typeof PiModelConfigSchema>;
 // ==== @byok-sdk/keys dist/pi-provider-launcher-core.d.ts ====
 import { type ChildProcess } from 'node:child_process';
-import { type CommandRunner } from './command-runner';
-import { type PiLauncherRuntimeEntry } from './pi-provider-projection';
-import type { ProviderProfileStore } from './profile-store';
-import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
-import { type ExactProviderProfileBinding } from './provider-profile-binding';
-import { type SecretStore } from './secret-store';
+import { type CommandRunner } from './command-runner.js';
+import { type PiLauncherRuntimeEntry } from './pi-provider-projection.js';
+import type { ProviderProfileStore } from './profile-store.js';
+import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile.js';
+import { type ExactProviderProfileBinding } from './provider-profile-binding.js';
+import { type SecretStore } from './secret-store.js';
 export interface PiProviderLauncherOptions {
     piBin: string;
     /** Explicit script entry for the selected interpreter; never inferred from a filename. */
@@ -1389,7 +1389,7 @@ export interface PiProviderLauncherHost {
  */
 export declare function runPiProviderLauncher(options: PiProviderLauncherOptions, host: PiProviderLauncherHost): Promise<number>;
 // ==== @byok-sdk/keys dist/pi-provider-projection.d.ts ====
-import type { ModelProviderProfile } from './provider-profile';
+import type { ModelProviderProfile } from './provider-profile.js';
 /**
  * The environment name the launcher delivers the key under to a prepared host,
  * and the `$` reference that host's projection uses. Only the prepared entry
@@ -1469,9 +1469,9 @@ export declare function buildPiPreparedArgs(delegatedArgs: readonly string[]): s
 /** Pi's `DEFAULT_THINKING_LEVEL`: the level Pi starts a session at when nothing else names one. */
 export declare const PI_DEFAULT_THINKING_LEVEL = "medium";
 // ==== @byok-sdk/keys dist/profile-store.d.ts ====
-import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody';
-import { ByokKeysError } from './errors';
-import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
+import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody.js';
+import { ByokKeysError } from './errors.js';
+import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile.js';
 /**
  * Storage contract for provider profiles — everything needed to address a
  * provider except the API key, which lives in a {@link SecretStore}.
@@ -1596,7 +1596,7 @@ export declare function raiseWatermark(watermarks: Map<ProviderProfileRef, numbe
  */
 export declare function reservationOf(pending: ProviderCustodyPending, reservations: ReadonlyMap<string, ProviderCustodyReservation>, receipts: ReadonlyMap<string, ProviderCustodyReceipt>): ProviderCustodyReservation | undefined;
 // ==== @byok-sdk/keys dist/provider-catalog.d.ts ====
-import type { ModelProviderAdapter, ProviderAuthMode } from './provider-profile';
+import type { ModelProviderAdapter, ProviderAuthMode } from './provider-profile.js';
 /**
  * One vendor the SDK can address without the consumer typing its endpoint.
  *
@@ -1671,9 +1671,9 @@ export declare const MODEL_PROVIDER_VENDOR_IDS: readonly ModelProviderVendorId[]
  */
 export declare function modelProviderVendor(kind: string): ModelProviderVendor | undefined;
 // ==== @byok-sdk/keys dist/provider-key-check.d.ts ====
-import type { ProviderKeyCheckOutcome } from './custody';
-import type { ProviderFetch } from './http';
-import type { ModelProviderProfile } from './provider-profile';
+import type { ProviderKeyCheckOutcome } from './custody.js';
+import type { ProviderFetch } from './http.js';
+import type { ModelProviderProfile } from './provider-profile.js';
 /** Default bound on one key check, below the transport's own 15 s ceiling. */
 export declare const PROVIDER_KEY_CHECK_TIMEOUT_MS = 10000;
 export interface ProviderKeyCheckOptions {
@@ -1700,7 +1700,7 @@ export interface ProviderKeyCheckOptions {
 export declare function checkProviderKey(profile: ModelProviderProfile, secret: string, options?: ProviderKeyCheckOptions): Promise<Exclude<ProviderKeyCheckOutcome, 'not_run'>>;
 export declare function classifyProviderKeyCheckFailure(error: unknown, timedOut: boolean): Exclude<ProviderKeyCheckOutcome, 'not_run' | 'ok'>;
 // ==== @byok-sdk/keys dist/provider-profile-binding.d.ts ====
-import { type ModelProviderProfile, type ProviderModelCapability, type ProviderProfileRef } from './provider-profile';
+import { type ModelProviderProfile, type ProviderModelCapability, type ProviderProfileRef } from './provider-profile.js';
 export interface ExactProviderProfileBinding {
     profileRef: ProviderProfileRef;
     profileRevision: string;
@@ -1720,8 +1720,8 @@ export declare function exactProviderProfileBinding(profileInput: ModelProviderP
 export declare function assertExactProviderProfileBinding(profile: ModelProviderProfile, expected: ExactProviderProfileBinding): void;
 // ==== @byok-sdk/keys dist/provider-profile.d.ts ====
 import { z } from 'zod';
-import { type ModelProviderVendorId } from './provider-catalog';
-import { type PiModelConfig } from './pi-model-config';
+import { type ModelProviderVendorId } from './provider-catalog.js';
+import { type PiModelConfig } from './pi-model-config.js';
 /**
  * Opaque, portable identity of one locally configured provider profile.
  *
@@ -1940,13 +1940,13 @@ export type ModelProviderProfileInput = z.input<typeof ModelProviderProfileSchem
  */
 export declare function parseModelProviderProfile(value: unknown): ModelProviderProfile;
 // ==== @byok-sdk/keys dist/registry.d.ts ====
-import { AnthropicMessagesClient } from './anthropic-client';
-import type { ProviderFetch } from './http';
-import { OpenAiCompatibleChatClient } from './openai-client';
-import { type ProviderProfileStore } from './profile-store';
-import type { PiModelConfig } from './pi-model-config';
-import { type ModelProviderAdapter, type ModelProviderKind, type ModelProviderProfile, type ProviderAuthMode, type ProviderModelCapability, type ProviderProfileRef } from './provider-profile';
-import { type ModelProviderSecretName, type SecretStore } from './secret-store';
+import { AnthropicMessagesClient } from './anthropic-client.js';
+import type { ProviderFetch } from './http.js';
+import { OpenAiCompatibleChatClient } from './openai-client.js';
+import { type ProviderProfileStore } from './profile-store.js';
+import type { PiModelConfig } from './pi-model-config.js';
+import { type ModelProviderAdapter, type ModelProviderKind, type ModelProviderProfile, type ProviderAuthMode, type ProviderModelCapability, type ProviderProfileRef } from './provider-profile.js';
+import { type ModelProviderSecretName, type SecretStore } from './secret-store.js';
 /** A transport client for whichever dialect the resolved profile declares. */
 export type ModelProviderClient = AnthropicMessagesClient | OpenAiCompatibleChatClient;
 /**
@@ -2096,12 +2096,12 @@ export declare class ProviderRegistry {
     setDefaultModelProvider(profileRef: ProviderProfileRef): Promise<ProviderStatus>;
 }
 // ==== @byok-sdk/keys dist/sealed-provisioning.d.ts ====
-import { type ProviderProvisioningResult } from './custody';
-import type { DeviceSealingKey } from './device-sealing-key';
-import { type ProviderKeyCheckOptions } from './provider-key-check';
-import { type ProviderProfileRef } from './provider-profile';
-import type { ProviderProfileStore } from './profile-store';
-import { type ModelProviderSecretName, type SecretStore } from './secret-store';
+import { type ProviderProvisioningResult } from './custody.js';
+import type { DeviceSealingKey } from './device-sealing-key.js';
+import { type ProviderKeyCheckOptions } from './provider-key-check.js';
+import { type ProviderProfileRef } from './provider-profile.js';
+import type { ProviderProfileStore } from './profile-store.js';
+import { type ModelProviderSecretName, type SecretStore } from './secret-store.js';
 /** Largest issuedAt-in-the-future a device tolerates (bounded clock skew, A9). */
 export declare const PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS: number;
 /** Persistence cut points of one applied operation, in order. */
@@ -2221,7 +2221,7 @@ export declare function assertSecretName<TName extends string>(name: TName): TNa
  */
 export declare function assertSecretNamespace(value: string): string;
 // ==== @byok-sdk/keys dist/secret-scope.d.ts ====
-import { type SecretStore } from './secret-store';
+import { type SecretStore } from './secret-store.js';
 /**
  * Tenant identity a secret store is partitioned by. Ported from
  * `aip-main-open@c6a5385` `apps/local-agent/src/local-data-scope.ts:19-22`
@@ -2281,7 +2281,7 @@ export declare class EnvelopeScopedSecretStore<TName extends string = string> im
     set(name: TName, secret: string): Promise<void>;
 }
 // ==== @byok-sdk/keys dist/secret-store.d.ts ====
-import { type ProviderProfileRef } from './provider-profile';
+import { type ProviderProfileRef } from './provider-profile.js';
 /**
  * Storage contract for a single secret entry in an operating-system credential
  * store.
@@ -2401,9 +2401,9 @@ export declare function isSharedSecretValue(secret: string): boolean;
  */
 export declare const PROVIDER_PROVISIONING_SECRET_MAX_BYTES = 2560;
 // ==== @byok-sdk/keys dist/sqlite-profile-store.d.ts ====
-import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody';
-import { type ProviderProfileStore } from './profile-store';
-import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
+import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody.js';
+import { type ProviderProfileStore } from './profile-store.js';
+import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile.js';
 export interface SqliteProviderProfileStoreOptions {
     /**
      * Database file path. `:memory:` exercises the SQLite code path without a
@@ -2570,9 +2570,9 @@ import type { StoreCompatibility } from '@byok-sdk/core';
 export declare function inspectProviderProfileStore(path: string): Promise<StoreCompatibility>;
 // ==== @byok-sdk/keys dist/truth-profile-store.d.ts ====
 import { type TenantId, type TruthStore } from '@byok-sdk/core';
-import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody';
-import { type ProviderProfileStore } from './profile-store';
-import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
+import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody.js';
+import { type ProviderProfileStore } from './profile-store.js';
+import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile.js';
 export declare const PROVIDER_PROFILE_TRUTH_RECORD_KEY = "byok-sdk.keys/model-provider-registry-v1";
 /**
  * Upper bound on how many profiles one tenant's registry snapshot may carry.
@@ -2638,7 +2638,7 @@ export declare function isLoopbackHost(hostname: string): boolean;
  */
 export declare function isPrivateNetworkLiteral(hostname: string): boolean;
 // ==== @byok-sdk/keys dist/windows-credential-manager.d.ts ====
-import { type SecretStore } from './secret-store';
+import { type SecretStore } from './secret-store.js';
 export interface WindowsCredentialManagerSecretStoreOptions {
     account?: string;
     /**

@@ -403,6 +403,16 @@ SELECT count(*) FROM task_attempt WHERE agent_ref_json IS NULL;
 
 A version 9 file cannot be opened by an earlier build.
 
+## Declarations resolve under NodeNext
+
+The published declaration files spell every relative specifier with its
+runtime extension (`./x.js`, `./x/index.js`), so a Host that compiles with
+`moduleResolution` NodeNext or Node16 now resolves the SDK types (#1828).
+Before this release such a Host got untyped (`any`) SDK imports with
+`skipLibCheck: true`, or TS2834 errors with `skipLibCheck: false`. Hosts on
+Bundler resolution see no change. A NodeNext Host may now see type errors in
+code that compiled against `any`; fix them against the real types.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
