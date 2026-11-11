@@ -18,7 +18,7 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
   const {
     daemonState, config, localAgentRelease, toolsetRegistry, cursorStore, observer, terminalCommits,
     overrides, outbound, setLifecycle, runPresenceDiscovery, halted, crashed, dispatchReliableRecord,
-    operationalHealth,
+    operationalHealth, taskSettlement,
   } = daemonScope;
   const {
     record, capabilities, runtimes, harnesses, runtimeUnavailable, handleAgentHomeProjectionEnvelope,
@@ -69,6 +69,7 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
       if (daemonState.tenantRebinding) {
         throw new Error('tenant enrollment is being re-paired; inbound work is blocked until restart');
       }
+      if (envelope.type === 'task.offer' && envelope.task_id !== undefined) taskSettlement.offerSeen(envelope.task_id);
       observer.handleInboundEnvelope(envelope);
       if (await handleAgentHomeProjectionEnvelope(envelope)) return;
       if (await handleAgentInputPreparationEnvelope(envelope)) return;
@@ -171,16 +172,25 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
         const { envelope } = settlement;
         outbound[settlement.outcome] += 1;
         const plain = sealedRun.sealedTasks?.plainOf(envelope) ?? envelope;
-        if (settlement.outcome !== 'rejected') { publishLocal(envelope, () => observer.handleOutboundEnvelope(plain)); continue; }
+        const terminal = terminalKindOf(envelope.type);
+        const settleTask = (): void => {
+          if (terminal !== undefined && envelope.task_id !== undefined) {
+            taskSettlement.terminalSettled(envelope.task_id, terminal, settlement.outcome === 'rejected' ? 'rejected' : 'accepted');
+          }
+        };
+        if (settlement.outcome !== 'rejected') {
+          publishLocal(envelope, () => { observer.handleOutboundEnvelope(plain); settleTask(); });
+          continue;
+        }
         const rejection = {
           envelopeId: envelope.id, type: envelope.type,
           ...(envelope.task_id === undefined ? {} : { taskId: envelope.task_id }),
-          reason: settlement.reason, terminal: terminalKindOf(envelope.type) !== undefined,
+          reason: settlement.reason, terminal: terminal !== undefined,
         };
         outbound.rejectedByReason[rejection.reason] = (outbound.rejectedByReason[rejection.reason] ?? 0) + 1;
         if (rejection.terminal) outbound.rejectedTerminals += 1;
         outbound.lastRejection = rejection;
-        publishLocal(envelope, () => observer.noteOutboundRejected(plain, rejection));
+        publishLocal(envelope, () => { observer.noteOutboundRejected(plain, rejection); settleTask(); });
       }
     },
     onStateChange: (state) => {

@@ -488,6 +488,7 @@ export type {
   VerifiedTruthRecord,
 } from './daemon/truth-memory-client.js';
 export type { ConnectionState } from './daemon/connection-manager.js';
+export { DaemonTaskUnknownError, type DaemonTaskSettlement, type DaemonTaskTerminal } from './daemon/task-settlement.js';
 export { DAEMON_HALT_REASONS, DaemonHaltError, DaemonNotOpenError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
 export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle.js';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';

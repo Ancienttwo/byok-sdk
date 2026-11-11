@@ -14,6 +14,7 @@ interface StartupOwnershipDeps {
   isOfferInFlight(taskId: string): boolean;
   allowRetry(): boolean;
   awaitTerminalCommit(taskId: string): Promise<void> | undefined;
+  onRegistered(taskId: string): void;
   onDisposed(taskId: string): void;
   onDisposalFailure(taskId: string, runtimeId: string, failure: RuntimeDisposalFailure): void;
 }
@@ -30,7 +31,10 @@ export class StartupOwnership {
 
   has(taskId: string): boolean { return this.owners.has(taskId); }
 
-  register(taskId: string, owner: StartupOwner): void { this.owners.set(taskId, owner); }
+  register(taskId: string, owner: StartupOwner): void {
+    this.owners.set(taskId, owner);
+    this.deps.onRegistered(taskId);
+  }
 
   /** The caller registers the active task on the same synchronous path. */
   transferToActive(taskId: string): void { this.owners.delete(taskId); }

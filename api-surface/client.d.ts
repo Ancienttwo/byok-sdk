@@ -5139,6 +5139,7 @@ export declare function parseInputPreparationLookupParams(value: unknown): Input
 export declare function parseInputPreparationCancelParams(value: unknown): InputPreparationCancelParamsV1 | undefined;
 // ==== @byok-sdk/client dist/daemon/create-daemon.d.ts ====
 import type { OutboundStatus } from './outbound-settlement.js';
+import { type DaemonTaskSettlement } from './task-settlement.js';
 import { type RuntimeObservation } from '../runtime-detection.js';
 import { type ServiceEnvironmentStatus } from '../login-shell-environment.js';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
@@ -5833,6 +5834,21 @@ export interface Daemon {
         readonly signal: AbortSignal;
     }): Promise<void>;
     stop(): Promise<void>;
+    /**
+     * Resolves once the task's terminal had its first outbound settlement (no
+     * earlier than its local terminal event) and the runtime owner reported
+     * its first disposal outcome. A task this daemon has not seen is read from
+     * the journal: after a restart the result reflects the journal's current
+     * truth, so a refused terminal that was replaced reads as its replacement,
+     * never the reverse. Rejects with {@link DaemonTaskUnknownError} for a task
+     * with neither, before `start()` the way `approve()` does, and with
+     * `signal.reason` on abort; the task is untouched. `stop()` rejects no
+     * pending wait, so pass a signal if one can span it; after `stop()` an
+     * unseen id rejects with the closed journal's error.
+     */
+    whenTaskSettled(taskId: string, options?: {
+        readonly signal?: AbortSignal;
+    }): Promise<DaemonTaskSettlement>;
     status(): DaemonStatus;
     /** Append one sanitized reliable record before its first transport attempt. */
     publishReliableAgentEgress?(input: AgentReliableEgressInput): Promise<AgentEgressReliableAppendResult>;
@@ -8935,6 +8951,55 @@ export declare const RESULT_NOT_SUBMITTED_REASON_PREFIX = "result_not_submitted"
  * preserved for repair.
  */
 export declare const RESULT_UNREADABLE_REASON_PREFIX = "result_unreadable";
+// ==== @byok-sdk/client dist/daemon/task-settlement.d.ts ====
+import type { TerminalTruthState } from './journal/journal.js';
+/** {@link DaemonTaskSettlement.terminal}: the kind of the task's terminal envelope. */
+export type DaemonTaskTerminal = 'complete' | 'failed' | 'cancelled' | 'declined';
+/** What `Daemon.whenTaskSettled` resolves with. */
+export interface DaemonTaskSettlement {
+    readonly terminal: DaemonTaskTerminal;
+    /** The first settlement of the terminal; `accepted` includes a duplicate. */
+    readonly delivery: 'accepted' | 'rejected';
+    /**
+     * `failed` exactly when `runtime-disposal-failed` was emitted for the task's
+     * runtime; a failed release of an offer-owned scratch (`runtimeId: 'scratch'`)
+     * can race the decline or failure settlement and is not covered.
+     * `none`: this daemon holds no runtime for the task and has no disposal
+     * receipt, as for a decline, a failure before start, or any task that
+     * finished before a restart.
+     */
+    readonly disposal: 'disposed' | 'failed' | 'none';
+}
+/** `whenTaskSettled` was asked about a task with no journal row and no in-memory record. */
+export declare class DaemonTaskUnknownError extends Error {
+    readonly taskId: string;
+    readonly code: 'daemon_task_unknown';
+    constructor(taskId: string);
+}
+/** The durable facts one daemon run reads for a task it has not seen. */
+export interface TaskSettlementJournal {
+    readTask(taskId: string): Promise<{
+        readonly localState: string;
+    } | undefined>;
+    /** Truth state of an unconfirmed terminal; `undefined` once confirmed or when there is none. */
+    unconfirmedTerminal(taskId: string): Promise<TerminalTruthState | undefined>;
+}
+/** Runtime ownership facts the task runner reports; a disposal failure arrives with `runtime-disposal-failed`. */
+export interface TaskRuntimeOwnership {
+    /** Before any terminal of the task is sent. */
+    runtimeHeld(taskId: string): void;
+    runtimeDisposed(taskId: string): void;
+}
+export declare class TaskSettlementRegistry implements TaskRuntimeOwnership {
+    #private;
+    bindJournal(journal: TaskSettlementJournal): void;
+    offerSeen(taskId: string): void;
+    runtimeHeld(taskId: string): void;
+    runtimeDisposed(taskId: string): void;
+    runtimeDisposalFailed(taskId: string): void;
+    terminalSettled(taskId: string, terminal: DaemonTaskTerminal, delivery: DaemonTaskSettlement['delivery']): void;
+    wait(taskId: string, signal?: AbortSignal): Promise<DaemonTaskSettlement>;
+}
 // ==== @byok-sdk/client dist/daemon/team-workspace.d.ts ====
 /**
  * The local team channel is deliberately a small, versioned contract.  It is
@@ -10005,6 +10070,7 @@ export type { InstallSkillPacksOptions, InstalledSkillPack, ProjectedSkillPack, 
 export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client.js';
 export type { LocalMemoryFilter, MemorySelector, TruthManifestQueryInput, TruthManifestRecord, TruthMemoryClientErrorCode, TruthMemoryClientOptions, TruthMemoryMetric, TruthSnapshotCandidateInput, TruthSnapshotWriteInput, TruthTerminalWriteInput, TruthWriteBody, TruthWriteResult, VerifiedTruthRecord, } from './daemon/truth-memory-client.js';
 export type { ConnectionState } from './daemon/connection-manager.js';
+export { DaemonTaskUnknownError, type DaemonTaskSettlement, type DaemonTaskTerminal } from './daemon/task-settlement.js';
 export { DAEMON_HALT_REASONS, DaemonHaltError, DaemonNotOpenError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
 export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle.js';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';

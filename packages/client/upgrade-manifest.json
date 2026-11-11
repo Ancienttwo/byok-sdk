@@ -279,6 +279,17 @@
       ]
     },
     {
+      "id": "daemon-when-task-settled",
+      "impact": "additive",
+      "summary": "Daemon.whenTaskSettled(taskId, { signal }) resolves DaemonTaskSettlement (terminal, delivery, disposal) once the terminal's first outbound settlement was published locally and the runtime owner reported its first disposal outcome; disposal is failed exactly when runtime-disposal-failed was emitted for the task's runtime (an offer-owned scratch release excepted) and none when the daemon holds no runtime for the task, including every task settled before a restart. A task with no journal row and no in-memory record rejects with the new DaemonTaskUnknownError (daemon_task_unknown). The Daemon member is required, so a Host test double typed as Daemon adds it (#1838).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#per-task-settlement-awaitable",
+      "items": [
+        "export:@byok-sdk/client#DaemonTaskSettlement",
+        "export:@byok-sdk/client#DaemonTaskTerminal",
+        "export:@byok-sdk/client#DaemonTaskUnknownError"
+      ]
+    },
+    {
       "id": "hermes-runtime-adapter-removed",
       "impact": "breaking",
       "summary": "The Hermes runtime adapter is archived (tag archive/hermes-runtime-adapter): HermesAdapter and its option, model and launcher types leave @byok-sdk/client and @byok-sdk/client/adapters, the Hermes custody launcher exports leave @byok-sdk/keys, and FakeRuntimeAdapterId drops hermes. A Host that constructed HermesAdapter deletes it, its imports and its custody launcher; the device no longer advertises the hermes harness. No alias or stub remains.",
@@ -482,6 +493,21 @@
       "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
       "change": "added",
       "entry": "clear-device-enrollment"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonTaskSettlement",
+      "change": "added",
+      "entry": "daemon-when-task-settled"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonTaskTerminal",
+      "change": "added",
+      "entry": "daemon-when-task-settled"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonTaskUnknownError",
+      "change": "added",
+      "entry": "daemon-when-task-settled"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
