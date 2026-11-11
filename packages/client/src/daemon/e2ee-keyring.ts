@@ -63,7 +63,7 @@ import {
   type MemberKemKey,
   type MemberKeyBundleV1,
   type MemberKeys,
-  type ScopeKeyPackageV2,
+  type ScopeKeyPackage,
   type ScopeKeyPackageOpenResult,
   type SealedCategory,
   type SealedContentHeaderV1,
@@ -593,7 +593,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       const found = await this.#readEpochs(scopeId);
       if (found === undefined) return 'scope_epochs_exceeded';
       const expected = new Map<number, string>();
-      const rewrapped: ScopeKeyPackageV2[] = [];
+      const rewrapped: ScopeKeyPackage[] = [];
       for (const [epoch, pkg] of found) {
         const current = await this.#openAccepted(view, scopeId, epoch, pkg, next);
         current?.scopeKey.fill(0);

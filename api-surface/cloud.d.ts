@@ -1532,7 +1532,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail, ActivityReadOptions } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageSchema } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -2007,7 +2007,7 @@ export interface ByokCloud {
      * listed in `skippedDeviceIds`; its packages are stored all the same.
      */
     putScopeKeyPackages(tenant: TenantId, input: {
-        readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[];
+        readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageSchema>[];
     }): Promise<{
         readonly stored: number;
         readonly skippedDeviceIds: readonly string[];
@@ -2485,7 +2485,7 @@ export declare function createWebCrypto(): CloudCrypto;
  * bytes the writer sent.
  */
 import { type TenantId } from '@byok-sdk/core';
-import { E2eeScopeKeyPackageV2Schema, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { E2eeScopeKeyPackageSchema, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
 import { z } from 'zod';
 import type { DeviceDirectory } from './stores/ports';
 /** One stored chain entry: its seq and its canonical JSON. */
@@ -2753,7 +2753,7 @@ export declare function readMemberChain(ctx: E2eeMemberContext, input?: {
     readonly entries: readonly E2eeMemberChainEntry[];
 }>;
 export declare function putScopeKeyPackages(ctx: E2eeMemberContext, input: {
-    readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[];
+    readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageSchema>[];
 }, writer: E2eeMemberWriter): Promise<{
     readonly stored: number;
     readonly skippedDeviceIds: readonly string[];

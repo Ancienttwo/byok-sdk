@@ -2319,8 +2319,13 @@ export declare const E2eeMemberChainEntrySchema: z.ZodObject<{
     sig: z.ZodString;
 }, z.core.$strict>;
 export type E2eeMemberChainEntry = z.infer<typeof E2eeMemberChainEntrySchema>;
-/** One scope key wrapped to one member's KEM key of `recipientKemEpoch` (§7.4, §77a). A put takes version 2 only. */
-export declare const E2eeScopeKeyPackageV2Schema: z.ZodObject<{
+/**
+ * One scope key wrapped to one member's KEM key of `recipientKemEpoch` (§7.4,
+ * §77a), as a put takes it and a read returns it. Version 2 is the only
+ * version (#1789).
+ */
+export declare const E2eeScopeKeyPackageSchema: z.ZodObject<{
+    v: z.ZodLiteral<2>;
     tenantId: z.ZodString;
     scopeId: z.ZodString;
     epoch: z.ZodNumber;
@@ -2330,34 +2335,8 @@ export declare const E2eeScopeKeyPackageV2Schema: z.ZodObject<{
     enc: z.ZodString;
     ciphertext: z.ZodString;
     sig: z.ZodString;
-    v: z.ZodLiteral<2>;
     recipientKemEpoch: z.ZodNumber;
 }, z.core.$strict>;
-/** A stored package as a read returns it: version 1 from before `e2ee.member.kem-epoch`, version 2 after. */
-export declare const E2eeScopeKeyPackageSchema: z.ZodUnion<readonly [z.ZodObject<{
-    v: z.ZodLiteral<1>;
-    tenantId: z.ZodString;
-    scopeId: z.ZodString;
-    epoch: z.ZodNumber;
-    keyId: z.ZodString;
-    recipient: z.ZodString;
-    sender: z.ZodString;
-    enc: z.ZodString;
-    ciphertext: z.ZodString;
-    sig: z.ZodString;
-}, z.core.$strict>, z.ZodObject<{
-    tenantId: z.ZodString;
-    scopeId: z.ZodString;
-    epoch: z.ZodNumber;
-    keyId: z.ZodString;
-    recipient: z.ZodString;
-    sender: z.ZodString;
-    enc: z.ZodString;
-    ciphertext: z.ZodString;
-    sig: z.ZodString;
-    v: z.ZodLiteral<2>;
-    recipientKemEpoch: z.ZodNumber;
-}, z.core.$strict>]>;
 export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
 /** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */
 export declare const E2eePairingMacSchema: z.ZodString;
@@ -3819,7 +3798,7 @@ export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_
 export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, DeviceNotRegisteredResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, ActivityIngress, MessageSendOutcome, OutboundRefusalReason, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, InputPreparationCompletionRequest, InputPreparationStatus, InputPreparationReadback, InputPreparationStatusQuery, } from './http-api';
 export type { HarnessId, HarnessInfo } from './messages';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
-export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, E2eeScopeKeyPackageV2Schema, } from './e2ee-member';
+export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, } from './e2ee-member';
 export type { E2eeClientPairingMac, E2eeKeyPackageAvailablePayload, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeMemberKeyRegisterRequest, E2eeScopeKeyPackage, } from './e2ee-member';
 export * from './bot-turn-outcome';
 export * from './routine-schedule';

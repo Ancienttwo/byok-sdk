@@ -295,6 +295,21 @@ Stop the daemon of the previous version before you upgrade such a store. A new C
 
 Do not share one store between users. Because the fallback name now carries the uid, two uids on the same long-path store (for example `sudo byok-agent doctor --fix` on another user's store) no longer contend for one fallback mutex. A live owner lease still refuses the second process, but two processes of different uids that start at the same moment and both reclaim a stale lease are not serialized against each other: the path-mutation gate is per uid as well.
 
+## Scope key packages are version 2 only
+
+`openScopeKeyPackage` refuses a version 1 scope key package with `key_package_invalid` (#1789). Every package must name the recipient's KEM epoch as `recipientKemEpoch`, and the recipient opens it only with that KEM key. `ScopeKeyPackageV1` and `ScopeKeyPackageV2` are no longer exported; `ScopeKeyPackage` is the one package type. SDK writers have sealed only version 2 since 0.30.2, and a 0.30.2 or later Host refuses a version 1 put. A device no longer re-wraps a version 1 package during a KEM rotation, because core cannot open it.
+
+The Host read shape narrows too: `E2eeScopeKeyPackageSchema` in `@byok-sdk/protocol` is now the version 2 shape for both puts and reads, and `E2eeScopeKeyPackageV2Schema` is removed; use `E2eeScopeKeyPackageSchema`. The put path is unchanged; it already took version 2 only. A Host read that meets one stored version 1 row fails the whole read (every package of that scope or page) with `e2ee_member_state_unreadable`, not only that package.
+
+Only a Host that served `e2ee.member` on 0.30.0 or 0.30.1, or stored packages sealed by 0.29.0 core, can hold a version 1 row. Before upgrading, run this count on every Host store:
+
+- Postgres: `SELECT count(*) FROM e2ee_scope_key_package WHERE (package::jsonb)->>'v' = '1'`
+- embedded SQLite: `SELECT count(*) FROM e2ee_scope_key_package WHERE json_extract(package, '$.v') = 1`
+
+Upgrade only when it returns 0. If it does not, stay on the previous version and run a KEM rotation on each member that is the recipient of a version 1 row: the previous version re-wraps, as version 2, each package addressed to that member whose sender is still a current member of the scope policy. Run the count again before upgrading. The SDK ships no migration for these rows.
+
+A rotation leaves a version 1 row in place when its sender is no longer a current member of the scope, so the count can stay above 0. If version 1 rows remain after the rotation, stay on the previous version and open an issue: the SDK has no automatic way to re-wrap them.
+
 ## Release and verification checklist
 
 - [ ] Review the final train diff and upgrade manifest for additional breaking changes; complete the pending sections above.
