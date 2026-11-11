@@ -1,5 +1,4 @@
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import type { Context } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context';
 import type { JsonObject } from '@earendil-works/pi-ai';
 import { Harness, ToolTask, createRegistry, defineExtension, hook, type AgentChange, type ConversationId, type ToolExecutionApi, type ToolExecutionResult, type Storage, type Cursor } from '@earendil-works/pi-durable';
 import { validateToolArguments } from '@earendil-works/pi-ai/utils/validation';

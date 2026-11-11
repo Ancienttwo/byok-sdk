@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2348786,
+      "budgetBytes": 2354312,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -120,7 +120,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 510582,
+      "budgetBytes": 510697,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -190,7 +190,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 75722,
+      "budgetBytes": 80957,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -451,7 +451,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 472961,
+      "budgetBytes": 473076,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -591,7 +591,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 565422,
+      "budgetBytes": 568410,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -678,11 +678,11 @@
         "eventsource-parser",
         "get-east-asian-width",
         "graceful-fs",
-        "grok-mermaid",
         "highlight.js",
         "hosted-git-info",
         "ignore",
         "isexe",
+        "lovely-mermaid",
         "lru-cache",
         "marked",
         "marked-cjk-friendly",
@@ -760,6 +760,7 @@
           "node:process",
           "node:querystring",
           "node:readline",
+          "node:readline/promises",
           "node:sqlite",
           "node:stream",
           "node:stream/web",
@@ -788,7 +789,7 @@
       "codegen": [
         {
           "file": "@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
-          "line": 18,
+          "line": 20,
           "rule": "opaque import()"
         },
         {
@@ -798,7 +799,7 @@
         },
         {
           "file": "@earendil-works/pi-ai/dist/auth/oauth/load.js",
-          "line": 17,
+          "line": 20,
           "rule": "opaque import()"
         },
         {
@@ -1556,7 +1557,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Headless Pi model route: choices, linkage, field errors and submission",
-      "budgetBytes": 315348,
+      "budgetBytes": 323502,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1636,7 +1637,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Pinned pi-ai catalog lookup for pi_model",
-      "budgetBytes": 287539,
+      "budgetBytes": 295693,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2129,7 +2130,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2341773,
+      "budgetBytes": 2345706,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

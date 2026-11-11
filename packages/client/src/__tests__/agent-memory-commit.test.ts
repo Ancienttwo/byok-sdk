@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_MEMORY_PROJECTION_CAPABILITY, createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AGENT_HOME_DIRECTORY, AgentHomeCommitCopyError, AgentHomeLeaseManager, AgentHomeManager } from '../agent-home';
 import { compareAndSwapAgentMemoryHomeFile, isAgentMemorySecureFilesystemAvailable, observeAgentMemoryHomeFile } from '../daemon/agent-memory';
+import { checkAgentMemoryHome } from '../agent-memory';
+import { AGENT_MEMORY_RECOVERY } from '../daemon/agent-memory-start-record';
 import { createAgentMemoryCommitStore, type AgentMemoryCommitHome } from '../daemon/agent-memory-commit';
 import { helperAgentMemoryIntentBackend, NATIVE_AGENT_MEMORY_INTENT_BACKEND } from '../daemon/agent-memory-intent';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -62,6 +64,15 @@ async function expectStarted(home: string): Promise<void> {
 }
 async function copyFiles(home: string): Promise<readonly string[]> {
   return (await fs.readdir(path.join(home, '.byok'))).filter((name) => name.startsWith('agent-memory-commit-'));
+}
+/** The Host's pre-dispatch check, with the filesystem the platform's backend uses. */
+async function checkHome(home: string) {
+  const filesystem = await backend.openFilesystem?.(await homeIdentity(home));
+  try {
+    return await checkAgentMemoryHome(home, { commit: { ...(filesystem === undefined ? {} : { filesystem }) } });
+  } finally {
+    await filesystem?.close();
+  }
 }
 async function homeIdentity(home: string): Promise<AgentMemoryCommitHome> {
   const stat = await fs.stat(home, { bigint: true });
@@ -414,6 +425,8 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
     expect(pi.startCalls).toHaveLength(0);
     expect((failure.payload as { reason: string }).reason).toContain('a write task with agentMemory:"none" and no agentMemoryCommit');
     await released();
+    // The Host's check gives the verdict the device just sent for the same home.
+    expect(await checkHome(home)).toEqual({ ok: false, code: failureClass, reason: (failure.payload as { reason: string }).reason });
   });
 
   it('settles a leftover copy before a writer that joined a reader\'s lease group reads memory', async () => {
@@ -438,5 +451,36 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
     const decline = await terminal('task.decline', 'durable');
     expect(decline.payload).toMatchObject({ retryable: false, reason: expect.stringContaining('durable lane') });
     expect(pi.startCalls).toHaveLength(0);
+  });
+});
+
+describe.skipIf(!supported)('checkAgentMemoryHome on a resident MEMORY.md', () => {
+  it('passes a compliant home', async () => {
+    const home = await temp('byok-check-home-');
+    await seed(home);
+    expect(await checkHome(home)).toEqual({ ok: true });
+  });
+
+  it.each([
+    ['over the limit', (file: string) => fs.writeFile(file, 'x'.repeat(8193)), `agent_memory_resident_over_limit: 8193/8192${AGENT_MEMORY_RECOVERY}`, 'agent_memory_resident_over_limit'],
+    ['invalid UTF-8', (file: string) => fs.writeFile(file, Buffer.from([0xff, 0xfe])), 'agent_memory_resident_unreadable: not valid UTF-8', 'agent_memory_resident_not_utf8'],
+    ['with a second hard link', async (file: string) => {
+      await fs.writeFile(file, 'small');
+      await fs.link(file, `${file}.outside`);
+    }, 'agent_memory_resident_unreadable: multiple links', 'agent_memory_resident_multiple_links'],
+    ['not a regular file', (file: string) => fs.mkdir(file), 'agent_memory_resident_unreadable: not a regular file', 'agent_memory_resident_not_regular_file'],
+  ])('refuses a MEMORY.md %s with the device\'s code and reason', async (_label, plant, reason, code) => {
+    const home = await temp('byok-check-home-');
+    await seed(home);
+    await fs.rm(path.join(home, 'MEMORY.md'));
+    await plant(path.join(home, 'MEMORY.md'));
+    expect(await checkHome(home)).toEqual({ ok: false, code, reason });
+  });
+
+  it('decides nothing for a MEMORY.md that is missing', async () => {
+    const home = await temp('byok-check-home-');
+    await seed(home);
+    await fs.rm(path.join(home, 'MEMORY.md'));
+    await expect(checkHome(home)).rejects.toThrow('cannot be judged');
   });
 });

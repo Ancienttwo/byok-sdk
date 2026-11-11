@@ -121,7 +121,7 @@ describe('resolveRuntimeVersionPolicy (#1103 O5)', () => {
 describe('default policies preserve today behavior verbatim (#1103 D3)', () => {
   it.each([
     ['codex', CODEX_VERSION_POLICY, '0.160.0', '0.161.0', 'warn'],
-    ['grok', GROK_VERSION_POLICY, '1.0.52', '1.0.62', 'warn'],
+    ['grok', GROK_VERSION_POLICY, '1.0.77', '1.0.62', 'warn'],
     ['claude', CLAUDE_VERSION_POLICY, '2.1.312', '2.1.313', 'allow'],
     ['pi', PI_VERSION_POLICY, PI_VERSION_POLICY.qualifiedVersion, '9.9.9', 'allow'],
   ] as const)('%s: qualified allow, unqualified %s', (_id, value, qualified, other, unqualified) => {

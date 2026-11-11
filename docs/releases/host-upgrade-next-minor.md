@@ -2,6 +2,10 @@
 
 Draft checklist for a Host moving from the current release to the next MINOR. Earlier Hosts must first apply the preceding Host upgrade checklists. Release preparation must review this guide against the final train before assigning a version and publishing it.
 
+## Clearing a device enrollment without a daemon
+
+An uninstaller that built a daemon per store only to call `daemon.unpair()` can call `clearDeviceEnrollment({ productId, storeDir, nativeAssetRoot })` instead (#1841); it needs no `productName`, `serverUrl` or `localAgentRelease`. It refuses with `DeviceEnrollmentClearError` `store_owned` while a daemon, doctor or installer holds the store, so call it after the service has stopped, and before deleting the store directory. It clears only the SDK device enrollment of the account it runs as, never Host secrets, and leaves the delivery cursor file. A Host that matched the text of `unpair()`'s credential-deletion error reads `DeviceEnrollmentClearError.code === 'clear_failed'` instead. See [Clearing an enrollment without running the daemon](../device-setup.md#clearing-an-enrollment-without-running-the-daemon).
+
 ## Loopback listener close waits for handlers
 
 `LoopbackListener.close()` now resolves only after every dispatched handler has settled; before, it destroyed connections and resolved while a handler could still run. Requests not yet dispatched get 503. There is no timeout. Shut down in the order `daemon.stop()`, `listener.close()`, `server.close()`, and do not make a request-scoped hook wait on anything the Host releases after `listener.close()`, or `close()` never resolves. See [Embedded path](../device-setup.md#embedded-path).
@@ -12,10 +16,18 @@ A single-file Host that ships `copySdkPackagingAssets` output can replace its ha
 
 A task that an Agent home's memory refuses before its runtime starts now carries a typed `task.fail.failure.class` (#1843): `agent_memory_resident_over_limit`, `agent_memory_resident_multiple_links`, `agent_memory_resident_not_regular_file`, `agent_memory_resident_not_utf8`, `agent_memory_snapshot_over_file_limit`, `agent_memory_snapshot_over_byte_limit` or `agent_memory_snapshot_refused`. The list is `AGENT_MEMORY_START_REFUSALS` from `@byok-sdk/protocol/constants`. The reason text is unchanged, so a Host that parses the reason prefix keeps working, but it should branch on `readTaskFailure(failure).class` instead.
 
-A Host on 0.41.0 reads these as `unknown` with `reportedClass` until it upgrades. A missing file, a changed home identity and an I/O failure stay `unknown`. A task that seals its output sends `unknown` for every refusal, so a Host that seals output still needs its own pre-dispatch check until `checkAgentMemoryHome` ships (#1843 slice 2). `TaskFailureReading` gains a member: an exhaustive `switch` over `readTaskFailure(failure).class` stops compiling until it handles the new classes. `agent_memory_resident_not_regular_file` cannot be repaired by a write task: the file has to be replaced outside a task. A `MEMORY.md` that is already not a regular file when the offer arrives is declined before claim with reason text and no class. Code that constructs `AgentMemorySnapshotLimitError` must pass the bound it hit as the new first argument.
+A Host on 0.41.0 reads these as `unknown` with `reportedClass` until it upgrades. A missing file, a changed home identity and an I/O failure stay `unknown`. A task that seals its output sends `unknown` for every refusal, so a Host that seals output takes the verdict before dispatch from `checkAgentMemoryHome` (see [Agent memory home check](#agent-memory-home-check)). `TaskFailureReading` gains a member: an exhaustive `switch` over `readTaskFailure(failure).class` stops compiling until it handles the new classes. `agent_memory_resident_not_regular_file` cannot be repaired by a write task: the file has to be replaced outside a task. A `MEMORY.md` that is already not a regular file when the offer arrives is declined before claim with reason text and no class. Code that constructs `AgentMemorySnapshotLimitError` must pass the bound it hit as the new first argument.
+## Agent memory home check
+
+`checkAgentMemoryHome(home, { commit?: { filesystem? } })` in `@byok-sdk/client/agent-memory` is additive: nothing existing changes. It returns `{ ok: true }` or `{ ok: false, code, reason }` with the class and reason the device would send for the same home. It throws when it cannot decide (missing `MEMORY.md`, a changed home identity, an I/O error, no secure memory filesystem; on macOS and Windows pass the helper's filesystem as `commit.filesystem` and close it yourself), and it is advisory because it holds no lease and has no task id. Its verdict is about the home: the device applies the resident refusals only to a task that carries `MEMORY.md` into its prompt and the snapshot refusals only to a task with `agentMemoryCommit`; the repair task (`agentMemory:"none"`, no commit) is never refused, so do not gate it on the verdict. Unlike the failure class, the check is not hidden on a task that seals its output. A Host that copied the device's limits (AiphaBee's `residentMemoryBreach` and `memoryBreach`) can replace that copy with this call.
+
 ## OAR 0.99.0 driver base (#1863)
 
 A Grok follow-up sent while Grok runs a turn of its own is held until that turn closes; budget the task deadline for that wait. Grok 429s that name a spending limit now fail as `quota` or `billing` (non-retryable) instead of retryable `rate_limited`. A Codex older than OAR needs, or with an unreadable `config.toml`, fails the start as non-retryable `invalid_request`. Confirm that the Host does not retry those classes as transient.
+
+## Grok qualified version 1.0.77
+
+The Grok adapter qualifies Grok 1.0.77 (#1884). A device on another version, 1.0.52 included, now reports `runtime_version_unqualified` with `qualifiedVersion: '1.0.77'`; the default policy stays `warn`, so tasks still run. A Host that pins its own Grok `versionPolicy` is unchanged. Grok's own turns, and the follow-up hold they cause, need 1.0.70 or later.
 
 ## OpenCode start failures
 
@@ -429,6 +441,12 @@ Before this release such a Host got untyped (`any`) SDK imports with
 `skipLibCheck: true`, or TS2834 errors with `skipLibCheck: false`. Hosts on
 Bundler resolution see no change. A NodeNext Host may now see type errors in
 code that compiled against `any`; fix them against the real types.
+
+## Pi 1.5.2 closure
+
+The official Pi closure moves from 1.5.0 to 1.5.2 (#1864). Prepare again every preparation compiled for 1.5.0: its runtime identity names the old closureDigest, so it declines with `preparation_runtime_identity_mismatch`. Check stored provider profiles against `piModelConfigFromPinnedCatalog` before the upgrade; 12 OpenRouter and Vercel AI Gateway entries that pi-ai 1.5.2 dropped return `not_in_catalog`. pi-durable replicas keep their document and schema versions, so this release and 0.41.0 open each other's replicas.
+
+No configuration change is needed for the new Pi defaults. Pi 1.5.1 keeps prompt caches warm for up to 30 minutes between runs by default (`cacheWarming: "idle"`). Because a Host cannot see or bound that spend, the session of every SDK Pi RPC host refuses each refresh while it is idle, so it warms only during an active run. Under `agentUserContext: 'inherit'` a device setting of `"off"` still turns warming off; under `excluded` the session's settings are in memory and do not read the device file. A pi-subagents child is disposed when its run ends, and disposal cancels its warmer, so no child warms after its run either. On the native Pi auth route, a task on the built-in `anthropic` provider at `api.anthropic.com` now sends only new messages and continues the server-side thread, falling back to a full request when the server refuses; a keys profile route sends full requests as before. A native launch with no Host model selection still uses the device's Pi settings; only when those name no default model does Pi pick its per-provider default, which is now `claude-opus-5-5` for `anthropic`.
 
 ## Embedded pairing and connection wait
 

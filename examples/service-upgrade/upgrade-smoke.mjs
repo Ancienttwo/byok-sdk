@@ -12,6 +12,7 @@
 //     → health check fails → v2 and its store snapshot restored → running
 //   rollback → v1 and the v2 upgrade's snapshot → running
 //   uninstall → no service, no versions; the store stays
+//   clear the enrollment (app: clearDeviceEnrollment; cli: byok-agent unpair, not on Windows)
 //
 // On Windows the cli run keeps its store on an 8.3 short-name path and the app
 // run on a path longer than 260 characters (#1030).
@@ -279,13 +280,22 @@ async function lifecycle(variant, cmd, server, payloads) {
   log(`${owner}: rolled back to v1`);
 
   await ok(cmd.uninstall());
-  // macOS and Linux keep the enrollment in the user's keychain or Secret Service; leave none behind.
-  // On Windows `byok-agent unpair` checks only a WinSW service, so neither run unpairs there.
-  if (!isWindows) {
+  // Leave no enrollment in this user's keychain, Secret Service or Credential Manager. The app run clears it
+  // with clearDeviceEnrollment, as an App's uninstaller does. The cli run's WinSW service enrolled as
+  // LocalSystem, out of this user's reach, and `byok-agent unpair` checks only a WinSW service, so the cli
+  // run unpairs outside Windows only.
+  if (owner === 'app' || !isWindows) {
     // The manager unloads the service before its daemon has released the store.
     await until(async () => (/^live status: daemon not reachable/mu.test((await run([agentCli, 'status', '--config', variant.config])).stdout) ? true : undefined),
       `${variant.name} exit`);
-    await ok([agentCli, 'unpair', '--yes', '--config', variant.config]);
+    if (owner === 'app') {
+      // Read back in the installer's process: koffi loaded here would lock the asset root against the final cleanup.
+      const status = await ok([installer, 'clear-enrollment', '--config', variant.config, '--install-root', variant.installRoot]);
+      assert.deepEqual(JSON.parse(status), { state: 'unpaired' });
+      log(`${owner}: enrollment cleared`);
+    } else {
+      await ok([agentCli, 'unpair', '--yes', '--config', variant.config]);
+    }
   }
   const left = await fs.readdir(variant.installRoot);
   assert.deepEqual(left, [], `install root after uninstall: ${left.join(', ')}`);

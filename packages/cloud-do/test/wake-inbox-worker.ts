@@ -1,5 +1,4 @@
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import type { Context } from '@earendil-works/chord';
+import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context';
 import { Harness, GenerationTask, defineTask, hook, type Registry, type ConversationId, type SubmissionDraft } from '@earendil-works/pi-durable';
 import { AgentDO } from '../src/agent-do';
 import { CloudDoError, cloudErrorResponse } from '../src/errors';

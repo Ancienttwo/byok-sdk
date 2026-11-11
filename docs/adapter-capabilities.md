@@ -32,7 +32,7 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.52` | `2.2.6` | `1.5.0` | `1.5.0` |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.77` | `2.2.6` | `1.5.2` | `1.5.2` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | no | yes | yes |
@@ -686,7 +686,7 @@ file does not disable the normal resource loader or all ambient context sources.
 Credential custody and environment filtering also do not establish prompt
 isolation: the allowlisted environment retains home/config discovery paths.
 
-Pi 1.5.0 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
+Pi 1.5.2 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
 `~/.pi/agent`. From it, Pi loads a context file (`AGENTS.override.md`,
 `AGENTS.md` or `CLAUDE.md`), `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions,
 prompts, themes and skills. It also loads skills from `~/.agents/skills`. The
@@ -705,7 +705,7 @@ same rule as Claude. Under `excluded` the settings are not project-trusted
 `.pi/SYSTEM.md` does not load either.
 
 On the ordinary RPC lane Pi declares all five user-context bits for
-`excluded`. The runtime contract suite checks three at Pi 1.5.0 with markers
+`excluded`. The runtime contract suite checks three at Pi 1.5.2 with markers
 that appear when inherited and are absent under `excluded`:
 
 - `userInstructions`: `AGENTS.md`, `SYSTEM.md` and `APPEND_SYSTEM.md` in the
@@ -715,7 +715,7 @@ that appear when inherited and are absent under `excluded`:
 - `userHookContext`: a user extension in `<agentDir>/extensions/` that adds a
   `before_agent_start` message.
 
-`userOutputStyle` and `userMemory` read `yes (no source)`: Pi 1.5.0 has a fixed
+`userOutputStyle` and `userMemory` read `yes (no source)`: Pi 1.5.2 has a fixed
 system-prompt preamble with no style setting (themes only color the UI and the
 HTML export), and no native memory. The same cases show that Host-authorized
 `agentSkillPaths` and `agentExtensionPaths` still reach the model under
@@ -852,7 +852,7 @@ What the upstream runtimes offer that the SDK does not use:
 - Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
   keys of its agent-mode guide have none. From the 1.0.62 guide and local
   folders; not probed with an SDK session or on 1.0.52.
-- Pi: Pi 1.5.0 has `SessionManager.inMemory` and the CLI flag `--no-session`
+- Pi: Pi 1.5.2 has `SessionManager.inMemory` and the CLI flag `--no-session`
   ("Don't save session (ephemeral)"). The SDK
   [host](../packages/client/src/bin/pi-session-runtime.ts) opens a saved session
   and accepts no such flag.
@@ -994,13 +994,23 @@ dependency.
   as cancelled. The end of Grok's own turn is not a task turn end; its text
   still reaches the event stream, and its token usage is reported with the
   next task turn. A Grok turn end while no turn is open fails the session as
-  a non-retryable infrastructure failure.
+  a non-retryable infrastructure failure. An interrupt sent before the
+  follow-up's prompt is answered waits for that answer, so it takes the held
+  input back instead of cancelling Grok's turn. The runtime contract `ownTurn`
+  case runs this on the qualified Grok: a background command's completion
+  wakes Grok, the follow-up sent during that turn reaches the model after it,
+  and each model request's usage is reported once.
+- Qualified version: 1.0.77, the newest stable release on 2026-11-12 (npm
+  `latest`; 1.0.78 to 1.0.81 are published only under `alpha`). Grok gates
+  its own turns at 1.0.70, and OAR 0.99's native-turn wire evidence is 1.0.77.
+  The 1.0.52 probes recorded elsewhere on this page were not repeated on
+  1.0.77 unless they say so; the runtime contract runs on 1.0.77.
 - Failure classes: a 429 is `quota` or `billing` when Grok's answer names a
   spending limit (Grok's free-usage code, or a provider error type such as
   `insufficient_quota`), otherwise `rate_limited`. A -32603 that carries the
   provider's `http_status` is classed by that status (402 is `billing`).
-- Detection: `grok --version` (advisory when it is not the qualified 1.0.52,
-  the newest OAR live evidence), `grok agent stdio --help` (else
+- Detection: `grok --version` (advisory when it is not the qualified 1.0.77),
+  `grok agent stdio --help` (else
   `refused: acp_unavailable`), and a login signal: `$GROK_HOME/auth.json`
   (default `~/.grok/auth.json`) exists, or `XAI_API_KEY` is set. The file is
   never read and no session opens.

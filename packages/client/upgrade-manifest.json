@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "415b9418b8163dabc9f39d6e9d3f97759ca7c143b603ecdfbafab76ce4687870"
+    "snapshotSha256": "7b0f8e7b8a520678ca429b538ad4e0ca5645ea7d7c543a5e075501cf4dedc89e"
   },
   "configFields": {
     "status": "tracked",
@@ -340,6 +340,38 @@
         "export:@byok-sdk/protocol/constants#AGENT_MEMORY_START_REFUSALS",
         "export:@byok-sdk/protocol/constants#AgentMemoryStartRefusal"
       ]
+    },
+    {
+      "id": "agent-memory-home-check",
+      "impact": "additive",
+      "summary": "checkAgentMemoryHome(home, { commit?: { filesystem? } }) in @byok-sdk/client/agent-memory returns the AgentMemoryStartRefusal code and the task.fail reason the device would send for an Agent home, read-only, or throws when it cannot decide. It holds no lease and is advisory; the repair task is never refused.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-home-check",
+      "items": [
+        "export:@byok-sdk/client/agent-memory#AgentMemoryHomeCheck",
+        "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome"
+      ]
+    },
+    {
+      "id": "clear-device-enrollment",
+      "impact": "additive",
+      "summary": "clearDeviceEnrollment({ productId, storeDir, nativeAssetRoot?, deviceCredentials? }) clears one store's device enrollment without a daemon or serverUrl, under the store's owner lease: member custody entries, the device credential with a read-back, then device.json, the same clear Daemon.unpair() runs; it leaves the delivery cursor file. It throws the new DeviceEnrollmentClearError with code store_owned (another process holds the lease; nothing is read), store_not_bound (the OS entry holds another store's enrollment; it stays) or clear_failed (the provider or filesystem error is the cause); a device.json that cannot be parsed is refused as clear_failed before anything is deleted and needs a re-pair. Host-visible on an existing path: Daemon.unpair() now throws DeviceEnrollmentClearError clear_failed, with the provider error as cause, when the device credential cannot be deleted, instead of an untyped Error; a Host that matched that error's text reads the code instead (#1841).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#clearing-a-device-enrollment-without-a-daemon",
+      "items": [
+        "export:@byok-sdk/client#DeviceEnrollmentClearError",
+        "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+        "export:@byok-sdk/client#clearDeviceEnrollment"
+      ]
+    },
+    {
+      "id": "pi-152-closure",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "The official Pi closure is pinned to exactly 1.5.2 (upstream commit b4afdddf); the closureDigest changes, so a preparation compiled for 1.5.0 declines with preparation_runtime_identity_mismatch until it is prepared again. keys: PI_MODEL_CATALOG_PI_AI_VERSION is 1.5.2, and 12 entries pi-ai 1.5.2 dropped return not_in_catalog. pi-durable 1.5.2 keeps its document and SQLite schema versions, so replicas written by either release open in the other.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-152-closure",
+      "items": [
+        "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+        "store:pi-durable"
+      ]
     }
   ],
   "changes": [
@@ -440,6 +472,16 @@
       "item": "export:@byok-sdk/client#DaemonOverrides",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentClearError",
+      "change": "added",
+      "entry": "clear-device-enrollment"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+      "change": "added",
+      "entry": "clear-device-enrollment"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
@@ -570,6 +612,11 @@
       "item": "export:@byok-sdk/client#SdkHostingOptions",
       "change": "added",
       "entry": "resolve-sdk-hosting"
+    },
+    {
+      "item": "export:@byok-sdk/client#clearDeviceEnrollment",
+      "change": "added",
+      "entry": "clear-device-enrollment"
     },
     {
       "item": "export:@byok-sdk/client#resolveSdkHosting",
@@ -720,6 +767,16 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryHomeCheck",
+      "change": "added",
+      "entry": "agent-memory-home-check"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome",
+      "change": "added",
+      "entry": "agent-memory-home-check"
     },
     {
       "item": "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper",
@@ -892,6 +949,11 @@
       "entry": "model-route-host-entry-default-thinking-level"
     },
     {
+      "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+      "change": "changed",
+      "entry": "pi-152-closure"
+    },
+    {
       "item": "export:@byok-sdk/protocol#AGENT_MEMORY_START_REFUSALS",
       "change": "added",
       "entry": "agent-memory-start-refusal-classes"
@@ -1049,6 +1111,13 @@
       "before": "ddl-sha256=a59cf523fe7a89d1",
       "after": "ddl-sha256=7c5c4e5f67ea8b36",
       "entry": "opencode-go-keys-store"
+    },
+    {
+      "item": "store:pi-durable",
+      "change": "changed",
+      "before": "@earendil-works/pi-durable@1.5.0",
+      "after": "@earendil-works/pi-durable@1.5.2",
+      "entry": "pi-152-closure"
     },
     {
       "item": "store:server-sqlite",

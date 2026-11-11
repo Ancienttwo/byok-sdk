@@ -18,7 +18,15 @@ node app-installer.ts install --payload ./payload-1 --install-root ./app --confi
 node app-installer.ts upgrade --payload ./payload-2 --install-root ./app --config device.json
 node app-installer.ts rollback --install-root ./app --config device.json
 node app-installer.ts uninstall --install-root ./app --config device.json
+node app-installer.ts clear-enrollment --install-root ./app --config device.json
 ```
+
+`uninstall` leaves the store and its device enrollment. `clear-enrollment`
+calls `clearDeviceEnrollment` once the daemon has exited: it removes the
+enrollment from this account's OS credential set and keeps the store
+directory. A store whose owner lease another process still holds prints
+`{ "error": "store_owned" }` and exits 3, as does a store that did not pair
+the OS entry (`store_not_bound`).
 
 On Windows pass `--winsw-bin <WinSW-x64.exe>` (and `--winsw-install-dir` for a
 short install path).
@@ -91,7 +99,9 @@ the user's keychain or Secret Service.
   `WINSW_BIN` on Windows) runs a real service under launchd, systemd `--user` or
   WinSW twice, once through the CLI and once through this installer. Each run
   installs v1, pairs through the service, upgrades to v2, has v3 fail its health
-  check and restores v2 with its store snapshot, rolls back to v1, and
-  uninstalls. On Windows it also kills the daemon with `taskkill /F` and waits
+  check and restores v2 with its store snapshot, rolls back to v1,
+  uninstalls and clears the enrollment (this installer's run with
+  `clear-enrollment`, also on Windows; the CLI run with `byok-agent unpair`,
+  except on Windows, where its WinSW service enrolled as `LocalSystem`). On Windows it also kills the daemon with `taskkill /F` and waits
   for the SCM to restart it, and keeps the stores on an 8.3 short-name path and
   on a path longer than 260 characters (#1030).

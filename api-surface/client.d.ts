@@ -1422,7 +1422,7 @@ export declare function runtimeEnvironmentFor(id: string, config: Pick<RuntimeAd
 /** Validates `piByokLauncher` and folds its `sessionDir`; the daemon and its retention build Pi from this one value. */
 export declare function resolvePiByokLauncher(config: Pick<RuntimeAdaptersConfig, 'piByokLauncher'>): PiByokLauncherConfig | undefined;
 // ==== @byok-sdk/client dist/agent-home-readers.d.ts ====
-import { type AgentMemoryStartRefusal, type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
+import { type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
 /**
  * How one Agent Attempt uses its home. The wire carries only
  * `homeAccess: 'memory-reader'`; an absent value is the writer.
@@ -1452,34 +1452,6 @@ export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
  * read fails; the caller then reports `unmeasured`.
  */
 export declare function digestAgentHomeMemory(home: string): Promise<AgentHomeMemoryDigest | undefined>;
-/**
- * One read of the resident `MEMORY.md`; see {@link readResidentMemory}. An
- * unreadable file names its `refusal` class when the home itself is at fault
- * (#1843); a missing file, a changed home identity or an I/O error has none.
- */
-export type ResidentMemoryRead = {
-    readonly kind: 'read';
-    readonly content: string;
-    readonly revision: string;
-    readonly byteCount: number;
-} | {
-    readonly kind: 'over-limit';
-    readonly byteCount: number;
-} | {
-    readonly kind: 'unreadable';
-    readonly reason: string;
-    readonly refusal?: AgentMemoryStartRefusal;
-};
-/**
- * Reads the resident `MEMORY.md` of a leased home (#1439) with one
- * implementation on every platform, at most the limit plus one byte, as strict
- * UTF-8. The `lstat` covers a platform without `O_NOFOLLOW`. The revision is
- * the one `memory_save` compares. A file problem is a result, never a throw.
- */
-export declare function readResidentMemory(home: string, homeIdentity: Readonly<{
-    dev: bigint;
-    ino: bigint;
-}>): Promise<ResidentMemoryRead>;
 /**
  * Compares the reader's start and terminal digests. `writerOverlapped` is
  * true when a writer Attempt of the same home was active at any time
@@ -1910,6 +1882,7 @@ export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjec
  * - `openAgentMemoryFilesystemHelper`— admission of the host's macOS or Windows helper.
  * - `serveAgentMemoryMcpOverStdio`   — the two memory tools over stdio.
  * - `prependAgentMemoryGuidance`     — the prompt half of the path contract.
+ * - `checkAgentMemoryHome`           — the device's pre-start memory verdict for one home.
  *
  * Three things are deliberately absent, and this file is the record of why.
  *
@@ -1976,6 +1949,10 @@ export type { AgentMemoryMcpDeps } from './mcp-server.js';
 export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance.js';
 /** Prepends that guidance to an Agent instruction, exactly as the daemon's task runner does. */
 export { prependAgentMemoryGuidance } from '../daemon/memory-guidance.js';
+/** Whether the device would refuse a task on this Agent home over its memory, with the same code and reason; read-only and advisory. */
+export { checkAgentMemoryHome } from '../daemon/agent-memory-home-check.js';
+/** The verdict of `checkAgentMemoryHome`. */
+export type { AgentMemoryHomeCheck } from '../daemon/agent-memory-home-check.js';
 /** The validated Agent identity carried by `AgentMemoryTaskContext`. */
 export type { AgentRef } from '../agent-home.js';
 // ==== @byok-sdk/client dist/agent-memory/mcp-server.d.ts ====
@@ -2714,6 +2691,41 @@ export declare function openAgentMemoryFilesystemHelper(input: Readonly<{
     ancestorRoot: string;
     homeIdentity: AgentHomeLease['homeIdentity'];
 }>): Promise<AgentMemoryFilesystem>;
+// ==== @byok-sdk/client dist/daemon/agent-memory-home-check.d.ts ====
+import type { AgentMemoryStartRefusal } from '@byok-sdk/protocol/constants';
+import type { AgentMemoryFilesystem } from './agent-memory-filesystem.js';
+/** The verdict of {@link checkAgentMemoryHome}. `reason` is the `task.fail` reason the device sends for the same home. */
+export type AgentMemoryHomeCheck = {
+    readonly ok: true;
+} | {
+    readonly ok: false;
+    readonly code: AgentMemoryStartRefusal;
+    readonly reason: string;
+};
+/**
+ * Whether the device would refuse a task on this Agent home because of its
+ * memory (#1843), with the code and reason it fails that task with. It runs the
+ * device's own readers, read-only, so the two cannot drift.
+ *
+ * It throws and decides nothing when it cannot read: a `MEMORY.md` that is
+ * missing (every lease creates one), a changed home identity, an I/O error, or
+ * no secure memory backend on this platform. On macOS and Windows pass the
+ * helper's filesystem for this home as `commit.filesystem`; the caller closes it.
+ *
+ * The verdict is about the home, and the device applies each half to one kind
+ * of task: resident refusals to a task that carries `MEMORY.md` into its
+ * prompt, start-record refusals to a task with `agentMemoryCommit`. The repair
+ * task (`agentMemory:"none"`, no commit) is never refused, so this verdict does
+ * not gate it.
+ *
+ * The check holds no home lease and has no task id, so it is advisory: a home
+ * within a task id's length of the start-record bound can pass and still be refused.
+ */
+export declare function checkAgentMemoryHome(home: string, options?: {
+    readonly commit?: {
+        readonly filesystem?: AgentMemoryFilesystem;
+    };
+}): Promise<AgentMemoryHomeCheck>;
 // ==== @byok-sdk/client dist/daemon/agent-memory-intent.d.ts ====
 import { type AgentMemoryIntentAvailablePayload, type AgentMemoryIntentCompletion, type AgentMemoryIntentFileObservation, type AgentMemoryIntentOperation, type AgentMemoryIntentReadback, type AgentMemoryIntentRejectionCode } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentHomeManager } from '../agent-home.js';
@@ -6711,6 +6723,71 @@ export interface HostDeviceProofSigner extends DeviceProofSigner {
  */
 export declare function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSignerOptions): HostDeviceProofSigner;
 export {};
+// ==== @byok-sdk/client dist/daemon/enrollment-clear.d.ts ====
+import { DeviceStore, type DeviceEnrollmentStatusOptions, type DeviceRecord } from './store.js';
+import type { DeviceCredentialBackend } from './device-credential-store.js';
+declare const CLEAR_MESSAGES: {
+    readonly store_owned: 'another process holds this store\'s owner lease (a daemon, doctor or installer); the enrollment is unchanged';
+    readonly store_not_bound: 'the OS credential entry for this productId holds an enrollment this storeDir did not pair; nothing was cleared';
+    readonly clear_failed: 'the device enrollment could not be cleared; see the cause';
+};
+export type DeviceEnrollmentClearErrorCode = keyof typeof CLEAR_MESSAGES;
+/**
+ * Why a device enrollment clear refused or failed:
+ * - `store_owned`: another process holds the store's owner lease. It may be a
+ *   running daemon, a doctor or an installer; nothing was read or cleared.
+ * - `store_not_bound`: the OS entry holds an enrollment another storeDir
+ *   paired; nothing was cleared.
+ * - `clear_failed`: `cause` holds the error. A `device.json` that cannot be
+ *   parsed (`DeviceRecordRePairRequiredError`) is refused before anything is
+ *   deleted; the store needs a re-pair. A credential provider failure leaves
+ *   the store paired. A failed `device.json` removal after the credential was
+ *   deleted leaves a valid projection without its credential, which a retry
+ *   clears.
+ */
+export declare class DeviceEnrollmentClearError extends Error {
+    readonly code: DeviceEnrollmentClearErrorCode;
+    constructor(code: DeviceEnrollmentClearErrorCode, options?: ErrorOptions);
+}
+/** One store's enrollment custody: the `device.json` projection, the OS credential and, with the OS provider, the member entries. */
+export interface EnrollmentCustody {
+    readonly store: DeviceStore;
+    readonly memberRecords: {
+        clear(): Promise<void>;
+    } | undefined;
+}
+/**
+ * The one enrollment clear, shared by `Daemon.unpair()` and
+ * {@link clearDeviceEnrollment}; the caller holds the store's owner lease.
+ * `readCurrent` reads the bound enrollment under that lease, so another
+ * store's OS entry is refused before anything is deleted. A `device.json`
+ * that cannot be parsed is refused too, with its
+ * `DeviceRecordRePairRequiredError`: nothing proves the productId-wide OS
+ * entry is this store's, and `remove()` could never delete that file. A valid
+ * projection without its credential (left by a failed metadata removal) is
+ * cleared. The member entries
+ * go first and the credential is read back after deletion: any failure up to
+ * there leaves the device paired. `onCredentialCleared` runs once the
+ * credential is gone, before `device.json` is removed. Returns the cleared
+ * enrollment, or undefined when the store held no readable one.
+ */
+export declare function clearEnrollmentUnderLease(custody: EnrollmentCustody, readCurrent: () => Promise<DeviceRecord | undefined>, onCredentialCleared?: () => void): Promise<DeviceRecord | undefined>;
+/**
+ * Clears one store's device enrollment without a daemon: its member
+ * entries, its OS credential (read back after deletion) and `device.json`,
+ * under the store's owner lease. It never reads Host secrets, returns no
+ * secret and makes no network call. Clearing a store that holds no
+ * enrollment succeeds. Unlike `Daemon.unpair()` it leaves the delivery cursor
+ * file, which no later pairing reads because each pairing mints a new device
+ * id. It reads the calling process's OS credential set, so it clears the
+ * enrollment of the account it runs as.
+ */
+export declare function clearDeviceEnrollment(options: DeviceEnrollmentStatusOptions & {
+    readonly storeDir: string;
+}, overrides?: {
+    readonly deviceCredentials?: DeviceCredentialBackend;
+}): Promise<void>;
+export {};
 // ==== @byok-sdk/client dist/daemon/execution-record.d.ts ====
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { RuntimeAdapterDescriptor } from '../types.js';
@@ -8809,6 +8886,20 @@ export declare class DeviceStore {
  * ({@link DeviceStoreBindingMismatchError}).
  */
 export declare function readEnrollmentAuthority(options: DeviceEnrollmentStatusOptions): Promise<EnrollmentAuthorityRead>;
+/** {@link readEnrollmentAuthority} over an already composed store. */
+export declare function readStoreEnrollment(store: DeviceStore): Promise<EnrollmentAuthorityRead>;
+/**
+ * Reads `productId` and `storeDir` exactly once each as plain data
+ * (`../util/plain-data`); other fields of a larger host config are never
+ * read. An accessor, Proxy, non-plain prototype or wrong type is a
+ * `TypeError` with no cause, before any filesystem or credential access.
+ */
+export declare function readEnrollmentOptions(options: unknown): {
+    productId: string;
+    storeDir: string | undefined;
+    deviceCredentials: DeviceCredentialConfig | undefined;
+    nativeAssetRoot: string | undefined;
+};
 /** The public non-secret identity projection of one enrollment record. */
 export declare function enrollmentIdentityOf(record: DeviceMetadata): DeviceEnrollmentIdentity;
 /**
@@ -9889,6 +9980,8 @@ export { LocalStorageEmergencyError } from './daemon/retention/pressure.js';
 export type { StoragePressureState } from './daemon/retention/pressure.js';
 export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry.js';
 export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store.js';
+export { clearDeviceEnrollment, DeviceEnrollmentClearError } from './daemon/enrollment-clear.js';
+export type { DeviceEnrollmentClearErrorCode } from './daemon/enrollment-clear.js';
 export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store.js';
 export { AuthResponseInvalidError } from './daemon/auth-manager.js';
 export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store.js';

@@ -1,4 +1,4 @@
-import type { JsonValue } from '@earendil-works/chord';
+import type { JsonValue } from '@earendil-works/chord/json';
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import { LiveDoc, type TaskId, type ConversationId } from '@earendil-works/pi-durable';
 import { commitWrites } from '@earendil-works/pi-durable/testing';
