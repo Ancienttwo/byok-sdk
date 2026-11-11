@@ -1871,7 +1871,7 @@ structured runtime fields only, never from prose; without one the class is
 `unknown`. A class the vendored OAR derives from error text is marked, and the
 adapter sends it as `unknown`. TaskRunner copies it to `task.fail.failure`
 when the server advertises `runtime-failure-class`, and gives a failure it
-makes itself `unknown`. It keeps `scope` only when the server also advertises
+makes itself `unknown`, except an Agent-memory start refusal (below). It keeps `scope` only when the server also advertises
 `runtime-quota-scope`. The class never changes `retry`.
 
 | Runtime | Evidence |
@@ -3082,7 +3082,21 @@ before the runtime starts when the file is over the limit
 (`agent_memory_resident_over_limit: <bytes>/<limit>; to recover, send a write task with agentMemory:"none" and no agentMemoryCommit that brings memory back within its limits`), or when it is missing,
 not a regular file or not valid UTF-8, has more than one hard link, or the home
 identity changed (`agent_memory_resident_unreadable: <reason>`). These prefixes
-are reason text, not wire values.
+are reason text, not wire values. The machine-readable verdict is
+`task.fail.failure.class`, one of `AGENT_MEMORY_START_REFUSALS` (#1843):
+`agent_memory_resident_over_limit`, `agent_memory_resident_multiple_links`,
+`agent_memory_resident_not_regular_file` and `agent_memory_resident_not_utf8`
+for `MEMORY.md`; `agent_memory_snapshot_over_file_limit`,
+`agent_memory_snapshot_over_byte_limit` and `agent_memory_snapshot_refused`
+(any other non-retryable refusal) for the start copy of a task with
+`agentMemoryCommit`. A missing file, a changed home identity and an I/O failure
+stay `unknown`. A task that seals its output sends `unknown` for every one of
+them: its reason is sealed, and the class would show the memory state that the
+reason hides (sealing `memory-projection` requires `task-output`). A
+`MEMORY.md` that is already not a regular file when the offer arrives is
+declined before claim with reason text and no code; the class appears only when
+the file changes after that check. A write task cannot repair a file that is
+not a regular file.
 
 Every writer Attempt keeps that read in memory as its start copy when the file
 was valid. When the Attempt ends, the runtime has stopped and `MEMORY.md` is a

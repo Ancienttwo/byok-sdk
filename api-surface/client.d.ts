@@ -1534,7 +1534,7 @@ export declare function runtimeEnvironmentFor(id: string, config: Pick<RuntimeAd
 /** Validates `piByokLauncher` and folds its `sessionDir`; the daemon and its retention build Pi from this one value. */
 export declare function resolvePiByokLauncher(config: Pick<RuntimeAdaptersConfig, 'piByokLauncher'>): PiByokLauncherConfig | undefined;
 // ==== @byok-sdk/client dist/agent-home-readers.d.ts ====
-import { type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
+import { type AgentMemoryStartRefusal, type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
 /**
  * How one Agent Attempt uses its home. The wire carries only
  * `homeAccess: 'memory-reader'`; an absent value is the writer.
@@ -1564,7 +1564,11 @@ export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
  * read fails; the caller then reports `unmeasured`.
  */
 export declare function digestAgentHomeMemory(home: string): Promise<AgentHomeMemoryDigest | undefined>;
-/** One read of the resident `MEMORY.md`; see {@link readResidentMemory}. */
+/**
+ * One read of the resident `MEMORY.md`; see {@link readResidentMemory}. An
+ * unreadable file names its `refusal` class when the home itself is at fault
+ * (#1843); a missing file, a changed home identity or an I/O error has none.
+ */
 export type ResidentMemoryRead = {
     readonly kind: 'read';
     readonly content: string;
@@ -1576,6 +1580,7 @@ export type ResidentMemoryRead = {
 } | {
     readonly kind: 'unreadable';
     readonly reason: string;
+    readonly refusal?: AgentMemoryStartRefusal;
 };
 /**
  * Reads the resident `MEMORY.md` of a leased home (#1439) with one
@@ -2989,9 +2994,14 @@ export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 /** One atomically replaced audit/outbox state must fit the cross-platform helper contract. */
 export declare const AGENT_MEMORY_MAX_LOCAL_LOG_BYTES: number;
-/** A complete snapshot cannot fit the bounded export contract. No partial result is returned. */
+/**
+ * A complete snapshot cannot fit the bounded export contract. No partial result
+ * is returned. `limit` names the bound: the snapshot file count, its total
+ * UTF-8 bytes, the directory entries a walk reads, or a start record's manifest.
+ */
 export declare class AgentMemorySnapshotLimitError extends AgentMemoryValidationError {
-    constructor(message: string);
+    readonly limit: 'files' | 'bytes' | 'entries' | 'manifest';
+    constructor(limit: 'files' | 'bytes' | 'entries' | 'manifest', message: string);
 }
 /**
  * Filesystem I/O failure: an open, read, write, fsync, rename or unlink did not

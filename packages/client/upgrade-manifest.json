@@ -305,6 +305,23 @@
         "export:@byok-sdk/client#sdkDistributionManifest",
         "export:@byok-sdk/client#sdkPackagingAssetLayout"
       ]
+    },
+    {
+      "id": "agent-memory-start-refusal-classes",
+      "impact": "breaking",
+      "summary": "A claimed task that the Agent home's memory refuses before its runtime starts now carries a typed task.fail.failure.class from AGENT_MEMORY_START_REFUSALS (resident MEMORY.md over the limit, with more than one link, not a regular file or not UTF-8; a commit-on-success start copy over the snapshot file or byte limit, or refused otherwise). The reason text is unchanged. A task that seals its output sends unknown. TaskFailureReading gains a member, so an exhaustive switch over its class stops compiling until it handles the new classes. AgentMemorySnapshotLimitError takes the bound it hit as its new first constructor argument and exposes it as limit.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-start-refusal-classes",
+      "items": [
+        "export:@byok-sdk/client#AgentMemorySnapshotLimitError",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_START_REFUSALS",
+        "export:@byok-sdk/protocol#AgentMemoryStartRefusal",
+        "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+        "export:@byok-sdk/protocol#TaskFailSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailureReading",
+        "export:@byok-sdk/protocol#TaskFailureSchema",
+        "export:@byok-sdk/protocol/constants#AGENT_MEMORY_START_REFUSALS",
+        "export:@byok-sdk/protocol/constants#AgentMemoryStartRefusal"
+      ]
     }
   ],
   "changes": [
@@ -335,6 +352,11 @@
       "before": "K4 0.0.1 src-sha256=29b76c2746aa7b33",
       "after": "K4 0.0.1 src-sha256=a62de5b4c4495e5e",
       "entry": "testing-in-memory-device-credential-backend"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemorySnapshotLimitError",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
     },
     {
       "item": "export:@byok-sdk/client#AgyAdapter",
@@ -802,9 +824,19 @@
       "entry": "model-route-host-entry-default-thinking-level"
     },
     {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_START_REFUSALS",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
       "item": "export:@byok-sdk/protocol#AgentHomeProjectionPayloadSchema",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryStartRefusal",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
     },
     {
       "item": "export:@byok-sdk/protocol#E2eeScopeKeyPackageSchema",
@@ -872,6 +904,26 @@
       "entry": "offer-selection-rules"
     },
     {
+      "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailSealedPayload",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureReading",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureSchema",
+      "change": "changed",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
       "change": "changed",
       "entry": "dts-node-next-specifiers"
@@ -890,6 +942,16 @@
       "item": "export:@byok-sdk/protocol#offerSelectionViolation",
       "change": "added",
       "entry": "offer-selection-rules"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AGENT_MEMORY_START_REFUSALS",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#AgentMemoryStartRefusal",
+      "change": "added",
+      "entry": "agent-memory-start-refusal-classes"
     },
     {
       "item": "export:@byok-sdk/server#TaskSnapshot",

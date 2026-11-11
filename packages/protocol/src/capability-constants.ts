@@ -94,6 +94,24 @@ export const RUNTIME_FAILURE_CLASSES = [
   'overloaded', 'provider', 'runtime_exited', 'limit_reached', 'output_schema', 'unknown',
 ] as const;
 
+/**
+ * The `task.fail.failure.class` values a device sends when an Agent home's
+ * memory refuses a claimed task before its runtime starts (#1843). They name a
+ * state of the home that holds until a write task or the owner changes it:
+ * the resident `MEMORY.md` (over its byte limit, more than one hard link, not
+ * a regular file, not UTF-8) or the start copy of a commit-on-success task
+ * (over the snapshot file or byte limit, or any other non-retryable refusal).
+ * A missing file, a changed home identity and an I/O failure stay `unknown`.
+ * Adapters never emit them, so they are not {@link RUNTIME_FAILURE_CLASSES}.
+ */
+export const AGENT_MEMORY_START_REFUSALS = [
+  'agent_memory_resident_over_limit', 'agent_memory_resident_multiple_links',
+  'agent_memory_resident_not_regular_file', 'agent_memory_resident_not_utf8',
+  'agent_memory_snapshot_over_file_limit', 'agent_memory_snapshot_over_byte_limit',
+  'agent_memory_snapshot_refused',
+] as const;
+export type AgentMemoryStartRefusal = (typeof AGENT_MEMORY_START_REFUSALS)[number];
+
 /** The values of a `quota` failure's `scope` (#1271), shared by schema and schema-free consumers. */
 export const RUNTIME_QUOTA_SCOPES = ['account', 'model'] as const;
 

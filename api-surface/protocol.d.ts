@@ -2007,6 +2007,18 @@ export declare const SEALED_PAYLOAD_V2_CAPABILITY: 'sealed-payload-v2';
  * schema-free consumers.
  */
 export declare const RUNTIME_FAILURE_CLASSES: readonly ['auth', 'quota', 'rate_limited', 'billing', 'model_unavailable', 'input_too_large', 'invalid_request', 'overloaded', 'provider', 'runtime_exited', 'limit_reached', 'output_schema', 'unknown'];
+/**
+ * The `task.fail.failure.class` values a device sends when an Agent home's
+ * memory refuses a claimed task before its runtime starts (#1843). They name a
+ * state of the home that holds until a write task or the owner changes it:
+ * the resident `MEMORY.md` (over its byte limit, more than one hard link, not
+ * a regular file, not UTF-8) or the start copy of a commit-on-success task
+ * (over the snapshot file or byte limit, or any other non-retryable refusal).
+ * A missing file, a changed home identity and an I/O failure stay `unknown`.
+ * Adapters never emit them, so they are not {@link RUNTIME_FAILURE_CLASSES}.
+ */
+export declare const AGENT_MEMORY_START_REFUSALS: readonly ['agent_memory_resident_over_limit', 'agent_memory_resident_multiple_links', 'agent_memory_resident_not_regular_file', 'agent_memory_resident_not_utf8', 'agent_memory_snapshot_over_file_limit', 'agent_memory_snapshot_over_byte_limit', 'agent_memory_snapshot_refused'];
+export type AgentMemoryStartRefusal = (typeof AGENT_MEMORY_START_REFUSALS)[number];
 /** The values of a `quota` failure's `scope` (#1271), shared by schema and schema-free consumers. */
 export declare const RUNTIME_QUOTA_SCOPES: readonly ['account', 'model'];
 /** Single value authority shared by schema validation and schema-free consumers. */
@@ -4621,7 +4633,7 @@ export declare const InputPreparationRejectionReasonSchema: z.ZodEnum<{
 export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRejectionReasonSchema>;
 // ==== @byok-sdk/protocol dist/messages.d.ts ====
 import { z } from 'zod';
-import { type RuntimeUnavailableCause } from './constants.js';
+import { type AgentMemoryStartRefusal, type RuntimeUnavailableCause } from './constants.js';
 import { ProviderProvisioningAvailablePayloadSchema } from './provider-provisioning.js';
 import { E2eeKeyPackageAvailablePayloadSchema } from './e2ee-member.js';
 import { type PlainJsonCheck } from './plain-json.js';
@@ -6643,6 +6655,9 @@ export type RuntimeQuotaScope = z.infer<typeof RuntimeQuotaScopeSchema>;
  * when the runtime reported them. `scope` is gated on the server's
  * `runtime-quota-scope` flag (#1271).
  *
+ * A device-made Agent-memory start refusal carries one of
+ * {@link AGENT_MEMORY_START_REFUSALS} (#1843).
+ *
  * The class is open (#1121): a well-formed class this version does not know,
  * with whatever fields a newer device put beside it, is accepted and kept
  * verbatim, so the terminal is still recorded. {@link readTaskFailure} is the
@@ -6671,6 +6686,16 @@ export declare const TaskFailureSchema: z.ZodUnion<readonly [z.ZodObject<{
         unknown: "unknown";
     }>;
 }, z.core.$strict>, z.ZodObject<{
+    class: z.ZodEnum<{
+        agent_memory_resident_multiple_links: "agent_memory_resident_multiple_links";
+        agent_memory_resident_not_regular_file: "agent_memory_resident_not_regular_file";
+        agent_memory_resident_not_utf8: "agent_memory_resident_not_utf8";
+        agent_memory_resident_over_limit: "agent_memory_resident_over_limit";
+        agent_memory_snapshot_over_byte_limit: "agent_memory_snapshot_over_byte_limit";
+        agent_memory_snapshot_over_file_limit: "agent_memory_snapshot_over_file_limit";
+        agent_memory_snapshot_refused: "agent_memory_snapshot_refused";
+    }>;
+}, z.core.$strict>, z.ZodObject<{
     class: z.ZodString;
 }, z.core.$loose>]>;
 export type TaskFailure = z.infer<typeof TaskFailureSchema>;
@@ -6681,6 +6706,8 @@ export type TaskFailureReading = {
     readonly scope?: RuntimeQuotaScope;
 } | {
     readonly class: Exclude<RuntimeFailureClass, 'quota' | 'unknown'>;
+} | {
+    readonly class: AgentMemoryStartRefusal;
 } | {
     readonly class: 'unknown';
     readonly reportedClass?: string;
@@ -6858,6 +6885,16 @@ export declare const TaskFailSealedPayloadSchema: z.ZodObject<{
             rate_limited: "rate_limited";
             runtime_exited: "runtime_exited";
             unknown: "unknown";
+        }>;
+    }, z.core.$strict>, z.ZodObject<{
+        class: z.ZodEnum<{
+            agent_memory_resident_multiple_links: "agent_memory_resident_multiple_links";
+            agent_memory_resident_not_regular_file: "agent_memory_resident_not_regular_file";
+            agent_memory_resident_not_utf8: "agent_memory_resident_not_utf8";
+            agent_memory_resident_over_limit: "agent_memory_resident_over_limit";
+            agent_memory_snapshot_over_byte_limit: "agent_memory_snapshot_over_byte_limit";
+            agent_memory_snapshot_over_file_limit: "agent_memory_snapshot_over_file_limit";
+            agent_memory_snapshot_refused: "agent_memory_snapshot_refused";
         }>;
     }, z.core.$strict>, z.ZodObject<{
         class: z.ZodString;
@@ -7674,6 +7711,16 @@ export declare const TaskFailPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
             unknown: "unknown";
         }>;
     }, z.core.$strict>, z.ZodObject<{
+        class: z.ZodEnum<{
+            agent_memory_resident_multiple_links: "agent_memory_resident_multiple_links";
+            agent_memory_resident_not_regular_file: "agent_memory_resident_not_regular_file";
+            agent_memory_resident_not_utf8: "agent_memory_resident_not_utf8";
+            agent_memory_resident_over_limit: "agent_memory_resident_over_limit";
+            agent_memory_snapshot_over_byte_limit: "agent_memory_snapshot_over_byte_limit";
+            agent_memory_snapshot_over_file_limit: "agent_memory_snapshot_over_file_limit";
+            agent_memory_snapshot_refused: "agent_memory_snapshot_refused";
+        }>;
+    }, z.core.$strict>, z.ZodObject<{
         class: z.ZodString;
     }, z.core.$loose>]>>;
     usage: z.ZodOptional<z.ZodObject<{
@@ -7746,6 +7793,16 @@ export declare const TaskFailPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
             rate_limited: "rate_limited";
             runtime_exited: "runtime_exited";
             unknown: "unknown";
+        }>;
+    }, z.core.$strict>, z.ZodObject<{
+        class: z.ZodEnum<{
+            agent_memory_resident_multiple_links: "agent_memory_resident_multiple_links";
+            agent_memory_resident_not_regular_file: "agent_memory_resident_not_regular_file";
+            agent_memory_resident_not_utf8: "agent_memory_resident_not_utf8";
+            agent_memory_resident_over_limit: "agent_memory_resident_over_limit";
+            agent_memory_snapshot_over_byte_limit: "agent_memory_snapshot_over_byte_limit";
+            agent_memory_snapshot_over_file_limit: "agent_memory_snapshot_over_file_limit";
+            agent_memory_snapshot_refused: "agent_memory_snapshot_refused";
         }>;
     }, z.core.$strict>, z.ZodObject<{
         class: z.ZodString;
