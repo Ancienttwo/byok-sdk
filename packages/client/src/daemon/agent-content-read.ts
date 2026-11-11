@@ -13,6 +13,7 @@ import {
   AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
 } from '@byok-sdk/protocol';
 import { AgentContentAuditStore, AgentContentAuditStoreError } from './agent-content-audit-store';
+import { type ExistingAncestor, resolveExistingAncestor as findExistingAncestor } from '../util/existing-ancestor';
 import { sameContent } from '../util/file-state';
 
 export const AGENT_CONTENT_READ_SURFACES = ['workspace', 'transcript', 'artifact'] as const;
@@ -406,26 +407,10 @@ function isSensitiveTarget(segments: readonly string[], productNames: readonly s
   return segments.some((segment) => patterns.some((pattern) => nameMatches(pattern, segment)));
 }
 
-interface ExistingAncestor {
-  readonly canonical: string;
-  readonly tail: readonly string[];
-}
-
 async function resolveExistingAncestor(inputPath: string): Promise<ExistingAncestor> {
-  let cursor = path.resolve(inputPath);
-  const tail: string[] = [];
-  for (;;) {
-    try {
-      return { canonical: await fs.realpath(cursor), tail };
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
-      const parent = path.dirname(cursor);
-      if (parent === cursor) throw new TargetPolicyError('target-missing');
-      tail.unshift(path.basename(cursor));
-      cursor = parent;
-    }
-  }
+  const ancestor = await findExistingAncestor(inputPath);
+  if (!ancestor) throw new TargetPolicyError('target-missing');
+  return ancestor;
 }
 
 class TargetPolicyError extends Error {
