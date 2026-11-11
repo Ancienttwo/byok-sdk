@@ -62,6 +62,9 @@ async function observe(parity: ParityCase): Promise<Observed[][]> {
     process.env = saved;
     await session?.close();
     await fs.rm(workspaceDir, { recursive: true, force: true });
+    // The outside-workspace artifact keeps the golden's literal path; the fake wrote it.
+    const artifact = parity.env.FAKE_CLAUDE_ARTIFACT_PATH;
+    if (artifact !== undefined && path.isAbsolute(artifact)) await fs.rm(artifact, { force: true });
   }
 }
 
