@@ -91,8 +91,9 @@ require `runtimeEntry` and moves the pi-rpc key to private IPC (#385). Keep
 manifests, lock workspace records, version documents and packed internal
 dependencies consistent.
 
-A release set contains eight aligned packages plus keys: nine packages. From
-0.28.2 all nine carry one version; `check:release-graph` fails when keys
+A release set contains nine aligned packages plus keys: ten packages, since
+`@byok-sdk/bot-collaboration` joins with the next MINOR (#1845). From 0.28.2 all
+of them carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
 the dist-tag `latest`, observed at 0.41.0 for all nine packages on 2026-11-09 (UTC).
 The pre-publication

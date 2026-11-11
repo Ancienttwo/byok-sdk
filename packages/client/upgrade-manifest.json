@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.41.0",
-    "snapshotSha256": "c982cf7205dc477ff90ca68ff4e349715da249f1520b109f3f77f5a1b4ea3550"
+    "snapshotSha256": "b18b69628849689a6d3298654f033a83e4e4f371bf53bbd8a5ccf6f36a277772"
   },
   "configFields": {
     "status": "tracked",
@@ -56,15 +56,6 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-helper-protocol-4",
       "items": [
         "export:@byok-sdk/client/agent-memory#openAgentMemoryFilesystemHelper"
-      ]
-    },
-    {
-      "id": "example-bot-collaboration-autonomy",
-      "impact": "additive",
-      "summary": "Fix: the hosted Host (examples/hosted-bot-collaboration) now enforces Bot autonomy as the local Host does. An observing Bot records would-do entities instead of running create_routine, a cross-Bot delegate or room_call. A Host that vendors the example runs HostedCollaborationStore.migrate() once on every existing schema before the new code serves (it replaces entity_kind_check and moves any wouldDo rows left in a scope frame by an older L import into would_do entity rows), then calls setBotAutonomy(credential, botId, 'auto') for each Bot that must keep acting on its own.",
-      "migration": "CHANGELOG.md#unreleased",
-      "items": [
-        "example:bot-collaboration"
       ]
     },
     {
@@ -394,6 +385,329 @@
         "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
         "store:pi-durable"
       ]
+    },
+    {
+      "id": "bot-collaboration-package",
+      "impact": "breaking",
+      "summary": "K8 is published as @byok-sdk/bot-collaboration on the SDK version, with four entries: . (the L Host), ./host-kit (the modules a Host adapter composes, Worker-loadable), ./rules (the pure rules, no node:sqlite) and ./testing (the shared vectors and the L test Host). The vendored example item ends: a Host that copied examples/bot-collaboration deletes its copy and installs the package at the SDK version, and maps its imports to the four entries. Names the copied source exposed but no entry exports are not public.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#bot-collaboration-is-a-package",
+      "items": [
+        "entry:@byok-sdk/bot-collaboration",
+        "entry:@byok-sdk/bot-collaboration/host-kit",
+        "entry:@byok-sdk/bot-collaboration/package.json",
+        "entry:@byok-sdk/bot-collaboration/rules",
+        "entry:@byok-sdk/bot-collaboration/testing",
+        "example:bot-collaboration",
+        "export:@byok-sdk/bot-collaboration#AgentMessageInput",
+        "export:@byok-sdk/bot-collaboration#BotCollaboration",
+        "export:@byok-sdk/bot-collaboration#BotOptions",
+        "export:@byok-sdk/bot-collaboration#HostIntentCancelResult",
+        "export:@byok-sdk/bot-collaboration#HostIntentHandler",
+        "export:@byok-sdk/bot-collaboration#HostIntentMessageHandler",
+        "export:@byok-sdk/bot-collaboration#MessageServer",
+        "export:@byok-sdk/bot-collaboration#TEAM_ROOM_LIMIT",
+        "export:@byok-sdk/bot-collaboration#TeamModeCode",
+        "export:@byok-sdk/bot-collaboration#TeamModeError",
+        "export:@byok-sdk/bot-collaboration#TeamSnapshot",
+        "export:@byok-sdk/bot-collaboration#TeamSnapshotBot",
+        "export:@byok-sdk/bot-collaboration#TeamSnapshotRoom",
+        "export:@byok-sdk/bot-collaboration#botCompactVeto",
+        "export:@byok-sdk/bot-collaboration#createBotPersonaProjection",
+        "export:@byok-sdk/bot-collaboration#teamSnapshot",
+        "export:@byok-sdk/bot-collaboration/host-kit#AdmittedIds",
+        "export:@byok-sdk/bot-collaboration/host-kit#ArchivedRecord",
+        "export:@byok-sdk/bot-collaboration/host-kit#Autonomy",
+        "export:@byok-sdk/bot-collaboration/host-kit#BOT_DREAM",
+        "export:@byok-sdk/bot-collaboration/host-kit#BOT_REPLY_MAX_BYTES",
+        "export:@byok-sdk/bot-collaboration/host-kit#BOT_ROUTINE",
+        "export:@byok-sdk/bot-collaboration/host-kit#BotProfile",
+        "export:@byok-sdk/bot-collaboration/host-kit#BotRoutine",
+        "export:@byok-sdk/bot-collaboration/host-kit#BotRoutineInput",
+        "export:@byok-sdk/bot-collaboration/host-kit#Card",
+        "export:@byok-sdk/bot-collaboration/host-kit#ChannelOptions",
+        "export:@byok-sdk/bot-collaboration/host-kit#ChannelPort",
+        "export:@byok-sdk/bot-collaboration/host-kit#CheckedOffer",
+        "export:@byok-sdk/bot-collaboration/host-kit#CollaborationState",
+        "export:@byok-sdk/bot-collaboration/host-kit#Command",
+        "export:@byok-sdk/bot-collaboration/host-kit#CommandPorts",
+        "export:@byok-sdk/bot-collaboration/host-kit#CommitConflict",
+        "export:@byok-sdk/bot-collaboration/host-kit#CommitRequest",
+        "export:@byok-sdk/bot-collaboration/host-kit#CommitResult",
+        "export:@byok-sdk/bot-collaboration/host-kit#ConfirmableSpec",
+        "export:@byok-sdk/bot-collaboration/host-kit#ContextTurn",
+        "export:@byok-sdk/bot-collaboration/host-kit#Conversation",
+        "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_AUTONOMY",
+        "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_CONTEXT_MAX_BYTES",
+        "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_CONTEXT_TURN_LIMIT",
+        "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_DREAM_MAX_DURATION_MS",
+        "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_HANDOFF_BUDGETS",
+        "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_INSTRUCTION_MAX_BYTES",
+        "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_MEMBER_MENTIONS",
+        "export:@byok-sdk/bot-collaboration/host-kit#DEVICE_CONCURRENCY",
+        "export:@byok-sdk/bot-collaboration/host-kit#DREAM_WAIT_MS",
+        "export:@byok-sdk/bot-collaboration/host-kit#Delegation",
+        "export:@byok-sdk/bot-collaboration/host-kit#DelegationCancelResult",
+        "export:@byok-sdk/bot-collaboration/host-kit#DelegationError",
+        "export:@byok-sdk/bot-collaboration/host-kit#Delivery",
+        "export:@byok-sdk/bot-collaboration/host-kit#DeliveryState",
+        "export:@byok-sdk/bot-collaboration/host-kit#DeviceModeError",
+        "export:@byok-sdk/bot-collaboration/host-kit#DeviceSwitchingError",
+        "export:@byok-sdk/bot-collaboration/host-kit#DeviceTopology",
+        "export:@byok-sdk/bot-collaboration/host-kit#Disposition",
+        "export:@byok-sdk/bot-collaboration/host-kit#DreamBot",
+        "export:@byok-sdk/bot-collaboration/host-kit#DreamRecord",
+        "export:@byok-sdk/bot-collaboration/host-kit#DreamSkip",
+        "export:@byok-sdk/bot-collaboration/host-kit#DreamState",
+        "export:@byok-sdk/bot-collaboration/host-kit#DreamSync",
+        "export:@byok-sdk/bot-collaboration/host-kit#DreamingOptions",
+        "export:@byok-sdk/bot-collaboration/host-kit#ExecutionRecord",
+        "export:@byok-sdk/bot-collaboration/host-kit#HomeReadback",
+        "export:@byok-sdk/bot-collaboration/host-kit#HostIntentError",
+        "export:@byok-sdk/bot-collaboration/host-kit#InboundClass",
+        "export:@byok-sdk/bot-collaboration/host-kit#InboundDisposition",
+        "export:@byok-sdk/bot-collaboration/host-kit#InboundMessage",
+        "export:@byok-sdk/bot-collaboration/host-kit#InboundRow",
+        "export:@byok-sdk/bot-collaboration/host-kit#InboundState",
+        "export:@byok-sdk/bot-collaboration/host-kit#InputBatch",
+        "export:@byok-sdk/bot-collaboration/host-kit#IntentConclusions",
+        "export:@byok-sdk/bot-collaboration/host-kit#IntentOutcomeError",
+        "export:@byok-sdk/bot-collaboration/host-kit#IntentRecord",
+        "export:@byok-sdk/bot-collaboration/host-kit#MainAction",
+        "export:@byok-sdk/bot-collaboration/host-kit#MemberMentions",
+        "export:@byok-sdk/bot-collaboration/host-kit#MessageDisposition",
+        "export:@byok-sdk/bot-collaboration/host-kit#MessageReceipt",
+        "export:@byok-sdk/bot-collaboration/host-kit#OccurrenceRecord",
+        "export:@byok-sdk/bot-collaboration/host-kit#OpenDream",
+        "export:@byok-sdk/bot-collaboration/host-kit#OutboxIntent",
+        "export:@byok-sdk/bot-collaboration/host-kit#OutboxRecord",
+        "export:@byok-sdk/bot-collaboration/host-kit#OutcomeOffer",
+        "export:@byok-sdk/bot-collaboration/host-kit#Principal",
+        "export:@byok-sdk/bot-collaboration/host-kit#PushRoute",
+        "export:@byok-sdk/bot-collaboration/host-kit#ROOM_CONTEXT_BYTES",
+        "export:@byok-sdk/bot-collaboration/host-kit#ROOM_CONTEXT_MESSAGES",
+        "export:@byok-sdk/bot-collaboration/host-kit#ROOM_GRACE_MS",
+        "export:@byok-sdk/bot-collaboration/host-kit#ROUTINE_LATE_AFTER_MS",
+        "export:@byok-sdk/bot-collaboration/host-kit#ROUTINE_WAIT_MS",
+        "export:@byok-sdk/bot-collaboration/host-kit#ReplyEntry",
+        "export:@byok-sdk/bot-collaboration/host-kit#ReplyRoute",
+        "export:@byok-sdk/bot-collaboration/host-kit#RetentionFacts",
+        "export:@byok-sdk/bot-collaboration/host-kit#RetentionInput",
+        "export:@byok-sdk/bot-collaboration/host-kit#RetentionLimits",
+        "export:@byok-sdk/bot-collaboration/host-kit#RetentionRefused",
+        "export:@byok-sdk/bot-collaboration/host-kit#RetentionRefusedCode",
+        "export:@byok-sdk/bot-collaboration/host-kit#RetentionResult",
+        "export:@byok-sdk/bot-collaboration/host-kit#RetentionStore",
+        "export:@byok-sdk/bot-collaboration/host-kit#RetiredIdentityError",
+        "export:@byok-sdk/bot-collaboration/host-kit#RetiredNamespace",
+        "export:@byok-sdk/bot-collaboration/host-kit#Room",
+        "export:@byok-sdk/bot-collaboration/host-kit#RoomMessage",
+        "export:@byok-sdk/bot-collaboration/host-kit#Round",
+        "export:@byok-sdk/bot-collaboration/host-kit#RoutineRecord",
+        "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_EXPORT_VERSION",
+        "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_SECTIONS",
+        "export:@byok-sdk/bot-collaboration/host-kit#SYSTEM_PROMPT",
+        "export:@byok-sdk/bot-collaboration/host-kit#SealReason",
+        "export:@byok-sdk/bot-collaboration/host-kit#SealedRoutineAction",
+        "export:@byok-sdk/bot-collaboration/host-kit#SealedRoutineVersionError",
+        "export:@byok-sdk/bot-collaboration/host-kit#Seat",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchContent",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchDevice",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchExport",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchExportError",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchExportMark",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchExportRefusal",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchExportedError",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchHeader",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchImportedError",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchManifest",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchReceipt",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchSection",
+        "export:@byok-sdk/bot-collaboration/host-kit#SwitchWork",
+        "export:@byok-sdk/bot-collaboration/host-kit#TEAM_NOTE_LIMIT",
+        "export:@byok-sdk/bot-collaboration/host-kit#TeamState",
+        "export:@byok-sdk/bot-collaboration/host-kit#TombstoneRecord",
+        "export:@byok-sdk/bot-collaboration/host-kit#Turn",
+        "export:@byok-sdk/bot-collaboration/host-kit#TurnAction",
+        "export:@byok-sdk/bot-collaboration/host-kit#TurnCancelResult",
+        "export:@byok-sdk/bot-collaboration/host-kit#UserInput",
+        "export:@byok-sdk/bot-collaboration/host-kit#WouldDo",
+        "export:@byok-sdk/bot-collaboration/host-kit#WouldDoAction",
+        "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
+        "export:@byok-sdk/bot-collaboration/host-kit#acceptDeliveryEcho",
+        "export:@byok-sdk/bot-collaboration/host-kit#admitUserInput",
+        "export:@byok-sdk/bot-collaboration/host-kit#applyHomeTerminal",
+        "export:@byok-sdk/bot-collaboration/host-kit#applyManagement",
+        "export:@byok-sdk/bot-collaboration/host-kit#applyModels",
+        "export:@byok-sdk/bot-collaboration/host-kit#autonomyOf",
+        "export:@byok-sdk/bot-collaboration/host-kit#botOutcomePorts",
+        "export:@byok-sdk/bot-collaboration/host-kit#botRoutines",
+        "export:@byok-sdk/bot-collaboration/host-kit#checkDreamInstruction",
+        "export:@byok-sdk/bot-collaboration/host-kit#checkHomeReadback",
+        "export:@byok-sdk/bot-collaboration/host-kit#classifyInbound",
+        "export:@byok-sdk/bot-collaboration/host-kit#cleanReplyTokens",
+        "export:@byok-sdk/bot-collaboration/host-kit#commitImport",
+        "export:@byok-sdk/bot-collaboration/host-kit#commitInLedger",
+        "export:@byok-sdk/bot-collaboration/host-kit#concludeRoutineTurn",
+        "export:@byok-sdk/bot-collaboration/host-kit#contextPack",
+        "export:@byok-sdk/bot-collaboration/host-kit#contextTurns",
+        "export:@byok-sdk/bot-collaboration/host-kit#createDefinition",
+        "export:@byok-sdk/bot-collaboration/host-kit#deliveryRoute",
+        "export:@byok-sdk/bot-collaboration/host-kit#discardImport",
+        "export:@byok-sdk/bot-collaboration/host-kit#dreamIntentIds",
+        "export:@byok-sdk/bot-collaboration/host-kit#dreamPolicy",
+        "export:@byok-sdk/bot-collaboration/host-kit#echoCandidates",
+        "export:@byok-sdk/bot-collaboration/host-kit#enablePush",
+        "export:@byok-sdk/bot-collaboration/host-kit#endable",
+        "export:@byok-sdk/bot-collaboration/host-kit#exportMarkOf",
+        "export:@byok-sdk/bot-collaboration/host-kit#failHomeFlush",
+        "export:@byok-sdk/bot-collaboration/host-kit#historyRowFromTurn",
+        "export:@byok-sdk/bot-collaboration/host-kit#homeEnqueued",
+        "export:@byok-sdk/bot-collaboration/host-kit#homeHead",
+        "export:@byok-sdk/bot-collaboration/host-kit#homeRequests",
+        "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
+        "export:@byok-sdk/bot-collaboration/host-kit#inboundDisposition",
+        "export:@byok-sdk/bot-collaboration/host-kit#inboundDispositions",
+        "export:@byok-sdk/bot-collaboration/host-kit#inboundKey",
+        "export:@byok-sdk/bot-collaboration/host-kit#isOwner",
+        "export:@byok-sdk/bot-collaboration/host-kit#memberMentions",
+        "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
+        "export:@byok-sdk/bot-collaboration/host-kit#minimumInstructionBytes",
+        "export:@byok-sdk/bot-collaboration/host-kit#outcomeFailure",
+        "export:@byok-sdk/bot-collaboration/host-kit#outcomeOffer",
+        "export:@byok-sdk/bot-collaboration/host-kit#outcomeSchema",
+        "export:@byok-sdk/bot-collaboration/host-kit#owned",
+        "export:@byok-sdk/bot-collaboration/host-kit#planHomeRetry",
+        "export:@byok-sdk/bot-collaboration/host-kit#promoteStaged",
+        "export:@byok-sdk/bot-collaboration/host-kit#queueDelivery",
+        "export:@byok-sdk/bot-collaboration/host-kit#readbackDelivery",
+        "export:@byok-sdk/bot-collaboration/host-kit#reconcileDreamRoutines",
+        "export:@byok-sdk/bot-collaboration/host-kit#recordDream",
+        "export:@byok-sdk/bot-collaboration/host-kit#recoverDelivery",
+        "export:@byok-sdk/bot-collaboration/host-kit#refuseRetired",
+        "export:@byok-sdk/bot-collaboration/host-kit#refuseRoute",
+        "export:@byok-sdk/bot-collaboration/host-kit#rememberInbound",
+        "export:@byok-sdk/bot-collaboration/host-kit#resealDefinition",
+        "export:@byok-sdk/bot-collaboration/host-kit#resendUnknown",
+        "export:@byok-sdk/bot-collaboration/host-kit#retainInLedger",
+        "export:@byok-sdk/bot-collaboration/host-kit#retainRoots",
+        "export:@byok-sdk/bot-collaboration/host-kit#retiredIdentity",
+        "export:@byok-sdk/bot-collaboration/host-kit#revisionOf",
+        "export:@byok-sdk/bot-collaboration/host-kit#revokePush",
+        "export:@byok-sdk/bot-collaboration/host-kit#routeTerminal",
+        "export:@byok-sdk/bot-collaboration/host-kit#routineCalendar",
+        "export:@byok-sdk/bot-collaboration/host-kit#routineOccurrence",
+        "export:@byok-sdk/bot-collaboration/host-kit#routineTurn",
+        "export:@byok-sdk/bot-collaboration/host-kit#runHostIntentHandler",
+        "export:@byok-sdk/bot-collaboration/host-kit#sealLedger",
+        "export:@byok-sdk/bot-collaboration/host-kit#sealSwitchExport",
+        "export:@byok-sdk/bot-collaboration/host-kit#sealedDefinition",
+        "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
+        "export:@byok-sdk/bot-collaboration/host-kit#sealedTemplate",
+        "export:@byok-sdk/bot-collaboration/host-kit#settleDelivery",
+        "export:@byok-sdk/bot-collaboration/host-kit#startDelivery",
+        "export:@byok-sdk/bot-collaboration/host-kit#stateOf",
+        "export:@byok-sdk/bot-collaboration/host-kit#switchAttempts",
+        "export:@byok-sdk/bot-collaboration/host-kit#syncDreams",
+        "export:@byok-sdk/bot-collaboration/host-kit#syncHead",
+        "export:@byok-sdk/bot-collaboration/host-kit#syncTail",
+        "export:@byok-sdk/bot-collaboration/host-kit#unknownDelivery",
+        "export:@byok-sdk/bot-collaboration/host-kit#updateBot",
+        "export:@byok-sdk/bot-collaboration/host-kit#updateDefinition",
+        "export:@byok-sdk/bot-collaboration/host-kit#verified",
+        "export:@byok-sdk/bot-collaboration/host-kit#verifySwitchExport",
+        "export:@byok-sdk/bot-collaboration/host-kit#wouldDoRows",
+        "export:@byok-sdk/bot-collaboration/host-kit#writeSnapshotBot",
+        "export:@byok-sdk/bot-collaboration/rules#COALESCE_DEFAULTS",
+        "export:@byok-sdk/bot-collaboration/rules#CONNECTOR_OUTCOME_UNKNOWN",
+        "export:@byok-sdk/bot-collaboration/rules#CoalescePolicy",
+        "export:@byok-sdk/bot-collaboration/rules#CommandRecord",
+        "export:@byok-sdk/bot-collaboration/rules#DEVICE_NOT_BOUND",
+        "export:@byok-sdk/bot-collaboration/rules#DEVICE_SWITCHING",
+        "export:@byok-sdk/bot-collaboration/rules#DelegationTimers",
+        "export:@byok-sdk/bot-collaboration/rules#DispatchIntent",
+        "export:@byok-sdk/bot-collaboration/rules#InputFields",
+        "export:@byok-sdk/bot-collaboration/rules#IntentCancelResult",
+        "export:@byok-sdk/bot-collaboration/rules#KeylessCommand",
+        "export:@byok-sdk/bot-collaboration/rules#OFFER_WAIT_MS",
+        "export:@byok-sdk/bot-collaboration/rules#ReplyCheck",
+        "export:@byok-sdk/bot-collaboration/rules#ReplyReadback",
+        "export:@byok-sdk/bot-collaboration/rules#SealedRoutineTemplate",
+        "export:@byok-sdk/bot-collaboration/rules#SeatFacts",
+        "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
+        "export:@byok-sdk/bot-collaboration/rules#SyncOptions",
+        "export:@byok-sdk/bot-collaboration/rules#SyncRefusal",
+        "export:@byok-sdk/bot-collaboration/rules#SyncStep",
+        "export:@byok-sdk/bot-collaboration/rules#addTurn",
+        "export:@byok-sdk/bot-collaboration/rules#admitBotToolsets",
+        "export:@byok-sdk/bot-collaboration/rules#admitDeviceSlot",
+        "export:@byok-sdk/bot-collaboration/rules#advanceRoomSeats",
+        "export:@byok-sdk/bot-collaboration/rules#autonomousIntentIds",
+        "export:@byok-sdk/bot-collaboration/rules#cardCallDue",
+        "export:@byok-sdk/bot-collaboration/rules#checkReply",
+        "export:@byok-sdk/bot-collaboration/rules#coalescePolicy",
+        "export:@byok-sdk/bot-collaboration/rules#collaborationDue",
+        "export:@byok-sdk/bot-collaboration/rules#commandBots",
+        "export:@byok-sdk/bot-collaboration/rules#commitCommand",
+        "export:@byok-sdk/bot-collaboration/rules#compactVeto",
+        "export:@byok-sdk/bot-collaboration/rules#delegationCancelAnswer",
+        "export:@byok-sdk/bot-collaboration/rules#hostIntentCancelAnswer",
+        "export:@byok-sdk/bot-collaboration/rules#hostMessageDisposition",
+        "export:@byok-sdk/bot-collaboration/rules#inactive",
+        "export:@byok-sdk/bot-collaboration/rules#observeDevices",
+        "export:@byok-sdk/bot-collaboration/rules#replyCheckDue",
+        "export:@byok-sdk/bot-collaboration/rules#reportCardDecisions",
+        "export:@byok-sdk/bot-collaboration/rules#requireMain",
+        "export:@byok-sdk/bot-collaboration/rules#seatTurn",
+        "export:@byok-sdk/bot-collaboration/rules#settleCardCall",
+        "export:@byok-sdk/bot-collaboration/rules#settleDelegations",
+        "export:@byok-sdk/bot-collaboration/rules#syncTurn",
+        "export:@byok-sdk/bot-collaboration/rules#turnCancelAnswer",
+        "export:@byok-sdk/bot-collaboration/rules#userFirst",
+        "export:@byok-sdk/bot-collaboration/testing#CardCallSubject",
+        "export:@byok-sdk/bot-collaboration/testing#CardSubject",
+        "export:@byok-sdk/bot-collaboration/testing#CoalesceSubject",
+        "export:@byok-sdk/bot-collaboration/testing#CommitSubject",
+        "export:@byok-sdk/bot-collaboration/testing#DeliverySubject",
+        "export:@byok-sdk/bot-collaboration/testing#DeviceSubject",
+        "export:@byok-sdk/bot-collaboration/testing#FINAL_BODY",
+        "export:@byok-sdk/bot-collaboration/testing#HomeCalls",
+        "export:@byok-sdk/bot-collaboration/testing#HomeSubject",
+        "export:@byok-sdk/bot-collaboration/testing#InMemoryDeviceCredentials",
+        "export:@byok-sdk/bot-collaboration/testing#LTestHost",
+        "export:@byok-sdk/bot-collaboration/testing#OccurrenceRow",
+        "export:@byok-sdk/bot-collaboration/testing#RETENTION_NOW",
+        "export:@byok-sdk/bot-collaboration/testing#ReplySubject",
+        "export:@byok-sdk/bot-collaboration/testing#ResultStubAdapter",
+        "export:@byok-sdk/bot-collaboration/testing#ResultStubSession",
+        "export:@byok-sdk/bot-collaboration/testing#RetentionSubject",
+        "export:@byok-sdk/bot-collaboration/testing#RoomSubject",
+        "export:@byok-sdk/bot-collaboration/testing#RoutineSubject",
+        "export:@byok-sdk/bot-collaboration/testing#SYNC_OPTIONS",
+        "export:@byok-sdk/bot-collaboration/testing#SeedTeam",
+        "export:@byok-sdk/bot-collaboration/testing#SettlementSubject",
+        "export:@byok-sdk/bot-collaboration/testing#SyncIntentRecord",
+        "export:@byok-sdk/bot-collaboration/testing#SyncSubject",
+        "export:@byok-sdk/bot-collaboration/testing#VECTOR_NOW",
+        "export:@byok-sdk/bot-collaboration/testing#cardCallVectors",
+        "export:@byok-sdk/bot-collaboration/testing#cardVectors",
+        "export:@byok-sdk/bot-collaboration/testing#coalesceVectors",
+        "export:@byok-sdk/bot-collaboration/testing#commitVectors",
+        "export:@byok-sdk/bot-collaboration/testing#deliveryVectors",
+        "export:@byok-sdk/bot-collaboration/testing#deviceVectors",
+        "export:@byok-sdk/bot-collaboration/testing#homeVectors",
+        "export:@byok-sdk/bot-collaboration/testing#openLTestHost",
+        "export:@byok-sdk/bot-collaboration/testing#policy",
+        "export:@byok-sdk/bot-collaboration/testing#replyToken",
+        "export:@byok-sdk/bot-collaboration/testing#replyVectors",
+        "export:@byok-sdk/bot-collaboration/testing#retentionVectors",
+        "export:@byok-sdk/bot-collaboration/testing#roomVectors",
+        "export:@byok-sdk/bot-collaboration/testing#routineVectors",
+        "export:@byok-sdk/bot-collaboration/testing#seedCollaboration",
+        "export:@byok-sdk/bot-collaboration/testing#seedRoom",
+        "export:@byok-sdk/bot-collaboration/testing#settlementVectors",
+        "export:@byok-sdk/bot-collaboration/testing#syncVectors",
+        "export:@byok-sdk/bot-collaboration/testing#template"
+      ]
     }
   ],
   "changes": [
@@ -412,11 +726,35 @@
       "entry": "codex-session-store"
     },
     {
+      "item": "entry:@byok-sdk/bot-collaboration",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "entry:@byok-sdk/bot-collaboration/host-kit",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "entry:@byok-sdk/bot-collaboration/package.json",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "entry:@byok-sdk/bot-collaboration/rules",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "entry:@byok-sdk/bot-collaboration/testing",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
       "item": "example:bot-collaboration",
-      "change": "changed",
+      "change": "removed",
       "before": "K8 0.0.1 src-sha256=01e1d1c922e507dd",
-      "after": "K8 0.0.0 src-sha256=ef4b685c00aff257",
-      "entry": "example-bot-collaboration-autonomy"
+      "entry": "bot-collaboration-package"
     },
     {
       "item": "example:host-execution-core",
@@ -424,6 +762,1551 @@
       "before": "K4 0.0.1 src-sha256=29b76c2746aa7b33",
       "after": "K4 0.0.1 src-sha256=a62de5b4c4495e5e",
       "entry": "testing-in-memory-device-credential-backend"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#AgentMessageInput",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#BotOptions",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#HostIntentCancelResult",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#HostIntentHandler",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#HostIntentMessageHandler",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#MessageServer",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#TEAM_ROOM_LIMIT",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#TeamModeCode",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#TeamModeError",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#TeamSnapshot",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#TeamSnapshotBot",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#TeamSnapshotRoom",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#botCompactVeto",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#createBotPersonaProjection",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#teamSnapshot",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#AdmittedIds",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ArchivedRecord",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Autonomy",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#BOT_DREAM",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#BOT_REPLY_MAX_BYTES",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#BOT_ROUTINE",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#BotProfile",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#BotRoutine",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#BotRoutineInput",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Card",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ChannelOptions",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ChannelPort",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#CheckedOffer",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#CollaborationState",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Command",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#CommandPorts",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#CommitConflict",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#CommitRequest",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#CommitResult",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ConfirmableSpec",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ContextTurn",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Conversation",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_AUTONOMY",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_CONTEXT_MAX_BYTES",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_CONTEXT_TURN_LIMIT",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_DREAM_MAX_DURATION_MS",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_HANDOFF_BUDGETS",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_INSTRUCTION_MAX_BYTES",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DEFAULT_MEMBER_MENTIONS",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DEVICE_CONCURRENCY",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DREAM_WAIT_MS",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Delegation",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DelegationCancelResult",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DelegationError",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Delivery",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DeliveryState",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DeviceModeError",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DeviceSwitchingError",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DeviceTopology",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Disposition",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DreamBot",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DreamRecord",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DreamSkip",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DreamState",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DreamSync",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DreamingOptions",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ExecutionRecord",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#HomeReadback",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#HostIntentError",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#InboundClass",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#InboundDisposition",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#InboundMessage",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#InboundRow",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#InboundState",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#InputBatch",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#IntentConclusions",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#IntentOutcomeError",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#IntentRecord",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#MainAction",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#MemberMentions",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#MessageDisposition",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#MessageReceipt",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#OccurrenceRecord",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#OpenDream",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#OutboxIntent",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#OutboxRecord",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#OutcomeOffer",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Principal",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#PushRoute",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ROOM_CONTEXT_BYTES",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ROOM_CONTEXT_MESSAGES",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ROOM_GRACE_MS",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ROUTINE_LATE_AFTER_MS",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ROUTINE_WAIT_MS",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ReplyEntry",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#ReplyRoute",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#RetentionFacts",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#RetentionInput",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#RetentionLimits",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#RetentionRefused",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#RetentionRefusedCode",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#RetentionResult",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#RetentionStore",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#RetiredIdentityError",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#RetiredNamespace",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Room",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#RoomMessage",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Round",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#RoutineRecord",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_EXPORT_VERSION",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_SECTIONS",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SYSTEM_PROMPT",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SealReason",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SealedRoutineAction",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SealedRoutineVersionError",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Seat",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchContent",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchDevice",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchExport",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchExportError",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchExportMark",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchExportRefusal",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchExportedError",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchHeader",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchImportedError",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchManifest",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchReceipt",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchSection",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SwitchWork",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#TEAM_NOTE_LIMIT",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#TeamState",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#TombstoneRecord",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Turn",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#TurnAction",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#TurnCancelResult",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#UserInput",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#WouldDo",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#WouldDoAction",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#acceptDeliveryEcho",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#admitUserInput",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#applyHomeTerminal",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#applyManagement",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#applyModels",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#autonomyOf",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#botOutcomePorts",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#botRoutines",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#checkDreamInstruction",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#checkHomeReadback",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#classifyInbound",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#cleanReplyTokens",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#commitImport",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#commitInLedger",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#concludeRoutineTurn",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#contextPack",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#contextTurns",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#createDefinition",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#deliveryRoute",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#discardImport",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#dreamIntentIds",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#dreamPolicy",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#echoCandidates",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#enablePush",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#endable",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#exportMarkOf",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#failHomeFlush",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#historyRowFromTurn",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#homeEnqueued",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#homeHead",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#homeRequests",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#inboundDisposition",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#inboundDispositions",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#inboundKey",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#isOwner",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#memberMentions",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#minimumInstructionBytes",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#outcomeFailure",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#outcomeOffer",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#outcomeSchema",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#owned",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#planHomeRetry",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#promoteStaged",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#queueDelivery",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#readbackDelivery",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#reconcileDreamRoutines",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#recordDream",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#recoverDelivery",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#refuseRetired",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#refuseRoute",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#rememberInbound",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#resealDefinition",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#resendUnknown",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#retainInLedger",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#retainRoots",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#retiredIdentity",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#revisionOf",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#revokePush",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#routeTerminal",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#routineCalendar",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#routineOccurrence",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#routineTurn",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#runHostIntentHandler",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#sealLedger",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#sealSwitchExport",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#sealedDefinition",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#sealedTemplate",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#settleDelivery",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#startDelivery",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#stateOf",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#switchAttempts",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#syncDreams",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#syncHead",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#syncTail",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#unknownDelivery",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#updateBot",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#updateDefinition",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#verified",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#verifySwitchExport",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#wouldDoRows",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#writeSnapshotBot",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#COALESCE_DEFAULTS",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#CONNECTOR_OUTCOME_UNKNOWN",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#CoalescePolicy",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#CommandRecord",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#DEVICE_NOT_BOUND",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#DEVICE_SWITCHING",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#DelegationTimers",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#DispatchIntent",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#InputFields",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#IntentCancelResult",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#KeylessCommand",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#OFFER_WAIT_MS",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#ReplyCheck",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#ReplyReadback",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SealedRoutineTemplate",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SeatFacts",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SyncOptions",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SyncRefusal",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SyncStep",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#addTurn",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#admitBotToolsets",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#admitDeviceSlot",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#advanceRoomSeats",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#autonomousIntentIds",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#cardCallDue",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#checkReply",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#coalescePolicy",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#collaborationDue",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#commandBots",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#commitCommand",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#compactVeto",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#delegationCancelAnswer",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#hostIntentCancelAnswer",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#hostMessageDisposition",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#inactive",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#observeDevices",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#replyCheckDue",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#reportCardDecisions",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#requireMain",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#seatTurn",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#settleCardCall",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#settleDelegations",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#syncTurn",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#turnCancelAnswer",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#userFirst",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#CardCallSubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#CardSubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#CoalesceSubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#CommitSubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#DeliverySubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#DeviceSubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#FINAL_BODY",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#HomeCalls",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#HomeSubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#InMemoryDeviceCredentials",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#LTestHost",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#OccurrenceRow",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#RETENTION_NOW",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#ReplySubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#ResultStubAdapter",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#ResultStubSession",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#RetentionSubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#RoomSubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#RoutineSubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#SYNC_OPTIONS",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#SeedTeam",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#SettlementSubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#SyncIntentRecord",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#SyncSubject",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#VECTOR_NOW",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#cardCallVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#cardVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#coalesceVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#commitVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#deliveryVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#deviceVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#homeVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#openLTestHost",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#policy",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#replyToken",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#replyVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#retentionVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#roomVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#routineVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#seedCollaboration",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#seedRoom",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#settlementVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#syncVectors",
+      "change": "added",
+      "entry": "bot-collaboration-package"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#template",
+      "change": "added",
+      "entry": "bot-collaboration-package"
     },
     {
       "item": "export:@byok-sdk/client#AgentMemorySnapshotLimitError",

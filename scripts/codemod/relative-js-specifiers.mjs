@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
-const PACKAGES = ['client', 'cloud', 'cloud-dataplane', 'cloud-do', 'core', 'keys', 'protocol', 'server', 'ui-runtime'];
+const PACKAGES = ['bot-collaboration', 'client', 'cloud', 'cloud-dataplane', 'cloud-do', 'core', 'keys', 'protocol', 'server', 'ui-runtime'];
 
 // `from '…'` (import/export … from), side-effect `import '…'`, and `import('…')`
 // in both value and type positions.

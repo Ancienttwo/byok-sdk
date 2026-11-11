@@ -26,8 +26,8 @@ import { packageSurface, sha256, splitGolden, splitStatements } from './dts-surf
 
 export const SNAPSHOT_SCHEMA_VERSION = 1;
 
-/** The nine published packages, by `packages/<dir>`. */
-export const PUBLIC_PACKAGES = ['client', 'cloud', 'cloud-dataplane', 'cloud-do', 'core', 'protocol', 'server', 'ui-runtime', 'keys'];
+/** The ten published packages, by `packages/<dir>`. */
+export const PUBLIC_PACKAGES = ['bot-collaboration', 'client', 'cloud', 'cloud-dataplane', 'cloud-do', 'core', 'protocol', 'server', 'ui-runtime', 'keys'];
 
 /**
  * Host-visible unions. Each one is read from a declaration in the gated
@@ -151,9 +151,7 @@ export const INTERPROCESS_PROTOCOLS = [
 
 /** Examples that Hosts copy (vendor) instead of installing. */
 export const VENDORED_EXAMPLES = [
-  { id: 'host-execution-core', label: 'K4', dir: 'examples/host-execution-core' },
-  // #1845 S2: K8 is a private package until it is published (S3).
-  { id: 'bot-collaboration', label: 'K8', dir: 'packages/bot-collaboration' },
+  { id: 'host-execution-core', label: 'K4' },
 ];
 
 /**
@@ -336,7 +334,7 @@ export function buildSnapshot(root) {
 
   // Vendored examples.
   for (const example of VENDORED_EXAMPLES) {
-    const { dir } = example;
+    const dir = `examples/${example.id}`;
     const manifest = JSON.parse(read(root, track(`${dir}/package.json`)));
     if (!existsSync(path.join(root, dir, 'src'))) throw new Error(`${dir}/src is missing`);
     const files = listFiles(root, `${dir}/src`).filter((file) => !/\.test\.[cm]?[jt]sx?$/.test(file));

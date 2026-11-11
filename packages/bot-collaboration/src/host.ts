@@ -221,7 +221,7 @@ function turnOf(result: CommitResult): string {
   if (result.disposition.outcome !== 'accepted' || typeof result.disposition.value !== 'string') throw new Error('Input command has no Turn id');
   return result.disposition.value;
 }
-/** Copy-and-own Host example. Use one instance per ledger tenant. */
+/** The local K8 Host. Use one instance per ledger tenant. */
 export class BotCollaboration {
   readonly core: HostExecutionCore;
   private chain: Promise<unknown> = Promise.resolve();

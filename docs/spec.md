@@ -328,7 +328,7 @@ of this candidate.
 
 ## Pre-1.0 package version policy
 
-All nine public packages use one version: the eight aligned dispatch packages
+All public packages use one version: the aligned dispatch packages
 and `@byok-sdk/keys`. Before 1.0, PATCH is limited to corrections with no new
 public behavior, API, persistence, or security authority; MINOR covers additive
 public API/features, new forward migrations/authority, and any pre-1.0
@@ -633,11 +633,13 @@ published and read back as `latest` on 2026-10-09 from the `v0.25.0` tag
 authority on what has shipped — read it back with `npm view @byok-sdk/core version`
 and `npm view @byok-sdk/keys version`.
 
-The public package set is exactly nine packages: the eight aligned train
+The public package set is exactly ten packages: the nine aligned train
 packages `@byok-sdk/core`, `@byok-sdk/protocol`, `@byok-sdk/client`,
-`@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`
-and `@byok-sdk/ui-runtime`, plus `@byok-sdk/keys`. From 0.28.2 all nine carry
-the same version.
+`@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`,
+`@byok-sdk/ui-runtime` and `@byok-sdk/bot-collaboration`, plus `@byok-sdk/keys`.
+From 0.28.2 all of them carry the same version. `@byok-sdk/bot-collaboration`
+(K8, #1845) is first published by the next MINOR; through 0.41.0 the set was
+the other nine.
 `@byok-sdk/implementation-identity` is retired: the SDK no longer attests
 executables, and no later train publishes it. Every other workspace package is
 private. Starting with 0.21.0 the unscoped `byok-sdk` namespace umbrella is
