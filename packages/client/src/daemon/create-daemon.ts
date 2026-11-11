@@ -748,9 +748,13 @@ export interface Daemon {
    * Resolves once the task's terminal had its first outbound settlement (no
    * earlier than its local terminal event) and the runtime owner reported
    * its first disposal outcome. A task this daemon has not seen is read from
-   * the journal. Rejects with {@link DaemonTaskUnknownError} for a task with
-   * neither, before `start()` the way `approve()` does, and with
-   * `signal.reason` on abort; the task is untouched.
+   * the journal: after a restart the result reflects the journal's current
+   * truth, so a refused terminal that was replaced reads as its replacement,
+   * never the reverse. Rejects with {@link DaemonTaskUnknownError} for a task
+   * with neither, before `start()` the way `approve()` does, and with
+   * `signal.reason` on abort; the task is untouched. `stop()` rejects no
+   * pending wait, so pass a signal if one can span it; after `stop()` an
+   * unseen id rejects with the closed journal's error.
    */
   whenTaskSettled(taskId: string, options?: { readonly signal?: AbortSignal }): Promise<DaemonTaskSettlement>;
   status(): DaemonStatus;

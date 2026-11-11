@@ -5938,9 +5938,13 @@ export interface Daemon {
      * Resolves once the task's terminal had its first outbound settlement (no
      * earlier than its local terminal event) and the runtime owner reported
      * its first disposal outcome. A task this daemon has not seen is read from
-     * the journal. Rejects with {@link DaemonTaskUnknownError} for a task with
-     * neither, before `start()` the way `approve()` does, and with
-     * `signal.reason` on abort; the task is untouched.
+     * the journal: after a restart the result reflects the journal's current
+     * truth, so a refused terminal that was replaced reads as its replacement,
+     * never the reverse. Rejects with {@link DaemonTaskUnknownError} for a task
+     * with neither, before `start()` the way `approve()` does, and with
+     * `signal.reason` on abort; the task is untouched. `stop()` rejects no
+     * pending wait, so pass a signal if one can span it; after `stop()` an
+     * unseen id rejects with the closed journal's error.
      */
     whenTaskSettled(taskId: string, options?: {
         readonly signal?: AbortSignal;
@@ -8978,7 +8982,9 @@ export interface DaemonTaskSettlement {
     /** The first settlement of the terminal; `accepted` includes a duplicate. */
     readonly delivery: 'accepted' | 'rejected';
     /**
-     * `failed` exactly when `runtime-disposal-failed` was emitted for the task.
+     * `failed` exactly when `runtime-disposal-failed` was emitted for the task's
+     * runtime; a failed release of an offer-owned scratch (`runtimeId: 'scratch'`)
+     * can race the decline or failure settlement and is not covered.
      * `none`: this daemon holds no runtime for the task and has no disposal
      * receipt, as for a decline, a failure before start, or any task that
      * finished before a restart.

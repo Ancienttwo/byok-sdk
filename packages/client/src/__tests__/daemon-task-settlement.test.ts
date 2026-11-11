@@ -89,6 +89,17 @@ describe('Daemon.whenTaskSettled', () => {
     await expect(d.whenTaskSettled('task-decline')).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
   });
 
+  it('resolves when called from the offered listener, before the offer is journaled', async () => {
+    const { d } = await started(new StubRuntimeAdapter());
+    let settlement: Promise<DaemonTaskSettlement> | undefined;
+    d.subscribe((event) => {
+      if (event.kind === 'offered' && event.taskId === 'task-from-offered') settlement = d.whenTaskSettled('task-from-offered');
+    });
+    offer('task-from-offered', { harnessId: 'acme-harness', runtime: 'claude' });
+    await vi.waitFor(() => expect(settlement).toBeDefined());
+    await expect(settlement).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
+  });
+
   it('reports the first settlement when the cloud refuses the terminal', async () => {
     const adapter = new StubRuntimeAdapter();
     const { d } = await started(adapter);

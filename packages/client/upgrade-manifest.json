@@ -285,7 +285,7 @@
     {
       "id": "daemon-when-task-settled",
       "impact": "additive",
-      "summary": "Daemon.whenTaskSettled(taskId, { signal }) resolves DaemonTaskSettlement (terminal, delivery, disposal) once the terminal's first outbound settlement was published locally and the runtime owner reported its first disposal outcome; disposal is failed exactly when runtime-disposal-failed was emitted and none when the daemon holds no runtime for the task, including every task settled before a restart. A task with no journal row and no in-memory record rejects with the new DaemonTaskUnknownError (daemon_task_unknown). The Daemon member is required, so a Host test double typed as Daemon adds it (#1838).",
+      "summary": "Daemon.whenTaskSettled(taskId, { signal }) resolves DaemonTaskSettlement (terminal, delivery, disposal) once the terminal's first outbound settlement was published locally and the runtime owner reported its first disposal outcome; disposal is failed exactly when runtime-disposal-failed was emitted for the task's runtime (an offer-owned scratch release excepted) and none when the daemon holds no runtime for the task, including every task settled before a restart. A task with no journal row and no in-memory record rejects with the new DaemonTaskUnknownError (daemon_task_unknown). The Daemon member is required, so a Host test double typed as Daemon adds it (#1838).",
       "migration": "docs/releases/host-upgrade-next-minor.md#per-task-settlement-awaitable",
       "items": [
         "export:@byok-sdk/client#DaemonTaskSettlement",
